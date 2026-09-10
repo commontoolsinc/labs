@@ -16,6 +16,7 @@ import { JSONSchema } from "@commonfabric/api";
 import { Schema } from "@commonfabric/api/schema";
 
 export {
+  type FavoriteAddress,
   type FavoriteEntry,
   favoriteEntrySchema,
   favoriteKey,

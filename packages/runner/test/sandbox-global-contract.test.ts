@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { assets, StaticCacheFS } from "@commonfabric/static";
+import { assets, StaticCache } from "@commonfabric/static";
 import { SANDBOX_WITHHELD_GLOBALS } from "@commonfabric/utils/sandbox-contract";
 import { createCallbackCompartmentGlobals } from "../src/sandbox/compartment-globals.ts";
 import { ensureSESLockdown } from "../src/sandbox/ses-runtime.ts";
@@ -73,7 +73,7 @@ function declaresValueMember(libText: string, start: number): boolean {
 }
 
 async function compilerDeclaredGlobals(): Promise<string[]> {
-  const cache = new StaticCacheFS();
+  const cache = StaticCache.fromFileSystem();
   const perFile = await Promise.all(
     TYPE_ASSETS.map(async (file) => declaredGlobals(await cache.getText(file))),
   );

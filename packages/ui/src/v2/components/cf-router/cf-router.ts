@@ -1,7 +1,8 @@
-import { html } from "lit";
-import { BaseElement } from "../../core/base-element.ts";
-import { property } from "lit/decorators.js";
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
+import { html } from "lit";
+import { property } from "lit/decorators.js";
+
+import { BaseElement } from "../../core/base-element.ts";
 
 export class CFRouter extends BaseElement {
   @property({ attribute: false })

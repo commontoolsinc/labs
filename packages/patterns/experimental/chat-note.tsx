@@ -43,10 +43,13 @@ type Input = {
   content?: Writable<string | Default<"">>;
   isHidden?: boolean | Default<false>;
   noteId?: string | Default<"">;
+
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new ChatNotes. */
   linkPattern?: Writable<string | Default<"">>;
+
   /** Parent notebook reference (passed via SELF from notebook.tsx) */
   parentNotebook?: any;
+
   /** Selected model for generation. Defaults to Sonnet 4.5 */
   model?: Writable<string | Default<"anthropic:claude-sonnet-4-5">>;
 };

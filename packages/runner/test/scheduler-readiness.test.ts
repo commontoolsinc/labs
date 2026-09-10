@@ -19,13 +19,18 @@ import type {
 } from "./scheduler-test-utils.ts";
 import { RetryWhenReady } from "../src/scheduler/retry-when-ready.ts";
 
+type TestTransactResponse = {
+  type: "response";
+  requestId: string;
+  ok?: unknown;
+  error?: { name: string; message: string };
+};
+
 type TestMemoryServer = {
-  transact(message: { requestId: string }): Promise<{
-    type: "response";
-    requestId: string;
-    ok?: unknown;
-    error?: { name: string; message: string };
-  }>;
+  transact(
+    message: { requestId: string },
+    publishVerdict?: (response: TestTransactResponse) => void,
+  ): Promise<TestTransactResponse>;
 };
 
 function delayNextServerTransact(
@@ -37,12 +42,12 @@ function delayNextServerTransact(
   const started = Promise.withResolvers<void>();
   const release = Promise.withResolvers<"confirm" | "fail">();
   let shouldDelay = true;
-  server.transact = async (message) => {
-    if (!shouldDelay) return await original(message);
+  server.transact = async (message, publishVerdict) => {
+    if (!shouldDelay) return await original(message, publishVerdict);
     shouldDelay = false;
     started.resolve();
     if (await release.promise === "fail") {
-      return {
+      const response: TestTransactResponse = {
         type: "response",
         requestId: message.requestId,
         error: {
@@ -50,8 +55,10 @@ function delayNextServerTransact(
           message: "forced readiness-lineage conflict",
         },
       };
+      publishVerdict?.(response);
+      return response;
     }
-    return await original(message);
+    return await original(message, publishVerdict);
   };
   return {
     started: started.promise,

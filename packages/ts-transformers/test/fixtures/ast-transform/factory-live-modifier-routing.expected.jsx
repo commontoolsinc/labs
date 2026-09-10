@@ -12,6 +12,7 @@ import { __cfHelpers } from "commonfabric";
 // Expected: asScope()/inSpace() chains stay direct and are never wrapped in
 //   __cf_data as plain module-scope values.
 import { lift, pattern } from "commonfabric";
+import "commonfabric/schema";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -41,21 +42,13 @@ const baseModule = lift((input: {
     result: input.value,
 }), {
     type: "object",
-    properties: {
-        value: {
-            type: "number"
-        }
-    },
-    required: ["value"]
-} as const satisfies __cfHelpers.JSONSchema, {
+    properties: { value: { type: "number" } },
+    required: ["value"],
+}, {
     type: "object",
-    properties: {
-        result: {
-            type: "number"
-        }
-    },
-    required: ["result"]
-} as const satisfies __cfHelpers.JSONSchema);
+    properties: { result: { type: "number" } },
+    required: ["result"],
+});
 export const scopedModule = baseModule.asScope("session");
 export default basePattern.asScope("space").inSpace();
 // @ts-ignore: Internals

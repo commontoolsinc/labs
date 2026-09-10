@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FactoryCodec } from "@/codec-common/FactoryCodec.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import {
   factoryStateOf,
   type FactoryStateV1,
@@ -11,7 +11,7 @@ import {
 } from "@/fabric-factory.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import type { FabricFactory, FabricPlainObject } from "@/interface.ts";
-import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 
 const REF = {
@@ -39,7 +39,7 @@ describe("FactoryCodec", () => {
     const decoded = codec.decode(
       "Factory@1",
       state,
-      EMPTY_RECONSTRUCTION_CONTEXT,
+      NULL_LIVE_ENVIRONMENT,
     ) as FabricFactory<[]>;
     expect(typeof decoded).toBe("function");
     expect(Object.isFrozen(decoded)).toBe(true);
@@ -104,7 +104,7 @@ describe("FactoryCodec", () => {
       const decoded = codec.decode(
         "Factory@1",
         state,
-        EMPTY_RECONSTRUCTION_CONTEXT,
+        NULL_LIVE_ENVIRONMENT,
       ) as FabricFactory<[]>;
       expect(Object.isFrozen(decoded)).toBe(true);
       expect(Object.isFrozen(factoryStateOf(decoded))).toBe(true);
@@ -252,7 +252,7 @@ describe("FactoryCodec", () => {
         new FactoryCodec().decode(
           "Factory@1",
           state as never,
-          EMPTY_RECONSTRUCTION_CONTEXT,
+          NULL_LIVE_ENVIRONMENT,
         )
       ).toThrow(message);
     });
@@ -272,7 +272,7 @@ describe("FactoryCodec", () => {
           paramsSchema: true,
           params: cycle,
         } as never,
-        EMPTY_RECONSTRUCTION_CONTEXT,
+        NULL_LIVE_ENVIRONMENT,
       )
     ).toThrow("cyclic state is not allowed");
 
@@ -287,7 +287,7 @@ describe("FactoryCodec", () => {
         paramsSchema: true,
         params: { left: shared, right: shared },
       },
-      EMPTY_RECONSTRUCTION_CONTEXT,
+      NULL_LIVE_ENVIRONMENT,
     );
     expect(typeof decoded).toBe("function");
   });
@@ -306,7 +306,7 @@ describe("FactoryCodec", () => {
         paramsSchema: true,
         params: params as unknown as FabricPlainObject,
       },
-      EMPTY_RECONSTRUCTION_CONTEXT,
+      NULL_LIVE_ENVIRONMENT,
     ) as FabricFactory<[]>;
     const state = factoryStateOf(decoded) as Extract<
       FactoryStateV1,
@@ -331,7 +331,7 @@ describe("FactoryCodec", () => {
         paramsSchema: true,
         params: { link },
       },
-      EMPTY_RECONSTRUCTION_CONTEXT,
+      NULL_LIVE_ENVIRONMENT,
     ) as FabricFactory<[]>;
     const state = factoryStateOf(decoded) as Extract<
       FactoryStateV1,

@@ -2,13 +2,15 @@
 
 ## Current implementation
 
-The first user to join the poll is captured into `adminName: PerSpace<string>`.
-Admin actions (add/remove option, reset votes) short-circuit when
-`myName !== adminName`. This is enforced at the pattern level — a determined
-caller can invoke a handler with arbitrary inputs and the runtime will not stop
-them. The "OCC + auto-retry" guarantees in `packages/runner/src/scheduler.ts`
-make the _claim race_ safe, but they don't make the admin role itself
-unforgeable.
+The first user to join stores their shared profile cell in the per-space `host`
+pointer. `isAdmin` and every host-gated handler compare that cell with the
+viewer's profile using `equals()`. Any joined participant can deliberately take
+the seat through `claimHost`.
+
+This is enforced at the pattern level — a determined caller can invoke a handler
+with inputs they control, and profile-cell equality is not a kernel
+authorization boundary. The scheduler's OCC/retry behavior makes concurrent seat
+changes converge, but it does not make the host role unforgeable.
 
 ## Target direction
 
@@ -38,12 +40,11 @@ The PR also fixes the runner so nested CFC labels survive array-item persistence
 ## Canonical reference
 
 `packages/patterns/cfc-group-chat-demo/` is the worked example. The shape that
-translates to cozy-poll:
+translates to lunch-poll:
 
 ```ts
 // Per-user pointer to my profile in the space-scoped directory.
-// (Same idiom we already use here for `me: PerUser<{user?: User}>`
-//  and verified in packages/patterns/scoped-user-directory/.)
+// (The group-chat demo and scoped-user-directory verify this idiom.)
 myProfile: PerUser<{ profile?: ProfileCell }>;
 
 // The profile value carries "represents me" — the runtime checks
@@ -63,9 +64,9 @@ type TrustedSentChatMessage = AuthoredByCurrentUser<
 UI rendering uses a component like `VerifiedChatBubble({ message })` which
 transparently verifies the integrity claim before showing trusted content.
 
-## Translation for cozy-poll
+## Translation for lunch-poll
 
-When the wiring lands, the cozy-poll equivalents would be roughly:
+When the wiring lands, the lunch-poll equivalents would be roughly:
 
 - `users: PerSpace<TrustedProfile[]>` — directory entries carry
   `RepresentsCurrentUser` and a `TrustedActionWrite` constraint on the
@@ -78,15 +79,16 @@ When the wiring lands, the cozy-poll equivalents would be roughly:
   profile on first-join, and `RequiresIntegrity<...,
   ["IsAdmin"]>` on the
   options/votes-reset write paths.
-- The pattern-level `myName === adminName` check becomes UX-only — hide the
-  admin UI when the viewer doesn't carry the claim, but the security boundary
-  moves to the kernel.
+- The pattern-level profile-cell comparison becomes UX-only — hide the admin UI
+  when the viewer doesn't carry the claim, while the write authorization moves
+  to the kernel.
 
 ## Path forward
 
-The pattern-level `adminName` equality check stays for compatibility, but the
-actual security boundary moves to CFC labels on the write paths, with the
-`cfc-group-chat-demo` as the reference for the exact API shape.
+Keep profile-cell equality for joined/host presentation and ordinary UX. Move
+the actual security boundary to CFC labels on the write paths, with
+`cfc-group-chat-demo` as the reference for the exact API shape. The retired
+`adminName` surface is not part of that transition.
 
 ## Cross-references
 

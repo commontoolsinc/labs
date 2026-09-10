@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import ts from "typescript";
-import { StaticCacheFS } from "@commonfabric/static";
+import { StaticCache } from "@commonfabric/static";
 
 import { TransformationContext } from "../src/core/context.ts";
 import { transformCfDirective } from "../src/mod.ts";
@@ -16,7 +16,7 @@ import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 // tests drive the emitter directly with a real TransformationContext and assert
 // on the node it returns.
 
-const cache = new StaticCacheFS();
+const cache = StaticCache.fromFileSystem();
 const es2023 = await cache.getText("types/es2023.d.ts");
 const dom = await cache.getText("types/dom.d.ts");
 const jsx = await cache.getText("types/jsx.d.ts");

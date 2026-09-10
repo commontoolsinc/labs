@@ -1,22 +1,25 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
+import { describe, it } from "@std/testing/bdd";
+
+import type { BuiltInLLMMessage } from "@commonfabric/api";
 import { cfcAtom } from "@commonfabric/api/cfc";
+import { Identity } from "@commonfabric/identity";
 import {
   clearMockResponses,
   enableMockMode,
   loadConversationFixture,
 } from "@commonfabric/llm/client";
-import type { BuiltInLLMMessage } from "@commonfabric/api";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
+
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { type JSONSchema } from "../src/builder/types.ts";
+import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { parseLink } from "../src/link-utils.ts";
-import { ID, type JSONSchema } from "../src/builder/types.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 import { waitForLlmMessages } from "./support/llm-result.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-llm-derived-stamp");
 
@@ -68,7 +71,6 @@ describe("CFC LlmDerived stamping mechanism", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       // Model-output push: builtin identity, item schema carries the stamp.
@@ -125,15 +127,15 @@ describe("CFC LlmDerived stamping mechanism", () => {
     }
   });
 
-  it("stamps an [ID]-split element on its own doc", async () => {
-    // Real dialog messages carry an [ID] sigil and split into their own
-    // entity docs; the stamp must land on the split doc and surface through
-    // the element's label view.
+  it("stamps a split element on its own doc", async () => {
+    // Exercises the generic split mechanism directly, via frame anchoring.
+    // Dialog messages reach the same shape by a different route -- the dialog
+    // creates each message's document explicitly -- and either way the stamp
+    // must land on the split doc and surface through the element's label view.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const modelTx = runtime.edit();
@@ -141,17 +143,25 @@ describe("CFC LlmDerived stamping mechanism", () => {
         kind: "builtin",
         builtinId: "llm-dialog",
       });
-      const stamping = runtime.getCell(
-        signer.did(),
-        "llm-derived-id-split",
-        stampingMessagesSchema,
-        modelTx,
-      );
-      stamping.push({
-        [ID]: { llmDialog: { message: "m", id: "id-split-1" } },
-        role: "assistant",
-        content: "model bytes",
-      } as unknown as { role: string; content: string });
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "llm-derived-id-split",
+        reactives: new Set(),
+      });
+      try {
+        const stamping = runtime.getCell(
+          signer.did(),
+          "llm-derived-id-split",
+          stampingMessagesSchema,
+          modelTx,
+        );
+        stamping.push({
+          role: "assistant",
+          content: "model bytes",
+        } as unknown as { role: string; content: string });
+      } finally {
+        popFrame(frame);
+      }
       modelTx.prepareCfc();
       expect((await modelTx.commit()).ok).toBeDefined();
 
@@ -183,7 +193,6 @@ describe("CFC LlmDerived stamping mechanism", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const authorTx = runtime.edit();
@@ -236,7 +245,6 @@ describe("llmDialog LlmDerived stamping (end to end)", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     const tx = runtime.edit();
     const { commonfabric } = createTrustedBuilder(runtime);
@@ -285,7 +293,7 @@ describe("llmDialog LlmDerived stamping (end to end)", () => {
       await waitForLlmMessages(runtime, result, 2);
 
       // The contract is the PERSISTED metadata on each message's own entity
-      // doc (messages carry [ID] and split); read it there directly — the
+      // doc (every message is its own document); read it there directly — the
       // multi-hop handle chain (result → messages link → element link) is a
       // separate label-view surfacing concern.
       const messagesCell = result.key("messages");
@@ -334,6 +342,8 @@ describe("llmDialog LlmDerived stamping (end to end)", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      // The assertion below reads that the assistant message document carries
+      // no stored CFC metadata. That holds at the `disabled` rung.
       cfcEnforcementMode: "disabled",
     });
     const tx = runtime.edit();

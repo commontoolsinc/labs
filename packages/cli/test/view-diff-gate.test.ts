@@ -1,12 +1,14 @@
 import { assertEquals } from "@std/assert";
 import { parseDiff } from "../lib/view/diff.ts";
 
+//
 // Coverage-gate tests for the C-style quoted-path decoder in lib/view/diff.ts.
 // They drive the decoder's malformed-input fallbacks, which the canonical suite
 // only reaches with well-formed quoted paths: a backslash as the final byte
 // before the string ends (no closing quote), an unrecognized escape character,
 // and a quoted path that never closes its quote at all. Each fall-through hands
 // the path to the surrounding-quote strip so the name is never dropped.
+//
 
 Deno.test("diff: a quoted path whose final byte is a lone backslash falls back", () => {
   // The path opens its quote, then ends on a backslash with nothing after it:

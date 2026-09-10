@@ -1,4 +1,4 @@
-import { action, assert, pattern, wish, Writable } from "commonfabric";
+import { action, assert, pattern, TESTS, wish, Writable } from "commonfabric";
 import type { MinimalPiece } from "../../notes/schemas.tsx";
 import NotebookNestBug from "./main.tsx";
 
@@ -18,7 +18,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_starts_empty },
       { action: action_create_nested_notebooks },
       { assertion: assert_registers_complete_tree },

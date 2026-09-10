@@ -3,8 +3,11 @@ import ts from "typescript";
 import { HelpersOnlyTransformer } from "../core/transformers.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import { resolvesToCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
-import { getNodeText } from "../ast/utils.ts";
-import { unwrapExpression } from "../utils/expression.ts";
+import { getNodeText, preserveSourceMapRange } from "../ast/utils.ts";
+import {
+  ASSERT_CAPTURE_HELPER_NAME,
+  unwrapExpression,
+} from "../utils/expression.ts";
 
 /**
  * AssertDiagnosticsTransformer: rewrites the body of an `assert(...)` call so
@@ -125,7 +128,7 @@ function rewriteAssertCall(
   node: ts.CallExpression,
   context: TransformationContext,
 ): ts.Node | undefined {
-  const callback = node.arguments[0];
+  const callback = node.arguments[0] && unwrapExpression(node.arguments[0]);
   if (
     !callback ||
     (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))
@@ -147,9 +150,12 @@ function rewriteAssertCall(
   );
   if (!returned) return undefined;
 
-  const body = factory.createBlock(
-    [createPartsDeclaration(partsIdentifier, context), ...returned],
-    true,
+  const body = preserveSourceMapRange(
+    factory.createBlock(
+      [createPartsDeclaration(partsIdentifier, context), ...returned],
+      true,
+    ),
+    callback.body,
   );
   const rewrittenCallback = ts.isArrowFunction(callback)
     ? factory.updateArrowFunction(
@@ -199,7 +205,7 @@ function rewriteResultStatements(
   context: TransformationContext,
 ): ts.Statement[] | undefined {
   if (!ts.isBlock(body)) {
-    return [createRecordReturn(body, partsIdentifier, context)];
+    return [createRecordReturn(body, body, partsIdentifier, context)];
   }
 
   let rewroteAny = false;
@@ -215,7 +221,12 @@ function rewriteResultStatements(
         return node;
       }
       rewroteAny = true;
-      return createRecordReturn(node.expression, partsIdentifier, context);
+      return createRecordReturn(
+        node.expression,
+        node,
+        partsIdentifier,
+        context,
+      );
     }
     return ts.visitEachChild(node, visit, context.tsContext);
   };
@@ -236,6 +247,7 @@ function rewriteResultStatements(
  */
 function createRecordReturn(
   resultExpression: ts.Expression,
+  authoredSite: ts.Node,
   partsIdentifier: ts.Identifier,
   context: TransformationContext,
 ): ts.Statement {
@@ -247,30 +259,40 @@ function createRecordReturn(
     ? instrumentExpression(resultExpression, partsIdentifier, context)
     : resultExpression;
 
-  return factory.createBlock([
-    createOkDeclaration(okIdentifier, instrumented, context),
+  const recordReturn = preserveSourceMapRange(
     factory.createReturnStatement(
-      factory.createObjectLiteralExpression([
-        factory.createPropertyAssignment("ok", okIdentifier),
-        factory.createPropertyAssignment(
-          "source",
-          factory.createStringLiteral(sourceTextOf(resultExpression)),
-        ),
-        // Rendering the recorded operands is deferred to here, and to only the
-        // failing path: `assertRenderParts` returns an empty list when `ok` is
-        // true, so a passing assertion never renders an operand.
-        factory.createPropertyAssignment(
-          "parts",
-          context.cfHelpers.createHelperCall(
-            "assertRenderParts",
-            resultExpression,
-            undefined,
-            [okIdentifier, partsIdentifier],
+      factory.createObjectLiteralExpression(
+        [
+          factory.createPropertyAssignment("ok", okIdentifier),
+          factory.createPropertyAssignment(
+            "source",
+            factory.createStringLiteral(sourceTextOf(resultExpression)),
           ),
-        ),
-      ], true),
+          // Rendering the recorded operands is deferred to here, and to only
+          // the failing path: `assertRenderParts` returns an empty list when
+          // `ok` is true, so a passing assertion never renders an operand.
+          factory.createPropertyAssignment(
+            "parts",
+            context.cfHelpers.createHelperCall(
+              "assertRenderParts",
+              resultExpression,
+              undefined,
+              [okIdentifier, partsIdentifier],
+            ),
+          ),
+        ],
+        true,
+      ),
     ),
-  ], true);
+    authoredSite,
+  );
+  return preserveSourceMapRange(
+    factory.createBlock([
+      createOkDeclaration(okIdentifier, instrumented, context),
+      recordReturn,
+    ], true),
+    authoredSite,
+  );
 }
 
 /** True for a node that owns any `return` written inside it. */
@@ -550,7 +572,7 @@ function captureOperand(
 }
 
 /**
- * Emits a recording call around `value`, labelled with the authored text of
+ * Emits a recording call around `value`, labeled with the authored text of
  * `labelSource`. The two differ once `value` has itself been instrumented, at
  * which point it no longer has authored text of its own to read.
  */
@@ -567,7 +589,7 @@ function captureValue(
   const source = sourceTextOf(unwrapExpression(labelSource));
 
   return context.cfHelpers.createHelperCall(
-    "assertCapture",
+    ASSERT_CAPTURE_HELPER_NAME,
     labelSource,
     undefined,
     [

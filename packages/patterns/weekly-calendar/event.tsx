@@ -201,7 +201,6 @@ const handleSetTime = handler<
 >(({ newStartTime, newEndTime }, { startTime, endTime }) => {
   startTime.set(newStartTime);
   endTime.set(newEndTime);
-  return { startTime: newStartTime, endTime: newEndTime };
 });
 
 const handleSetColor = handler<

@@ -1,23 +1,28 @@
-import { describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
-import { type CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/interface";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import type { MemorySpace, URI } from "@commonfabric/memory/interface";
-import type { JSONSchema } from "../src/builder/types.ts";
-import { parseLink } from "../src/link-utils.ts";
+import { describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import type { FabricValue } from "@commonfabric/data-model";
+import { Identity } from "@commonfabric/identity";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
+
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
+import { type CfcConfClause, clausesEqual } from "../src/cfc/clause.ts";
 import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
+import { commitmentAwareEquals } from "../src/cfc/label-representation.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import {
   buildCfcPolicySnapshot,
   type ExchangeRule,
 } from "../src/cfc/policy.ts";
-import { clausesEqual } from "../src/cfc/clause.ts";
+import { parseLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
-// ===========================================================================
 // Cross-space integrity & declassification — expressing the four scenarios and
 // pinning where the gaps are.
 //
@@ -42,7 +47,6 @@ import { clausesEqual } from "../src/cfc/clause.ts";
 //     and FAILS CLOSED (3a). `projection` (§8.3) IS implemented — verified at
 //     commit with scoped-integrity carry (3a′ shows the subset-declaration
 //     sliver; full behavior in cfc-projection.test.ts).
-// ===========================================================================
 
 const signer = await Identity.fromPassphrase("cfc-cross-space-integrity");
 const spaceA = signer.did();
@@ -79,7 +83,6 @@ const makeRuntime = (
   new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
-    cfcEnforcementMode: "enforce-explicit",
   });
 
 // Seed a doc's stored CFC metadata directly (an ungated path-[] full-document
@@ -95,11 +98,12 @@ const seedLabeledDoc = async (
   const seed = runtime.edit();
   const cell = runtime.getCell(space, id, undefined, seed);
   const docId = cell.getAsNormalizedFullLink().id as URI;
+  writeSeedEnvelopeDoc(seed, space);
   seed.writeOrThrow({ space, id: docId, type: "application/json", path: [] }, {
     value,
     cfc: {
       version: 1,
-      schemaHash: `seed-${id}`,
+      schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
       labelMap: { version: 1, entries },
     },
   });
@@ -107,26 +111,30 @@ const seedLabeledDoc = async (
   return docId;
 };
 
+// An address a `LinkReference` endorsement carries: the plaintext address, or
+// the digest marker standing in for it.
+type EndorsementAddress =
+  | { space: string; id: string; path: string[] }
+  | { digestOf: string };
+
 const isLinkReference = (atom: unknown): atom is {
   type: string;
-  source: { space: string; id: string; path: string[] };
-  target: { space: string; id: string; path: string[] };
+  source: EndorsementAddress;
+  target: EndorsementAddress;
 } =>
   typeof atom === "object" && atom !== null &&
   (atom as { type?: unknown }).type ===
     "https://commonfabric.org/cfc/atom/LinkReference";
 
-// ===========================================================================
-
 describe("CFC cross-space integrity", () => {
-  // -------------------------------------------------------------------------
-  // Primitive: a value gets integrity. Declared `ifc.integrity` with a
-  // non-reserved atom persists as an `origin: "declared"` entry, exactly like
-  // declared confidentiality. (Reserved runtime-minted atoms — LlmDerived,
-  // PolicyCertified, … — are gated to builtin identities and would be stripped
-  // here; a plain string or custom-URL atom is the author-mintable form.)
-  // -------------------------------------------------------------------------
   it("scenario 1a — a value created in a space gets integrity (declared)", async () => {
+    // Primitive: a value gets integrity. Declared `ifc.integrity` with a
+    // non-reserved atom persists as an `origin: "declared"` entry, exactly like
+    // declared confidentiality. (Reserved runtime-minted atoms — LlmDerived,
+    // PolicyCertified, … — are gated to builtin identities and would be
+    // stripped here; a plain string or custom-URL atom is the author-mintable
+    // form.)
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime(storageManager);
     try {
@@ -163,12 +171,11 @@ describe("CFC cross-space integrity", () => {
     }
   });
 
-  // -------------------------------------------------------------------------
-  // Same-space verbatim copy: `exactCopyOf` is content-address verified and
-  // carries the SOURCE integrity onto the copy (§8.4). This is the "verbatim
-  // copy retains integrity" primitive — but note the space constraint below.
-  // -------------------------------------------------------------------------
   it("scenario 1b — same-space exactCopyOf carries integrity onto the copy", async () => {
+    // Same-space verbatim copy: `exactCopyOf` is content-address verified and
+    // carries the SOURCE integrity onto the copy (§8.4). This is the "verbatim
+    // copy retains integrity" primitive — but note the space constraint below.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime(storageManager);
     try {
@@ -210,25 +217,30 @@ describe("CFC cross-space integrity", () => {
     }
   });
 
-  // -------------------------------------------------------------------------
-  // Scenario 1 proper (reference / no-copy): space B holds a LINK to the
-  // labeled value in space A. Traversing the link yields the source integrity
-  // PRESERVED plus a runtime-minted `LinkReference` endorsement that records
-  // BOTH spaces (§3.7.2: integrity = target ∪ link-endorsement), and the
-  // source confidentiality carried across the boundary (§3.7.1). This is the
-  // mechanism that genuinely crosses spaces today.
-  // -------------------------------------------------------------------------
   it("scenario 1c — a cross-space link retains the source integrity (+ endorsement)", async () => {
+    // Scenario 1 proper (reference / no-copy): space B holds a LINK to the
+    // labeled value in space A. Traversing the link yields the source integrity
+    // PRESERVED plus a runtime-minted `LinkReference` endorsement that records
+    // BOTH spaces (§3.7.2: integrity = target ∪ link-endorsement), and the
+    // source confidentiality carried across the boundary (§3.7.1). This is the
+    // mechanism that genuinely crosses spaces today.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime(storageManager);
     try {
-      await seedLabeledDoc(runtime, spaceA, "s1c-src", "37.77,-122.41", [{
-        path: [],
-        label: {
-          integrity: ["gps-reading"],
-          confidentiality: ["space-a-secret"],
-        },
-      }]);
+      const srcId = await seedLabeledDoc(
+        runtime,
+        spaceA,
+        "s1c-src",
+        "37.77,-122.41",
+        [{
+          path: [],
+          label: {
+            integrity: ["gps-reading"],
+            confidentiality: ["space-a-secret"],
+          },
+        }],
+      );
 
       const tx = runtime.edit();
       const src = runtime.getCell(spaceA, "s1c-src", undefined, tx);
@@ -246,22 +258,34 @@ describe("CFC cross-space integrity", () => {
       tx.prepareCfc();
       expect((await tx.commit()).error).toBeUndefined();
 
-      const doc = readDoc(
-        storageManager,
-        spaceB,
-        parseLink(sink.getAsLink()).id!,
-      );
+      const sinkId = parseLink(sink.getAsLink()).id!;
+      const doc = readDoc(storageManager, spaceB, sinkId);
       const entries = entriesFor(doc, ["ref"]);
       expect(entries).toHaveLength(1);
       const entry = entries[0];
       expect(entry.origin).toBe("link");
       // Source integrity preserved…
       expect(entry.label.integrity).toContain("gps-reading");
-      // …plus the endorsement recording the A→B edge.
+      // …plus the endorsement recording the edge from space A to space B.
+      // The endorsement addresses are commitment-classified fields, so
+      // `commitmentAwareEquals` reads the plaintext address and the digest
+      // marker standing in for it alike.
       const linkRef = (entry.label.integrity ?? []).find(isLinkReference);
       expect(linkRef).toBeDefined();
-      expect(linkRef!.source.space).toBe(spaceA);
-      expect(linkRef!.target.space).toBe(spaceB);
+      expect(
+        commitmentAwareEquals(linkRef!.source, {
+          space: spaceA,
+          id: srcId,
+          path: [],
+        }),
+      ).toBe(true);
+      expect(
+        commitmentAwareEquals(linkRef!.target, {
+          space: spaceB,
+          id: sinkId,
+          path: ["ref"],
+        }),
+      ).toBe(true);
       // Source confidentiality carried across the space boundary.
       expect(entry.label.confidentiality).toContain("space-a-secret");
     } finally {
@@ -270,16 +294,16 @@ describe("CFC cross-space integrity", () => {
     }
   });
 
-  // -------------------------------------------------------------------------
-  // Verbatim copy across spaces, DONE RIGHT: carry the REFERENCE. `exactCopyOf`
-  // compares two paths within one value tree — but a path may HOLD a link into
-  // another space, and the label it copies is that path's (link-carried) label.
-  // So a field whose source is a cross-space link is (a) verified as an exact
-  // copy AND (b) carries the source's integrity across the boundary. This is the
-  // "verbatim copy retains integrity across spaces" scenario — the reference is
-  // the carrier, and exactCopyOf is the verified claim on top of it.
-  // -------------------------------------------------------------------------
   it("scenario 1d — exactCopyOf of a cross-space link carries integrity and verifies the copy", async () => {
+    // Verbatim copy across spaces, DONE RIGHT: carry the REFERENCE.
+    // `exactCopyOf` compares two paths within one value tree — but a path may
+    // HOLD a link into another space, and the label it copies is that path's
+    // (link-carried) label. So a field whose source is a cross-space link is
+    // (a) verified as an exact copy AND (b) carries the source's integrity
+    // across the boundary. This is the "verbatim copy retains integrity across
+    // spaces" scenario — the reference is the carrier, and exactCopyOf is the
+    // verified claim on top of it.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime(storageManager);
     try {
@@ -361,15 +385,14 @@ describe("CFC cross-space integrity", () => {
     }
   });
 
-  // -------------------------------------------------------------------------
-  // The boundary of scenario 1d: copying the RESOLVED VALUE (plain bytes)
-  // rather than the reference does NOT carry the label. Once a handler
-  // materializes bytes, the runtime has no basis to attest they are the same
-  // labeled thing, so the copy is a fresh, unendorsed value. This is not a bug —
-  // it is why the REFERENCE (link) is load-bearing for cross-space integrity:
-  // carry the link (scenario 1c/1d), not the extracted bytes.
-  // -------------------------------------------------------------------------
   it("scenario 1e — a resolved-byte copy across spaces is unendorsed (carry the reference, not the bytes)", async () => {
+    // The boundary of scenario 1d: copying the RESOLVED VALUE (plain bytes)
+    // rather than the reference does NOT carry the label. Once a handler
+    // materializes bytes, the runtime has no basis to attest they are the same
+    // labeled thing, so the copy is a fresh, unendorsed value. This is not a
+    // bug — it is why the REFERENCE (link) is load-bearing for cross-space
+    // integrity: carry the link (scenario 1c/1d), not the extracted bytes.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime(storageManager);
     try {
@@ -419,13 +442,12 @@ describe("CFC cross-space integrity", () => {
     }
   });
 
-  // -------------------------------------------------------------------------
-  // GAP (remaining): the spec's reference annotation (§8.2 `passThrough`) is
-  // unimplemented; a write through a schema declaring it FAILS CLOSED rather
-  // than being silently ignored. Reference behaviours stay reachable via
-  // per-path labels and links (scenarios 1c / 3).
-  // -------------------------------------------------------------------------
   it("scenario 3a [GAP] — the passThrough ifc annotation fails closed (unimplemented)", async () => {
+    // GAP (remaining): the spec's reference annotation (§8.2 `passThrough`) is
+    // unimplemented; a write through a schema declaring it FAILS CLOSED rather
+    // than being silently ignored. Reference behaviors stay reachable via
+    // per-path labels and links (scenarios 1c / 3).
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime(storageManager);
     try {
@@ -452,16 +474,15 @@ describe("CFC cross-space integrity", () => {
     }
   });
 
-  // -------------------------------------------------------------------------
-  // Scenario 3a′ — the §8.3 `projection` annotation IS implemented: the
-  // ergonomic "declare this field is a scoped projection" syntax verifies at
-  // commit (the target must equal the claimed source field) and carries the
-  // source's confidentiality in full plus its integrity SCOPED to the
-  // projected pointer, so the projected field can never claim whole-object
-  // integrity. Mismatch/wildcard/malformed fail-closed behavior and the
-  // provenance-class drops live in cfc-projection.test.ts.
-  // -------------------------------------------------------------------------
   it("scenario 3a′ — the projection ifc annotation verifies and carries a scoped label", async () => {
+    // Scenario 3a′ — the §8.3 `projection` annotation IS implemented: the
+    // ergonomic "declare this field is a scoped projection" syntax verifies at
+    // commit (the target must equal the claimed source field) and carries the
+    // source's confidentiality in full plus its integrity SCOPED to the
+    // projected pointer, so the projected field can never claim whole-object
+    // integrity. Mismatch/wildcard/malformed fail-closed behavior and the
+    // provenance-class drops live in cfc-projection.test.ts.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime(storageManager);
     try {
@@ -509,13 +530,12 @@ describe("CFC cross-space integrity", () => {
     }
   });
 
-  // -------------------------------------------------------------------------
-  // Scenario 3 (reference variant): referencing only a SUBSET. A link to a
-  // sub-path of the source carries only that sub-path's label — the sibling
-  // field's label stays behind. This is the "solve the subset with references,
-  // at least partially" case.
-  // -------------------------------------------------------------------------
   it("scenario 3b — a cross-space link to a sub-path carries only that subset's label", async () => {
+    // Scenario 3 (reference variant): referencing only a SUBSET. A link to a
+    // sub-path of the source carries only that sub-path's label — the sibling
+    // field's label stays behind. This is the "solve the subset with
+    // references, at least partially" case.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime(storageManager);
     try {
@@ -567,19 +587,19 @@ describe("CFC cross-space integrity", () => {
     }
   });
 
-  // -------------------------------------------------------------------------
-  // Subset — the SUBTLE part. Source data carries MORE fields than the
-  // destination schema declares:
-  //   { foo: { bar, secret }, baz, secret }   vs   { foo: { bar }, baz }
-  //
-  // GOTCHA: linking the WHOLE object does NOT project it to the schema. The
-  // link carries the source's FULL labelMap — the undeclared `foo.secret` and
-  // top-level `secret` labels come across too. A narrower destination schema is
-  // a read-time VIEW, not a projection: it does not sanitize the reference. The
-  // secret fields stay confined by their OWN confidentiality labels (so this is
-  // safe, not a leak), but "only the right fields crossed" is FALSE here.
-  // -------------------------------------------------------------------------
   it("scenario 3d — a whole-object cross-space link carries undeclared sibling labels (no projection)", async () => {
+    // Subset — the SUBTLE part. Source data carries MORE fields than the
+    // destination schema declares:
+    //   { foo: { bar, secret }, baz, secret }   vs   { foo: { bar }, baz }
+    //
+    // GOTCHA: linking the WHOLE object does NOT project it to the schema. The
+    // link carries the source's FULL labelMap — the undeclared `foo.secret` and
+    // top-level `secret` labels come across too. A narrower destination schema
+    // is a read-time VIEW, not a projection: it does not sanitize the
+    // reference. The secret fields stay confined by their OWN confidentiality
+    // labels (so this is safe, not a leak), but "only the right fields crossed"
+    // is FALSE here.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime(storageManager);
     try {
@@ -643,13 +663,13 @@ describe("CFC cross-space integrity", () => {
     }
   });
 
-  // -------------------------------------------------------------------------
-  // Subset — DONE RIGHT: link the specific sub-paths. Only the selected fields'
-  // labels cross; the undeclared `secret` fields are never referenced, so their
-  // labels (and values) stay entirely behind. This is how you copy a genuine
-  // subset by reference, integrity-preserving and leak-free.
-  // -------------------------------------------------------------------------
   it("scenario 3e — per-field cross-space links copy exactly the chosen subset", async () => {
+    // Subset — DONE RIGHT: link the specific sub-paths. Only the selected
+    // fields' labels cross; the undeclared `secret` fields are never
+    // referenced, so their labels (and values) stay entirely behind. This is
+    // how you copy a genuine subset by reference, integrity-preserving and
+    // leak-free.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime(storageManager);
     try {
@@ -711,7 +731,6 @@ describe("CFC cross-space integrity", () => {
   });
 });
 
-// ===========================================================================
 // Scenario 2 — declassify while releasing/copying the value. Declassification
 // is a boundary-time rewrite expressed by EXCHANGE RULES: a rule adds an
 // alternative to (or drops) a CONFIDENTIALITY clause, gated by evidence. The
@@ -721,7 +740,6 @@ describe("CFC cross-space integrity", () => {
 //
 // These use the exchange evaluator directly, which is the label transform the
 // sink/egress boundary applies under `cfcPolicyEvaluation: "enforce"`.
-// ===========================================================================
 
 const BOB = "did:key:bob";
 const userBob = cfcAtom.user(BOB);
@@ -778,10 +796,9 @@ const publishRule: ExchangeRule = {
 };
 
 describe("CFC declassification while copying (exchange rules)", () => {
-  // -------------------------------------------------------------------------
-  // Declassify by WIDENING the audience, integrity retained.
-  // -------------------------------------------------------------------------
   it("scenario 2a — releasing to a reader widens confidentiality, integrity untouched", () => {
+    // Declassify by WIDENING the audience, integrity retained.
+
     const result = evaluateExchangeRules(
       { confidentiality: [spaceASecret], integrity: [bobReadsA, gpsReading] },
       snapshotOf([spaceReaderRule]),
@@ -798,10 +815,9 @@ describe("CFC declassification while copying (exchange rules)", () => {
     expect(result.label.integrity).toContainEqual(bobReadsA);
   });
 
-  // -------------------------------------------------------------------------
-  // Declassify FULLY (drop the clause → public), integrity retained.
-  // -------------------------------------------------------------------------
   it("scenario 2b — a publish approval drops the clause; integrity survives", () => {
+    // Declassify FULLY (drop the clause → public), integrity retained.
+
     const result = evaluateExchangeRules(
       {
         confidentiality: [spaceASecret],
@@ -817,11 +833,10 @@ describe("CFC declassification while copying (exchange rules)", () => {
     expect(result.label.integrity).toContainEqual(PUBLISH_APPROVED);
   });
 
-  // -------------------------------------------------------------------------
-  // No evidence → no declassification (fail-closed). The confidentiality clause
-  // stands; nothing is released.
-  // -------------------------------------------------------------------------
   it("scenario 2c — without the evidence, nothing is declassified", () => {
+    // No evidence → no declassification (fail-closed). The confidentiality
+    // clause stands; nothing is released.
+
     const result = evaluateExchangeRules(
       { confidentiality: [spaceASecret], integrity: [gpsReading] },
       snapshotOf([spaceReaderRule, publishRule]),
@@ -831,15 +846,14 @@ describe("CFC declassification while copying (exchange rules)", () => {
     expect(result.label.integrity).toContain(gpsReading);
   });
 
-  // -------------------------------------------------------------------------
-  // Scenario 3 (declassify only the SUBSET): clause-locality. A `referenced`
-  // policy fires only on the clause that carries its hash-bound ref atom — its
-  // "home clause" — leaving sibling clauses confined even when the same
-  // evidence would satisfy the guard there. Combined with per-path labels
-  // (scenario 3b), this scopes a declassification to exactly one part of the
-  // value; integrity is still untouched.
-  // -------------------------------------------------------------------------
   it("scenario 3c — a referenced policy declassifies only its home clause", () => {
+    // Scenario 3 (declassify only the SUBSET): clause-locality. A `referenced`
+    // policy fires only on the clause that carries its hash-bound ref atom —
+    // its "home clause" — leaving sibling clauses confined even when the same
+    // evidence would satisfy the guard there. Combined with per-path labels
+    // (scenario 3b), this scopes a declassification to exactly one part of the
+    // value; integrity is still untouched.
+
     const spaceB2 = cfcAtom.space(spaceB);
     const bobReadsB = cfcAtom.hasRole(BOB, spaceB, "reader");
     const shareSnapshot = buildCfcPolicySnapshot([{

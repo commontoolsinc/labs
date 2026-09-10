@@ -16,8 +16,9 @@
  * use scopes — capabilities are configured in the integration dashboard.
  * Notion embeds owner info in the token response; we extract it via tokenMapper.
  */
+
 import env from "@/env.ts";
-import type { ProviderDescriptor } from "../oauth2-common/oauth2-common.types.ts";
+import type { ProviderDescriptor } from "@/routes/integrations/oauth2-common/oauth2-common.types.ts";
 
 export const NotionDescriptor: ProviderDescriptor = {
   name: "notion",

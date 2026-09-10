@@ -1,5 +1,4 @@
 export type {
-  Compiler,
   JsScript,
   Program,
   ProgramResolver,
@@ -20,13 +19,16 @@ export {
   type TypeScriptCompilerOptions,
 } from "./typescript/mod.ts";
 export {
+  collectDataFileNames,
   collectImportSpecifiers,
   resolveImportSpecifier,
 } from "./typescript/resolver.ts";
+export { assertImportInsideProgramRoot } from "./specifier.ts";
 export {
   FileSystemProgramResolver,
   HttpProgramResolver,
   InMemoryProgram,
+  readDataFileSource,
 } from "./program.ts";
 export {
   composeBundleSourceMap,

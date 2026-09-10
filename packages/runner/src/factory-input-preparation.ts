@@ -1,8 +1,8 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
-import { resolveLocalSchemaRef } from "@commonfabric/data-model/schema-utils";
+import { resolveLocalSchemaRef } from "@commonfabric/data-model-schema";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { Cell } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
@@ -85,7 +85,7 @@ function resolveFactoryDiscoverySchema(
   let current = candidate;
   const seen = new Set<string>();
   while (
-    isRecord(current) && typeof current.$ref === "string" &&
+    isObjectNotArray(current) && typeof current.$ref === "string" &&
     !("asFactory" in current) && root !== undefined
   ) {
     const ref = current.$ref;
@@ -102,11 +102,11 @@ function resolveFactoryDiscoverySchema(
     current = {
       ...target,
       ...siblings,
-      ...(isRecord(root) && target.$defs === undefined &&
+      ...(isObjectNotArray(root) && target.$defs === undefined &&
           root.$defs !== undefined
         ? { $defs: root.$defs }
         : {}),
-      ...(isRecord(root) && target.definitions === undefined &&
+      ...(isObjectNotArray(root) && target.definitions === undefined &&
           root.definitions !== undefined
         ? { definitions: root.definitions }
         : {}),
@@ -127,7 +127,7 @@ function canFactoryBranchMatch(
   value: unknown,
 ): boolean {
   if (!canBranchMatch(branch, value)) return false;
-  if (!isRecord(branch) || isSigilLink(value)) return true;
+  if (!isObjectNotArray(branch) || isSigilLink(value)) return true;
 
   if ("const" in branch && !deepEqual(branch.const, value)) return false;
   if (
@@ -137,7 +137,7 @@ function canFactoryBranchMatch(
     return false;
   }
 
-  if (isRecord(value) && isRecord(branch.properties)) {
+  if (isObjectNotArray(value) && isObjectNotArray(branch.properties)) {
     for (const [key, childSchema] of Object.entries(branch.properties)) {
       if (
         key in value &&
@@ -175,7 +175,7 @@ export function materializeScheduledFactoryInputs(
   const resolvedSchemaFor = (
     candidate: JSONSchema | undefined,
   ): JSONSchema | undefined => {
-    if (!isRecord(candidate)) {
+    if (!isObjectNotArray(candidate)) {
       return resolveFactoryDiscoverySchema(candidate, fullSchema);
     }
     if (resolvedSchemaMemo.has(candidate)) {
@@ -191,7 +191,9 @@ export function materializeScheduledFactoryInputs(
     candidate: JSONSchema | undefined,
   ): { contains: boolean; complete: boolean } => {
     const resolved = resolvedSchemaFor(candidate);
-    if (!isRecord(resolved)) return { contains: false, complete: true };
+    if (!isObjectNotArray(resolved)) {
+      return { contains: false, complete: true };
+    }
     const cached = factorySchemaMemo.get(resolved);
     if (cached !== undefined) return { contains: cached, complete: true };
     if (factorySchemaVisiting.has(resolved)) {
@@ -207,7 +209,7 @@ export function materializeScheduledFactoryInputs(
     factorySchemaVisiting.add(resolved);
     let complete = true;
     const children: Array<JSONSchema | undefined> = [];
-    if (isRecord(resolved.properties)) {
+    if (isObjectNotArray(resolved.properties)) {
       children.push(...Object.values(resolved.properties));
     }
     children.push(resolved.items);
@@ -244,7 +246,7 @@ export function materializeScheduledFactoryInputs(
     path: readonly string[],
   ): unknown => {
     const resolvedSchema = resolvedSchemaFor(currentSchema);
-    if (!isRecord(resolvedSchema)) return currentValue;
+    if (!isObjectNotArray(resolvedSchema)) return currentValue;
 
     // An explicit Cell<Factory> remains a Cell. Its contents are read under
     // ordinary Cell semantics by authored code; this preparation pass only
@@ -278,7 +280,10 @@ export function materializeScheduledFactoryInputs(
     }
 
     let result = currentValue;
-    if (isRecord(currentValue) && isRecord(resolvedSchema.properties)) {
+    if (
+      isObjectNotArray(currentValue) &&
+      isObjectNotArray(resolvedSchema.properties)
+    ) {
       const container = currentValue as Record<string, unknown>;
       for (
         const [key, childSchema] of Object.entries(
@@ -329,10 +334,10 @@ export function materializeScheduledFactoryInputs(
     }
 
     if (
-      isRecord(currentValue) &&
+      isObjectNotArray(currentValue) &&
       schemaContainsFactory(resolvedSchema.additionalProperties)
     ) {
-      const declared = isRecord(resolvedSchema.properties)
+      const declared = isObjectNotArray(resolvedSchema.properties)
         ? new Set(Object.keys(resolvedSchema.properties))
         : undefined;
       for (const key of Object.keys(currentValue)) {
@@ -367,7 +372,7 @@ export function materializeScheduledFactoryInputs(
           continue;
         }
         if (
-          compound !== "allOf" && isRecord(resolvedBranch) &&
+          compound !== "allOf" && isObjectNotArray(resolvedBranch) &&
           "asFactory" in resolvedBranch
         ) {
           const expected = factoryContractFromSchema(resolvedBranch)!;

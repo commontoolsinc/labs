@@ -1,0 +1,4 @@
+import { pattern } from "commonfabric";
+
+export const counter = pattern(() => {
+  return <div>{`Count: ${

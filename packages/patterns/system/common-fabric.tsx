@@ -26,6 +26,7 @@ import { type MentionablePiece } from "./backlinks-index.tsx";
 type CalculatorRequest = {
   /** The mathematical expression to evaluate. */
   expression: string;
+
   /** The base to use for the calculation. */
   base?: number;
 };
@@ -276,20 +277,24 @@ export const readWebpage = pattern<
  * Execute a bash command in a persistent cloud sandbox.
  * The sandbox preserves installed packages and files across calls.
  */
-export type BashRequest = {
+type BashRequest = {
   /** The bash command to execute. */
   command: string;
+
   /** Working directory for the command. */
   workingDirectory?: string;
+
   /** Timeout in milliseconds. Defaults to 60000. */
   timeout?: number;
+
   /** Additional environment variables as key-value pairs. */
   environment?: Record<string, string>;
+
   /** Sandbox identifier. Automatically provided — do not set. */
   sandboxId: FrameworkProvided<string>;
 };
 
-export type BashResult = {
+type BashResult = {
   stdout: string;
   stderr: string;
   exitCode: number;
@@ -354,7 +359,7 @@ export default pattern<ToolsInput>(({ list }) => {
  * Pass in arguments to initialize the pattern. It's especially useful to pass
  * in links to other cells as `{ "@link": "/of:bafe.../path/to/data" }`.
  */
-export type FetchAndRunPatternInput = {
+type FetchAndRunPatternInput = {
   url: string;
   args: Writable<any>;
 };
@@ -395,7 +400,7 @@ export const fetchAndRunPattern = pattern<FetchAndRunPatternInput>(
  * Especially useful after instantiating a pattern with fetchAndRunPattern:
  * Pass the "@link" you get at `cell` to navigate to the pattern's view.
  */
-export type NavigateToPatternInput = { cell: Writable<any> }; // Hack to steer LLM
+type NavigateToPatternInput = { cell: Writable<any> }; // Hack to steer LLM
 export const navigateToPattern = pattern<NavigateToPatternInput>(
   ({ cell }) => {
     const success = navigateTo(cell);
@@ -440,7 +445,7 @@ export const listPatternIndex = pattern<ListPatternIndexInput>(
  *
  * Allows the LLM to remember things about the user by updating their profile text.
  */
-export type UpdateProfileInput = {
+type UpdateProfileInput = {
   /** New profile summary text to set */
   summary: string;
 };
@@ -469,27 +474,12 @@ export const updateProfile = pattern<
 });
 
 export const listMentionable = pattern<
-  { mentionable?: Array<MentionablePiece> },
+  { mentionable: Array<MentionablePiece> },
   { result: Array<{ label: string; piece: MentionablePiece }> }
 >(({ mentionable }) => {
-  const result = computed(() =>
-    (mentionable ?? []).map((c) => ({
-      label: c[NAME]!,
-      piece: c,
-    }))
-  );
+  const result = mentionable.map((c) => ({
+    label: c[NAME]!,
+    piece: c,
+  }));
   return { result };
-});
-
-export const listRecent = pattern<
-  { recentPieces?: Array<MentionablePiece> },
-  { result: Array<{ label: string; piece: MentionablePiece }> }
->(({ recentPieces }) => {
-  const namesList = computed(() =>
-    (recentPieces ?? []).map((c) => ({
-      label: c[NAME]!,
-      piece: c,
-    }))
-  );
-  return { result: namesList };
 });

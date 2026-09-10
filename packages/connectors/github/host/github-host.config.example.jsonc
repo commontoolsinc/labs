@@ -1,0 +1,7 @@
+{
+  "schema": "commonfabric.github-host.config.v1",
+  "account": "your-github-login",
+  // Set to zero to collect only at startup and on SIGHUP.
+  "collectionIntervalMs": 900000,
+  "graphqlEndpoint": "https://api.github.com/graphql"
+}

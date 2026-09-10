@@ -1,10 +1,10 @@
 import type { Tokens } from "@cmd-johnson/oauth2-client";
-import type { Context } from "@hono/hono";
-import { getLogger } from "@commonfabric/utils/logger";
 import { setBGPiece } from "@commonfabric/background-piece";
-import { runtime } from "@/index.ts";
 import { OAuth2TokenSchema } from "@commonfabric/runner";
 import type { JSONSchema } from "@commonfabric/runner";
+import { getLogger } from "@commonfabric/utils/logger";
+import type { Context } from "@hono/hono";
+
 import type {
   CallbackResult,
   OAuth2HandlerOptions,
@@ -28,9 +28,10 @@ import {
   persistTokens,
   tokenToGenericAuthData,
 } from "./oauth2-common.utils.ts";
+import { runtime } from "@/index.ts";
 
 /**
- * Strip the `schema` field from a serialised cell-link JSON string.
+ * Strip the `schema` field from a serialized cell-link JSON string.
  *
  * The frontend sends the full CellRef (including the JSON Schema) inside
  * `authCellId`.  The schema is large and redundant here – the callback
@@ -68,7 +69,7 @@ function encodeOAuthState(data: {
   codeVerifier: string;
   scopes?: string[];
 }): string {
-  // Single-letter keys to minimise payload:
+  // Single-letter keys to minimize payload:
   // a = authCellId (schema-stripped), p = integrationPieceId,
   // v = codeVerifier, s = scopes
   const compact: Record<string, unknown> = {
@@ -150,9 +151,6 @@ export function createOAuth2Handlers(
     (OAuth2TokenSchema as unknown as JSONSchema);
   const emptyAuthData = options.emptyAuthData ?? EMPTY_OAUTH2_DATA;
 
-  // -----------------------------------------------------------------------
-  // LOGIN
-  // -----------------------------------------------------------------------
   async function login(c: Context) {
     try {
       const payload = await c.req.json();
@@ -202,9 +200,6 @@ export function createOAuth2Handlers(
     }
   }
 
-  // -----------------------------------------------------------------------
-  // CALLBACK
-  // -----------------------------------------------------------------------
   async function callback(c: Context) {
     const query = c.req.query();
     logger.info(`Received ${config.name} OAuth callback`, query);
@@ -365,9 +360,6 @@ export function createOAuth2Handlers(
     }
   }
 
-  // -----------------------------------------------------------------------
-  // REFRESH
-  // -----------------------------------------------------------------------
   async function refresh(c: Context) {
     try {
       const payload = await c.req.json();
@@ -431,9 +423,6 @@ export function createOAuth2Handlers(
     }
   }
 
-  // -----------------------------------------------------------------------
-  // LOGOUT
-  // -----------------------------------------------------------------------
   async function logout(c: Context) {
     try {
       const payload = await c.req.json();
@@ -463,9 +452,7 @@ export function createOAuth2Handlers(
     }
   }
 
-  // -----------------------------------------------------------------------
-  // BACKGROUND INTEGRATION (shared, not provider-specific)
-  // -----------------------------------------------------------------------
+  /** BACKGROUND INTEGRATION (shared, not provider-specific) */
   async function backgroundIntegration(c: Context) {
     try {
       const payload = await c.req.json();

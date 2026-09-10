@@ -1,53 +1,75 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { type CellScope, resolveScopeKey } from "@commonfabric/memory/v2";
+import { describe, it } from "@std/testing/bdd";
+
 import type { SchemaPathSelector } from "@commonfabric/api";
+import type { FabricValue } from "@commonfabric/data-model";
+import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
+  internPathSelector,
+  isInternedSchema,
+} from "@commonfabric/data-model-schema";
 import type {
   Entity,
   Revision,
   State,
   URI,
 } from "@commonfabric/memory/interface";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
-import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
-import { internPathSelector } from "@commonfabric/data-model/schema-utils";
+
+import type { JSONSchema } from "../src/builder/types.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import { StoreObjectManager } from "../src/storage/query.ts";
 import {
   canBranchMatch,
-  combineSchema,
+  combineSchemaForLink,
   CompoundCycleTracker,
   createDefaultTraversalContext,
+  createSchemaMemo,
   createTraversalContext,
   getAtPath,
+  IMemorySpaceValueAttestation,
   ManagedStorageTransaction,
   MapSet,
   MapSetStringToPathSelectors,
   mergeAnyOfBranchSchemas,
   mergeAnyOfMatches,
   PointerCycleTracker,
+  type SchemaMemo,
   SchemaObjectTraverser,
   schemaTrackerCoversSelector,
+  setTraverseDiagnostics,
   type TraversalContext,
 } from "../src/traverse.ts";
-import { StoreObjectManager } from "../src/storage/query.ts";
-import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
-import { ContextualFlowControl } from "@commonfabric/runner";
-import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E). These tests traverse space-scoped docs, so any one
+// identity partitions alike.
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
 
 // Helper function to get the SchemaObjectTraverser backed by a store map
 function getTraverser(
   store: Map<string, Revision<State>>,
   selector: SchemaPathSelector,
-  context: TraversalContext = createDefaultTraversalContext(),
+  context: TraversalContext = createDefaultTraversalContext(
+    TEST_SCOPE_IDENTITY,
+  ),
+  sharedSchemaMemo?: SchemaMemo,
 ): SchemaObjectTraverser<FabricValue> {
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const tx = new ExtendedStorageTransaction(managedTx);
-  return new SchemaObjectTraverser(tx, selector, context);
+  return new SchemaObjectTraverser(
+    tx,
+    selector,
+    context,
+    undefined,
+    sharedSchemaMemo,
+  );
 }
 
 describe("SchemaObjectTraverser.traverseDAG", () => {
@@ -65,7 +87,6 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
       the: type,
       of: doc1Entity,
       is: { value: doc1Value },
-      cause: hashOf({ the: type, of: doc1Entity }),
       since: 1,
     };
     store.set(
@@ -108,7 +129,6 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
       the: type,
       of: doc2Entity,
       is: { value: doc2Value },
-      cause: hashOf({ the: type, of: doc2Entity }),
       since: 2,
     };
     store.set(
@@ -177,7 +197,6 @@ describe("SchemaObjectTraverser missing value handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -220,7 +239,6 @@ describe("SchemaObjectTraverser missing value handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -267,7 +285,6 @@ describe("SchemaObjectTraverser missing value handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -318,7 +335,6 @@ describe("SchemaObjectTraverser missing value handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -367,7 +383,6 @@ describe("SchemaObjectTraverser missing value handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -411,7 +426,6 @@ describe("SchemaObjectTraverser missing value handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -444,60 +458,6 @@ describe("SchemaObjectTraverser missing value handling", () => {
 });
 
 describe("SchemaObjectTraverser array traversal", () => {
-  it("traverses persisted inline objects containing factories", () => {
-    const store = new Map<string, Revision<State>>();
-    const type = "application/json" as const;
-    const docUri = "of:doc-factory-array" as URI;
-    const docEntity = docUri as Entity;
-    const factory = createFactoryShell({
-      kind: "module",
-      ref: {
-        identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-        symbol: "array-factory",
-      },
-    });
-    const docValue = [{ factory }];
-    const docRevision: Revision<State> = {
-      the: type,
-      of: docEntity,
-      is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
-      since: 1,
-    };
-    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
-
-    const traverser = getTraverser(store, {
-      path: ["value"],
-      schema: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            factory: {
-              asFactory: {
-                kind: "module",
-                argumentSchema: true,
-                resultSchema: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    const result = traverser.traverse({
-      address: {
-        space: "did:null:null",
-        id: docUri,
-        type,
-        path: ["value"],
-      },
-      value: docValue,
-    });
-
-    expect(result).toHaveProperty("ok");
-  });
-
   it("uses prefixItems schemas for indexed items", () => {
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;
@@ -510,7 +470,6 @@ describe("SchemaObjectTraverser array traversal", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -557,7 +516,6 @@ describe("SchemaObjectTraverser array traversal", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -586,11 +544,11 @@ describe("SchemaObjectTraverser array traversal", () => {
     expect(error).toBeDefined();
   });
 
-  // CT-1562 / B3: companion to the test above. Same `items: false` constraint
-  // but without `prefixItems` — i.e., "this array allows no items at all,
-  // only `[]` matches." The traverser currently accepts populated arrays
-  // through this schema, returning them unchanged. RED until B3 is fixed.
   it("rejects populated array when items is false and no prefixItems (B3)", () => {
+    // CT-1562 / B3: companion to the test above, with the same `items: false`
+    // constraint but without `prefixItems`. The traverser rejects a populated
+    // array against it.
+
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;
     const docUri = "of:doc-items-false-no-prefix" as URI;
@@ -602,7 +560,6 @@ describe("SchemaObjectTraverser array traversal", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -628,6 +585,9 @@ describe("SchemaObjectTraverser array traversal", () => {
   });
 
   it("accepts empty array when items is false (B3 baseline)", () => {
+    // `items: false` without `prefixItems` means "this array allows no items at
+    // all, only `[]` matches."
+
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;
     const docUri = "of:doc-items-false-empty" as URI;
@@ -639,7 +599,6 @@ describe("SchemaObjectTraverser array traversal", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -683,7 +642,6 @@ describe("SchemaObjectTraverser array traversal", () => {
         the: "application/json",
         of: id,
         is: { value: value },
-        cause: hashOf({ the: "application/json", of: id }),
         since: 1,
       };
     }
@@ -711,7 +669,6 @@ describe("SchemaObjectTraverser array traversal", () => {
           the: "application/json",
           of: id,
           is: { value: value },
-          cause: hashOf({ the: "application/json", of: id }),
           since: 1,
         };
       }
@@ -740,9 +697,12 @@ describe("SchemaObjectTraverser array traversal", () => {
         FabricValue,
         JSONSchema | undefined
       >();
-      const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, cfc, schemaTracker);
+      const context = createTraversalContext(
+        tracker,
+        schemaTracker,
+        TEST_SCOPE_IDENTITY,
+      );
       const docAFoo: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -750,7 +710,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "foo"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.foo as FabricValue,
+        value: (revA.is as any).value.foo,
       };
       const docASelector = {
         path: ["value", "foo"],
@@ -803,9 +763,12 @@ describe("SchemaObjectTraverser array traversal", () => {
         FabricValue,
         JSONSchema | undefined
       >();
-      const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, cfc, schemaTracker);
+      const context = createTraversalContext(
+        tracker,
+        schemaTracker,
+        TEST_SCOPE_IDENTITY,
+      );
       const docACurrent: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -813,7 +776,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.current as FabricValue,
+        value: (revA.is as any).value.current,
       };
       const docASelector = { path: ["value", "current"], schema: true };
       const [curDoc, _selector1] = getAtPath(
@@ -867,9 +830,12 @@ describe("SchemaObjectTraverser array traversal", () => {
         FabricValue,
         JSONSchema | undefined
       >();
-      const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, cfc, schemaTracker);
+      const context = createTraversalContext(
+        tracker,
+        schemaTracker,
+        TEST_SCOPE_IDENTITY,
+      );
       const docACurrent: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -877,7 +843,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.current as FabricValue,
+        value: (revA.is as any).value.current,
       };
       const docASelector = {
         path: ["value", "current"],
@@ -930,7 +896,6 @@ describe("getAtPath array index validation", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -942,9 +907,12 @@ describe("getAtPath array index validation", () => {
       FabricValue,
       JSONSchema | undefined
     >();
-    const cfc = new ContextualFlowControl();
     const schemaTracker = new MapSetStringToPathSelectors(true);
-    const context = createTraversalContext(tracker, cfc, schemaTracker);
+    const context = createTraversalContext(
+      tracker,
+      schemaTracker,
+      TEST_SCOPE_IDENTITY,
+    );
 
     const doc: IMemorySpaceValueAttestation = {
       address: {
@@ -994,7 +962,6 @@ describe("SchemaObjectTraverser boolean type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1032,7 +999,6 @@ describe("SchemaObjectTraverser boolean type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1071,7 +1037,6 @@ describe("SchemaObjectTraverser FabricSpecialObject type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1114,7 +1079,6 @@ describe("SchemaObjectTraverser FabricSpecialObject type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1152,7 +1116,6 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1193,7 +1156,6 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1248,7 +1210,6 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1311,7 +1272,6 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     });
     return { store, docUri, type };
@@ -1423,7 +1383,7 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
     // receives that self-contained schema and must resolve the $ref before
     // deciding whether undefined is a valid substitute.
     const docValue = ["hello", true];
-    const { store, docUri, type } = makeArrayDoc(docValue as FabricValue[]);
+    const { store, docUri, type } = makeArrayDoc(docValue);
 
     const schema = {
       type: "array",
@@ -1441,7 +1401,7 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
           type,
           path: ["value"],
         },
-        value: docValue as FabricValue[],
+        value: docValue,
       });
 
     // After fix: $ref is resolved to { type: "string" }, which does not allow
@@ -1463,7 +1423,6 @@ describe("SchemaObjectTraverser oneOf correctness", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1508,7 +1467,6 @@ describe("SchemaObjectTraverser oneOf correctness", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1553,14 +1511,12 @@ describe("SchemaObjectTraverser oneOf correctness", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     });
     store.set(`${linkedUri}/${type}`, {
       the: type,
       of: linkedUri as Entity,
       is: { value: { label: "should not appear" } },
-      cause: hashOf({ the: type, of: linkedUri as Entity }),
       since: 2,
     });
 
@@ -1596,7 +1552,6 @@ describe("SchemaObjectTraverser oneOf correctness", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     });
 
@@ -1636,7 +1591,6 @@ describe("SchemaObjectTraverser allOf correctness", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1682,7 +1636,6 @@ describe("SchemaObjectTraverser allOf correctness", () => {
       the: type,
       of: targetUri as Entity,
       is: { value: { city: "Paris" } },
-      cause: hashOf({ the: type, of: targetUri as Entity }),
       since: 1,
     });
 
@@ -1694,7 +1647,6 @@ describe("SchemaObjectTraverser allOf correctness", () => {
       the: type,
       of: docUri as Entity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docUri as Entity }),
       since: 1,
     });
 
@@ -1771,7 +1723,7 @@ describe("CompoundCycleTracker cleanup", () => {
     const disposable = tracker.include(key, true);
     expect(disposable).not.toBeNull();
     disposable![Symbol.dispose]();
-    expect((tracker as any).partial.size).toBe(0);
+    expect(tracker.accessForTestingOnly.partial.size).toBe(0);
   });
 
   it("retains partial-key entries while sibling entries are live", () => {
@@ -1787,11 +1739,11 @@ describe("CompoundCycleTracker cleanup", () => {
     // Disposing only A must not remove the outer `partial` entry —
     // B's live entry still keys on the same partialKey.
     dispA![Symbol.dispose]();
-    expect((tracker as any).partial.size).toBe(1);
-    expect((tracker as any).partial.get(key)!.size).toBe(1);
+    expect(tracker.accessForTestingOnly.partial.size).toBe(1);
+    expect(tracker.accessForTestingOnly.partial.get(key)!.size).toBe(1);
     // Disposing B then cleans up.
     dispB![Symbol.dispose]();
-    expect((tracker as any).partial.size).toBe(0);
+    expect(tracker.accessForTestingOnly.partial.size).toBe(0);
   });
 });
 
@@ -1975,6 +1927,27 @@ describe("canBranchMatch", () => {
     ).toBe(true);
   });
 
+  it("treats the nominal brand key as present on a `FabricSpecialObject`", () => {
+    // The generator's emitted shape for a FabricBytes-typed field: the
+    // brand has no runtime existence, so a `FabricSpecialObject` satisfies it
+    // by construction; `length` is satisfied by the class accessor.
+    const branch = {
+      type: "object",
+      required: ["length", "@commonfabric/FabricSpecialObject"],
+    } as const;
+    expect(canBranchMatch(branch, new FabricBytes(new Uint8Array([1]))))
+      .toBe(true);
+    // No exemption for a plain record, which genuinely lacks the brand.
+    expect(canBranchMatch(branch, { length: 1 })).toBe(false);
+    // A key the primitive lacks still rejects it.
+    expect(
+      canBranchMatch(
+        { type: "object", required: ["x"] },
+        new FabricBytes(new Uint8Array([1])),
+      ),
+    ).toBe(false);
+  });
+
   it("conservatively accepts property-level const (values may be unresolved links)", () => {
     // Even when the property value doesn't match the const, we can't reject
     // because the value might be a link that resolves to a matching value.
@@ -2096,11 +2069,14 @@ describe("canBranchMatch", () => {
     ).toBe(true);
   });
 
-  // CT-1562 / B1: `items: false` on an array schema means "no items allowed"
-  // (only the empty array `[]` matches). canBranchMatch currently checks
-  // `type === "array"` but ignores `items: false`, so populated arrays falsely
-  // pass the fast-reject check. These tests RED until B1 is fixed.
   it("accepts empty array against items: false (only empty arrays match)", () => {
+    // CT-1562 / B1: `items: false` on an array schema means "no items allowed"
+    // (only the empty array `[]` matches). canBranchMatch checks
+    // `type === "array"` but ignores `items: false`, so a populated array still
+    // passes this fast-reject check. This case pins the empty-array half, which
+    // matches either way; nothing here covers the populated half, so the gap
+    // shows up in no failing test.
+
     expect(canBranchMatch({ type: "array", items: false }, [])).toBe(true);
   });
 });
@@ -2118,7 +2094,6 @@ describe("SchemaObjectTraverser number/integer type pruning", () => {
         the: type,
         of: docEntity,
         is: { value },
-        cause: hashOf({ the: type, of: docEntity }),
         since: 1,
       });
 
@@ -2150,7 +2125,7 @@ describe("mergeAnyOfMatches", () => {
   // CT-1562 / B2: when an anyOf produces multiple successful matches and all
   // of them are arrays, the current `Object.assign({}, ...arrays)` merge
   // strips array-ness, returning `{ "0": …, "1": … }` instead of `[…, …]`.
-  // Arrays satisfy `isRecord` (typeof [] === "object" && [] !== null), so
+  // Arrays satisfy `isObjectOrArray` (typeof [] === "object" && [] !== null), so
   // the object-merge branch fires erroneously.
   //
   // The existing object-merge semantic is intentional for object branches
@@ -2336,7 +2311,6 @@ describe("anyOf optimization integration", () => {
       the: type,
       of: docEntity,
       is: { value },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     });
 
@@ -2376,7 +2350,6 @@ describe("anyOf optimization integration", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2439,7 +2412,6 @@ describe("anyOf optimization integration", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2485,7 +2457,6 @@ describe("anyOf optimization integration", () => {
       the: type,
       of: linkedEntity,
       is: { value: "linked-value" },
-      cause: hashOf({ the: type, of: linkedEntity }),
       since: 1,
     };
     store.set(`${linkedRevision.of}/${linkedRevision.the}`, linkedRevision);
@@ -2506,7 +2477,6 @@ describe("anyOf optimization integration", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2560,7 +2530,6 @@ describe("anyOf optimization integration", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2602,7 +2571,6 @@ describe("anyOf optimization integration", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2647,7 +2615,6 @@ describe("link schema path narrowing", () => {
       the: TYPE,
       of: entity,
       is: { value },
-      cause: hashOf({ the: TYPE, of: entity }),
       since: 1,
     } as Revision<State>);
   }
@@ -2791,13 +2758,25 @@ describe("link schema path narrowing", () => {
       expected: 2,
     },
     {
-      name: "preserves a false link schema at the exact link path",
+      name: "ignores a false link schema when the reader has its own schema",
       targetPath: [],
       targetValue: "Rejected",
       selectorPath: [],
       selectorSchema: { type: "string" },
       linkSchema: false,
-      expected: undefined,
+      expected: "Rejected",
+    },
+    {
+      // The permissive traversal's placeholder for a link it will not
+      // descend into is null, so the false link schema withholds the target
+      // value without voiding the read.
+      name: "adopts a false link schema for a permissive reader",
+      targetPath: [],
+      targetValue: "Rejected",
+      selectorPath: [],
+      selectorSchema: true,
+      linkSchema: false,
+      expected: null,
     },
   ];
 
@@ -2832,7 +2811,12 @@ describe("link schema path narrowing", () => {
     });
   }
 
-  it("voids a linked object missing a field required only by the link schema", () => {
+  it("returns a linked object missing a field required only by the link schema", () => {
+    // The link describes more of its target than the reader asked for. The
+    // reader's schema takes precedence at the hop (`combineSchemaForLink`), so
+    // the link's extra `required` entry must not void the reader's narrower
+    // view of a target that satisfies everything the reader itself demanded.
+
     const store = new Map<string, Revision<State>>();
     const rootUri = "of:link-schema-required-union-root" as URI;
     const targetUri = "of:link-schema-required-union-target" as URI;
@@ -2875,23 +2859,87 @@ describe("link schema path narrowing", () => {
       value: rootValue,
     });
 
-    expect(ok).toBeUndefined();
-    expect(error).toBeDefined();
+    expect(error).toBeUndefined();
+    expect(ok).toEqual({ item: { a: "present" } });
   });
 
-  // A graph can contain records of one recursive type: for example, every
-  // User has a friends Cell whose elements are links to other Users. Each
-  // link legitimately carries the full User schema, including its required
-  // friends property. A query for "me and my direct friends" must therefore
-  // override that nested friends edge with an opaque boundary; otherwise the
-  // schema carried by each friend link makes traversal continue to friends of
-  // friends (and then onward through the recursive graph).
-  //
-  // The boundary should retain the direct friend's raw friends pointer in the
-  // query result, but must not load or subscribe to the pointer's target. The
-  // non-opaque control at the end proves that the deeper documents are
-  // reachable and are excluded specifically because of the boundary.
+  it("does not traverse a link-schema property the reader did not select", () => {
+    // The reader's schema keeps the unselected key out of the combined
+    // schema's `properties`, so the traversal treats it like any other key the
+    // reader did not ask for: the query system carries the raw value through
+    // without descending, and the link under it is neither followed nor
+    // tracked for the subscription.
+
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:link-schema-projection-root" as URI;
+    const targetUri = "of:link-schema-projection-target" as URI;
+    const unselectedUri = "of:link-schema-projection-unselected" as URI;
+    const linkSchema = {
+      type: "object",
+      properties: {
+        a: { type: "string" },
+        b: { type: "string" },
+      },
+      required: ["a", "b"],
+    } as const satisfies JSONSchema;
+    const rootValue = {
+      item: makeLink(targetUri, [], linkSchema),
+    };
+    const targetValue = {
+      a: "present",
+      b: makeLink(unselectedUri, [], { type: "string" }),
+    };
+    putDoc(store, rootUri, rootValue);
+    putDoc(store, targetUri, targetValue);
+    putDoc(store, unselectedUri, "unselected");
+
+    const readerSchema = {
+      type: "object",
+      properties: {
+        item: {
+          type: "object",
+          properties: { a: { type: "string" } },
+          required: ["a"],
+        },
+      },
+      required: ["item"],
+    } as const satisfies JSONSchema;
+    const context = createDefaultTraversalContext(TEST_SCOPE_IDENTITY);
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schema: readerSchema,
+    }, context);
+    const { ok, error } = traverser.traverse({
+      address: {
+        space: SPACE,
+        id: rootUri,
+        type: TYPE,
+        path: ["value"],
+      },
+      value: rootValue,
+    });
+
+    expect(error).toBeUndefined();
+    expect(ok).toEqual({ item: { a: "present", b: targetValue.b } });
+    expect(context.schemaTracker.has(`${SPACE}/space/${unselectedUri}`)).toBe(
+      false,
+    );
+  });
+
   it("limits a recursive friends query to one hop with an opaque boundary", () => {
+    // A graph can contain records of one recursive type: for example, every
+    // User has a friends Cell whose elements are links to other Users. Each
+    // link legitimately carries the full User schema, including its required
+    // friends property. A query for "me and my direct friends" must therefore
+    // override that nested friends edge with an opaque boundary; otherwise the
+    // schema carried by each friend link makes traversal continue to friends of
+    // friends (and then onward through the recursive graph).
+    //
+    // The boundary should retain the direct friend's raw friends pointer in the
+    // query result, but must not load or subscribe to the pointer's target. The
+    // non-opaque control at the end proves that the deeper documents are
+    // reachable and are excluded specifically because of the boundary.
+
     const {
       store,
       rootUri,
@@ -2929,7 +2977,7 @@ describe("link schema path narrowing", () => {
       },
       required: ["id", "friends"],
     } as const satisfies JSONSchema;
-    const context = createDefaultTraversalContext();
+    const context = createDefaultTraversalContext(TEST_SCOPE_IDENTITY);
     const traverser = getTraverser(
       store,
       { path: ["value"], schema: querySchema },
@@ -2979,7 +3027,7 @@ describe("link schema path narrowing", () => {
         },
       },
     } as const satisfies JSONSchema;
-    const nonOpaqueContext = createDefaultTraversalContext();
+    const nonOpaqueContext = createDefaultTraversalContext(TEST_SCOPE_IDENTITY);
     const nonOpaqueTraverser = getTraverser(
       store,
       { path: ["value"], schema: nonOpaqueQuerySchema },
@@ -3002,12 +3050,14 @@ describe("link schema path narrowing", () => {
     ).toBe(true);
   });
 
-  // This parent schema corresponds to the projected type
-  // `{ id: string; friends?: never }`. The stored link still carries a full
-  // User schema with an optional friends list. Intersecting the two should
-  // keep `friends: false` without making it required. Traversal can then omit
-  // that property while retaining the direct friend record itself.
   it("omits an optional nested friends property narrowed to false", () => {
+    // This parent schema corresponds to the projected type
+    // `{ id: string; friends?: never }`. The stored link still carries a full
+    // User schema with an optional friends list. Combining the two for the
+    // link hop should keep `friends: false` without making it required.
+    // Traversal can then omit that property while retaining the direct friend
+    // record itself.
+
     const {
       store,
       rootUri,
@@ -3028,7 +3078,7 @@ describe("link schema path narrowing", () => {
       required: ["id"],
     } as const satisfies JSONSchema;
 
-    expect(combineSchema(directFriendSchema, fullUserSchema)).toEqual({
+    expect(combineSchemaForLink(directFriendSchema, fullUserSchema)).toEqual({
       type: "object",
       properties: {
         id: { type: "string" },
@@ -3048,7 +3098,7 @@ describe("link schema path narrowing", () => {
       },
       required: ["id", "friends"],
     } as const satisfies JSONSchema;
-    const context = createDefaultTraversalContext();
+    const context = createDefaultTraversalContext(TEST_SCOPE_IDENTITY);
     const traverser = getTraverser(
       store,
       { path: ["value"], schema: querySchema },
@@ -3103,8 +3153,10 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
   const TYPE = "application/json" as const;
 
   /** Build a tracker key matching the internal getTrackerKey() format. */
-  function trackerKey(id: string, scope = "space"): string {
-    return `${SPACE}/${scope}/${id}`;
+  function trackerKey(id: string, scope: CellScope = "space"): string {
+    // Instance keys (stage E): the scope segment is the shared scope_key
+    // resolved against the traversal's identity, not the scope name.
+    return `${SPACE}/${resolveScopeKey(scope, TEST_SCOPE_IDENTITY)}/${id}`;
   }
 
   /** Shortcut: store a document in the map-based store. */
@@ -3118,7 +3170,6 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
       the: TYPE,
       of: entity,
       is: { value },
-      cause: hashOf({ the: TYPE, of: entity }),
       since: 1,
     } as Revision<State>);
   }
@@ -3142,6 +3193,46 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
   ): MapSet<string, SchemaPathSelector> {
     return (traverser as any).schemaTracker;
   }
+
+  it("repeat unscoped links keep their values (stage-E neutrality guard)", () => {
+    // Two links to one unscoped target inside one traversal. The coverage
+    // memo must NOT fire for unscoped links (isLinkedDocumentCovered's
+    // neutrality guard): pre-stage-E the coverage key never matched for
+    // them, and the covered-skip path replaces a repeat link's value with
+    // `null` in traverseCells mode — which value consumers (the html
+    // reconciler's cell reads) would render. Both occurrences must carry
+    // the value.
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:repeat-link-root" as URI;
+    const targetUri = "of:repeat-link-target" as URI;
+
+    const rootValue = {
+      a: makeLink(targetUri),
+      b: makeLink(targetUri),
+    };
+    putDoc(store, rootUri, rootValue);
+    putDoc(store, targetUri, { label: "hello" });
+
+    const linkedSchema = {
+      type: "object",
+      properties: { label: { type: "string" } },
+    } as const;
+    const schema = {
+      type: "object",
+      properties: { a: linkedSchema, b: linkedSchema },
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const { ok: result } = traverser.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: rootValue,
+    });
+
+    expect(result).toEqual({
+      a: { label: "hello" },
+      b: { label: "hello" },
+    });
+  });
 
   it("tracks same-id linked docs in different scopes separately", () => {
     const store = new Map<string, Revision<State>>();
@@ -3496,7 +3587,6 @@ describe("sparse array preservation in traverseDAG", () => {
       the: type,
       of: docEntity,
       is: { value: sparseArray },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -3535,7 +3625,6 @@ describe("sparse array preservation in traverseDAG", () => {
       the: type,
       of: docEntity,
       is: { value: denseArray },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -3579,7 +3668,6 @@ describe("sparse array preservation in traverseArrayWithSchema", () => {
       the: type,
       of: docEntity,
       is: { value: sparseArray },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -3715,7 +3803,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -3751,14 +3838,12 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     });
     store.set(`${linkedUri}/${type}`, {
       the: type,
       of: linkedUri as Entity,
       is: { value: { label: "should not appear" } },
-      cause: hashOf({ the: type, of: linkedUri as Entity }),
       since: 1,
     });
 
@@ -3787,7 +3872,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: doc1Uri as Entity,
       is: { value: { name: "Alice", secret: "hidden" } },
-      cause: hashOf({ the: type, of: doc1Uri as Entity }),
       since: 1,
     });
 
@@ -3799,7 +3883,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: doc2Uri as Entity,
       is: { value: doc2Value },
-      cause: hashOf({ the: type, of: doc2Uri as Entity }),
       since: 2,
     });
 
@@ -3844,7 +3927,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestDataUri as Entity,
       is: { value: { label: "should not appear" } },
-      cause: hashOf({ the: type, of: redirectTestDataUri as Entity }),
       since: 1,
     });
 
@@ -3856,7 +3938,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestSecondUri as Entity,
       is: { value: secondValue },
-      cause: hashOf({ the: type, of: redirectTestSecondUri as Entity }),
       since: 2,
     });
 
@@ -3868,7 +3949,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestFirstUri as Entity,
       is: { value: firstValue },
-      cause: hashOf({ the: type, of: redirectTestFirstUri as Entity }),
       since: 3,
     });
 
@@ -3883,7 +3963,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestRedirUri as Entity,
       is: { value: redirValue },
-      cause: hashOf({ the: type, of: redirectTestRedirUri as Entity }),
       since: 4,
     });
 
@@ -3897,7 +3976,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestInnerUri as Entity,
       is: { value: innerValue },
-      cause: hashOf({ the: type, of: redirectTestInnerUri as Entity }),
       since: 5,
     });
 
@@ -3913,7 +3991,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestOuterUri as Entity,
       is: { value: outerValue },
-      cause: hashOf({ the: type, of: redirectTestOuterUri as Entity }),
       since: 6,
     });
 
@@ -3934,7 +4011,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
     const traverser = new SchemaObjectTraverser(tx, {
       path: ["value"],
       schema,
-    });
+    }, createDefaultTraversalContext(TEST_SCOPE_IDENTITY));
 
     const { ok: result, error } = traverser.traverse({
       address: {
@@ -3981,7 +4058,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestDataUri as Entity,
       is: { value: { label: "should not appear" } },
-      cause: hashOf({ the: type, of: redirectTestDataUri as Entity }),
       since: 1,
     });
 
@@ -3993,7 +4069,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestSecondUri as Entity,
       is: { value: secondValue },
-      cause: hashOf({ the: type, of: redirectTestSecondUri as Entity }),
       since: 2,
     });
 
@@ -4005,7 +4080,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestFirstUri as Entity,
       is: { value: firstValue },
-      cause: hashOf({ the: type, of: redirectTestFirstUri as Entity }),
       since: 3,
     });
 
@@ -4020,7 +4094,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestRedirUri as Entity,
       is: { value: redirValue },
-      cause: hashOf({ the: type, of: redirectTestRedirUri as Entity }),
       since: 4,
     });
 
@@ -4034,7 +4107,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestInnerUri as Entity,
       is: { value: innerValue },
-      cause: hashOf({ the: type, of: redirectTestInnerUri as Entity }),
       since: 5,
     });
 
@@ -4050,7 +4122,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestOuterUri as Entity,
       is: { value: outerValue },
-      cause: hashOf({ the: type, of: redirectTestOuterUri as Entity }),
       since: 6,
     });
 
@@ -4071,7 +4142,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
     const traverser = new SchemaObjectTraverser(tx, {
       path: ["value"],
       schema,
-    });
+    }, createDefaultTraversalContext(TEST_SCOPE_IDENTITY));
 
     const { ok: result, error } = traverser.traverse({
       address: {
@@ -4104,7 +4175,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: targetUri as Entity,
       is: { value: { shouldNotLoad: true } },
-      cause: hashOf({ the: type, of: targetUri as Entity }),
       since: 1,
     });
 
@@ -4118,7 +4188,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: outerUri as Entity,
       is: { value: outerValue },
-      cause: hashOf({ the: type, of: outerUri as Entity }),
       since: 2,
     });
 
@@ -4137,7 +4206,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
     const traverser = new SchemaObjectTraverser(
       tx,
       { path: ["value"], schema },
-      createDefaultTraversalContext(false),
+      createDefaultTraversalContext(TEST_SCOPE_IDENTITY, false),
     );
 
     const { ok: result, error } = traverser.traverse({
@@ -4163,7 +4232,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: linkedUri as Entity,
       is: { value: { label: "should not appear" } },
-      cause: hashOf({ the: type, of: linkedUri as Entity }),
       since: 1,
     });
 
@@ -4174,7 +4242,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: docUri as Entity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docUri as Entity }),
       since: 2,
     });
 
@@ -4203,7 +4270,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     });
 
@@ -4225,6 +4291,7 @@ describe("canBranchMatch NaN and Infinity type handling", () => {
   // NaN and the infinities are first-class stored numbers, so getJsonType
   // types them as "number": a "number" branch accepts them and a
   // non-number branch rejects them, exactly like any other number.
+
   it("does not reject NaN against a {type: 'number'} branch", () => {
     expect(canBranchMatch({ type: "number" }, NaN)).toBe(true);
   });
@@ -4259,6 +4326,7 @@ describe("MapSet size and totalValues", () => {
   // Both getters exist only to fill in the slow-traverse report, so nothing
   // else in the runtime reads them. Covering them here keeps them off the
   // machine-speed-dependent path that report used to sit on.
+
   it("counts keys and values in the reference-equality mode", () => {
     const mapSet = new MapSet<string, string>();
     expect(mapSet.size).toBe(0);
@@ -4272,6 +4340,13 @@ describe("MapSet size and totalValues", () => {
 
     expect(mapSet.size).toBe(2);
     expect(mapSet.totalValues).toBe(3);
+    expect(mapSet.get("a")).toEqual(new Set(["one", "two"]));
+    expect(mapSet.get("absent")).toBeUndefined();
+
+    // Emptying a key drops the key, so both counts fall.
+    mapSet.deleteValue("b", "three");
+    expect(mapSet.size).toBe(1);
+    expect(mapSet.totalValues).toBe(2);
   });
 
   it("counts keys and values in the hash-dedup mode", () => {
@@ -4288,6 +4363,11 @@ describe("MapSet size and totalValues", () => {
 
     expect(mapSet.size).toBe(2);
     expect(mapSet.totalValues).toBe(3);
+
+    // Dropping a key takes the values it held with it.
+    mapSet.delete("a");
+    expect(mapSet.size).toBe(1);
+    expect(mapSet.totalValues).toBe(1);
   });
 });
 
@@ -4302,13 +4382,16 @@ describe("SchemaObjectTraverser slow-traverse reporting", () => {
   // what `readStore` is asserted on.
   class ClockAdvancingStore extends Map<string, Revision<State>> {
     advanced = false;
-    constructor(private readonly onFirstRead: () => void) {
+    readonly #onFirstRead: () => void;
+
+    constructor(onFirstRead: () => void) {
       super();
+      this.#onFirstRead = onFirstRead;
     }
     override get(key: string): Revision<State> | undefined {
       if (!this.advanced) {
         this.advanced = true;
-        this.onFirstRead();
+        this.#onFirstRead();
       }
       return super.get(key);
     }
@@ -4343,14 +4426,12 @@ describe("SchemaObjectTraverser slow-traverse reporting", () => {
       the: type,
       of: targetUri as Entity,
       is: { value: { employees: [{ name: "Bob" }] } },
-      cause: hashOf({ the: type, of: targetUri as Entity }),
       since: 1,
     });
     store.set(`${docUri}/${type}`, {
       the: type,
       of: docUri as Entity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docUri as Entity }),
       since: 2,
     });
 
@@ -4408,5 +4489,199 @@ describe("SchemaObjectTraverser slow-traverse reporting", () => {
     // without a test noticing.
     expect(traverseWithElapsed(100).warnings).toEqual([]);
     expect(traverseWithElapsed(101).warnings.length).toBe(1);
+  });
+
+  // Runs a slow traversal over a container that links into `targetCount`
+  // separate docs, linking target `i` exactly `i + 1` times, so every target
+  // ends with a different visit count. Ids are long enough to be truncated in
+  // the report.
+  function traverseLinkingIntoManyDocs(targetCount: number): string[] {
+    const docUri = "of:slow-traverse-many-container" as URI;
+    const targetUri = (i: number) =>
+      `of:slow-traverse-linked-document-${i}` as URI;
+    const properties: Record<string, JSONSchema> = {};
+    const docValue: Record<string, FabricValue> = {};
+    for (let i = 0; i < targetCount; i++) {
+      for (let link = 0; link <= i; link++) {
+        docValue[`p${i}_${link}`] = {
+          "/": { [LINK_V1_TAG]: { id: targetUri(i), path: ["name"] } },
+        };
+        properties[`p${i}_${link}`] = { type: "string" };
+      }
+    }
+
+    let now = 1000;
+    const store = new ClockAdvancingStore(() => {
+      now += 150;
+    });
+    for (let i = 0; i < targetCount; i++) {
+      const of = targetUri(i) as Entity;
+      store.set(`${of}/${type}`, {
+        the: type,
+        of,
+        is: { value: { name: `name-${i}` } },
+        since: 1,
+      });
+    }
+    store.set(`${docUri}/${type}`, {
+      the: type,
+      of: docUri as Entity,
+      is: { value: docValue },
+      since: 2,
+    });
+
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schema: { type: "object", properties },
+    });
+    const doc: IMemorySpaceValueAttestation = {
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    };
+
+    const warnings: string[] = [];
+    const savedWarn = console.warn;
+    const savedNow = performance.now;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map((arg) => String(arg)).join(" "));
+    };
+    Reflect.set(performance, "now", () => now);
+    setTraverseDiagnostics(true);
+    try {
+      traverser.traverse(doc);
+    } finally {
+      setTraverseDiagnostics(undefined);
+      Reflect.set(performance, "now", savedNow);
+      console.warn = savedWarn;
+    }
+    return warnings;
+  }
+
+  it("names the five most-visited docs when diagnostics are on", () => {
+    const warnings = traverseLinkingIntoManyDocs(6);
+
+    expect(warnings.length).toBe(1);
+    // Six targets plus the container were visited, and all seven are counted.
+    expect(warnings[0]).toContain("uniqueDocs=7");
+
+    const listed = /topDocs=(.*)$/.exec(warnings[0])![1].trim().split(" ");
+    // Seven docs were visited and five are named: the field is capped.
+    expect(listed.length).toBe(5);
+    // Each entry is an id cut to its first 20 characters, then its count.
+    for (const entry of listed) {
+      expect(entry).toMatch(/^.{20}\.\.=\d+$/);
+    }
+    // Most-visited first. Target `i` was linked `i + 1` times, so the two
+    // least-visited targets are the ones the cap dropped. (These links
+    // are unscoped, so the coverage memo deliberately does not skip
+    // their re-walks — the stage-E neutrality guard in
+    // isLinkedDocumentCovered preserves the pre-re-keying behavior, and
+    // this assertion doubles as its regression test.)
+    const counts = listed.map((entry) => Number(entry.split("=")[1]));
+    expect(counts).toEqual([...counts].sort((a, b) => b - a));
+    expect(counts).not.toContain(1);
+    expect(counts).not.toContain(2);
+  });
+
+  it("collects nothing when diagnostics are off", () => {
+    // The default, and what every job that measures coverage runs under.
+    expect(traverseWithElapsed(150).warnings[0]).toContain("uniqueDocs=0");
+  });
+});
+
+describe("SchemaObjectTraverser schema memo keys", () => {
+  const SPACE = "did:null:null";
+  const TYPE = "application/json" as const;
+
+  // An inline document: one whose id is a data URI carrying the document's
+  // whole content, which is what a pattern's UI produces for a component
+  // holding a list of labelled entries — the emoji list an autocomplete
+  // offers, say. The traversal walks every node under that one id, so the id
+  // is the same on thousands of visits while only the path differs.
+  function inlineDocument(groupCount: number): {
+    id: URI;
+    value: FabricValue;
+    schema: JSONSchema;
+  } {
+    const entries = (group: number) =>
+      Object.fromEntries(
+        Array.from(
+          { length: groupCount },
+          (_, i) => [`entry${i}`, `label for entry ${i} of group ${group}`],
+        ),
+      );
+    const value = {
+      items: Object.fromEntries(
+        Array.from(
+          { length: groupCount },
+          (_, group) => [`group${group}`, entries(group)],
+        ),
+      ),
+    };
+    const schema = {
+      type: "object",
+      properties: {
+        items: {
+          type: "object",
+          additionalProperties: {
+            type: "object",
+            additionalProperties: { type: "string" },
+          },
+        },
+      },
+    } as JSONSchema;
+    return { id: dataUriFromValue(value) as URI, value, schema };
+  }
+
+  // Traverses one inline document and hands back the memo it filled.
+  function traverseInlineDocument(groupCount: number): {
+    memo: SchemaMemo;
+    idLength: number;
+  } {
+    const { id, value, schema } = inlineDocument(groupCount);
+    const memo = createSchemaMemo();
+    const traverser = getTraverser(
+      new Map<string, Revision<State>>(),
+      { path: ["value"], schema },
+      createDefaultTraversalContext(TEST_SCOPE_IDENTITY),
+      memo,
+    );
+    traverser.traverse({
+      address: { space: SPACE, id, type: TYPE, path: ["value"] },
+      value,
+    });
+    return { memo, idLength: id.length };
+  }
+
+  it("holds one bounded key per visit, whatever the id costs", () => {
+    const { memo, idLength } = traverseInlineDocument(20);
+
+    // The traversal reached every entry, so the memo speaks for hundreds of
+    // visits rather than for a single node.
+    expect(memo.size).toBeGreaterThan(400);
+    // The id runs to tens of thousands of characters, so a key that carried
+    // it would cost a copy and a hash of that much on every one of those
+    // visits.
+    expect(idLength).toBeGreaterThan(10_000);
+
+    const longestKey = Math.max(...[...memo.keys()].map((key) => key.length));
+    expect(longestKey).toBeLessThan(1000);
+  });
+
+  it("grows its key material with the visit count, not the id length", () => {
+    // Doubling the fan-out quadruples the visit count, and quadruples the
+    // length of the id along with it. Key material that carried the id would
+    // grow with the product of the two; carrying a fixed-size stand-in
+    // instead, it grows with the visit count alone, so the share per visit
+    // holds steady.
+    const small = traverseInlineDocument(10);
+    const large = traverseInlineDocument(20);
+
+    const perVisit = ({ memo }: { memo: SchemaMemo }) =>
+      [...memo.keys()].reduce((total, key) => total + key.length, 0) /
+      memo.size;
+
+    expect(large.idLength).toBeGreaterThan(small.idLength * 3);
+    expect(perVisit(large)).toBeLessThan(perVisit(small) * 1.1);
   });
 });

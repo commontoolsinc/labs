@@ -1,5 +1,12 @@
+import {
+  CFC_ATOM_TYPE,
+  type CfcAtom,
+  type CfcModulePolicyRefAtom,
+} from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { utf8Compare } from "@commonfabric/utils/utf8";
+
 import {
   type AtomPatternBindings,
   conceptGuard,
@@ -8,12 +15,6 @@ import {
   matchAtomPattern,
   matchAtomPatternAgainstAtoms,
 } from "./atom-pattern.ts";
-import { isRecord } from "@commonfabric/utils/types";
-import {
-  CFC_ATOM_TYPE,
-  type CfcAtom,
-  type CfcModulePolicyRefAtom,
-} from "@commonfabric/api/cfc";
 import {
   type CfcConfClause,
   type CfcOrClause,
@@ -21,11 +22,11 @@ import {
   isOrClause,
   normalizeClause,
 } from "./clause.ts";
-import type { IFCLabel } from "./label-view-core.ts";
 import {
   commitmentAwareEquals,
   isCfcFieldCommitment,
 } from "./label-representation.ts";
+import type { IFCLabel } from "./label-view-core.ts";
 import {
   type ExchangeRule,
   lowerCfcPolicyTemplateRules,
@@ -39,7 +40,7 @@ import type { TrustResolver } from "./trust.ts";
 /**
  * The guarded-rewrite evaluator (spec §4.4.5, Epic B4 of
  * docs/history/plans/cfc-future-work-implementation.md §3): runs a policy snapshot's
- * exchange rules over one label to a fuelled fixpoint. The ONLY things a
+ * exchange rules over one label to a fueled fixpoint. The ONLY things a
  * firing may do:
  *
  * - ADD instantiated alternatives to the clause whose alternative the rule's
@@ -70,7 +71,7 @@ import type { TrustResolver } from "./trust.ts";
  * federation soundness (docs/specs/cfc-spec-changes.md SC-28).
  *
  * Termination (spec §4.4.5): add-only rule sets converge by monotonicity;
- * add+drop sets can cycle, so the evaluator is fuelled and FAILS CLOSED on
+ * add+drop sets can cycle, so the evaluator is fueled and FAILS CLOSED on
  * exhaustion — `exhausted: true` with the ORIGINAL label, never a partial
  * rewrite (invariant 6: violating a policy disables exchange, it never
  * silently downgrades).
@@ -83,11 +84,15 @@ export const DEFAULT_EXCHANGE_FUEL = 64;
 export type RuleFiring = {
   readonly recordId: string;
   readonly ruleId: string;
+
   /** Index of the rewritten clause in the label AT FIRING TIME. */
   readonly clauseIndex: number;
+
   readonly kind: "add" | "drop";
+
   /** Alternatives added by an `add` firing. */
   readonly added?: readonly unknown[];
+
   /** The alternative removed by a `drop` firing. */
   readonly dropped?: unknown;
 };
@@ -117,6 +122,7 @@ export type CfcGrantConsumptionContext = "consuming" | "observing";
 export type CfcGrantResolverQuery = {
   readonly kind: string;
   readonly fields: Readonly<Record<string, unknown>>;
+
   /**
    * The evaluation site's consumption context, stamped from
    * {@link ExchangeEvalContext.grantConsumption}. ABSENT means observing
@@ -156,16 +162,21 @@ export type ExchangeEvalContext = {
    * pool is `label.integrity ∪ ctx.integrity`.
    */
   readonly integrity?: readonly CfcAtom[];
+
   /** Boundary-context atoms minted for this evaluation site (B5). */
   readonly boundary?: readonly CfcAtom[];
+
   /** Trust closure for concept-valued integrity guards (B3). */
   readonly trustResolver?: TrustResolver;
+
   readonly actingPrincipal?: string;
+
   /**
    * Grant lookup for `policyState` guards (route 2a). Absent → every
    * policyState guard is unsatisfied and its rule never fires (fail closed).
    */
   readonly grantResolver?: CfcGrantResolver;
+
   /**
    * Consuming vs observing evaluation site (single-use releases, design
    * §2.2) — stamped onto every resolver query. Absent = observing (fail
@@ -174,6 +185,7 @@ export type ExchangeEvalContext = {
    * the same prepare pass. See {@link CfcGrantConsumptionContext}.
    */
   readonly grantConsumption?: CfcGrantConsumptionContext;
+
   /**
    * Exact module-manifest lookup. Absent or unsuccessful lookup fails the
    * whole evaluation closed when the label selects a module policy.
@@ -264,7 +276,7 @@ const policyRefHomeClauses = (
   if (record.digest.length === 0) return homes;
   for (let index = 0; index < confidentiality.length; index++) {
     for (const alternative of clauseAlternatives(confidentiality[index])) {
-      if (!isRecord(alternative) || Array.isArray(alternative)) continue;
+      if (!isObjectNotArray(alternative)) continue;
       const atom = alternative as {
         type?: unknown;
         name?: unknown;
@@ -309,7 +321,7 @@ const isModulePolicyCandidate = (value: Record<string, unknown>): boolean =>
 const isExactModulePolicyRef = (
   value: unknown,
 ): value is CfcModulePolicyRefAtom => {
-  if (!isRecord(value) || Array.isArray(value)) return false;
+  if (!isObjectNotArray(value)) return false;
   if (
     value.type !== CFC_ATOM_TYPE.Policy || value.policyRefKind !== "module" ||
     typeof value.moduleIdentity !== "string" ||
@@ -336,7 +348,7 @@ const collectSelectedModulePolicyRefs = (
   const failures: ModulePolicyResolutionFailure[] = [];
   for (const clause of confidentiality) {
     for (const alternative of clauseAlternatives(clause)) {
-      if (!isRecord(alternative) || Array.isArray(alternative)) continue;
+      if (!isObjectNotArray(alternative)) continue;
       if (
         alternative.type !== CFC_ATOM_TYPE.Policy &&
         alternative.type !== CFC_ATOM_TYPE.Context
@@ -387,11 +399,11 @@ const modulePolicyRefHomeClauses = (
 };
 
 const isThisPolicyPattern = (value: unknown): boolean =>
-  isRecord(value) && Object.keys(value).length === 1 &&
+  isObjectOrArray(value) && Object.keys(value).length === 1 &&
   value.thisPolicy === true;
 
 const isThisPolicySubjectPattern = (value: unknown): boolean =>
-  isRecord(value) && Object.keys(value).length === 1 &&
+  isObjectOrArray(value) && Object.keys(value).length === 1 &&
   value.thisPolicyField === "subject";
 
 const bindThisPolicy = (
@@ -403,7 +415,7 @@ const bindThisPolicy = (
   if (Array.isArray(value)) {
     return value.map((entry) => bindThisPolicy(entry, reference));
   }
-  if (!isRecord(value)) return value;
+  if (!isObjectOrArray(value)) return value;
   return Object.fromEntries(
     Object.entries(value).map(([key, field]) => [
       key,
@@ -492,7 +504,7 @@ const grantGuardQuery = (
   consumption: CfcGrantConsumptionContext,
 ): CfcGrantResolverQuery | undefined => {
   if (
-    !isRecord(pattern) || Array.isArray(pattern) ||
+    !isObjectNotArray(pattern) ||
     isAtomVarPlaceholder(pattern)
   ) {
     return undefined;
@@ -759,7 +771,7 @@ const applyRuleMatch = (
 };
 
 /**
- * Runs every snapshot rule over `label` to a fuelled fixpoint and returns
+ * Runs every snapshot rule over `label` to a fueled fixpoint and returns
  * the rewritten label (or the ORIGINAL on fuel exhaustion, flagged).
  *
  * Determinism: records and rules evaluate in canonical (id) order; matches

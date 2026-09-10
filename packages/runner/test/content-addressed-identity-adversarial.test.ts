@@ -1,21 +1,24 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
-import {
-  getVerifiedProvenance,
-  recordVerifiedProvenance,
-} from "../src/harness/verified-provenance.ts";
 import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-contract";
+
 import {
   brandTrustedBuilderArtifact,
   isTrustedBuilderArtifact,
 } from "../src/builder/pattern-metadata.ts";
-import { ExecutableRegistry } from "../src/harness/executable-registry.ts";
+import { moduleToEncodableForm } from "../src/builder/to-encodable-form.ts";
 import type { JSONSchema, Module, Pattern } from "../src/builder/types.ts";
+import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
+import { ExecutableRegistry } from "../src/harness/executable-registry.ts";
 import type { HarnessedFunction } from "../src/harness/types.ts";
+import {
+  getVerifiedProvenance,
+  recordVerifiedProvenance,
+} from "../src/harness/verified-provenance.ts";
+import { Runtime } from "../src/runtime.ts";
 
 /**
  * C5 red-team gate for PR C (content-addressed `$implRef` + CFC provenance) of
@@ -92,7 +95,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
     const pattern = await runtime.patternManager.compilePattern(PROGRAM);
     await runtime.idle();
@@ -107,10 +109,10 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       )
       .map((n) => n.module as Module);
 
-  // ---------------------------------------------------------------------------
-  // Attack 1 — forged function with byte-identical source, built outside eval.
-  // ---------------------------------------------------------------------------
   describe("attack 1: byte-identical forged function", () => {
+    // Attack 1 — forged function with byte-identical source, built outside
+    // eval.
+
     it("a forged twin (identical source, no eval registration) has no provenance and resolves unsupported", async () => {
       const pattern = await setup();
       const real = handlerModules(pattern)[0]
@@ -156,10 +158,9 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Attack 2 — $implRef replay / confusion. State graphs are attacker data.
-  // ---------------------------------------------------------------------------
   describe("attack 2: $implRef replay/confusion", () => {
+    // Attack 2 — $implRef replay / confusion. State graphs are attacker data.
+
     it("$implRef at a non-existent or host: identity resolves nothing executable (miss → fallback)", async () => {
       await setup();
       const pm = runtime!.patternManager;
@@ -245,10 +246,9 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Attack 3 — __cf_data-forged factory shapes through the indexing sink.
-  // ---------------------------------------------------------------------------
   describe("attack 3: __cf_data-forged factory shapes", () => {
+    // Attack 3 — __cf_data-forged factory shapes through the indexing sink.
+
     it("an unbranded {implementation, __cfVerifiedBindingIdentity} shape is dropped by the trust gate", () => {
       const forgedFactory = {
         implementation: function forgedImpl() {},
@@ -281,10 +281,9 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Attack 4 — bindingIdentity spoofing (highest-value: ownership gate).
-  // ---------------------------------------------------------------------------
   describe("attack 4: bindingIdentity spoofing of writeAuthorizedBy ownership", () => {
+    // Attack 4 — bindingIdentity spoofing (highest-value: ownership gate).
+
     it("an attacker-chosen __cfVerifiedBindingIdentity on an unbranded factory yields no verified binding", () => {
       // The factory carries a binding annotation pointing at a victim's
       // owner-protected cell. Without the trust brand it never reaches
@@ -306,7 +305,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
         trustSnapshotProvider: () => ({
           id: "ts-attack4",
           actingPrincipal: signer.did(),
@@ -355,7 +353,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
         trustSnapshotProvider: () => ({
           id: "ts-attack4b",
           actingPrincipal: signer.did(),
@@ -413,7 +410,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
         trustSnapshotProvider: () => ({
           id: "ts-attack4d",
           actingPrincipal: signer.did(),
@@ -464,7 +460,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
         trustSnapshotProvider: () => ({
           id: "ts-attack4c",
           actingPrincipal: signer.did(),
@@ -504,19 +499,19 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       });
       cell.set({ owned: "authorized" });
 
+      // The prepare is what runs the writeAuthorizedBy arm, and the runtime's
+      // own commit paths run it before every commit.
+      const digest = tx.prepareCfc();
+      expect(digest).not.toBe("");
       const result = await tx.commit();
-      // The writeAuthorizedBy arm passes; any remaining reason would be unrelated
-      // to identity-borrowing. Assert specifically no writeAuthorizedBy failure.
-      if (result.error) {
-        expect(String(result.error)).not.toContain("writeAuthorizedBy");
-      }
+      expect(result.error).toBeUndefined();
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Attack 5 — claim forgery in stored schemas (hand-built __ctWriterIdentityOf).
-  // ---------------------------------------------------------------------------
   describe("attack 5: forged stored writeAuthorizedBy claims", () => {
+    // Attack 5 — claim forgery in stored schemas (hand-built
+    // __ctWriterIdentityOf).
+
     const driveClaim = async (
       claim: Record<string, unknown>,
       identity: Record<string, unknown>,
@@ -526,7 +521,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
         trustSnapshotProvider: () => ({
           id: `ts-${name}`,
           actingPrincipal: signer.did(),
@@ -634,11 +628,10 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         "attack5-self-authoring",
       );
       // Accepted: the writer authored its own claim (file/path agree with the
-      // writer's identity, and the missing id field is stamped to self).
-      if (result.error) {
-        expect(String(result.error)).not.toContain("writeAuthorizedBy");
-      }
-      expect(typeof digest).toBe("string");
+      // writer's identity, and the missing id field is stamped to self). A
+      // prepare that reached a verdict returns a digest, and the commit lands.
+      expect(digest).not.toBe("");
+      expect(result.error).toBeUndefined();
     });
 
     it("a legacy claim (bundleId only) does NOT match a moduleIdentity-only identity (no cross-arm confusion)", async () => {
@@ -665,10 +658,9 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Attack 6 — fn.src spoofing vs the provenance identity.
-  // ---------------------------------------------------------------------------
   describe("attack 6: fn.src spoofing", () => {
+    // Attack 6 — fn.src spoofing vs the provenance identity.
+    //
     // These probe resolveProvenanceImplementationIdentity directly: we fabricate
     // a provenance entry (the trusted channel's effect) on a function WE control,
     // then mismatch its src. recordVerifiedProvenance is the exact write the real
@@ -743,10 +735,9 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Attack 7 — dynamic (in-action-minted) artifact path.
-  // ---------------------------------------------------------------------------
   describe("attack 7: dynamic in-session artifacts", () => {
+    // Attack 7 — dynamic (in-action-minted) artifact path.
+
     it("a dynamic-provenance fn with consistent src resolves verified but carries no symbol (no cross-session ref)", () => {
       const fn = Object.assign(() => undefined, {
         src: "cf:module/DYN_MODULE/main.tsx:2:1",
@@ -786,7 +777,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
     });
 
     it("a dynamic artifact (no symbol) serializes without $implRef", async () => {
-      // moduleToJSON only emits $implRef when provenance.symbol is present, so a
+      // moduleToEncodableForm only emits $implRef when provenance.symbol is present, so a
       // dynamic (symbol-less) artifact never gets a serialized, reload-resolvable
       // reference — confirming in-session-only authority on the serialization seam.
       const pattern = await setup();
@@ -807,26 +798,25 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         type: "javascript" as const,
         implementation: dyn,
         implementationRef: "dyn-ref",
-        toJSON: undefined as unknown,
+        toEncodableForm: undefined as unknown,
       };
-      // moduleToJSON is reached via the builder; call the same path the real
-      // module uses. We re-import it lazily to avoid widening the import surface.
-      const { moduleToJSON } = await import("../src/builder/json-utils.ts");
-      const json = moduleToJSON(dynModule as unknown as Module) as Record<
+      // moduleToEncodableForm is reached via the builder; call the same path
+      // the real module uses.
+      const encodable = moduleToEncodableForm(
+        dynModule as unknown as Module,
+      ) as Record<
         string,
         unknown
       >;
-      expect(json.$implRef).toBeUndefined();
+      expect(encodable.$implRef).toBeUndefined();
     });
   });
 
-  // ===========================================================================
   // E2 red-team gate. The attacks below target the surfaces PR E2 introduced
   // (provenance-only verified identity, the now-LIVE bundleId verification arm,
   // the strong content-addressed implementation index, and the loadId-less
   // dynamic registrar). They are the negative complement to the happy-path
   // tests in content-addressed-identity.test.ts.
-  // ===========================================================================
 
   // A claim/identity driver matching attack 5's, lifted to the outer scope so
   // the E2 bundleId-arm attacks can reuse it.
@@ -839,7 +829,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: `ts-${name}`,
         actingPrincipal: signer.did(),
@@ -861,15 +850,14 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
     return { digest, result };
   };
 
-  // ---------------------------------------------------------------------------
-  // Attacks 8 + 9 (historical) — the legacy bundleId verification arm and the
-  // dynamic-artifact registrar are GONE (identity E5): a claim without a
-  // moduleIdentity fails closed, and minting builder artifacts inside an
-  // action throws at creation time (test/dynamic-builder-call-throw.test.ts).
-  // What remains to pin is the fail-closed floor for stored bundleId-only
-  // claims: they never verify, against ANY identity.
-  // ---------------------------------------------------------------------------
   describe("attacks 8+9 (retired arms): bundleId-only claims always fail closed", () => {
+    // Attacks 8 + 9 (historical) — the legacy bundleId verification arm and the
+    // dynamic-artifact registrar are GONE (identity E5): a claim without a
+    // moduleIdentity fails closed, and minting builder artifacts inside an
+    // action throws at creation time (test/dynamic-builder-call-throw.test.ts).
+    // What remains to pin is the fail-closed floor for stored bundleId-only
+    // claims: they never verify, against ANY identity.
+
     it("a bundleId-only claim is rejected even when the writer is fully verified", async () => {
       const { digest, result } = await driveE2Claim(
         {
@@ -909,20 +897,18 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         },
         "attack8-both-ids-module-arm",
       );
-      expect(typeof digest).toBe("string");
-      if (result.error) {
-        expect(String(result.error)).not.toContain("writeAuthorizedBy");
-      }
+      expect(digest).not.toBe("");
+      expect(result.error).toBeUndefined();
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Attack 10 — the strong content-addressed implementation index
-  // (verifiedImplementationsByEntryRef, surfaced as
-  // harness.getVerifiedImplementation). A replayed/forged $implRef must MISS,
-  // and a genuine one returns the REAL recorded function — never attacker data.
-  // ---------------------------------------------------------------------------
   describe("attack 10: $implRef replay against the strong implementation index", () => {
+    // Attack 10 — the strong content-addressed implementation index
+    // (verifiedImplementationsByEntryRef, surfaced as
+    // harness.getVerifiedImplementation). A replayed/forged $implRef must MISS,
+    // and a genuine one returns the REAL recorded function — never attacker
+    // data.
+
     it("a forged identity, or the genuine identity with an unregistered symbol, misses; the genuine pair returns the real fn", async () => {
       const pattern = await setup();
       const mod = handlerModules(pattern)[0];
@@ -957,15 +943,14 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Attack 11 — host pseudo-module separation (identity E5). Host-trusted
-  // functions register into the SAME content-addressed implementation index
-  // as verified modules (under minted `host:<n>` identities), so the residual
-  // invariant is: that registration makes them EXECUTABLE by `$implRef`, but
-  // never VERIFIED — no provenance is recorded, and the CFC policy-facing
-  // resolution fails closed on its absence.
-  // ---------------------------------------------------------------------------
   describe("attack 11: host pseudo-module registration grants execution, never verification", () => {
+    // Attack 11 — host pseudo-module separation (identity E5). Host-trusted
+    // functions register into the SAME content-addressed implementation index
+    // as verified modules (under minted `host:<n>` identities), so the residual
+    // invariant is: that registration makes them EXECUTABLE by `$implRef`, but
+    // never VERIFIED — no provenance is recorded, and the CFC policy-facing
+    // resolution fails closed on its absence.
+
     it("a host entry resolves by { identity, symbol } but carries no provenance", () => {
       const reg = new ExecutableRegistry();
       const fn = (() => {}) as unknown as HarnessedFunction;
@@ -992,13 +977,13 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Attack 12 — host-artifact escalation. A host-trusted callable EXECUTES but
-  // yields NO `kind:"verified"` CFC identity, by two independent defenses: the
-  // `unsafe-host:` debugName short-circuit AND the absence of provenance. A
-  // genuine canonical `fn.src` on a host fn does NOT manufacture verification.
-  // ---------------------------------------------------------------------------
   describe("attack 12: host artifacts execute but never resolve verified", () => {
+    // Attack 12 — host-artifact escalation. A host-trusted callable EXECUTES
+    // but yields NO `kind:"verified"` CFC identity, by two independent
+    // defenses: the `unsafe-host:` debugName short-circuit AND the absence of
+    // provenance. A genuine canonical `fn.src` on a host fn does NOT
+    // manufacture verification.
+
     it("a host fn with an EMPTY debugName falls into the provenance arm and resolves undefined (src alone is not proof)", () => {
       const hostFn = Object.assign(() => 42, {
         src: "cf:module/SOME_MODULE/main.tsx:1:1",

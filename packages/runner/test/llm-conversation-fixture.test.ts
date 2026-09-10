@@ -6,31 +6,30 @@
  * to read, write, and maintain.
  */
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { join } from "@std/path";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import type {
+  BuiltInLLMMessage,
+  BuiltInLLMTool,
+  JSONSchema,
+} from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   clearMockResponses,
   type ConversationFixture,
   loadConversationFixture,
   loadConversationFixtureFile,
 } from "@commonfabric/llm/client";
-import type {
-  BuiltInLLMMessage,
-  BuiltInLLMTool,
-  JSONSchema,
-} from "@commonfabric/api";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { createBuilder } from "../src/builder/factory.ts";
-import {
-  createTrustedBuilder,
-  installTestPatternArtifact,
-} from "./support/trusted-builder.ts";
+import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
-import { join } from "@std/path";
 import { waitForLlmMessages, waitForLlmSettled } from "./support/llm-result.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator fixtures");
 const space = signer.did();
@@ -56,6 +55,9 @@ describe("conversation fixtures", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
+  let patternTool: ReturnType<
+    typeof createBuilder
+  >["commonfabric"]["patternTool"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let generateObject: ReturnType<
     typeof createBuilder
@@ -72,7 +74,7 @@ describe("conversation fixtures", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, generateObject, llmDialog, Cell } = commonfabric);
+    ({ pattern, generateObject, llmDialog, Cell, patternTool } = commonfabric);
   });
 
   afterEach(async () => {
@@ -138,20 +140,17 @@ describe("conversation fixtures", () => {
       join(FIXTURES_DIR, "multi-turn-dialog.json"),
     );
 
-    const getWeatherTool = installTestPatternArtifact(
-      runtime,
-      pattern(
-        ({ location: _location }: any) => {
-          return "Sunny, 72°F";
-        },
-        {
-          description: "Get current weather for a location",
-          type: "object",
-          properties: { location: { type: "string" } },
-          required: ["location"],
-        } as const satisfies JSONSchema,
-        { type: "string" },
-      ),
+    const getWeatherTool = pattern(
+      ({ location: _location }: any) => {
+        return "Sunny, 72°F";
+      },
+      {
+        description: "Get current weather for a location",
+        type: "object",
+        properties: { location: { type: "string" } },
+        required: ["location"],
+      } as const satisfies JSONSchema,
+      { type: "string" },
     );
 
     const testPattern = pattern(
@@ -160,7 +159,9 @@ describe("conversation fixtures", () => {
         const dialog = llmDialog({
           messages,
           tools: {
-            getWeather: getWeatherTool as unknown as BuiltInLLMTool,
+            getWeather: patternTool(
+              getWeatherTool,
+            ) as unknown as BuiltInLLMTool,
           },
         });
         return {

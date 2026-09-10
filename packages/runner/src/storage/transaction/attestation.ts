@@ -1,10 +1,22 @@
-import { isRecord } from "@commonfabric/utils/types";
 import {
+  type DebugValueOptions,
+  FabricInstance,
   type FabricPlainObject,
   type FabricValue,
+  isWalkableObjectOrArray,
+  toCompactDebugString,
+  toDebugKindString,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+} from "@commonfabric/data-model";
+import {
+  extractDataUriPayloadText,
+  isDataUriMediaType,
+  isFabricDataUri,
+  valueFromDataUriPayloadText,
+} from "@commonfabric/data-model/codec-data-uri";
+import { LRUCache } from "@commonfabric/utils/cache";
+import { getLogger } from "@commonfabric/utils/logger";
+
 import type {
   IAttestation,
   IInvalidDataURIError,
@@ -19,16 +31,8 @@ import type {
   Result,
   State,
 } from "../interface.ts";
-import { unclaimed } from "@commonfabric/memory/fact";
-import { getLogger } from "@commonfabric/utils/logger";
-import { LRUCache } from "@commonfabric/utils/cache";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { toTransactionDocumentValue } from "../v2-document.ts";
-import {
-  extractDataUriPayloadText,
-  isDataUri,
-  isDataUriMediaType,
-  valueFromDataUriPayloadText,
-} from "@commonfabric/data-model/data-uri-codec";
 
 const logger = getLogger("attestation", {
   enabled: false,
@@ -39,6 +43,7 @@ const cacheHitLogger = getLogger("attestation-hit", {
   enabled: false,
   level: "debug",
 });
+
 /**
  * Cache for parsed data URIs to avoid redundant parsing.
  * Key format: `${address.id}::${address.type}`
@@ -73,10 +78,13 @@ export const UnsupportedMediaTypeError = (
 /**
  * Reads requested `address` from the provided `source` attestation and either
  * succeeds with derived {@link IAttestation} with the given `address` or fails
- * with inconsistency error if resolving an `address` encounters a non-object
- * along the path. Note it will succeed with `undefined` if last component of
- * the path does not exist on the object. Below are some examples illustrating
- * read behavior
+ * with inconsistency error if resolving an `address` encounters a value it
+ * cannot address by key along the path. A non-object is one such value; so is
+ * a `FabricSpecialObject`, which holds its state behind no property name, and
+ * which therefore stops a resolution the way a scalar does rather than
+ * reporting the slot beneath it as absent. Note it will succeed with
+ * `undefined` if last component of the path does not exist on the object.
+ * Below are some examples illustrating read behavior
  *
  * ```ts
  * const address = {
@@ -116,11 +124,10 @@ export const read = (
 > => resolve(source, address);
 
 /**
- * Takes a source fact {@link State} and derives an attestion describing its
- * state.
+ * Takes a source {@link State} and derives an attestation describing it.
  */
 export const attest = (
-  { the, of, is, scope }: Omit<State, "cause"> & Pick<IMemoryAddress, "scope">,
+  { the, of, is, scope }: State & Pick<IMemoryAddress, "scope">,
 ): IAttestation => {
   return {
     address: { id: of, type: the, path: [], scope },
@@ -131,7 +138,7 @@ export const attest = (
 /**
  * Verifies consistency of provided attestation with a given replica. If
  * current state matches provided attestation function succeeds with a state
- * of the fact in the given replica otherwise function fails with
+ * of the address in the given replica otherwise function fails with
  * `IStorageTransactionInconsistent` error.
  *
  * Values are compared with `valueEqual()`.
@@ -139,16 +146,26 @@ export const attest = (
 export const claim = (
   { address, value: expected }: IAttestation,
   replica: ISpaceReplica,
+  // The reading transaction's scope-instance identity (server-execution v2
+  // stage A — OW17's tx→replica seam): the claim re-reads the SAME instance
+  // the load came from; absent = the replica's own, as before.
+  identity?: ScopeKeyIdentity,
+  durable = false,
 ): Result<State, IStorageTransactionInconsistent> => {
   const type = address.type ?? "application/json";
-  const state = replica.get(address) ??
-    unclaimed({ of: address.id, the: type });
+  const state = replica.get(address) ?? { the: type, of: address.id };
   const source = attest(state);
   const actual = type === "application/json" &&
       address.path.length === 0 &&
       typeof replica.getDocument === "function"
     ? toTransactionDocumentValue(
-      replica.getDocument(address.id, address.scope),
+      durable && replica.getNonSpeculativeDocument
+        ? replica.getNonSpeculativeDocument(
+          address.id,
+          address.scope,
+          identity,
+        )
+        : replica.getDocument(address.id, address.scope, identity),
     )
     : read(source, address)?.ok?.value;
 
@@ -165,7 +182,9 @@ export const claim = (
  * Attempts to resolve given `address` from the `source` attestation. Function
  * succeeds with derived attestation that will have provided `address` or fails
  * with a not found error if the path doesn't exist, or a type mismatch error if
- * resolving an address encounters non-object along the resolution path.
+ * resolving an address encounters a value it cannot address by key along the
+ * resolution path -- a non-object, or a `FabricSpecialObject`, whose state
+ * sits behind no property name.
  */
 export const resolve = (
   source: IAttestation,
@@ -194,7 +213,22 @@ export const resolve = (
 
   while (++at < path.length) {
     const key = path[at];
-    if (isRecord(value)) {
+    // A path reaching a `FabricInstance` reports the `TypeMismatchError` this
+    // function is declared to return, so a caller handles it like every other
+    // unresolvable address. The fetch builtins store a `FabricError` as a
+    // result, and resolving a link whose path continues past one lands here.
+    if (value instanceof FabricInstance) {
+      return {
+        error: TypeMismatchError(
+          { ...address, path: path.slice(0, at + 1) },
+          toDebugKindString(value),
+          "read",
+        ),
+      };
+    }
+    // A `FabricPrimitive` takes the mismatch arm below alongside the scalars:
+    // a path addresses nothing inside a leaf.
+    if (isWalkableObjectOrArray(value)) {
       const record = value as FabricPlainObject;
       value = Object.hasOwn(record, key) ? record[key] : undefined;
     } else {
@@ -205,8 +239,10 @@ export const resolve = (
           error: NotFound(source, address, path.slice(0, Math.max(0, at))),
         };
       }
-      // Type mismatch - trying to access property on non-object
-      const actualType = value === null ? "null" : typeof value;
+      // Type mismatch - trying to access property on non-object.
+      // `toDebugKindString` names the class, where `typeof` returns "object"
+      // for every special object alike.
+      const actualType = toDebugKindString(value);
       return {
         error: TypeMismatchError(
           { ...address, path: path.slice(0, at + 1) },
@@ -244,7 +280,7 @@ export const load = (
   >;
 
   try {
-    if (!isDataUri(address.id)) {
+    if (!isFabricDataUri(address.id)) {
       result = {
         error: UnsupportedMediaTypeError(
           `Unsupported media type in data URI: ${address.id.slice(0, 64)}`,
@@ -354,6 +390,18 @@ export const TypeMismatchError = (
   },
 });
 
+/**
+ * Rendering options for the two values an inconsistency message compares:
+ * arrays, objects, and strings whole, so that a change past the renderer's
+ * default limits shows as a difference rather than as two identical
+ * renderings.
+ */
+const INCONSISTENCY_RENDER_OPTIONS: DebugValueOptions = {
+  maxArrayLength: Infinity,
+  maxProperties: Infinity,
+  maxStringLines: Infinity,
+};
+
 export const StateInconsistency = (source: {
   address: IMemoryAddress;
   expected?: FabricValue;
@@ -367,9 +415,9 @@ export const StateInconsistency = (source: {
     }"`,
     space ? ` in space "${space}"` : "",
     ` hash changed. Previously it used to be:\n `,
-    toCompactDebugString(expected),
+    toCompactDebugString(expected, INCONSISTENCY_RENDER_OPTIONS),
     "\n and currently it is:\n ",
-    toCompactDebugString(actual),
+    toCompactDebugString(actual, INCONSISTENCY_RENDER_OPTIONS),
   ].join("");
 
   return {

@@ -7,7 +7,7 @@ See the [verifiable-execution document map](README.md) for navigation.
 - **Normative language:** “MUST”, “SHOULD”, etc are used in the RFC 2119 sense.
 - **Content addressing:** Hashes and references are computed via this project's
   `hashOf()` function.
-- **Types:** Where practical, names and shapes align with `packages/memory/interface.ts`.
+- **Types:** Where practical, names and shapes align with the memory package: the fact model in `packages/memory/interface.ts`, and the commit and protocol shapes in `packages/memory/v2.ts`.
 
 ---
 
@@ -103,11 +103,12 @@ a point in time:
 
 State MAY be represented as:
 
-- Full materialized state (content-addressed via merkle-reference), or
+- Full materialized state (content-addressed), or
 - A patch applied to a prior state
 
-Implementations MUST produce a deterministic hash for every update via the
-`merkle-reference` library (see `packages/memory/HASHING.md`).
+Implementations MUST produce a deterministic hash for every update via this
+project's `hashOf()` function, whose byte-level encoding is specified in
+[`../space-model-formal-spec/2-hash-byte-format.md`](../space-model-formal-spec/2-hash-byte-format.md).
 
 ### 3.3 Receipt
 

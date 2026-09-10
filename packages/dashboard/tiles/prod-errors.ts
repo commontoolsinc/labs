@@ -1,25 +1,32 @@
-// prod errors: the production trace error rate from SigNoz. The headline number
-// is the rate over the last 12 hours (errored spans / all spans); the sparkline
-// is the per-hour rate over the full retained trace history on a linear time axis
-// (hours with no traces count as zero errors), with the trailing 12-hour slice
-// that feeds the headline drawn brighter — the same recent-vs-trend split, and the
-// same highlight, as the ci-duration tile. Env-gated on SIGNOZ_URL + SIGNOZ_API_KEY.
-//
-// Both counts are scoped to one service (PROD_SERVICE). The same SigNoz holds
-// staging and one-off perf runs, and a rate taken across all of them is not
-// production's: staging alone has run an order of magnitude hotter than production
-// on the same day, which is enough to hold this tile red over a healthy production
-// and teach everyone to ignore it.
-//
-// The instance has no generic HTTP "5xx rate"; spans carry SigNoz's own error
-// flag (set for any errored span — memory ops, HTTP handlers, etc.), so has_error
-// is the portable "errors" signal. Queried through the v5 query_range API with
-// hourly buckets. The window asks for 14 days but SigNoz keeps only ~15 days of
-// traces, so the sparkline covers however much is retained. When SigNoz itself is
-// unreachable the tile goes gray (unknown), not red — red is reserved for an
-// actually-high error rate.
+/**
+ * Reports the production trace error rate from SigNoz. The headline number is
+ * the rate over the last 12 hours, errored spans as a share of all spans. The
+ * sparkline is the per-hour rate over the full retained trace history on a
+ * linear time axis, where an hour with no traces counts as zero errors, with
+ * the trailing 12-hour slice that feeds the headline drawn brighter. That is
+ * the same split between the recent figure and the trend, and the same
+ * highlight, that the ci-duration tile uses. The tile only runs when
+ * SIGNOZ_URL and SIGNOZ_API_KEY are both set.
+ *
+ * Both counts are scoped to one service, PROD_SERVICE. The same SigNoz holds
+ * staging and one-off performance runs, and a rate taken across all of them is
+ * not production's: staging alone has run an order of magnitude hotter than
+ * production on the same day, which is enough to hold this tile red over a
+ * healthy production and teach everyone to ignore it.
+ *
+ * The instance has no generic rate of HTTP 5xx responses. Spans carry SigNoz's
+ * own error flag, set for any errored span whether it is a memory operation or
+ * an HTTP handler, so has_error is the portable signal for errors. It is
+ * queried through the v5 query_range API with hourly buckets. The window asks
+ * for 14 days but SigNoz keeps around 15 days of traces, so the sparkline
+ * covers however much is retained. When SigNoz itself is unreachable the tile
+ * goes gray rather than red: red is reserved for an error rate that really is
+ * high.
+ */
+
 import type { Status, Tile, TileView } from "../types.ts";
-import { serviceName, SPARK_FADE, sparkline } from "../lib.ts";
+import { serviceName, sparkline } from "../lib.ts";
+import { CHART_HIGHLIGHT, CHART_LINE } from "../theme.ts";
 
 const RECENT_MS = 12 * 60 * 60 * 1000; // headline number: last 12 hours
 const TREND_MS = 14 * 24 * 60 * 60 * 1000; // sparkline reach (capped by ~15-day trace retention)
@@ -97,7 +104,7 @@ export const prodErrors: Tile = {
     // prefers SIGNOZ_UI_URL and only falls back to SIGNOZ_URL when it's public https.
     const service = serviceName(ctx.env);
     const uiBase = ctx.env("SIGNOZ_UI_URL") ?? (base.startsWith("https://") ? base : undefined);
-    const drill = uiBase ? { href: `${uiBase.replace(/\/$/, "")}/logs`, hint: "logs ↗" } : {};
+    const drill = uiBase ? { href: `${uiBase.replace(/\/$/, "")}/logs/logs-explorer`, hint: "logs ↗" } : {};
 
     let trend: { total: Map<number, number>; err: Map<number, number> };
     try {
@@ -140,7 +147,7 @@ export const prodErrors: Tile = {
     // Brighten the trailing last-12h hours, but keep the whole retained range in
     // view (scaleAll) — the recent window can sit near zero while history spikes.
     const highlight = recent.length >= 2
-      ? { count: recent.length, color: "#c7ccd4", scaleAll: true }
+      ? { count: recent.length, color: CHART_HIGHLIGHT, scaleAll: true }
       : undefined;
     return {
       ...drill,
@@ -148,7 +155,7 @@ export const prodErrors: Tile = {
       status,
       value: rate === undefined ? "—" : `${rate.toFixed(2)}%`,
       sub: rate === undefined ? "no traces · last 12h" : `${recentErr} err / ${recentTotal} spans · last 12h`,
-      extra: sparkline(series, "#727882", highlight, SPARK_FADE[status]),
+      extra: sparkline(series, CHART_LINE, highlight, true),
       duration: span,
     };
   },

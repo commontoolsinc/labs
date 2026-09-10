@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { createSchemaTransformerV2 } from "@commonfabric/schema-generator";
+import { SchemaGenerator } from "@commonfabric/schema-generator";
 
 import {
   classifyLegacyPatternCarrier,
@@ -32,8 +32,7 @@ import {
   resolvePatternFactorySchemaContract,
 } from "../../transformers/schema-injection.ts";
 import { CaptureCollector } from "../capture-collector.ts";
-import { SchemaFactory } from "../utils/schema-factory.ts";
-import type { ClosureTransformationStrategy } from "./strategy.ts";
+import { createHandlerStateSchema } from "../utils/schema-factory.ts";
 
 /**
  * Closure-convert an authored pattern used as a value inside another pattern.
@@ -43,7 +42,7 @@ import type { ClosureTransformationStrategy } from "./strategy.ts";
  * by the generated `.curry(captures)` call. Module-scoped declarations remain
  * lexical so the base artifact can be evaluated in its defining module.
  */
-export class PatternStrategy implements ClosureTransformationStrategy {
+export class PatternStrategy {
   canTransform(
     node: ts.Node,
     context: TransformationContext,
@@ -163,7 +162,7 @@ export class PatternStrategy implements ClosureTransformationStrategy {
     );
     const paramsType = hasUnrepresentableCapture
       ? context.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword)
-      : new SchemaFactory(context).createHandlerStateSchema(captureTree);
+      : createHandlerStateSchema(captureTree, undefined, context);
     if (!hasUnrepresentableCapture) {
       propagateFactoryContractHints(captures, paramsType, context);
     }
@@ -216,7 +215,7 @@ function reportUnrepresentableCaptureSchemas(
   captureTree: ReadonlyMap<string, CaptureTreeNode>,
   context: TransformationContext,
 ): boolean {
-  const schemaGenerator = createSchemaTransformerV2();
+  const schemaGenerator = new SchemaGenerator();
   let found = false;
 
   const visit = (node: CaptureTreeNode): void => {

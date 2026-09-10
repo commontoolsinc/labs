@@ -11,8 +11,8 @@
 // member when the result is run and read.
 //
 // Two candidate outcomes were considered up front:
-//   (a) THROW — the runtime rejects the arbitrary JavaScript function before
-//       it can become stored Fabric data.
+//   (a) THROW — storing the result throws "Not representable as a
+//       `FabricValue`: function" (packages/data-model native-conversion).
 //   (b) DROP — the function member is silently dropped (the result schema /
 //       projection omits function members before storage) and the rest of the
 //       result is stored fine.
@@ -21,11 +21,12 @@
 // member kinds behave DIFFERENTLY:
 //
 //   * METHOD member (`read() { ... }`) -> THROW. The member is a live function
-//     on the pattern's structural graph. Factory-aware identity derivation now
-//     rejects it in `createRef()` with
-//       "Arbitrary functions are not valid createRef values".
-//     The throw still happens synchronously inside `runtime.run(...)` at setup
-//     time, before any commit; only the first rejecting boundary changed.
+//     on the materialized result object. When `Runner.#updateResultProjection`
+//     converts the result with `fabricFromNativeValue(result)`, the function
+//     reaches `shallowFabricFromNativeValue` and throws
+//       "Not representable as a `FabricValue`: function"
+//     (packages/data-model/src/native-conversion.ts). The throw happens
+//     synchronously inside `runtime.run(...)` at setup time, before any commit.
 //
 //   * GETTER member (`get derived() { return 2; }`) -> NOT a function at all by
 //     the time the runtime sees it. A getter on an object literal is invoked
@@ -103,10 +104,11 @@ describe("Pattern result object with a function member", () => {
       tx,
     );
 
-    // ...but running it throws synchronously when identity derivation encounters
-    // the arbitrary function in the structural graph.
+    // ...but running it throws synchronously at result-projection time, when
+    // the live function is converted to a `FabricValue`. The error originates
+    // in packages/data-model/src/native-conversion.ts.
     expect(() => runtime.run(tx, methodPattern, {}, resultCell)).toThrow(
-      "Arbitrary functions are not valid createRef values",
+      "Not representable as a `FabricValue`: function",
     );
   });
 

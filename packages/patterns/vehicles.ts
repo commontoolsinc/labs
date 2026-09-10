@@ -1,3 +1,5 @@
+// PATTERN TIER: legacy — superseded or non-idiomatic; kept for what
+// depends on it. Do not copy from this file. Tiers: packages/patterns/index.md
 // ============================================================
 // Vehicle catalog and utilities for the Parking Coordinator
 // ============================================================

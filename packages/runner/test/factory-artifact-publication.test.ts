@@ -2,7 +2,7 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 
 import { getMetaCell } from "../src/link-utils.ts";

@@ -1,10 +1,40 @@
-// Shared helpers used across tiles and the core.
+/**
+ * Collects the helpers the tiles and the dashboard core share: the wrappers
+ * that call the GitHub REST API and spend its rate-limit budget, the service
+ * name a SigNoz query is scoped to, the small formatting routines that turn a
+ * number or a span into the text a tile shows, and the sparkline and strip
+ * drawing the tiles chart their history with.
+ */
+
 import type { Status } from "./types.ts";
 import { PROD_SERVICE } from "./config.ts";
 import {
   type GitHubPrimaryRateLimit,
   performanceGitHubRateLimit,
 } from "./github-rate-limit.ts";
+import {
+  compactSpan,
+  daysLabel,
+  DURATION_LABEL_HEIGHT,
+  durationTag,
+  escapeHtml,
+  groupDigits,
+  humanSpan,
+  SPARKLINE_HEIGHT,
+  STATUS_DOT,
+} from "./tile-render-values.ts";
+
+export {
+  compactSpan,
+  daysLabel,
+  DURATION_LABEL_HEIGHT,
+  durationTag,
+  escapeHtml,
+  groupDigits,
+  humanSpan,
+  SPARKLINE_HEIGHT,
+  STATUS_DOT,
+};
 
 // The service.name to scope a SigNoz query to. The name lands inside a query
 // expression, so anything outside the shape a service name has falls back to the
@@ -21,6 +51,214 @@ function githubToken(path: string, token?: string): string {
   const t = token ?? Deno.env.get("GH_TOKEN") ?? Deno.env.get("GITHUB_TOKEN");
   if (!t) throw new Error(`GitHub API ${path}: set GH_TOKEN or GITHUB_TOKEN`);
   return t;
+}
+
+type GitHubOperationStage =
+  | "waiting for performance-request capacity"
+  | "requesting GitHub"
+  | "recording performance-request use"
+  | "reading GitHub response";
+
+interface ActiveGitHubOperation {
+  id: number;
+  path: string;
+  startedAt: number;
+  stage: GitHubOperationStage;
+}
+
+export interface GitHubOperationInProgress {
+  id: number;
+  path: string;
+  elapsedMs: number;
+  stage: GitHubOperationStage;
+}
+
+const activeGitHubOperations = new Map<number, ActiveGitHubOperation>();
+let nextGitHubOperationId = 1;
+const SLOW_GITHUB_OPERATION_MS = 10_000;
+const GITHUB_ERROR_BODY_BYTES = 4_096;
+const GITHUB_LOG_DETAIL_CHARS = 300;
+
+export interface GitHubRequestOptions {
+  // These expected HTTP responses stay quiet while transport failures still log.
+  ignoreStatuses?: readonly number[];
+}
+
+export interface GitHubDownload {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly body: Uint8Array<ArrayBuffer>;
+}
+
+export function githubOperationsInProgress(
+  now = Date.now(),
+): GitHubOperationInProgress[] {
+  return [...activeGitHubOperations.values()].map((operation) => ({
+    id: operation.id,
+    path: operation.path,
+    elapsedMs: Math.max(0, now - operation.startedAt),
+    stage: operation.stage,
+  }));
+}
+
+function boundedLogDetail(detail: string): string | undefined {
+  const prefix = detail.slice(0, GITHUB_LOG_DETAIL_CHARS * 4);
+  const withoutControls = [...prefix].map((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || (code >= 127 && code <= 159) ? " " : character;
+  }).join("");
+  const compact = withoutControls.replace(/\s+/g, " ").trim();
+  return compact ? compact.slice(0, GITHUB_LOG_DETAIL_CHARS) : undefined;
+}
+
+function errorMessage(error: unknown): string {
+  const detail = error instanceof Error
+    ? `${error.name}: ${error.message}`
+    : String(error);
+  return boundedLogDetail(detail) ?? "unknown error";
+}
+
+function githubResponseContext(response: Response): string {
+  const parts = [`HTTP ${response.status}`];
+  const header = (name: string): string | undefined => {
+    const value = response.headers.get(name);
+    return value === null ? undefined : boundedLogDetail(value);
+  };
+  const requestId = header("x-github-request-id");
+  if (requestId) parts.push(`request ${requestId}`);
+  const remaining = header("x-ratelimit-remaining");
+  const limit = header("x-ratelimit-limit");
+  if (remaining || limit) {
+    parts.push(`rate limit ${remaining ?? "?"} remaining of ${limit ?? "?"}`);
+  }
+  const reset = header("x-ratelimit-reset");
+  if (reset) parts.push(`rate limit resets at ${reset}`);
+  const retryAfter = header("retry-after");
+  if (retryAfter) parts.push(`retry after ${retryAfter}`);
+  return parts.join(", ");
+}
+
+function githubErrorBody(body: string): string | undefined {
+  let detail = body;
+  try {
+    const value: unknown = JSON.parse(body);
+    if (
+      value !== null && typeof value === "object" && "message" in value &&
+      typeof value.message === "string"
+    ) {
+      detail = value.message;
+    }
+  } catch {
+    // A plain-text GitHub error body is already the useful detail.
+  }
+  return boundedLogDetail(detail);
+}
+
+function finishGitHubOperation(
+  operation: ActiveGitHubOperation,
+  response: Response | undefined,
+  failed: boolean,
+): void {
+  const elapsedMs = Math.max(0, Date.now() - operation.startedAt);
+  activeGitHubOperations.delete(operation.id);
+  if (!failed && response?.ok && elapsedMs >= SLOW_GITHUB_OPERATION_MS) {
+    console.warn(
+      `GitHub API operation ${operation.id} for ${operation.path} completed slowly after ` +
+        `${elapsedMs} ms: ${githubResponseContext(response)}`,
+    );
+  }
+}
+
+function logGitHubOperationFailure(
+  operation: ActiveGitHubOperation,
+  error: unknown,
+): void {
+  console.error(
+    `GitHub API operation ${operation.id} for ${operation.path} failed after ` +
+      `${Math.max(0, Date.now() - operation.startedAt)} ms ` +
+      `while ${operation.stage}: ${errorMessage(error)}`,
+  );
+}
+
+function logGitHubErrorResponseFailure(
+  response: Response,
+  operation: ActiveGitHubOperation,
+  action: string,
+  error: unknown,
+): void {
+  console.error(
+    "GitHub API operation " + operation.id + " for " + operation.path +
+      " could not " + action + " the error response from " +
+      githubResponseContext(response) + ": " + errorMessage(error),
+  );
+}
+
+function discardGitHubErrorResponseBody(
+  response: Response,
+  operation: ActiveGitHubOperation,
+): void {
+  if (!response.body) return;
+  try {
+    void response.body.cancel().catch((error) => {
+      logGitHubErrorResponseFailure(response, operation, "discard", error);
+    });
+  } catch (error) {
+    logGitHubErrorResponseFailure(response, operation, "discard", error);
+  }
+}
+
+async function githubErrorResponseBody(
+  response: Response,
+  operation: ActiveGitHubOperation,
+): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  const detail = (): string => {
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return new TextDecoder().decode(bytes);
+  };
+  if (!response.body) return "";
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try {
+    reader = response.body.getReader();
+  } catch (error) {
+    logGitHubErrorResponseFailure(response, operation, "read", error);
+    return "";
+  }
+  const cancel = async (): Promise<void> => {
+    try {
+      await reader.cancel();
+    } catch (error) {
+      logGitHubErrorResponseFailure(response, operation, "stop reading", error);
+    }
+  };
+  try {
+    while (length < GITHUB_ERROR_BODY_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) return detail();
+      const remaining = GITHUB_ERROR_BODY_BYTES - length;
+      const kept = value.slice(0, remaining);
+      chunks.push(kept);
+      length += kept.length;
+    }
+    await cancel();
+    return detail();
+  } catch (error) {
+    logGitHubErrorResponseFailure(response, operation, "read", error);
+    return detail();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+interface GitHubResponseResult {
+  response: Response;
+  operation: ActiveGitHubOperation;
 }
 
 function githubRequest(path: string, token: string, withTimeout: boolean): Promise<Response> {
@@ -40,10 +278,14 @@ function githubRequest(path: string, token: string, withTimeout: boolean): Promi
 
 async function githubPrimaryRateLimit(
   token: string,
+  operation: ActiveGitHubOperation,
 ): Promise<GitHubPrimaryRateLimit> {
   const response = await githubRequest("rate_limit", token, false);
   if (!response.ok) {
-    throw new Error(`GitHub API rate_limit failed: HTTP ${response.status}`);
+    discardGitHubErrorResponseBody(response, operation);
+    throw new Error(
+      `GitHub API rate_limit failed: ${githubResponseContext(response)}`,
+    );
   }
   const value = await response.json() as {
     resources?: { core?: GitHubPrimaryRateLimit };
@@ -59,73 +301,190 @@ async function githubResponse(
   token: string,
   performance: boolean,
   withTimeout: boolean,
-): Promise<Response> {
-  const reservation = performance
-    ? await performanceGitHubRateLimit.reserve(
-      token,
-      () => githubPrimaryRateLimit(token),
-    )
-    : null;
+): Promise<GitHubResponseResult> {
+  const normalizedPath = path.replace(/^\//, "");
+  const operation: ActiveGitHubOperation = {
+    id: nextGitHubOperationId++,
+    path: normalizedPath,
+    startedAt: Date.now(),
+    stage: performance
+      ? "waiting for performance-request capacity"
+      : "requesting GitHub",
+  };
+  activeGitHubOperations.set(operation.id, operation);
+  let reservation: Awaited<ReturnType<typeof performanceGitHubRateLimit.reserve>> | null = null;
   let response: Response | undefined;
+  let failed = false;
+  let operationError: unknown;
   try {
+    if (performance) {
+      reservation = await performanceGitHubRateLimit.reserve(
+        token,
+        () => githubPrimaryRateLimit(token, operation),
+      );
+      operation.stage = "requesting GitHub";
+    }
     response = await githubRequest(path, token, withTimeout);
-    return response;
-  } finally {
-    if (reservation) await reservation.complete(response);
+  } catch (error) {
+    failed = true;
+    operationError = error;
+    logGitHubOperationFailure(operation, error);
   }
+  try {
+    if (reservation) {
+      operation.stage = "recording performance-request use";
+      await reservation.complete(response);
+    }
+  } catch (error) {
+    failed = true;
+    operationError = error;
+    logGitHubOperationFailure(operation, error);
+  }
+  if (failed) {
+    finishGitHubOperation(operation, response, true);
+    throw operationError;
+  }
+  operation.stage = "reading GitHub response";
+  return { response: response!, operation };
 }
 
 async function githubJson<T>(
   path: string,
   token: string,
   performance: boolean,
+  options: GitHubRequestOptions,
 ): Promise<T> {
-  const res = await githubResponse(path, token, performance, true);
+  const { response: res, operation } = await githubResponse(
+    path,
+    token,
+    performance,
+    true,
+  );
   if (!res.ok) {
+    const reportHttpError = !options.ignoreStatuses?.includes(res.status);
+    const body = await githubErrorResponseBody(
+      res,
+      operation,
+    );
     let rateLimited = false;
     if (res.status === 403) {
-      const message = await res.text();
       rateLimited = res.headers.get("x-ratelimit-remaining") === "0" ||
-        res.headers.has("retry-after") || /rate.?limit/i.test(message);
+        res.headers.has("retry-after") || /rate.?limit/i.test(body);
     }
     const detail = rateLimited ? " (rate-limited)" : "";
+    const responseDetail = githubErrorBody(body);
+    if (reportHttpError) {
+      console.error(
+        `GitHub API operation ${operation.id} for ${operation.path} returned ` +
+          `${githubResponseContext(res)} after ` +
+          `${Math.max(0, Date.now() - operation.startedAt)} ms` +
+          `${responseDetail ? `: ${responseDetail}` : ""}`,
+      );
+    }
+    finishGitHubOperation(operation, res, true);
     throw new Error(
       `GitHub API ${path} failed: HTTP ${res.status}${detail}`,
     );
   }
-  return await res.json() as T;
+  try {
+    const value = await res.json() as T;
+    finishGitHubOperation(operation, res, false);
+    return value;
+  } catch (error) {
+    console.error(
+      `GitHub API operation ${operation.id} for ${operation.path} could not read valid JSON ` +
+        `from ${githubResponseContext(res)} after ` +
+        `${Math.max(0, Date.now() - operation.startedAt)} ms: ${errorMessage(error)}`,
+    );
+    finishGitHubOperation(operation, res, true);
+    throw error;
+  }
 }
 
 export async function github<T = unknown>(
   path: string,
   token?: string,
+  options: GitHubRequestOptions = {},
 ): Promise<T> {
   const t = githubToken(path, token);
-  return await githubJson<T>(path, t, false);
+  return await githubJson<T>(path, t, false, options);
 }
 
 export async function githubDownload(
   path: string,
   token?: string,
-): Promise<Response> {
+  options: GitHubRequestOptions = {},
+): Promise<GitHubDownload> {
   const t = githubToken(path, token);
-  return await githubResponse(path, t, false, false);
+  return await githubDownloadResponse(
+    path,
+    t,
+    false,
+    options,
+  );
 }
 
 export async function performanceGithub<T = unknown>(
   path: string,
   token?: string,
+  options: GitHubRequestOptions = {},
 ): Promise<T> {
   const t = githubToken(path, token);
-  return await githubJson<T>(path, t, true);
+  return await githubJson<T>(path, t, true, options);
 }
 
 export async function performanceGithubDownload(
   path: string,
   token?: string,
-): Promise<Response> {
+  options: GitHubRequestOptions = {},
+): Promise<GitHubDownload> {
   const t = githubToken(path, token);
-  return await githubResponse(path, t, true, false);
+  return await githubDownloadResponse(
+    path,
+    t,
+    true,
+    options,
+  );
+}
+
+async function githubDownloadResponse(
+  path: string,
+  token: string,
+  performance: boolean,
+  options: GitHubRequestOptions,
+): Promise<GitHubDownload> {
+  const { response, operation } = await githubResponse(
+    path,
+    token,
+    performance,
+    false,
+  );
+  if (!response.ok) {
+    const reportHttpError = !options.ignoreStatuses?.includes(response.status);
+    discardGitHubErrorResponseBody(response, operation);
+    if (reportHttpError) {
+      console.error(
+        `GitHub API operation ${operation.id} for download ${operation.path} returned ` +
+          `${githubResponseContext(response)} after ` +
+          `${Math.max(0, Date.now() - operation.startedAt)} ms`,
+      );
+    }
+    finishGitHubOperation(operation, response, true);
+    return { ok: false, status: response.status, body: new Uint8Array() };
+  }
+  if (!response.body) {
+    finishGitHubOperation(operation, response, false);
+    return { ok: true, status: response.status, body: new Uint8Array() };
+  }
+  try {
+    const body = new Uint8Array(await response.arrayBuffer());
+    finishGitHubOperation(operation, response, false);
+    return { ok: true, status: response.status, body };
+  } catch (error) {
+    logGitHubOperationFailure(operation, error);
+    finishGitHubOperation(operation, response, true);
+    throw error;
+  }
 }
 
 // Cache an async result for ttlMs; a rejection is not cached (so it retries).
@@ -142,39 +501,6 @@ export function memo<T>(ttlMs: number, fn: () => Promise<T>): () => Promise<T> {
     }
     return cached;
   };
-}
-
-// good/warn/bad/unknown -> the dot color class the renderer uses.
-export const STATUS_DOT: Record<Status, string> = { good: "green", warn: "amber", bad: "red", unknown: "grey" };
-
-export const escapeHtml = (s: string) =>
-  s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
-
-// Per-status left edge for a sparkline's fade gradient — a shade just below the
-// tile's own (status-tinted) background, so the line fades up out of the tile.
-export const SPARK_FADE: Record<Status, string> = {
-  good: "#0e1915",
-  warn: "#1a1713",
-  bad: "#1e1113",
-  unknown: "#121317",
-};
-
-// How a sparkline caption spells a day span, consistently across tiles:
-// "5 days", "1 day", "<1 day".
-export function daysLabel(days: number): string {
-  if (days < 1) return "<1 day";
-  return `${days} day${days === 1 ? "" : "s"}`;
-}
-
-// A time span for sparkline captions: "5 days" (>= 1 day, via daysLabel), else a
-// finer "8 hours", else "30 min".
-export function humanSpan(ms: number): string {
-  if (ms >= 86_400_000) return daysLabel(Math.round(ms / 86_400_000));
-  if (ms >= 3_600_000) {
-    const hr = Math.round(ms / 3_600_000);
-    return `${hr} hour${hr === 1 ? "" : "s"}`;
-  }
-  return `${Math.max(1, Math.round(ms / 60_000))} min`;
 }
 
 export function humanDur(ms: number): string {
@@ -230,9 +556,9 @@ export function usd(n: number): string {
 
 // A completed run's dot color: only genuine failures are red.
 export function concDot(conclusion: string | null, attempt: number): string {
-  if (conclusion === "success") return attempt > 1 ? "grey" : "green";
+  if (conclusion === "success") return attempt > 1 ? "gray" : "green";
   if (conclusion === "failure" || conclusion === "timed_out" || conclusion === "startup_failure") return "red";
-  return "grey";
+  return "gray";
 }
 
 // A lighter tint of a "#rrggbb" color, blended toward white. Sparklines mark the
@@ -248,31 +574,38 @@ export function lighten(hex: string, amount = 0.6): string {
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
 }
 
-// The span the line covers, formatted with humanSpan for the bottom-left corner
-// of a chart, absolutely positioned. The renderer draws it for a tile's `duration`
-// slot; standalone chart pages (the bench drill-down) reuse it directly. Its
-// container must be position:relative.
-export function durationTag(ms: number): string {
-  return `<span style="position:absolute;left:1px;bottom:0;font-size:9px;line-height:1;color:#c7ccd4;pointer-events:none">${escapeHtml(humanSpan(ms))}</span>`;
+function scaleValues(
+  vals: number[],
+  scale: { trim?: number; minValues?: number } | undefined,
+): number[] {
+  const count = Math.max(0, Math.floor(scale?.trim ?? 0));
+  const minimum = Math.max(count * 2 + 2, scale?.minValues ?? 0);
+  if (count === 0 || vals.length < minimum) return vals;
+  return [...vals].sort((a, b) => a - b).slice(count, -count);
 }
 
 // A trend line from a numeric series (oldest -> newest). With `highlight`, the
 // trailing `count` points are overdrawn in a second color (e.g. to pick out the
 // most recent runs against a longer trend). The vertical scale is normalized to
 // those recent points' range plus 25% headroom, so older outliers clip off the
-// edges instead of flattening the recent detail into a useless line. `fadeFrom`
-// makes the base line a horizontal gradient from that color on the far left up to
-// `color` by the tile's midpoint. `xs` gives each point's horizontal position as a
-// fraction 0..1 of the width (for placing several sparklines on one shared axis —
-// e.g. a real time axis); a series that doesn't reach the ends occupies only part
-// of the width. Without it, points are spaced evenly. The line has no label of its
-// own — a tile's `duration` slot draws the span in the corner.
+// edges instead of flattening the recent detail into a useless line. `fade`
+// makes the base line a horizontal gradient from transparent on the far left up
+// to `color` by the tile's midpoint. `xs` gives each point's horizontal
+// position as a fraction 0..1 of the width (for placing several sparklines on
+// one shared axis — e.g. a real time axis); a series that doesn't reach the
+// ends occupies only part of the width. Without it, points are spaced evenly.
+// The line has no label of its own. A tile's `duration` slot draws the span in
+// the corner. `scale.trim`
+// excludes that many values from each end of the sorted scale inputs without
+// removing the points themselves. A series below `scale.minValues`, or too short
+// to leave two scale values, keeps its full range.
 export function sparkline(
   vals: number[],
   color: string,
   highlight?: { count: number; color: string; scaleAll?: boolean },
-  fadeFrom?: string,
+  fade = false,
   xs?: number[],
+  scale?: { trim?: number; minValues?: number },
 ): string {
   if (vals.length < 2) return "";
   const w = 220, h = 26;
@@ -280,7 +613,8 @@ export function sparkline(
   // series in view while still brightening the tail (for series whose recent
   // window can sit far from the historical range, e.g. a near-zero error rate).
   const recent = highlight && !highlight.scaleAll ? vals.slice(-highlight.count) : vals;
-  const lo = Math.min(...recent), hi = Math.max(...recent);
+  const scaled = scaleValues(recent, scale);
+  const lo = Math.min(...scaled), hi = Math.max(...scaled);
   const pad = (hi - lo) * 0.125 || 0.5; // 12.5% each side ≈ +25% range; a floor for a flat series
   const min = lo - pad, rng = (hi + pad) - min;
   // Place each point at its `xs` fraction of the width (shared axis), else evenly.
@@ -288,21 +622,35 @@ export function sparkline(
   const pts = vals.map((v, i) =>
     `${xAt(i).toFixed(1)},${(h - 3 - ((v - min) / rng) * (h - 6)).toFixed(1)}`
   );
-  // The base line fades from `fadeFrom` on the far left to `color`, then holds
-  // `color` (SVG extends the last stop). objectBoundingBox units keep the
-  // transition placed regardless of the preserveAspectRatio stretch.
+  // The base line fades from transparent on the far left to `color`, then holds
+  // `color` (SVG extends the last stop). userSpaceOnUse keeps the transition at
+  // the same screen x when `xs` places the line on only part of the chart.
   let defs = "", baseStroke = color;
-  if (fadeFrom) {
+  if (fade) {
     // Reach `color` by the tile's midpoint — or sooner, if the highlight starts
     // before halfway (so the base is fully `color` before the handoff).
-    const edge = highlight
-      ? Math.max(0, Math.min(1, (vals.length - highlight.count) / (vals.length - 1)))
+    const edge = highlight && highlight.count >= 2 && highlight.count < vals.length
+      ? Math.max(
+        0,
+        Math.min(
+          1,
+          xs?.length === vals.length
+            ? xs[vals.length - highlight.count]
+            : (vals.length - highlight.count) / (vals.length - 1),
+        ),
+      )
       : 1;
     const tf = Math.min(0.5, edge);
     if (tf > 0) {
-      const id = `spk-${fadeFrom.replace(/[^0-9a-fA-F]/g, "")}-${color.replace(/[^0-9a-fA-F]/g, "")}-${Math.round(tf * 100)}`;
-      defs = `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="0">` +
-        `<stop offset="0" stop-color="${fadeFrom}"/><stop offset="${tf.toFixed(3)}" stop-color="${color}"/>` +
+      const id = `spk-${
+        color.replace(/[^0-9a-fA-F]/g, "")
+      }-${Math.round(tf * 100)}`;
+      defs = `<defs><linearGradient id="${id}" ` +
+        `gradientUnits="userSpaceOnUse" x1="0" y1="0" ` +
+        `x2="${w}" y2="0">` +
+        `<stop offset="0" stop-color="${color}" stop-opacity="0"/>` +
+        `<stop offset="${tf.toFixed(3)}" stop-color="${color}" ` +
+        `stop-opacity="1"/>` +
         `</linearGradient></defs>`;
       baseStroke = `url(#${id})`;
     }
@@ -314,34 +662,43 @@ export function sparkline(
     const tail = pts.slice(vals.length - highlight.count);
     lines.push(`<polyline points="${tail.join(" ")}" fill="none" stroke="${highlight.color}" stroke-width="2"/>`);
   }
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="24" preserveAspectRatio="none" style="margin-top:9px">${defs}${lines.join("")}</svg>`;
+  // The svg is a block, so the chart's box is the height it draws: an inline svg
+  // sits on a text baseline, and the line box around it reserves descender space
+  // underneath.
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${SPARKLINE_HEIGHT}" preserveAspectRatio="none" style="display:block;margin-top:9px">${defs}${lines.join("")}</svg>`;
 }
 
 // Overlaid trend lines (each oldest -> newest) sharing one vertical scale, each
 // in its own color. With a per-series `label`, that series' value is placed in a
 // right-hand gutter at the line's end height, in the line color. With
-// `opts.fadeFrom`, each line fades from that color on the far left up to its own
-// color, reaching full color by the midpoint (or by the start of the highlight,
-// if that comes sooner) — like the ci-duration sparkline. A series' `xs`
-// places its points on a shared horizontal axis. Its `highlightCount` redraws
-// its trailing points, including explicit markers, in a lighter tint.
+// `opts.fade`, each line fades from transparent on the far left up to its own
+// color, reaching full opacity by the midpoint (or by the start of the
+// highlight, if that comes sooner) — like the ci-duration sparkline. The `xs`
+// field positions points on a shared horizontal axis. The `highlightCount`
+// field redraws trailing points, including explicit markers, in a lighter tint.
 // `opts.highlight` supplies the count for series that do not set one. `maxXGap`
 // breaks a path when adjacent horizontal positions are farther apart than that
 // fraction of the chart. `showSinglePoint` draws explicit markers for a
 // one-sample series and for points isolated by those breaks. All overlays are
 // HTML or gradients, so preserveAspectRatio="none" cannot distort them. The
-// span it covers is drawn separately by a tile's `duration` slot.
+// span it covers is drawn separately by a tile's `duration` slot. `opts.scale`
+// has the same trimming behavior as `sparkline`.
 export function multiSparkline(
   series: {
     vals: number[];
     color: string;
+    highlightColor?: string;
     label?: string;
     xs?: number[];
     highlightCount?: number;
     maxXGap?: number;
     showSinglePoint?: boolean;
   }[],
-  opts: { fadeFrom?: string; highlight?: { count: number } } = {},
+  opts: {
+    fade?: boolean;
+    highlight?: { count: number };
+    scale?: { trim?: number; minValues?: number };
+  } = {},
 ): string {
   const drawable = series.filter((line) =>
     line.vals.length >= 2 ||
@@ -349,14 +706,18 @@ export function multiSparkline(
   );
   const all = drawable.flatMap((line) => line.vals);
   if (!all.length) return "";
-  const w = 220, h = 34, min = Math.min(...all), max = Math.max(...all), rng = (max - min) || 1;
+  const scaled = scaleValues(all, opts.scale);
+  const lo = Math.min(...scaled), hi = Math.max(...scaled);
+  // Match sparkline's centered flat range when trimming leaves two equal values.
+  const pad = scaled === all || lo !== hi ? 0 : 0.5;
+  const w = 220, h = 34, min = lo - pad, max = hi + pad, rng = (max - min) || 1;
   const yv = (v: number) => h - 3 - ((v - min) / rng) * (h - 6);
 
-  // Each line fades from `fadeFrom` on the left up to its own color, reaching full
-  // color at the handoff `tf`: the midpoint, or the start of the highlight when
-  // that comes sooner (so the base is solid before the handoff). userSpaceOnUse
-  // keeps the transition at the same screen x for every line and avoids the
-  // zero-bbox quirk when a line is flat.
+  // Each line fades from transparent on the left up to its own color, reaching
+  // full opacity at the handoff `tf`: the midpoint, or the start of the
+  // highlight when that comes sooner (so the base is solid before the handoff).
+  // userSpaceOnUse keeps the transition at the same screen x for every line and
+  // avoids the zero-bbox quirk when a line is flat.
   const defs: string[] = [];
   const highlightCount = (
     line: (typeof series)[number],
@@ -364,7 +725,7 @@ export function multiSparkline(
   const highlightEdge = (line: (typeof series)[number]): number => {
     const count = highlightCount(line);
     if (count < 2) return 1;
-    if (count >= line.vals.length) return 0;
+    if (count >= line.vals.length) return 1;
     const index = line.vals.length - count;
     return line.xs?.length === line.vals.length
       ? line.xs[index]
@@ -372,14 +733,17 @@ export function multiSparkline(
   };
   const strokeFor = (line: (typeof series)[number]): string => {
     const color = line.color;
-    if (!opts.fadeFrom) return color;
+    if (!opts.fade) return color;
     const tf = Math.min(0.5, Math.max(0, highlightEdge(line)));
     const off = String(+tf.toFixed(3));
-    const id = `mspk-${opts.fadeFrom.replace(/[^0-9a-fA-F]/g, "")}-${color.replace(/[^0-9a-fA-F]/g, "")}-${Math.round(tf * 100)}`;
+    const id = `mspk-${
+      color.replace(/[^0-9a-fA-F]/g, "")
+    }-${Math.round(tf * 100)}`;
     if (!defs.some((d) => d.includes(`"${id}"`))) {
       defs.push(
         `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="${w}" y2="0">` +
-          `<stop offset="0" stop-color="${opts.fadeFrom}"/><stop offset="${off}" stop-color="${color}"/>` +
+          `<stop offset="0" stop-color="${color}" stop-opacity="0"/>` +
+          `<stop offset="${off}" stop-color="${color}" stop-opacity="1"/>` +
           `</linearGradient>`,
       );
     }
@@ -458,7 +822,9 @@ export function multiSparkline(
     if (start === undefined) return "";
     return splitPoints(points.slice(start), s.maxXGap)
       .filter((segment) => segment.length >= 2)
-      .map((segment) => poly(segment.map(svgPoint), lighten(s.color)))
+      .map((segment) =>
+        poly(segment.map(svgPoint), s.highlightColor ?? lighten(s.color))
+      )
       .join("");
   }).join("");
   const isolatedMarkers = drawn.map(({ s, points, segments }) => {
@@ -470,7 +836,7 @@ export function multiSparkline(
         const point = segment[0];
         const color = highlightStart !== undefined &&
             point.index >= highlightStart
-          ? lighten(s.color)
+          ? s.highlightColor ?? lighten(s.color)
           : s.color;
         return marker(point, color);
       })
@@ -488,27 +854,104 @@ export function multiSparkline(
 
   const labeled = drawable.filter((s) => s.label !== undefined);
   if (labeled.length === 0) {
-    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="32" preserveAspectRatio="none" style="margin-top:9px">${defsBlock}${lines}</svg>`;
+    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${SPARKLINE_HEIGHT}" preserveAspectRatio="none" style="display:block;margin-top:9px">${defsBlock}${lines}</svg>`;
   }
-  const RH = 32; // rendered svg height, px
+  const RH = SPARKLINE_HEIGHT;
+  const LABEL_INSET = 6;
+  const LABEL_GAP = 12;
+  const labelEdge = RH - LABEL_INSET;
   // Each label sits at its line's end height; when a chart is drawn its value
-  // appears only here, so spread any labels that would overlap into one unreadable
-  // stack — sort by height and push each down to at least MIN_GAP below the last.
-  const MIN_GAP = 12;
+  // appears only here. Sort the labels by height and spread close labels apart.
+  // A crowded chart divides the available band evenly between every label.
   const placed = labeled
-    .map((s) => ({ s, py: Math.max(6, Math.min(26, (yv(s.vals[s.vals.length - 1]) / h) * RH)) }))
+    .map((s) => ({ s, py: Math.max(LABEL_INSET, Math.min(labelEdge, (yv(s.vals[s.vals.length - 1]) / h) * RH)) }))
     .sort((a, b) => a.py - b.py);
+  const gap = placed.length > 1
+    ? Math.min(LABEL_GAP, (labelEdge - LABEL_INSET) / (placed.length - 1))
+    : 0;
   for (let i = 1; i < placed.length; i++) {
-    if (placed[i].py - placed[i - 1].py < MIN_GAP) placed[i].py = placed[i - 1].py + MIN_GAP;
+    placed[i].py = Math.max(placed[i].py, placed[i - 1].py + gap);
   }
-  const overflow = placed.length ? placed[placed.length - 1].py - 26 : 0;
-  if (overflow > 0) for (const p of placed) p.py -= overflow;
+  if (placed[placed.length - 1].py > labelEdge) {
+    placed[placed.length - 1].py = labelEdge;
+    for (let i = placed.length - 2; i >= 0; i--) {
+      placed[i].py = Math.min(placed[i].py, placed[i + 1].py - gap);
+    }
+  }
   const tags = placed.map(({ s, py }) =>
     `<span style="position:absolute;right:0;top:${py.toFixed(1)}px;transform:translateY(-50%);font-size:11px;line-height:1;color:${s.color};font-variant-numeric:tabular-nums;pointer-events:none">${escapeHtml(s.label!)}</span>`
   ).join("");
   const svgWidth = labeled.length ? "calc(100% - 24px)" : "100%";
   const svg = `<svg viewBox="0 0 ${w} ${h}" width="${svgWidth}" height="${RH}" preserveAspectRatio="none" style="display:block">${defsBlock}${lines}</svg>`;
   return `<div style="position:relative;margin-top:9px;height:${RH}px">${svg}${tags}</div>`;
+}
+
+// The middle of a series. An even count has no single middle sample, so it is
+// the mean of the two: taking the upper one alone reports a value no sample
+// had, and always the higher of the pair. The input is copied before sorting,
+// so a caller's array keeps its own order.
+export function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length / 2;
+  return sorted.length % 2
+    ? sorted[Math.floor(mid)]
+    : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+// Inflate raw-deflate bytes (the compression zip uses) to their decompressed form.
+async function inflateRaw(data: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
+  const ds = new DecompressionStream("deflate-raw");
+  const collected = new Response(ds.readable).arrayBuffer(); // read as we write
+  const writer = ds.writable.getWriter();
+  await writer.write(data);
+  await writer.close();
+  return new Uint8Array(await collected);
+}
+
+// Extract the first *.json file from a zip via its central directory (which holds
+// the true sizes even when a streamed zip leaves them out of the local headers).
+// A GitHub artifact download is one of these.
+export async function jsonFromZip(
+  buf: Uint8Array<ArrayBuffer>,
+): Promise<string | null> {
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const u16 = (o: number) => dv.getUint16(o, true);
+  const u32 = (o: number) => dv.getUint32(o, true);
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0 && i >= buf.length - 22 - 0x10000; i--) {
+    if (u32(i) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) return null;
+  let p = u32(eocd + 16); // central directory offset
+  const count = u16(eocd + 10);
+  for (let n = 0; n < count; n++) {
+    if (u32(p) !== 0x02014b50) break; // central-directory file header signature
+    const method = u16(p + 10);
+    const compSize = u32(p + 20);
+    const nameLen = u16(p + 28),
+      extraLen = u16(p + 30),
+      commentLen = u16(p + 32);
+    const lho = u32(p + 42); // local header offset
+    const name = new TextDecoder().decode(
+      buf.subarray(p + 46, p + 46 + nameLen),
+    );
+    p += 46 + nameLen + extraLen + commentLen;
+    if (!name.endsWith(".json")) continue;
+    if (u32(lho) !== 0x04034b50) return null; // local file header signature
+    const dataStart = lho + 30 + u16(lho + 26) + u16(lho + 28);
+    const comp = buf.subarray(dataStart, dataStart + compSize);
+    const bytes = method === 0
+      ? comp
+      : method === 8
+      ? await inflateRaw(comp)
+      : null;
+    return bytes ? new TextDecoder().decode(bytes) : null;
+  }
+  return null;
 }
 
 // Evenly thin an array to at most `max` items, keeping the first and last.
@@ -521,16 +964,25 @@ export function thin<T>(arr: T[], max: number): T[] {
 }
 
 // A grid of small run-outcome cells (one per run, oldest first) laid out in
-// `cols` fixed columns. Each cell links to that run's CI results. Cells shrink
-// to fit width.
-export function strip(cells: { outcome: string; href: string }[], cols: number): string {
+// responsive columns. Each cell links to that run's CI results.
+export function strip(
+  cells: { outcome: string; href: string }[],
+  labelSpace = false,
+): string {
   if (!cells.length) return "";
   const col = (d: string) =>
-    d === "green" ? "#43c574" : d === "red" ? "#e2504a" : d === "run" ? "#6ea8fe" : "#7c828c";
+    d === "green"
+      ? "var(--status-good)"
+      : d === "red"
+      ? "var(--status-bad)"
+      : d === "run"
+      ? "var(--running)"
+      : "var(--status-unknown)";
   const html = cells.map((c) =>
     `<a class="cell" href="${escapeHtml(c.href)}" target="_blank" rel="noopener" style="background:${col(c.outcome)}"></a>`
   ).join("");
-  return `<div class="cells" style="grid-template-columns:repeat(${cols},1fr)">${html}</div>`;
+  const className = labelSpace ? "cells labeled" : "cells";
+  return `<div class="${className}">${html}</div>`;
 }
 
 // The PR that landed a commit: squash titles end "(#123)", merge commits start

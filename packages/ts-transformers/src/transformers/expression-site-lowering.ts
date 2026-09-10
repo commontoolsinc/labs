@@ -3,9 +3,12 @@ import {
   detectCallKind,
   isCollectionType,
   isFunctionLikeExpression,
+  isSyntheticNode,
+  preserveSourceMapRange,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 import { shouldTransformArrayMethod } from "../closures/strategies/array-method-policy.ts";
 import { transformArrayMethodCallback } from "../closures/strategies/array-method-transform.ts";
 import {
@@ -77,7 +80,8 @@ export function isSyntheticHelperWrapperInArrayMethodCallback(
   context: TransformationContext,
 ): boolean {
   if (
-    expression.pos >= 0 || !isReactiveHelperWrapperCall(expression, context)
+    !isSyntheticNode(expression) ||
+    !isReactiveHelperWrapperCall(expression, context)
   ) {
     return false;
   }
@@ -112,7 +116,7 @@ function markSyntheticReactiveCollectionDeclarationIfNeeded(
     !rewritten.initializer ||
     (
       rewrittenOriginal === rewritten.initializer &&
-      rewritten.initializer.pos >= 0
+      !isSyntheticNode(rewritten.initializer)
     ) ||
     !isReactiveHelperWrapperCall(
       rewritten.initializer,
@@ -230,7 +234,9 @@ function rewriteLateArrayMethodCallbackCall(
   context: TransformationContext,
   visit: ts.Visitor,
 ): ts.CallExpression | undefined {
-  const callback = node.arguments[0];
+  // Read the callback through paren spelling — a blind read here skips the
+  // lowering and a raw reactive method call reaches the runtime.
+  const callback = node.arguments[0] && unwrapExpression(node.arguments[0]);
   if (!callback || !isFunctionLikeExpression(callback)) {
     return undefined;
   }
@@ -285,18 +291,6 @@ export function rewriteExpressionSite(
 
   if (!analysis.requiresRewrite && !hasLogicalOps && !controlFlowNeedsRewrite) {
     return undefined;
-  }
-
-  if (context.options.mode === "error") {
-    if (containerKind === "jsx-expression") {
-      context.reportDiagnostic({
-        type: "reactive:jsx-expression",
-        message:
-          "JSX expression with Reactive computation should use computed()",
-        node: expression,
-      });
-    }
-    return expression;
   }
 
   const result = rewriteExpression({
@@ -364,15 +358,6 @@ export function rewriteOwnedPreClosureJsxExpressionSite(
     shouldDeferToLateInPlaceLowering(context, expression, relevantDataFlows)
   ) {
     return undefined;
-  }
-
-  if (context.options.mode === "error") {
-    context.reportDiagnostic({
-      type: "reactive:jsx-expression",
-      message: "JSX expression with Reactive computation should use computed()",
-      node: expression,
-    });
-    return expression;
   }
 
   const result = rewriteExpression({
@@ -569,9 +554,12 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
         preferInputBoundWrappers: true,
       });
       if (rewritten) {
-        return context.factory.createJsxExpression(
-          node.dotDotDotToken,
-          rewritten,
+        return preserveSourceMapRange(
+          context.factory.createJsxExpression(
+            node.dotDotDotToken,
+            rewritten,
+          ),
+          node,
         );
       }
 
@@ -682,16 +670,7 @@ function allDataFlowsAreElementBindingRoots(
 function isPassthroughContainerExpression(
   expression: ts.Expression,
 ): boolean {
-  let current = expression;
-  while (
-    ts.isParenthesizedExpression(current) ||
-    ts.isAsExpression(current) ||
-    ts.isTypeAssertionExpression(current) ||
-    ts.isSatisfiesExpression(current) ||
-    ts.isNonNullExpression(current)
-  ) {
-    current = current.expression;
-  }
+  const current = unwrapExpression(expression);
   return ts.isPropertyAccessExpression(current) ||
     ts.isElementAccessExpression(current) ||
     ts.isObjectLiteralExpression(current) ||
@@ -900,9 +879,12 @@ export function rewriteArrayMethodCallbackExpressionSites(
           preferInputBoundWrappers: true,
         });
         if (rewritten) {
-          return context.factory.createJsxExpression(
-            node.dotDotDotToken,
-            rewritten,
+          return preserveSourceMapRange(
+            context.factory.createJsxExpression(
+              node.dotDotDotToken,
+              rewritten,
+            ),
+            node,
           );
         }
       }

@@ -207,12 +207,16 @@ export interface Output {
   auth: Writable<AirtableAuth>;
   scopes: string[];
   selectedScopes: SelectedScopes;
+
   /** Compact user display */
   userChip: VNode;
+
   /** Minimal preview for picker display */
   [TILE_UI]: VNode;
+
   /** Refresh the OAuth token from other pieces */
   refreshToken: Stream<Record<string, never>>;
+
   /** Background updater for proactive token refresh */
   bgUpdater: Stream<Record<string, never>>;
 }

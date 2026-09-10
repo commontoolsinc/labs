@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/counter/counter.test.tsx --verbose
  */
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import { default as ContactBook, matchesSearch } from "./contact-book.tsx";
 import { type Contact } from "./contact-detail.tsx";
 
@@ -61,7 +61,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_empty_query_matches_all },
       { assertion: assert_name_query_matches },
       { assertion: assert_email_query_matches },

@@ -1,91 +1,55 @@
+/**
+ * Cloning to a requested frozenness, and which option combinations mean
+ * anything together.
+ *
+ * Two of them are errors rather than choices, having no coherent answer to
+ * give: forcing a copy of a value that will be immutable anyway, and
+ * shallow-thawing a tree whose frozenness is mixed. Refusing those is what
+ * keeps each remaining combination meaning exactly one thing.
+ *
+ * The rest is what may be shared and what must be rebuilt. A value already in
+ * the requested state comes back as it is unless a copy was forced,
+ * inherently immutable values are never copied at all, and a null prototype is
+ * canonicalized rather than carried through, not being a shape the value type
+ * admits.
+ *
+ * Cycles are detected on the deep paths, and the subclass matrix asks the same
+ * questions of every concrete class rather than trusting one to stand in for
+ * the others.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { cloneIfNecessary, type CloneOptions } from "@/fabric-value.ts";
-import type { FabricValue } from "@/fabric-value.ts";
-import { isDeepFrozen, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
+import {
+  cloneIfNecessary,
+  type CloneOptions,
+  isValidFabricValue,
+} from "@/index.ts";
+import type { FabricValue } from "@/index.ts";
+import { isDeepFrozen, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { FabricPrimitive, FabricSpecialObject } from "@/interface.ts";
-import { registerFabricFactory } from "@/fabric-factory.ts";
 
-const FACTORY_REF = {
-  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-  symbol: "__cfFactory_1",
-} as const;
-
-describe("cloneIfNecessary", () => {
-  describe("Fabric factories", () => {
-    it("preserves one hardened factory atom for mutable and frozen requests", () => {
-      const factories = [
-        registerFabricFactory(() => undefined, "pattern", {
-          kind: "pattern",
-          rootToken: {},
-          ref: FACTORY_REF,
-          argumentSchema: true,
-          resultSchema: true,
-        }),
-        registerFabricFactory(() => undefined, "module", {
-          kind: "module",
-          rootToken: {},
-          ref: FACTORY_REF,
-        }),
-        registerFabricFactory(() => undefined, "handler", {
-          kind: "handler",
-          rootToken: {},
-          ref: FACTORY_REF,
-        }),
-      ];
-
-      for (const factory of factories) {
-        expect(cloneIfNecessary(factory)).toBe(factory);
-        expect(Object.isFrozen(factory)).toBe(true);
-        expect(cloneIfNecessary(factory, { frozen: false })).toBe(factory);
-        expect(
-          cloneIfNecessary(factory, {
-            frozen: false,
-            deep: false,
-            force: true,
-          }),
-        ).toBe(factory);
-      }
-    });
-
-    it("fails before cloning a live factory whose artifact ref is unavailable", () => {
-      const factory = registerFabricFactory(() => undefined, "handler", {
-        kind: "handler",
-        rootToken: {},
-      });
-
-      expect(() => cloneIfNecessary(factory)).toThrow(
-        "artifact ref is not available",
-      );
-      expect(Object.isFrozen(factory)).toBe(false);
-    });
-
-    it("rejects an arbitrary function even when it is the same reference", () => {
-      const fn = (() => undefined) as unknown as FabricValue;
-      expect(() => cloneIfNecessary(fn)).toThrow("function");
-    });
-  });
-
+describe("cloneIfNecessary()", () => {
   describe(`error cases`, () => {
     it("throws for `frozen=true`, `force=true`", () => {
-      const value = { a: 1 } as FabricValue;
+      const value = { a: 1 };
       expect(() => cloneIfNecessary(value, { frozen: true, force: true }))
         .toThrow("frozen: true, force: true");
     });
 
     it("throws for `frozen=false`, `force=false`, `deep=true`", () => {
-      const value = { a: 1 } as FabricValue;
+      const value = { a: 1 };
       expect(() => cloneIfNecessary(value, { frozen: false, force: false }))
         .toThrow("frozen: false, force: false, deep: true");
     });
@@ -93,19 +57,19 @@ describe("cloneIfNecessary", () => {
 
   describe(`default options`, () => {
     it("passes through primitives unchanged", () => {
-      expect(cloneIfNecessary(42 as FabricValue)).toBe(42);
-      expect(cloneIfNecessary("hello" as FabricValue)).toBe("hello");
+      expect(cloneIfNecessary(42)).toBe(42);
+      expect(cloneIfNecessary("hello")).toBe("hello");
       expect(cloneIfNecessary(null)).toBe(null);
-      expect(cloneIfNecessary(true as FabricValue)).toBe(true);
+      expect(cloneIfNecessary(true)).toBe(true);
       expect(cloneIfNecessary(undefined)).toBe(undefined);
     });
 
-    it("passes through bigint unchanged", () => {
-      expect(cloneIfNecessary(42n as FabricValue)).toBe(42n);
+    it("passes through a `bigint` unchanged", () => {
+      expect(cloneIfNecessary(42n)).toBe(42n);
     });
 
     it("returns a frozen copy of an unfrozen object", () => {
-      const value = { a: 1, b: "two" } as FabricValue;
+      const value = { a: 1, b: "two" };
       const result = cloneIfNecessary(value);
       expect(result).toEqual({ a: 1, b: "two" });
       expect(result).not.toBe(value);
@@ -113,7 +77,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("returns a frozen copy of an unfrozen array", () => {
-      const value = [1, 2, 3] as FabricValue;
+      const value = [1, 2, 3];
       const result = cloneIfNecessary(value);
       expect(result).toEqual([1, 2, 3]);
       expect(result).not.toBe(value);
@@ -121,7 +85,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("deep-freezes nested structures", () => {
-      const value = { a: { b: [1, 2] } } as FabricValue;
+      const value = { a: { b: [1, 2] } };
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result.a)).toBe(true);
@@ -131,7 +95,7 @@ describe("cloneIfNecessary", () => {
 
     it("returns already-deep-frozen value as-is (identity optimization)", () => {
       const inner = Object.freeze([1, 2]);
-      const value = Object.freeze({ a: inner }) as FabricValue;
+      const value = Object.freeze({ a: inner });
       const result = cloneIfNecessary(value);
       expect(result).toBe(value); // identity -- no clone needed
     });
@@ -140,7 +104,7 @@ describe("cloneIfNecessary", () => {
       // `frozenChild` is a deep-frozen subtree.
       const frozenChild = Object.freeze({ x: Object.freeze([1, 2]) });
       // `value` is NOT frozen (unfrozen parent), so it must be cloned.
-      const value = { a: frozenChild, b: "mutable" } as FabricValue;
+      const value = { a: frozenChild, b: "mutable" };
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       // The outer object is a new frozen clone.
       expect(result).not.toBe(value);
@@ -153,7 +117,7 @@ describe("cloneIfNecessary", () => {
 
   describe(`\`frozen=false\`, deep clone`, () => {
     it("returns a mutable copy of a frozen object", () => {
-      const value = Object.freeze({ a: 1, b: "two" }) as FabricValue;
+      const value = Object.freeze({ a: 1, b: "two" });
       const result = cloneIfNecessary(value, { frozen: false });
       expect(result).toEqual({ a: 1, b: "two" });
       expect(result).not.toBe(value);
@@ -161,7 +125,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("returns a mutable array copy", () => {
-      const value = Object.freeze([1, 2, 3]) as FabricValue;
+      const value = Object.freeze([1, 2, 3]);
       const result = cloneIfNecessary(value, { frozen: false });
       expect(result).toEqual([1, 2, 3]);
       expect(result).not.toBe(value);
@@ -170,7 +134,7 @@ describe("cloneIfNecessary", () => {
 
     it("clones already-mutable values (`force=true` default)", () => {
       const inner = { x: 1 };
-      const value = { a: inner, b: [2, 3] } as FabricValue;
+      const value = { a: inner, b: [2, 3] };
       const result = cloneIfNecessary(value, { frozen: false }) as Record<
         string,
         unknown
@@ -188,7 +152,7 @@ describe("cloneIfNecessary", () => {
       const inner = Object.freeze([1, 2]);
       const value = Object.freeze({
         a: Object.freeze({ b: inner }),
-      }) as FabricValue;
+      });
       const result = cloneIfNecessary(value, { frozen: false }) as Record<
         string,
         unknown
@@ -203,7 +167,7 @@ describe("cloneIfNecessary", () => {
   describe(`shallow clone`, () => {
     it("shallow-clones an unfrozen object to frozen", () => {
       const inner = { x: 1 };
-      const value = { a: inner } as FabricValue;
+      const value = { a: inner };
       const result = cloneIfNecessary(value, { deep: false }) as Record<
         string,
         unknown
@@ -215,13 +179,13 @@ describe("cloneIfNecessary", () => {
     });
 
     it("returns already-frozen object as-is (shallow, `force=false`)", () => {
-      const value = Object.freeze({ a: 1 }) as FabricValue;
+      const value = Object.freeze({ a: 1 });
       const result = cloneIfNecessary(value, { deep: false });
       expect(result).toBe(value);
     });
 
     it("shallow-clones frozen object to mutable (`deep=false`, `frozen=false`)", () => {
-      const value = Object.freeze({ a: 1, b: "two" }) as FabricValue;
+      const value = Object.freeze({ a: 1, b: "two" });
       const result = cloneIfNecessary(value, {
         deep: false,
         frozen: false,
@@ -232,7 +196,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("force-copies mutable object (shallow, `frozen=false`, `force=true`)", () => {
-      const value = { a: 1 } as FabricValue;
+      const value = { a: 1 };
       const result = cloneIfNecessary(value, {
         deep: false,
         frozen: false,
@@ -243,7 +207,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("returns mutable as-is (shallow, `frozen=false`, `force=false`)", () => {
-      const value = { a: 1 } as FabricValue;
+      const value = { a: 1 };
       const result = cloneIfNecessary(value, {
         deep: false,
         frozen: false,
@@ -253,7 +217,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("thaws frozen value (shallow, `frozen=false`, `force=false`)", () => {
-      const value = Object.freeze({ a: 1 }) as FabricValue;
+      const value = Object.freeze({ a: 1 });
       const result = cloneIfNecessary(value, {
         deep: false,
         frozen: false,
@@ -270,6 +234,7 @@ describe("cloneIfNecessary", () => {
       // A `FabricError` with no `cause` or extras is deep-frozen as soon
       // as the wrapper is `Object.freeze`'d (the wrapper itself is the
       // canonical state). `cloneIfNecessary` therefore returns identity.
+
       const error = FabricError.fromNativeError(new Error("test"));
       Object.freeze(error);
       const result = cloneIfNecessary(error);
@@ -279,6 +244,7 @@ describe("cloneIfNecessary", () => {
 
     it("deep-clones a `FabricError` with a mutable cause", () => {
       // Wrapper frozen but `cause` not -> not deep-frozen -> clone.
+
       const error = FabricError.fromNativeError(
         new Error("test", { cause: { mutable: true } }),
       );
@@ -293,10 +259,11 @@ describe("cloneIfNecessary", () => {
     it("produces a mutable `FabricError` clone (deep, `frozen=false`)", () => {
       // Deep clone with `frozen: false` yields a fresh *mutable*
       // `FabricError`.
+
       const error = FabricError.fromNativeError(new Error("test"));
       Object.freeze(error);
       const result = cloneIfNecessary(
-        error as unknown as FabricValue,
+        error,
         { frozen: false },
       );
       expect(result).toBeInstanceOf(FabricError);
@@ -308,9 +275,10 @@ describe("cloneIfNecessary", () => {
     it("preserves a nested already-deep-frozen `FabricError` by identity", () => {
       // Container is rebuilt (mutable input -> frozen output) but the
       // nested deep-frozen FabricError is returned by identity.
+
       const error = FabricError.fromNativeError(new Error("nested"));
       Object.freeze(error);
-      const value = { err: error, x: 42 } as FabricValue;
+      const value = { err: error, x: 42 };
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(result).not.toBe(value);
       expect(Object.isFrozen(result)).toBe(true);
@@ -323,8 +291,9 @@ describe("cloneIfNecessary", () => {
     it("shallow-clones an object containing a `FabricError` (`deep=false`)", () => {
       // Shallow clone of a container shares the nested instance by
       // reference -- it is never traversed or rebuilt.
+
       const error = FabricError.fromNativeError(new Error("nested"));
-      const value = { err: error, x: 42 } as FabricValue;
+      const value = { err: error, x: 42 };
       const result = cloneIfNecessary(value, { deep: false }) as Record<
         string,
         unknown
@@ -338,7 +307,7 @@ describe("cloneIfNecessary", () => {
 
   describe(`\`undefined\` preservation`, () => {
     it("preserves `undefined` in objects", () => {
-      const value = { a: 1, b: undefined } as FabricValue;
+      const value = { a: 1, b: undefined };
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(result.b).toBe(undefined);
       expect("b" in result).toBe(true);
@@ -346,7 +315,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("preserves `undefined` in arrays", () => {
-      const value = [1, undefined, 3] as FabricValue;
+      const value = [1, undefined, 3];
       const result = cloneIfNecessary(value) as unknown[];
       expect(result[1]).toBe(undefined);
       expect(1 in result).toBe(true);
@@ -364,54 +333,63 @@ describe("cloneIfNecessary", () => {
     });
   });
 
-  describe(`\`null\` prototype preservation`, () => {
-    it("preserves `null` prototype on objects", () => {
-      const value = Object.create(null) as Record<string, unknown>;
-      value.a = 1;
-      value.b = "two";
-      const result = cloneIfNecessary(
-        value as FabricValue,
-      ) as Record<string, unknown>;
-      expect(Object.getPrototypeOf(result)).toBe(null);
-      expect(result.a).toBe(1);
-      expect(result.b).toBe("two");
-      expect(Object.isFrozen(result)).toBe(true);
+  describe(`\`null\` prototype canonicalization`, () => {
+    // A null-prototype object is not a `FabricValue`, so none can arrive here
+    // by any validating route. Should one reach this function anyway, the
+    // clone leaves in the shape a `FabricPlainObject` has -- the same
+    // answer the array case gives an `Array` subclass -- rather than
+    // propagating a shape the model has no representation for.
+
+    function nullProto(
+      fields: Record<string, unknown>,
+    ): Record<string, unknown> {
+      return Object.assign(
+        Object.create(null) as Record<string, unknown>,
+        fields,
+      );
+    }
+
+    for (
+      const [label, opts] of [
+        ["deep and frozen", undefined],
+        ["deep and unfrozen", { frozen: false }],
+        ["shallow and frozen", { deep: false }],
+        ["shallow and unfrozen", { frozen: false, deep: false }],
+      ] as const
+    ) {
+      it(`re-roots a null-prototype object, ${label}`, () => {
+        const value = nullProto({ a: 1, b: "two" });
+        const result = cloneIfNecessary(
+          value as FabricValue,
+          opts as CloneOptions | undefined,
+        ) as Record<string, unknown>;
+
+        expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+        expect(result.a).toBe(1);
+        expect(result.b).toBe("two");
+        expect(Object.isFrozen(result)).toBe(opts?.frozen !== false);
+      });
+    }
+
+    it("re-roots a nested null-prototype object on a deep clone", () => {
+      const value = { child: nullProto({ v: 42 }) };
+      const result = cloneIfNecessary(value as FabricValue) as {
+        child: Record<string, unknown>;
+      };
+
+      expect(Object.getPrototypeOf(result.child)).toBe(Object.prototype);
+      expect(result.child.v).toBe(42);
     });
 
-    it("preserves `null` prototype when `frozen=false`", () => {
-      const value = Object.create(null) as Record<string, unknown>;
-      value.x = 42;
-      const result = cloneIfNecessary(
-        value as FabricValue,
-        { frozen: false },
-      ) as Record<string, unknown>;
-      expect(Object.getPrototypeOf(result)).toBe(null);
-      expect(result.x).toBe(42);
-      expect(Object.isFrozen(result)).toBe(false);
-    });
+    it("produces a value `isValidFabricValue()` accepts", () => {
+      // The point of canonicalizing: what comes out is a member of the type,
+      // where the input was not.
 
-    it("preserves `null` prototype on shallow clone", () => {
-      const value = Object.create(null) as Record<string, unknown>;
-      value.a = 1;
-      const result = cloneIfNecessary(
-        value as FabricValue,
-        { deep: false },
-      ) as Record<string, unknown>;
-      expect(Object.getPrototypeOf(result)).toBe(null);
-      expect(result.a).toBe(1);
-      expect(Object.isFrozen(result)).toBe(true);
-    });
-
-    it("preserves `null` prototype on shallow clone when `frozen=false`", () => {
-      const value = Object.create(null) as Record<string, unknown>;
-      value.b = 2;
-      const result = cloneIfNecessary(
-        value as FabricValue,
-        { frozen: false, deep: false },
-      ) as Record<string, unknown>;
-      expect(Object.getPrototypeOf(result)).toBe(null);
-      expect(result.b).toBe(2);
-      expect(Object.isFrozen(result)).toBe(false);
+      const value = nullProto({ a: 1 });
+      expect(isValidFabricValue(value)).toBe(false);
+      expect(isValidFabricValue(cloneIfNecessary(value as FabricValue))).toBe(
+        true,
+      );
     });
   });
 
@@ -419,29 +397,78 @@ describe("cloneIfNecessary", () => {
     it("passes through `FabricEpochNsec` unchanged", () => {
       const epoch = new FabricEpochNsec(1234567890n);
       Object.freeze(epoch);
-      const result = cloneIfNecessary(epoch as unknown as FabricValue);
-      expect(result).toBe(epoch); // identity -- special primitives are immutable
+      const result = cloneIfNecessary(epoch);
+      // Identity: a `FabricPrimitive` is immutable.
+      expect(result).toBe(epoch);
     });
 
     it("passes through `FabricEpochNsec` when `frozen=false`", () => {
       const epoch = new FabricEpochNsec(42n);
       Object.freeze(epoch);
-      // frozen parameter is irrelevant for special primitives
+      // The `frozen` parameter is irrelevant for a `FabricPrimitive`.
       const result = cloneIfNecessary(
-        epoch as unknown as FabricValue,
+        epoch,
         { frozen: false },
       );
-      expect(result).toBe(epoch); // identity -- special primitives are immutable
+      // Identity: a `FabricPrimitive` is immutable.
+      expect(result).toBe(epoch);
     });
 
     it("passes through `FabricEpochNsec` nested in an object", () => {
       const epoch = new FabricEpochNsec(999n);
       Object.freeze(epoch);
-      const value = { time: epoch, label: "test" } as FabricValue;
+      const value = { time: epoch, label: "test" };
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(result.time).toBe(epoch); // same instance -- not cloned
       expect(result.label).toBe("test");
+    });
+  });
+
+  describe(`indirect \`Array\` instances`, () => {
+    // An `Array` subclass is not a `FabricValue`, so the deep-frozen identity
+    // optimization must not apply to one: returning it as-is would carry a
+    // live prototype into stored state, where an overridden `Symbol.iterator`
+    // yields content that the indices never show.
+
+    class Smuggler extends Array<unknown> {
+      override *[Symbol.iterator](): Generator<unknown> {
+        yield "smuggled";
+      }
+    }
+
+    function frozenSmuggler(): unknown[] {
+      const result = new Smuggler();
+      result.push("benign");
+      Object.freeze(result);
+      return result;
+    }
+
+    it("does not report a frozen subclass instance as deep-frozen", () => {
+      // This is what turns off the identity optimization below.
+
+      expect(isValidDeepFrozenFabricValue(frozenSmuggler()))
+        .toBe(false);
+    });
+
+    it("deep-clones a frozen subclass instance into a direct `Array`", () => {
+      const value = frozenSmuggler();
+      const result = cloneIfNecessary(value as FabricValue) as unknown[];
+
+      expect(result).not.toBe(value);
+      expect(Object.getPrototypeOf(result)).toBe(Array.prototype);
+      expect([...result]).toEqual(["benign"]);
+      expect(Object.isFrozen(result)).toBe(true);
+    });
+
+    it("deep-clones a nested frozen subclass instance", () => {
+      const value = { data: frozenSmuggler() };
+      const result = cloneIfNecessary(value as FabricValue) as {
+        data: unknown[];
+      };
+
+      expect(Object.getPrototypeOf(result.data)).toBe(Array.prototype);
+      expect([...result.data]).toEqual(["benign"]);
     });
   });
 
@@ -471,9 +498,9 @@ describe("cloneIfNecessary", () => {
       );
     });
 
-    it("handles shared (diamond) references without throwing", () => {
+    it("clones a diamond-shared reference into two equal subtrees", () => {
       const shared = { x: 1 };
-      const value = { a: shared, b: shared } as FabricValue;
+      const value = { a: shared, b: shared };
       // Shared (non-circular) references should not throw.
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(result).toEqual({ a: { x: 1 }, b: { x: 1 } });
@@ -484,21 +511,22 @@ describe("cloneIfNecessary", () => {
   // Per-subclass coverage matrix.
   //
   // Systematically exercises every concrete `FabricInstance` and
-  // `FabricPrimitive` subclass in this package across the full `cloneIfNecessary`
-  // option matrix, and validates the result -- frozenness, identity preservation,
-  // observable state -- or that the call throws when a subclass's protocol
-  // implementation is a documented stub.
+  // `FabricPrimitive` subclass in this package across the full
+  // `cloneIfNecessary` option matrix, and validates the result -- frozenness,
+  // identity preservation, observable state -- or that the call throws when a
+  // subclass's protocol implementation is a documented stub.
   //
   // The point is twofold: (a) make sure existing subclasses behave consistently
   // under every option combination callers in production are likely to use, and
-  // (b) make sure any future subclass added to the package without full protocol
-  // coverage trips this matrix instead of silently breaking call sites.
+  // (b) make sure any future subclass added to the package without full
+  // protocol coverage trips this matrix instead of silently breaking call
+  // sites.
 
   /**
    * Describes what `cloneIfNecessary` is expected to do for a given subclass on
-   * a given option vector. `kind: "ok"` means the call returns; `kind: "throws"`
-   * means it throws (we don't pin the exact message -- subclass stubs use
-   * varying phrasing).
+   * a given option vector. `kind: "ok"` means the call returns; `kind:
+   * "throws"` means it throws (we don't pin the exact message -- subclass stubs
+   * use varying phrasing).
    */
   type ExpectedOutcome =
     | { kind: "ok" }
@@ -515,8 +543,8 @@ describe("cloneIfNecessary", () => {
    * Other distinctions (whether the subclass is a `FabricPrimitive`, whether
    * the deep-freeze protocol is implemented as a real impl vs. a stub) are
    * detected at test time -- the former via `instanceof FabricPrimitive` on the
-   * factory output, the latter via `try/catch` around `isDeepFrozenFabricValue`
-   * in the predicate.
+   * factory output, the latter via `try/catch` around
+   * `isValidDeepFrozenFabricValue` in the predicate.
    */
   type SubclassCase = {
     readonly name: string;
@@ -535,13 +563,12 @@ describe("cloneIfNecessary", () => {
     },
     {
       name: "ProblematicValue",
-      factory: () =>
-        new ProblematicValue("Foo@1", "state-data" as FabricValue, "boom"),
+      factory: () => new ProblematicValue("Foo@1", "state-data", "boom"),
       deepCloneImplemented: false,
     },
     {
       name: "UnknownValue",
-      factory: () => new UnknownValue("Foo@1", "state-data" as FabricValue),
+      factory: () => new UnknownValue("Foo@1", "state-data"),
       deepCloneImplemented: false,
     },
     // `FabricInstance` with all-protocol stubs (only shallow works).
@@ -550,15 +577,15 @@ describe("cloneIfNecessary", () => {
       factory: () =>
         new FabricMap(
           new Map<FabricValue, FabricValue>([[
-            "k" as FabricValue,
-            1 as FabricValue,
+            "k",
+            1,
           ]]),
         ),
       deepCloneImplemented: false,
     },
     {
       name: "FabricSet",
-      factory: () => new FabricSet(new Set<FabricValue>([1 as FabricValue])),
+      factory: () => new FabricSet(new Set<FabricValue>([1])),
       deepCloneImplemented: false,
     },
     // `FabricPrimitive` subclasses (intrinsically immutable).
@@ -578,8 +605,8 @@ describe("cloneIfNecessary", () => {
       deepCloneImplemented: false,
     },
     {
-      name: "FabricEpochDays",
-      factory: () => new FabricEpochDays(42n),
+      name: "FabricEpochDay",
+      factory: () => new FabricEpochDay(42n),
       deepCloneImplemented: false,
     },
     {
@@ -590,7 +617,7 @@ describe("cloneIfNecessary", () => {
   ];
 
   /**
-   * Compute the expected outcome of a `cloneIfNecessary(value, opts)` call for
+   * Computes the expected outcome of a `cloneIfNecessary(value, opts)` call for
    * a given subclass, by inspecting the *actual* value to predict which
    * `cloneHelper` arm is reached. The point of computing rather than tabulating
    * is so that adding a new subclass to `subclassCases` (or changing what its
@@ -602,7 +629,7 @@ describe("cloneIfNecessary", () => {
    *   2. For `FabricInstance`, `canReturnAsIs` short-circuits the call when
    *      the requested frozenness matches the input's frozenness AND
    *      `force: false`. In `deep: true` mode that check uses
-   *      `isDeepFrozenFabricValue`, which invokes `[IS_DEEP_FROZEN]` on
+   *      `isValidDeepFrozenFabricValue`, which invokes `[IS_DEEP_FROZEN]` on
    *      `FabricInstance` arms -- a subclass with a throwing stub for that
    *      member throws if the probe descends that far.
    *   3. Otherwise `cloneIfNecessary` falls through to `shallowClone(frozen)`
@@ -624,14 +651,15 @@ describe("cloneIfNecessary", () => {
     if (!force) {
       let canReturnAsIs: boolean;
       if (deep) {
-        // The check is `frozen && isDeepFrozenFabricValue(v)`. The latter may
-        // call `[IS_DEEP_FROZEN]` on a `FabricInstance` arm -- if a subclass's
-        // implementation is a throwing stub, the probe throws and propagates.
+        // The check is `frozen && isValidDeepFrozenFabricValue(v)`. The latter
+        // may call `[IS_DEEP_FROZEN]` on a `FabricInstance` arm -- if a
+        // subclass's implementation is a throwing stub, the probe throws and
+        // propagates.
         if (!frozen) {
           canReturnAsIs = false;
         } else {
           try {
-            canReturnAsIs = isDeepFrozenFabricValue(value);
+            canReturnAsIs = isValidDeepFrozenFabricValue(value);
           } catch {
             return { kind: "throws" };
           }
@@ -707,14 +735,14 @@ describe("cloneIfNecessary", () => {
 
                 const expected = expectedOutcome(
                   c,
-                  value as unknown as FabricValue,
+                  value,
                   vec.opts,
                 );
 
                 if (expected.kind === "throws") {
                   expect(() =>
                     cloneIfNecessary(
-                      value as unknown as FabricValue,
+                      value,
                       vec.opts,
                     )
                   ).toThrow();
@@ -731,15 +759,15 @@ describe("cloneIfNecessary", () => {
                   identityExpected = false;
                 } else if (vec.opts.deep) {
                   identityExpected = vec.opts.frozen &&
-                    isDeepFrozenFabricValue(
-                      value as unknown as FabricValue,
+                    isValidDeepFrozenFabricValue(
+                      value,
                     );
                 } else {
                   identityExpected = wasFrozen === vec.opts.frozen;
                 }
 
                 const result = cloneIfNecessary(
-                  value as unknown as FabricValue,
+                  value,
                   vec.opts,
                 ) as FabricSpecialObject;
 

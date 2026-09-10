@@ -1,11 +1,11 @@
+import { checkoutDocsCorpusRoots } from "../src/docs-corpus/corpus.ts";
+import { resolveHarnessSkillsRoot } from "../src/skills/root.ts";
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import {
-  chatViewOfRequest,
-  responsesBodyFromChatFixture,
-} from "./support/responses-fixture.ts";
-import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
+
+import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
+
 import {
   createFileSystemHarnessArtifactStore,
   readHarnessRunArtifacts,
@@ -13,8 +13,8 @@ import {
   readHarnessRunState,
   readHarnessTranscript,
 } from "../src/artifacts.ts";
-import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import type { HarnessPolicyTrace } from "../src/contracts/policy-trace.ts";
+import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -23,16 +23,33 @@ import type {
   SandboxCommandRequest,
   SandboxCommandResult,
   SandboxRuntime,
+  SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
+import { createPatternSkillsFixture } from "./support/pattern-skills-fixture.ts";
+import {
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
 
 class FakeSandboxRuntime implements SandboxRuntime {
-  readonly kind = "docker-runsc-cfc" as const;
   readonly shellRequests: SandboxShellRequest[] = [];
 
+  readonly #shellResults: SandboxCommandResult[];
+
   constructor(
-    private readonly shellResults: SandboxCommandResult[] = [],
-  ) {}
+    shellResults: SandboxCommandResult[] = [],
+  ) {
+    this.#shellResults = shellResults;
+  }
+
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: this.defaultWorkingDirectory(),
+      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+    };
+  }
 
   resolvePath(path: string, cwd = this.defaultWorkingDirectory()): string {
     return normalize(path.startsWith("/") ? path : `${cwd}/${path}`);
@@ -40,6 +57,10 @@ class FakeSandboxRuntime implements SandboxRuntime {
 
   isPathWithinWorkspace(path: string): boolean {
     return path === "/workspace" || path.startsWith("/workspace/");
+  }
+
+  isPathWithinAllowedRoots(path: string): boolean {
+    return this.isPathWithinWorkspace(path);
   }
 
   defaultWorkingDirectory(): string {
@@ -68,7 +89,7 @@ class FakeSandboxRuntime implements SandboxRuntime {
       });
     }
     return Promise.resolve(
-      this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      this.#shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
   }
 }
@@ -169,6 +190,8 @@ Deno.test({
           { stdout: "hello\n", stderr: "", exitCode: 0 },
         ]),
         runId: "run-artifacts",
+        // The persisted run state and the invocation context beside it are both
+        // asserted to record this rung.
         cfcEnforcementMode: "observe",
         now: (() => {
           const timestamps = [
@@ -215,11 +238,9 @@ Deno.test({
       );
       assertEquals(persistedState, {
         runId: "run-artifacts",
-        status: "completed",
+        status: "pending",
         createdAt: "2026-04-15T21:00:00.000Z",
         updatedAt: "2026-04-15T21:00:05.000Z",
-        endedAt: "2026-04-15T21:00:05.000Z",
-        terminalReason: "tool_completed",
         cfcEnforcementMode: "observe",
         modelProvider: "openai-compatible-gateway",
         modelAuthSource: "api-key",
@@ -228,7 +249,7 @@ Deno.test({
           version: 1,
           sequence: 1,
           runId: "run-artifacts",
-          createdAt: "2026-04-15T21:00:04.000Z",
+          createdAt: "2026-04-15T21:00:03.000Z",
           toolId: "bash",
           toolOutputId: createToolOutputId("run-artifacts", "bash", 1),
           operation: "shell",
@@ -245,6 +266,12 @@ Deno.test({
           },
         }],
         currentDir: "/workspace",
+        docsCorpus: {
+          type: "cf-harness.docs-corpus-record",
+          source: "checkout-default",
+          roots: checkoutDocsCorpusRoots(),
+        },
+        skillsRoot: resolveHarnessSkillsRoot(),
         artifactRoot: runRoot,
         capabilitySnapshot: {
           type: "cf-harness.capability-snapshot",
@@ -391,6 +418,7 @@ Deno.test({
     "CfHarnessPromptLoop persists the transcript when artifactRoot is configured",
   permissions: { read: true, write: true },
   async fn() {
+    await using fixture = await createPatternSkillsFixture();
     const artifactRoot = await Deno.makeTempDir({
       prefix: "cf-harness-transcript-",
     });
@@ -409,6 +437,11 @@ Deno.test({
           ]),
           runId: "run-loop-persisted",
           model: "gpt-5.4",
+          skillsRoot: fixture.skillsRoot,
+          // The policy-snapshot comparison below reads this rung and its
+          // source back, and the run reads a file, which a rung above this
+          // one refuses without direct-command authorization.
+          cfcEnforcementMode: "enforce-explicit",
           now: (() => {
             const timestamps = [
               "2026-04-15T21:10:00.000Z",
@@ -518,8 +551,8 @@ Deno.test({
       );
       assertEquals(persistedPolicySnapshot.cfc, {
         enforcementMode: "enforce-explicit",
-        enforcementModeSource: "default",
-        absenceBehavior: "permissive-if-absent",
+        enforcementModeSource: "explicit-config",
+        absenceBehavior: "fail-closed-if-absent",
         substrateStatus: "not-attested",
       });
       assertEquals(persistedPolicySnapshot.runManifest, { present: false });
@@ -537,6 +570,8 @@ Deno.test({
           "edit_file",
           "write_file",
           "delegate_task",
+          "describe_handle",
+          "query_docs",
         ],
       });
       assertEquals(persistedPolicySnapshot.subagents.allowedProfiles, [
@@ -566,6 +601,8 @@ Deno.test({
         allowed: 1,
         warned: 0,
         denied: 0,
+        invalid: 0,
+        withheld: 0,
       });
       assertEquals(persistedPolicyTrace.decisions[0], {
         type: "cf-harness.policy-decision",
@@ -617,6 +654,8 @@ Deno.test({
         allowed: 1,
         warned: 0,
         denied: 0,
+        invalid: 0,
+        withheld: 0,
       });
       assertEquals(persistedReport.policyDecisions, [
         persistedPolicyTrace.decisions[0],
@@ -646,52 +685,55 @@ Deno.test({
         },
         resultRef: result.runState.toolOutputs[0],
       });
-      assertEquals(persistedReport.gatewayAttempts?.length, 2);
       assertEquals(persistedReport.modelAttempts?.length, 2);
       assertEquals(
         persistedReport.modelAttempts?.map((attempt) => attempt.providerId),
         ["openai-compatible-gateway", "openai-compatible-gateway"],
       );
       assertEquals(
-        persistedReport.gatewayAttempts?.map((attempt) => attempt.sequence),
+        persistedReport.modelAttempts?.map((attempt) => attempt.operation),
+        ["responses", "responses"],
+      );
+      assertEquals(
+        persistedReport.modelAttempts?.map((attempt) => attempt.sequence),
         [1, 2],
       );
       assertEquals(
-        persistedReport.gatewayAttempts?.map((attempt) => attempt.modelTurn),
+        persistedReport.modelAttempts?.map((attempt) => attempt.modelTurn),
         [1, 2],
       );
       assertEquals(
-        persistedReport.gatewayAttempts?.map((attempt) => attempt.runId),
+        persistedReport.modelAttempts?.map((attempt) => attempt.runId),
         ["run-loop-persisted", "run-loop-persisted"],
       );
       assertEquals(
-        persistedReport.gatewayAttempts?.[0].outcome,
+        persistedReport.modelAttempts?.[0].outcome,
         "http_response",
       );
-      assertEquals(persistedReport.gatewayAttempts?.[0].httpStatus, 200);
+      assertEquals(persistedReport.modelAttempts?.[0].httpStatus, 200);
       assertEquals(
         {
-          model: persistedReport.gatewayAttempts?.[0].request.model,
-          messageCount: persistedReport.gatewayAttempts?.[0].request
+          model: persistedReport.modelAttempts?.[0].request.model,
+          messageCount: persistedReport.modelAttempts?.[0].request
             .messageCount,
-          toolCount: persistedReport.gatewayAttempts?.[0].request.toolCount,
+          toolCount: persistedReport.modelAttempts?.[0].request.toolCount,
         },
         {
           model: "gpt-5.4",
           messageCount: 1,
-          toolCount: 7,
+          toolCount: 9,
         },
       );
       assert(
-        (persistedReport.gatewayAttempts?.[0].request.serializedBytes ?? 0) >
+        (persistedReport.modelAttempts?.[0].request.serializedBytes ?? 0) >
           0,
       );
       assertEquals(
-        persistedReport.gatewayAttempts?.[1].request.messageCount,
+        persistedReport.modelAttempts?.[1].request.messageCount,
         3,
       );
       assertEquals(
-        JSON.stringify(persistedReport.gatewayAttempts).includes(
+        JSON.stringify(persistedReport.modelAttempts).includes(
           "Summarize the todo file.",
         ),
         false,
@@ -1035,7 +1077,6 @@ Deno.test({
             source: "loom",
             credentialOwner,
           },
-          cfcEnforcementMode: "enforce-explicit",
         }),
         fetchFn: async (_input, init) => {
           const body = JSON.parse(String(init?.body)) as {
@@ -1195,6 +1236,11 @@ Deno.test({
       });
       assertEquals(childState.runManifest?.source, "loom");
       assertEquals(childState.runManifest?.credentialOwner, credentialOwner);
+      // The child scans the tree its parent scanned, and records how that tree
+      // was arrived at rather than relabelling an inherited default as
+      // something an operator named.
+      assertEquals(childState.skillsRoot?.source, "checkout-default");
+      assertEquals(childState.skillsRoot, persistedState.skillsRoot);
       assertEquals(childState.status, "completed");
       assertEquals(childState.artifactRoot, childRunRoot);
       assertEquals(
@@ -1298,6 +1344,8 @@ Deno.test({
           ]),
           runId: "run-subagent-sanitized-failure",
           model: "gpt-5.4",
+          // The child's second failure is the `tool_not_allowed` policy event
+          // this rung produces, and the run asserts a failure count of two.
           cfcEnforcementMode: "enforce-explicit",
         }),
         fetchFn: (_input, init) => {
@@ -1406,7 +1454,9 @@ Deno.test({
       assertEquals(parentFailure.kind, "tool_not_allowed");
       assertEquals(parentFailure.source, "policy_event");
       assertEquals(parentFailure.toolId, "bash");
-      assertEquals(parentFailure.toolCallId, "call-child-bash-failure");
+      // The call id is the child model's own text, so it stays in the audit
+      // artifacts rather than reaching the parent model.
+      assertEquals("toolCallId" in parentFailure, false);
       assertEquals("outputId" in parentFailure, false);
       assertEquals("commandName" in parentFailure, false);
       assertEquals("exitCode" in parentFailure, false);
@@ -1488,7 +1538,6 @@ Deno.test({
         artifactRoot,
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-prompt-slot",
-        cfcEnforcementMode: "observe",
       });
 
       engine.setPromptSlotBinding(promptSlotBinding);
@@ -1519,6 +1568,8 @@ Deno.test({
           sandboxRuntime: new FakeSandboxRuntime(),
           runId: "run-denied-report",
           model: "gpt-5.4",
+          // The write the run asks for is denied at this rung, and the persisted
+          // tool activity is asserted to record the denial and the rung.
           cfcEnforcementMode: "enforce-explicit",
           now: (() => {
             const timestamps = [
@@ -1600,6 +1651,8 @@ Deno.test({
         allowed: 0,
         warned: 0,
         denied: 1,
+        invalid: 0,
+        withheld: 0,
       });
       assertEquals(policyTrace.decisions[0].decision, "denied");
       assertEquals(policyTrace.decisions[0].reasonCodes, [
@@ -1719,6 +1772,8 @@ Deno.test({
           ]),
           runId: "run-missing-cfc-report",
           model: "gpt-5.4",
+          // Output mediation denies the sandbox result at this rung, which is the
+          // denial the run report is asserted to carry.
           cfcEnforcementMode: "enforce-explicit",
         }),
         fetchFn: (_input, init) => {
@@ -1874,6 +1929,29 @@ Deno.test({
         role: "assistant",
         content: "inside transcript",
       }]);
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "filesystem artifact store advertises an image-attachment snapshot dir under its run root",
+  permissions: { read: true, write: true },
+  async fn() {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-artifacts-",
+    });
+    try {
+      const store = createFileSystemHarnessArtifactStore({
+        artifactRoot,
+        runId: "run-snapshot-dir",
+      });
+      assertEquals(
+        store.imageAttachmentSnapshotDir,
+        join(store.runRoot, "image-attachments"),
+      );
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
     }

@@ -1,10 +1,11 @@
 /**
- * Editor behaviour at the session level: revealing/moving/hiding the text
+ * Editor behavior at the session level: revealing/moving/hiding the text
  * cursor, live re-highlighting on edit, the Emacs kill/yank bindings reached
  * through the session, saving to disk, and the dirty-quit save prompt. The
- * cursor-free pager behaviour lives in view-session.test.ts; the pure edit
+ * cursor-free pager behavior lives in view-session.test.ts; the pure edit
  * engine is covered in view-editbuffer.test.ts.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { parseDocument, promptText } from "./view-helpers.ts";
 import { highlightDocument } from "../lib/view/languages/typescript/parse.ts";
@@ -152,6 +153,92 @@ Deno.test("editor: backspace deletes and Enter splits the line", () => {
   press(s, "enter");
   assertEquals(s.doc.text, "a\n\n", "Enter inserts a newline");
   assertEquals(s.view().cursor, { line: 1, col: 0 });
+});
+
+Deno.test("editor: edits text before CRLF transport but can edit a final carriage return", () => {
+  const encoder = new TextEncoder();
+  const cases = [
+    { input: "new\r\n", expected: "ne\r\n" },
+    { input: "new\r", expected: "new" },
+  ];
+  for (const testCase of cases) {
+    const path = Deno.makeTempFileSync({ suffix: ".ts" });
+    try {
+      Deno.writeFileSync(path, encoder.encode(testCase.input));
+      const source = fileSource(path);
+      const session = editSession(testCase.input, source);
+      press(session, "e", "end", "backspace", "f3");
+
+      assertEquals(
+        Deno.readFileSync(path),
+        encoder.encode(testCase.expected),
+      );
+    } finally {
+      Deno.removeSync(path);
+    }
+  }
+});
+
+Deno.test("editor: structural edits treat CRLF as one line boundary", () => {
+  const encoder = new TextEncoder();
+  const cases = [
+    {
+      keys: ["end", "enter"],
+      expected: "ab\r\n\r\ncd\r\n",
+    },
+    {
+      keys: ["end", "delete"],
+      expected: "abcd\r\n",
+    },
+    {
+      keys: ["down", "home", "backspace"],
+      expected: "abcd\r\n",
+    },
+    {
+      keys: ["end", "ctrl-k"],
+      expected: "abcd\r\n",
+    },
+    {
+      keys: ["down", "down", "enter"],
+      expected: "ab\r\ncd\r\n\r\n",
+    },
+  ];
+  for (const testCase of cases) {
+    const path = Deno.makeTempFileSync({ suffix: ".ts" });
+    try {
+      const input = "ab\r\ncd\r\n";
+      Deno.writeFileSync(path, encoder.encode(input));
+      const source = fileSource(path);
+      const session = editSession(input, source);
+      press(session, "e", ...testCase.keys, "f3");
+
+      assertEquals(Deno.readFileSync(path), encoder.encode(testCase.expected));
+    } finally {
+      Deno.removeSync(path);
+    }
+  }
+});
+
+Deno.test("editor: Enter at an unterminated EOF inherits nearby CRLF", () => {
+  const encoder = new TextEncoder();
+  for (
+    const testCase of [
+      { input: "first\r\nlast", expected: "first\r\nlast\r\n" },
+      { input: "first\r\nlast\r", expected: "first\r\nlast\r\r\n" },
+    ]
+  ) {
+    const path = Deno.makeTempFileSync({ suffix: ".ts" });
+    try {
+      Deno.writeFileSync(path, encoder.encode(testCase.input));
+      const source = fileSource(path);
+      const session = editSession(testCase.input, source);
+      press(session, "e", "down", "end", "enter", "f3");
+
+      assertEquals(Deno.readFileSync(path), encoder.encode(testCase.expected));
+    } finally {
+      Deno.removeSync(path);
+    }
+  }
 });
 
 Deno.test("editor: Ctrl-K kills to end of line, Ctrl-Y yanks it back", () => {
@@ -416,13 +503,13 @@ Deno.test("editor: typing re-highlights live and defers only the structure repar
   assert(!s.needsReparse, "reparse clears the deferred flag");
 });
 
-Deno.test("editor: opening a block comment re-colours the following lines live", () => {
+Deno.test("editor: opening a block comment re-colors the following lines live", () => {
   const { src } = memSource();
   const s = editSession("const a = 1;\nconst b = 2;\n", src);
   press(s, "e"); // reveal at (0,0)
   type(s, "/* "); // open an (unterminated) block comment at the top
-  // Line 1 is now inside the comment — re-coloured immediately, no reparse. A
-  // per-line patch would leave `const` on line 1 still keyword-coloured.
+  // Line 1 is now inside the comment — re-colored immediately, no reparse. A
+  // per-line patch would leave `const` on line 1 still keyword-colored.
   const line1 = s.doc.lines[1];
   assert(
     !line1.spans.some((sp) => sp.cls === "storageKeyword"),
@@ -430,7 +517,7 @@ Deno.test("editor: opening a block comment re-colours the following lines live",
   );
   assert(
     line1.spans.some((sp) => sp.cls === "comment"),
-    `line 1 should be comment-coloured: ${line1.spans.map((x) => x.cls)}`,
+    `line 1 should be comment-colored: ${line1.spans.map((x) => x.cls)}`,
   );
 });
 

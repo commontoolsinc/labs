@@ -14,7 +14,7 @@ hash-addressed JSON facts plus subscription-id live updates to:
 ## Current Status
 
 This file and
-[10-implementation-guidance.md](/Users/berni/src/labs.exp-memory-impl-4/docs/specs/memory-v2/10-implementation-guidance.md)
+[10-implementation-guidance.md](10-implementation-guidance.md)
 are the authoritative implementation notes for the current code. They describe
 what is shipped now and what remains explicitly deferred, even where sections
 04-06 still describe the broader target design.
@@ -24,10 +24,20 @@ Implemented on the current branch:
 - `engine-v3` / `.engine-v3` storage roots for the rewritten v2 engine
 - seq/revision-based JSON storage with point-in-time reads
 - lightweight WebSocket framing with `hello`, `session.open`, `transact`,
-  `graph.query`, `session.watch.set`, `session.watch.add`, `session.ack`,
-  `response`, and `session/effect`
+  `graph.query`, `op.query`, `session.watch.set`, `session.watch.add`,
+  `session.ack`, `response`, and `session/effect`
+- experimental collaborative fields: negotiated versioned codec registries,
+  top-level `apply-op` and `release-op-field` commits, submitted and integrated
+  SQLite history, stable epoch/version operation ids, atomic ordinary-value
+  materialization, and direct operation-field query/watch effects
+- a codec-neutral runner and runtime-client collaboration capability plus an
+  opt-in CodeMirror adapter in `cf-code-editor`; ordinary Cell readers continue
+  to consume the derived string value
+- storage-owned checkpoints and retention floors, submitted-history operator
+  inspection, reconnect recovery, and multi-browser collaboration coverage
 - session-scoped watch-union sync with catch-up frames, `removes`, and
-  conflict-time sync flushing
+  per-verdict catch-up markers with client-side verdict parking (conflicts
+  and accepts, CT-1927)
 - one-shot `graph.query` support for `branch` and `atSeq`
 - `session.watch.add` duplicate-id handling: identical definitions are no-ops,
   changed definitions are rejected
@@ -46,6 +56,7 @@ Explicitly deferred:
 - public branch lifecycle commands on the v2 wire protocol
 - merge proposal generation, merge conflict workflows, and advanced branch
   live-sync optimizations
+- the structured-codec readiness proof required before a WordGard integration
 - broad protocol-spec reconciliation outside these implementation notes
 
 This is a clean break:
@@ -83,7 +94,7 @@ memory route.
 
 - Rewrite this file to reflect the actual execution plan.
 - Rewrite
-  [10-implementation-guidance.md](/Users/berni/src/labs.exp-memory-impl-4/docs/specs/memory-v2/10-implementation-guidance.md)
+  [10-implementation-guidance.md](10-implementation-guidance.md)
   so it no longer points implementers at `fact` / `value` tables, commit hashes,
   or invocation-id-scoped subscriptions.
 - Keep sections 01-06, 10, and this file aligned enough that the code can use
@@ -127,8 +138,13 @@ memory route.
 - Recompute watch-union results per session and emit:
   - `upserts` for relevant current entity state
   - `removes` when an entity leaves the watch union
-- Flush already-committed relevant sync before returning `ConflictError`, so the
-  client can retry on fresh state.
+- Return transact verdicts inline before the independently batched fan-out;
+  serialize transaction publication and fan-out with one lock per space. Send
+  the verdict while the transaction holds the lock, finish its post-commit
+  scheduler bookkeeping, and release the lock for fan-out. Stage a
+  `caughtUpLocalSeq` catch-up obligation for accepts and conflict rejections
+  (CT-1927), delivered by the batched fan-out, so the CLIENT parks each verdict's
+  state application until the marker covers it.
 
 ## Phase 3: Client Rewrite
 

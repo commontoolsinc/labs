@@ -6,20 +6,43 @@
  * set of collapsed files into the per-file ranges and the collapsed line list
  * the session renders; the session owns the fold state and the key commands.
  */
+
 import type { Line, Span, TokenClass } from "./model.ts";
 import { parseDiff } from "./diff.ts";
+import { languageForFile } from "./languages/language.ts";
 
 /** One file in the diff, with the collapsed one-line summary to show for it. */
 export interface DiffFileRange {
   /** 0-based index in document order — the stable key for the fold set. */
   readonly index: number;
-  /** First and last (inclusive) diff-text line of the file (header … last
-   * hunk line). */
+
+  /** First diff-text line of the file, which is its header line. */
   readonly headerLine: number;
+
+  /** Last such line, inclusive — the file's last hunk line. */
   readonly endLine: number;
-  /** The path used for test-file detection (new side, else old side). */
+
+  /** The path used for file-category detection (new side, else old side). */
   readonly path: string;
+
+  /** Path on the diff's removed side, when it has one. */
+  readonly oldPath?: string;
+
+  /** Path on the diff's added side, when it has one. */
+  readonly newPath?: string;
+
+  /** Whether Git reports binary content instead of line changes. */
+  readonly binary: boolean;
+
   readonly isTest: boolean;
+  readonly isMarkdown: boolean;
+
+  /** Added line count within the file's range. */
+  readonly adds: number;
+
+  /** Removed line count over the same range. */
+  readonly dels: number;
+
   /** The one-line summary shown when the file is collapsed. */
   readonly summary: Line;
 }
@@ -44,7 +67,13 @@ export function diffFiles(text: string): DiffFileRange[] {
       headerLine: file.headerLine,
       endLine: file.endLine,
       path,
+      oldPath: file.oldPath,
+      newPath: file.newPath,
+      binary,
       isTest: isTestPath(path),
+      isMarkdown: isMarkdownPath(path),
+      adds,
+      dels,
       summary: summaryLine({
         oldPath: file.oldPath,
         newPath: file.newPath,
@@ -53,6 +82,21 @@ export function diffFiles(text: string): DiffFileRange[] {
         binary,
       }),
     };
+  });
+}
+
+/** Builds a file's collapsed summary with replacement line counts. */
+export function diffFileSummary(
+  file: DiffFileRange,
+  adds = file.adds,
+  dels = file.dels,
+): Line {
+  return summaryLine({
+    oldPath: file.oldPath,
+    newPath: file.newPath,
+    adds,
+    dels,
+    binary: file.binary,
   });
 }
 
@@ -73,8 +117,9 @@ interface SummaryInput {
   readonly binary: boolean;
 }
 
-/** Build the collapsed summary line: `▸ path  +A −D`, with a `(new)` /
- * `(deleted)` / `(binary)` tag and `old → new` for a rename. */
+/** Build the collapsed summary line: `▸ path  +A −D`, with new and deleted
+ * files showing only their applicable count and status. Binary files carry a
+ * `(binary)` tag, and renames show `old → new`. */
 function summaryLine(f: SummaryInput): Line {
   const spans: Span[] = [];
   let text = "";
@@ -92,16 +137,15 @@ function summaryLine(f: SummaryInput): Line {
     add(f.newPath ?? f.oldPath ?? "(unknown file)", "sectionHeader");
   }
 
-  const tag = f.binary
-    ? "binary"
-    : f.newPath === undefined
-    ? "deleted"
-    : f.oldPath === undefined
-    ? "new"
-    : "";
-  if (tag) add(`  (${tag})`, "diffMeta");
-
-  if (!f.binary) {
+  if (f.binary) {
+    add("  (binary)", "diffMeta");
+  } else if (f.newPath === undefined) {
+    add("  ", "whitespace");
+    add(`−${f.dels} (deleted)`, "diffDel");
+  } else if (f.oldPath === undefined) {
+    add("  ", "whitespace");
+    add(`+${f.adds} (new)`, "diffAdd");
+  } else {
     add("  ", "whitespace");
     add(`+${f.adds}`, "diffAdd");
     add(" ", "whitespace");
@@ -116,7 +160,9 @@ function cpCount(s: string): number {
   return n;
 }
 
-// --- the collapsed line list ------------------------------------------------
+//
+// the collapsed line list
+//
 
 /**
  * Maps between the full document's lines and the collapsed display: a collapsed
@@ -127,9 +173,11 @@ export interface FoldPlan {
   /** The lines to render: full lines, with each collapsed file's range replaced
    * by one summary line. */
   readonly displayLines: readonly Line[];
+
   /** A document line → the display row it appears on (a line inside a collapsed
    * file maps to that file's summary row). */
   docToDisplay(docLine: number): number;
+
   /** A display row → the document line it stands for (a summary row maps to its
    * file's header line). */
   displayToDoc(displayRow: number): number;
@@ -196,7 +244,14 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
-// --- test-file detection ----------------------------------------------------
+//
+// file-category detection
+//
+
+/** Whether a path selects the pager's Markdown language. */
+export function isMarkdownPath(path: string): boolean {
+  return languageForFile(path).id === "markdown";
+}
 
 const TEST_SEGMENTS = new Set([
   "test",

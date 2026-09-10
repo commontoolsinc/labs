@@ -15,7 +15,6 @@ async function diagnose(
   source: string,
 ): Promise<readonly TransformationDiagnostic[]> {
   const { diagnostics } = await validateFiles({ "/cast.ts": source }, {
-    mode: "error",
     types: COMMONFABRIC_TYPES,
   });
   return diagnostics;

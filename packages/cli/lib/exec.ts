@@ -1,35 +1,41 @@
-import type { PieceManager } from "@commonfabric/piece";
+import { basename, dirname, join, relative, resolve } from "@std/path";
+
 import {
+  PieceController,
   type PiecePatternRef,
   PiecesController,
 } from "@commonfabric/piece/ops";
-import { basename, dirname, join, relative, resolve } from "@std/path";
+import type { Cell } from "@commonfabric/runner";
+
 import {
   type MountedCallablePath,
   parseMountedCallablePath,
 } from "../../fuse/callable-path.ts";
+import { executeCallableCommand } from "./callable-command.ts";
 import {
-  type CallableCellLike,
   callableCommandSpec,
   type CallableExecutionDeps,
-  type CallableManagerLike,
-  type CallablePieceLike,
   type CallableResultRef,
   detectCallableKind,
+  type InvocationIdentity,
+  type InvocationOutcome,
+  type InvocationPhase,
 } from "./callable.ts";
-import { executeCallableCommand } from "./callable-command.ts";
+import type { CellSelection } from "./cell-selection.ts";
 import {
   type ExecCommandSpec,
   type ParsedExecArgs,
   renderExecHelp,
   renderExecHelpJson,
+  usageCommandPrefix,
 } from "./exec-schema.ts";
 import {
   canonicalizeMountLookupPath,
   findMountForPath,
   type MountStateEntry,
 } from "./fuse.ts";
-import { loadManager, type SpaceConfig } from "./piece.ts";
+import { loadPieces, type SpaceConfig } from "./piece.ts";
+import { newSessionId } from "./session.ts";
 
 export interface MountedPieceMeta {
   id: string;
@@ -41,22 +47,22 @@ export interface MountedPieceMeta {
 export interface ResolvedMountedCallableFile {
   absPath: string;
   callablePath: MountedCallablePath;
-  callableCell: CallableCellLike;
+  callableCell: Cell<any>;
   commandSpec: ExecCommandSpec;
-  manager: CallableManagerLike;
+  pieces: PiecesController;
   mount: { entry: MountStateEntry; path: string };
-  piece: CallablePieceLike;
+  piece: PieceController;
   pieceId: string;
   pieceMeta: MountedPieceMeta;
 }
 
-export interface ExecDependencies extends CallableExecutionDeps {
+export interface ExecDependencies {
   stateDir?: string;
-  loadManager?: (config: SpaceConfig) => Promise<CallableManagerLike>;
+  loadPieces?: (config: SpaceConfig) => Promise<PiecesController>;
   loadPiece?: (
-    manager: CallableManagerLike,
+    pieces: PiecesController,
     pieceId: string,
-  ) => Promise<CallablePieceLike>;
+  ) => Promise<PieceController>;
   stat?: (path: string) => Promise<Deno.FileInfo>;
   readDir?: (path: string) => AsyncIterable<Deno.DirEntry>;
   delay?: (ms: number) => Promise<void>;
@@ -66,13 +72,29 @@ export interface ExecDependencies extends CallableExecutionDeps {
   readTextInput?: () => Promise<string>;
   readTextFile?: (path: string) => Promise<string>;
   isStdinTerminal?: () => boolean;
+
+  /** @internal Seam for tests, the same one `getCellValue` and
+   * `CallableExecutionDeps` carry. */
+  deriveSelectedValue?: CallableExecutionDeps["deriveSelectedValue"];
+
+  /**
+   * Each phase the dispatch below reaches, in order. A caller announcing the
+   * invocation identity hangs it here: the identity is what a failed call is
+   * retried under, and the phase is what says whether retrying is safe.
+   */
+  onPhase?: (phase: InvocationPhase) => void;
 }
 
 export interface ExecutedMountedCallableFile {
   helpText?: string;
   outputText?: string;
+
+  /** Handler invocation outcome, passed through from ExecutedCallable. */
+  invocation?: InvocationOutcome;
+
   /** Tool result cell address, passed through from ExecutedCallable. */
   resultRef?: CallableResultRef;
+
   parsed: ParsedExecArgs;
   resolved: ResolvedMountedCallableFile;
 }
@@ -81,14 +103,25 @@ export interface ResolveMountedCallableOptions {
   jsonOutput?: boolean;
 }
 
+/** What the caller asked of the invocation, as opposed to what it is wired
+ * with. */
+export interface ExecuteMountedCallableOptions {
+  /** `--filter`/`--select`/`--schema`: the shape the caller asked the result
+   * to arrive in, answered by the same selection step `cf cell get`,
+   * `cf piece call` and `cf wish` read through — so one grammar covers every
+   * arrival, whichever one a caller reached for. */
+  selection?: CellSelection;
+
+  /** @internal Seam for tests. Production mints a fresh pair per call: see
+   * {@link executeMountedCallableFile}. */
+  invocation?: InvocationIdentity;
+}
+
 async function defaultLoadPiece(
-  manager: CallableManagerLike,
+  pieces: PiecesController,
   pieceId: string,
-): Promise<CallablePieceLike> {
-  return await new PiecesController(manager as unknown as PieceManager).get(
-    pieceId,
-    true,
-  );
+): Promise<PieceController> {
+  return await pieces.get(pieceId, true);
 }
 
 async function readMountedPieceMeta(
@@ -267,26 +300,19 @@ export async function resolveMountedCallableFile(
 
   await assertMountedCallableFileExists(canonicalAbsPath, deps);
   const pieceMeta = await readMountedPieceMeta(canonicalAbsPath, callablePath);
-  const manager = deps.loadManager
-    ? await deps.loadManager({
-      apiUrl: mount.entry.apiUrl,
-      identity: mount.entry.identity,
-      space: callablePath.spaceName,
-      ...(options.jsonOutput ? { jsonOutput: true } : {}),
-    })
-    : await loadManager({
-      apiUrl: mount.entry.apiUrl,
-      identity: mount.entry.identity,
-      space: callablePath.spaceName,
-      ...(options.jsonOutput ? { jsonOutput: true } : {}),
-    }) as unknown as CallableManagerLike;
+  const pieces = await (deps.loadPieces ?? loadPieces)({
+    apiUrl: mount.entry.apiUrl,
+    identity: mount.entry.identity,
+    space: callablePath.spaceName,
+    ...(options.jsonOutput ? { jsonOutput: true } : {}),
+  });
   const piece = await (deps.loadPiece ?? defaultLoadPiece)(
-    manager,
+    pieces,
     pieceMeta.id,
   );
-  const rootCell = await piece[callablePath.cellProp].getCell();
-  const childCell = rootCell.key(callablePath.cellKey);
-  const callableCell = childCell.asSchemaFromLinks?.() ?? childCell;
+  const rootCell: Cell<any> = await piece[callablePath.cellProp].getCell();
+  const callableCell = rootCell.key(callablePath.cellKey)
+    .asSchemaFromLinks<any>();
   const actualKind = detectCallableKind(undefined, callableCell);
   if (actualKind !== callablePath.callableKind) {
     throw new Error(
@@ -299,7 +325,7 @@ export async function resolveMountedCallableFile(
     callablePath,
     callableCell,
     commandSpec: callableCommandSpec(callableCell, callablePath.callableKind),
-    manager,
+    pieces,
     mount,
     piece,
     pieceId: pieceMeta.id,
@@ -307,30 +333,56 @@ export async function resolveMountedCallableFile(
   };
 }
 
+/**
+ * Run the callable a mounted file names, and answer with what it produced.
+ *
+ * A handler is dispatched under an invocation identity, one pair per call.
+ * That is what gives this arrival an outcome at all: a handler's result is
+ * read back off the receipt its handling files, and a dispatch naming no id
+ * files under none. Minting both halves is the same default
+ * `resolveInvocationIdentity` applies to a `cf piece call` that names neither
+ * — the id is random, so it names an outcome nothing else will ask for.
+ * Without it a `--select` over a handler could only ever answer nothing, which
+ * is the silence the read options exist to remove.
+ *
+ * `options.invocation` is how a caller supplies the pair instead, and the
+ * command does: the identity a failure is retried under is no use to anyone
+ * who cannot read it, so `cf exec` mints it where it can also announce it and
+ * name it again if the call fails. The fallback minted here keeps a direct
+ * caller — a test, an embedder — from having to care.
+ */
 export async function executeMountedCallableFile(
   filePath: string,
   rawArgs: string[],
   deps: ExecDependencies = {},
+  options: ExecuteMountedCallableOptions = {},
 ): Promise<ExecutedMountedCallableFile> {
   const resolved = await resolveMountedCallableFile(filePath, deps, {
     jsonOutput: true,
   });
   const invocationStyle = deps.invocationStyle ??
     (Deno.env.get("CF_EXEC_SHEBANG") === "1" ? "direct" : "cf");
+  const invocation = options.invocation ??
+    { id: crypto.randomUUID(), session: newSessionId() };
   const result = await executeCallableCommand({
     resolved,
     execution: {
       callableCell: resolved.callableCell,
       callableKind: resolved.callablePath.callableKind,
       cellKey: resolved.callablePath.cellKey,
-      cellProp: resolved.callablePath.cellProp,
-      manager: resolved.manager,
-      piece: resolved.piece,
-      space: resolved.manager.getSpace?.() ?? resolved.callablePath.spaceName,
+      pieces: resolved.pieces,
+      space: resolved.pieces.getSpace(),
     },
     commandSpec: resolved.commandSpec,
     rawArgs,
-    deps,
+    sectionPrefix: usageCommandPrefix(filePath, invocationStyle),
+    deps: {
+      ...deps,
+      invocation,
+      ...(options.selection === undefined
+        ? {}
+        : { selection: options.selection }),
+    },
     renderHelp: (commandSpec, parsed) =>
       parsed.showHelpJson
         ? renderExecHelpJson(commandSpec)
@@ -341,13 +393,10 @@ export async function executeMountedCallableFile(
 
   // Auto-step: trigger reactive recomputation after handler execution.
   // Skip if --help was shown — no mutation occurred.
-  if (!result.helpText && typeof resolved.piece.getCell === "function") {
+  if (!result.helpText) {
     try {
-      const pieceCell = resolved.piece.getCell();
-      if (typeof pieceCell.pull === "function") {
-        await pieceCell.pull();
-      }
-      await resolved.manager.synced();
+      await resolved.piece.getCell().pull();
+      await resolved.pieces.synced();
     } catch {
       // Auto-step is best-effort; the handler already executed successfully.
     }

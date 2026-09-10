@@ -4,9 +4,16 @@
     "./packages/background-piece-service",
     "./packages/piece",
     "./packages/cli",
+    "./packages/connectors/agents/connector",
+    "./packages/connectors/agents/debug-view",
+    "./packages/connectors/agents/host",
+    "./packages/connectors/github/activity-view",
+    "./packages/connectors/github/connector",
+    "./packages/connectors/github/host",
     "./packages/content-hash",
     "./packages/dashboard",
     "./packages/data-model",
+    "./packages/data-model-schema",
     "./packages/deno-web-test",
     "./packages/felt",
     "./packages/generated-patterns",
@@ -23,12 +30,14 @@
     "./packages/cf-harness",
     "./packages/llm",
     "./packages/memory",
+    "./packages/navigation",
     "./packages/patterns",
     "./packages/patterns/auth",
     "./packages/pure-json",
     "./packages/runner",
     "./packages/runtime-client",
     "./packages/shell",
+    "./packages/spec-model",
     "./packages/state-inspector",
     "./packages/static",
     "./packages/toolshed",
@@ -36,7 +45,6 @@
     "./packages/utils",
     "./packages/leb128",
     "./packages/fuse",
-    "./packages/fs-sync-example",
     "./tasks",
     "./scripts"
   ],
@@ -44,24 +52,52 @@
     "check": "./tasks/check.sh",
     "check-docs": "deno run --allow-read --allow-write --allow-run --allow-env ./docs/check.ts",
     "check-no-waitfor": "deno run --allow-read ./tasks/check-no-waitfor.ts",
+    "check-conflict-markers": "deno run --allow-read --allow-run=git ./tasks/check-conflict-markers.ts",
+    "check-control-characters": "deno run --allow-read --allow-run=git ./tasks/check-control-characters.ts",
+    "check-local-program": "deno run --allow-read --allow-env --allow-run=git ./tasks/check-local-program.ts",
+    "check-docs-history-index": "deno run --allow-read ./tasks/check-docs-history-index.ts",
     "check-unused-deps": "deno run --allow-read --allow-run=git ./tasks/check-unused-deps.ts",
     "check-deno-pins": "deno run --allow-read ./tasks/check-deno-pins.ts",
+    "check-action-pins": "deno run --allow-read --allow-net=api.github.com --allow-env ./tasks/check-action-pins.ts",
     "check-single-copy-deps": "deno run --allow-read ./tasks/check-single-copy-deps.ts",
+    "check-package-cycles": "deno run --allow-read --allow-run=git ./tasks/check-package-cycles.ts",
     "cfcheck": "deno run -A ./tasks/cfcheck.ts",
     "pattern-compat": "deno run -A ./tasks/pattern-compat.ts",
     "pattern-vintage": "deno run -A ./tasks/pattern-vintage.ts",
     "check-baselines-append-only": "deno run --allow-read --allow-run=git ./tasks/check-baselines-append-only.ts",
+    "check-test-aliases": "deno run --allow-read --allow-run=git ./tasks/check-test-aliases.ts",
+    "check-test-topology": "deno run --allow-read --allow-env --allow-net ./tasks/check-test-topology.ts",
+    "check-pattern-tiers": "deno run --allow-read ./tasks/check-pattern-tiers.ts",
+    // The gate above is what CI runs, and it cannot write. Applying a marker is
+    // this separate task, so the permission to rewrite a pattern comes with
+    // asking for it.
+    "fix-pattern-tiers": "deno run --allow-read --allow-write ./tasks/check-pattern-tiers.ts --write",
     "check-skill-facts": "deno run --allow-read --allow-run=git ./tasks/check-skill-facts.ts",
+    "check-verb-session-sync": "deno run --allow-read ./tasks/check-verb-session-sync.ts",
+    // Building the CLI's command tree is what this walks, and mounting it
+    // resolves the whole CLI — including the SQLite library `cf inspect`
+    // opens spaces with, which is why this needs --allow-ffi.
+    "check-completion-slots": "deno run --allow-read --allow-env --allow-sys --allow-ffi ./tasks/check-completion-slots.ts",
+    "check-command-docs": "deno run --allow-read --allow-env --allow-sys --allow-ffi ./tasks/check-command-docs.ts",
+    "check-tripwires": "deno run --allow-read ./tasks/check-tripwires.ts",
+    // Reports the docs/ link graph; --allow-write serves its --out flag.
+    "docs-links": "deno run --allow-read --allow-write ./scripts/docs-links.ts",
     "cf": "deno run --allow-run --allow-env --allow-read ./packages/cli/launcher.ts",
+    "agents-host": "deno run -A ./packages/connectors/agents/host/main.ts",
+    "github-host": "deno run -A ./packages/connectors/github/host/main.ts",
     "test": "./tasks/test.ts",
     "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
+    "run-recorded": "./tasks/run-recorded.ts",
+    "test-records-key": "./tasks/test-records-key.ts",
+    "test-records-compact": "./tasks/test-records-compact.ts",
+    "test-selection": "./tasks/test-selection.ts",
     "build-binaries": "./tasks/build-binaries.ts",
     "install-hooks": "./scripts/install-git-hooks.sh",
     "install-cf": "./scripts/install-cf.sh",
     "initialize-db": "deno run --allow-env --allow-read --allow-write --allow-ffi --allow-net=github.com,release-assets.githubusercontent.com,jsr.io packages/memory/scripts/initialize-db.ts",
     "integration": "./tasks/integration.ts",
     "demo": "./tasks/demo.ts",
-    "dashboard": "deno run --allow-net --allow-run=deno,git --allow-read --allow-write --allow-env packages/dashboard/server.ts",
+    "dashboard": "deno run --allow-net --allow-run=deno --allow-read --allow-write --allow-env packages/dashboard/server.ts",
     "profile": "./scripts/restart-local-dev.sh --inspect-brk",
     "cf-profile": "ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && deno run -A \"$ROOT/packages/cli/support/profiling/cf-profile.ts\"",
     "cf-inspect-brk": "bash -lc 'ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && CF_CLI_NAME=cf deno run --inspect-brk --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\" \"$@\"' --",
@@ -69,7 +105,7 @@
   },
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@commonfabric/html",
+    "jsxImportSource": "@commonfabric/runner",
     "types": [
       "./packages/html/src/jsx.d.ts"
     ],
@@ -96,8 +132,7 @@
       ".claude/",
       ".beads/",
       "./packages/static/assets",
-      "./tmp/",
-      "./packages/patterns/record/"
+      "./tmp/"
     ],
     "rules": {
       "tags": [
@@ -113,7 +148,13 @@
         "no-explicit-any",
         "require-yield"
       ]
-    }
+    },
+    "plugins": [
+      "./tasks/lint-access-for-testing-only.ts",
+      "./tasks/lint-bench-console.ts",
+      "./tasks/lint-inline-imports.ts",
+      "./tasks/lint-self-import.ts"
+    ]
   },
   "fmt": {
     "indentWidth": 2,
@@ -130,6 +171,9 @@
       "packages/static/assets/",
       "packages/ts-transformers/test/fixtures",
       "packages/schema-generator/test/fixtures",
+      // Attached data files travel byte-for-byte and their bytes are asserted
+      // on; formatting them would rewrite the thing under test.
+      "packages/cli/integration/pattern/data/",
       "packages/ui/src/v2/components/cf-chart/cf-chart.ts",
       "packages/ui/src/v2/components/cf-chart/lib/axes.ts",
       "packages/ui/src/v2/components/cf-chart/lib/render.ts",
@@ -162,6 +206,13 @@
     "@std/jsonc": "jsr:@std/jsonc@^1.0.2",
     "@std/path": "jsr:@std/path@^1.1.6",
     "@std/testing": "jsr:@std/testing@^1.0.19",
+    // Every test file's `@std/testing/bdd` resolves to a module of ours
+    // that re-exports the real one and applies this invocation's skip
+    // list. The real module keeps a specifier of its own, which is the
+    // only thing that imports it.
+    "@std/testing/bdd": "./packages/test-support/src/records/bdd.ts",
+    "@std/testing/bdd/real": "jsr:@std/testing@^1.0.19/bdd",
+    "@std/ulid": "jsr:@std/ulid@^1.0.0",
     "dagre": "npm:dagre@^0.8.5",
     "hash-wasm": "npm:hash-wasm@^4.12.0",
     "lit": "npm:lit@^3.3.3",

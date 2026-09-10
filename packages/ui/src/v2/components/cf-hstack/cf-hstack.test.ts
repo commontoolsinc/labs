@@ -1,6 +1,7 @@
 /**
  * Tests for CFHStack component
  */
+
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { CFHStack } from "./index.ts";

@@ -16,6 +16,7 @@ import {
 import type { FactoryContract } from "../src/factory-materialization.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { externalRefTo } from "./schema-ref-helpers.ts";
 
 type InvokeFactory = (
   factory: unknown,
@@ -156,12 +157,12 @@ describe("dynamic factory builder node shape", () => {
 
       const node = built.nodes[0] as Pattern["nodes"][number];
       expect(node.module).toEqual(
-        argumentAlias("operation", factorySchema(expected)),
+        argumentAlias("operation", externalRefTo(factorySchema(expected))),
       );
       expect(node.outputs).toEqual(
         derivedAlias(
           "result",
-          kind === "pattern" ? undefined : RESULT_SCHEMA,
+          kind === "pattern" ? undefined : externalRefTo(RESULT_SCHEMA),
         ),
       );
 
@@ -171,7 +172,7 @@ describe("dynamic factory builder node shape", () => {
       expect(
         containsDeepValue(
           node.inputs,
-          argumentAlias("value", { type: "number" }),
+          argumentAlias("value", externalRefTo({ type: "number" })),
         ),
       ).toBe(true);
 
@@ -208,12 +209,12 @@ describe("dynamic factory builder node shape", () => {
 
     const node = built.nodes[0] as Pattern["nodes"][number];
     expect(node.module).toEqual(
-      argumentAlias("operation", factorySchema(expected)),
+      argumentAlias("operation", externalRefTo(factorySchema(expected))),
     );
     expect(node.outputs).toEqual({});
     expect(node.inputs).toMatchObject({
       $ctx: {
-        value: argumentAlias("value", { type: "number" }),
+        value: argumentAlias("value", externalRefTo({ type: "number" })),
       },
       $event: derivedAlias("events"),
     });

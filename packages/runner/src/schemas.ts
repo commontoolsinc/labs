@@ -4,8 +4,9 @@
  * /!\ interfaces and utilities.
  */
 
+import { internSchema } from "@commonfabric/data-model-schema";
+
 import { NAME, type Schema, UI } from "./shared.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 
 export const rendererVDOMSchema = internSchema(
   {

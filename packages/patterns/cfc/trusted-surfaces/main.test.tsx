@@ -1,4 +1,11 @@
-import { assert, handler, pattern, Stream, Writable } from "commonfabric";
+import {
+  assert,
+  handler,
+  pattern,
+  Stream,
+  TESTS,
+  Writable,
+} from "commonfabric";
 import {
   SAVE_DRAFT_ACTION,
   SAVE_TITLE_ACTION,
@@ -390,7 +397,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_set_title },
       // The `savedTitle` / `savedBody` writes carry TrustedAction UI
       // contracts: send the renderer-trusted gesture for the reviewed surface

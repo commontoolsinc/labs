@@ -4,27 +4,39 @@ import { Identity } from "@commonfabric/identity";
 
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import { getMetaLink } from "../src/link-utils.ts";
 import { isMissingStreamMarkerFailure } from "../src/runner.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 // A nested/embedded piece — a profile mounted via a `#wish`, say — is
 // instantiated by the runtime's start walk WITHOUT a setup phase and with no
 // pattern watcher armed to self-heal. If its stored doc predates the pattern's
 // setup (here: set up for V1, then re-pointed at the handler-bearing V3 whose
 // `bump` stream marker the V1 doc never materialized), instantiation throws
-// "Handler used as lift … marker was never written". Runner.startCore's initial
-// instantiation re-runs the pinned pattern's OWN setup on that failure (gated by
-// systemPatternAutoUpdate) and retries — the same repair the home ROOT gets in
-// startEnsuredDefaultPattern, reachable at last for the nested pieces that never
-// pass through the PieceController. The root itself is EXCLUDED (the controller
-// owns it); a nested piece is never a space's defaultPattern, so it heals here.
+// "Handler used as lift … marker was never written". `Runner.#startCore()`'s
+// initial instantiation re-runs the pinned pattern's OWN setup on that
+// failure and retries — the same repair the home ROOT gets in
+// startEnsuredDefaultPattern, here for the nested pieces that never pass
+// through the PieceController.
+// The repair moves no durable identity pointer; it replays the pattern the
+// pointer already names. The root itself is excluded because its controller
+// owns the repair; a nested piece is never a space's `.defaultPattern`, so it
+// heals here.
 
 const signer = await Identity.fromPassphrase("nested-piece-setup-repair");
 const space = signer.did();
 
+// The argument object is OPEN and the piece is set up holding `limit: "ten"`,
+// which V3 below declares as a NUMBER. That mismatch is deliberate: the repair
+// re-runs setup for the pattern the pointer already names, so it would take the
+// stale-marker re-stage branch if that branch were not opted out — and the
+// re-stage validates. A repair that starts refusing here would be rewriting (or
+// rejecting) the piece's own data on what is meant to be an internal-cell fix.
 const V1_NO_HANDLER = [
   "import { Writable, pattern } from 'commonfabric';",
-  "export default pattern<Record<string, never>, { count: Writable<number> }>(() => {",
+  "interface Args { [key: string]: any }",
+  "export default pattern<Args, { count: Writable<number> }>(() => {",
   "  const count = new Writable<number>(0).for('count');",
   "  return { count };",
   "});",
@@ -35,10 +47,11 @@ const V1_NO_HANDLER = [
 // is absent from a doc set up for V1, so instantiating V3 over that doc bricks.
 const V3_WITH_HANDLER = [
   "import { Writable, handler, pattern } from 'commonfabric';",
+  "interface Args { limit?: number; [key: string]: any }",
   "const bump = handler<void, { count: Writable<number> }>((_, { count }) => {",
   "  count.set((count.get() ?? 0) + 1);",
   "});",
-  "export default pattern<Record<string, never>, { count: Writable<number> }>(() => {",
+  "export default pattern<Args, { count: Writable<number> }>(() => {",
   "  const count = new Writable<number>(0).for('count');",
   "  return { count, bump: bump({ count }) };",
   "});",
@@ -50,11 +63,13 @@ const programOf = (contents: string): RuntimeProgram => ({
   files: [{ name: "/main.tsx", contents }],
 });
 
-// The repair keys on ONE variant of the handler-stream failure — the
-// setup-missing "marker was never written" case. Its two siblings are NOT
-// setup-missing (re-running setup would not fix them), so they must not trigger
-// a repair. These messages mirror `describeHandlerStreamFailure`'s three shapes.
 describe("isMissingStreamMarkerFailure discriminates the setup-missing variant", () => {
+  // The repair keys on ONE variant of the handler-stream failure — the
+  // setup-missing "marker was never written" case. Its two siblings are NOT
+  // setup-missing (re-running setup would not fix them), so they must not
+  // trigger a repair. These messages mirror `describeHandlerStreamFailure`'s
+  // three shapes.
+
   it("matches the marker-never-written variant", () => {
     expect(
       isMissingStreamMarkerFailure(
@@ -101,11 +116,10 @@ describe("isMissingStreamMarkerFailure discriminates the setup-missing variant",
 describe("nested-piece cold-start setup repair", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
-  const newRuntime = (systemPatternAutoUpdate: boolean) =>
+  const newRuntime = () =>
     new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { systemPatternAutoUpdate },
     });
 
   beforeEach(() => {
@@ -133,7 +147,7 @@ describe("nested-piece cold-start setup repair", () => {
       undefined,
       tx,
     );
-    const running = rt.run(tx, v1, {}, cell);
+    const running = rt.run(tx, v1, { limit: "ten" }, cell);
     await tx.commit();
     await running.pull();
     // Stop, then move the pinned identity to V3 with NO setup for it — the
@@ -143,25 +157,15 @@ describe("nested-piece cold-start setup repair", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v3Ref.identity,
       symbol: v3Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     // It is not the space's defaultPattern, so the runner repair (not the
     // controller) is what must heal it.
     return { cell, v3Ref };
   };
 
-  it("bricks on start when the repair flag is OFF (locks in the gap)", async () => {
-    const rt = newRuntime(false);
-    try {
-      const { cell } = await brickedNestedPiece(rt);
-      await expect(rt.start(cell)).rejects.toThrow("marker was never written");
-    } finally {
-      await rt.dispose();
-    }
-  });
-
-  it("heals a nested piece by re-running its setup on start (flag ON)", async () => {
-    const rt = newRuntime(true);
+  it("heals a nested piece by re-running its setup on start", async () => {
+    const rt = newRuntime();
     try {
       const { cell, v3Ref } = await brickedNestedPiece(rt);
       // Starts WITHOUT throwing: the setup repair materializes the missing
@@ -174,6 +178,17 @@ describe("nested-piece cold-start setup repair", () => {
         getMetaRaw: (k: string) => unknown;
       }).getMetaRaw("patternIdentity") as { identity?: string } | undefined;
       expect(idRaw?.identity).toBe(v3Ref.identity);
+      // …and the piece's own data is untouched. This repair materializes
+      // missing internal cells; it must not re-point or re-validate the stored
+      // argument, which is what makes it safe to run on an ordinary start. The
+      // stored `limit` violates V3's declared type, so a repair that re-staged
+      // would either rewrite this doc or refuse the start outright.
+      const argumentLink = getMetaLink(cell as never, "argument")!;
+      expect(
+        rt.getCellFromLink(argumentLink).getRaw(),
+        "the internal-cell repair rewrote or rejected the piece's stored " +
+          "argument — it is meant to leave the piece's data alone",
+      ).toEqual({ limit: "ten" });
       // …and the once-missing handler stream now fires end to end.
       const before = (cell.getAsQueryResult() as { count: number }).count;
       (cell.key("bump") as unknown as { send: (e: unknown) => void }).send({});

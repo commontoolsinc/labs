@@ -8,13 +8,14 @@ import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-projection");
 
-// §8.3 projection claims (spec cfc/08-03-projection-semantics.md): a field
-// copied out of a structured source inherits the source's confidentiality in
-// full (§8.3.1) and carries the source's integrity SCOPED to the projected
-// path (§8.3.2) — the projected value can never claim whole-object integrity,
-// and atoms that cannot express the scoping (string atoms, provenance-class
-// evidence) are dropped, fail-closed.
 describe("CFC projection claims", () => {
+  // §8.3 projection claims (spec cfc/08-03-projection-semantics.md): a field
+  // copied out of a structured source inherits the source's confidentiality in
+  // full (§8.3.1) and carries the source's integrity SCOPED to the projected
+  // path (§8.3.2) — the projected value can never claim whole-object integrity,
+  // and atoms that cannot express the scoping (string atoms, provenance-class
+  // evidence) are dropped, fail-closed.
+
   const createRuntime = () => {
     const storageManager = StorageManager.emulate({
       as: signer,
@@ -22,7 +23,6 @@ describe("CFC projection claims", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     return { runtime, storageManager };
   };

@@ -12,10 +12,26 @@
  * - **metrics**: aggregated traverser counters. These are *not* asserted —
  *   they exist so benchmarks can attribute wins (e.g. anyOfBranches -80%).
  */
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+
 import type { SchemaPathSelector } from "@commonfabric/api";
+import {
+  deepFreeze,
+  type FabricValue,
+  hashStringOf,
+} from "@commonfabric/data-model";
+import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
+
+import { ExtendedStorageTransaction } from "../../src/storage/extended-storage-transaction.ts";
+import type {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+  IReadOptions,
+} from "../../src/storage/interface.ts";
+import { load as loadDataURI } from "../../src/storage/transaction/attestation.ts";
+import {
+  fixtureDocKey,
+  type TraverseFixture,
+} from "../../src/traverse-recorder.ts";
 import {
   type BaseMemoryAddress,
   CompoundCycleTracker,
@@ -29,32 +45,24 @@ import {
   SchemaObjectTraverser,
   type TraversalContext,
 } from "../../src/traverse.ts";
-import { ContextualFlowControl } from "../../src/cfc.ts";
-import { ExtendedStorageTransaction } from "../../src/storage/extended-storage-transaction.ts";
-import { load as loadDataURI } from "../../src/storage/transaction/attestation.ts";
-import type {
-  IExtendedStorageTransaction,
-  IMemorySpaceAddress,
-  IReadOptions,
-} from "../../src/storage/interface.ts";
-import {
-  fixtureDocKey,
-  type TraverseFixture,
-} from "../../src/traverse-recorder.ts";
 import { readMaybeGzippedText } from "./gzip.ts";
 
 export type ReplayInvocationOracle = {
   ok: boolean;
+
   /** TraverseFailure code when ok is false. */
   code?: string;
+
   /** Truncated structural hash of the returned value ("undefined" if so). */
   hash: string;
 };
 
 export type ReplayOracle = {
   invocations: ReplayInvocationOracle[];
+
   /** Sorted unique read descriptors: `space|scope|id|<json path>|flags`. */
   readSet: string[];
+
   /**
    * Per context id: sorted `trackerKey::selectorHash` entries. Only contexts
    * shared by multiple invocations or with includeMeta (the server query
@@ -98,10 +106,17 @@ export type ReplayLatencySample = {
   ms: number;
   selector: number;
   docId: string;
-  /** Counter deltas for this single invocation. */
+
+  /** Schema-call delta for this single invocation. */
   schemaCalls: number;
+
+  /** `anyOf`-branch delta over the same invocation. */
   anyOfBranches: number;
+
+  /** DAG-call delta over the same invocation. */
   dagCalls: number;
+
+  /** Pointer-call delta over the same invocation. */
   pointerCalls: number;
 };
 
@@ -112,6 +127,7 @@ export type ReplayLatencyReport = {
   p999: number;
   max: number;
   mean: number;
+
   /** The N slowest invocations, slowest first. */
   slowest: ReplayLatencySample[];
 };
@@ -147,12 +163,16 @@ function buildLatencyReport(
  * the corpus, exactly as live storage does.
  */
 export class FixtureObjectManager implements ObjectStorageManager {
-  private attestations = new Map<string, IAttestation>();
+  #attestations = new Map<string, IAttestation>();
 
-  constructor(private docs: Record<string, FabricValue>) {}
+  #docs: Record<string, FabricValue>;
+
+  constructor(docs: Record<string, FabricValue>) {
+    this.#docs = docs;
+  }
 
   load(address: BaseMemoryAddress): IAttestation | null {
-    if (address.id.startsWith("data:")) {
+    if (hasDataUriScheme(address.id)) {
       // Use the canonical data-URI attestation loader so replay matches live
       // semantics (decoded JSON rooted at path [], LRU-cached).
       const { ok } = loadDataURI(address);
@@ -161,9 +181,9 @@ export class FixtureObjectManager implements ObjectStorageManager {
     const key = fixtureDocKey(
       address as BaseMemoryAddress & { space: string },
     );
-    const cached = this.attestations.get(key);
+    const cached = this.#attestations.get(key);
     if (cached !== undefined) return cached;
-    const value = this.docs[key];
+    const value = this.#docs[key];
     if (value === undefined) return null;
     const attestation: IAttestation = {
       address: { ...address, path: [] },
@@ -171,9 +191,9 @@ export class FixtureObjectManager implements ObjectStorageManager {
       // (decodeMemoryBoundary), so frozen corpus values are the faithful
       // replay shape — without this, frozen-identity fast paths in traverse
       // can never engage during replay even though they do in production.
-      value: deepFreeze(value) as FabricValue,
+      value: deepFreeze(value),
     };
-    this.attestations.set(key, attestation);
+    this.#attestations.set(key, attestation);
     return attestation;
   }
 }
@@ -228,11 +248,18 @@ function wrapTxWithReadLog(
   });
 }
 
+// The acting identity replayed traversals resolve scoped addresses against
+// (stage E) — fixtures are recorded from space-scoped runs.
+const REPLAY_SCOPE_IDENTITY = {
+  principal: "did:test:replay",
+  sessionId: "replay-session",
+};
+
 function makeContext(includeMeta: boolean): TraversalContext {
   return createTraversalContext(
     new CompoundCycleTracker(),
-    new ContextualFlowControl(),
     new MapSetStringToPathSelectors(true),
+    REPLAY_SCOPE_IDENTITY,
     includeMeta,
   );
 }
@@ -242,6 +269,7 @@ export function replayFixture(
   options: {
     collectOracle?: boolean;
     limit?: number;
+
     /** Collect per-invocation latency samples (slight timing overhead). */
     collectLatency?: boolean;
   } = {},

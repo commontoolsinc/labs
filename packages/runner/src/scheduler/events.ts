@@ -1,13 +1,19 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { recordTrustedEventPolicyInputs } from "../cfc/ui-contract.ts";
 import type { Cancel } from "../cancel.ts";
-import { ensurePieceRunning } from "../ensure-piece-running.ts";
+import {
+  ensurePieceRunningVerdict,
+  type EnsurePieceVerdict,
+} from "../ensure-piece-running.ts";
+import { waveRunContextOf } from "../executor/wave.ts";
 import {
   areNormalizedLinksSame,
   type NormalizedFullLink,
 } from "../link-utils.ts";
 import type { Runtime } from "../runtime.ts";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type {
+  CommitError,
   IExtendedStorageTransaction,
   IPreconditionFailedError,
   MemorySpace,
@@ -40,13 +46,19 @@ import {
   trustedEventWriteCandidatesFromTransaction,
   txToReactivityLog,
 } from "./reactivity.ts";
-import type {
-  Action,
-  EventHandler,
-  EventHandlerRegistration,
-  EventPreflightTraceContext,
-  QueuedEvent,
-  ReactivityLog,
+import {
+  isCfcRejectedCommitError,
+  reportDroppedCfcRejectedWrite,
+} from "./cfc-rejection-report.ts";
+import {
+  type Action,
+  type EventHandler,
+  type EventHandlerRegistration,
+  type EventPreflightTraceContext,
+  LT1_LATE_SEAL_REFUSED,
+  type QueuedEvent,
+  type ReactivityLog,
+  type ServedEventFailureOutcome,
 } from "./types.ts";
 
 const logger = getLogger("scheduler", {
@@ -55,25 +67,84 @@ const logger = getLogger("scheduler", {
 });
 const EVENT_COMMIT_TELEMETRY_WRITE_LIMIT = 25;
 
+type EventCommitError = {
+  readonly name?: string;
+  readonly message: string;
+  readonly precondition?: IPreconditionFailedError["precondition"];
+};
+
 /**
- * A CFC-enforcement-rejected commit on a give-up disposition is silent data
- * loss of user intent — the UI's write simply never lands (labs#4772 shipped
- * that way for weeks behind the opt-in scheduler logger, which is disabled in
- * deployed workers). Report it unconditionally; the opt-in `logger.warn`
- * alongside still carries the full disposition detail.
+ * The error handed to work staged on an event's transaction when the event ends
+ * without a commit verdict at all — the handler threw, the caller opted out of
+ * retrying, or the seal was refused. There is no rejection to pass on in those
+ * cases, and the staged work needs to hear that none is coming.
  */
-export function reportDroppedCfcRejectedWrite(
-  error: { message?: string } | undefined,
-  handlerId: unknown,
-): void {
-  if (!error?.message?.startsWith("CFC enforcement rejected commit")) {
-    return;
+function eventAbandonError(reason: string): CommitError {
+  return {
+    name: "StorageTransactionAborted",
+    message: `event abandoned before it committed: ${reason}`,
+    reason: new Error(reason),
+  } as CommitError;
+}
+
+function normalizeEventCommitRejection(reason: unknown): EventCommitError {
+  if (reason instanceof Error) {
+    return reason as EventCommitError;
   }
-  console.error(
-    "[cfc] Owner-protected write dropped: CFC enforcement rejected the " +
-      "commit and re-running cannot resolve it.",
-    { error: error.message, handlerId },
+  if (reason !== null && typeof reason === "object") {
+    const candidate = reason as Partial<EventCommitError>;
+    const precondition = candidate.precondition === "origin-committed" ||
+        candidate.precondition === "receipt-exists"
+      ? candidate.precondition
+      : undefined;
+    return {
+      ...(typeof candidate.name === "string" ? { name: candidate.name } : {}),
+      message: typeof candidate.message === "string"
+        ? candidate.message
+        : "Storage commit promise rejected",
+      ...(precondition ? { precondition } : {}),
+    };
+  }
+  return new Error(
+    reason
+      ? String(reason)
+      : "Storage commit promise rejected without a reason",
   );
+}
+
+/** Report a served event's durable outcome without letting an observer failure
+ * escape into scheduler control flow. The callback is notification-only: a
+ * broken observer must neither change the event disposition nor skip later
+ * settlement work. */
+export function reportServedEventFailure(
+  served: Pick<NonNullable<QueuedEvent["served"]>, "onFailure"> | undefined,
+  outcome: ServedEventFailureOutcome,
+): void {
+  try {
+    served?.onFailure?.(outcome);
+  } catch (callbackError) {
+    logger.error(
+      "schedule-error",
+      "Error in served event failure callback:",
+      callbackError,
+    );
+  }
+}
+
+/** Whether a failed event transaction carries positive producer evidence that
+ * an explicit local abort discarded it before storage. Other errors in the
+ * same family can describe ambiguous commit failures and are not terminal
+ * evidence. */
+export function isExplicitTransactionAbort(
+  error:
+    | { name?: string; message?: string; abortedBeforeStorage?: unknown }
+    | undefined,
+): error is {
+  name: "StorageTransactionAborted";
+  abortedBeforeStorage: true;
+} {
+  return error?.name === "StorageTransactionAborted" &&
+    error.abortedBeforeStorage === true;
 }
 
 export function isHeadEventParked(
@@ -105,12 +176,11 @@ export interface SchedulerEventQueueState {
   readonly eventHandlers: readonly EventHandlerRegistration[];
   readonly eventQueue: QueuedEvent[];
   readonly backgroundTasks: Set<Promise<unknown>>;
-  readonly nextEventSequence: () => number;
   readonly loadPieceForEvent?: (
     runtime: Runtime,
     eventLink: NormalizedFullLink,
-    signal: AbortSignal,
-  ) => Promise<boolean>;
+    options?: { signal?: AbortSignal },
+  ) => Promise<EnsurePieceVerdict>;
   readonly queueExecution: () => void;
   readonly recordLineageEvent: (
     originTx: IExtendedStorageTransaction,
@@ -136,10 +206,35 @@ function notifyEventDropped(
   args: {
     readonly eventLink: NormalizedFullLink;
     readonly onCommit?: QueuedEvent["onCommit"];
+    readonly served?: QueuedEvent["served"];
   },
   reason: string,
+  servedKind: "dropped" | "deferred" = "dropped",
+  options: {
+    quiet?: boolean;
+    servedOutcome?: ServedEventFailureOutcome;
+  } = {},
 ): void {
-  logger.warn("scheduler", reason, { eventLink: args.eventLink });
+  if (options.quiet === true) {
+    // A routine, counted pre-dispatch removal (the serving loop's LT1
+    // leftover purge, stage C build W3): debug, not warn.
+    logger.debug("scheduler", () => [reason, { eventLink: args.eventLink }]);
+  } else {
+    logger.warn("scheduler", reason, { eventLink: args.eventLink });
+  }
+  // The serving drain's terminal arms (events.md §5): `dropped` — no
+  // runnable handler, the drain writes the dropped-event notice as the
+  // event's consequence and advances the stream past it (non-wedging);
+  // `deferred` — the handler was UNREACHABLE (a cold-view load, or a
+  // required replica load that failed at the dispatch preflight's
+  // park), no consequence is written and a later wave re-drains the
+  // entry. `cause` tells the two deferrals apart for the drain's retry
+  // budget (see ServedEventDispatch.onFailure).
+  const outcome: ServedEventFailureOutcome = options.servedOutcome ??
+    (servedKind === "dropped"
+      ? { kind: "dropped", message: reason }
+      : { kind: "deferred", message: reason });
+  reportServedEventFailure(args.served, outcome);
   if (!args.onCommit) return;
   const tx = state.runtime.edit();
   tx.abort(new Error(reason));
@@ -166,7 +261,16 @@ export function dropQueuedEvent(
     & Partial<Pick<SchedulerEventQueueState, "releaseLineageEvent">>,
   event: QueuedEvent,
   reason: string,
+  servedKind: "dropped" | "deferred" = "dropped",
+  options: {
+    quiet?: boolean;
+    servedOutcome?: ServedEventFailureOutcome;
+  } = {},
 ): void {
+  if (event.cancelPending !== undefined) {
+    event.cancelPending(reason);
+    return;
+  }
   const loadControl = event.handlerLoadControl;
   delete event.handlerLoadControl;
   loadControl?.abortLoad(reason);
@@ -177,7 +281,61 @@ export function dropQueuedEvent(
   }
   if (event.finalOutcomeNotified) return;
   event.finalOutcomeNotified = true;
-  notifyEventDropped(state, event, reason);
+  notifyEventDropped(state, event, reason, servedKind, options);
+}
+
+/**
+ * events.md §2's per-space ARRIVAL-ORDER BARRIER, carried by a deferral
+ * (the in-queue sweep `failHeadEventLoadPark` performs in facade.ts,
+ * shared here by the deferral arms that live in this module — the
+ * handler-not-run withdrawal and the piece-start deferral): when a
+ * served event DEFERS — its durable entry left pending for a later
+ * drain — every later-arrived durable served entry queued behind it in
+ * the SAME SPACE defers with it, or a later arrival's consequence lands
+ * ahead of an earlier one (the b01 register class, re-demonstrated on
+ * the handler-not-run withdrawal as review-6459 F1: the drain queues a
+ * pass's pending entries together, so a healthy follower dispatches —
+ * and SEALS — right behind the deferred head). The exclusions mirror
+ * the load-park arm's, deliberately: cross-space queue neighbours
+ * (§2's order is per-space) and LT1 in-process copies (`served` with
+ * no `streamEntry`) — a running event's same-wave cascade children,
+ * not later arrivals. The enqueueSeq guard scopes the sweep to LATER
+ * arrivals, which the facade arm gets implicitly (its failing event is
+ * the un-dispatched queue head, so everything queued is later): these
+ * arms run after the deferring event left the queue (dispatch) or off
+ * the head slot (piece load), and an earlier event requeued by a
+ * concurrent commit verdict must not be barred behind an event that
+ * arrived after it. Sweeping is order-safe by construction — a swept
+ * entry re-drains in arrival order on a later pass — so a spurious
+ * sweep costs one deferral round, never disorder.
+ */
+export function deferLaterSameSpaceServedEvents(
+  state:
+    & Pick<SchedulerEventQueueState, "runtime" | "eventQueue">
+    & Partial<Pick<SchedulerEventQueueState, "releaseLineageEvent">>,
+  behind: Pick<QueuedEvent, "id" | "eventLink" | "enqueueSeq">,
+  deferralReason: string,
+): void {
+  for (const later of [...state.eventQueue]) {
+    if (later.eventLink.space !== behind.eventLink.space) continue;
+    if (later.served?.streamEntry === undefined) continue;
+    if (later.enqueueSeq <= behind.enqueueSeq) continue;
+    dropQueuedEvent(
+      state,
+      later,
+      `Event deferred: held behind ${behind.id}, ${deferralReason}; ` +
+        `later-arrived events wait behind it`,
+      "deferred",
+      {
+        quiet: true,
+        servedOutcome: {
+          kind: "deferred",
+          cause: "arrival-barrier",
+          blockedBy: behind.id,
+        },
+      },
+    );
+  }
 }
 
 function findEventHandler(
@@ -190,21 +348,48 @@ function findEventHandler(
   );
 }
 
+// Source of QueuedEvent.enqueueSeq stamps. Process-global monotonicity is a
+// superset of the per-queue monotonicity the ordered requeue insert needs.
+let nextEnqueueSeq = 1;
+
+/**
+ * Returns a retried event to its original dispatch slot: before the first
+ * queued event with a later enqueue stamp. A plain unshift is only order-
+ * preserving while a single (head) event is in failure at a time; with
+ * commits not awaited, several in-flight events can be rejected together,
+ * and unshifting each as its verdict arrives would make the LAST-rejected
+ * event the new head regardless of send order.
+ */
+function insertInEnqueueOrder(
+  queue: QueuedEvent[],
+  event: QueuedEvent,
+): void {
+  let index = 0;
+  while (index < queue.length && queue[index].enqueueSeq < event.enqueueSeq) {
+    index++;
+  }
+  queue.splice(index, 0, event);
+}
+
 function readyQueuedEvent(args: {
   readonly id: string;
-  readonly sequence: number;
   readonly eventLink: NormalizedFullLink;
   readonly event: unknown;
   readonly registration: EventHandlerRegistration;
   readonly retries: boolean;
   readonly onCommit?: QueuedEvent["onCommit"];
+  readonly eventId?: string;
   readonly originTx?: IExtendedStorageTransaction;
   readonly time?: number;
+  readonly runtimeInjectedEventKeys?: readonly string[];
+  readonly served?: QueuedEvent["served"];
+  readonly parentEventId?: string;
 }): QueuedEvent {
   return {
     id: args.id,
+    ...(args.eventId !== undefined ? { callerSuppliedId: true } : {}),
+    enqueueSeq: nextEnqueueSeq++,
     time: args.time,
-    sequence: args.sequence,
     originTx: args.originTx,
     eventLink: args.eventLink,
     action: (tx) => args.registration.handler(tx, args.event),
@@ -212,8 +397,11 @@ function readyQueuedEvent(args: {
     handlerRegistration: args.registration,
     handlerGeneration: args.registration.generation,
     event: args.event,
+    runtimeInjectedEventKeys: args.runtimeInjectedEventKeys,
     retry: args.retries,
     onCommit: args.onCommit,
+    served: args.served,
+    parentEventId: args.parentEventId,
   };
 }
 
@@ -283,12 +471,14 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly eventId?: string;
   readonly originTx?: IExtendedStorageTransaction;
   readonly time?: number;
+  readonly runtimeInjectedEventKeys?: readonly string[];
+  readonly served?: QueuedEvent["served"];
+  readonly parentEventId?: string;
 }): void {
   // `eventId` here is an already-durable delivery id, used verbatim — an
   // ingress caller's opaque idempotency key is bound to its stream earlier,
   // at the send surface (cell.ts), via scopeCallerEventId.
   const id = args.eventId ?? mintEventId(args.eventLink, args.originTx);
-  const sequence = state.nextEventSequence();
   const registration = findEventHandler(state.eventHandlers, args.eventLink);
 
   if (registration) {
@@ -297,26 +487,79 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     // collapse the newest into the last pending entry (last-wins) instead of
     // growing the backlog, so a pattern cannot observe an unbounded post-block
     // event count.
+    //
+    // Caller-supplied durable ids are excluded from that merge in BOTH
+    // directions. The handling's receipt address derives from the delivery id
+    // (spec §7.6), so collapsing such an event away would leave its receipt
+    // address never written — a later same-pair retry would find no receipt
+    // and re-execute instead of deduplicating — and rewriting a queued
+    // caller-id entry's payload would durably record a result its owner never
+    // sent. At the cap a caller-id send coalesces onto an already-queued entry
+    // with the SAME delivery id (the same invocation; first payload wins,
+    // matching the create-only receipt arbitration the pair gets after
+    // dispatch) and is otherwise refused loudly before dispatch.
     if (
       // The matching (stream, handler) count can only reach the cap once the
       // whole queue is at it, so this O(queue) scan runs only after a backlog
       // has already formed — ordinary enqueue stays O(1).
-      state.eventQueue.length >= MAX_EVENT_BACKLOG_PER_STREAM
+      state.eventQueue.length >= MAX_EVENT_BACKLOG_PER_STREAM &&
+      // Events-down (server-execution v2 Phase 3; events.md §2): the
+      // last-wins collapse would DESTROY durable intent ids — the root
+      // fire's committed append id, a cascade id bound for
+      // `consequenceOf` — so under the flag collapse is DISABLED and
+      // backpressure is shaped at the binding layer instead (README
+      // §3.8; ledger L8 records the collapse-but-list alternative).
+      state.runtime.experimental.serverExecution !== true
     ) {
       let pending = 0;
       let lastSameOrigin: QueuedEvent | undefined;
+      let sameDeliveryId: QueuedEvent | undefined;
       for (const q of state.eventQueue) {
         if (
           q.handlerRegistration === registration &&
           areNormalizedLinksSame(q.eventLink, args.eventLink)
         ) {
           pending++;
+          if (args.eventId !== undefined && q.id === id) sameDeliveryId = q;
           // Collapse only within the same origin transaction. Coalescing an
           // event from a different origin would misattribute speculation
           // lineage: the surviving entry keeps its original originTx, so the
-          // single dispatch-time release would key off the wrong origin.
-          if (q.originTx === args.originTx) lastSameOrigin = q;
+          // single dispatch-time release would key off the wrong origin. A
+          // caller-id entry is never the survivor either — last-wins would
+          // rewrite the payload its receipt is about to witness.
+          if (q.originTx === args.originTx && q.callerSuppliedId !== true) {
+            lastSameOrigin = q;
+          }
         }
+      }
+      if (
+        pending >= MAX_EVENT_BACKLOG_PER_STREAM && args.eventId !== undefined
+      ) {
+        if (
+          sameDeliveryId !== undefined &&
+          sameDeliveryId.originTx === args.originTx
+        ) {
+          // The same invocation is already pending: ride it rather than refuse
+          // it. First payload wins — after dispatch, a differing retry payload
+          // would lose the create-only receipt race and read the original back
+          // anyway — and both senders settle on that one outcome.
+          sameDeliveryId.onCommit = chainOnCommit(
+            sameDeliveryId.onCommit,
+            args.onCommit,
+          );
+          state.queueExecution();
+          return;
+        }
+        notifyEventDropped(
+          state,
+          args,
+          `Event backlog for this stream is full ` +
+            `(${MAX_EVENT_BACKLOG_PER_STREAM} pending), so this send was ` +
+            `refused before dispatch: nothing executed, no receipt was ` +
+            `created, and the same invocation id is safe to send again once ` +
+            `the backlog drains.`,
+        );
+        return;
       }
       if (
         pending >= MAX_EVENT_BACKLOG_PER_STREAM &&
@@ -327,7 +570,11 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
         // into a log-flood amplifier; any telemetry added later must be
         // rate-limited.
         lastSameOrigin.event = args.event;
-        lastSameOrigin.action = (tx) => registration.handler(tx, args.event);
+        lastSameOrigin.action = (tx) =>
+          registration.handler(tx, args.event);
+        // Last-wins takes the newest event's injection provenance with its
+        // payload — the marker must describe the payload that dispatches.
+        lastSameOrigin.runtimeInjectedEventKeys = args.runtimeInjectedEventKeys;
         // Last-wins takes the newest event's time too, so the dispatched
         // handler's clock reflects the event it actually runs. For a same-origin
         // handler flood every collapsed event already shares one frozen instant,
@@ -350,7 +597,6 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     const queuedEvent = readyQueuedEvent({
       ...args,
       id,
-      sequence,
       registration,
     });
     state.eventQueue.push(queuedEvent);
@@ -379,7 +625,6 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     const queuedEvent = readyQueuedEvent({
       ...args,
       id,
-      sequence,
       registration: unavailableRegistration,
     });
     queuedEvent.handlerLoadPending = true;
@@ -387,8 +632,8 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     const loadAbort = new AbortController();
     const loadControl = {
       releaseSchedulerWait: () => loadWaitReleased.resolve(),
-      abortLoad: (reason: string) => {
-        loadAbort.abort(new Error(reason));
+      abortLoad: (_reason: string) => {
+        loadAbort.abort();
         loadWaitReleased.resolve();
       },
     };
@@ -402,15 +647,15 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     const startTask = (async () => {
       try {
         const loadOutcome = await Promise.race([
-          (state.loadPieceForEvent ?? ensurePieceRunning)(
+          (state.loadPieceForEvent ?? ensurePieceRunningVerdict)(
             state.runtime,
             args.eventLink,
-            loadAbort.signal,
-          ).then((started) => ({ kind: "loaded" as const, started })),
+            { signal: loadAbort.signal },
+          ).then((verdict) => ({ kind: "loaded" as const, verdict })),
           loadWaitReleased.promise.then(() => ({ kind: "released" as const })),
         ]);
         if (loadOutcome.kind === "released") return;
-        const { started } = loadOutcome;
+        const { verdict } = loadOutcome;
         // The origin may have failed while the piece was loading.
         if (
           queuedEvent.finalOutcomeNotified ||
@@ -423,21 +668,80 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
         );
         if (loadedHandler) {
           hydrateLoadPendingEvent(queuedEvent, loadedHandler);
-        } else if (!started) {
+        } else if (
+          verdict.started && verdict.graphIsInstalled?.() !== false
+        ) {
+          // The piece is running with its pattern graph installed and
+          // registered NOTHING for this stream — events.md §5's drop
+          // predicate ("no runnable handler"). A verdict carrying no
+          // graph probe reads as installed: only a start walk mints
+          // one, and its absence says nothing about the piece.
           dropQueuedEvent(
             state,
             queuedEvent,
-            `Event dropped: no handler registered for ${args.eventLink.id} and its piece could not be started`,
+            `Event dropped: no handler registered for ${args.eventLink.id} after starting its piece`,
           );
+        } else {
+          // Either the piece could not be STARTED, or it has no
+          // pattern graph installed: a refused instantiation commit
+          // retires the graph the start walk installed, and the runner
+          // then either re-instantiates once from a caught-up view or
+          // retires the registration with it. The walk ran before any
+          // of that, so `started` reports a piece that has nothing
+          // registered for any of its streams. Neither shape is the
+          // drop predicate — the handler is missing because the commit
+          // was raced, not because there is none, and events.md §5
+          // calls for a requeue there. For a served (drained) event
+          // that is a deferral: the durable entry stays pending and a
+          // later wave re-drains it, under the serving loop's bounded
+          // deferral budget — a condition that outlasts the budget
+          // hardens into §5's drop notice rather than wedging the
+          // stream. Client-side the distinction is moot (no durable
+          // entry to re-drain) and the drop keeps its existing shape.
+          const pieceState = verdict.started
+            ? "has no pattern graph installed"
+            : "could not be started";
+          dropQueuedEvent(
+            state,
+            queuedEvent,
+            `Event dropped: no handler registered for ${args.eventLink.id} and its piece ${pieceState}`,
+            queuedEvent.served !== undefined ? "deferred" : "dropped",
+          );
+          if (queuedEvent.served !== undefined) {
+            // A deferral carries the drain's arrival-order barrier
+            // (events.md §2; review-6459 F1's sibling arm), exactly as
+            // the handler-not-run withdrawal and the facade's load-park
+            // arm do.
+            deferLaterSameSpaceServedEvents(
+              state,
+              queuedEvent,
+              `whose piece ${pieceState}`,
+            );
+          }
         }
       } catch (error) {
+        // Unlike the arms above, this one is reachable with the event
+        // ALREADY SETTLED: the finalOutcomeNotified/queue-membership
+        // recheck runs after the load await resolves, and a rejection
+        // never crosses it. A settled head holds no barrier — its
+        // disposition was someone else's (e.g. a lineage drop mid-load).
+        const alreadySettled = queuedEvent.finalOutcomeNotified === true;
         dropQueuedEvent(
           state,
           queuedEvent,
           `Event dropped: starting the piece for ${args.eventLink.id} failed: ${
             error instanceof Error ? error.message : String(error)
           }`,
+          queuedEvent.served !== undefined ? "deferred" : "dropped",
         );
+        if (!alreadySettled && queuedEvent.served !== undefined) {
+          // Same deferral disposition as the arm above — same barrier.
+          deferLaterSameSpaceServedEvents(
+            state,
+            queuedEvent,
+            "whose piece failed to start",
+          );
+        }
       } finally {
         if (queuedEvent.handlerLoadControl === loadControl) {
           delete queuedEvent.handlerLoadControl;
@@ -606,6 +910,16 @@ export interface SchedulerEventExecutionState {
     deps: ReactivityLog,
     invalidDeps: Set<Action>,
   ) => boolean;
+
+  /** The transient-demander preflight (fan-out stage B, review F2):
+   * re-arm the fanned-out nodes in a served handler's closure whose
+   * instance for the actor is not current. Undefined off the serving
+   * posture. */
+  readonly rearmNotCurrentFanOutForActor?: (
+    deps: ReactivityLog,
+    actor: ScopeKeyIdentity,
+  ) => Action[];
+
   readonly setEventPassDemandRefresh: (
     refresh: ((demand: Set<Action>) => void) | undefined,
   ) => void;
@@ -649,6 +963,18 @@ export function preflightQueuedEventDependencies(state: {
     deps: ReactivityLog,
     invalidDeps: Set<Action>,
   ) => boolean;
+
+  /** The transient-demander preflight (server-execution v2 fan-out
+   * stage B, review F2): re-arm the fanned-out nodes in a served
+   * handler's closure whose instance for the ACTOR is not current, so
+   * the actor's own per-user derivation is materialized before the
+   * handler reads it. Returns the re-armed nodes (the event waits on
+   * them). Undefined off the serving posture. */
+  readonly rearmNotCurrentFanOutForActor?: (
+    deps: ReactivityLog,
+    actor: ScopeKeyIdentity,
+  ) => Action[];
+
   readonly collectPendingLoadParkKeys: (
     event: QueuedEvent,
     deps: ReactivityLog,
@@ -679,6 +1005,21 @@ export function preflightQueuedEventDependencies(state: {
   // Get the handler's dependencies (read-only, just capturing what will be read)
   const depTx = state.runtime.edit();
   depTx.setReadOnly?.("scheduler.populateDependencies()");
+  // A SERVED event's dependency probe reads AS the event's server-stamped
+  // actor (server-execution v2 stage A — OW17's tx→replica identity seam,
+  // LD1): the handler run will read that actor's instances of every
+  // scoped input, so the probe must name the SAME instances — its absent
+  // reads then kick instance-named loads, and the pending-load park below
+  // holds the head event on exactly those loads (an at-most-once handler
+  // must not run against the service instance's empty draft — the R7
+  // wall). Absent on every client-side event, byte-identical there.
+  const firedAt = queuedEvent.served?.firedAt;
+  if (firedAt?.user !== undefined) {
+    depTx.tx.scopeKeyIdentity = {
+      principal: firedAt.user,
+      sessionId: firedAt.session === "server" ? undefined : firedAt.session,
+    } as never;
+  }
   let stepStart = performance.now();
   logger.timeStart(
     "scheduler",
@@ -810,6 +1151,51 @@ export function preflightQueuedEventDependencies(state: {
     scheduleMs = performance.now() - stepStart;
   }
 
+  // The transient-demander preflight (server-execution v2 fan-out stage B,
+  // design §B5's motivating case; independent review F2). A SERVED event's
+  // actor whose handler reads a per-user DERIVATION she does not watch has
+  // no instance of that node — the node is node-level CLEAN (it ran for
+  // the watchers), so the invalid-upstream pass above found nothing, and
+  // the handler would read the actor's MISSING instance (its argument
+  // fails the schema and the run is skipped — which, until the
+  // mark/effects-atomicity fix below in `finalize`, sealed the entry
+  // consequenced with no error: silent event loss. The finalize now
+  // withdraws a skipped served dispatch, so the residual cost of a miss
+  // here is a deferral-and-re-drain cycle, not a lost event — this
+  // preflight remains what makes the FIRST delivery succeed). B7 made
+  // cleanliness
+  // per instance: re-arm the fanned-out nodes in the handler's closure
+  // whose instance for THIS actor is not current, materializing her own
+  // instance (as her transient demand) before the handler runs. The
+  // handler then reads a current instance instead of losing its event.
+  // Runs even when the node-level pass already skipped (a dirty input can
+  // coexist with a never-run actor instance — the review's dirty-input
+  // variant); the two schedule the same node, and the fan-out loop runs
+  // both the dirty watcher instance and the actor's uncomputed one. Off
+  // the serving posture `rearmNotCurrentFanOutForActor` is undefined and
+  // this is inert.
+  const actorFiredAt = queuedEvent.served?.firedAt;
+  if (
+    !shouldSkipEvent && actorFiredAt?.user !== undefined &&
+    state.rearmNotCurrentFanOutForActor !== undefined
+  ) {
+    const actor: ScopeKeyIdentity = {
+      principal: actorFiredAt.user,
+      ...(actorFiredAt.session !== undefined &&
+          actorFiredAt.session !== "server"
+        ? { sessionId: actorFiredAt.session as never }
+        : {}),
+    };
+    const rearmed = state.rearmNotCurrentFanOutForActor(deps, actor);
+    if (rearmed.length > 0) {
+      for (const dep of rearmed) {
+        state.pendingActions.add(dep);
+        state.eventBlockingDeps.add(dep);
+      }
+      shouldSkipEvent = true;
+    }
+  }
+
   // Replica-staleness gate (CT-1795): with no invalid upstream left, an
   // address the closure depends on may still have a load in flight — the
   // wish shape, where a computation settles CLEAN on a provisional value
@@ -916,6 +1302,11 @@ export async function processPullQueuedEventDuringExecute(
           deps,
           invalidDeps,
         ),
+      ...(state.rearmNotCurrentFanOutForActor !== undefined
+        ? {
+          rearmNotCurrentFanOutForActor: state.rearmNotCurrentFanOutForActor,
+        }
+        : {}),
       collectPendingLoadParkKeys: (event, deps) =>
         state.collectPendingLoadParkKeys(event, deps),
       parkHeadEventForLoads: (event, keys) =>
@@ -1042,7 +1433,21 @@ export async function dispatchQueuedEvent(state: {
   // surface as the handler's own read failure, not silently drop the event.
   if (typeof handler.presyncInputs === "function") {
     try {
-      await handler.presyncInputs(eventValue);
+      // A served event's presync loads the event actor's instances (stage
+      // A — see EventHandler.presyncInputs); a client-side event passes
+      // nothing, byte-identical to before.
+      const firedAt = queuedEvent.served?.firedAt;
+      await handler.presyncInputs(
+        eventValue,
+        firedAt?.user !== undefined
+          ? {
+            principal: firedAt.user,
+            sessionId: firedAt.session === "server"
+              ? undefined
+              : firedAt.session,
+          } as never
+          : undefined,
+      );
     } catch (error) {
       logger.warn(
         "scheduler",
@@ -1068,8 +1473,99 @@ export async function dispatchQueuedEvent(state: {
   const tx = state.runtime.edit();
   tx.dispatchedEventId = queuedEvent.id;
   tx.dispatchedEventTime = queuedEvent.time;
+  tx.dispatchedRuntimeInjectedEventKeys = queuedEvent.runtimeInjectedEventKeys;
   tx.tx.immediate = true;
   tx.tx.sourceAction = action;
+  // Server-execution v2 stage F (serving-loop.md §3d): the event-dispatch
+  // choke point — a serving runtime's installed stamper attaches the wave
+  // run context (kind event-handler, the durable event id) before the
+  // handler runs. A no-op everywhere else. The action identity is the
+  // HANDLER's durable id (`handlerId`, computed above): the queued
+  // `action` is a per-event wrapper closure, and stamping IT hands the
+  // basis index a non-durable identity — the wrapper's inferred name
+  // collapses every handler onto one constant id (rows overwrite across
+  // handlers), while the requeue paths' anonymous wrappers split rows
+  // per event; scheduler_basis requires "durable ... restart-stable"
+  // (serving-loop.md §3b).
+  const served = queuedEvent.served;
+  //
+  // Stage P2-F — the LT6 inheritance rule (events.md §2, RULED
+  // 2026-08-03: "an event emitted by ANY run carries that run's acting
+  // identity — events run as the session they originated from"): a
+  // server-side event whose ORIGIN transaction ran under a stamped
+  // per-run identity hands that identity to the handler run, so a
+  // cascade rooted in a demanded (user, session) derivation preserves
+  // the acting pair hop by hop instead of blanking to the userless
+  // service fallback. Off the serving posture `waveRunContextOf` finds
+  // no stamp and this is inert. Phase 3's events carry the
+  // server-stamped `firedAt` through their own carriage (`served`,
+  // below), and that explicit carriage WINS where it speaks: a drained
+  // entry's stamp is the event's own durable actor, while the origin
+  // inheritance covers the in-process queueEvent shapes that carry no
+  // served stamp.
+  const originContext = queuedEvent.originTx !== undefined
+    ? waveRunContextOf(queuedEvent.originTx)
+    : undefined;
+  state.runtime.stampServerRun(tx, {
+    actionId: handlerId,
+    kind: "event-handler",
+    eventId: queuedEvent.id,
+    // The same-wave cascade's fold key (C8d; review 2026-08-11 M2):
+    // the emitter's own eventId, threaded from the emission's
+    // dispatch carriage so the wave can roll a cascade child back
+    // with its requeued parent. The client-echo thread
+    // (QueuedEvent.parentEventId, independent review M1) carries the
+    // same fact on a flag-ON client's speculative cascade, where the
+    // navigate capture derives its ATTEMPT-MINTED tag from it
+    // (navigate-context.ts) — the speculation stamp is never a wave
+    // context, so the fold semantics stay server-only.
+    ...((served?.parentEventId ?? queuedEvent.parentEventId) !== undefined
+      ? {
+        parentEventId: served?.parentEventId ?? queuedEvent.parentEventId,
+      }
+      : {}),
+    ...(served?.firedAt !== undefined
+      ? {
+        // LD1 (protocol.md §2, scopes.md §5): the handler runs AS the
+        // event's server-stamped actor — its scoped reads and writes
+        // resolve against the acting identity, and the attribution
+        // annotations carry it. A run with NO acting user carries no
+        // attribution at all (protocol.md §1); a sessionless chain
+        // supplies no session component, so a session-scoped write
+        // fails closed in resolveScopeKey (events.md §2's
+        // sessionless-actor error).
+        ...(served.firedAt.user !== undefined
+          ? {
+            acting: {
+              user: served.firedAt.user,
+              ...(served.firedAt.session !== undefined &&
+                  served.firedAt.session !== "server"
+                ? { session: served.firedAt.session }
+                : {}),
+            },
+          }
+          : {}),
+        scopeKeyIdentity: {
+          principal: served.firedAt.user,
+          sessionId: served.firedAt.session === "server"
+            ? undefined
+            : served.firedAt.session,
+        } as never,
+      }
+      : originContext?.scopeKeyIdentity !== undefined
+      ? { scopeKeyIdentity: originContext.scopeKeyIdentity }
+      : {}),
+    ...(originContext?.actionScopeKey !== undefined
+      ? { actionScopeKey: originContext.actionScopeKey }
+      : {}),
+    ...(served?.streamEntry !== undefined
+      ? { streamEntry: served.streamEntry }
+      : {}),
+    // The LT1 in-process copy's appending-wave identity (stage C build
+    // W3, (α)): the emitter's transaction, resolved by the SpaceServer's
+    // stamper to the wave that carries this event's durable entry.
+    ...(served?.lt1 !== undefined ? { lt1: served.lt1 } : {}),
+  });
   if (queuedEvent.originTx !== undefined) {
     const originLocalSeq = state.getOriginLocalSeq(
       queuedEvent.originTx,
@@ -1078,7 +1574,14 @@ export async function dispatchQueuedEvent(state: {
     if (
       originLocalSeq !== undefined &&
       state.lineageStatus(queuedEvent.originTx) === "pending" &&
-      state.runtime.experimental.commitPreconditions === true
+      state.runtime.experimental.commitPreconditions === true &&
+      // Events-down (runtime-mapping N26): the receipt/precondition
+      // exactly-once machinery is SUBSUMED by the stream's
+      // `eventWatermark` (events.md §4) and the two mechanisms MUST NOT
+      // be active for the same event. Under the flag the handler run is
+      // a diverted echo (client) or a wave-sealed run (server) — its
+      // tx never carries wire preconditions.
+      state.runtime.experimental.serverExecution !== true
     ) {
       tx.addCommitPrecondition?.(queuedEvent.eventLink.space, {
         kind: "origin-committed",
@@ -1102,10 +1605,22 @@ export async function dispatchQueuedEvent(state: {
   // origin run.
   const requeueForNameResolution = () => {
     if (!isQueuedEventRegistrationCurrent(queuedEvent)) return;
+    // A served name-resolution retry re-enters this scheduler settle. If it
+    // runs before the flush deadline, the installed destination seals its
+    // warmed-cache run into the current wave; a cut instead leaves the
+    // existing LT1-purge/durable-drain cadence in charge. The retry keeps the
+    // served carriage: acting identity, stream-entry consequence mark, LT1
+    // ownership, and failure hook. This does not opt the event into commit
+    // retries; `retry` remains false and a failed commit still belongs to the
+    // wave/drain cadence.
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
+      // The flag rides every requeue with the id it describes: dropping it
+      // would let a later same-origin send select this entry as a collapse
+      // survivor and rewrite the payload its receipt is about to witness.
+      callerSuppliedId: queuedEvent.callerSuppliedId,
+      enqueueSeq: queuedEvent.enqueueSeq,
       time: queuedEvent.time,
-      sequence: queuedEvent.sequence,
       originTx: queuedEvent.originTx,
       action,
       eventLink: queuedEvent.eventLink,
@@ -1113,10 +1628,14 @@ export async function dispatchQueuedEvent(state: {
       handlerRegistration: queuedEvent.handlerRegistration,
       handlerGeneration: queuedEvent.handlerGeneration,
       event: eventValue,
+      runtimeInjectedEventKeys: queuedEvent.runtimeInjectedEventKeys,
       retry,
       onCommit,
+      ...(queuedEvent.served !== undefined
+        ? { served: queuedEvent.served }
+        : {}),
     };
-    state.eventQueue.unshift(requeued);
+    insertInEnqueueOrder(state.eventQueue, requeued);
     if (requeued.originTx !== undefined) {
       state.recordLineageEvent(requeued.originTx, requeued);
     }
@@ -1134,14 +1653,7 @@ export async function dispatchQueuedEvent(state: {
       ...queuedEvent,
       notBefore: undefined,
     };
-    const insertionIndex = state.eventQueue.findIndex((candidate) =>
-      candidate.sequence > requeued.sequence
-    );
-    if (insertionIndex === -1) {
-      state.eventQueue.push(requeued);
-    } else {
-      state.eventQueue.splice(insertionIndex, 0, requeued);
-    }
+    insertInEnqueueOrder(state.eventQueue, requeued);
     if (requeued.originTx !== undefined) {
       state.recordLineageEvent(requeued.originTx, requeued);
     }
@@ -1161,10 +1673,26 @@ export async function dispatchQueuedEvent(state: {
     runAt: number,
   ) => {
     if (!isQueuedEventRegistrationCurrent(queuedEvent)) return;
+    // Same served-absence assert as the name-resolution requeue above:
+    // served copies queue with retries: false, so a stale-basis failure
+    // classifies give-up "opt-out" and never reaches the backoff window —
+    // the wave is a served copy's retry cadence. A served entry rebuilt
+    // here would silently shed the acting identity and the failure hook;
+    // served retry semantics are undecided, so fail loudly instead.
+    if (queuedEvent.served !== undefined) {
+      throw new Error(
+        "requeueForBackoff reached with a served event; served retry " +
+          "semantics are undecided (see the comment at this assert)",
+      );
+    }
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
+      // Same as the name-resolution requeue above: the flag travels with the
+      // id, or the collapse-survivor exclusion silently ends at the first
+      // retry.
+      callerSuppliedId: queuedEvent.callerSuppliedId,
+      enqueueSeq: queuedEvent.enqueueSeq,
       time: queuedEvent.time,
-      sequence: queuedEvent.sequence,
       originTx: queuedEvent.originTx,
       action,
       eventLink: queuedEvent.eventLink,
@@ -1172,13 +1700,14 @@ export async function dispatchQueuedEvent(state: {
       handlerRegistration: queuedEvent.handlerRegistration,
       handlerGeneration: queuedEvent.handlerGeneration,
       event: eventValue,
+      runtimeInjectedEventKeys: queuedEvent.runtimeInjectedEventKeys,
       retry,
       onCommit,
       retryAttempts: attempts,
       retryDeadline: deadline,
       notBefore: runAt,
     };
-    state.eventQueue.unshift(requeued);
+    insertInEnqueueOrder(state.eventQueue, requeued);
     if (requeued.originTx !== undefined) {
       state.recordLineageEvent(requeued.originTx, requeued);
     }
@@ -1249,11 +1778,28 @@ export async function dispatchQueuedEvent(state: {
         cancelParkedReadiness,
       );
       if (queuedEvent.originTx !== undefined) {
-        state.recordLineageEvent(queuedEvent.originTx, queuedEvent);
-        if (state.lineageStatus(queuedEvent.originTx) === "failed") {
+        const originTx = queuedEvent.originTx;
+        state.recordLineageEvent(originTx, queuedEvent);
+        const originStatus = originTx.status().status;
+        if (
+          state.lineageStatus(originTx) === "failed" ||
+          originStatus === "error"
+        ) {
           cancelParkedReadiness(
             "Event readiness canceled after its speculative origin failed",
           );
+        } else if (originStatus === "ready" || originStatus === "pending") {
+          // The event left the FIFO before its handler disclosed that it had
+          // to park. Observe the origin directly as well as through lineage:
+          // an in-flight origin can fail in the interval between that dequeue
+          // and this re-registration, after lineage has released its record.
+          originTx.addVerdictCallback((_settledTx, result) => {
+            if (result.error) {
+              cancelParkedReadiness(
+                "Event readiness canceled after its speculative origin failed",
+              );
+            }
+          });
         }
       }
       error.readiness.then(
@@ -1295,10 +1841,12 @@ export async function dispatchQueuedEvent(state: {
       if (tx.status().status === "ready") {
         tx.abort(error);
       }
-      if (retry) {
+      if (retry || served !== undefined) {
         requeueForNameResolution();
       } else {
-        // retries: false is a one-shot; it does not re-run to resolve names.
+        // An unserved retries:false event is a one-shot; it does not re-run to
+        // resolve names. Served events take the same-wave arm above because
+        // the server, not a later client speculation, owns their result.
         logger.warn(
           "scheduler",
           "Event handler needed inSpace-name resolution but opted out of " +
@@ -1306,22 +1854,80 @@ export async function dispatchQueuedEvent(state: {
           { handlerId },
         );
         runFinalCommitCallback();
+        tx.abandonStagedWork(eventAbandonError("retry opted out"));
       }
       return;
     }
 
     if (error) {
+      const handlerError = error instanceof Error
+        ? error
+        : new Error(String(error));
       try {
-        state.handleError(error as Error, action);
+        state.handleError(handlerError, action);
       } finally {
         if (tx.status().status === "ready") {
-          tx.abort(error);
+          tx.abort(handlerError);
         }
+        // The serving drain's ERROR arm (events.md §5): the handler
+        // threw server-side — the error IS the consequence. The
+        // handler tx (with its consequenced mark) aborted above; the
+        // drain seals the error consequence in its own transaction.
+        reportServedEventFailure(served, {
+          kind: "error",
+          message: handlerError.message,
+        });
         // A throwing handler is a final outcome for this event — settle the
         // commit callback (with the aborted tx) instead of leaving callers
         // that await it hanging.
         runFinalCommitCallback();
+        tx.abandonStagedWork(eventAbandonError("handler threw"));
       }
+      return;
+    }
+
+    // Mark/effects atomicity (events.md §4, RULED 2026-08-27 — the a04
+    // write-side member): a SERVED dispatch whose handler body DID NOT
+    // RUN must not seal. The dispatch stamper wrote the entry's
+    // `consequenced` mark into this tx BEFORE the body ran
+    // (space-server.ts), so sealing the skipped run would commit a 1-op
+    // mark-only consequence — the entry permanently consumed with zero
+    // effects and no error (a04's seqs 53/56: two Create clicks lost to
+    // a transient argument-resolution failure). Withdraw the whole tx
+    // instead: the entry stays pending-unconsequenced, the drain
+    // re-delivers it (a drain copy's plain-deferral arm releases the
+    // in-flight guard and arms the rescan; the 8-deferral threshold
+    // hardens a permanently unresolvable argument into the visible §5
+    // DROP notice), and the retried handler's cause-derived idempotent
+    // writes converge. An LT1 in-process copy carries no onFailure —
+    // its abort alone leaves the durable entry unmarked and the next
+    // wave's drain delivers it once, WITH a streamEntry (C8b).
+    // Client/OFF dispatches carry no mark and keep the silent skip.
+    if (served !== undefined && tx.dispatchedHandlerNotRun !== undefined) {
+      const reason = tx.dispatchedHandlerNotRun.reason;
+      if (tx.status().status === "ready") {
+        tx.abort(
+          new Error(`served handler did not run: ${reason}`),
+        );
+      }
+      reportServedEventFailure(served, {
+        kind: "deferred",
+        cause: "handler-not-run",
+        message: reason,
+      });
+      // The withdrawal is a deferral, and a deferral carries the
+      // drain's arrival-order BARRIER (events.md §2; review-6459 F1):
+      // the drain queues a pass's pending entries together, so
+      // same-space followers already sit behind this head and would
+      // dispatch — and SEAL — next, landing a later arrival's
+      // consequence ahead of the withdrawn entry's re-drain (the b01
+      // overtake: durable log ["B","A"] against arrival [a1, b1]).
+      deferLaterSameSpaceServedEvents(
+        state,
+        queuedEvent,
+        `whose served handler did not run (${reason})`,
+      );
+      runFinalCommitCallback();
       return;
     }
 
@@ -1340,47 +1946,150 @@ export async function dispatchQueuedEvent(state: {
     // commit() registers itself with the storage manager's pending-commit
     // barrier, which the client-facing idle (Scheduler.idleWithPendingCommits)
     // waits on without blocking the scheduler loop here.
-    tx.commit().then((result) => {
-      const permanentRejection =
-        result.error && isPermanentRejection(result.error)
-          ? (result.error as IPreconditionFailedError).precondition
-          : undefined;
+    const handleCommitResult = (error: EventCommitError | undefined): void => {
+      if (
+        served !== undefined && error !== undefined &&
+        isLt1LateSealRefusal(error)
+      ) {
+        // The serving loop REFUSED this LT1 in-process copy's seal
+        // because it completed outside its appending wave (stage C
+        // build W3, (α); events.md §4's one-entry-one-completed-run
+        // sentence): the invariant working, not a failed commit — the
+        // durable entry is the truth and the drain delivers it with a
+        // streamEntry. Settle the copy quietly (no retry, no warn; the
+        // SpaceServer counted it — `events.lt1LateSealsRefused`). This
+        // early return also SKIPS the `scheduler.event.commit` telemetry
+        // submit below for the refused copy (deliberate: the copy is
+        // not a commit outcome; the drain's copy of the same entry
+        // reports its own).
+        logger.debug("lt1-late-seal-refused", () => [
+          `LT1 in-process copy of ${queuedEvent.id} sealed outside its ` +
+          "appending wave and was refused; the drain delivers the entry",
+        ]);
+        // No abandonment: the durable entry is still the truth and the drain
+        // delivers it, so a further attempt at this event is coming and work
+        // staged on it is waiting for something rather than nothing.
+        runFinalCommitCallback();
+        return;
+      }
+      if (served !== undefined && error !== undefined) {
+        logger.warn("served-event-commit-failed", () => [
+          `served event ${queuedEvent.id} commit failed`,
+          error,
+        ]);
+      }
+      const permanentRejection = error && isPermanentRejection(error)
+        ? error.precondition
+        : undefined;
       // Classify the commit outcome. A committed write that represents user
       // intent must converge or fail loudly: a stale-basis rejection backs off
       // and retries within a bounded window rather than being dropped; a
       // permanent or non-stale-basis rejection is not retried; an unconverged
       // write surfaces a terminal error.
       const disposition = classifyCommitDisposition(
-        result.error,
+        error,
         queuedEvent,
         state.backpressure,
       );
 
-      state.runtime.telemetry.submit({
-        type: "scheduler.event.commit",
-        handlerId,
-        handlerInfo: state.getActionTelemetryInfo(handler),
-        readCount: log.reads.length + log.shallowReads.length,
-        writeCount: log.writes.length,
-        changedWriteCount: log.writes.length,
-        writes: telemetryWrites,
-        ...(log.writes.length > EVENT_COMMIT_TELEMETRY_WRITE_LIMIT
-          ? { writesTruncated: true }
-          : {}),
-        ...(result.error ? { error: result.error.message } : {}),
-        ...(permanentRejection !== undefined ? { permanentRejection } : {}),
-        ...(disposition.kind === "backoff"
-          ? {
-            retryAttempt: disposition.attempts,
-            backoffMs: disposition.delayMs,
-          }
-          : {}),
-        ...(disposition.kind === "convergence-failed"
-          ? { retryAttempt: disposition.attempts, terminal: "convergence" }
-          : {}),
-        ...(disposition.kind === "permanent" ? { terminal: "permanent" } : {}),
-        ...(disposition.kind === "terminal" ? { terminal: "rule" } : {}),
-      });
+      let telemetryFailure: { readonly error: unknown } | undefined;
+      try {
+        state.runtime.telemetry.submit({
+          type: "scheduler.event.commit",
+          handlerId,
+          handlerInfo: state.getActionTelemetryInfo(handler),
+          readCount: log.reads.length + log.shallowReads.length,
+          writeCount: log.writes.length,
+          changedWriteCount: log.writes.length,
+          writes: telemetryWrites,
+          ...(log.writes.length > EVENT_COMMIT_TELEMETRY_WRITE_LIMIT
+            ? { writesTruncated: true }
+            : {}),
+          ...(error ? { error: error.message } : {}),
+          ...(permanentRejection !== undefined ? { permanentRejection } : {}),
+          ...(disposition.kind === "backoff"
+            ? {
+              retryAttempt: disposition.attempts,
+              backoffMs: disposition.delayMs,
+            }
+            : {}),
+          ...(disposition.kind === "convergence-failed"
+            ? { retryAttempt: disposition.attempts, terminal: "convergence" }
+            : {}),
+          ...(disposition.kind === "permanent"
+            ? { terminal: "permanent" }
+            : {}),
+          ...(disposition.kind === "terminal" ? { terminal: "rule" } : {}),
+        });
+      } catch (error) {
+        telemetryFailure = { error };
+      }
+
+      // A served event's DETERMINISTIC CFC pre-storage refusal seals an
+      // error consequence (events.md §5: the error IS the consequence — the
+      // same honesty as the throw arm in `finalize` above). Without one the
+      // durable entry stays unconsequenced and every wave re-drains it into
+      // the identical refusal. Scoped to exactly the class
+      // `reportDroppedCfcRejectedWrite` reports: every other non-retried
+      // outcome has its own explicit routing below: typed delivery failures
+      // checkpoint, proven-no-commit failures terminalize, and a handler abort
+      // seals a safe error consequence. Called before the commit callback on
+      // both paths that carry a refusal, so the drain's in-flight guard sees
+      // the staged notice ("marked") rather than releasing the still-"queued"
+      // copy.
+      const sealCfcRefusalConsequence = (): void => {
+        if (served === undefined || !isCfcRejectedCommitError(error)) return;
+        reportServedEventFailure(served, {
+          kind: "error",
+          message: error.message,
+        });
+      };
+      const deferCommitPreparationFailure = (): void => {
+        if (served === undefined || error?.name !== "CommitPreparationError") {
+          return;
+        }
+        reportServedEventFailure(served, {
+          kind: "deferred",
+          cause: "delivery-failure",
+          role: "failed-head",
+          phase: "commit-preparation",
+          failure: {
+            failureClass: "unknown",
+            recoveryEpoch: "commit-preparation",
+            permanentEvidence: false,
+          },
+        });
+      };
+      const routeProvenNoCommitFailure = (): void => {
+        if (served === undefined || error === undefined) return;
+        const rowLabelRefusal = error.name === "RowLabelCommitError";
+        const aclRevision = (error as { aclRevision?: unknown }).aclRevision;
+        const authorizationRefusal = error.name === "AuthorizationError" &&
+          (error as { permanentEvidence?: unknown }).permanentEvidence ===
+            true &&
+          typeof aclRevision === "number";
+        if (!rowLabelRefusal && !authorizationRefusal) return;
+        reportServedEventFailure(served, {
+          kind: "deferred",
+          cause: "delivery-failure",
+          role: "failed-head",
+          phase: "commit-finalization",
+          failure: {
+            failureClass: rowLabelRefusal ? "protocol" : "authorization",
+            recoveryEpoch: rowLabelRefusal
+              ? "row-label-verdict"
+              : `acl:${aclRevision}`,
+            permanentEvidence: true,
+          },
+        });
+      };
+      const sealExplicitHandlerAbort = (): void => {
+        if (served === undefined || !isExplicitTransactionAbort(error)) return;
+        reportServedEventFailure(served, {
+          kind: "error",
+          message: "Event handler aborted its transaction",
+        });
+      };
 
       // A cancellation after commit kickoff cannot undo an already-applied
       // local transaction, but it must fence every later-generation behavior:
@@ -1393,10 +2102,18 @@ export async function dispatchQueuedEvent(state: {
       switch (disposition.kind) {
         case "success":
           runFinalCommitCallback();
-          return;
+          break;
         case "give-up":
+          deferCommitPreparationFailure();
+          routeProvenNoCommitFailure();
+          sealExplicitHandlerAbort();
+          sealCfcRefusalConsequence();
           runFinalCommitCallback();
-          reportDroppedCfcRejectedWrite(result.error, handlerId);
+          reportDroppedCfcRejectedWrite(error, handlerId);
+          // No further attempt at this event is coming, so anything staged on
+          // the transaction and waiting for it to commit is waiting for
+          // nothing.
+          tx.abandonStagedWork(error as CommitError);
           logger.warn(
             "scheduler",
             disposition.reason === "non-retryable"
@@ -1404,11 +2121,11 @@ export async function dispatchQueuedEvent(state: {
                 "that re-running cannot resolve; dropping the write without retry"
               : "Event handler commit failed and the caller opted out of " +
                 "retry (retries: false); dropping the write",
-            { error: result.error, handlerId },
+            { error, handlerId },
           );
-          return;
+          break;
         case "backoff":
-          logger.warn(
+          logger.debug(
             "scheduler",
             `Event handler commit failed transiently; backing off ` +
               `${Math.round(disposition.delayMs)}ms ` +
@@ -1420,23 +2137,36 @@ export async function dispatchQueuedEvent(state: {
             disposition.deadline,
             disposition.runAt,
           );
-          return;
+          break;
         case "terminal":
           // A deterministic commit-rule refusal: run the final callback and
           // stop. No retry (would recompute the identical refused write) and no
           // handleError — the rejection is observable via the commit telemetry
           // marker (`terminal: "rule"`), mirroring the permanent path; surfacing
           // a scheduler error here is reserved for non-deterministic failures.
+          // A CFC boundary refusal is classified terminal rather than
+          // give-up, so both of the give-up path's CFC obligations have to
+          // hold here too: seal the served entry's error consequence, and
+          // report the dropped write. Neither is optional — see
+          // `sealCfcRefusalConsequence` for what an unconsequenced entry
+          // costs, and `reportDroppedCfcRejectedWrite` for why the
+          // `logger.warn` below is not enough on its own.
+          deferCommitPreparationFailure();
+          routeProvenNoCommitFailure();
+          sealCfcRefusalConsequence();
           runFinalCommitCallback();
+          reportDroppedCfcRejectedWrite(error, handlerId);
+          tx.abandonStagedWork(error as CommitError);
           logger.warn(
             "scheduler",
             "Event handler commit terminally rejected (deterministic refusal); " +
               "not retrying",
-            { error: result.error, handlerId },
+            { error, handlerId },
           );
-          return;
+          break;
         case "permanent":
           runFinalCommitCallback();
+          tx.abandonStagedWork(error as CommitError);
           if (permanentRejection === "receipt-exists") {
             logger.warn(
               "event-lost-race",
@@ -1449,11 +2179,12 @@ export async function dispatchQueuedEvent(state: {
           logger.warn(
             "scheduler",
             "Event handler commit permanently rejected; not retrying",
-            { error: result.error, handlerId, permanentRejection },
+            { error, handlerId, permanentRejection },
           );
-          return;
+          break;
         case "convergence-failed": {
           runFinalCommitCallback();
+          tx.abandonStagedWork(error as CommitError);
           logger.error(
             "commit-convergence-failed",
             () => [
@@ -1466,20 +2197,33 @@ export async function dispatchQueuedEvent(state: {
               handlerId,
               attempts: disposition.attempts,
               elapsedMs: disposition.elapsedMs,
-              cause: result.error,
+              cause: error,
             }),
             action,
           );
-          return;
+          break;
         }
       }
-    }).catch((error) => {
+      if (telemetryFailure !== undefined) {
+        throw telemetryFailure.error;
+      }
+    };
+    const handled = tx.commit().then(
+      ({ error }) => handleCommitResult(error),
+      (reason) => handleCommitResult(normalizeEventCommitRejection(reason)),
+    ).catch((error) => {
       logger.error(
         "schedule-error",
-        "Event handler commit promise rejected:",
+        "Event handler commit result handling failed:",
         error,
       );
     });
+    // The barrier entry commit() registered settles with the commit
+    // promise, but the disposition above — a conflict's backoff requeue in
+    // particular — runs a few microtasks later. Register the handled chain
+    // too, so the pending-commit barrier cannot release in the gap between
+    // a rejection settling and its retry being requeued.
+    state.runtime.storageManager.trackPendingCommit(handled);
   };
 
   try {
@@ -1565,8 +2309,9 @@ type CommitDisposition =
  *  - permanent: a commit-time precondition failure (receipt-exists,
  *    origin-committed). Re-running can never succeed and would double-handle the
  *    event, so it is never retried.
- *  - terminal: a deterministic server-side refusal of the committed data (a CFC
- *    row-label commit-rule violation, `isTerminalRejection`); never retried —
+ *  - terminal: a deterministic refusal of the committed data on its own merits
+ *    (`isTerminalRejection`) — the server's CFC row-label commit rule, or the
+ *    client's CFC boundary refusing before storage; never retried —
  *    re-running recomputes the identical refused write, and the doomed re-runs'
  *    speculative rev bumps would starve concurrent siblings. Surfaced as a
  *    terminal outcome (telemetry `terminal: "rule"`) rather than a silent drop.
@@ -1601,6 +2346,15 @@ type CommitDisposition =
  * way — a stale basis is bounded by the retry window, and a non-stale-basis
  * rejection drops on the first attempt.
  */
+
+/** Whether a served event's commit error is the serving loop's
+ * LT1-late-seal refusal (stage C build W3, (α)) — carried as the
+ * `reason` Error's message, the sentinel `LT1_LATE_SEAL_REFUSED`. */
+function isLt1LateSealRefusal(error: EventCommitError): boolean {
+  const reason = (error as { reason?: unknown }).reason;
+  return reason instanceof Error && reason.message === LT1_LATE_SEAL_REFUSED;
+}
+
 function classifyCommitDisposition(
   error: { name?: string } | undefined,
   queuedEvent: QueuedEvent,

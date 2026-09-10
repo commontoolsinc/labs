@@ -1,4 +1,4 @@
-import type { ContextualFlowControl } from "../cfc.ts";
+import { ContextualFlowControl } from "../cfc.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { isPrimitiveCellLink, parseLink } from "../link-utils.ts";
 
@@ -10,7 +10,6 @@ import { isPrimitiveCellLink, parseLink } from "../link-utils.ts";
  * needs narrowing when the slot is inline at this array index.
  */
 export function listElementLink(
-  cfc: ContextualFlowControl,
   listBase: NormalizedFullLink,
   slot: unknown,
   index: number,
@@ -20,7 +19,7 @@ export function listElementLink(
   const indexPart = String(index);
   const elementSchema = listBase.schema === undefined
     ? undefined
-    : cfc.schemaAtPath(listBase.schema, [indexPart]);
+    : ContextualFlowControl.schemaAtPath(listBase.schema, [indexPart]);
   const slotBase: NormalizedFullLink = {
     ...listBase,
     path: [...listBase.path, indexPart],

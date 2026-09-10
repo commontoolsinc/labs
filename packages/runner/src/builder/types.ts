@@ -1,103 +1,58 @@
-import { isRecord } from "@commonfabric/utils/types";
-import type { EntityKind } from "../entity-kind.ts";
-import type { PatternBuilder } from "./pattern.ts";
-import type { NormalizedFullLink } from "../link-types.ts";
-
 import type {
-  ActionFunction,
-  AsCell,
-  AsComparableCell,
-  AsOpaqueCell,
-  AsReadonlyCell,
   AssertCaptureFunction,
-  AssertFunction,
   AssertRenderPartsFunction,
-  AsStream,
-  AsWriteonlyCell,
-  ByRefFunction,
   Cell,
   CellScope,
-  CellTypeConstructor,
-  CfDataFunction,
-  CfSqliteHelpers,
-  CompileAndRunFunction,
-  ComputedFunction,
-  EntityRefToStringFunction,
-  EqualsFunction,
-  FabricValue as ApiFabricValue,
+  FabricExecValue,
   FactoryInput,
-  FetchBinaryFunction,
-  FetchJsonFunction,
-  FetchJsonUncheckedFunction,
-  FetchProgramFunction,
-  FetchTextFunction,
-  GenerateObjectFunction,
-  GenerateTextFunction,
-  GetEntityIdFunction,
-  GetPatternEnvironmentFunction,
-  HandlerFunction,
   HFunction,
-  ID as IDSymbol,
-  ID_FIELD as IDFieldSymbol,
-  IfElseFunction,
-  InspectConfLabelFunction,
   JSONSchema,
   JSONValue,
-  JSXElement,
-  LiftFunction,
-  LLMDialogFunction,
-  LLMFunction,
   Module,
-  NavigateToFunction,
   Pattern,
   PatternFactory,
   Reactive,
   schema as schemaFunction,
   SELF as SELFSymbol,
-  SqliteCfLinkFunction,
-  SqliteDatabaseFunction,
-  SqliteQueryFunction,
-  SqliteTableFunction,
-  Stream,
-  StreamDataFunction,
-  StrFunction,
-  UiActionProps,
-  UiDisclosureProps,
-  UiPromptSlotProps,
-  UIVariantFunction,
-  UnlessFunction,
-  WhenFunction,
-  WishFunction,
 } from "@commonfabric/api";
+import type * as DeclaredApi from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
-import { toSchema } from "@commonfabric/api";
+import {
+  CHIP_UI,
+  FRAMEWORK_RESULT_KEYS,
+  FS,
+  NAME,
+  TESTS,
+  TILE_UI,
+  TYPE,
+  UI,
+} from "@commonfabric/utils/framework-result-keys";
+import type { entityRefToString } from "@commonfabric/data-model/cell-rep";
+import type { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
+import type { valueEqual } from "@commonfabric/data-model";
+import type * as RowLabelHelpers from "@commonfabric/memory/sqlite/row-label";
+import type { cfLink, table } from "@commonfabric/memory/sqlite/schema";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
 import type { ImplementationIdentity } from "../cfc/types.ts";
-import { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
+import type { FactoryContract } from "../factory-contract.ts";
+import type { EntityKind } from "../entity-kind.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+import { type Runtime } from "../runtime.ts";
 import {
   type IExtendedStorageTransaction,
   type MemorySpace,
 } from "../storage/interface.ts";
-import { type Runtime } from "../runtime.ts";
-import type { FactoryContract } from "../factory-contract.ts";
-import type { AliasBinding, SigilWriteRedirectLink } from "../sigil-types.ts";
+import type { PatternBuilder } from "./pattern.ts";
+import { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
 
 // Define runtime constants here - actual runtime values
-export const ID: typeof IDSymbol = Symbol("ID, unique to the context") as any;
-export const ID_FIELD: typeof IDFieldSymbol = Symbol(
-  "ID_FIELD, name of sibling that contains id",
-) as any;
 
-// Should be Symbol("UI") or so, but this makes repeat() use these when
-// iterating over patterns.
-export const TYPE = "$TYPE";
-export const NAME = "$NAME";
-export const UI = "$UI";
-// UI variants (CT-1321): optional sibling renderings addressed alongside [UI].
-// chip = inline, tile = gallery/grid card; absent variants fail over to a
-// per-variant default (see uiVariant()), with [UI] as the universal floor.
-export const TILE_UI = "$TILE_UI";
-export const CHIP_UI = "$CHIP_UI";
-export const FS = "$FS";
+// The reserved result keys are spelled in `@commonfabric/utils`, where the
+// transformer that polices what a pattern may declare about them reads the
+// same list. They are re-exported here because this is the builder surface a
+// pattern sees them through.
+export { CHIP_UI, FRAMEWORK_RESULT_KEYS, FS, NAME, TESTS, TILE_UI, TYPE, UI };
 
 // Symbol for accessing self-reference in patterns
 export const SELF: typeof SELFSymbol = Symbol("SELF") as any;
@@ -135,10 +90,10 @@ export type {
   FsProjection,
   Handler,
   HandlerFactory,
+  HandlerState,
   HKT,
   ICell,
   IDerivable,
-  IDFields,
   IKeyableOpaque,
   IOpaquable,
   IOpaqueCell,
@@ -169,6 +124,7 @@ export type {
   Stream,
   StripCell,
   StripDefaultBrand,
+  toEncodableForm,
   toJSON,
   ToSchemaFunction,
   UiActionProps,
@@ -179,6 +135,11 @@ export type {
 } from "@commonfabric/api";
 export type { AsCellEntry } from "@commonfabric/api";
 export type { Schema, SchemaWithoutCell } from "@commonfabric/api/schema";
+
+/** Transformer-only callable view; `.curry` is intentionally not public API. */
+export type InternalPatternFactory<T, R> = PatternFactory<T, R> & {
+  curry(params: unknown): InternalPatternFactory<T, R>;
+};
 
 export const isReactiveMarker = Symbol("isReactive");
 
@@ -204,13 +165,15 @@ export type StreamValue = {
 };
 
 export function isStreamValue(value: unknown): value is StreamValue {
-  return isRecord(value) && "$stream" in value && value.$stream === true;
+  return isObjectNotArray(value) && "$stream" in value &&
+    value.$stream === true;
 }
 
 declare module "@commonfabric/api" {
   export interface Module {
     type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
     implementation?: ((...args: any[]) => any) | Pattern | string;
+
     /**
      * Content-addressed reference to the module-scope builder artifact whose
      * implementation this module runs: the defining module's content identity
@@ -218,21 +181,27 @@ declare module "@commonfabric/api" {
      * identity (see docs/specs/content-addressed-action-identity.md).
      */
     $implRef?: { identity: string; symbol: string };
+
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
-    writableProxy?: boolean;
     propagateInputIfc?: boolean;
+
     /** If true, this module is an effect (side-effectful) rather than a computation */
     isEffect?: boolean;
+
     /** Optional scheduler debounce delay in milliseconds */
     debounce?: number;
+
     /** Opt out of scheduler auto-debounce */
     noDebounce?: boolean;
+
     /** Optional scheduler throttle period in milliseconds */
     throttle?: number;
+
     /** Pull-mode write envelopes for broad/dynamic writable-input materializers */
     materializerWriteEnvelopes?: readonly NormalizedFullLink[];
+
     /**
      * Exhaustive analyzed record of input paths the module may write. Only
      * writable-branded paths become materializer envelopes; stream paths
@@ -241,12 +210,14 @@ declare module "@commonfabric/api" {
      * the opaque-result envelope fallback.
      */
     materializerWriteInputPaths?: readonly (readonly string[])[];
+
     /**
      * Transformer proof that this source-backed lift's cell surface is
      * exhaustively described by its structural bindings.  Absence means
      * unknown/incomplete; raw modules and handlers never receive this marker.
      */
     completeSchedulerScopeSummary?: true;
+
     /** Run this module's result in a specific space. */
     targetSpace?: MemorySpace;
   }
@@ -268,21 +239,18 @@ export function isModule(value: unknown): value is Module {
  */
 export type Node = {
   description?: string;
-  /** Static module metadata or the serialized link for a dynamic factory. */
-  module: Module | AliasBinding | SigilWriteRedirectLink;
-  inputs: GraphValue;
-  outputs: GraphValue;
+  module: Module; // TODO(seefeld): Add `Alias` here once supported
+  inputs: FabricExecValue;
+  outputs: FabricExecValue;
   /** Trusted call-site contract; never sourced from the selected factory. */
   expectedFactory?: FactoryContract;
 };
-
-/** Serialized pattern graph data, including admitted callable factories. */
-export type GraphValue = ApiFabricValue;
 
 export type DerivedInternalCellDescriptor = {
   partialCause: JSONValue;
   schema?: JSONSchema;
   scope?: CellScope;
+
   /**
    * Entity kind minted into the cell's id (preimage + visible tag). Set to
    * `"computed"` only when the builder proves the cell is written solely by
@@ -298,7 +266,7 @@ declare module "@commonfabric/api" {
     argumentSchema: JSONSchema;
     resultSchema: JSONSchema;
     derivedInternalCells?: DerivedInternalCellDescriptor[];
-    result: GraphValue;
+    result: FabricExecValue;
     nodes: Node[];
     // NOTE: `program` (rehydration source) and the derivation link to a
     // copy's original live in WeakMaps/WeakSets in ./pattern-metadata.ts (so
@@ -325,12 +293,6 @@ export type UnsafeBinding = {
   parent?: UnsafeBinding;
 };
 
-export type SourceLocationContext = {
-  script: string;
-  filename: string;
-  nextSearchOffset: number;
-};
-
 export type Frame = {
   parent?: Frame;
   cause?: unknown;
@@ -341,6 +303,7 @@ export type Frame = {
   space?: MemorySpace;
   inHandler?: boolean;
   reactives: Set<Reactive<any>>;
+
   /**
    * Positive marker for the kind of authored pattern code running under this
    * frame: "handler" for an event handler, "lift" for a reactive computation
@@ -349,6 +312,7 @@ export type Frame = {
    * — both of which lack `inHandler` — without conflating them.
    */
   frameKind?: "lift" | "handler";
+
   /**
    * The wall-clock instant (ms) bound to the event that opened this handler
    * frame. A handler's ambient clock reads this FROZEN value, coarsened, rather
@@ -359,180 +323,218 @@ export type Frame = {
    * Only meaningful on handler frames.
    */
   eventTime?: number;
+
   unsafe_binding?: UnsafeBinding;
-  sourceLocationContext?: SourceLocationContext;
+
+  /**
+   * Marks a module-evaluation frame. Its presence is the whole signal: it is
+   * how the action-execution guard admits the transformer's module-scope
+   * builder mints while an action is suspended.
+   */
+  moduleEvaluation?: true;
+
   /**
    * Named/anonymous `PatternFactory.inSpace(...)` targets encountered during
    * this frame whose space DID was not yet cached. The runner resolves these
    * after the run and re-runs (see RetryImmediately).
    */
   pendingSpaceNames?: Set<string>;
+
   /** Per-frame counter giving each anonymous `inSpace()` call a stable name. */
   inSpaceCounter?: number;
 };
 
-// Builder functions interface
-export interface BuilderFunctionsAndConstants {
-  // Pattern creation
-  pattern: PatternBuilder;
+/**
+ * The type of the `commonfabric` module as pattern code sees it. A pattern
+ * compiles against `types/commonfabric.d.ts`, which is `packages/api/index.ts`,
+ * and the sandbox binds that same module name to the object `createBuilder()`
+ * returns. So these declarations describe that object, and every value they
+ * declare has to be there.
+ *
+ * `@commonfabric/api/schema` adds schema-carrying overloads to several of these
+ * declarations by module augmentation, and this file imports it above, so those
+ * overloads are part of what is required here.
+ */
+type DeclaredSurface = typeof DeclaredApi;
 
-  // Module creation
-  lift: LiftFunction;
-  handler: HandlerFunction;
-  action: ActionFunction;
-  computed: ComputedFunction;
-  assert: AssertFunction;
-
-  // Operand recording for `assert` bodies. The assert-diagnostics transformer
-  // emits calls to these against the injected `__cfHelpers` object; they are
-  // not meant to be called from authored code. `assertCapture` stashes each
-  // operand's resolved value; `assertRenderParts` renders them into the
-  // record's `parts`, but only when the assertion failed.
-  assertCapture: AssertCaptureFunction;
-  assertRenderParts: AssertRenderPartsFunction;
-
-  // Built-in modules
-  str: StrFunction;
-  ifElse: IfElseFunction;
-  when: WhenFunction;
-  unless: UnlessFunction;
-  uiVariant: UIVariantFunction;
-  llm: LLMFunction;
-  llmDialog: LLMDialogFunction;
-  generateObject: GenerateObjectFunction;
-  generateText: GenerateTextFunction;
-  fetchBinary: FetchBinaryFunction;
-  fetchText: FetchTextFunction;
-  fetchJson: FetchJsonFunction;
-  fetchJsonUnchecked: FetchJsonUncheckedFunction;
-  fetchProgram: FetchProgramFunction;
-  streamData: StreamDataFunction;
-  compileAndRun: CompileAndRunFunction;
-  sqliteDatabase: SqliteDatabaseFunction;
-  sqliteQuery: SqliteQueryFunction;
-  table: SqliteTableFunction;
-  cfLink: SqliteCfLinkFunction;
-  cfSqlite: CfSqliteHelpers;
-  navigateTo: NavigateToFunction;
-  inspectConfLabel: InspectConfLabelFunction;
-  wish: WishFunction;
-
-  // Cell creation
-  cell: CellTypeConstructor<AsCell>["of"];
-  equals: EqualsFunction;
-
-  // Cell constructors with static methods
-  Cell: CellTypeConstructor<AsCell>;
-  Writable: CellTypeConstructor<AsCell>; // Alias for Cell with clearer write-access semantics
-  OpaqueCell: CellTypeConstructor<AsOpaqueCell>;
-  Stream: CellTypeConstructor<AsStream>;
-  ComparableCell: CellTypeConstructor<AsComparableCell>;
-  ReadonlyCell: CellTypeConstructor<AsReadonlyCell>;
-  WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
-
-  // Utility
-  byRef: ByRefFunction;
-  invokeFactory: {
-    (
-      factory: unknown,
-      input: unknown,
-      expected: Extract<FactoryContract, { kind: "handler" }>,
-    ): Stream<unknown>;
-    (
-      factory: unknown,
-      input: unknown,
-      expected: Exclude<FactoryContract, { kind: "handler" }>,
-    ): Reactive<unknown>;
-    (
-      factory: unknown,
-      input: unknown,
-      expected: FactoryContract,
-    ): Reactive<unknown> | Stream<unknown>;
-  };
-
-  // Environment
-  getPatternEnvironment: GetPatternEnvironmentFunction;
-
-  // Entity utilities
-  getEntityId: GetEntityIdFunction;
-  entityRefToString: EntityRefToStringFunction;
-
-  // Constants
-  ID: typeof ID;
-  ID_FIELD: typeof ID_FIELD;
-  SELF: typeof SELF;
-  TYPE: typeof TYPE;
-  NAME: typeof NAME;
-  UI: typeof UI;
-  TILE_UI: typeof TILE_UI;
-  CHIP_UI: typeof CHIP_UI;
-  FS: typeof FS;
-
-  // Schema utilities
-  schema: typeof schema;
-  toSchema: typeof toSchema;
-  __cf_data: CfDataFunction;
-  AuthSchema: typeof AuthSchema;
-  WebhookConfigSchema: typeof WebhookConfigSchema;
-
-  // Render utils
-  h: HFunction;
-  UiAction: (props: UiActionProps) => JSXElement;
-  UiPromptSlot: (props: UiPromptSlotProps) => JSXElement;
-  UiDisclosure: (props: UiDisclosureProps) => JSXElement;
-
-  // Fabric value classes, in the order they are declared in api/index.ts.
-  FabricSpecialObject:
-    typeof import("@commonfabric/data-model/fabric-value").FabricSpecialObject;
-  FabricInstance:
-    typeof import("@commonfabric/data-model/fabric-value").FabricInstance;
-  FabricPrimitive:
-    typeof import("@commonfabric/data-model/fabric-value").FabricPrimitive;
-  FabricEpochNsec:
-    typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochNsec;
-  FabricEpochDays:
-    typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochDays;
-  FabricHash:
-    typeof import("@commonfabric/data-model/fabric-primitives").FabricHash;
-  FabricLink:
-    typeof import("@commonfabric/data-model/fabric-instances").FabricLink;
-  FabricBytes:
-    typeof import("@commonfabric/data-model/fabric-primitives").FabricBytes;
-  FabricRegExp:
-    typeof import("@commonfabric/data-model/fabric-primitives").FabricRegExp;
-  FabricError:
-    typeof import("@commonfabric/data-model/fabric-instances").FabricError;
-
-  // Debug stringifiers
-  toCompactDebugString:
-    typeof import("@commonfabric/data-model/value-debug").toCompactDebugString;
-  toIndentedDebugString:
-    typeof import("@commonfabric/data-model/value-debug").toIndentedDebugString;
-
-  // Value comparison
-  valueEqual: typeof import("@commonfabric/data-model/fabric-value").valueEqual;
+/**
+ * The bindings whose implementation type does not satisfy the type
+ * `@commonfabric/api` declares for them, each mapped to the type the binding
+ * actually has. Every other name on the pattern surface is required to match
+ * its declaration exactly, so this is the whole of what the compiler is not
+ * checking.
+ *
+ * - `table` takes a column map, and a parameter is checked the other way round
+ *   from a result: the declared `Record<string, SqliteColumnSpec>` has to be
+ *   assignable to the implementation's own generic column map, which it is not.
+ * - `cfSqlite` gathers `table` with the row-label helpers, whose declarations
+ *   say `unknown` where the implementation says which label shape it takes. So
+ *   the whole namespace is taken from the implementation, which is also what
+ *   keeps its members agreeing with each other: a rule built from the helpers
+ *   has to be one `table` accepts.
+ * - `entityRefToString` and `valueEqual` come from `@commonfabric/data-model`
+ *   and take fabric values as parameters, so the same reversal applies. The
+ *   pattern-visible `FabricHash` and `FabricValue` are structural views of
+ *   classes whose private fields no interface can carry, which is why no
+ *   declaration can be assignable to them.
+ * - `FabricKeyPair` is the one fabric class in the same position: its second
+ *   constructor takes the key bytes, so the declared `FabricBytes` would have
+ *   to be assignable to the class. Its instance side is compared, both here and
+ *   by the `satisfies` beside the class.
+ *
+ * {@link StaleDriftingBinding} keeps this set from outliving its reasons.
+ */
+interface DriftingBindings {
+  table: typeof table;
+  cfSqlite:
+    & Pick<
+      typeof RowLabelHelpers,
+      Exclude<keyof DeclaredSurface["cfSqlite"], "table" | "cfLink">
+    >
+    & { table: typeof table; cfLink: typeof cfLink };
+  entityRefToString: typeof entityRefToString;
+  valueEqual: typeof valueEqual;
+  FabricKeyPair: typeof FabricKeyPair;
 }
 
 /**
- * Runtime-only helpers emitted by the transformer. This surface is available
- * through the private `__cfHelpers` namespace and is deliberately absent from
- * the authored Common Fabric API.
+ * A member of {@link DriftingBindings} whose implementation has come back into
+ * line with its declaration. Such a member no longer needs an entry, and the
+ * assertion below stops compiling until the entry is removed -- so the set can
+ * only shrink.
  */
-export type InternalBuilderHelpers = BuilderFunctionsAndConstants & {
-  withPatternParamsSchema<T extends (...args: any[]) => unknown>(
-    callback: T,
-    schema: JSONSchema,
-  ): T;
-  withFrameworkProvidedPaths<T extends (...args: any[]) => unknown>(
-    callback: T,
-    paths: readonly (readonly string[])[],
-  ): T;
-};
+type StaleDriftingBinding = {
+  [K in keyof DriftingBindings]: DriftingBindings[K] extends DeclaredSurface[K]
+    ? K
+    : never;
+}[keyof DriftingBindings];
 
-/** Transformer-only callable view; `.curry` is intentionally not public API. */
-export type InternalPatternFactory<T, R> = PatternFactory<T, R> & {
-  curry(params: unknown): InternalPatternFactory<T, R>;
-};
+/** Fails to compile when `T` is anything but `never`. */
+type AssertNever<T extends never> = T;
+
+/** Fails to compile unless `Bound` satisfies `Declared`. */
+type AssertSatisfies<Bound extends Declared, Declared> = Bound;
+
+export type NoStaleDriftingBindings = AssertNever<StaleDriftingBinding>;
+
+/**
+ * `pattern` is the one name below written out because its binding is a
+ * different type rather than a richer one, so it is the one name the interface
+ * cannot check for itself. This says what the two still have in common:
+ * whatever else `PatternBuilder` carries, a pattern author's call has to be one
+ * `PatternFunction` describes.
+ */
+export type PatternBuilderSatisfiesDeclaration = AssertSatisfies<
+  PatternBuilder,
+  DeclaredSurface["pattern"]
+>;
+
+/**
+ * Every declared name the interface below does not require, written out.
+ *
+ * This was once two rules -- drop a `unique symbol`, drop anything the CFC
+ * authoring vocabulary also exports -- which read well and were the wrong
+ * shape. A rule reaches as far as it reaches, so a declaration that fell
+ * through one would not fail; it would quietly stop being required, which is
+ * the one outcome all of this exists to prevent. `SELF` was the standing proof:
+ * a `unique symbol` and so a brand by that rule, yet a real value a pattern
+ * reads, required only because someone noticed and wrote it back in.
+ *
+ * Written out instead, the default is the safe one. A declaration is required
+ * unless it appears here, so a new one is checked without anyone deciding
+ * anything, and exempting one is a visible edit to this list with its reason
+ * beside it.
+ */
+type IntentionallyUnrequired =
+  // Brands. Each keys a branded type and has no runtime existence.
+  | "CELL_BRAND"
+  | "CELL_INNER_TYPE"
+  | "CELL_LIKE"
+  | "CELL_RESULT_TYPE"
+  | "DEFAULT_MARKER"
+  | "FRAMEWORK_PROVIDED_MARKER"
+  | "SCOPE_BRAND"
+  | "SQLITE_DB_BRAND"
+  // The CFC authoring vocabulary. `packages/api/index.ts` re-exports the types
+  // out of `cfc.ts` with `export type *`, and TypeScript carries the value
+  // meaning of those names into the module's type even though nothing is
+  // re-exported at runtime. Their runtime home is `commonfabric/cfc`, bound
+  // alongside this module in `sandbox/runtime-modules.ts`. Not
+  // `CFC_CANONICAL_ALIAS_NAMES`, which `index.ts` re-exports as a value, so a
+  // pattern reaches that one through `commonfabric` and it is required.
+  | "CFC_ATOM_TYPE"
+  | "CFC_COMPILED_BY_ATOM"
+  | "CFC_COMPILED_BY_ATOM_PREFIX"
+  | "CFC_CONCEPT_KIND"
+  | "CFC_FUSE_ATOM_CLASS"
+  | "CFC_RUNTIME_SUBJECT"
+  | "THIS_POLICY"
+  | "cfcAtom"
+  | "cfcPattern"
+  | "exchangeRule"
+  | "exchangeRules"
+  | "v";
+
+/**
+ * A name exempted above that `@commonfabric/api` no longer declares. Its entry
+ * exempts nothing, and is either a typo or what a removed declaration left
+ * behind, so this stops compiling until the entry goes.
+ */
+export type NoStaleIntentionallyUnrequired = AssertNever<
+  Exclude<IntentionallyUnrequired, keyof DeclaredSurface>
+>;
+
+/**
+ * The `commonfabric` module the sandbox hands a pattern.
+ *
+ * Every value `@commonfabric/api` declares is required here, with the declared
+ * type, because that is what a pattern was type-checked against: a declaration
+ * with no binding behind it compiles and then reads as `undefined` when the
+ * pattern runs. What the members below add to that is a binding whose type says
+ * more than the declaration does, and the bindings a pattern cannot name at
+ * all.
+ */
+export interface BuilderFunctionsAndConstants extends
+  Omit<
+    DeclaredSurface,
+    IntentionallyUnrequired | keyof DriftingBindings | "pattern"
+  >,
+  DriftingBindings {
+  /**
+   * Carries the pattern-building methods (`inSpace`, and the rest) alongside
+   * the call signature `PatternFunction` declares.
+   */
+  pattern: PatternBuilder;
+
+  // The rest of this interface is what the sandbox binds beyond what
+  // `@commonfabric/api` declares. Pattern source cannot name any of it: the
+  // assert-diagnostics transformer reaches the two operand recorders through
+  // the injected `__cfHelpers` object, JSX lowering emits calls to `h`, and the
+  // two schemas are read by the runner rather than by pattern code.
+  assertCapture: AssertCaptureFunction;
+  assertRenderParts: AssertRenderPartsFunction;
+  h: HFunction;
+  AuthSchema: typeof AuthSchema;
+  WebhookConfigSchema: typeof WebhookConfigSchema;
+}
+
+/** Runtime-only helpers emitted by the transformer. */
+export type InternalBuilderHelpers =
+  & Omit<
+    BuilderFunctionsAndConstants,
+    "__cfHelpers"
+  >
+  & {
+    invokeFactory: typeof import("./invoke-factory.ts").invokeFactory;
+    withPatternParamsSchema<T extends (...args: any[]) => unknown>(
+      callback: T,
+      schema: JSONSchema,
+    ): T;
+    withFrameworkProvidedPaths<T extends (...args: any[]) => unknown>(
+      callback: T,
+      paths: readonly (readonly string[])[],
+    ): T;
+  };
 
 // Runtime interface needed by createCell
 export interface BuilderRuntime {

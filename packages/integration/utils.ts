@@ -88,6 +88,7 @@ export const awaitViewSettled = async (page: Page): Promise<boolean> => {
 export interface ProbeApi {
   /** Every element matching `selector`, descending through shadow roots. */
   collect(selector: string): Element[];
+
   /**
    * Whether `element` is rendered: it has a non-empty layout box and is not
    * `display:none` or `visibility:hidden`. Viewport-independent, so an element
@@ -96,10 +97,23 @@ export interface ProbeApi {
    * a click scrolls the element into view itself.
    */
   isRendered(element: Element): boolean;
+
+  /**
+   * Whether `element` declines a click: it carries `disabled`, or
+   * `aria-disabled="true"`. This is the "will this control act on a click"
+   * question a predicate asks alongside {@link ProbeApi.isRendered}, because a
+   * control can be laid out and take no click. A component that wraps its
+   * control in a host asks this of both: `disabled` does not inherit, so a host
+   * carrying it over a control that does not is a separate answer.
+   */
+  isDisabled(element: Element): boolean;
+
   /** Whether `element` is rendered and also on-screen. */
   isVisible(element: Element): boolean;
+
   /** Visible text of `root` plus its shadow and slotted descendants. */
   deepText(root: ParentNode): string;
+
   /**
    * Add `token` to the whitespace-separated token list held in `element`'s
    * `attribute`, keeping the tokens already there. This is how a predicate
@@ -113,11 +127,31 @@ export interface ProbeApi {
  * A predicate evaluated in the page. It receives a {@link ProbeApi} plus the
  * `args` passed to {@link waitForCondition}, and returns whether the awaited
  * condition holds. It may be async (for example to await `rt.idle()`).
+ *
+ * A predicate may answer with a JSON value instead of `true`. Any truthy result
+ * satisfies the condition, and a result other than `true` is carried back to
+ * the test process as {@link waitForCondition}'s resolution. That is how a
+ * wait hands over a measurement taken at the instant the condition held —
+ * the coordinates a trusted click is about to be aimed at, say — without a
+ * second round trip in which the page could move on. Values outside
+ * {@link PageConditionValue} are rejected rather than being silently changed
+ * by JSON serialization at the page boundary.
  */
-export type PageCondition<A extends readonly unknown[]> = (
+export type PageConditionValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly PageConditionValue[]
+  | { readonly [key: string]: PageConditionValue };
+
+export type PageCondition<
+  A extends readonly unknown[],
+  R extends PageConditionValue = PageConditionValue,
+> = (
   probe: ProbeApi,
   ...args: A
-) => boolean | Promise<boolean>;
+) => boolean | R | Promise<boolean | R>;
 
 /**
  * Installed in the page by {@link waitForCondition}. Re-evaluates `predicate`
@@ -147,6 +181,10 @@ function installWaiter(
     return rect.width > 0 && rect.height > 0;
   };
 
+  const isDisabled = (element: Element): boolean =>
+    element.hasAttribute("disabled") ||
+    element.getAttribute("aria-disabled") === "true";
+
   // Typed as the ProbeApi the predicates are handed, so a method added to that
   // interface has to be implemented here too. The annotation is erased before
   // this function is serialized into the page, so it adds no runtime reference
@@ -168,6 +206,7 @@ function installWaiter(
       return out;
     },
     isRendered,
+    isDisabled,
     isVisible(element) {
       if (!isRendered(element)) return false;
       const rect = element.getBoundingClientRect();
@@ -286,15 +325,126 @@ function installWaiter(
   registry.get(bindingName)?.();
 
   let stopped = false;
-  let signalled = false;
+  let signaled = false;
   let running = false;
   let rerun = false;
+
+  // The value the predicate answered with, carried to the test process in the
+  // binding payload so a measurement taken at the instant the condition held
+  // reaches the caller without a second round trip.
+  let answer: unknown = true;
+
+  // Copy an answer into the exact value JSON will carry. JSON.stringify alone
+  // is not a validator: it silently drops functions, symbols, and undefined
+  // properties, turns Map into {}, and changes non-finite numbers to null. A
+  // wait must either deliver the predicate's answer or report that it cannot;
+  // silently delivering a different value makes the condition look satisfied
+  // with an answer it never produced.
+  const copyJsonAnswer = (
+    value: unknown,
+    path = "$",
+    seen = new WeakSet<object>(),
+  ): unknown => {
+    if (
+      value === null || typeof value === "string" ||
+      typeof value === "boolean"
+    ) {
+      return value;
+    }
+    if (typeof value === "number") {
+      if (!Number.isFinite(value) || Object.is(value, -0)) {
+        const kind = Object.is(value, -0)
+          ? "Negative zero"
+          : "Non-finite number";
+        throw new TypeError(`${kind} at ${path} is not JSON-safe`);
+      }
+      return value;
+    }
+    if (typeof value !== "object") {
+      throw new TypeError(`${typeof value} at ${path} is not JSON-safe`);
+    }
+    if (seen.has(value)) {
+      throw new TypeError(`Cycle at ${path} is not JSON-safe`);
+    }
+
+    seen.add(value);
+    try {
+      if (Array.isArray(value)) {
+        if (typeof (value as { toJSON?: unknown }).toJSON === "function") {
+          throw new TypeError(`toJSON at ${path} is not JSON-safe`);
+        }
+        if (
+          Object.keys(value).some((key) => {
+            const index = Number(key);
+            return !Number.isInteger(index) || index < 0 ||
+              index >= value.length || String(index) !== key;
+          }) ||
+          Object.getOwnPropertySymbols(value).some((symbol) =>
+            Object.prototype.propertyIsEnumerable.call(value, symbol)
+          )
+        ) {
+          throw new TypeError(`Array properties at ${path} are not JSON-safe`);
+        }
+
+        const copy: unknown[] = [];
+        for (let index = 0; index < value.length; index++) {
+          if (!Object.prototype.hasOwnProperty.call(value, index)) {
+            throw new TypeError(`Sparse array at ${path} is not JSON-safe`);
+          }
+          copy.push(copyJsonAnswer(value[index], `${path}[${index}]`, seen));
+        }
+        return copy;
+      }
+
+      const prototype = Object.getPrototypeOf(value);
+      if (prototype !== Object.prototype && prototype !== null) {
+        const tag = Object.prototype.toString.call(value);
+        throw new TypeError(`${tag} at ${path} is not a plain JSON object`);
+      }
+      if (
+        Object.getOwnPropertySymbols(value).some((symbol) =>
+          Object.prototype.propertyIsEnumerable.call(value, symbol)
+        )
+      ) {
+        throw new TypeError(
+          `Enumerable symbol key at ${path} is not JSON-safe`,
+        );
+      }
+
+      const copy = Object.create(null) as Record<string, unknown>;
+      for (const key of Object.keys(value)) {
+        copy[key] = copyJsonAnswer(
+          (value as Record<string, unknown>)[key],
+          `${path}.${key}`,
+          seen,
+        );
+      }
+      return copy;
+    } finally {
+      seen.delete(value);
+    }
+  };
 
   const fire = (): boolean => {
     const notify = (globalThis as Record<string, unknown>)[bindingName];
     if (typeof notify !== "function") return false;
-    signalled = true;
-    (notify as (payload: string) => void)("ok");
+    signaled = true;
+    let payload: string;
+    try {
+      payload = JSON.stringify({
+        value: answer === true ? undefined : copyJsonAnswer(answer),
+      });
+    } catch (error) {
+      // An answer that cannot cross the boundary is reported as one. Sending
+      // "no value" instead would read to the caller as a condition that held
+      // and simply had nothing to say, which is a different thing.
+      payload = JSON.stringify({
+        unserializable: String(
+          error instanceof Error ? error.message : error,
+        ),
+      });
+    }
+    (notify as (payload: string) => void)(payload);
     return true;
   };
 
@@ -318,7 +468,7 @@ function installWaiter(
     // outer timeout.
     let attempts = 0;
     const tryFire = () => {
-      if (signalled) return;
+      if (signaled) return;
       if (fire()) {
         registry.delete(bindingName);
       } else if (++attempts < 100) {
@@ -344,8 +494,10 @@ function installWaiter(
       .then((ok) => {
         running = false;
         if (stopped) return;
-        if (ok) onConditionMet();
-        else if (rerun) {
+        if (ok) {
+          answer = ok;
+          onConditionMet();
+        } else if (rerun) {
           rerun = false;
           evaluate();
         }
@@ -387,19 +539,40 @@ function installWaiter(
  * safety net elapses; callers add the context and rich probe for the failure
  * message. There is no caller-supplied timeout: the wait resolves on the
  * condition, and the safety net is not the common-case latency.
+ *
+ * Resolves with whatever the predicate answered, when that answer is a value
+ * rather than `true`. The answer travels in the same notification that ends
+ * the wait, so a caller acting on it acts on the page as it was when the
+ * condition held, with no round trip in between for the page to change in.
  */
-export const waitForCondition = async <A extends readonly unknown[]>(
+export const waitForCondition = async <
+  A extends readonly unknown[],
+  R extends PageConditionValue,
+>(
   page: Page,
-  predicate: PageCondition<A>,
+  predicate: PageCondition<A, R>,
   { args }: { args?: A } = {},
-): Promise<void> => {
+): Promise<R | undefined> => {
   const bindingName = `__cfcWait_${crypto.randomUUID().replace(/-/g, "")}`;
+  let answer: R | undefined;
+  let answerError: string | undefined;
   let resolveSignal!: () => void;
-  const signalled = new Promise<void>((resolve) => {
+  const signaled = new Promise<void>((resolve) => {
     resolveSignal = resolve;
   });
-  const unsubscribe = page.onBindingCalled((name) => {
-    if (name === bindingName) resolveSignal();
+  const unsubscribe = page.onBindingCalled((name, payload) => {
+    if (name !== bindingName) return;
+    try {
+      const parsed = JSON.parse(payload) as {
+        value?: R;
+        unserializable?: string;
+      };
+      answerError = parsed.unserializable;
+      answer = parsed.value;
+    } catch (error) {
+      answerError = `the wait's notification did not parse: ${String(error)}`;
+    }
+    resolveSignal();
   });
   await page.addBinding(bindingName);
 
@@ -419,7 +592,14 @@ export const waitForCondition = async <A extends readonly unknown[]>(
         WAIT_FOR_CONDITION_TIMEOUT,
       );
     });
-    await Promise.race([signalled, timedOut]);
+    await Promise.race([signaled, timedOut]);
+    if (answerError !== undefined) {
+      throw new Error(
+        `The condition held, but its answer did not reach the test: ` +
+          answerError,
+      );
+    }
+    return answer;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     unsubscribe();

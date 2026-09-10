@@ -37,8 +37,6 @@ This v1 draft focuses on the **reactive expression language inside patterns**:
 - collection operators over reactive receivers
 - direct reactive property/element access
 - pattern-body expression forms that interact with ownership-first lowering
-- serializable `PatternFactory`, `ModuleFactory`, and `HandlerFactory` values,
-  their modifier derivations, and calls across eager/scheduled boundaries
 
 It does **not** attempt to restate every validation rule in the package. The
 existing current-behavior spec remains the descriptive inventory for those
@@ -64,6 +62,8 @@ Each construct family is classified as one of:
 | Reactive property access in JSX or helper-owned expressions | Supported | Authored reactive reads like `state.user.name` should remain natural and lower to explicit reactive access as needed |
 | Reactive element access with static or known-symbol keys | Supported | Forms like `items[0]`, `item[NAME]`, `state["foo"]` should lower predictably when the access path is statically representable |
 | Reactive ternary control flow in supported lowered value-expression sites | Supported | Authored `cond ? x : y` should preserve JavaScript branch meaning in JSX, top-level pattern-body value sites, and callback-local values inside supported collection callbacks |
+| Callback-local value bindings inside a plain-array `map` callback | Supported | A plain-array `map` callback in a pattern body runs during pattern build and its result is collected rather than read, so its value-expression sites are pattern-body value sites: a binding such as `const isToday = weekDates?.[colIdx] === todayDate` inside `COLUMN_INDICES.map(...)` lowers to a per-iteration lift-applied computation, and reads the same as the equivalent binding written directly in the pattern body |
+| Callback-local value bindings inside a result-interpreting array callback | Unsupported | `filter`, `find`, `some`, `every`, `sort`, `flatMap`, and `reduce` read what their callback returns while they run — as a boolean, a number, an array test, or the next accumulator. A lifted binding returned from one of those is a cell rather than the value the method expects, so these callbacks carry no pattern-owned wrapper site and a reactive computation in one still moves into `computed(...)` |
 | Reactive logical control flow in supported lowered pattern-owned expression sites (`&&`, `||`, `??`) | Supported | Reactive short-circuiting should preserve authored JavaScript meaning where the expression-site policy admits lowering |
 | Authored helper control flow (`ifElse`, `when`, `unless`) | Supported | These are first-class reactive control-flow forms, not mere implementation helpers |
 | `map` / `filter` / `flatMap` on reactive receivers in pattern-facing contexts | Supported | These operators are core language forms and may be structurally rewritten to explicit reactive collection operators |
@@ -80,15 +80,8 @@ Each construct family is classified as one of:
 | Optional receiver navigation and optional invocation on otherwise-supported call roots | Supported | Optionality does not define a separate call family: `value?.method()`, `value.method?.()`, and combined chains lower wherever the corresponding non-optional call is supported, with receiver binding, evaluation order, nullish short-circuiting, and skipped argument evaluation preserved |
 | Direct non-JSX receiver-method calls on reactive values in top-level pattern-body expression sites | Supported | Value-like receiver-method roots at top-level object-property, call-argument, variable-initializer, array-element, or return-expression sites lower to derived local value expressions |
 | Direct receiver-method roots inside supported collection callbacks | Supported | Callback-local value-like receiver-method roots lower to callback-local lift-applied computations instead of remaining raw or requiring manual wrapper calls |
-| Trusted `PatternFactory`, `ModuleFactory`, and `HandlerFactory` values | Supported | Factories are first-class serializable values with exact public input/output contracts; trust comes from Common Fabric provenance or compiler-owned contract metadata, not a matching type name |
-| Factory calls at eager pattern public/private boundaries | Supported | Public factory inputs and private captured factories are symbolic during eager graph construction and lower to an explicit runtime invocation node with their exact contract |
-| Factory calls inside scheduled callbacks | Supported | Factory inputs to `lift`, `computed`, `handler`, action, and event callbacks are materialized direct callables; calls retain ordinary receiver/evaluation semantics |
-| Factory modifier derivations (`asScope`, `inSpace`) | Supported | These derive a new factory while preserving the receiver's exact contract and trusted provenance; they are not invocations |
-| Same-kind factory unions with exactly equal contracts | Supported | A callable union is valid only when every arm has the same kind, normalized public input/output schemas, and FrameworkProvided paths |
-| Cross-kind, contract-mismatched, or partially provenanced callable unions | Unsupported | The compiler must not guess one executable contract or let one union arm authorize another |
-| Symbolic factory call with one explicit non-spread argument | Supported | The compiler lowers one public input without synchronously reading reactive proxy state |
-| Spread factory arguments or one helper shared by eager-symbolic and scheduled-materialized sites | Unsupported | Spread cannot be synchronously materialized during graph construction; mixed/unknown helper exposure has no single safe lowering and should diagnose with split/inline guidance |
-| Direct top-level `.get()` reads in pattern-owned reactive context | Unsupported | Even on true cell-like values, eager `.get()` reads should move into JSX or an explicit computation callback such as `computed`, `action`, `lift`, or `handler` rather than living directly in the top-level declarative pattern body |
+| Direct top-level `.get()` reads on explicitly cell-like values at a lowerable expression site | Supported | On a true `Cell`/`Writable`/`Stream`, an eager read is part of the language wherever a lowerable expression site can carry it: a variable initializer, a return, an object property, an array element, a call argument, a computation over the read, or a call whose receiver chain reaches it. That site lowers into a lift, so the read stays live rather than freezing. Parentheses, the computed-key spelling `cell["get"]()`, and the optional spellings `cell?.get()` / `cell.get?.()` do not change the classification |
+| Direct top-level `.get()` reads with no lowerable expression site | Unsupported | A read with nothing to carry it stays outside the language, because there is no site to lower into a lift: statement position (`count.get();`) and a reactive array-method callback (`rows.map((row) => row.cell.get())`), whose callback becomes a sub-pattern over per-element cells rather than pattern-body code. These move into an explicit computation callback such as `computed`, `action`, `lift`, or `handler` |
 | `.get()` on ordinary opaque/reactive values | Unsupported | Pattern inputs, `computed` results, `lift` results, and other ordinary reactive values should be read directly rather than through `.get()` |
 | Statement-boundary imperative constructs in top-level pattern-owned code (`let`, loops, function creation, early return) | Unsupported | Top-level pattern context is intentionally declarative; imperative statement structure belongs in explicit callback bodies such as `computed`, `action`, `lift`, or `handler` |
 
@@ -116,8 +109,8 @@ Those container kinds appear to authors in three main buckets:
 2. top-level pattern-body value-expression sites such as returned object
    property values, variable initializers, call arguments, array elements, and
    direct function return expressions
-3. callback-local value-expression sites inside supported reactive collection
-   callbacks
+3. callback-local value-expression sites inside supported collection
+   callbacks, both the reactive operators and plain-array `map` callbacks
 
 Explicit computation callbacks such as `computed`, `action`, `lift`, and
 `handler` are important boundaries, but their bodies are **not** blanket
@@ -146,9 +139,10 @@ pattern(({ items, show }) => ({
 
 ```ts
 // Shown for illustration only.
-pattern(({ user, count }) => ({
-  value: count.get(),
-}));
+pattern(({ count }) => {
+  count.get();
+  return { value: 1 };
+});
 ```
 
 Why:
@@ -158,7 +152,9 @@ Why:
 - top-level helper control flow is part of the language
 - top-level receiver-method roots are supported at lowerable non-JSX
   expression sites
-- eager `.get()` reads still move into JSX, authored helper control flow, or an explicit
+- an eager `.get()` read on a true cell is supported wherever a lowerable
+  expression site carries it, so `{ value: count.get() }` belongs here; a read
+  in statement position has no such site and moves into an explicit
   computation callback
 
 ### JSX Expressions
@@ -219,6 +215,45 @@ Why:
 - `.get()` on ordinary opaque/reactive values is still not part of the
   language, even inside a computation callback
 
+### Where A Builder's Callback May Come From
+
+A trusted builder's callback is written at the call, or named by a binding the
+same module declares. Those are the two shapes the module verifier can follow,
+and a module that uses any other is refused at load
+(`docs/specs/sandboxing/SES_SANDBOXING_SPEC.md`, goal 3 "Direct Callback
+Builders"), so the compiler rejects them instead.
+
+**Good here**
+
+```ts
+// Shown at module scope.
+const atTheCall = lift((n: number) => n + 1);
+const double = (n: number) => n * 2;
+const byName = lift(double);
+function triple(n: number) {
+  return n * 3;
+}
+const byDeclaration = lift(triple);
+```
+
+**Still unsupported here**
+
+```ts
+// Shown at module scope.
+declare const callbacks: { double: (n: number) => number };
+declare const importedDouble: (n: number) => number;
+const viaProperty = lift(callbacks.double);
+const viaImport = lift(importedDouble);
+```
+
+Why:
+
+- the verifier reads one module at a time, so a callback whose body it cannot
+  see at this call is indistinguishable from a computed one
+- naming the function in this module costs one line and keeps the callback
+  where every later stage — schema injection, hoisting, and the verifier —
+  already looks for it
+
 ### Event Handler JSX Attributes
 
 Event handlers are an explicit callback boundary for imperative UI logic.
@@ -240,7 +275,9 @@ Why:
 ### Supported Collection Callbacks
 
 Callbacks for supported reactive collection operators are their own authored
-expression context.
+expression context. A plain-array `map` callback shares it: it runs during
+pattern build and `map` collects what it returns without reading it, so a value
+site in one is a pattern-body value site.
 
 **Good here**
 
@@ -262,50 +299,46 @@ Why:
   and nested JSX-local expressions are valid here
 - inner plain arrays stay plain JS and are not implicitly promoted into
   pattern-owned collection operators
+- a plain-array `map` callback's own value sites lower too, so naming a value
+  there reads the same as writing the expression where the name is used
+- the array callbacks that read their result as they run — `filter`, `find`,
+  `some`, `every`, `sort`, `flatMap`, `reduce` — do not lower callback-local
+  value sites. A lift returned to one of them is a cell where the method wants
+  a boolean, a number, or an array, so a reactive computation in one belongs in
+  `computed(...)`
+- a read of a reactive operator's own per-element binding does not lower
+  either: `rows.map((row) => row.cell.get())` makes its callback a sub-pattern
+  over per-element cells, and the read has no pattern-body site to become a
+  lift
 
-### Factory Values Across Execution Boundaries
+A plain-array map in JSX, with the per-column comparison named before it is
+used as a condition:
 
-Factory values are supported at both eager and scheduled boundaries, but the
-call form follows where the value is materialized:
-
-```ts
-import { lift, pattern, type PatternFactory } from "commonfabric";
-
-interface ChildInput {
-  title: string;
-}
-
-interface ChildOutput {
-  title: string;
-}
-
-pattern<{ child: PatternFactory<ChildInput, ChildOutput> }>(
-  ({ child }) => ({ nested: child({ title: "eager" }) }),
-);
-
-lift(({ child }: {
-  child: PatternFactory<ChildInput, ChildOutput>;
-}) => child({ title: "scheduled" }));
+```tsx
+// Shown as JSX element children.
+{COLUMN_INDICES.map((colIdx: number) => {
+  const isToday = weekDates?.[colIdx] === todayDate;
+  return <div>{isToday ? "Today" : ""}</div>;
+})}
 ```
-
-The first call is symbolic at eager graph construction and is compiler-lowered;
-the second receives a materialized callable from the runner and calls directly.
-A helper called from both forms must be split or inlined unless the compiler can
-prove one exposure for every entry site.
 
 ## 4.2 Common Relocation Patterns
 
 When an authored form is unsupported, the right answer is usually to move it
 into a context that already has a clear language meaning.
 
-### Top-Level Eager `.get()` -> Helper Control Flow Or Computation Callback
+### Site-Less Eager `.get()` -> Computation Callback
+
+An eager read on a true cell needs a lowerable expression site to become a
+lift. A read in statement position, or inside a reactive array-method
+callback, has none, so it moves into a callback that supplies one.
 
 **Avoid**
 
 ```ts
 // Shown for illustration only.
-pattern(({ count }) => ({
-  value: count.get(),
+pattern(({ rows }) => ({
+  titles: rows.map((row) => row.title.get()),
 }));
 ```
 
@@ -313,19 +346,15 @@ pattern(({ count }) => ({
 
 ```ts
 // Shown for illustration only.
-pattern(({ count, show }) => ({
-  value: ifElse(show, count.get(), 0),
+pattern(({ rows }) => ({
+  titles: computed(() => rows.map((row) => row.title.get())),
 }));
 ```
 
-or:
-
-```ts
-// Shown for illustration only.
-pattern(({ count }) => ({
-  value: computed(() => count.get()),
-}));
-```
+A read that already has a site needs no relocation — `{ value: count.get() }`,
+`const total = rows.get().length`,
+`["-", "+"].map((sep) => rows.get().join(sep))`, and
+`{ifElse(show, count.get(), 0)}` are all part of the language as written.
 
 ### Bare Dynamic Key Access -> JSX, Callback, Or Structural Binding
 
@@ -569,21 +598,45 @@ The intended split is:
      values is part of the authored language
    - example:
      - `input.key("foo")` where `input` is a declared `Writable<{ ... }>`
-2. **true cell-style eager read inside JSX, authored helper control flow, or an explicit computation callback**
-   - `.get()` remains valid when the authored value truly has cell semantics
-     and the read occurs inside JSX, helper control flow, or an explicit
-     computation callback
+2. **true cell-style eager read inside an explicit computation callback**
+   - `.get()` is ordinary eager reading inside a `computed` / `lift` /
+     `handler` / `action` body, where the callback already supplies the
+     compute context
    - examples:
      - `computed(() => input.key("foo").get())`
-     - JSX expression sites like `{input.key("foo").get()}`
-     - `ifElse(show, count.get(), 0)`
      - `lift` / `handler` / `action` callbacks that preserve declared cell
        semantics
-3. **direct top-level eager read in pattern-owned reactive context**
-   - not part of the target language, even for true cells
-   - example:
-     - `{ value: input.key("foo").get() }` directly in a top-level pattern body
-4. **`.get()` on ordinary opaque/reactive values**
+3. **true cell-style eager read at a lowerable expression site**
+   - `.get()` is part of the authored language in pattern-owned context
+     wherever a lowerable expression site can carry it; that site lowers into
+     a lift, which is what keeps the read live instead of freezing it to a
+     construction-time snapshot
+   - the qualifying sites are the variable initializer, the return, the object
+     property, the array element, the call argument, a computation over the
+     read, a call whose receiver chain reaches the read, and the JSX
+     expression
+   - examples:
+     - `{ value: input.key("foo").get() }` in a top-level pattern body
+     - `const total = rows.get().length`
+     - `const sorted = rows.get().toSorted(byDate)`
+     - JSX expression sites like `{input.key("foo").get()}`
+     - `ifElse(show, count.get(), 0)`
+   - the spelling of the read does not change the classification
+     (paren-invariance): parentheses around the site, the computed-key form
+     `cell["get"]()`, and the optional forms `cell?.get()` and `cell.get?.()`
+     all follow the same rule (§5.6)
+4. **eager read with no lowerable expression site**
+   - not part of the target language, even for true cells — there is no site
+     to lower into a lift, so the read cannot be kept live
+   - examples:
+     - statement position: `count.get();`
+     - a reactive array-method callback: `rows.map((row) => row.cell.get())`,
+       whose callback becomes a sub-pattern over per-element cells
+   - a plain-array `map` callback is not an example: it runs during pattern
+     build and collects what it returns, so its value sites carry the read the
+     way the pattern body's own sites do. Its result-interpreting siblings
+     (`filter`, `find`, `sort`, and the rest) remain examples
+5. **`.get()` on ordinary opaque/reactive values**
    - not part of the target language
    - examples:
      - `input.get()` where `input` is an ordinary pattern value
@@ -593,47 +646,46 @@ So the language should not be read as “`.get()` / `.key()` are transitional.�
 The real rule is:
 
 - `.key(...)` is a real source-level API for true cell-like values
-- `.get()` is valid only when both the value semantics and the authored
-  expression context justify an eager read, including helper control flow
+- `.get()` is valid when the value truly has cell semantics **and** the read
+  either sits inside an explicit computation callback or has a lowerable
+  expression site to carry it
 - ordinary opaque/reactive values should still prefer direct property access
   and canonical lowered traversal rather than authored `.get()`
 
-One important nuance: the implementation has moved on this boundary since
-this spec's v1 — since #3725, validation accepts **computation-feeding**
-top-level eager reads (`{ value: count.get() * 2 }`) and auto-wraps them into
-lift-applied computations, while terminal reads (`{ value: count.get() }`)
-still reject. That carve-out is an unratified delta recorded in
-`ts_transformers_design_deltas.md` (2026-07-10): either this matrix gains the
-carve-out or the implementation reverts; per §1, do not treat the accident of
-acceptance as language policy in the meantime.
+The site rule is deliberately about the site rather than the shape of the
+read. A terminal read and a read feeding a computation are the same construct
+at the same site, and an author who extracts a JSX expression into a named
+binding is refactoring, not changing what their program means — so both
+spellings resolve the same way.
 
-## 5.8 First-Class Factory Values And Calls
+## 5.8 Verb Results Are Declared, Never Inferred
 
-Factories form one serializable construct family, not three unrelated callable
-special cases:
+A verb (an `action(...)` or `handler(...)` body) that produces a value for
+its caller declares it by naming the result type argument —
+`action<Event, Result>(...)` / `handler<Event, State, Result>(...)` — so the
+schema layer can see it (verb contract WS-C). Inference is deliberately
+unavailable: the void overloads absorb every callback, because a concise
+body's completion value is whatever its last call returns (`Cell.set` returns
+the cell) and an incidental return must never declare a result nobody wrote.
 
-1. `PatternFactory<I, O>` and `ModuleFactory<I, O>` carry public argument and
-   result schemas; `HandlerFactory<C, E>` carries context and event schemas.
-2. Public pattern input and private closure captures remain separate contracts.
-   Capturing a factory never widens the factory's public input or binds public
-   fields through private `.curry(...)` state.
-3. Call lowering follows value origin plus the nearest decisive execution
-   boundary. Live and scheduled-materialized values call directly; eager
-   symbolic values lower to an explicit runtime node.
-4. `asScope()` and `inSpace()` preserve kind, public contract, and provenance.
-5. Callable unions are invocable only when every arm is same-kind and has
-   exactly equal normalized public schemas and protected input paths.
-6. A source-level invocation takes one explicit non-spread argument. Unknown
-   origin, mixed helper exposure, ambiguous callable/non-callable unions, or
-   incomplete trusted provenance is outside the language and must diagnose.
-7. `FrameworkProvided` inputs are system channels. Eager patterns may forward
-   statically proven object paths from wrapper argument 0; authored values and
-   scheduled callback data may not supply them.
+Consequently, under a void-declared verb, a block body's explicit
+`return <expr>` of a **definitely plain-shaped** expression — object/array
+literal, string/number/boolean/null literal, template string, or
+arithmetic/concatenation over those — is a compile-time error
+(`verb-result:undeclared-return`): plain data returned without a declaration
+is a value the verb's contract never announces — no caller can rely on it.
+The fix the diagnostic names is declaring the result, or a bare `return;`
+for an early exit.
 
-This family is the deliberate exception to the ordinary rule that callable
-properties are not serializable schema values. Recognition must be provenance-
-checked: a user type merely named like a public factory is still an ordinary
-callable and receives no serialization authority.
+Everything else stays legal, deliberately: concise bodies (the absorption
+rule above), bare `return;` / `return undefined;` (control flow), and
+returns of calls, identifiers, property reads, or JSX — the
+launch/navigation/render idioms (`return navigateTo(piece)`, returning a
+freshly created piece, returning rendered UI) that the runtime consumes
+without a declaration. The authored surface renders `Reactive<T>`
+transparently, so these cannot be told apart from plain values by type;
+the boundary is syntactic and is pinned in
+`test/verb-return-validation.test.ts`.
 
 ## 6. Non-Normative Hardening Follow-Ups
 

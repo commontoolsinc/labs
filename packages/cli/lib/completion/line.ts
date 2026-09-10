@@ -12,6 +12,9 @@
  */
 
 import type { Argument, Command, Option } from "@cliffy/command";
+// Free at completion time: walking the tree means loading the command tree,
+// which already resolves this module.
+import { isReference } from "../llm-friendly-ref.ts";
 
 /**
  * A command of any option/argument parameterization.
@@ -25,6 +28,7 @@ export type AnyCommand = Command<any>;
 
 /** What the word under the cursor is a position for. */
 export type CompletionSlot =
+
   /** A subcommand name of `command`. */
   | { readonly kind: "subcommand" }
   /** An option flag (the word starts with `-`). */
@@ -33,6 +37,7 @@ export type CompletionSlot =
   | {
     readonly kind: "option-value";
     readonly option: Option;
+
     /** Set when completing `--name=value`; candidates must carry the prefix. */
     readonly inlinePrefix?: string;
   }
@@ -43,9 +48,11 @@ export type CompletionSlot =
     readonly index: number;
   }
   /**
-   * A word after `--`. `cf piece call` and `cf exec` hand these to the
-   * callable's own schema-derived parser, so the CLI's option tree does not
-   * describe them.
+   * A word after `--`, which on `cf piece call` and `cf exec` is the read step's
+   * section: `--select`, `--schema` and `--filter`, and `--help` reaching the
+   * callable. Item 6 of
+   * [CLI completion coverage](../../../../docs/plans/cli-completion-coverage.md)
+   * is what fills it, from the verb's declared result.
    */
   | { readonly kind: "passthrough"; readonly index: number }
   /** The value of a pre-parse global such as `--log-level`. */
@@ -67,6 +74,7 @@ export type CompletionSlot =
 export interface PreParseGlobal {
   readonly flags: readonly string[];
   readonly description: string;
+
   /** Accepted values, when the flag takes one. */
   readonly values?: readonly string[];
 }
@@ -91,17 +99,31 @@ function findPreParseGlobal(token: string): PreParseGlobal | undefined {
 export interface CompletionLine {
   /** Deepest command the words resolved to. */
   readonly command: AnyCommand;
-  /** Command path below the program name, e.g. `["piece", "call"]`. */
+
+  /** Command path below the program name, e.g. `["piece", "ls"]`. */
   readonly path: readonly string[];
+
   readonly slot: CompletionSlot | null;
+
   /** The partial word under the cursor; `""` at a fresh position. */
   readonly word: string;
+
   /** Long name -> last value, for value-taking options already on the line. */
   readonly options: ReadonlyMap<string, string>;
+
   /** Long names of valueless flags already on the line. */
   readonly flags: ReadonlySet<string>;
+
+  /**
+   * A canonical reference written in the first positional, in place of
+   * `--cell`. It does not count as a positional: the command reads it out
+   * before the rest, so `<callable>` is still the argument after it.
+   */
+  readonly address?: string;
+
   /** Positional words already supplied to `command`. */
   readonly positionals: readonly string[];
+
   /** Words after a `--` separator, excluding the separator itself. */
   readonly passthrough: readonly string[];
 }
@@ -164,7 +186,7 @@ function expandBundle(
  * Subcommands that represent real commands.
  *
  * `main` registers `help` with `.global()`, so Cliffy propagates it to every
- * descendant and `hasCommands()` is true even on leaves like `piece call`.
+ * descendant and `hasCommands()` is true even on leaves like `cf piece call`.
  * Taking that at face value would resolve every leaf's positional to a
  * subcommand slot and silently disable all dynamic value completion.
  */
@@ -174,12 +196,75 @@ function realSubcommands(command: AnyCommand): AnyCommand[] {
   );
 }
 
+/**
+ * Whether the command ends its own option parsing at the first positional.
+ *
+ * `cf piece call` and `cf exec` are `stopEarly()`, so every word after the
+ * callable name belongs to the callable's schema-derived parser and the CLI's
+ * own flags are refused there. Cliffy stores the property with no accessor, so
+ * it is read off the field: keeping the question where the command declares it
+ * means a third command becoming `stopEarly()` needs no edit here.
+ */
+function stopsEarly(command: AnyCommand): boolean {
+  return (command as unknown as { _stopEarly?: boolean })._stopEarly === true;
+}
+
+/**
+ * Commands whose first positional may carry a reference in place of the
+ * `--cell` flag, keyed the way the provider tables are.
+ *
+ * `readTargetPositionals` and `readCallTarget` in `commands/piece.ts` are what
+ * implement it, and nothing on the command tree distinguishes those two
+ * arguments from an ordinary one — `get` declares `[addressOrPath]` and `call`
+ * declares `<callable>`, both plain strings. Carried explicitly for the same
+ * reason `PRE_PARSE_GLOBALS` is.
+ */
+const POSITIONAL_ADDRESS_COMMANDS: ReadonlySet<string> = new Set([
+  "cell get",
+  "cell set",
+  "piece call",
+  // The superseded spellings, which accept the same positional for as long as
+  // they answer at all.
+  "get",
+  "set",
+  "call",
+]);
+
+/**
+ * Whether `token` in the first positional of `path` names the target rather
+ * than filling that argument. The deciding grammar is the command's:
+ * a reference begins with `/`, and neither a cell path nor a callable name
+ * ever does.
+ */
+function isPositionalAddress(
+  path: readonly string[],
+  token: string,
+): boolean {
+  return POSITIONAL_ADDRESS_COMMANDS.has(path.join(" ")) &&
+    isReference(token);
+}
+
+/**
+ * Subcommands a caller can reach, hidden ones included.
+ *
+ * A superseded spelling is hidden so that nothing offers it, and stays mounted
+ * so that a caller who already types it still works. Completion follows that
+ * split: suggestion lists only what {@link realSubcommands} returns, while
+ * resolving a typed name and walking the tree for slots see everything
+ * reachable — otherwise the old spelling would complete none of its own flags.
+ */
+function reachableSubcommands(command: AnyCommand): AnyCommand[] {
+  return command.getCommands(true).filter((child) =>
+    child.getName() !== "help"
+  );
+}
+
 /** Resolve a subcommand by name or alias, skipping Cliffy's own `help`. */
 function findSubcommand(
   command: AnyCommand,
   name: string,
 ): AnyCommand | undefined {
-  return command.getCommands(false).find((child) =>
+  return reachableSubcommands(command).find((child) =>
     child.getName() === name || child.getAliases().includes(name)
   );
 }
@@ -275,6 +360,7 @@ export function resolveCompletionLine(
   const path: string[] = [];
   const options = new Map<string, string>();
   const flags = new Set<string>();
+  let address: string | undefined;
   let positionals: string[] = [];
   const passthrough: string[] = [];
   let separatorSeen = false;
@@ -288,6 +374,15 @@ export function resolveCompletionLine(
     }
     if (token === "--") {
       separatorSeen = true;
+      continue;
+    }
+
+    // Past a `stopEarly()` boundary the verb has opened its own section, so
+    // every word belongs to the callable and a flag-shaped one is data rather
+    // than an option. Reading it as an option would shift the positional index
+    // the argument slot depends on.
+    if (positionals.length > 0 && stopsEarly(command)) {
+      positionals.push(token);
       continue;
     }
 
@@ -355,6 +450,12 @@ export function resolveCompletionLine(
         positionals = [];
         continue;
       }
+      // A positional address replaces `--cell` rather than filling the
+      // argument, so the words after it keep the indices they would have had.
+      if (address === undefined && isPositionalAddress(path, token)) {
+        address = token;
+        continue;
+      }
     }
     positionals.push(token);
   }
@@ -376,6 +477,7 @@ export function resolveCompletionLine(
     word,
     options,
     flags,
+    ...(address !== undefined && { address }),
     positionals,
     passthrough,
   };
@@ -394,6 +496,15 @@ function resolveSlot(input: {
 
   if (separatorSeen) {
     return { kind: "passthrough", index: input.passthrough.length };
+  }
+
+  // Past a `stopEarly()` boundary the CLI's own flags are refused, so no
+  // option slot is reachable there. The position belongs to the callable's
+  // vocabulary, which the argument slot below names — and which nothing
+  // completes yet. Offering nothing is what a position whose words the command
+  // cannot name should offer; offering flags the command rejects is not.
+  if (positionals.length > 0 && stopsEarly(command)) {
+    return positionalSlot(command, positionals);
   }
 
   // `--name=<cursor>` completes the value, and candidates must be emitted with
@@ -446,18 +557,100 @@ function resolveSlot(input: {
     return { kind: "subcommand" };
   }
 
-  const args = command.getArguments();
-  if (args.length > 0) {
-    const index = Math.min(positionals.length, args.length - 1);
-    const argument = args[index];
-    // Only a variadic final argument accepts more words than it declares.
-    if (positionals.length < args.length || argument.variadic) {
-      return { kind: "argument", argument, index: positionals.length };
-    }
-  }
+  return positionalSlot(command, positionals);
+}
 
+/** The argument the next positional word fills, or `null` past the last one. */
+function positionalSlot(
+  command: AnyCommand,
+  positionals: readonly string[],
+): CompletionSlot | null {
+  const args = command.getArguments();
+  if (args.length === 0) return null;
+  const index = Math.min(positionals.length, args.length - 1);
+  const argument = args[index];
+  // Only a variadic final argument accepts more words than it declares.
+  if (positionals.length < args.length || argument.variadic) {
+    return { kind: "argument", argument, index: positionals.length };
+  }
   return null;
 }
 
 /** Exported for `providers.ts`, which keys context lookups by long name. */
 export { longName, takesValue };
+
+/** One positional a command tree declares, and where it sits. */
+export interface DeclaredPositional {
+  /** `<command path>:<argument name>`, the key its provider carries. */
+  readonly key: string;
+
+  /** The command path, or `<root>` for the root command's own. */
+  readonly where: string;
+
+  /** Its place in that command's argument order, so a line can reach it. */
+  readonly index: number;
+}
+
+/** Every value-taking option and every positional a command tree declares. */
+export interface DeclaredSlots {
+  /** Option long name -> the command paths declaring it. */
+  readonly options: ReadonlyMap<string, readonly string[]>;
+
+  readonly positionals: readonly DeclaredPositional[];
+
+  /**
+   * The option slots whose value may be omitted, as
+   * `<command path>:--<long name>`.
+   *
+   * Such an option never swallows the next word, so the cursor after
+   * `--name ` is on a positional and only `--name=` reaches the option's own
+   * value. Anything walking these slots to drive a line has to spell them that
+   * way or it drives a different slot.
+   */
+  readonly optionalValues: ReadonlySet<string>;
+}
+
+/**
+ * Every slot the tree offers a value at, walked the way `resolveCompletionLine`
+ * walks it: {@link reachableSubcommands} decides which children are commands,
+ * and `takesValue` decides which options have a value to complete.
+ *
+ * Reachable rather than suggestible, which is the same split resolving a typed
+ * name follows: a superseded spelling is hidden from {@link realSubcommands},
+ * so nothing offers it, and it still owns every slot below it — a caller who
+ * types it completes its flags, and a slot reached only through it is one the
+ * provider tables have to answer for.
+ *
+ * Both keys the provider tables use fall out of this walk, which is what lets
+ * a check subtract the tables from the tree — in either direction — rather
+ * than remembering what was added.
+ */
+export function declaredSlots(root: AnyCommand): DeclaredSlots {
+  const options = new Map<string, string[]>();
+  const positionals: DeclaredPositional[] = [];
+  const optionalValues = new Set<string>();
+  const walk = (command: AnyCommand, path: readonly string[]): void => {
+    const where = path.join(" ") || "<root>";
+    for (const option of command.getOptions(false)) {
+      if (!takesValue(option)) continue;
+      const seen = options.get(longName(option)) ?? [];
+      if (!seen.includes(where)) seen.push(where);
+      options.set(longName(option), seen);
+      if (valueIsOptional(option)) {
+        optionalValues.add(`${where}:--${longName(option)}`);
+      }
+    }
+    command.getArguments().forEach((argument: Argument, index: number) => {
+      positionals.push({
+        key: `${path.join(" ")}:${argument.name}`,
+        where,
+        index,
+      });
+    });
+    for (const child of reachableSubcommands(command)) {
+      walk(child, [...path, child.getName()]);
+    }
+  };
+  walk(root, []);
+  return { options, positionals, optionalValues };
+}

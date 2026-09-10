@@ -575,12 +575,14 @@ Deno.test("pattern curry reads a dynamic child contract from call-site metadata"
   try {
     const commonfabric = createTrustedBuilder(runtime).commonfabric;
     const invokeFactory = (commonfabric as unknown as {
-      invokeFactory: (
-        factory: unknown,
-        input: unknown,
-        contract: typeof expected,
-      ) => unknown;
-    }).invokeFactory;
+      __cfHelpers: {
+        invokeFactory: (
+          factory: unknown,
+          input: unknown,
+          contract: typeof expected,
+        ) => unknown;
+      };
+    }).__cfHelpers.invokeFactory;
     commonfabric.pattern(
       (input: any) => {
         const child = invokeFactory(

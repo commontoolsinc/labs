@@ -18,6 +18,7 @@ import { type Default, NAME, UI, type VNode } from "commonfabric";
 export interface PersonLike {
   firstName: string;
   lastName: string;
+
   /** Optional link to same entity in another context (e.g., work vs personal) */
   sameAs?: PersonLike;
 }

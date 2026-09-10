@@ -1,5 +1,7 @@
 import ts from "typescript";
 
+import { unwrapTransparentWrapperOnce } from "../utils/expression.ts";
+
 import type {
   DataFlowAnalysis,
   DataFlowGraph,
@@ -240,21 +242,13 @@ export function normalizeDataFlows(
 
     // Only normalize away truly meaningless wrappers that don't change semantics
     while (true) {
-      // Remove parentheses - purely syntactic, no semantic difference
-      if (ts.isParenthesizedExpression(current)) {
-        current = current.expression;
-        continue;
-      }
-
-      // Remove type assertions - don't affect runtime behavior
-      if (ts.isAsExpression(current) || ts.isTypeAssertionExpression(current)) {
-        current = current.expression;
-        continue;
-      }
-
-      // Remove non-null assertions - don't affect runtime behavior
-      if (ts.isNonNullExpression(current)) {
-        current = current.expression;
+      // Remove transparent wrappers - parentheses are purely syntactic, and
+      // the assertion forms do not affect runtime behavior. Two data flows that
+      // differ only by one of these normalize to the same expression and group
+      // together, so the set has to be the whole one.
+      const unwrapped = unwrapTransparentWrapperOnce(current);
+      if (unwrapped) {
+        current = unwrapped;
         continue;
       }
 

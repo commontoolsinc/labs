@@ -1,8 +1,10 @@
 import { assertEquals } from "@std/assert";
-import { Runtime } from "../src/runtime.ts";
+
+import { Identity } from "@commonfabric/identity";
+
 import { lift } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
-import { Identity } from "@commonfabric/identity";
+import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { trustPattern } from "./support/trusted-builder.ts";
 
@@ -46,8 +48,7 @@ Deno.test("computed throws error", async () => {
 
   let errorCaught = false;
 
-  const errorHandlers = (runtime.scheduler as any).errorHandlers;
-  errorHandlers.add((_err: Error, _action: unknown) => {
+  runtime.scheduler.onError((_err: Error) => {
     errorCaught = true;
   });
 

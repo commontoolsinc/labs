@@ -5,6 +5,17 @@ import { unwrapExpression } from "../../utils/expression.ts";
 import { isFallbackOperator } from "../../utils/reactive-keys.ts";
 import { isSimpleReactiveAccess } from "../cell-type.ts";
 
+/**
+ * True when `expression` is the receiver of an unlowered `map`, so a fallback
+ * such as `(xs ?? []).map(...)` can be left for the array-method rewrite to
+ * own rather than wrapped on its own.
+ *
+ * The receiver walk steps through parentheses and partially emitted nodes, and
+ * deliberately not the rest of the transparent wrapper set: the shapes this
+ * gate accepts are binary fallback expressions, and an `as`, `<T>`,
+ * `satisfies`, or `!` between the fallback and the `.map` changes what the
+ * array-method rewrite reads there.
+ */
 export function isFallbackMapReceiverExpression(
   expression: ts.BinaryExpression,
 ): boolean {

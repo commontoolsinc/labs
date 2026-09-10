@@ -9,14 +9,15 @@
  */
 
 import { assertEquals } from "@std/assert";
-import { WorkerReconciler } from "../src/worker/reconciler.ts";
-import type { WorkerRenderNode, WorkerVNode } from "../src/worker/types.ts";
 
-import type { VDomOp } from "../src/vdom-ops.ts";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "@commonfabric/runner";
 import type { Cell } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import type { VDomOp } from "../src/vdom-ops.ts";
+import { WorkerReconciler } from "../src/worker/reconciler.ts";
+import type { WorkerRenderNode, WorkerVNode } from "../src/worker/types.ts";
 
 /**
  * Helper to collect ops emitted by the reconciler.
@@ -50,7 +51,7 @@ Deno.test("worker reconciler - $alias records in child position", async (t) => {
 
   // Define MockCell extending CellImpl
   class MockCell extends (CellImplConstructor as any) {
-    private subscribers = new Set<(value: any) => void>();
+    #subscribers = new Set<(value: any) => void>();
 
     constructor(public value: any) {
       // CellImpl(runtime, tx, link, synced, causeContainer, kind)
@@ -59,16 +60,16 @@ Deno.test("worker reconciler - $alias records in child position", async (t) => {
     }
 
     sink(callback: (value: any) => void) {
-      this.subscribers.add(callback);
+      this.#subscribers.add(callback);
       callback(this.value);
       return () => {
-        this.subscribers.delete(callback);
+        this.#subscribers.delete(callback);
       };
     }
 
     set(newValue: any) {
       this.value = newValue;
-      for (const sub of this.subscribers) {
+      for (const sub of this.#subscribers) {
         sub(newValue);
       }
     }

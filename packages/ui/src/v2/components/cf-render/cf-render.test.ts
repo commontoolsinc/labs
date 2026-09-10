@@ -1,8 +1,15 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { defer } from "@commonfabric/utils/defer";
-import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
+import { describe, it } from "@std/testing/bdd";
+
 import type { CellHandle } from "@commonfabric/runtime-client";
+import { defer } from "@commonfabric/utils/defer";
+
+import { providePieceBoundary } from "../../../../../html/src/main/space-context.ts";
+import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
+import {
+  createMockElement,
+  installMockDocument,
+} from "../../test-utils/mock-document.ts";
 import {
   CFRender,
   hasVariantValue,
@@ -107,29 +114,71 @@ describe("CFRender render concurrency", () => {
   });
 
   it("cleans up an error render when its cell is cleared", async () => {
-    const element = new CFRender();
-    const container = { innerHTML: "" } as HTMLDivElement;
-    const internals = element as unknown as {
-      _cleanup?: () => void;
-      _containerRef: { value?: HTMLDivElement };
-      _handleRenderError(error: unknown): void;
-      _renderCell(): Promise<void>;
-    };
-    internals._containerRef = { value: container };
-    element.cell = {
-      runtime: () => ({ signal: { aborted: false } }),
-    } as unknown as CellHandle;
+    const mockDocument = installMockDocument();
+    try {
+      const element = new CFRender();
+      const container = createMockElement("div");
+      const internals = element as unknown as {
+        _cleanup?: () => void;
+        _containerRef: { value?: HTMLDivElement };
+        _handleRenderError(error: unknown): void;
+        _renderCell(): Promise<void>;
+      };
+      internals._containerRef = {
+        value: container as unknown as HTMLDivElement,
+      };
+      element.cell = {
+        runtime: () => ({ signal: { aborted: false } }),
+      } as unknown as CellHandle;
 
-    captureConsoleError(() => {
-      internals._handleRenderError(new Error("boom"));
-    });
-    expect(container.innerHTML).toContain("Error rendering content: boom");
+      captureConsoleError(() => {
+        internals._handleRenderError(new Error("boom"));
+      });
+      expect(container.children.map((child) => child.textContent)).toEqual([
+        "Error rendering content: boom",
+      ]);
 
-    element.cell = undefined;
-    await internals._renderCell();
+      element.cell = undefined;
+      await internals._renderCell();
 
-    expect(container.innerHTML).toBe("");
-    expect(internals._cleanup).toBeUndefined();
+      expect(container.children).toEqual([]);
+      expect(internals._cleanup).toBeUndefined();
+    } finally {
+      mockDocument.restore();
+    }
+  });
+
+  it("renders a failure message as text rather than as markup", () => {
+    const mockDocument = installMockDocument();
+    try {
+      const element = new CFRender();
+      const container = createMockElement("div");
+      const internals = element as unknown as {
+        _containerRef: { value?: HTMLDivElement };
+        _handleRenderError(error: unknown): void;
+      };
+      internals._containerRef = {
+        value: container as unknown as HTMLDivElement,
+      };
+      element.cell = {
+        runtime: () => ({ signal: { aborted: false } }),
+      } as unknown as CellHandle;
+
+      captureConsoleError(() => {
+        internals._handleRenderError(
+          new Error('<img src="x" onerror="alert(1)">'),
+        );
+      });
+
+      // The message reaches the page whole, as the text of one element, so
+      // markup in it describes nothing for the browser to build.
+      expect(container.children.length).toBe(1);
+      expect(container.children[0].textContent).toBe(
+        'Error rendering content: <img src="x" onerror="alert(1)">',
+      );
+    } finally {
+      mockDocument.restore();
+    }
   });
 
   it("accepts a retarget delivered before subscribe returns", async () => {
@@ -1034,6 +1083,7 @@ describe("CFRender piece context menu", () => {
   function contextMenuEvent(
     deepestTarget?: EventTarget,
     modifiers: { shiftKey?: boolean } = {},
+    ancestors: EventTarget[] = [],
   ): MouseEvent & { defaultPrevented: boolean; propagationStopped: boolean } {
     const event = {
       clientX: 120,
@@ -1041,7 +1091,7 @@ describe("CFRender piece context menu", () => {
       shiftKey: modifiers.shiftKey ?? false,
       defaultPrevented: false,
       propagationStopped: false,
-      composedPath: () => (deepestTarget ? [deepestTarget] : []),
+      composedPath: () => (deepestTarget ? [deepestTarget, ...ancestors] : []),
       preventDefault() {
         event.defaultPrevented = true;
       },
@@ -1207,6 +1257,90 @@ describe("CFRender piece context menu", () => {
 
     const detail = rightClick(element, contextMenuEvent());
     expect(detail?.pieceId).toBe("of:fid1:tile-piece");
+    expect(detail?.variant).toBe("full");
+  });
+
+  it("reports the innermost nested pattern in the click path", () => {
+    const element = new CFRender();
+    element.variant = "tile";
+    element.cell = createMockCellHandle({ name: "outer" }, {
+      id: "of:fid1:outer-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const inner = createMockCellHandle({ name: "inner" }, {
+      id: "of:fid1:inner-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const innerRoot = new EventTarget() as unknown as Element;
+    providePieceBoundary(innerRoot, inner);
+
+    const detail = rightClick(
+      element,
+      contextMenuEvent(innerRoot, {}, [element]),
+    );
+
+    expect(detail?.pieceId).toBe("of:fid1:inner-piece");
+    expect(detail?.variant).toBe("full");
+  });
+
+  it("does not inherit a piece boundary outside this renderer", () => {
+    const element = new CFRender();
+    element.cell = createMockCellHandle({ name: "inner" }, {
+      id: "of:fid1:inner-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const outer = createMockCellHandle({ name: "outer" }, {
+      id: "of:fid1:outer-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const outerRoot = new EventTarget() as unknown as Element;
+    providePieceBoundary(outerRoot, outer);
+    const innerTarget = {
+      dispatchEvent: (event: Event) => outerRoot.dispatchEvent(event),
+    } as EventTarget;
+
+    const detail = rightClick(
+      element,
+      contextMenuEvent(innerTarget, {}, [element, outerRoot]),
+    );
+
+    expect(detail?.pieceId).toBe("of:fid1:inner-piece");
+    expect(detail?.variant).toBe("full");
+  });
+
+  it("skips a nested provider that is not a whole piece", () => {
+    const element = new CFRender();
+    element.cell = createMockCellHandle({ name: "renderer" }, {
+      id: "of:fid1:renderer-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const outer = createMockCellHandle({ name: "outer" }, {
+      id: "of:fid1:outer-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const field = createMockCellHandle({ name: "field" }, {
+      id: "of:fid1:field-piece" as never,
+      space: "did:key:zSpace" as never,
+      path: ["value"],
+    }) as CellHandle;
+    const outerRoot = new EventTarget() as unknown as Element;
+    const fieldRoot = new EventTarget() as unknown as Element;
+    providePieceBoundary(outerRoot, outer);
+    providePieceBoundary(fieldRoot, field);
+    const deepestTarget = {
+      dispatchEvent(event: Event) {
+        fieldRoot.dispatchEvent(event);
+        if (!event.cancelBubble) outerRoot.dispatchEvent(event);
+        return !event.defaultPrevented;
+      },
+    } as EventTarget;
+
+    const detail = rightClick(
+      element,
+      contextMenuEvent(deepestTarget, {}, [fieldRoot, outerRoot, element]),
+    );
+
+    expect(detail?.pieceId).toBe("of:fid1:outer-piece");
     expect(detail?.variant).toBe("full");
   });
 });

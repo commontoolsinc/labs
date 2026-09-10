@@ -5,20 +5,23 @@ import {
   handler,
   pattern,
   type Stream,
+  TESTS,
   UI,
   Writable,
 } from "commonfabric";
 import {
   findElementByExactText,
-  findNode,
+  findNodeByProp,
   hasText,
   propsOf,
+  propValue,
   readValue,
 } from "../test/vnode-helpers.ts";
 import PollOptionCard from "./poll-option-card.tsx";
 import type {
   CastVoteEvent,
   LogVisitEvent,
+  LunchProfile,
   Option,
   RemoveOptionEvent,
   SetOptionImageEvent,
@@ -26,21 +29,6 @@ import type {
 } from "./main.tsx";
 
 type EmptyState = Record<PropertyKey, never>;
-
-const findNodeByProp = (
-  root: unknown,
-  prop: string,
-  expected: unknown,
-): unknown | undefined =>
-  findNode(root, (node) => {
-    const props = propsOf(node);
-    return props !== undefined && readValue(props[prop]) === expected;
-  });
-
-const propValue = (node: unknown, prop: string): unknown => {
-  const props = propsOf(node);
-  return props ? readValue(props[prop]) : undefined;
-};
 
 const noopCastVote = handler<CastVoteEvent, EmptyState>(() => {});
 const noopRemoveOption = handler<RemoveOptionEvent, EmptyState>(() => {});
@@ -80,15 +68,13 @@ export const fetchMocks = [
 const GENERATED_IMAGE_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
-const votes: Vote[] = [
-  {
-    optionId: "opt-sushi",
-    voterName: "Alex",
-    voteType: "green",
-  },
-];
-
 export default pattern(() => {
+  // Identity is a profile cell, so the viewer and their vote are built here
+  // rather than seeded as module-level static data.
+  const alex = Writable.of<LunchProfile>({ name: "Alex" });
+  const votes = computed((): Vote[] => [
+    { optionId: "opt-sushi", voter: alex, voteType: "green" },
+  ]);
   const removeConfirmTarget = new Writable<string | null | undefined>(
     undefined,
   );
@@ -108,7 +94,7 @@ export default pattern(() => {
   const card = PollOptionCard({
     option: STORED_OPTION,
     rank: reactiveRank,
-    me: "Alex",
+    viewerProfile: alex,
     isJoined: true,
     isAdmin: true,
     votes,
@@ -227,7 +213,7 @@ export default pattern(() => {
   const generatingCard = PollOptionCard({
     option: GENERATING_OPTION,
     rank: 2,
-    me: "Alex",
+    viewerProfile: alex,
     isJoined: true,
     isAdmin: true,
     votes,
@@ -268,7 +254,7 @@ export default pattern(() => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_my_green_vote_label_renders },
       { assertion: assert_unset_rank_renders_placeholder },
       { action: action_resolve_rank },

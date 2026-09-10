@@ -6,13 +6,10 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type FactoryInput, NAME } from "../src/builder/types.ts";
+import { type Cell, type FactoryInput, NAME } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import type { Pattern } from "../src/builder/types.ts";
-import {
-  createTrustedBuilder,
-  installTestPatternArtifact,
-} from "./support/trusted-builder.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -78,19 +75,17 @@ describe("Pattern Runner - Regressions", () => {
       ({ items }) => {
         // Map over items, returning item name if visible, null otherwise
         const mapped = (items as any).mapWithPattern(
-          installTestPatternArtifact(
-            runtime,
-            pattern(({ element, index, array }: FactoryInput<any>) =>
-              (((item: any) =>
-                ifElse(
-                  lift((i: { name: string; visible: boolean }) => i.visible)(
-                    item,
-                  ),
-                  lift((i: { name: string; visible: boolean }) => i.name)(item),
-                  null,
-                )) as any)(element, index, array)
-            ),
+          pattern(({ element, index, array }: FactoryInput<any>) =>
+            (((item: any) =>
+              ifElse(
+                lift((i: { name: string; visible: boolean }) => i.visible)(
+                  item,
+                ),
+                lift((i: { name: string; visible: boolean }) => i.name)(item),
+                null,
+              )) as any)(element, index, array)
           ),
+          {},
         );
         return { items, mapped };
       },
@@ -164,13 +159,17 @@ describe("Pattern Runner - Regressions", () => {
 
     const createNote = handler<
       void,
-      { notes: Array<ReturnType<typeof notePattern>> }
+      { notes: Cell<Array<ReturnType<typeof notePattern>>> }
     >(
+      true,
+      {
+        type: "object",
+        properties: { notes: { type: "array", asCell: ["cell"] } },
+      },
       (_, { notes }) => {
         const newNote = notePattern({ title: "Stream Created Note" });
         notes.push(newNote);
       },
-      { proxy: true },
     );
 
     const notebookLikePattern = pattern<{
@@ -249,7 +248,7 @@ describe("Pattern Runner - Regressions", () => {
       tx,
     );
 
-    const runner = runtime.runner as any;
+    const runner = runtime.runner.accessForTestingOnly;
     runner.setupInternal(tx, echoPattern, { title: "draft" }, resultCell);
     const key = runner.getDocKey(resultCell);
     expect(runner.locallyPreparedResults.has(key)).toBe(true);
@@ -271,7 +270,7 @@ describe("Pattern Runner - Regressions", () => {
     tx = runtime.edit();
   });
 
-  it("rejects arbitrary toJSON function fields before raw runner writes in v2", async () => {
+  it("normalizes nested builder artifacts before raw runner writes in v2", async () => {
     await commitTx();
     await runtime.dispose();
     await storageManager.close();
@@ -286,23 +285,25 @@ describe("Pattern Runner - Regressions", () => {
     tx = runtime.edit();
     bindBuilder();
 
+    // Shaped like a builder artifact: a function carrying its own
+    // `toEncodableForm`, which is the member the write path keys on.
     const initialRecipe = Object.assign(() => {}, {
-      toJSON() {
+      toEncodableForm() {
         return { name: "initial recipe" };
       },
     });
-    const resultRecipe = {
-      toJSON() {
+    const resultRecipe = Object.assign(() => {}, {
+      toEncodableForm() {
         return { name: "result recipe" };
       },
-    };
+    });
 
     const rawValuePattern = {
       argumentSchema: {},
       resultSchema: {},
       derivedInternalCells: [{
         partialCause: "recipe",
-        schema: { default: initialRecipe.toJSON() },
+        schema: { default: initialRecipe.toEncodableForm() },
       }],
       result: {
         internalRecipe: {
@@ -323,8 +324,13 @@ describe("Pattern Runner - Regressions", () => {
       tx,
     );
 
-    expect(() => runtime.run(tx, rawValuePattern, {}, resultCell)).toThrow(
-      "Arbitrary functions are not valid binding values: toJSON",
-    );
+    const result = runtime.run(tx, rawValuePattern, {}, resultCell);
+    await commitTx();
+
+    const value = await result.pull();
+    expect(value).toMatchObject({
+      internalRecipe: { name: "initial recipe" },
+      resultRecipe: { name: "result recipe" },
+    });
   });
 });

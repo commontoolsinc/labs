@@ -4,10 +4,9 @@ import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
-// Benchmark: the ESM module-record loader (compile + evaluate) for a
-// representative multi-file pattern — compartment construction plus per-module
-// importNow. This is the runtime's only module-load path since the AMD bundle
-// loader was removed.
+// Benchmark: the module-record loader (compile + evaluate) for a representative
+// multi-file pattern — compartment construction plus per-module importNow. This
+// is the runtime's only module-load path.
 
 const signer = await Identity.fromPassphrase("bench operator");
 

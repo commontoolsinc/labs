@@ -1,19 +1,28 @@
-import type ts from "typescript";
-import { getLogger } from "@commonfabric/utils/logger";
 import type { Source, SourceMap } from "@commonfabric/js-compiler";
-import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
-import { resolveImportSpecifier } from "@commonfabric/js-compiler/specifier";
+import {
+  resolveDataFilePath,
+  resolveImportSpecifier,
+} from "@commonfabric/js-compiler/specifier";
+import type {
+  BuilderSourceSitesV1,
+  PatternCoverageSpan,
+} from "@commonfabric/ts-transformers";
+import { getLogger } from "@commonfabric/utils/logger";
+import type ts from "typescript";
+
 import { compilerStack } from "../harness/deferred-compiler-stack.ts";
 import {
   computeModuleHashes,
   findInternalTarget,
 } from "../harness/module-identity.ts";
 import { recordDefiningModule } from "../harness/verified-provenance.ts";
+import { freezeSandboxValue } from "./hardening.ts";
 import type { VirtualModuleRecord } from "./esm-module-loader.ts";
 
 /**
- * Adapter from authored TypeScript sources to SES virtual module records
- * (Phase 2 of docs/specs/module-loading.md).
+ * Adapter from authored TypeScript sources to SES virtual module records; see
+ * docs/specs/module-loading.md §"Loader: per-module records in SES
+ * compartments".
  *
  * Each module is compiled independently to CommonJS, content-addressed by its
  * module hash (`cf:module/<hash>`), and wrapped in a {@link VirtualModuleRecord}
@@ -29,11 +38,29 @@ import type { VirtualModuleRecord } from "./esm-module-loader.ts";
 
 const logger = getLogger("module-record-compiler");
 
+/** Identity-only import edge for an attached source entry point. */
+export const SOURCE_ROOT_SPECIFIER = "cf:source-root/";
+
+export function sourceRootSpecifier(path: string): string {
+  return `${SOURCE_ROOT_SPECIFIER}${path.replace(/^\/+/, "")}`;
+}
+
+/** The runtime export a module reads an attached data file through. */
+const DATA_FILE_READER = "dataFile";
+
+/** Identity-only import edge for an attached data file. */
+export const DATA_FILE_SPECIFIER = "cf:data-file/";
+
+export function dataFileSpecifier(path: string): string {
+  return `${DATA_FILE_SPECIFIER}${path.replace(/^\/+/, "")}`;
+}
+
 /**
- * Memo of the two pure derivations {@link buildRecordsFromCompiled} extracts
- * from a module's compiled body: its direct export surface (names + `export *`
- * target specifiers) and its runtime `require()` specifiers. **Keyed by the
- * compiled body itself** — both derivations are pure functions of that body.
+ * Memo of one of the two pure derivations {@link buildRecordsFromCompiled}
+ * extracts from a module's compiled body: its direct export surface (names +
+ * `export *` target specifiers). Its partner is `importParseCache` below.
+ * **Keyed by the compiled body itself** — both derivations are pure functions
+ * of that body.
  *
  * At piece boot every system pattern loaded by identity rebuilds its record
  * graph from the SAME shared module closure, so `buildRecordsFromCompiled` runs
@@ -42,15 +69,14 @@ const logger = getLogger("module-record-compiler");
  * one parse per distinct body per process.
  *
  * Keying on the body (not the module's source `identity`) is deliberate: a
- * content-hash identity is a hash of the *authored source*, and the same
- * identity can map to *different* compiled bytes across compilation modes /
- * runtime versions (cf. the `recordCache` note in `compileSourcesToRecords`,
- * where a precompiled body and a bare-transpiled body share a content-hash key).
- * An identity key could therefore serve one body's parse for another; the body
- * fully determines the parse, so a body key is exact and cross-contamination is
- * impossible.
+ * content-hash identity is a hash of the *authored source*, so one identity can
+ * map to different compiled bytes across compilation modes and runtime
+ * versions — the CF-transformed body and the bare-transpiled body of the same
+ * source share a content-hash key. An identity key could therefore serve one
+ * body's parse for another; the body fully determines the parse, so a body key
+ * is exact and cross-contamination is impossible.
  *
- * The two maps are process-global and unbounded by design: one small
+ * Both maps are process-global and unbounded by design: one small
  * record-surface entry (export names + import specifiers) per distinct compiled
  * body, retained for the process lifetime and keyed by the body string. Distinct
  * bodies are bounded by the pattern universe a worker serves; a long-lived
@@ -64,6 +90,12 @@ const exportParseCache = new Map<
   string,
   { exportNames: readonly string[]; starTargetSpecs: readonly string[] }
 >();
+
+/**
+ * Memo of the other derivation: the module body's runtime `require()`
+ * specifiers. Same key, same lifetime, and same reasoning as
+ * `exportParseCache` above.
+ */
 const importParseCache = new Map<string, readonly string[]>();
 
 function parseCompiledExports(
@@ -112,15 +144,6 @@ export function deriveModuleRecordFields(code: string): {
   };
 }
 
-/**
- * Create a write-once exports target for a module body. Re-assigning,
- * redefining, or deleting a property that already holds a real (non-`undefined`)
- * value throws. A `void 0` placeholder — the TS `exports.x = void 0;` forward
- * declaration — leaves the property unlocked so the subsequent real assignment
- * is permitted, and the real assignment then locks it. This blocks export
- * corruption smuggled into the evaluation of an otherwise-accepted expression,
- * which the (deliberately AST-free) verifier cannot detect.
- */
 /**
  * Run a compiled module factory against a write-once exports object and snapshot
  * the declared exports onto `moduleExports` (the SES namespace target).
@@ -218,23 +241,6 @@ function stampDefiningModule(
 export type HoistRegistrationSink = Map<string, Map<string, unknown>>;
 
 /**
- * Build the per-module `__cfReg` registrar (the module factory's 4th parameter)
- * plus a `commit` hook. The registrar enforces the integrity invariants that let
- * the verifier stay simple:
- *
- * - **Run-once**: a second `__cfReg(...)` call throws — an injected/duplicate
- *   registration aborts the import (which is terminal for the module).
- * - **Closed window**: calls after the module body returns throw, so a closure
- *   that captured `__cfReg` cannot register late (e.g. from a handler callback).
- * - **Transactional**: entries are staged locally and only flushed into `sink`
- *   by `commit()`, which the caller invokes ONLY after the factory returns
- *   normally. A throw (including the run-once trap) therefore leaves nothing
- *   behind.
- *
- * Security (trust of the registered values) is enforced separately, per value,
- * by the PatternManager — not here.
- */
-/**
  * The registrar handed to a module the verifier did NOT approve for hoist
  * registration (no valid top-level `__cfReg({ … })` call). Any invocation throws
  * — so a `__cfReg` reference the verifier's static check failed to reject still
@@ -255,6 +261,23 @@ export function createRejectingRegistrar(): {
   };
 }
 
+/**
+ * Build the per-module `__cfReg` registrar (the module factory's 4th parameter)
+ * plus a `commit` hook. The registrar enforces the integrity invariants that let
+ * the verifier stay simple:
+ *
+ * - **Run-once**: a second `__cfReg(...)` call throws — an injected/duplicate
+ *   registration aborts the import (which is terminal for the module).
+ * - **Closed window**: calls after the module body returns throw, so a closure
+ *   that captured `__cfReg` cannot register late (e.g. from a handler callback).
+ * - **Transactional**: entries are staged locally and only flushed into `sink`
+ *   by `commit()`, which the caller invokes ONLY after the factory returns
+ *   normally. A throw (including the run-once trap) therefore leaves nothing
+ *   behind.
+ *
+ * Security (trust of the registered values) is enforced separately, per value,
+ * by the PatternManager — not here.
+ */
 export function createHoistRegistrar(
   identity: string,
   sink: HoistRegistrationSink,
@@ -320,6 +343,15 @@ function hardenExportedValue<T>(value: T): T {
   }
 }
 
+/**
+ * Create a write-once exports target for a module body. Re-assigning,
+ * redefining, or deleting a property that already holds a real (non-`undefined`)
+ * value throws. A `void 0` placeholder — the TS `exports.x = void 0;` forward
+ * declaration — leaves the property unlocked so the subsequent real assignment
+ * is permitted, and the real assignment then locks it. This blocks export
+ * corruption smuggled into the evaluation of an otherwise-accepted expression,
+ * which the (deliberately AST-free) verifier cannot detect.
+ */
 export function createWriteOnceExports(): Record<string, unknown> {
   const target: Record<string, unknown> = {};
   const locked = new Set<string | symbol>();
@@ -351,27 +383,6 @@ export function createWriteOnceExports(): Record<string, unknown> {
   });
 }
 
-/** Per-module compiled artifact, cacheable by module hash (Phase 4). */
-export interface CompiledModuleArtifact {
-  exports: string[];
-  compiled: string;
-}
-
-/**
- * Cache of compiled module artifacts keyed by content-addressed module hash.
- * Because the hash already folds in the transitive import closure, a cached
- * artifact is valid as long as its key matches — editing one file invalidates
- * only that module (and its importers, whose hashes change).
- *
- * The cache assumes the fixed compiler options used by this adapter (CommonJS,
- * ES2023, esModuleInterop). A caller sharing one cache across differing
- * compiler options would need to fold an options tag into the key.
- */
-export interface ModuleRecordCache {
-  get(moduleHash: string): CompiledModuleArtifact | undefined;
-  set(moduleHash: string, artifact: CompiledModuleArtifact): void;
-}
-
 export interface CompileSourcesOptions {
   /**
    * Names exported by each bare runtime module specifier (e.g.
@@ -379,9 +390,16 @@ export interface CompileSourcesOptions {
    * `cf:runtime/<specifier>`; the caller must register a matching record.
    */
   runtimeModules?: Record<string, string[]>;
+
   runtimeFingerprint?: string;
-  /** Optional per-module compiled-artifact cache, keyed by module hash. */
-  recordCache?: ModuleRecordCache;
+
+  /**
+   * Attached data files as `[authored path, bytes]`, carried onto the graph for
+   * the modules that read them. They are not sources: nothing here compiles,
+   * parses, or records them.
+   */
+  dataFiles?: Iterable<readonly [string, string]>;
+
   /**
    * Pre-compiled CommonJS body per source name. When provided (e.g. from
    * `TypeScriptCompiler.compileToModules`, which runs the full CF transformer
@@ -390,26 +408,32 @@ export interface CompileSourcesOptions {
    * generation, `__cf_data` wrapping) cannot be produced by transpileModule.
    */
   precompiledBodies?: Map<string, string>;
+
   /**
    * Per-source source map (from `compileToModules`), keyed by source name. Used
-   * to compose a per-load bundle source map so `fn.src` / CFC verified-source
-   * coordinates resolve back to the original authored files under the ESM
-   * loader (the AMD path registers the bundle map via the isolate).
+   * to compose per-load maps so error stacks resolve back to the original
+   * authored files.
    */
   precompiledSourceMaps?: Map<string, SourceMap>;
+
+  /** Debug-only authored builder sites per source name. */
+  precompiledBuilderSourceSites?: Map<string, BuilderSourceSitesV1>;
+
   /**
    * Whole-program path prefix (`/<id>`, no trailing slash) to strip from each
-   * module's path *for content-addressed identity only*. The ESM compile path
+   * module's path *for content-addressed identity only*. The compile path
    * resolves a program whose files are prefixed with `/<computeId>/...` (a
-   * whole-program hash) so source locations match the AMD bundle. Folding that
-   * prefix into the per-module identity would make `cf:module/<hash>`
+   * whole-program hash) to namespace per-load source-map and diagnostic
+   * coordinates. Folding that prefix into the per-module identity would make
+   * `cf:module/<hash>`
    * whole-program-dependent — defeating cross-program dedup and diverging from
    * the entry-point-independent identity the spec mandates
    * (docs/specs/module-loading.md). Stripping it here yields stable, dedupable
    * identities while every other artifact (record sourceUrls, source-map keys,
-   * `fn.src` resolution) keeps the prefixed path untouched.
+   * error-stack mapping) keeps the prefixed path untouched.
    */
   idPrefix?: string;
+
   /**
    * Precomputed per-path module identities (from {@link computeModuleIdentities}).
    * When the caller already derived these (e.g. the Engine, for its cache-hit
@@ -417,27 +441,45 @@ export interface CompileSourcesOptions {
    * be consistent with `idPrefix` / `runtimeFingerprint`.
    */
   identityByPath?: Map<string, string>;
+
   /**
    * Maps an authored import specifier to a concrete file already present in the
    * program. Used for scheme-prefixed fabric refs mounted under reserved paths.
    */
   specifierAliases?: ReadonlyMap<string, string>;
+
+  /**
+   * The stored path for a resolved source name — the spelling `dataFiles` is
+   * keyed by, with the per-load `idPrefix` and any fabric mount root taken off.
+   * A module's `dataFile()` reads resolve against this name, so the path a read
+   * produces and the path a file was attached under are in the same space.
+   * Omitted, a source's name is its stored path.
+   */
+  storedNameFor?: (name: string) => string;
 }
 
 export interface CompiledModuleGraph {
   records: Map<string, VirtualModuleRecord>;
+
   /** Content-addressed specifier for each original file path. */
   specifierByPath: Map<string, string>;
+
   /** Compiled CommonJS body per specifier — the text the verifier classifies. */
   compiledBodies: Map<string, string>;
+
   /** Per-specifier source map (compiled body → original source), when available. */
   moduleSourceMaps: Map<string, SourceMap>;
+
+  /** Debug-only authored builder sites per content-addressed module identity. */
+  builderSourceSitesByIdentity: Map<string, BuilderSourceSitesV1>;
+
   /**
    * Hoist registrations, populated as the graph's modules evaluate (`__cfReg`).
    * Empty until `importNow` runs each module's `execute`. The engine reads it
    * after evaluation; the PatternManager assigns `{ identity, symbol }` refs.
    */
   registrationSink: HoistRegistrationSink;
+
   /**
    * Specifiers of modules the VERIFIER approved for hoist registration (a valid
    * top-level `__cfReg({ … })` call). The engine fills this during the verify
@@ -446,6 +488,16 @@ export interface CompiledModuleGraph {
    * missed fails closed at runtime instead of registering attacker values.
    */
   registrationApproved: Set<string>;
+
+  /**
+   * Verbatim bytes of every attached data file in this graph, keyed by the
+   * data entry's authored path. These are carried alongside the records rather
+   * than as records: a data file is never a module, so it has no specifier, no
+   * exports, and nothing to execute. The graph carries them so the bytes a
+   * pattern reads come from the same content-addressed closure its code came
+   * from, on the warm load path as much as the cold one.
+   */
+  dataByPath: Map<string, string>;
 }
 
 /**
@@ -460,6 +512,19 @@ function stripIdentityPrefix(name: string, idPrefix?: string): string {
 }
 
 /**
+ * The parts of a deployed source package that bind to the entry module's
+ * identity without being reachable from it through an import. `rootPaths` are
+ * attached source entry points such as tests; `dataPaths` are attached data
+ * files. Each contributes one identity-only edge from `entryPath`, so adding,
+ * changing, or removing any of them yields a distinct entry identity.
+ */
+export interface SourcePackageIdentity {
+  entryPath: string;
+  rootPaths: readonly string[];
+  dataPaths?: readonly string[];
+}
+
+/**
  * Per-module content-addressed identity (`cf:module/<hash>` minus the `cf:module/`
  * scheme) for every source path, computed prefix-free so identities dedupe
  * across programs. Shared by {@link compileSourcesToRecords} and the Engine's
@@ -468,19 +533,59 @@ function stripIdentityPrefix(name: string, idPrefix?: string): string {
  */
 export function computeModuleIdentities(
   sources: Source[],
-  options: { idPrefix?: string; runtimeFingerprint?: string } = {},
+  options: {
+    idPrefix?: string;
+    runtimeFingerprint?: string;
+    sourcePackage?: SourcePackageIdentity;
+  } = {},
 ): Map<string, string> {
+  const stripPath = (path: string) =>
+    stripIdentityPrefix(path, options.idPrefix);
+  const additionalInternalDeps = new Map<
+    string,
+    { specifier: string; target: string }[]
+  >();
+  const dataFiles = new Set<string>();
+  if (options.sourcePackage !== undefined) {
+    const entryPath = stripPath(options.sourcePackage.entryPath);
+    const rootPaths = [
+      ...new Set(options.sourcePackage.rootPaths.map(stripPath)),
+    ]
+      .filter((rootPath) => rootPath !== entryPath);
+    const dataPaths = [
+      ...new Set((options.sourcePackage.dataPaths ?? []).map(stripPath)),
+    ]
+      .filter((dataPath) => dataPath !== entryPath);
+    for (const dataPath of dataPaths) dataFiles.add(dataPath);
+    const entryDeps = [
+      ...rootPaths.map((rootPath) => ({
+        specifier: sourceRootSpecifier(rootPath),
+        target: rootPath,
+      })),
+      ...dataPaths.map((dataPath) => ({
+        specifier: dataFileSpecifier(dataPath),
+        target: dataPath,
+      })),
+    ];
+    if (entryDeps.length > 0) {
+      additionalInternalDeps.set(entryPath, entryDeps);
+    }
+  }
   const hashes = computeModuleHashes(
     {
       main: "",
       files: sources.map((s) => ({
         ...s,
-        name: stripIdentityPrefix(s.name, options.idPrefix),
+        name: stripPath(s.name),
       })),
     },
-    options.runtimeFingerprint !== undefined
-      ? { runtimeFingerprint: options.runtimeFingerprint }
-      : {},
+    {
+      ...(options.runtimeFingerprint !== undefined
+        ? { runtimeFingerprint: options.runtimeFingerprint }
+        : {}),
+      ...(additionalInternalDeps.size === 0 ? {} : { additionalInternalDeps }),
+      ...(dataFiles.size === 0 ? {} : { dataFiles }),
+    },
   );
   const identityByPath = new Map<string, string>();
   for (const source of sources) {
@@ -497,8 +602,10 @@ export const FABRIC_MOUNT_ROOT = "/~cf/";
 export interface FabricMount {
   /** Terminal identity the subtree was fetched by and must hash back to. */
   entryIdentity: string;
+
   /** Mounted path of the subtree's entry file. */
   entryPath: string;
+
   /** The fabric specifiers that resolve to this mount. */
   specifiers: string[];
 }
@@ -511,7 +618,11 @@ export interface FabricMount {
 export function computeFabricModuleIdentities(
   sources: Source[],
   mounts: readonly FabricMount[],
-  options: { idPrefix?: string; runtimeFingerprint?: string } = {},
+  options: {
+    idPrefix?: string;
+    runtimeFingerprint?: string;
+    sourcePackage?: SourcePackageIdentity;
+  } = {},
 ): Map<string, string> {
   const authored: Source[] = [];
   const mountFiles = new Map<FabricMount, Source[]>();
@@ -559,11 +670,81 @@ function mountPrefix(mount: FabricMount): string {
   return `${FABRIC_MOUNT_ROOT}${mount.entryIdentity}/`;
 }
 
+/**
+ * Hands one module its view of a runtime namespace it imports: the namespace
+ * itself, or a copy carrying that module's own `dataFile`.
+ */
+type NamespaceBinder = (
+  namespace: Record<string, unknown>,
+) => Record<string, unknown>;
+
+/**
+ * A module's own view of the runtime namespaces that expose `dataFile`.
+ *
+ * A data file is read by path, and that path resolves against the module that
+ * reads it, exactly as an import specifier resolves against the module that
+ * imports it. The runtime namespaces a graph registers are shared by every
+ * module in it, so the resolution cannot live in them: each module is instead
+ * handed its own copy of the namespace, whose `dataFile` closes over that
+ * module's own stored path.
+ *
+ * The caller applies this only to a namespace imported through a runtime module
+ * that declares the reader. An authored module is free to export a value of its
+ * own named `dataFile`, and an importer gets the one it imported; a runtime
+ * module that declares no reader gains none.
+ *
+ * The read is a map lookup: the closure is fully loaded before any module
+ * executes, so it needs no storage access and cannot be asynchronous.
+ *
+ * A graph carrying no data files hands every namespace straight through, and a
+ * read reaches the builder's placeholder, which reports that the load attached
+ * nothing.
+ */
+function dataFileBinding(
+  dataByPath: ReadonlyMap<string, string>,
+): (moduleName: string) => NamespaceBinder {
+  if (dataByPath.size === 0) {
+    const passThrough: NamespaceBinder = (namespace) => namespace;
+    return () => passThrough;
+  }
+  const attached = [...dataByPath.keys()].sort();
+  return (moduleName: string) => {
+    const read = freezeSandboxValue((path: string): string => {
+      const resolved = resolveDataFilePath(path, moduleName);
+      const bytes = dataByPath.get(resolved);
+      if (bytes !== undefined) return bytes;
+      // The message states what is attached and stops there. How a caller
+      // attaches one differs by the surface driving the compile — a CLI flag, a
+      // scenario field, an argument to `resolveLocalProgram` — and the runtime
+      // knows none of that, so naming any single mechanism would misdirect
+      // every caller reaching it by another route.
+      throw new Error(
+        `No attached data file "${resolved}". ` +
+          `Attached: ${attached.join(", ")}.`,
+      );
+    });
+    const bound = new WeakMap<
+      Record<string, unknown>,
+      Record<string, unknown>
+    >();
+    return (namespace) => {
+      const memo = bound.get(namespace);
+      if (memo !== undefined) return memo;
+      const copy = Object.freeze({ ...namespace, [DATA_FILE_READER]: read });
+      bound.set(namespace, copy);
+      return copy;
+    };
+  };
+}
+
 export function compileSourcesToRecords(
   sources: Source[],
   options: CompileSourcesOptions = {},
 ): CompiledModuleGraph {
   const runtimeModules = options.runtimeModules ?? {};
+  const dataByPath = new Map(options.dataFiles ?? []);
+  const bindDataFileFor = dataFileBinding(dataByPath);
+  const storedNameFor = options.storedNameFor ?? ((name: string) => name);
   // Identities are computed prefix-free (see computeModuleIdentities) so
   // `cf:module/<hash>` is entry-point independent and dedupes across programs.
   // Reuse the caller's precomputed map when supplied (avoids a second hash pass).
@@ -650,6 +831,10 @@ export function compileSourcesToRecords(
   const records = new Map<string, VirtualModuleRecord>();
   const compiledBodies = new Map<string, string>();
   const moduleSourceMaps = new Map<string, SourceMap>();
+  const builderSourceSitesByIdentity = new Map<
+    string,
+    BuilderSourceSitesV1
+  >();
   const registrationSink: HoistRegistrationSink = new Map();
   const registrationApproved = new Set<string>();
   for (const source of sources) {
@@ -657,24 +842,19 @@ export function compileSourcesToRecords(
     const moduleHash = identityByPath.get(source.name)!;
     const sourceMap = options.precompiledSourceMaps?.get(source.name);
     if (sourceMap) moduleSourceMaps.set(specifier, sourceMap);
+    const builderSourceSites = options.precompiledBuilderSourceSites?.get(
+      source.name,
+    );
+    if (builderSourceSites) {
+      builderSourceSitesByIdentity.set(moduleHash, builderSourceSites);
+    }
     const precompiled = options.precompiledBodies?.get(source.name);
-    let exportNames: string[];
+    const exportNames = resolveFullExports(source.name);
     let compiled: string;
-    // A precompiled (CF-transformed) body is authoritative. Do NOT consult or
-    // populate the shared cache: it may hold a bare-transpiled body under the
-    // same content-hash key (different compilation mode), which must not mix.
-    const cached = precompiled === undefined
-      ? options.recordCache?.get(moduleHash)
-      : undefined;
     if (precompiled !== undefined) {
-      exportNames = resolveFullExports(source.name);
       compiled = precompiled;
-    } else if (cached) {
-      exportNames = cached.exports;
-      compiled = cached.compiled;
     } else {
       const { ts: tsc } = compilerStack();
-      exportNames = resolveFullExports(source.name);
       compiled = tsc.transpileModule(source.contents, {
         fileName: source.name,
         compilerOptions: {
@@ -683,7 +863,6 @@ export function compileSourcesToRecords(
           esModuleInterop: true,
         },
       }).outputText;
-      options.recordCache?.set(moduleHash, { exports: exportNames, compiled });
     }
 
     // Runtime imports are exactly the `require()` calls in the compiled output.
@@ -696,6 +875,9 @@ export function compileSourcesToRecords(
     // (VirtualModuleRecord.imports is `string[]`); this is the cold compile path.
     const importSpecs = [...extractRuntimeImports(compiled)];
     const resolutions: Record<string, string> = {};
+    // The specifiers whose runtime namespace declares `dataFile`, and so the
+    // only ones this module reads a data file through.
+    const readerImports = new Set<string>();
     for (const spec of importSpecs) {
       const resolved = resolveImportSpecifier(spec, source);
       const internal = findInternalTarget(fileNames, resolved);
@@ -703,6 +885,9 @@ export function compileSourcesToRecords(
         resolutions[spec] = specifierByPath.get(internal)!;
       } else if (spec in runtimeModules) {
         resolutions[spec] = `cf:runtime/${spec}`;
+        if (runtimeModules[spec].includes(DATA_FILE_READER)) {
+          readerImports.add(spec);
+        }
       } else if (options.specifierAliases?.has(spec)) {
         const target = options.specifierAliases.get(spec)!;
         const targetSpecifier = specifierByPath.get(target);
@@ -723,29 +908,19 @@ export function compileSourcesToRecords(
     // rather than wrapping the whole namespace. Authored sources are ESM.
     const namespaceExports = [...exportNames, "__esModule"];
 
-    // Tag the eval with a sourceURL = the (prefixed) source path. Under Deno's
-    // tamed SES `errorTaming` this is stripped from `new Error().stack`, so the
-    // stack-based resolver (`resolveSourceLocationFromStack`) does not fire there
-    // — but full source-location fidelity under the ESM loader is nonetheless
-    // achieved (scheduler content-addressed implementation hash + CFC
-    // verified-source) via two mechanisms, so this is NOT a remaining blocker for
-    // enabling the flag by default:
-    //   1. Deno: the `indexOf`-into-`script` fallback in
-    //      `resolveLocationFromFunctionSource` (builder/module.ts) maps `fn.src`
-    //      to the canonical `cf:module/<hash>/<path>` form via the per-load
-    //      `sourceLocationContext` the engine pushes.
-    //   2. Browsers (which DO surface the per-module eval frame in stacks): the
-    //      engine registers a per-module source map keyed on THIS `sourceURL`
-    //      (engine.ts, near `loadSourceMap`), so the stack-based resolver
-    //      translates the eval coordinate back to the authored source.
-    // Both paths are covered: `esm-source-location.test.ts` (CFC verified-source
-    // parity, flag-on) and `action-fingerprint.test.ts` (scheduler hash).
+    // Tag the eval with a sourceURL = the (prefixed) source path. Browsers name
+    // this URL in `new Error().stack`, and the engine registers a per-module
+    // source map keyed on it so a pattern's stack traces read in authored
+    // coordinates. Under Deno's tamed SES `errorTaming` the URL is stripped
+    // from stacks; debug function locations do not depend on it because they
+    // come from the compiler sidecar.
     //
     // SECURITY: strip JS line terminators before interpolating into the
     // `//# sourceURL=` line comment. A newline (or U+2028/U+2029) in
     // `source.name` would otherwise end the comment and let the remainder of
     // the name execute as code inside the compartment.
     const sourceUrl = source.name.replace(/[\r\n\u2028\u2029]/g, "_");
+    const bindDataFile = bindDataFileFor(storedNameFor(source.name));
     records.set(specifier, {
       imports: importSpecs,
       exports: namespaceExports,
@@ -773,11 +948,24 @@ export function compileSourcesToRecords(
         // already-populated export throw, so the smuggle fails closed. A `void 0`
         // forward declaration is treated as a placeholder, so the canonical
         // `exports.x = void 0; … exports.x = real;` compiler shape is allowed.
-        const requireShim = (specifier: string) =>
-          compartment.importNow(resolvedImports[specifier] ?? specifier);
+        // `Object.hasOwn`, not `?? specifier`: `resolvedImports` is a plain
+        // object literal, so a bare `resolvedImports["constructor"]` would read
+        // Object.prototype's member instead of falling through as absent. Either
+        // way the lookup fails closed (importNowHook throws on anything not in
+        // `records`), but only the own-property test makes "absent from the map
+        // resolves to itself" literally true — which is what the spec states.
+        const requireShim = (specifier: string) => {
+          const namespace = compartment.importNow(
+            Object.hasOwn(resolvedImports, specifier)
+              ? resolvedImports[specifier]
+              : specifier,
+          );
+          return readerImports.has(specifier)
+            ? bindDataFile(namespace)
+            : namespace;
+        };
         // A throw inside the factory is terminal for this module: SES caches the
-        // error and re-throws it on every subsequent importNow (the same
-        // contract as a failed AMD factory).
+        // error and re-throws it on every subsequent importNow.
         // Grant the real registrar ONLY if the verifier approved this module's
         // `__cfReg` call; otherwise a throwing one (fail closed).
         const { register, commit } = registrationApproved.has(specifier)
@@ -806,8 +994,10 @@ export function compileSourcesToRecords(
     specifierByPath,
     compiledBodies,
     moduleSourceMaps,
+    builderSourceSitesByIdentity,
     registrationSink,
     registrationApproved,
+    dataByPath,
   };
 }
 
@@ -815,14 +1005,25 @@ export function compileSourcesToRecords(
 export interface CachedCompiledModule {
   /** Prefix-free content identity (the `cf:module/<hash>` hash, no scheme). */
   identity: string;
+
   /** Normalized authored path (e.g. `/main.tsx`); used for the eval sourceURL. */
   filename: string;
-  /** Compiled CommonJS body. */
+
+  /** Compiled CommonJS body, or the verbatim bytes of a data entry. */
   code: string;
+
   /** Internal import edges: require specifier → dependency module identity. */
   imports: { specifier: string; targetIdentity: string }[];
+
+  /**
+   * This entry carries data rather than code, so `code` is its authored bytes.
+   * A data entry never becomes a module record and is never parsed as one.
+   */
+  isData?: boolean;
+
   /** Per-module source map, if cached. */
   sourceMap?: SourceMap;
+
   /**
    * Precomputed record surface (Fix B), derived from `code` at compile time via
    * {@link deriveModuleRecordFields} and persisted on the compiled doc: the
@@ -833,8 +1034,13 @@ export interface CachedCompiledModule {
    * which parses and writes the surface back for later warm loads.
    */
   exportNames?: readonly string[];
+
+  /** The `export *` target specifiers of that same surface. */
   starTargetSpecs?: readonly string[];
+
+  /** The runtime import specifiers of that same surface. */
   importSpecs?: readonly string[];
+
   /**
    * Authored-line spans for the coverage probes baked into `code`, carried from
    * the cached document. The engine registers them with the collector it
@@ -842,6 +1048,9 @@ export interface CachedCompiledModule {
    * resolve to source lines. Absent whenever `code` is uninstrumented.
    */
   patternCoverageSpans?: readonly PatternCoverageSpan[];
+
+  /** Debug-only authored builder sites carried from the cached document. */
+  builderSourceSites?: BuilderSourceSitesV1;
 }
 
 /**
@@ -849,9 +1058,9 @@ export interface CachedCompiledModule {
  * closure has unique filenames, but a fabric importer's closure also carries
  * its imported subtrees' modules, which routinely share names (`/main.tsx`).
  * The cached record path keys several side tables by source name
- * (`specifierByPath` → per-module source maps, export map,
- * `exportsByIdentity`; the engine's fn.src canonicalization) — a name
- * collision silently drops one module from all of them. Disambiguate
+ * (`specifierByPath` → per-module source maps, export map, and
+ * `exportsByIdentity`) — a name collision silently drops one module from all
+ * of them. Disambiguate
  * colliding names with the mount-root convention; a collision-free closure
  * keeps plain filenames (byte-identical to pre-fabric behavior).
  */
@@ -893,8 +1102,17 @@ export function buildRecordsFromCompiled(
 ): CompiledModuleGraph {
   const runtimeModules = options.runtimeModules ?? {};
   const specifierOf = (identity: string) => `cf:module/${identity}`;
-  const byIdentity = new Map(modules.map((m) => [m.identity, m]));
-  const sourceNames = cachedModuleSourceNames(modules);
+  // Data entries leave before anything reads `code` as JavaScript. Their bytes
+  // are the payload, not a body, so they never gain a specifier or a record.
+  const dataByPath = new Map<string, string>();
+  const moduleEntries = modules.filter((m) => {
+    if (!m.isData) return true;
+    dataByPath.set(m.filename, m.code);
+    return false;
+  });
+  const byIdentity = new Map(moduleEntries.map((m) => [m.identity, m]));
+  const sourceNames = cachedModuleSourceNames(moduleEntries);
+  const bindDataFileFor = dataFileBinding(dataByPath);
 
   // Fix B: use the record surface persisted on the compiled doc; parse the body
   // only when it wasn't precomputed. A module carries the full surface (a warm
@@ -928,7 +1146,7 @@ export function buildRecordsFromCompiled(
     string,
     { names: Set<string>; starTargets: string[] }
   >();
-  for (const m of modules) {
+  for (const m of moduleEntries) {
     const parsed = persistedSurface(m) ?? parseCompiledExports(m.code);
     const names = new Set<string>(parsed.exportNames);
     const starTargets: string[] = [];
@@ -967,27 +1185,38 @@ export function buildRecordsFromCompiled(
   const records = new Map<string, VirtualModuleRecord>();
   const compiledBodies = new Map<string, string>();
   const moduleSourceMaps = new Map<string, SourceMap>();
+  const builderSourceSitesByIdentity = new Map<
+    string,
+    BuilderSourceSitesV1
+  >();
   const specifierByPath = new Map<string, string>();
   const registrationSink: HoistRegistrationSink = new Map();
   const registrationApproved = new Set<string>();
 
-  for (const m of modules) {
+  for (const m of moduleEntries) {
     const specifier = specifierOf(m.identity);
     specifierByPath.set(sourceNames.get(m.identity)!, specifier);
     compiledBodies.set(specifier, m.code);
     if (m.sourceMap) moduleSourceMaps.set(specifier, m.sourceMap);
+    if (m.builderSourceSites) {
+      builderSourceSitesByIdentity.set(m.identity, m.builderSourceSites);
+    }
 
     const surface = persistedSurface(m);
     const importSpecs = surface
       ? [...surface.importSpecs]
       : [...parseCompiledImports(m.code)];
     const resolutions: Record<string, string> = {};
+    const readerImports = new Set<string>();
     for (const spec of importSpecs) {
       const edge = m.imports.find((i) => i.specifier === spec);
       if (edge !== undefined) {
         resolutions[spec] = specifierOf(edge.targetIdentity);
       } else if (spec in runtimeModules) {
         resolutions[spec] = `cf:runtime/${spec}`;
+        if (runtimeModules[spec].includes(DATA_FILE_READER)) {
+          readerImports.add(spec);
+        }
       } else {
         resolutions[spec] = spec;
       }
@@ -1000,6 +1229,9 @@ export function buildRecordsFromCompiled(
       "_",
     );
     const compiled = m.code;
+    // The module's own filename, not the disambiguated source name: a data
+    // file is keyed by filename too, so both sides of a read agree.
+    const bindDataFile = bindDataFileFor(m.filename);
     records.set(specifier, {
       imports: importSpecs,
       exports: namespaceExports,
@@ -1013,8 +1245,14 @@ export function buildRecordsFromCompiled(
           module: { exports: Record<string, unknown> },
           register: (entries: Record<string, unknown>) => void,
         ) => void;
-        const requireShim = (spec: string) =>
-          compartment.importNow(resolvedImports[spec] ?? spec);
+        // Own-property test, matching the cold path in
+        // `compileSourcesToRecords` — see the note there.
+        const requireShim = (spec: string) => {
+          const namespace = compartment.importNow(
+            Object.hasOwn(resolvedImports, spec) ? resolvedImports[spec] : spec,
+          );
+          return readerImports.has(spec) ? bindDataFile(namespace) : namespace;
+        };
         const { register, commit } = registrationApproved.has(specifier)
           ? createHoistRegistrar(m.identity, registrationSink)
           : createRejectingRegistrar();
@@ -1040,8 +1278,10 @@ export function buildRecordsFromCompiled(
     specifierByPath,
     compiledBodies,
     moduleSourceMaps,
+    builderSourceSitesByIdentity,
     registrationSink,
     registrationApproved,
+    dataByPath,
   };
 }
 
@@ -1174,17 +1414,17 @@ function collectBindingNames(name: ts.BindingName, out: Set<string>): void {
   }
 }
 
-/**
- * Statically collect the names a module exports (named, default, enum,
- * namespace, destructured). Throws loudly on forms this adapter does not yet
- * support, rather than producing a silently-incomplete namespace.
- */
 /** Direct export names of a module plus the specifiers it `export *`s from. */
 interface ModuleExports {
   names: string[];
   starTargets: string[];
 }
 
+/**
+ * Statically collect the names a module exports (named, default, enum,
+ * namespace, destructured). Throws loudly on forms this adapter does not yet
+ * support, rather than producing a silently-incomplete namespace.
+ */
 function collectModuleExports(source: Source): ModuleExports {
   const { ts: tsc } = compilerStack();
   const sourceFile = tsc.createSourceFile(

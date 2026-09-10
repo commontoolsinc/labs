@@ -22,6 +22,15 @@ describe("Path operations", () => {
       expect(obj).toEqual({ a: [{ b: "test" }] });
     });
 
+    it("replaces a `null` spine slot with a container", () => {
+      // `typeof null` is `"object"`, so a walk that decides the spine by
+      // `typeof` alone descends `null` and then writes onto it.
+
+      const obj = { x: null };
+      setValueAtPath(obj, ["x", "y"], 2);
+      expect(obj).toEqual({ x: { y: 2 } });
+    });
+
     it("should overwrite existing values", () => {
       const obj = { x: { y: 1 } };
       setValueAtPath(obj, ["x", "y"], 2);

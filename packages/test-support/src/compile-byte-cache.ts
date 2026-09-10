@@ -20,7 +20,16 @@ export interface SerializedModuleBytes {
   js: string;
   sourceMap?: unknown;
   patternCoverageSpans?: CachedPatternCoverageSpan[];
+  builderSourceSites?: CachedBuilderSourceSitesV1;
   policyManifests?: readonly unknown[];
+}
+
+export interface CachedBuilderSourceSitesV1 {
+  formatVersion: 1;
+  sites: Record<
+    string,
+    { line: number; col: number; bindingName?: string }
+  >;
 }
 
 export interface CachedPatternCoverageSpan {
@@ -37,6 +46,7 @@ export interface CompiledModuleArtifact {
   js: string;
   sourceMap?: unknown;
   patternCoverageSpans?: CachedPatternCoverageSpan[];
+  builderSourceSites?: CachedBuilderSourceSitesV1;
   policyManifests?: readonly unknown[];
 }
 
@@ -63,30 +73,37 @@ const cacheFiles = new WeakMap<ProcessModuleByteCache, string>();
  * instances. A byte cap bounds the total retained JS and evicts oldest-first.
  */
 export class ProcessModuleByteCache implements ModuleByteCache {
-  // Keyed by `${runtimeVersion}\0${identity}`. Map insertion order gives FIFO
-  // eviction (recency-refreshed on read, so eviction is ~LRU).
-  private readonly entries = new Map<
+  /**
+   * The cached artifacts, keyed by `${runtimeVersion}\0${identity}`. Map
+   * insertion order gives FIFO eviction (recency-refreshed on read, so
+   * eviction is ~LRU).
+   */
+  readonly #entries = new Map<
     string,
     { artifact: CompiledModuleArtifact; size: number }
   >();
-  private totalBytes = 0;
-  private readonly maxBytes: number;
+
+  #totalBytes = 0;
+  readonly #maxBytes: number;
 
   constructor(maxBytes = 256 * 1024 * 1024) {
-    this.maxBytes = maxBytes;
+    this.#maxBytes = maxBytes;
   }
 
-  private static key(runtimeVersion: string, identity: string): string {
+  static #key(runtimeVersion: string, identity: string): string {
     return `${runtimeVersion}\0${identity}`;
   }
 
-  private static sizeOf(artifact: CompiledModuleArtifact): number {
+  static #sizeOf(artifact: CompiledModuleArtifact): number {
     let size = artifact.js.length;
     if (typeof artifact.sourceMap === "string") {
       size += artifact.sourceMap.length;
     }
     if (artifact.patternCoverageSpans !== undefined) {
       size += JSON.stringify(artifact.patternCoverageSpans).length;
+    }
+    if (artifact.builderSourceSites !== undefined) {
+      size += JSON.stringify(artifact.builderSourceSites).length;
     }
     if (artifact.policyManifests !== undefined) {
       size += JSON.stringify(artifact.policyManifests).length;
@@ -98,11 +115,11 @@ export class ProcessModuleByteCache implements ModuleByteCache {
     runtimeVersion: string,
     identity: string,
   ): CompiledModuleArtifact | undefined {
-    const key = ProcessModuleByteCache.key(runtimeVersion, identity);
-    const entry = this.entries.get(key);
+    const key = ProcessModuleByteCache.#key(runtimeVersion, identity);
+    const entry = this.#entries.get(key);
     if (entry === undefined) return undefined;
-    this.entries.delete(key);
-    this.entries.set(key, entry);
+    this.#entries.delete(key);
+    this.#entries.set(key, entry);
     return entry.artifact;
   }
 
@@ -124,32 +141,32 @@ export class ProcessModuleByteCache implements ModuleByteCache {
     identity: string,
     artifact: CompiledModuleArtifact,
   ): void {
-    this.insert(
-      ProcessModuleByteCache.key(runtimeVersion, identity),
+    this.#insert(
+      ProcessModuleByteCache.#key(runtimeVersion, identity),
       artifact,
       { replaceExisting: true },
     );
   }
 
-  private insert(
+  #insert(
     key: string,
     artifact: CompiledModuleArtifact,
     options: { replaceExisting: boolean },
   ): void {
-    const existing = this.entries.get(key);
+    const existing = this.#entries.get(key);
     if (existing !== undefined) {
-      this.entries.delete(key);
-      this.totalBytes -= existing.size;
+      this.#entries.delete(key);
+      this.#totalBytes -= existing.size;
       if (!options.replaceExisting) {
-        this.entries.set(key, existing);
-        this.totalBytes += existing.size;
+        this.#entries.set(key, existing);
+        this.#totalBytes += existing.size;
         return;
       }
     }
-    const size = ProcessModuleByteCache.sizeOf(artifact);
-    this.entries.set(key, { artifact, size });
-    this.totalBytes += size;
-    this.evictToCap();
+    const size = ProcessModuleByteCache.#sizeOf(artifact);
+    this.#entries.set(key, { artifact, size });
+    this.#totalBytes += size;
+    this.#evictToCap();
   }
 
   putAll(
@@ -161,20 +178,20 @@ export class ProcessModuleByteCache implements ModuleByteCache {
     }
   }
 
-  private evictToCap(): void {
-    while (this.totalBytes > this.maxBytes) {
-      const oldest = this.entries.keys().next().value;
+  #evictToCap(): void {
+    while (this.#totalBytes > this.#maxBytes) {
+      const oldest = this.#entries.keys().next().value;
       if (oldest === undefined) break;
-      const entry = this.entries.get(oldest);
-      this.entries.delete(oldest);
-      if (entry !== undefined) this.totalBytes -= entry.size;
+      const entry = this.#entries.get(oldest);
+      this.#entries.delete(oldest);
+      if (entry !== undefined) this.#totalBytes -= entry.size;
     }
   }
 
   /** A serializable dump of every cached module. Pairs with {@link restore}. */
   snapshot(): SerializedModuleBytes[] {
     const out: SerializedModuleBytes[] = [];
-    for (const [key, { artifact }] of this.entries) {
+    for (const [key, { artifact }] of this.#entries) {
       const serialized: SerializedModuleBytes = { key, js: artifact.js };
       if (artifact.sourceMap !== undefined) {
         serialized.sourceMap = artifact.sourceMap;
@@ -182,6 +199,11 @@ export class ProcessModuleByteCache implements ModuleByteCache {
       if (artifact.patternCoverageSpans !== undefined) {
         serialized.patternCoverageSpans = artifact.patternCoverageSpans.map(
           copyPatternCoverageSpan,
+        );
+      }
+      if (artifact.builderSourceSites !== undefined) {
+        serialized.builderSourceSites = copyBuilderSourceSites(
+          artifact.builderSourceSites,
         );
       }
       if (artifact.policyManifests !== undefined) {
@@ -204,9 +226,15 @@ export class ProcessModuleByteCache implements ModuleByteCache {
       const patternCoverageSpans = normalizePatternCoverageSpans(
         e.patternCoverageSpans,
       );
+      const builderSourceSites = normalizeBuilderSourceSites(
+        e.builderSourceSites,
+      );
       if (
         e.patternCoverageSpans !== undefined &&
         patternCoverageSpans === undefined
+      ) continue;
+      if (
+        e.builderSourceSites !== undefined && builderSourceSites === undefined
       ) continue;
       if (
         e.policyManifests !== undefined &&
@@ -217,10 +245,13 @@ export class ProcessModuleByteCache implements ModuleByteCache {
       if (patternCoverageSpans !== undefined) {
         artifact.patternCoverageSpans = patternCoverageSpans;
       }
+      if (builderSourceSites !== undefined) {
+        artifact.builderSourceSites = builderSourceSites;
+      }
       if (e.policyManifests !== undefined) {
         artifact.policyManifests = [...e.policyManifests];
       }
-      this.insert(
+      this.#insert(
         e.key,
         artifact,
         { replaceExisting: false },
@@ -229,12 +260,12 @@ export class ProcessModuleByteCache implements ModuleByteCache {
   }
 
   clear(): void {
-    this.entries.clear();
-    this.totalBytes = 0;
+    this.#entries.clear();
+    this.#totalBytes = 0;
   }
 
   stats(): { entries: number; bytes: number } {
-    return { entries: this.entries.size, bytes: this.totalBytes };
+    return { entries: this.#entries.size, bytes: this.#totalBytes };
   }
 }
 
@@ -246,6 +277,11 @@ function artifactFromModule(
   if (module.patternCoverageSpans !== undefined) {
     artifact.patternCoverageSpans = module.patternCoverageSpans.map(
       copyPatternCoverageSpan,
+    );
+  }
+  if (module.builderSourceSites !== undefined) {
+    artifact.builderSourceSites = copyBuilderSourceSites(
+      module.builderSourceSites,
     );
   }
   if (module.policyManifests !== undefined) {
@@ -293,6 +329,55 @@ function copyPatternCoverageSpan(
     startColumn: span.startColumn,
     endColumn: span.endColumn,
   };
+}
+
+function normalizeBuilderSourceSites(
+  value: unknown,
+): CachedBuilderSourceSitesV1 | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const sidecar = value as Partial<CachedBuilderSourceSitesV1>;
+  if (
+    sidecar.formatVersion !== 1 || sidecar.sites === null ||
+    typeof sidecar.sites !== "object" || Array.isArray(sidecar.sites)
+  ) {
+    return undefined;
+  }
+  const sites = Object.create(null) as CachedBuilderSourceSitesV1["sites"];
+  for (const [symbol, value] of Object.entries(sidecar.sites)) {
+    if (symbol.length === 0 || value === null || typeof value !== "object") {
+      return undefined;
+    }
+    const site = value as {
+      line?: unknown;
+      col?: unknown;
+      bindingName?: unknown;
+    };
+    if (
+      !Number.isInteger(site.line) || (site.line as number) < 1 ||
+      !Number.isInteger(site.col) || (site.col as number) < 0 ||
+      (site.bindingName !== undefined &&
+        (typeof site.bindingName !== "string" || site.bindingName.length === 0))
+    ) {
+      return undefined;
+    }
+    sites[symbol] = {
+      line: site.line as number,
+      col: site.col as number,
+      ...(site.bindingName === undefined
+        ? {}
+        : { bindingName: site.bindingName }),
+    };
+  }
+  return { formatVersion: 1, sites };
+}
+
+function copyBuilderSourceSites(
+  sidecar: CachedBuilderSourceSitesV1,
+): CachedBuilderSourceSitesV1 {
+  return normalizeBuilderSourceSites(sidecar)!;
 }
 
 /**

@@ -1,14 +1,11 @@
 import { Command } from "@cliffy/command";
 import { Table } from "@cliffy/table";
-import {
-  getAcl,
-  removeAclEntry,
-  setAclEntry,
-  SpaceConfig,
-} from "../lib/acl.ts";
+import { isCapability } from "@commonfabric/memory/acl";
+
+import { getAcl, removeAclEntry, setAclEntry } from "../lib/acl.ts";
 import { cliText } from "../lib/cli-name.ts";
 import { render } from "../lib/render.ts";
-import { isCapability } from "@commonfabric/memory";
+import { parseSpaceOptions } from "./piece.ts";
 
 // Usage patterns for examples
 const spaceUsage = `--identity <identity> --api-url <api-url> --space <space>`;
@@ -17,14 +14,20 @@ export const acl = new Command()
   .name("acl")
   .description("Manage Access Control Lists for spaces.")
   .default("help")
-  .globalEnv("CF_API_URL=<url:string>", "URL of the fabric instance.", {
+  .globalEnv("CF_API_URL=<url:string>", "URL of the fabric server instance.", {
     prefix: "CF_",
   })
-  .globalOption("-a,--api-url <url:string>", "URL of the fabric instance.")
+  .globalOption(
+    "-a,--api-url <url:string>",
+    "URL of the fabric server instance.",
+  )
   .globalEnv("CF_IDENTITY=<path:string>", "Path to an identity keyfile.", {
     prefix: "CF_",
   })
   .globalOption("-i,--identity <path:string>", "Path to an identity keyfile.")
+  .globalEnv("CF_SPACE=<space:string>", "The space name or DID.", {
+    prefix: "CF_",
+  })
   .globalOption("-s,--space <space:string>", "The space name or DID")
   /* acl ls */
   .command("ls", "List all ACL entries for a space.")
@@ -95,39 +98,3 @@ export const acl = new Command()
     await removeAclEntry(config, did);
     render(`Removed ${did} from ACL`);
   });
-
-/**
- * Parse space-related options from command arguments
- */
-function parseSpaceOptions(
-  options: Record<string, string | undefined>,
-): SpaceConfig {
-  const apiUrl = options.apiUrl || Deno.env.get("CF_API_URL");
-  const identity = options.identity || Deno.env.get("CF_IDENTITY");
-  const space = options.space;
-
-  if (!apiUrl) {
-    render(
-      "Error: --api-url is required or set CF_API_URL environment variable",
-    );
-    Deno.exit(1);
-  }
-
-  if (!identity) {
-    render(
-      "Error: --identity is required or set CF_IDENTITY environment variable",
-    );
-    Deno.exit(1);
-  }
-
-  if (!space) {
-    render("Error: --space is required");
-    Deno.exit(1);
-  }
-
-  return {
-    apiUrl: new URL(apiUrl),
-    identityPath: identity,
-    space: space,
-  };
-}

@@ -1,19 +1,23 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { hashOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
+
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { setPatternEnvironment } from "../src/env.ts";
 import { streamData as rawStreamData } from "../src/builtins/stream-data.ts";
+import { createCell } from "../src/cell.ts";
+import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
+import { setPatternEnvironment } from "../src/env.ts";
+import { Runtime } from "../src/runtime.ts";
 import {
   ExtendedStorageTransaction,
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
-import { createCell } from "../src/cell.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
+import { refuseAtCommitBoundary } from "./refused-commit.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test stream-data outbox");
 const space = signer.did();
@@ -28,9 +32,14 @@ describe("stream-data outbox mechanism", () => {
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
+    // The retry cases below need a commit the gate REFUSES: their subject is
+    // what the outbox does after one. Only an enforcing rung produces that
+    // refusal, so the suite names one rather than inheriting whichever rung
+    // the fleet is set to.
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      cfcEnforcementMode: "enforce-explicit",
     });
 
     const { commonfabric } = createTrustedBuilder(runtime);
@@ -215,11 +224,14 @@ describe("stream-data outbox mechanism", () => {
     );
 
     const rejectedTx = runtime.edit();
-    rejectedTx.setCfcEnforcementMode("enforce-explicit");
-    rejectedTx.markCfcRelevant("streamData retry regression");
+    refuseAtCommitBoundary(
+      rejectedTx,
+      space,
+      "streamData retry regression",
+    );
     action(rejectedTx);
     const rejectedResult = await rejectedTx.commit();
-    expect(rejectedResult.error).toBeDefined();
+    expect(isCfcEnforcementRejection(rejectedResult.error)).toBe(true);
     await runtime.settled();
     expect(fetchCalls).toEqual([]);
 

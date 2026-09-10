@@ -1,7 +1,10 @@
+import { encodeHex } from "@std/encoding/hex";
+
 import { CFC_FUSE_ATOM_CLASS, cfcAtom } from "@commonfabric/api/cfc";
 import { sha256 } from "@commonfabric/content-hash";
 import { isLinkRef } from "@commonfabric/runner/shared";
-import { encodeHex } from "@std/encoding/hex";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
 import type { CallableKind } from "./callables.ts";
 
 export type CfcProjectionKind =
@@ -196,10 +199,6 @@ function labelKeys(): Array<keyof CfcLabel> {
   return ["confidentiality", "integrity"];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function canonicalPath(path: readonly CfcPathSegment[]): string[] {
   return path.map(String);
 }
@@ -377,7 +376,13 @@ function canonicalLabelForGeneration(label: CfcLabel): CfcLabel {
   return canonical;
 }
 
-export function joinLabels(...labels: Array<CfcLabel | undefined>): CfcLabel {
+/**
+ * `joinLabels` over a list. Takes the labels as an array so that a join over
+ * as many labels as a value has nodes stays within the argument limit.
+ */
+export function joinLabelList(
+  labels: ReadonlyArray<CfcLabel | undefined>,
+): CfcLabel {
   const joined: CfcLabel = {};
   for (const key of labelKeys()) {
     const seen = new Set<string>();
@@ -397,6 +402,10 @@ export function joinLabels(...labels: Array<CfcLabel | undefined>): CfcLabel {
     }
   }
   return joined;
+}
+
+export function joinLabels(...labels: Array<CfcLabel | undefined>): CfcLabel {
+  return joinLabelList(labels);
 }
 
 function failClosedLabel(): CfcLabel {
@@ -478,10 +487,16 @@ export function cfcDirectoryEntryNameDigest(name: string): string {
 }
 
 export class CfcProjectionAnnotator {
+  readonly #tree: AnnotatableTree;
+  readonly #base: CfcProjectionBase;
+
   constructor(
-    private readonly tree: AnnotatableTree,
-    private readonly base: CfcProjectionBase,
-  ) {}
+    tree: AnnotatableTree,
+    base: CfcProjectionBase,
+  ) {
+    this.#tree = tree;
+    this.#base = base;
+  }
 
   jsonContext(path: CfcPathSegment[]): CfcJsonAnnotationContext {
     return { annotator: this, path: [...path] };
@@ -501,15 +516,15 @@ export class CfcProjectionAnnotator {
   ): CfcProjectionRef {
     const ref: CfcProjectionRef = {
       type: "common-fabric-fuse-ref-v1",
-      space: this.base.space,
-      ...(this.base.entity === undefined ? {} : { entity: this.base.entity }),
-      ...(this.base.rootKind === undefined
+      space: this.#base.space,
+      ...(this.#base.entity === undefined ? {} : { entity: this.#base.entity }),
+      ...(this.#base.rootKind === undefined
         ? {}
-        : { rootKind: this.base.rootKind }),
-      ...(this.base.cell === undefined ? {} : { cell: this.base.cell }),
+        : { rootKind: this.#base.rootKind }),
+      ...(this.#base.cell === undefined ? {} : { cell: this.#base.cell }),
       path: [...path],
       projection,
-      generation: this.base.generation,
+      generation: this.#base.generation,
     };
     for (
       const [key, value] of Object.entries(overrides) as Array<
@@ -526,49 +541,83 @@ export class CfcProjectionAnnotator {
   }
 
   labelAt(path: readonly CfcPathSegment[]): CfcLabel {
-    const labels = labelViewEntriesAt(this.base.labelView, path);
+    const labels = labelViewEntriesAt(this.#base.labelView, path);
     if (labels.length === 0) {
       return failClosedLabel();
     }
     return joinLabels(...labels);
   }
 
+  /**
+   * The label covering `value` and everything under it: the labels of its
+   * leaves, joined. A value already met along the way contributes the
+   * fail-closed label instead of being walked again.
+   *
+   * The walk holds its own stack of nodes still to visit rather than
+   * recursing, so a value nests as deeply as it likes without reaching the
+   * call stack's limit. Nodes come off that stack in the order a depth-first
+   * walk reaches them, which is the order `joinLabelList` keeps.
+   */
   subtreeLabel(
     value: unknown,
     path: readonly CfcPathSegment[],
     seen = new WeakSet<object>(),
   ): CfcLabel {
-    if (isLeafValue(value)) {
-      return this.labelAt(path);
+    interface PendingNode {
+      value: unknown;
+      path: readonly CfcPathSegment[];
     }
+    const contributions: CfcLabel[] = [];
+    const pending: PendingNode[] = [{ value, path }];
 
-    if (typeof value === "object" && value !== null) {
-      if (seen.has(value)) {
-        return labelWithFailClosed(this.labelAt(path));
+    while (pending.length > 0) {
+      const node = pending.pop()!;
+
+      if (isLeafValue(node.value)) {
+        contributions.push(this.labelAt(node.path));
+        continue;
       }
-      seen.add(value);
+
+      if (typeof node.value === "object" && node.value !== null) {
+        if (seen.has(node.value)) {
+          contributions.push(labelWithFailClosed(this.labelAt(node.path)));
+          continue;
+        }
+        seen.add(node.value);
+      }
+
+      // Children go on in reverse so the last one pushed — the first child —
+      // is the next one taken.
+      if (Array.isArray(node.value)) {
+        if (node.value.length === 0) {
+          contributions.push(this.labelAt(node.path));
+          continue;
+        }
+        for (let index = node.value.length - 1; index >= 0; index--) {
+          pending.push({
+            value: node.value[index],
+            path: [...node.path, index],
+          });
+        }
+        continue;
+      }
+
+      // Everything left is a record: a leaf, a link ref and an array each
+      // took an arm above.
+      const entries = Object.entries(node.value as Record<string, unknown>);
+      if (entries.length === 0) {
+        contributions.push(this.labelAt(node.path));
+        continue;
+      }
+      for (let index = entries.length - 1; index >= 0; index--) {
+        const [key, entry] = entries[index];
+        pending.push({ value: entry, path: [...node.path, key] });
+      }
     }
 
-    if (Array.isArray(value)) {
-      if (value.length === 0) return this.labelAt(path);
-      return joinLabels(
-        ...value.map((entry, index) =>
-          this.subtreeLabel(entry, [...path, index], seen)
-        ),
-      );
-    }
-
-    if (isRecord(value)) {
-      const entries = Object.entries(value);
-      if (entries.length === 0) return this.labelAt(path);
-      return joinLabels(
-        ...entries.map(([key, entry]) =>
-          this.subtreeLabel(entry, [...path, key], seen)
-        ),
-      );
-    }
-
-    return this.labelAt(path);
+    return contributions.length === 1
+      ? contributions[0]
+      : joinLabelList(contributions);
   }
 
   namespaceLabel(value: unknown, path: readonly CfcPathSegment[]): CfcLabel {
@@ -579,7 +628,7 @@ export class CfcProjectionAnnotator {
       );
     }
 
-    if (isRecord(value) && !isLinkRef(value)) {
+    if (isObjectNotArray(value) && !isLinkRef(value)) {
       const keys = Object.keys(value);
       if (keys.length === 0) return this.labelAt(path);
       return joinLabels(...keys.map((key) => this.labelAt([...path, key])));
@@ -594,11 +643,11 @@ export class CfcProjectionAnnotator {
     value: unknown,
   ): void {
     const contentLabel = this.subtreeLabel(value, path);
-    this.setNodeAnnotation(ino, {
+    this.#setNodeAnnotation(ino, {
       ref: this.ref("value", path),
       contentLabel,
       metadataLabels: defaultMetadataLabels(contentLabel),
-      incomplete: this.incompleteIfFailClosed(contentLabel, path),
+      incomplete: this.#incompleteIfFailClosed(contentLabel, path),
     });
   }
 
@@ -608,12 +657,12 @@ export class CfcProjectionAnnotator {
     value: unknown,
   ): void {
     const namespaceLabel = this.namespaceLabel(value, path);
-    this.setNodeAnnotation(ino, {
+    this.#setNodeAnnotation(ino, {
       ref: this.ref("dir", path),
       namespaceLabel,
       entries: { version: 1, entries: [] },
       metadataLabels: defaultMetadataLabels(namespaceLabel),
-      incomplete: this.incompleteIfFailClosed(namespaceLabel, path),
+      incomplete: this.#incompleteIfFailClosed(namespaceLabel, path),
     });
   }
 
@@ -623,11 +672,11 @@ export class CfcProjectionAnnotator {
     value: unknown,
   ): void {
     const contentLabel = this.subtreeLabel(value, path);
-    this.setNodeAnnotation(ino, {
+    this.#setNodeAnnotation(ino, {
       ref: this.ref("aggregate-json", path),
       contentLabel,
       metadataLabels: defaultMetadataLabels(contentLabel),
-      incomplete: this.incompleteIfFailClosed(contentLabel, path),
+      incomplete: this.#incompleteIfFailClosed(contentLabel, path),
     });
   }
 
@@ -639,7 +688,7 @@ export class CfcProjectionAnnotator {
     const linkTextLabel = this.labelAt(path);
     const targetLabel = targetIdentityLabel(target);
     const contentLabel = joinLabels(linkTextLabel, targetLabel);
-    this.setNodeAnnotation(ino, {
+    this.#setNodeAnnotation(ino, {
       ref: this.ref("symlink", path),
       contentLabel,
       metadataLabels: defaultMetadataLabels(contentLabel),
@@ -649,7 +698,7 @@ export class CfcProjectionAnnotator {
         linkTextLabel,
         targetIdentityLabel: targetLabel,
       },
-      incomplete: this.incompleteIfFailClosed(contentLabel, path),
+      incomplete: this.#incompleteIfFailClosed(contentLabel, path),
     });
   }
 
@@ -667,7 +716,7 @@ export class CfcProjectionAnnotator {
       ? cloneLabel(options.schemaLabel)
       : CFC_PUBLIC_LABEL;
     const descriptorLabel = joinLabels(schemaLabel);
-    this.setNodeAnnotation(ino, {
+    this.#setNodeAnnotation(ino, {
       ref: this.ref("callable", path, { cell: options.cellProp }),
       contentLabel: descriptorLabel,
       metadataLabels: defaultMetadataLabels(descriptorLabel),
@@ -678,7 +727,7 @@ export class CfcProjectionAnnotator {
         key: options.cellKey,
         descriptor: {
           contentLabel: descriptorLabel,
-          generation: this.base.generation,
+          generation: this.#base.generation,
         },
         schemaLabel,
         invocation: {
@@ -700,12 +749,12 @@ export class CfcProjectionAnnotator {
     },
   ): void {
     const contentLabel = options.contentLabel ?? failClosedLabel();
-    this.setNodeAnnotation(ino, {
+    this.#setNodeAnnotation(ino, {
       ref: this.ref(options.projection, options.path, options.ref),
       contentLabel,
       namespaceLabel: options.namespaceLabel,
       metadataLabels: defaultMetadataLabels(contentLabel),
-      incomplete: this.incompleteIfFailClosed(contentLabel, options.path),
+      incomplete: this.#incompleteIfFailClosed(contentLabel, options.path),
     });
   }
 
@@ -719,11 +768,11 @@ export class CfcProjectionAnnotator {
       existenceLabel?: CfcLabel;
     } = {},
   ): void {
-    const child = this.tree.getNode(childIno);
+    const child = this.#tree.getNode(childIno);
     if (!child?.cfc) return;
     const labelPath = options.labelPath ?? child.cfc.ref.path;
     const defaultEntryLabel = this.labelAt(labelPath);
-    this.tree.setCfcEntryAnnotation(parentIno, name, {
+    this.#tree.setCfcEntryAnnotation(parentIno, name, {
       name,
       nameDigest: cfcDirectoryEntryNameDigest(name),
       childRef: child.cfc.ref,
@@ -734,22 +783,22 @@ export class CfcProjectionAnnotator {
     });
   }
 
-  private setNodeAnnotation(
+  #setNodeAnnotation(
     ino: bigint,
     annotation: Omit<
       CfcNodeAnnotation,
       "version" | "generation" | "derivedSlots"
     >,
   ): void {
-    this.tree.setCfcAnnotation(ino, {
+    this.#tree.setCfcAnnotation(ino, {
       version: 1,
-      generation: this.base.generation,
+      generation: this.#base.generation,
       derivedSlots: emptyDerivedSlots(),
       ...annotation,
     });
   }
 
-  private incompleteIfFailClosed(
+  #incompleteIfFailClosed(
     label: CfcLabel,
     path: readonly CfcPathSegment[],
   ): CfcIncompleteAnnotation | undefined {

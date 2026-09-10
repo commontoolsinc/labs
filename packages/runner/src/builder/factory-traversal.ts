@@ -7,19 +7,19 @@ import {
 } from "@commonfabric/data-model/fabric-factory";
 import {
   codecOf,
-  EMPTY_RECONSTRUCTION_CONTEXT,
+  NULL_LIVE_ENVIRONMENT,
+  ProblematicValue,
 } from "@commonfabric/data-model/codec-common";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   FabricLink,
   FabricMap,
   FabricSet,
-  ProblematicValue,
 } from "@commonfabric/data-model/fabric-instances";
 import {
+  deepFreeze,
   FabricInstance,
   type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 
 import {
   deriveFactoryStateCopy,
@@ -68,14 +68,14 @@ export function mapFabricInstanceStateForTraversal<T extends FabricInstance>(
   mapState: (state: FabricValue) => FabricValue,
 ): T {
   const codec = codecOf(value);
-  const state = codec.encode(value as FabricValue);
+  const state = codec.encode(value as FabricValue, NULL_LIVE_ENVIRONMENT);
   const mappedState = mapState(state);
   if (Object.is(mappedState, state)) return value;
 
   const mapped = codec.decode(
     codec.tagForValue(value as FabricValue),
     mappedState,
-    EMPTY_RECONSTRUCTION_CONTEXT,
+    NULL_LIVE_ENVIRONMENT,
   );
   if (!(mapped instanceof FabricInstance) || codecOf(mapped) !== codec) {
     throw new Error("Codec traversal changed the Fabric instance type");

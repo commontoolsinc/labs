@@ -1,17 +1,31 @@
-import { describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
+/**
+ * A nanosecond timestamp as a `FabricPrimitive`: always frozen, wrapping a
+ * `bigint`, and encoded to a flat base64 string.
+ *
+ * Holding a `bigint` rather than a number is the reason the class exists, so
+ * the cases reach for magnitudes past where a double stops being exact -- a
+ * far-future timestamp as well as pre-epoch ones -- rather than staying near
+ * zero, where any representation would look correct.
+ *
+ * Malformed state decodes to a `ProblematicValue` rather than throwing, and
+ * conversion leaves an instance alone even when asked for something mutable.
+ */
 
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { shallowFabricFromNativeValue } from "@/index.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
-import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
-import { CODEC } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 describe("FabricEpochNsec", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
   // rule (don't fit a single member, aren't construction mechanics).
+
   it("is an instance of `FabricPrimitive`", () => {
     expect(new FabricEpochNsec(0n) instanceof FabricPrimitive).toBe(
       true,
@@ -46,7 +60,7 @@ describe("FabricEpochNsec", () => {
         expect(sn.value).toBe(-1000000000n);
       });
 
-      it("handles a large future date (year 3000)", () => {
+      it("returns the value it was given for a year-3000 timestamp", () => {
         const nsec = 32503680000000000000n;
         const sn = new FabricEpochNsec(nsec);
         expect(sn.value).toBe(nsec);
@@ -55,10 +69,10 @@ describe("FabricEpochNsec", () => {
   });
 
   describe("static members", () => {
-    describe("[CODEC]", () => {
-      const codec = FabricEpochNsec[CODEC];
+    describe("[JSON_CODEC]", () => {
+      const codec = FabricEpochNsec[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.EpochNsec;
-      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `EpochNsec` wire type tag", () => {
@@ -77,7 +91,17 @@ describe("FabricEpochNsec", () => {
         it("encodes to a flat base64 string (epoch zero)", () => {
           const sn = new FabricEpochNsec(0n);
           // Flat format: base64 string directly, not nested {"/BigInt@1": ...}.
-          expect(codec.encode(sn)).toBe("AA");
+          expect(codec.encode(sn, env)).toBe("AA");
+        });
+      });
+
+      describe("canDecode()", () => {
+        it("returns `true` for string state", () => {
+          expect(codec.canDecode("AA")).toBe(true);
+        });
+
+        it("returns `false` for state that is not a string", () => {
+          expect(codec.canDecode(42)).toBe(false);
         });
       });
 
@@ -86,22 +110,17 @@ describe("FabricEpochNsec", () => {
           const decoded = codec.decode(
             expectedTag,
             "AA",
-            context,
+            env,
           ) as unknown as FabricEpochNsec;
           expect(decoded).toBeInstanceOf(FabricEpochNsec);
           expect(decoded.value).toBe(0n);
-        });
-
-        it("decodes non-string state to a `ProblematicValue`", () => {
-          const decoded = codec.decode(expectedTag, 42, context);
-          expect(decoded).toBeInstanceOf(ProblematicValue);
         });
 
         it("decodes malformed base64 to a `ProblematicValue`", () => {
           const decoded = codec.decode(
             expectedTag,
             "not valid base64!!",
-            context,
+            env,
           );
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
@@ -112,21 +131,22 @@ describe("FabricEpochNsec", () => {
           const sn = new FabricEpochNsec(0n);
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(sn),
-            context,
+            codec.encode(sn, env),
+            env,
           ) as unknown as FabricEpochNsec;
           expect(decoded).toBeInstanceOf(FabricEpochNsec);
           expect(decoded.value).toBe(0n);
         });
 
         it("round-trips positive nanosecond timestamp", () => {
-          // 2024-01-01T00:00:00Z = 1704067200 seconds = 1704067200000000000 nsec
+          // 2024-01-01T00:00:00Z is 1704067200 seconds, so
+          // 1704067200000000000 nsec.
           const nsec = 1704067200000000000n;
           const sn = new FabricEpochNsec(nsec);
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(sn),
-            context,
+            codec.encode(sn, env),
+            env,
           ) as unknown as FabricEpochNsec;
           expect(decoded).toBeInstanceOf(FabricEpochNsec);
           expect(decoded.value).toBe(nsec);
@@ -137,8 +157,8 @@ describe("FabricEpochNsec", () => {
           const sn = new FabricEpochNsec(nsec);
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(sn),
-            context,
+            codec.encode(sn, env),
+            env,
           ) as unknown as FabricEpochNsec;
           expect(decoded).toBeInstanceOf(FabricEpochNsec);
           expect(decoded.value).toBe(nsec);
@@ -150,8 +170,8 @@ describe("FabricEpochNsec", () => {
           const sn = new FabricEpochNsec(nsec);
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(sn),
-            context,
+            codec.encode(sn, env),
+            env,
           ) as unknown as FabricEpochNsec;
           expect(decoded.value).toBe(nsec);
         });
@@ -159,9 +179,10 @@ describe("FabricEpochNsec", () => {
     });
   });
 
-  // Exercises the free `shallowFabricFromNativeValue()` rather than a member
-  // of the class, so it lives directly under the class `describe()`.
-  describe("shallowFabricFromNativeValue() integration", () => {
+  describe("`shallowFabricFromNativeValue()` integration", () => {
+    // Exercises the free `shallowFabricFromNativeValue()` rather than a member
+    // of the class, so it lives directly under the class `describe()`.
+
     it("passes through unchanged even with `freeze=false`", () => {
       const nsec = new FabricEpochNsec(123n);
       // freeze=false should still return the same instance (not a copy).

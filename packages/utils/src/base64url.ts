@@ -1,11 +1,8 @@
-/**
- * Base64url helper functions.
- */
+/** Base64url helper functions. */
 
 /**
- * Do we need to use our own implementation of base64url encoding? As of
- * 2024-04, most current browser releases support it directly, but it's not
- * universal.
+ * Whether base64url conversion needs the polyfill below. As of 2024-04, most
+ * current browser releases support it directly, but it is not universal.
  */
 const useBase64Polyfill = !Uint8Array.fromBase64;
 
@@ -19,6 +16,37 @@ export function toUnpaddedBase64url(bytes: Uint8Array): string {
     : bytes.toBase64({ alphabet: "base64url", omitPadding: true });
 }
 
+/** Shared text encoder, created once. */
+const textEncoder = new TextEncoder();
+
+/**
+ * Scratch buffer for {@link toUnpaddedBase64urlFromText}, sized in characters
+ * rather than in worst-case bytes. Text that is entirely ASCII occupies one
+ * byte per character, so a string of at most this many characters fits.
+ */
+const textScratch = new Uint8Array(4096);
+
+/**
+ * Encodes the UTF-8 form of `text` as an unpadded base64url string. The
+ * result is what {@link toUnpaddedBase64url} gives for the bytes
+ * `TextEncoder.encode()` produces from `text`.
+ */
+export function toUnpaddedBase64urlFromText(text: string): string {
+  // Encoding into a buffer that is already there costs no byte array, which
+  // `encode()` allocates and hands back on every call. `encodeInto()` reports
+  // how many characters it consumed, which is how the whole string is known
+  // to have fit; text that did not fit -- longer than the buffer, or with
+  // multi-byte characters that overran it -- goes through `encode()` instead.
+  if (text.length <= textScratch.length) {
+    const { read, written } = textEncoder.encodeInto(text, textScratch);
+    if (read === text.length) {
+      return toUnpaddedBase64url(textScratch.subarray(0, written));
+    }
+  }
+
+  return toUnpaddedBase64url(textEncoder.encode(text));
+}
+
 /**
  * Decodes a base64url string to `Uint8Array`. This accepts both unpadded and
  * padded (trailing `=` characters) in the `encoded` input. Uses the base64url
@@ -30,17 +58,15 @@ export function fromBase64url(encoded: string): Uint8Array {
     : Uint8Array.fromBase64(encoded, { alphabet: "base64url" });
 }
 
-// ---------------------------------------------------------------------------
+//
 // Polyfill
-// ---------------------------------------------------------------------------
+//
 
 /** Base64url alphabet (RFC 4648 section 5): `+` -> `-`, `/` -> `_`. */
 const B64_CHARS =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
-/**
- * Polyfill for `toUnpaddedBase64url()`. `export`ed just for testing.
- */
+/** Polyfill for `toUnpaddedBase64url()`. `export`ed just for testing. */
 export function toBase64Polyfill(bytes: Uint8Array): string {
   let result = "";
   const len = bytes.length;
@@ -81,13 +107,12 @@ const B64_PADDING_CHAR = "=";
 
 /** Reverse lookup: base64 char -> 6-bit value. */
 const B64_DECODE = new Uint8Array(128).fill(B64_INVALID);
+
 for (let i = 0; i < B64_CHARS.length; i++) {
   B64_DECODE[B64_CHARS.charCodeAt(i)] = i;
 }
 
-/**
- * Polyfill for `fromBase64url()`. `export`ed just for testing.
- */
+/** Polyfill for `fromBase64url()`. `export`ed just for testing. */
 export function fromBase64Polyfill(encoded: string): Uint8Array {
   const s = encoded;
 
@@ -100,7 +125,7 @@ export function fromBase64Polyfill(encoded: string): Uint8Array {
     inLen--;
   }
   if ((s.length - inLen) > 2) {
-    throw new Error("fromBase64url: too much padding");
+    throw new Error("`fromBase64url()`: too much padding");
   }
 
   // Compute output byte count from the number of base64 characters.
@@ -112,7 +137,9 @@ export function fromBase64Polyfill(encoded: string): Uint8Array {
     switch (val) {
       case undefined:
       case B64_INVALID: {
-        throw new Error(`fromBase64url: invalid character at index ${i}`);
+        throw new Error(
+          `\`fromBase64url()\`: invalid character at index \`${i}\``,
+        );
       }
       default: {
         bitBuf = (bitBuf << 6) | val;

@@ -1,7 +1,10 @@
-// ci-duration's drill-down: the Gantt page and the /bench/gantt.svg image behind it.
-// The image handler shells out to scripts/ci-gantt.ts and writes a temp file.
-// The subprocess and the filesystem calls around it are replaced with
-// stubs that record what the handler asked for and hand back a canned result.
+/**
+ * ci-duration's drill-down: the Gantt page and the /bench/gantt.svg image behind it.
+ * The image handler shells out to scripts/ci-gantt.ts and writes a temp file.
+ * The subprocess and the filesystem calls around it are replaced with
+ * stubs that record what the handler asked for and hand back a canned result.
+ */
+
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx, Run } from "../types.ts";
 import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO } from "../config.ts";
@@ -12,17 +15,35 @@ import type {
 } from "../ci-job-history.ts";
 import {
   ciCommitGanttPage,
+  type CiGanttDataProvider,
   ciGanttPage,
+  commitGanttUrl,
   labsCiDuration,
   loomCiDuration,
-  median,
   renderGantt,
   renderGanttRoute,
 } from "./ci-duration.ts";
+import { PERFORMANCE_VIEW_STYLES } from "../performance-views.ts";
+import { STATUS_EDGE, STATUS_WASH } from "../palette.ts";
 
 const SVG = new TextEncoder().encode(
   '<svg xmlns="http://www.w3.org/2000/svg"><text>chart</text></svg>',
 );
+
+// Stands in for the collector, which writes the renderer's input file itself
+// rather than handing back a chart to be serialized.
+function provideGantt(
+  chart: (
+    source: CiHistorySource,
+    options: CiGanttOptions,
+  ) => CiGanttInput["runs"],
+): CiGanttDataProvider {
+  return async (source, options, destination) => {
+    const runs = chart(source, options);
+    await Deno.writeTextFile(destination, JSON.stringify({ runs }));
+    return runs.length;
+  };
+}
 
 function ctx(runs: Run[]): Ctx {
   return {
@@ -33,6 +54,7 @@ function ctx(runs: Run[]): Ctx {
 }
 
 function run(over: Partial<Run>): Run {
+  const startedAt = new Date(Date.now() - 3_600_000).toISOString();
   return {
     id: 1,
     status: "completed",
@@ -41,7 +63,8 @@ function run(over: Partial<Run>): Run {
     event: "push",
     head_sha: "sha",
     display_title: "t",
-    run_started_at: new Date(Date.now() - 3_600_000).toISOString(),
+    created_at: startedAt,
+    run_started_at: startedAt,
     updated_at: new Date().toISOString(),
     html_url: "",
     head_commit: { message: "t (#1)" },
@@ -142,27 +165,25 @@ async function gantt(
     const url = new URL(`http://d/bench/gantt.svg${query}`);
     const res = await renderGantt(
       url.searchParams,
-      (source, options) => {
+      provideGantt((source, options) => {
         requested = { source, options };
-        return Promise.resolve({
-          runs: Array.from(
-            { length: Math.min(options.limit, 60) },
-            (_, index) => ({
-              run: {
-                attempt: 1,
-                databaseId: index + 1,
-                status: "completed",
-                conclusion: "success",
-                event: "push",
-                headBranch: "main",
-                startedAt: "2026-06-20T18:00:00Z",
-                workflowName: source.workflow,
-              },
-              jobs: [],
-            }),
-          ),
-        });
-      },
+        return Array.from(
+          { length: Math.min(options.limit, 60) },
+          (_, index) => ({
+            run: {
+              attempt: 1,
+              databaseId: index + 1,
+              status: "completed",
+              conclusion: "success",
+              event: "push",
+              headBranch: "main",
+              startedAt: "2026-06-20T18:00:00Z",
+              workflowName: source.workflow,
+            },
+            jobs: [],
+          }),
+        );
+      }),
       signal,
     );
     return {
@@ -197,6 +218,23 @@ Deno.test("the Gantt page shares the performance view selector", async () => {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
   );
   assertStringIncludes(html, "<title>CI run Gantt</title>");
+  assertStringIncludes(html, PERFORMANCE_VIEW_STYLES);
+  for (const status of ["good", "warn", "bad"] as const) {
+    assertStringIncludes(
+      html,
+      `.brow.${status},.crow.${status}{border-color:color-mix(in srgb,var(--status-${status}) ${
+        Number((STATUS_EDGE[status] * 100).toFixed(4))
+      }%,transparent);background:color-mix(in srgb,var(--status-${status}) ${
+        Number((STATUS_WASH[status] * 0.75 * 100).toFixed(4))
+      }%,transparent)}`,
+    );
+  }
+  assertStringIncludes(
+    html,
+    `.fetch-progress.error,.fetch-progress.warning{border-color:color-mix(in srgb,var(--status-warn) ${
+      Number((STATUS_EDGE.warn * 100).toFixed(4))
+    }%,transparent)}`,
+  );
   assertStringIncludes(html, `${REPO} · ${CI_WORKFLOW}`);
   assertStringIncludes(html, `href="/"`); // a way back to the dashboard
   assertStringIncludes(
@@ -213,6 +251,7 @@ Deno.test("the Gantt page shares the performance view selector", async () => {
   );
   assertStringIncludes(html, '<option value="labs" selected>labs</option>');
   assertStringIncludes(html, "/bench/gantt.svg?"); // the controls point at the image route
+  assertStringIncludes(html, "p.set('theme', document.documentElement.dataset.theme");
   assertStringIncludes(html, 'id="fetch-progress"');
   assertStringIncludes(html, 'id="fetch-title">Idle</strong>');
   assertStringIncludes(html, 'aria-label="CI Gantt fetch progress"');
@@ -234,7 +273,7 @@ Deno.test("the Gantt page shares the performance view selector", async () => {
   assert(!html.includes('class="spinner"'));
   assert(!html.includes("min runs per job"));
   assert(!html.includes("minRuns"));
-  // The runs slider offers only what the image route will honour, so dragging it
+  // The runs slider offers only what the image route will honor, so dragging it
   // to either end can't ask for a limit that comes back silently clamped.
   assertStringIncludes(html, `id="limit" min="1" max="150"`);
   assertEquals((await gantt("?limit=150")).args.indexOf("150") >= 0, true);
@@ -337,10 +376,14 @@ Deno.test("the commit Gantt page contains only one commit selection", () => {
   assertStringIncludes(html, "const image = new Image()");
   assertStringIncludes(html, "image.onerror = () =>");
   assertStringIncludes(html, "URL.revokeObjectURL(src)");
+  assertStringIncludes(html, "url.searchParams.set('theme'");
   assertStringIncludes(html, "if (chartSrc) URL.revokeObjectURL(chartSrc)");
   assertStringIncludes(html, "if (chartSettled) return");
   assertStringIncludes(html, "chartSettled = true");
-  assertStringIncludes(html, "stream.close();\n    chartSrc = src");
+  assertStringIncludes(
+    html,
+    "stream.close();\n    if (chartSrc) URL.revokeObjectURL(chartSrc);\n    chartSrc = src",
+  );
   assert(!html.includes('class="controls"'));
   assert(!html.includes('aria-label="Performance view"'));
 
@@ -352,6 +395,23 @@ Deno.test("the commit Gantt page contains only one commit selection", () => {
     "No successful main CI runs were supplied for this commit.",
   );
   assert(!empty.includes("/ci-gantt.svg?"));
+});
+
+Deno.test("commit Gantt URL normalization preserves only renderer themes", () => {
+  const selection = `repo=labs&sha=${"e".repeat(40)}&run=42:1`;
+  for (const theme of ["dark", "light"]) {
+    const normalized = commitGanttUrl(
+      new URL(`http://d/ci-gantt.svg?${selection}&theme=${theme}`),
+    );
+    assert(normalized);
+    assertEquals(normalized.searchParams.get("theme"), theme);
+  }
+
+  const unknown = commitGanttUrl(
+    new URL(`http://d/ci-gantt.svg?${selection}&theme=sepia`),
+  );
+  assert(unknown);
+  assertEquals(unknown.searchParams.has("theme"), false);
 });
 
 Deno.test("commit Gantt data routes start the exact selected collection", async () => {
@@ -431,16 +491,17 @@ Deno.test("/bench/gantt.svg: a successful render returns SVG uncached", async ()
   assertEquals(opt(args, "--repo"), REPO);
   assertEquals(opt(args, "--workflow"), CI_WORKFLOW);
   assertEquals(opt(args, "--limit"), "30");
-  assertEquals(opt(args, "--out"), "/fake-tmp/ci-gantt-1.svg"); // the bytes come from where it was told to write
-  assertEquals(opt(args, "--input"), "/fake-tmp/ci-gantt-input-2.json");
+  assertEquals(opt(args, "--theme"), "dark");
+  assertEquals(opt(args, "--out"), "/fake-tmp/ci-gantt-2.svg"); // the bytes come from where it was told to write
+  assertEquals(opt(args, "--input"), "/fake-tmp/ci-gantt-input-1.json");
   assert(!args.includes("--allow-net"));
   assert(!args.includes("--allow-env"));
-  assert(args.includes("--allow-read=/fake-tmp/ci-gantt-input-2.json"));
+  assert(args.includes("--allow-read=/fake-tmp/ci-gantt-input-1.json"));
   assert(!args.includes("--allow-read"));
   assert(!args.includes("--allow-write"));
   assert(!args.includes("--allow-ffi"));
   assert(!args.includes("--allow-sys=cpus,networkInterfaces,hostname"));
-  assert(args.includes("--allow-write=/fake-tmp/ci-gantt-1.svg"));
+  assert(args.includes("--allow-write=/fake-tmp/ci-gantt-2.svg"));
   assertEquals(opt(args, "--scale"), undefined);
   assertEquals(input.runs.length, 30);
   assertEquals(requested.source.key, "labs");
@@ -450,40 +511,42 @@ Deno.test("/bench/gantt.svg: a successful render returns SVG uncached", async ()
     allConclusions: false,
   });
   assertEquals(leftover, []); // the temp file is cleaned up on the way out
+
+  const light = await gantt("?limit=1&theme=light");
+  assertEquals(opt(light.args, "--theme"), "default");
 });
 
 Deno.test("/bench/gantt.svg includes chart labels without server fonts", async () => {
   const response = await renderGantt(
     new URLSearchParams("limit=1&mainOnly=1"),
-    () =>
-      Promise.resolve({
-        runs: [{
-          run: {
-            attempt: 1,
-            databaseId: 123,
-            status: "completed",
+    provideGantt(() => [
+      {
+        run: {
+          attempt: 1,
+          databaseId: 123,
+          status: "completed",
+          conclusion: "success",
+          event: "push",
+          headBranch: "main",
+          startedAt: "2026-07-28T18:00:00Z",
+          workflowName: CI_WORKFLOW,
+        },
+        jobs: [{
+          name: "Check dashboard labels",
+          status: "completed",
+          conclusion: "success",
+          started_at: "2026-07-28T18:00:05Z",
+          completed_at: "2026-07-28T18:01:05Z",
+          steps: [{
+            name: "🔎 Check",
+            number: 1,
             conclusion: "success",
-            event: "push",
-            headBranch: "main",
-            startedAt: "2026-07-28T18:00:00Z",
-            workflowName: CI_WORKFLOW,
-          },
-          jobs: [{
-            name: "Check dashboard labels",
-            status: "completed",
-            conclusion: "success",
-            started_at: "2026-07-28T18:00:05Z",
-            completed_at: "2026-07-28T18:01:05Z",
-            steps: [{
-              name: "🔎 Check",
-              number: 1,
-              conclusion: "success",
-              started_at: "2026-07-28T18:00:10Z",
-              completed_at: "2026-07-28T18:01:00Z",
-            }],
+            started_at: "2026-07-28T18:00:10Z",
+            completed_at: "2026-07-28T18:01:00Z",
           }],
         }],
-      }),
+      },
+    ]),
   );
 
   assertEquals(response.status, 200);
@@ -502,20 +565,39 @@ Deno.test("/bench/gantt.svg finishes collection but skips an abandoned render", 
   });
   const url = new URL(request.url);
   const originalTemp = Deno.makeTempFile;
+  const originalRemove = Deno.remove;
   let collected = false;
+  const created: string[] = [];
+  const removed: string[] = [];
   try {
-    Deno.makeTempFile = () => {
-      throw new Error("abandoned render created a temporary file");
+    Deno.makeTempFile = (opts?: Deno.MakeTempOptions) => {
+      const path = `/fake-tmp/${opts?.prefix ?? ""}${opts?.suffix ?? ""}`;
+      created.push(path);
+      return Promise.resolve(path);
     };
-    const response = await renderGanttRoute(request, url, () => {
+    Deno.remove = (path: string | URL) => {
+      removed.push(String(path));
+      return Promise.resolve();
+    };
+    const response = await renderGanttRoute(request, url, (
+      _source,
+      _options,
+      destination,
+    ) => {
       collected = true;
-      return Promise.resolve({ runs: [] });
+      assertEquals(destination, "/fake-tmp/ci-gantt-input-.json");
+      return Promise.resolve(0);
     });
     assert(collected);
+    // The collection writes into a temporary file, so that one exists; the
+    // chart image is never started, so no file is made for its output.
+    assertEquals(created, ["/fake-tmp/ci-gantt-input-.json"]);
+    assertEquals(removed, ["/fake-tmp/ci-gantt-input-.json"]);
     assertEquals(response.status, 204);
     assertEquals(response.headers.get("cache-control"), "no-store");
   } finally {
     Deno.makeTempFile = originalTemp;
+    Deno.remove = originalRemove;
   }
 });
 
@@ -702,6 +784,7 @@ Deno.test("ci-duration: no passing runs is gray, never a false green", async () 
 Deno.test("ci-duration: the median minutes set the status against the thresholds", async () => {
   const mins = (m: number) =>
     run({
+      created_at: new Date(Date.now() - m * 60_000).toISOString(),
       run_started_at: new Date(Date.now() - m * 60_000).toISOString(),
       updated_at: new Date().toISOString(),
     });
@@ -729,15 +812,18 @@ Deno.test("ci-duration: the median minutes set the status against the thresholds
   assertStringIncludes(v.sub ?? "", "last 3 passing runs"); // under the 20-run bar -> count window
 });
 
-Deno.test("ci-duration: an even window takes the mean of the two middle runs", () => {
-  // The default window is 20 runs, so even is the normal case. Taking the upper
-  // middle alone reports a duration no run had, and always the higher of the pair.
-  assertEquals(median([2, 4, 6, 8]), 5);
-  assertEquals(median([2, 4, 6, 10]), 5);
-  assertEquals(median([1, 2, 3]), 2); // odd is the middle run itself
-  assertEquals(median([7]), 7);
-  assertEquals(median([]), 0);
-  // The shape that made this matter: 20 runs where the two middle values differ.
-  const twenty = Array.from({ length: 20 }, (_, i) => i + 1); // 1..20
-  assertEquals(median(twenty), 10.5); // not 11
+Deno.test("ci-duration measures from landing through completion", async () => {
+  const now = Date.now();
+  const view = await labsCiDuration.collect(
+    ctx([
+      run({
+        created_at: new Date(now - 15 * 60_000).toISOString(),
+        run_started_at: new Date(now - 5 * 60_000).toISOString(),
+        updated_at: new Date(now).toISOString(),
+      }),
+    ]),
+  );
+
+  assertEquals(view.value, "15m");
 });
+

@@ -23,20 +23,19 @@ const signer = await Identity.fromPassphrase("test operator");
  *
  * Two coordinate conventions to be aware of:
  * - The engine injects the CF helper import as a new first line of every
- *   module, so mapped line numbers are AUTHORED LINE + 1 (the same convention
- *   the AMD bundle path used; see the `// mapped line N` comments).
+ *   module, so mapped line numbers are AUTHORED LINE + 1 (see the
+ *   `// mapped line N` comments).
  * - Mapped frames carry the load-prefixed module path
  *   (`/<programHash>/main.tsx`), so assertions match on the authored
  *   `<file>:<line>:` suffix rather than a full path.
  *
- * NOTE: the AMD-era "maps top-level error" case is gone — arbitrary top-level
- * calls (`export default fail();`) are rejected by the SES module-scope policy
- * under the ESM record loader, so the construct no longer exists in production.
- * Module-evaluation-time error mapping is covered by
- * stack-trace-patterns.test.ts ("mapWithPattern synthetic pattern callsite"),
- * which throws inside an allowed trusted-builder call. The AMD-era "with CTS
- * transformer" describe block is gone too: the Engine's module path ALWAYS
- * runs the CommonFabricTransformerPipeline, so every test below covers it.
+ * NOTE: there is deliberately no top-level-error case here. An arbitrary
+ * top-level call (`export default fail();`) is rejected by the SES module-scope
+ * policy, so it cannot reach evaluation. Module-evaluation-time error mapping is
+ * covered by stack-trace-patterns.test.ts ("mapWithPattern synthetic pattern
+ * callsite"), which throws inside an allowed trusted-builder call. Nor is there a
+ * separate transformer-on/off split: the Engine's module path ALWAYS runs the
+ * CommonFabricTransformerPipeline, so every test below covers it.
  */
 
 function makeProgram(files: Record<string, string>): RuntimeProgram {

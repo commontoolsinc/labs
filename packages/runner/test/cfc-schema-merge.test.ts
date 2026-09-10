@@ -1,54 +1,61 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { JSONSchemaObj } from "../src/builder/types.ts";
-import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
+import {
+  cfcSchemaMergeIssue,
+  mergeCfcSchemaEnvelopes,
+} from "../src/cfc/schema-merge.ts";
 import { storedSchemaCoversCandidateEnvelope } from "../src/cfc/prepare.ts";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 describe("mergeCfcSchemaEnvelopes", () => {
-  // C5: `observes` is a scalar consumption class, not a set-like claim.
-  // Agreement keeps the class through a merge; any disagreement (including
-  // one covering side) merges to covering — the widest consumption, the
-  // over-taint direction (fail-safe). Dropping it on every merge would
-  // silently defeat the C5 narrowing on the common re-write path.
-  it("keeps observes when both sides agree", () => {
-    const merged = mergeCfcSchemaEnvelopes({
-      type: "object",
-      properties: {
-        rows: {
-          type: "string",
-          ifc: { confidentiality: ["a"], observes: "value" },
-        },
-      },
-    }, {
-      type: "object",
-      properties: {
-        rows: {
-          type: "string",
-          ifc: { confidentiality: ["a"], observes: "value" },
-        },
-      },
-    }) as JSONSchemaObj;
-    const rows = (merged.properties as Record<string, JSONSchemaObj>).rows;
-    expect((rows.ifc as { observes?: string }).observes).toBe("value");
-  });
+  describe("observes through a merge", () => {
+    // C5: `observes` is a scalar consumption class, not a set-like claim.
+    // Agreement keeps the class through a merge; any disagreement (including
+    // one covering side) merges to covering — the widest consumption, the
+    // over-taint direction (fail-safe). Dropping it on every merge would
+    // silently defeat the C5 narrowing on the common re-write path.
 
-  it("merges disagreeing observes to covering", () => {
-    const merged = mergeCfcSchemaEnvelopes({
-      type: "object",
-      properties: {
-        rows: {
-          type: "string",
-          ifc: { confidentiality: ["a"], observes: "value" },
+    it("keeps observes when both sides agree", () => {
+      const merged = mergeCfcSchemaEnvelopes({
+        type: "object",
+        properties: {
+          rows: {
+            type: "string",
+            ifc: { confidentiality: ["a"], observes: "value" },
+          },
         },
-      },
-    }, {
-      type: "object",
-      properties: {
-        rows: { type: "string", ifc: { confidentiality: ["a"] } },
-      },
-    }) as JSONSchemaObj;
-    const rows = (merged.properties as Record<string, JSONSchemaObj>).rows;
-    expect((rows.ifc as { observes?: string }).observes).toBeUndefined();
+      }, {
+        type: "object",
+        properties: {
+          rows: {
+            type: "string",
+            ifc: { confidentiality: ["a"], observes: "value" },
+          },
+        },
+      }) as JSONSchemaObj;
+      const rows = (merged.properties as Record<string, JSONSchemaObj>).rows;
+      expect((rows.ifc as { observes?: string }).observes).toBe("value");
+    });
+
+    it("merges disagreeing observes to covering", () => {
+      const merged = mergeCfcSchemaEnvelopes({
+        type: "object",
+        properties: {
+          rows: {
+            type: "string",
+            ifc: { confidentiality: ["a"], observes: "value" },
+          },
+        },
+      }, {
+        type: "object",
+        properties: {
+          rows: { type: "string", ifc: { confidentiality: ["a"] } },
+        },
+      }) as JSONSchemaObj;
+      const rows = (merged.properties as Record<string, JSONSchemaObj>).rows;
+      expect((rows.ifc as { observes?: string }).observes).toBeUndefined();
+    });
   });
 
   it("allows additive required fields when a default preserves old documents", () => {
@@ -111,51 +118,41 @@ describe("mergeCfcSchemaEnvelopes", () => {
     ).toThrow(/required field.*default/i);
   });
 
-  it("exempts an additive required STREAM slot from the default requirement", () => {
-    // A stream (`asCell: ["stream"]`) is a runtime-materialized capability
-    // marker, not stored document data, so an old doc that predates it has
-    // nothing to preserve and no meaningful default a `Stream<…>` could carry
-    // (estuary home handler streams). Additive-required WITHOUT a default is
-    // therefore allowed — the pattern re-materializes the marker on every run.
+  it("allows additive required fields anywhere in a generated result document", () => {
     const merged = mergeCfcSchemaEnvelopes({
       type: "object",
-      properties: { secret: { type: "string" } },
+      properties: {
+        secret: { type: "string" },
+        meta: {
+          type: "object",
+          properties: { existing: { type: "string" } },
+          required: ["existing"],
+        },
+      },
       required: ["secret"],
     }, {
       type: "object",
       properties: {
         secret: { type: "string" },
-        evt: { type: "object", asCell: ["stream"] },
+        meta: {
+          type: "object",
+          properties: {
+            existing: { type: "string" },
+            generated: { type: "string" },
+          },
+          required: ["existing", "generated"],
+        },
       },
-      required: ["secret", "evt"],
-    }) as JSONSchemaObj;
-    expect(merged.required).toEqual(["secret", "evt"]);
+      required: ["secret", "meta"],
+    }, { generatedOutputPaths: [[]] }) as JSONSchemaObj;
+    expect(merged.required).toEqual(["secret", "meta"]);
+    expect((merged.properties?.meta as JSONSchemaObj).required).toEqual([
+      "existing",
+      "generated",
+    ]);
   });
 
-  it("exempts an additive required stream slot in the scoped-descriptor dialect", () => {
-    // The outer `asCell` entry may be a `{ kind, scope }` descriptor rather than
-    // a bare string; the exemption keys on the normalized KIND, so a scoped
-    // stream is still a stream. A bare `.includes("stream")` missed this.
-    const merged = mergeCfcSchemaEnvelopes({
-      type: "object",
-      properties: { secret: { type: "string" } },
-      required: ["secret"],
-    }, {
-      type: "object",
-      properties: {
-        secret: { type: "string" },
-        evt: { type: "object", asCell: [{ kind: "stream", scope: "user" }] },
-      },
-      required: ["secret", "evt"],
-    }) as JSONSchemaObj;
-    expect(merged.required).toEqual(["secret", "evt"]);
-  });
-
-  it("does NOT exempt an additive required CELL that merely nests a stream", () => {
-    // `["cell", "stream"]` is a CELL of a stream: its IMMEDIATE outer slot is a
-    // cell, so it DOES hold preservable data and an additive-required instance
-    // still needs a default. The prior `asCell.includes("stream")` wrongly
-    // exempted this (#4967 review, Blocking 3) — only the FIRST entry decides.
+  it("does not infer output role from the value's stream capability", () => {
     expect(() =>
       mergeCfcSchemaEnvelopes({
         type: "object",
@@ -165,11 +162,59 @@ describe("mergeCfcSchemaEnvelopes", () => {
         type: "object",
         properties: {
           secret: { type: "string" },
-          nested: { type: "object", asCell: ["cell", "stream"] },
+          evt: {
+            type: "object",
+            asCell: [{ kind: "stream", scope: "user" }],
+          },
         },
-        required: ["secret", "nested"],
+        required: ["secret", "evt"],
       })
     ).toThrow(/required field.*default/i);
+  });
+
+  it("scopes the generated-output exemption to the declared path", () => {
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        type: "object",
+        properties: {
+          generated: { type: "object", properties: {} },
+          retained: { type: "object", properties: {} },
+        },
+      }, {
+        type: "object",
+        properties: {
+          generated: {
+            type: "object",
+            properties: { output: { type: "string" } },
+            required: ["output"],
+          },
+          retained: {
+            type: "object",
+            properties: { input: { type: "string" } },
+            required: ["input"],
+          },
+        },
+      }, { generatedOutputPaths: [["generated"]] })
+    ).toThrow(/required field input needs a default/i);
+
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: {
+        generated: { type: "object", properties: {} },
+      },
+    }, {
+      type: "object",
+      properties: {
+        generated: {
+          type: "object",
+          properties: { output: { type: "string" } },
+          required: ["output"],
+        },
+      },
+    }, { generatedOutputPaths: [["generated"]] }) as JSONSchemaObj;
+    expect(
+      (merged.properties?.generated as JSONSchemaObj).required,
+    ).toEqual(["output"]);
   });
 
   it("rejects weakened ifc constraints", () => {
@@ -632,32 +677,224 @@ describe("mergeCfcSchemaEnvelopes", () => {
     expect((merged as JSONSchemaObj).ifc?.confidentiality).toEqual(["secret"]);
   });
 
-  it("rejects nested divergent branches with local ifc labels", () => {
-    expect(() =>
-      mergeCfcSchemaEnvelopes({
+  it("rejects nested divergent branches with local ifc labels (two carriers)", () => {
+    // RULING 5 (2026-08-21) narrowed the guard, so genuine ambiguity — MORE
+    // than one ifc-carrying branch — is what this pin holds refused now.
+    const twoCarriers = {
+      type: "array",
+      items: {
+        oneOf: [
+          { type: "string", ifc: { confidentiality: ["secret"] } },
+          { type: "number", ifc: { confidentiality: ["other"] } },
+        ],
+      },
+    } as const;
+    expect(() => mergeCfcSchemaEnvelopes(twoCarriers, twoCarriers))
+      .toThrow(/divergent oneOf branches/);
+  });
+
+  describe("RULING 5: a single ifc-carrying branch with type-disjoint siblings", () => {
+    // RULING 5 (CFC owner, 2026-08-21; verification-coverage.md OW49): a SINGLE
+    // ifc-carrying branch whose every sibling is syntactically type-disjoint is
+    // the union's policy carrier and MERGES — the wish builtin's
+    // optional-result shape. Everything the ruling's constraints name stays
+    // refused, pinned one by one below.
+
+    it("admits a single ifc-carrying branch with type-disjoint siblings (RULING 5)", () => {
+      const optionalIfcView = {
+        type: "object",
+        properties: {
+          result: {
+            anyOf: [
+              { type: "undefined" },
+              {
+                type: "object",
+                properties: {
+                  name: {
+                    type: "string",
+                    ifc: { confidentiality: ["secret"] },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      } as const;
+      const merged = mergeCfcSchemaEnvelopes(
+        optionalIfcView,
+        optionalIfcView,
+      ) as JSONSchemaObj;
+      const result = (merged.properties?.result ?? {}) as JSONSchemaObj;
+      expect(Array.isArray(result.anyOf)).toBe(true);
+      const carrier = (result.anyOf?.[1] ?? {}) as JSONSchemaObj;
+      expect(
+        ((carrier.properties?.name ?? {}) as JSONSchemaObj).ifc
+          ?.confidentiality,
+      ).toEqual(["secret"]);
+    });
+
+    it("admits the single carrier under oneOf and nested positions too (RULING 5)", () => {
+      const nested = {
         type: "array",
         items: {
           oneOf: [
-            {
-              type: "string",
-              ifc: { confidentiality: ["secret"] },
-            },
+            { type: "string", ifc: { confidentiality: ["secret"] } },
             { type: "number" },
           ],
         },
-      }, {
-        type: "array",
-        items: {
-          oneOf: [
-            {
-              type: "string",
-              ifc: { confidentiality: ["secret"] },
-            },
-            { type: "number" },
+      } as const;
+      const merged = mergeCfcSchemaEnvelopes(nested, nested) as JSONSchemaObj;
+      const items = (merged.items ?? {}) as JSONSchemaObj;
+      expect(Array.isArray(items.oneOf)).toBe(true);
+    });
+
+    it("still rejects a single carrier whose sibling is NOT syntactically disjoint (RULING 5 constraints)", () => {
+      const carrier = {
+        type: "object",
+        properties: {
+          secret: { type: "string", ifc: { confidentiality: ["secret"] } },
+        },
+      } as const;
+      // Same-type sibling: a labeled value could also match it (the dodge).
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [carrier, { type: "object" }] },
+          { anyOf: [carrier, { type: "object" }] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+      // No `type` on the sibling: overlap unprovable.
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [carrier, { properties: {} }] },
+          { anyOf: [carrier, { properties: {} }] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+      // Type ARRAY on the sibling: not scalar, unprovable.
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [carrier, { type: ["string", "number"] } as never] },
+          { anyOf: [carrier, { type: ["string", "number"] } as never] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+      // Combinator sibling: unprovable.
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [carrier, { anyOf: [{ type: "string" }] }] },
+          { anyOf: [carrier, { anyOf: [{ type: "string" }] }] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+      // Boolean sibling (`true` matches anything): unprovable.
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [carrier, true] },
+          { anyOf: [carrier, true] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+    });
+
+    it("still rejects an integer/number carrier-sibling pair — value-set overlap, not string equality (RULING 5 constraints; review F1)", () => {
+      // Every JSON-Schema integer IS a number, so a concrete value (e.g. `5`)
+      // matches BOTH branches — the ONE scalar pair whose value-sets overlap
+      // while the type STRINGS differ. Disjointness is decided over value-sets,
+      // so this pair is NOT disjoint and the union must refuse, both branch
+      // orders and either carrier position.
+      const integerCarrier = {
+        type: "integer",
+        ifc: { confidentiality: ["secret"] },
+      } as const;
+      const numberCarrier = {
+        type: "number",
+        ifc: { confidentiality: ["secret"] },
+      } as const;
+      // ifc on the `integer` branch, `number` sibling — both orders.
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [integerCarrier, { type: "number" }] },
+          { anyOf: [integerCarrier, { type: "number" }] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [{ type: "number" }, integerCarrier] },
+          { anyOf: [{ type: "number" }, integerCarrier] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+      // ifc on the `number` branch, `integer` sibling — both orders.
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [numberCarrier, { type: "integer" }] },
+          { anyOf: [numberCarrier, { type: "integer" }] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          { anyOf: [{ type: "integer" }, numberCarrier] },
+          { anyOf: [{ type: "integer" }, numberCarrier] },
+        )
+      ).toThrow(/divergent anyOf branches/);
+    });
+
+    it("still admits a genuinely value-disjoint scalar pair beside the numeric fix (RULING 5)", () => {
+      // The fix excludes ONLY the integer/number pair; every other cross-type
+      // pair stays genuinely disjoint and admits. `string` vs `number` is such
+      // a pair (a value is never both), so a single `number` carrier with a
+      // `string` sibling still MERGES.
+      const merged = mergeCfcSchemaEnvelopes(
+        {
+          anyOf: [
+            { type: "number", ifc: { confidentiality: ["secret"] } },
+            { type: "string" },
           ],
         },
-      })
-    ).toThrow(/divergent oneOf branches/);
+        {
+          anyOf: [
+            { type: "number", ifc: { confidentiality: ["secret"] } },
+            { type: "string" },
+          ],
+        },
+      ) as JSONSchemaObj;
+      expect(Array.isArray(merged.anyOf)).toBe(true);
+      const carrier = (merged.anyOf?.[0] ?? {}) as JSONSchemaObj;
+      expect(carrier.ifc?.confidentiality).toEqual(["secret"]);
+    });
+
+    it("still rejects allOf with an ifc-carrying branch (RULING 5 scope)", () => {
+      // allOf is conjunctive: type-disjoint siblings are unsatisfiable by
+      // construction, so no carrier reading exists there.
+      const conjunctive = {
+        allOf: [
+          { type: "object", ifc: { confidentiality: ["secret"] } },
+          { type: "undefined" },
+        ],
+      } as const;
+      expect(() => mergeCfcSchemaEnvelopes(conjunctive, conjunctive))
+        .toThrow(/divergent allOf branches/);
+    });
+
+    it("still recurses INTO the admitted carrier (nested divergence refuses)", () => {
+      const carrierWithNestedDivergence = {
+        anyOf: [
+          { type: "undefined" },
+          {
+            type: "object",
+            properties: {
+              inner: {
+                anyOf: [
+                  { type: "string", ifc: { confidentiality: ["a"] } },
+                  { type: "number", ifc: { confidentiality: ["b"] } },
+                ],
+              },
+            },
+          },
+        ],
+      } as const;
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          carrierWithNestedDivergence,
+          carrierWithNestedDivergence,
+        )
+      ).toThrow(/divergent anyOf branches/);
+    });
   });
 
   it("rejects divergent ifc branches nested under a tuple slot", () => {
@@ -668,7 +905,7 @@ describe("mergeCfcSchemaEnvelopes", () => {
       prefixItems: [{
         oneOf: [
           { type: "string", ifc: { confidentiality: ["secret"] } },
-          { type: "number" },
+          { type: "number", ifc: { confidentiality: ["other"] } },
         ],
       }],
     } as const;
@@ -682,7 +919,7 @@ describe("mergeCfcSchemaEnvelopes", () => {
       additionalProperties: {
         anyOf: [
           { type: "string", ifc: { confidentiality: ["secret"] } },
-          { type: "number" },
+          { type: "number", ifc: { confidentiality: ["other"] } },
         ],
       },
     } as const;
@@ -940,10 +1177,92 @@ describe("mergeCfcSchemaEnvelopes", () => {
   });
 });
 
-// CT-1895: the merge-skip decision judged envelopes "covered" via the items
-// branch while their tuple slots differed, dropping the candidate's slot
-// info instead of merging it (fail-open: coverage=true skips the merge).
 describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
+  // CT-1895: the merge-skip decision judged envelopes "covered" via the items
+  // branch while their tuple slots differed, dropping the candidate's slot info
+  // instead of merging it (fail-open: coverage=true skips the merge).
+
+  it("covers a candidate that declares nothing", () => {
+    // `true` and the empty object schema carry no label, no policy claim and
+    // no shape, so a merge leaves the stored envelope as it stands. The
+    // stored side saying nothing about the path is the case that matters
+    // most: the merge reads the STORED envelope, so a writer naming nothing
+    // would otherwise be refused for a defect in a schema it neither wrote
+    // nor touches.
+    const stored = {
+      type: "object",
+      properties: { name: { type: "string", ifc: { confidentiality: ["s"] } } },
+    } as const;
+    expect(storedSchemaCoversCandidateEnvelope(stored, true)).toBe(true);
+    expect(storedSchemaCoversCandidateEnvelope(stored, {})).toBe(true);
+    expect(storedSchemaCoversCandidateEnvelope(undefined, true)).toBe(true);
+    expect(storedSchemaCoversCandidateEnvelope(undefined, {})).toBe(true);
+    expect(
+      storedSchemaCoversCandidateEnvelope(stored, {
+        type: "object",
+        properties: { error: true },
+      }),
+    ).toBe(true);
+  });
+
+  it("does not cover a candidate carrying only `ifc`, `default` or `$defs`", () => {
+    // `cfcSchemaIsTrue` admits all three as true schemas. Each carries
+    // something the merge has to fold in, so none of them is a schema that
+    // declares nothing.
+    const stored = { type: "object" } as const;
+    expect(
+      storedSchemaCoversCandidateEnvelope(stored, {
+        ifc: { confidentiality: ["s"] },
+      }),
+    ).toBe(false);
+    expect(storedSchemaCoversCandidateEnvelope(stored, { default: 1 })).toBe(
+      false,
+    );
+    expect(
+      storedSchemaCoversCandidateEnvelope(stored, { $defs: { a: true } }),
+    ).toBe(false);
+    expect(
+      storedSchemaCoversCandidateEnvelope(undefined, { default: 1 }),
+    ).toBe(false);
+  });
+
+  it("does not cover a nothing-declaring candidate against a stored `false`", () => {
+    // `false` admits no value, so there is nothing for a candidate to be
+    // folded into: `mergeCfcSchemaEnvelopes` refuses the form, and the write
+    // with it.
+    expect(storedSchemaCoversCandidateEnvelope(false, true)).toBe(false);
+    expect(
+      storedSchemaCoversCandidateEnvelope(
+        { type: "object", properties: { error: false } },
+        { type: "object", properties: { error: true } },
+      ),
+    ).toBe(false);
+  });
+
+  it("does not cover a candidate key a stored rest claim would govern", () => {
+    // The merge pulls an object-valued `additionalProperties` claim down
+    // onto a key the candidate names, which is what mints that key's label.
+    // Skipping the merge would land the value unlabeled.
+    const stored = {
+      type: "object",
+      properties: { a: { type: "string", ifc: { confidentiality: ["seed"] } } },
+      additionalProperties: { ifc: { confidentiality: ["secret"] } },
+    } as const;
+    expect(
+      storedSchemaCoversCandidateEnvelope(stored, {
+        type: "object",
+        properties: { error: true },
+      }),
+    ).toBe(false);
+    // A key the stored side names itself is judged on that named schema.
+    expect(
+      storedSchemaCoversCandidateEnvelope(stored, {
+        type: "object",
+        properties: { a: true },
+      }),
+    ).toBe(true);
+  });
+
   it("differing tuple slots are not judged covered by matching items", () => {
     const stored = {
       type: "array",
@@ -1109,5 +1428,150 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
       items: { type: "number" },
     } as const;
     expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(false);
+  });
+});
+
+describe("cfcSchemaMergeIssue", () => {
+  // `cfcSchemaMergeIssue` is the dry-run seam over the SAME merge: `cf piece
+  // setsrc --check` asks it whether a candidate envelope would be accepted
+  // rather than attempting the swap and taking a low-level commit rejection.
+  // What it must not do is reimplement the rules, so these cases pin that its
+  // verdict is the merge's own — including the message, verbatim.
+
+  it("reports no issue when the merge succeeds", () => {
+    expect(cfcSchemaMergeIssue({
+      type: "object",
+      properties: { a: { type: "string" } },
+    }, {
+      type: "object",
+      properties: { a: { type: "string" } },
+    })).toBe(undefined);
+  });
+
+  it("discriminates the additive-required migration class", () => {
+    // The class the runnability backstop rolls forward on: an old document
+    // predating a now-required field that declares no default. A caller has to
+    // be able to tell it apart from a hard incompatibility, because only this
+    // one is recoverable.
+    const issue = cfcSchemaMergeIssue({
+      type: "object",
+      properties: { a: { type: "string" } },
+    }, {
+      type: "object",
+      properties: { a: { type: "string" }, b: { type: "string" } },
+      required: ["b"],
+    });
+    expect(issue?.migration).toBe(true);
+    expect(issue?.message).toContain("needs a default");
+  });
+
+  it("reports a weakened ifc claim as a hard incompatibility", () => {
+    const issue = cfcSchemaMergeIssue({
+      type: "object",
+      properties: { a: { type: "string", ifc: { confidentiality: ["x"] } } },
+    }, {
+      type: "object",
+      properties: { a: { type: "string", ifc: { confidentiality: ["y"] } } },
+    });
+    expect(issue?.migration).toBe(false);
+    expect(issue?.message).toContain("confidentiality cannot be weakened");
+  });
+
+  it("refuses two different claims whose identity is an array", () => {
+    // A claim reconciles with another only when their bindings correspond,
+    // which is read from the identity's `file` and `path`. An array carries
+    // neither. Different bindings conflict.
+    const mergeArrayIdentities = () =>
+      mergeCfcSchemaEnvelopes({
+        ifc: {
+          writeAuthorizedBy: { __ctWriterIdentityOf: ["one"] },
+        } as any,
+      }, {
+        ifc: {
+          writeAuthorizedBy: { __ctWriterIdentityOf: ["two"] },
+        } as any,
+      });
+
+    expect(mergeArrayIdentities).toThrow(
+      "writeAuthorizedBy must remain stable",
+    );
+  });
+});
+
+describe("schema comparison over a fabric-valued default", () => {
+  // A fabric-valued default has no properties for a schema comparison to
+  // read, so a comparison built on a property walk calls two schemas that
+  // differ only there equal -- and coverage=true skips the merge, discarding
+  // the candidate's default.
+
+  const withDefault = (bytes: readonly number[]) => ({
+    type: "object",
+    properties: {
+      a: {
+        type: "object",
+        default: new FabricBytes(new Uint8Array(bytes)) as never,
+      },
+    },
+  } as const);
+
+  it("does not judge differing fabric defaults covered", () => {
+    expect(
+      storedSchemaCoversCandidateEnvelope(
+        withDefault([1, 2]),
+        withDefault([3]),
+      ),
+    ).toBe(false);
+  });
+
+  it("still judges equal fabric defaults covered", () => {
+    expect(
+      storedSchemaCoversCandidateEnvelope(
+        withDefault([1, 2]),
+        withDefault([1, 2]),
+      ),
+    ).toBe(true);
+  });
+
+  it("merges a fabric default onto a plain one rather than to `{}`", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: { a: { type: "object", default: { x: 1 } } },
+    }, withDefault([7])) as JSONSchemaObj;
+    const properties = merged.properties as Record<string, JSONSchemaObj>;
+    expect(properties.a.default).toBeInstanceOf(FabricBytes);
+  });
+});
+
+describe("schema comparison over a link-valued default", () => {
+  // `stripWriterIdentityStamp` runs over the whole schema before two are
+  // compared, and it rebuilds every record it visits. A link is a reference
+  // rather than a record of the writer's, so it is carried whole; rebuilding
+  // one would strip nothing and erase the difference between two schemas that
+  // point at different documents.
+
+  const linkTo = (id: string) => ({ "/": { "link@1": { id, path: [] } } });
+
+  const withLink = (id: string) =>
+    ({
+      type: "object",
+      properties: { a: { type: "object", default: linkTo(id) as never } },
+    }) as const;
+
+  it("does not judge differing link defaults covered", () => {
+    expect(
+      storedSchemaCoversCandidateEnvelope(
+        withLink("of:sp-one"),
+        withLink("of:sp-two"),
+      ),
+    ).toBe(false);
+  });
+
+  it("still judges equal link defaults covered", () => {
+    expect(
+      storedSchemaCoversCandidateEnvelope(
+        withLink("of:sp-one"),
+        withLink("of:sp-one"),
+      ),
+    ).toBe(true);
   });
 });

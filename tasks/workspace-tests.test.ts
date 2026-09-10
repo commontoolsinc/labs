@@ -1,14 +1,37 @@
-import { assertEquals, assertThrows } from "@std/assert";
 import {
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
+import {
+  acceptsJUnitPath,
+  acceptsPreload,
+  assertMemberTestTasksDefined,
   assertTaskTestsIncluded,
   initializeDb,
+  junitCapableMembers,
+  leafFlags,
+  memberRecordingArguments,
+  memberTestTask,
   parseDisabledPackageList,
   readWorkspaceMembers,
+  recordingSpool,
   runTests,
   selectShardMembers,
   testConcurrency,
   testPackage,
 } from "./workspace-tests.ts";
+import { preloadArgument } from "@commonfabric/test-support/records";
+import { WORKSPACE_TEST_WEIGHTS } from "./test-timing-weights.ts";
+import {
+  readUnlaunchedMembers,
+  UNLAUNCHED_MEMBERS_FILE,
+} from "./unlaunched-members.ts";
+
+const WORKSPACE_SHARDS = 8;
+const AGENTS_HOST_SHARDS = 5;
+const CLI_SHARDS = 10;
 
 // Write a minimal workspace under `dir`: a root deno.jsonc listing the
 // members, and one directory per package whose `test` task records that it
@@ -82,17 +105,17 @@ Deno.test("selectShardMembers returns every enabled member without a shard", () 
   );
 });
 
-Deno.test("selectShardMembers splits enabled members round-robin over the sorted name list", () => {
+Deno.test("selectShardMembers balances enabled members by weight", () => {
   const members = [
     "./packages/d",
     "./packages/b",
     "./packages/a",
     "./packages/c",
-    "./tasks",
+    "./packages/e",
   ];
   assertEquals(
     unitNames(selectShardMembers(members, [], { index: 1, total: 2 })),
-    ["a", "c", "tasks"],
+    ["a", "c", "e"],
   );
   assertEquals(
     unitNames(selectShardMembers(members, [], { index: 2, total: 2 })),
@@ -122,29 +145,128 @@ Deno.test("selectShardMembers expands the cli package into internal shards when 
     { memberPath: "./packages/z", packageName: "z" },
   ]);
 
-  // Sorted units: a, cli (1/3), cli (2/3), cli (3/3), z — round-robin over
-  // two shards interleaves the cli slices across both.
-  assertEquals(selectShardMembers(members, [], { index: 1, total: 2 }), [
-    { memberPath: "./packages/a", packageName: "a" },
-    {
+  const selections = Array.from(
+    { length: WORKSPACE_SHARDS },
+    (_, offset) =>
+      selectShardMembers(members, [], {
+        index: offset + 1,
+        total: WORKSPACE_SHARDS,
+      }),
+  );
+  const units = selections.flat();
+  const cliUnits = units.filter((unit) => unit.packageName.startsWith("cli "))
+    .toSorted((a, b) => {
+      const slice = (name: string) => Number(name.match(/\((\d+)\//)?.[1]);
+      return slice(a.packageName) - slice(b.packageName);
+    });
+  assertEquals(
+    cliUnits,
+    Array.from({ length: CLI_SHARDS }, (_, offset) => ({
       memberPath: "./packages/cli",
-      packageName: "cli (2/3)",
-      env: { CLI_TEST_SHARD: "2/3" },
+      packageName: `cli (${offset + 1}/${CLI_SHARDS})`,
+      env: { CLI_TEST_SHARD: `${offset + 1}/${CLI_SHARDS}` },
+    })),
+  );
+  assertEquals(unitNames(units).filter((name) => name === "a"), ["a"]);
+  assertEquals(unitNames(units).filter((name) => name === "z"), ["z"]);
+});
+
+Deno.test("selectShardMembers expands agents-host into internal shards", () => {
+  const members = ["./packages/connectors/agents/host"];
+  const units = Array.from(
+    { length: AGENTS_HOST_SHARDS },
+    (_, offset) =>
+      selectShardMembers(members, [], {
+        index: offset + 1,
+        total: AGENTS_HOST_SHARDS,
+      }),
+  ).flat();
+
+  assertEquals(
+    units,
+    Array.from({ length: AGENTS_HOST_SHARDS }, (_, offset) => ({
+      memberPath: "./packages/connectors/agents/host",
+      packageName: `connectors/agents/host (${
+        offset + 1
+      }/${AGENTS_HOST_SHARDS})`,
+      env: {
+        AGENTS_HOST_TEST_SHARD: `${offset + 1}/${AGENTS_HOST_SHARDS}`,
+      },
+    })),
+  );
+});
+
+Deno.test("selectShardMembers expands piece and tasks into internal shards", () => {
+  const members = ["./packages/piece", "./tasks"];
+  const units = Array.from(
+    { length: 3 },
+    (_, offset) =>
+      selectShardMembers(members, [], { index: offset + 1, total: 3 }),
+  ).flat();
+
+  assertEquals(
+    unitNames(units).sort(),
+    [
+      "piece (1/3)",
+      "piece (2/3)",
+      "piece (3/3)",
+      "tasks (1/3)",
+      "tasks (2/3)",
+      "tasks (3/3)",
+    ],
+  );
+});
+
+Deno.test("real workspace timing weights limit two-worker makespans", async () => {
+  const expectedAgentsHostUnits = Array.from(
+    { length: AGENTS_HOST_SHARDS },
+    (_, offset) =>
+      `connectors/agents/host (${offset + 1}/${AGENTS_HOST_SHARDS})`,
+  );
+  const profiledAgentsHostUnits = Object.keys(WORKSPACE_TEST_WEIGHTS)
+    .filter((name) => name.startsWith("connectors/agents/host ("))
+    .toSorted((a, b) => {
+      const slice = (name: string) => Number(name.match(/\((\d+)\//)?.[1]);
+      return slice(a) - slice(b);
+    });
+  assertEquals(profiledAgentsHostUnits, expectedAgentsHostUnits);
+
+  const expectedCliUnits = Array.from(
+    { length: CLI_SHARDS },
+    (_, offset) => `cli (${offset + 1}/${CLI_SHARDS})`,
+  );
+  const profiledCliUnits = Object.keys(WORKSPACE_TEST_WEIGHTS)
+    .filter((name) => name.startsWith("cli ("))
+    .toSorted((a, b) => {
+      const slice = (name: string) => Number(name.match(/\((\d+)\//)?.[1]);
+      return slice(a) - slice(b);
+    });
+  assertEquals(profiledCliUnits, expectedCliUnits);
+
+  const members = await readWorkspaceMembers(
+    new URL("../deno.jsonc", import.meta.url),
+  );
+  const makespans = Array.from(
+    { length: WORKSPACE_SHARDS },
+    (_, offset) => {
+      const workerLoads = [0, 0];
+      const units = selectShardMembers(members, ["runner"], {
+        index: offset + 1,
+        total: WORKSPACE_SHARDS,
+      });
+      for (const unit of units) {
+        const worker = workerLoads[0] <= workerLoads[1] ? 0 : 1;
+        workerLoads[worker] += WORKSPACE_TEST_WEIGHTS[unit.packageName] ?? 1;
+      }
+      return Math.max(...workerLoads);
     },
-    { memberPath: "./packages/z", packageName: "z" },
-  ]);
-  assertEquals(selectShardMembers(members, [], { index: 2, total: 2 }), [
-    {
-      memberPath: "./packages/cli",
-      packageName: "cli (1/3)",
-      env: { CLI_TEST_SHARD: "1/3" },
-    },
-    {
-      memberPath: "./packages/cli",
-      packageName: "cli (3/3)",
-      env: { CLI_TEST_SHARD: "3/3" },
-    },
-  ]);
+  );
+
+  assertEquals(
+    Math.max(...makespans) < 80,
+    true,
+    `modeled workspace two-worker makespans: ${makespans.join(", ")}`,
+  );
 });
 
 Deno.test("readWorkspaceMembers reads the workspace list from a JSONC manifest", async () => {
@@ -198,6 +320,27 @@ async function withTestConcurrency<T>(
       Deno.env.delete("TEST_CONCURRENCY");
     } else {
       Deno.env.set("TEST_CONCURRENCY", saved);
+    }
+  }
+}
+
+// Run `fn` with DENO_COVERAGE_DIR pointing at a fresh directory under `dir`,
+// then restore the caller's value, and hand `fn` the directory so it can read
+// what the run left there.
+async function withCoverageDir<T>(
+  dir: string,
+  fn: (coverageDir: string) => T | Promise<T>,
+): Promise<T> {
+  const coverageDir = `${dir}/coverage/raw`;
+  const saved = Deno.env.get("DENO_COVERAGE_DIR");
+  Deno.env.set("DENO_COVERAGE_DIR", coverageDir);
+  try {
+    return await fn(coverageDir);
+  } finally {
+    if (saved === undefined) {
+      Deno.env.delete("DENO_COVERAGE_DIR");
+    } else {
+      Deno.env.set("DENO_COVERAGE_DIR", saved);
     }
   }
 }
@@ -276,6 +419,110 @@ Deno.test("runTests reports a failure and stops scheduling packages", async () =
   }
 });
 
+Deno.test("runTests records the packages it selected and never started", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-unlaunched-" });
+  try {
+    await makeWorkspace(dir, ["a", "b", "c"]);
+    await Deno.writeTextFile(
+      `${dir}/packages/a/deno.jsonc`,
+      JSON.stringify({
+        tasks: { test: "echo started > ran.txt && exit 1" },
+      }),
+    );
+
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...values: unknown[]) => {
+      errors.push(values.map(String).join(" "));
+    };
+    let unlaunched: string[];
+    try {
+      unlaunched = await withCoverageDir(
+        dir,
+        (coverageDir) =>
+          withTestConcurrency("1", async () => {
+            await runTests([], undefined, dir);
+            return await readUnlaunchedMembers(coverageDir);
+          }),
+      );
+    } finally {
+      console.error = originalError;
+    }
+
+    // `a` is the only package that started, so `b` and `c` are the ones the
+    // run has nothing to say about.
+    assertEquals(await ranPackages(dir, ["a", "b", "c"]), ["a"]);
+    assertEquals(unlaunched, ["./packages/b", "./packages/c"]);
+    assertEquals(
+      errors.filter((message) => message === "- ./packages/b").length,
+      1,
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("runTests writes no record when every package it selected started", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-all-launched-" });
+  try {
+    await makeWorkspace(dir, ["a", "b", "c"]);
+    const recordPath = await withCoverageDir(
+      dir,
+      (coverageDir) =>
+        withTestConcurrency("1", async () => {
+          assertEquals(await runTests([], undefined, dir), true);
+          return `${coverageDir}/${UNLAUNCHED_MEMBERS_FILE}`;
+        }),
+    );
+
+    // The file's absence is the signal, not an empty file: a reader of the
+    // coverage profile takes any record it finds as a run that left something
+    // unmeasured.
+    await assertRejects(() => Deno.stat(recordPath), Deno.errors.NotFound);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("runTests clears the record an earlier run left in the same coverage directory", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-stale-record-" });
+  try {
+    await makeWorkspace(dir, ["a", "b", "c"]);
+    await Deno.writeTextFile(
+      `${dir}/packages/a/deno.jsonc`,
+      JSON.stringify({ tasks: { test: "exit 1" } }),
+    );
+
+    const originalError = console.error;
+    console.error = () => {};
+    let records: string[][];
+    try {
+      records = await withCoverageDir(
+        dir,
+        (coverageDir) =>
+          withTestConcurrency("1", async () => {
+            await runTests([], undefined, dir);
+            const stopped = await readUnlaunchedMembers(coverageDir);
+            await Deno.writeTextFile(
+              `${dir}/packages/a/deno.jsonc`,
+              JSON.stringify({ tasks: { test: "echo ok > ran.txt" } }),
+            );
+            assertEquals(await runTests([], undefined, dir), true);
+            return [stopped, await readUnlaunchedMembers(coverageDir)];
+          }),
+      );
+    } finally {
+      console.error = originalError;
+    }
+
+    // The second run started every package it selected, so nothing left in the
+    // directory may still say otherwise.
+    assertEquals(records, [["./packages/b", "./packages/c"], []]);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("runTests runs every enabled package's test task", async () => {
   const dir = await Deno.makeTempDir({ prefix: "ws-run-" });
   try {
@@ -310,14 +557,16 @@ Deno.test("runTests passes internal shard environment to expanded packages", asy
         tasks: { test: "echo shard=$CLI_TEST_SHARD > ran.txt" },
       }),
     );
-    // Sorted units: a, cli (1/3), cli (2/3), cli (3/3), z. Shard 1 of 2
-    // selects a, cli (2/3), and z — exactly one cli slice, so the marker file
-    // is written by a single task and carries that slice's environment.
-    const passed = await runTests([], { index: 1, total: 2 }, dir);
+    const shard = { index: 1, total: WORKSPACE_SHARDS };
+    const expected = selectShardMembers(
+      ["./packages/a", "./packages/cli", "./packages/z"],
+      [],
+      shard,
+    ).find((unit) => unit.packageName.startsWith("cli "));
+    const passed = await runTests([], shard, dir);
     assertEquals(passed, true);
     const ran = await Deno.readTextFile(`${dir}/packages/cli/ran.txt`);
-    assertEquals(ran.trim(), "shard=2/3");
-    assertEquals(await ranPackages(dir, ["a", "z"]), ["a", "z"]);
+    assertEquals(ran.trim(), `shard=${expected?.env?.CLI_TEST_SHARD}`);
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
@@ -345,9 +594,369 @@ Deno.test("initializeDb runs the initialize-db task in the given directory", asy
     await makeWorkspace(dir, [], {
       "initialize-db": "echo ok > initialized.txt",
     });
-    await initializeDb(dir);
+    assertEquals(await initializeDb(dir), true);
     await Deno.stat(`${dir}/initialized.txt`);
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
+});
+
+Deno.test("initializeDb returns false when the task fails", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-initdb-fail-" });
+  try {
+    await makeWorkspace(dir, [], {
+      "initialize-db": "exit 3",
+    });
+    assertEquals(await initializeDb(dir), false);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("runTests reports a failure when every member is disabled", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-empty-" });
+  try {
+    await makeWorkspace(dir, ["a", "b"]);
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...values: unknown[]) => {
+      errors.push(values.map(String).join(" "));
+    };
+    let passed: boolean;
+    try {
+      passed = await runTests(["a", "b"], undefined, dir);
+    } finally {
+      console.error = originalError;
+    }
+    // A run that tested nothing is a misconfiguration, not a pass.
+    assertEquals(passed, false);
+    assertEquals(errors, ["No workspace packages selected to test."]);
+    assertEquals(await ranPackages(dir, ["a", "b"]), []);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+//
+// The runner reads each member's manifest to decide whether an appended
+// --junit-path reaches its `deno test` whole, so an ordinary new package is
+// covered without being named anywhere.
+//
+
+Deno.test("acceptsJUnitPath reads an ordinary test task", () => {
+  assertEquals(acceptsJUnitPath("./packages/x", "deno test"), true);
+  assertEquals(
+    acceptsJUnitPath("./packages/x", "ENV=test deno test --no-check -A"),
+    true,
+  );
+  assertEquals(acceptsJUnitPath("./packages/x", undefined), false);
+  assertEquals(
+    acceptsJUnitPath("./packages/x", "echo 'No tests defined.'"),
+    false,
+  );
+});
+
+Deno.test("acceptsPreload refuses a task naming its own import map", () => {
+  // That map governs every module of the invocation, the preload
+  // included, so a specifier the preload needs and the map does not carry
+  // fails the whole run rather than the preload alone.
+  assertEquals(acceptsPreload("./packages/x", "deno test"), true);
+  assertEquals(
+    acceptsPreload("./packages/x", "deno test -A --import-map ./m.json ."),
+    false,
+  );
+  assertEquals(
+    acceptsPreload("./packages/x", "deno test -A --import-map=./m.json ."),
+    false,
+  );
+  // A member that cannot take the JUnit path cannot take the preload
+  // either: neither reaches the leaf.
+  assertEquals(
+    acceptsPreload("./packages/x", "deno test a/ && deno test b/"),
+    false,
+  );
+  assertEquals(acceptsPreload("./packages/x", undefined), false);
+});
+
+Deno.test("acceptsJUnitPath refuses a task whose flag would land elsewhere", () => {
+  // The appended flag reaches only the last command of a chain, which is
+  // how a benchmark once received a --junit-path meant for the tests.
+  assertEquals(
+    acceptsJUnitPath("./packages/x", "deno test test/ && deno run -A perf.ts"),
+    false,
+  );
+  assertEquals(
+    acceptsJUnitPath("./packages/x", "deno test a/ ; deno test b/"),
+    false,
+  );
+  assertEquals(
+    acceptsJUnitPath("./packages/x", "deno test > results.txt"),
+    false,
+  );
+});
+
+Deno.test("acceptsJUnitPath takes a runner only when it is known to forward", () => {
+  const runner = "deno run -A test/run-tests.ts";
+  assertEquals(acceptsJUnitPath("./packages/piece", runner), true);
+  assertEquals(acceptsJUnitPath("./tasks", runner), true);
+  assertEquals(acceptsJUnitPath("./packages/cli", runner), false);
+  assertEquals(acceptsJUnitPath("./packages/dashboard", runner), false);
+});
+
+Deno.test("memberTestTask accepts a directory path as well as a URL", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-manifest-root-" });
+  try {
+    await Deno.mkdir(`${dir}/packages/probe`, { recursive: true });
+    await Deno.writeTextFile(
+      `${dir}/packages/probe/deno.jsonc`,
+      JSON.stringify({ tasks: { test: "deno test" } }),
+    );
+    // A plain path is the natural thing to pass, and reading through it
+    // must find the manifest rather than quietly reporting none.
+    assertEquals(await memberTestTask("./packages/probe", dir), "deno test");
+    assertEquals(
+      await memberTestTask("./packages/probe", new URL(`file://${dir}/`)),
+      "deno test",
+    );
+    // Without the trailing slash a member resolves beside the directory
+    // rather than inside it, which reads as a member with no manifest.
+    assertEquals(
+      await memberTestTask("./packages/probe", new URL(`file://${dir}`)),
+      "deno test",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("memberTestTask reads deno.json ahead of deno.jsonc", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-manifest-order-" });
+  try {
+    await Deno.mkdir(`${dir}/packages/probe`, { recursive: true });
+    // Deno resolves deno.json first, so that is the task that governs.
+    await Deno.writeTextFile(
+      `${dir}/packages/probe/deno.json`,
+      JSON.stringify({ tasks: { test: "deno test" } }),
+    );
+    await Deno.writeTextFile(
+      `${dir}/packages/probe/deno.jsonc`,
+      JSON.stringify({ tasks: { test: "echo 'No tests defined.'" } }),
+    );
+    assertEquals(await memberTestTask("./packages/probe", dir), "deno test");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("the workspace's capable members are read from their manifests", async () => {
+  const rootUrl = new URL("../", import.meta.url);
+  const members = await readWorkspaceMembers(new URL("deno.jsonc", rootUrl));
+  const capable = await junitCapableMembers(members, rootUrl);
+
+  // An ordinary package, a flag-forwarding runner, and a member whose task
+  // ends in a `deno test`, all of which take the flag.
+  for (
+    const member of ["./packages/navigation", "./tasks", "./packages/runner"]
+  ) {
+    assertEquals(capable.has(member), true, `${member} should take the flag`);
+  }
+  // A chained task, a runner that runs several test commands, and a
+  // browser harness, none of which do.
+  for (
+    const member of ["./packages/api", "./packages/cli", "./packages/dashboard"]
+  ) {
+    assertEquals(capable.has(member), false, `${member} should not`);
+  }
+});
+
+Deno.test("the spool a run records into is resolved once", () => {
+  // Each leaf runs with its own package as the working directory, so a
+  // relative spool would name a different place in each of them.
+  assertEquals(
+    recordingSpool("spool/records", "/work"),
+    "/work/spool/records",
+  );
+  assertEquals(recordingSpool("/var/records", "/work"), "/var/records");
+  assertEquals(recordingSpool(undefined, "/work"), undefined);
+});
+
+Deno.test("a spool Deno cannot be told about is not recorded into", () => {
+  // A comma separates one path from the next inside `--allow-write=`, so
+  // such a spool is granted as two paths that are not it. The run turns
+  // recording off rather than failing the members that would take it.
+  const said: string[] = [];
+  assertEquals(
+    recordingSpool("/var/a,b/records", "/work", (m) => said.push(m)),
+    undefined,
+  );
+  assertEquals(said.length, 1);
+  assertStringIncludes(said[0]!, "/var/a,b/records");
+});
+
+Deno.test("a forwarding runner is read by the flags it hands its leaf", () => {
+  // The runner process and the leaf `deno test` carry separate flag
+  // lists, and the leaf's is the one that loads the preload. Reading the
+  // whole line would answer from the runner's.
+  assertEquals(
+    leafFlags(
+      "./tasks",
+      "deno run --allow-read runner.ts x . -- --no-check -A",
+    ),
+    ["--no-check", "-A"],
+  );
+  // A member running its leaf directly has one list, and it is the whole
+  // of the line.
+  assertEquals(
+    leafFlags("./packages/html", "deno test --allow-read a.test.ts"),
+    ["deno", "test", "--allow-read", "a.test.ts"],
+  );
+});
+
+Deno.test("a recording leaf is given the preload and a write it needs", async () => {
+  const rootUrl = new URL("../", import.meta.url);
+  const members = await readWorkspaceMembers(new URL("deno.jsonc", rootUrl));
+  const recording = await memberRecordingArguments(members, "/spool", rootUrl);
+
+  const preload = preloadArgument();
+  // A member whose task names a write list of its own, and one naming no
+  // write at all, are each granted the spool on top of what they have,
+  // so the preload has somewhere to leave the name map its class names
+  // were traded for.
+  for (const member of ["./packages/runner", "./packages/html"]) {
+    assertEquals(recording.get(member), [preload, "--allow-write=/spool"]);
+  }
+  // A member already permitted to write anywhere is granted nothing.
+  // This one runs under `-A`, which Deno refuses to take beside an
+  // `--allow-write` path list at all, ending the run before it starts.
+  assertEquals(recording.get("./packages/toolshed"), [preload]);
+  // A member that cannot read the tree is granted nothing either: the
+  // write is what makes the preload take the class names, and the read
+  // is what finds the files that replace them.
+  assertEquals(recording.get("./packages/utils"), [preload]);
+  // A member whose task cannot take the preload takes nothing at all.
+  assertEquals(recording.get("./packages/cli"), []);
+});
+
+//
+// Every member's own `test` task
+//
+// The runner refuses to start a run when a member defines none: `deno task
+// test` in that member's directory resolves against the root workspace
+// instead, and the suite re-enters itself once per such member.
+//
+
+Deno.test("assertMemberTestTasksDefined names every member defining no test task", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-missing-test-task-" });
+  try {
+    await makeWorkspace(dir, ["a", "b", "c"]);
+    // Two shapes, one report: a manifest whose tasks are all something
+    // else, which is what falls through to the root workspace, and a member
+    // with no manifest, which never gets that far — Deno refuses to load a
+    // workspace at all when one of its members has no config file.
+    await Deno.writeTextFile(
+      `${dir}/packages/b/deno.jsonc`,
+      JSON.stringify({ tasks: { bench: "deno bench" } }),
+    );
+    await Deno.remove(`${dir}/packages/c/deno.jsonc`);
+
+    const members = await readWorkspaceMembers(`${dir}/deno.jsonc`);
+    const error = await assertRejects(
+      () => assertMemberTestTasksDefined(members, dir),
+      Error,
+      "Missing from: `./packages/b/deno.jsonc`, `./packages/c/deno.jsonc`",
+    );
+    // Whoever meets this has just added a package and does not know the
+    // rule, so the message carries the entry to add and where to copy it
+    // from.
+    assertStringIncludes(error.message, "echo 'No tests defined.'");
+    assertStringIncludes(error.message, "packages/utils/deno.jsonc");
+    // Creating the other manifest is the way out that costs the member its
+    // `imports`, so the message has to warn against it where it is met.
+    assertStringIncludes(error.message, "ignores the other whole");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("assertMemberTestTasksDefined accepts a test task defined by dependencies alone", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-dependency-test-task-" });
+  try {
+    await makeWorkspace(dir, ["a"]);
+    await Deno.writeTextFile(
+      `${dir}/packages/a/deno.jsonc`,
+      JSON.stringify({
+        tasks: {
+          check: "deno check .",
+          "just-test": "deno test",
+          test: { dependencies: ["check", "just-test"] },
+        },
+      }),
+    );
+
+    // Such a task resolves in the member's own directory, so the suite
+    // cannot re-enter itself through it. Whether it carries a command line
+    // is a different question, and the one `memberTestTask()` asks.
+    const members = await readWorkspaceMembers(`${dir}/deno.jsonc`);
+    await assertMemberTestTasksDefined(members, dir);
+    assertEquals(await memberTestTask("./packages/a", dir), undefined);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("assertMemberTestTasksDefined reads the manifest Deno resolves", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-manifest-precedence-" });
+  try {
+    await makeWorkspace(dir, ["a"]);
+    // `makeWorkspace` gave the member a `deno.jsonc` with a `test` task.
+    // Deno takes the `deno.json` where a member carries both and ignores the
+    // other file whole, so the task in it is not one `deno task test` can
+    // find, and the member falls through to the root workspace all the same.
+    await Deno.writeTextFile(
+      `${dir}/packages/a/deno.json`,
+      JSON.stringify({ tasks: { bench: "deno bench" } }),
+    );
+
+    const members = await readWorkspaceMembers(`${dir}/deno.jsonc`);
+    // The manifest named is the one Deno reads, not the one the author put
+    // the task in — which is the whole of what the member got wrong.
+    await assertRejects(
+      () => assertMemberTestTasksDefined(members, dir),
+      Error,
+      "Missing from: `./packages/a/deno.json`",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("runTests refuses a workspace whose member defines no test task", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-guarded-run-" });
+  try {
+    await makeWorkspace(dir, ["a", "b"]);
+    await Deno.writeTextFile(
+      `${dir}/packages/b/deno.jsonc`,
+      JSON.stringify({ tasks: { bench: "deno bench" } }),
+    );
+
+    await assertRejects(
+      () => runTests([], undefined, dir),
+      Error,
+      "Missing from: `./packages/b/deno.jsonc`",
+    );
+    // Each package's test task writes a marker when it runs, so an empty
+    // list is what says the refusal came ahead of the spawn loop rather than
+    // part way through it.
+    assertEquals(await ranPackages(dir, ["a", "b"]), []);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("every workspace member defines a test task of its own", async () => {
+  // The same assertion the runner makes ahead of its spawn loop, made here
+  // so that a member missing one is named by a failing test as well.
+  const rootUrl = new URL("../", import.meta.url);
+  const members = await readWorkspaceMembers(new URL("deno.jsonc", rootUrl));
+  await assertMemberTestTasksDefined(members, rootUrl);
 });

@@ -34,7 +34,7 @@ Deno.test(
       interface Output { result: number }
       type PatternOperation = PatternFactory<Input, Output>;
       type ModuleOperation = ModuleFactory<Input, Output>;
-      type EventOperation = HandlerFactory<Input, Output>;
+      type EventOperation = HandlerFactory<Output, Input>;
 
       export default pattern<{
         patterns: Record<string, PatternOperation>;

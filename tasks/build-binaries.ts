@@ -6,6 +6,7 @@ import {
   computeCompilerVersion,
   renderVersionModule,
 } from "../packages/runner/src/compilation-cache/compiler-fingerprint.deno.ts";
+import { CONNECTOR_PATTERN_SOURCES } from "../packages/connectors/pattern-sources.ts";
 
 export interface BuildConfigInitializer {
   root: string;
@@ -40,8 +41,8 @@ export class BuildConfig {
   readonly toolshedFlags: string[];
   readonly binaries: readonly BinaryName[];
   readonly cliOnly: boolean;
-  private _manifestOriginal: string;
-  private _compileCacheVersionOriginal: string;
+  #manifestOriginal: string;
+  #compileCacheVersionOriginal: string;
 
   constructor(options: BuildConfigInitializer) {
     this.root = options.root;
@@ -56,39 +57,41 @@ export class BuildConfig {
       ? ["cf"]
       : requestedBinaries(options.binaries ?? []);
     this.cliOnly = this.binaries.length === 1 && this.binaries[0] === "cf";
-    this._manifestOriginal = Deno.readTextFileSync(
+    this.#manifestOriginal = Deno.readTextFileSync(
       this.workspaceManifestPath(),
     );
-    this._compileCacheVersionOriginal = Deno.readTextFileSync(
+    this.#compileCacheVersionOriginal = Deno.readTextFileSync(
       this.compileCacheVersionPath(),
     );
   }
 
-  private path(...args: string[]): string {
+  #path(...args: string[]): string {
     return path.join(this.root, ...args);
   }
 
-  // A fresh, mutable copy of the workspace manifest, parsed from its original
-  // bytes. The build mutates this copy; the original bytes stay untouched so
-  // the revert can restore the file exactly.
+  /**
+   * Returns a fresh, mutable copy of the workspace manifest, parsed from its
+   * original bytes. The build mutates this copy; the original bytes stay
+   * untouched so the revert can restore the file exactly.
+   */
   manifest(): Record<string, any> {
-    return parseJsonc(this._manifestOriginal) as Record<string, any>;
+    return parseJsonc(this.#manifestOriginal) as Record<string, any>;
   }
 
   manifestOriginal() {
-    return this._manifestOriginal;
+    return this.#manifestOriginal;
   }
 
   compileCacheVersionOriginal() {
-    return this._compileCacheVersionOriginal;
+    return this.#compileCacheVersionOriginal;
   }
 
   workspaceManifestPath() {
-    return this.path("deno.jsonc");
+    return this.#path("deno.jsonc");
   }
 
   compileCacheVersionPath() {
-    return this.path(
+    return this.#path(
       "packages",
       "runner",
       "src",
@@ -98,39 +101,39 @@ export class BuildConfig {
   }
 
   workspaceLockPath() {
-    return this.path("deno.lock");
+    return this.#path("deno.lock");
   }
 
   shellProjectPath() {
-    return this.path("packages", "shell");
+    return this.#path("packages", "shell");
   }
 
   shellOutPath() {
-    return this.path("packages", "shell", "dist");
+    return this.#path("packages", "shell", "dist");
   }
 
   toolshedProjectPath() {
-    return this.path("packages", "toolshed");
+    return this.#path("packages", "toolshed");
   }
 
   toolshedShellFrontendPath() {
-    return this.path("packages", "toolshed", "shell-frontend");
+    return this.#path("packages", "toolshed", "shell-frontend");
   }
 
   toolshedShellFrontendPathDev() {
-    return this.path("packages", "toolshed", "shell-frontend-dev");
+    return this.#path("packages", "toolshed", "shell-frontend-dev");
   }
 
   toolshedEntryPath() {
-    return this.path("packages", "toolshed", "index.ts");
+    return this.#path("packages", "toolshed", "index.ts");
   }
 
   bgPieceServiceEntryPath() {
-    return this.path("packages", "background-piece-service", "src", "main.ts");
+    return this.#path("packages", "background-piece-service", "src", "main.ts");
   }
 
   bgPieceServiceWorkerPath() {
-    return this.path(
+    return this.#path(
       "packages",
       "background-piece-service",
       "src",
@@ -139,43 +142,52 @@ export class BuildConfig {
   }
 
   toolshedEnvPath() {
-    return this.path("packages", "toolshed", "COMPILED");
+    return this.#path("packages", "toolshed", "COMPILED");
+  }
+
+  cliEnvPath() {
+    return this.#path("packages", "cli", "COMPILED");
   }
 
   staticAssetsPath() {
-    return this.path("packages", "static", "assets");
+    return this.#path("packages", "static", "assets");
   }
 
-  patternsPath() {
-    return this.path("packages", "patterns");
+  patternPaths() {
+    return [
+      this.#path("packages", "patterns"),
+      ...CONNECTOR_PATTERN_SOURCES.map((source) =>
+        this.#path(...source.directory.split("/"))
+      ),
+    ];
   }
 
   staticTypesPath() {
-    return this.path("packages", "static", "assets", "types");
+    return this.#path("packages", "static", "assets", "types");
   }
 
   docsCommonPath() {
-    return this.path("docs", "common");
+    return this.#path("docs", "common");
   }
 
   cliEntryPath() {
-    return this.path("packages", "cli", "mod.ts");
+    return this.#path("packages", "cli", "mod.ts");
   }
 
   cliMultiUserTestWorkerPath() {
-    return this.path("packages", "cli", "lib", "multi-user-test-worker.ts");
+    return this.#path("packages", "cli", "lib", "multi-user-test-worker.ts");
   }
 
   fusePackagePath() {
-    return this.path("packages", "fuse");
+    return this.#path("packages", "fuse");
   }
 
   distDir() {
-    return this.path("dist");
+    return this.#path("dist");
   }
 
   distPath(binary: string) {
-    return this.path("dist", binary);
+    return this.#path("dist", binary);
   }
 
   builds(binary: BinaryName): boolean {
@@ -252,6 +264,10 @@ async function buildShell(config: BuildConfig): Promise<void> {
       stdout: "inherit",
       stderr: "inherit",
       env: {
+        // `clearEnv` remains false, so this child inherits the caller's
+        // EXPERIMENTAL_SERVER_EXECUTION value and bakes the same posture as
+        // the parent binary build. This is load-bearing for the opposite
+        // CI lane's cache-miss path.
         COMMIT_SHA: Deno.env.get("COMMIT_SHA") || mode,
       },
     }).output();
@@ -295,8 +311,10 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
       config.toolshedEnvPath(),
       "--include",
       config.staticAssetsPath(),
-      "--include",
-      config.patternsPath(),
+      ...config.patternPaths().flatMap((patternPath) => [
+        "--include",
+        patternPath,
+      ]),
       ...config.toolshedFlags,
       config.toolshedEntryPath(),
     ],
@@ -395,6 +413,9 @@ async function buildCli(config: BuildConfig): Promise<void> {
       // followed by compile's static analysis, so include it explicitly.
       "--include",
       config.cliMultiUserTestWorkerPath(),
+      // Build metadata marker read by packages/cli/lib/build-info.ts.
+      "--include",
+      config.cliEnvPath(),
       config.cliEntryPath(),
     ],
     cwd: config.root,
@@ -448,17 +469,31 @@ export async function prepareWorkspace(
     denoJsonPath,
     `${JSON.stringify(manifest, null, 2)}\n`,
   );
-  // Write build metadata into the COMPILED file. Included via `--include`
-  // when the toolshed binary is compiled, so the values travel with the
-  // artifact and can be read at runtime (see packages/toolshed/lib/build-info.ts).
+  // Write build metadata into the COMPILED files. Included via `--include`
+  // when the toolshed and cf binaries are compiled, so the values travel with
+  // each artifact and can be read at runtime (see
+  // packages/toolshed/lib/build-info.ts and packages/cli/lib/build-info.ts).
   const buildInfo = {
     commitSha: Deno.env.get("COMMIT_SHA") ?? "",
     builtAt: new Date().toISOString(),
+    // The server-execution v2 posture the browser shell BAKES (an esbuild
+    // define read from this same environment in packages/shell/felt.config.ts
+    // when buildShell runs below): the raw `EXPERIMENTAL_SERVER_EXECUTION`
+    // value, or null when unset — the shell then follows the first-party
+    // default. Surfaced on toolshed's /api/meta as
+    // `shellServerExecutionDefine` so CI's posture probes can verify the
+    // binary they run: the opposite lanes require an explicitly built shell,
+    // and the default lanes require the define unset
+    // (docs/specs/server-side-execution/testing.md §2; the shell define is
+    // baked, so a lane on the wrong binary would silently be a mixed
+    // posture). Written to both markers because
+    // they are one file written twice; only the toolshed embeds the shell.
+    shellServerExecutionDefine: Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") ??
+      null,
   };
-  await Deno.writeTextFile(
-    config.toolshedEnvPath(),
-    JSON.stringify(buildInfo, null, 2) + "\n",
-  );
+  const serialized = JSON.stringify(buildInfo, null, 2) + "\n";
+  await Deno.writeTextFile(config.toolshedEnvPath(), serialized);
+  await Deno.writeTextFile(config.cliEnvPath(), serialized);
 }
 
 export async function revertWorkspace(config: BuildConfig): Promise<void> {
@@ -475,9 +510,11 @@ export async function revertWorkspace(config: BuildConfig): Promise<void> {
     config.compileCacheVersionOriginal(),
   );
 
-  // Remove the COMPILED env file
-  if ((await exists(toolshedEnvPath))) {
-    await Deno.remove(toolshedEnvPath);
+  // Remove the COMPILED env files
+  for (const path of [toolshedEnvPath, config.cliEnvPath()]) {
+    if ((await exists(path))) {
+      await Deno.remove(path);
+    }
   }
 }
 

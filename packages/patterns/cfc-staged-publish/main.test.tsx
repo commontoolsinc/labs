@@ -1,4 +1,4 @@
-import { assert, handler, pattern, Writable } from "commonfabric";
+import { assert, handler, pattern, TESTS, Writable } from "commonfabric";
 import {
   PUBLISH_SNAPSHOT_ACTION,
   REVIEW_SNAPSHOT_ACTION,
@@ -80,7 +80,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_initial_stage },
       { action: action_set_draft },
       // Each stage's write is gated on its reviewed surface's trusted

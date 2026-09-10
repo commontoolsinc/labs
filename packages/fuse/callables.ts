@@ -4,11 +4,11 @@ import {
   isAdmittedFabricFactory,
 } from "@commonfabric/data-model/fabric-factory";
 import {
-  jsonFromValue,
-  seemsLikeJsonEncodedFabricValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
+import type { FabricValue } from "@commonfabric/data-model";
 
 const encoder = new TextEncoder();
 
@@ -78,7 +78,7 @@ export function patternFactorySchemasFromSchema(
 
 export function encodeFactoryProjection(value: unknown): string | undefined {
   return isAdmittedFabricFactory(value)
-    ? jsonFromValue(value as FabricValue)
+    ? jsonFromFabricValue(value as FabricValue)
     : undefined;
 }
 
@@ -92,11 +92,11 @@ export function encodeFactoryProjection(value: unknown): string | undefined {
  */
 export function decodeFactoryProjection(value: unknown): unknown | undefined {
   if (
-    typeof value !== "string" || !seemsLikeJsonEncodedFabricValue(value)
+    typeof value !== "string" || !JsonCodecEngine.seemsLikeEncoded(value)
   ) {
     return undefined;
   }
-  const decoded = valueFromJson(value);
+  const decoded = fabricFromJsonValue(value);
   if (!isAdmittedFabricFactory(decoded)) {
     throw new TypeError("Tagged FUSE callable value is not a Factory@1");
   }

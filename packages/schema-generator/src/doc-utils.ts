@@ -137,3 +137,23 @@ export function extractDocFromType(
   if (docs[0]) result.firstDoc = docs[0];
   return result;
 }
+
+/**
+ * Whether the symbol's JSDoc carries an `@deprecated` tag on any declaration
+ * in a non-declaration file. The doc-text extractors above deliberately filter
+ * `@`-tag lines out of descriptions; this reads the tag itself. Consumed for
+ * verb listing marks: a `@deprecated` stream property lowers to standard JSON
+ * Schema `deprecated: true` (verb contract WS-F), which `cf piece verbs`
+ * hides by default while the verb stays callable.
+ */
+export function symbolHasDeprecatedTag(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!symbol) return false;
+  const hasUserDecl = (symbol.declarations ?? []).some((d) =>
+    !d.getSourceFile().isDeclarationFile
+  );
+  if (!hasUserDecl) return false;
+  return symbol.getJsDocTags(checker).some((tag) => tag.name === "deprecated");
+}

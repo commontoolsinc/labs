@@ -24,8 +24,10 @@ import {
   JSONSchema,
   NAME,
   pattern,
+  type PatternFactory,
   TILE_UI,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
@@ -162,13 +164,20 @@ interface MailPieceAnalysisItem {
   imageUrl: string;
   analysis: {
     pending: boolean;
-    error?: unknown;
+    error?: string;
     result?: MailAnalysis;
   };
   pending: boolean;
-  error?: string | null;
+  error?: string;
   result?: MailAnalysis;
 }
+
+type ReactiveArray<T> = T[] & {
+  mapWithPattern<I, S>(
+    op: PatternFactory<I, S>,
+    params: Record<string, unknown>,
+  ): S[];
+};
 
 // =============================================================================
 // HELPERS
@@ -321,7 +330,7 @@ If you cannot read the image clearly, make your best guess based on what you can
     imageUrl: imageInfo.imageUrl,
     analysis,
     pending: analysis.pending,
-    error: computed(() => analysis.error ? String(analysis.error) : null),
+    error: analysis.error,
     result: analysis.result,
   };
 });
@@ -341,8 +350,7 @@ const confirmMember = handler<
   unknown,
   { member: Writable<HouseholdMember> }
 >((_event, { member }) => {
-  const current = member.get();
-  member.set({ ...current, isConfirmed: true });
+  member.update({ isConfirmed: true });
 });
 
 // Handler to delete a household member
@@ -374,6 +382,8 @@ interface PatternInput {
 
 /** USPS Informed Delivery mail analyzer. #uspsInformedDelivery */
 export interface PatternOutput {
+  [NAME]: string;
+  [UI]: VNode;
   mailPieces: (MailAnalysis | undefined)[];
   householdMembers: HouseholdMember[];
   mailCount: number;
@@ -387,11 +397,11 @@ export interface PatternOutput {
   medicalCount: number;
   subscriptionCount: number;
   charityCount: number;
-  [TILE_UI]: import("commonfabric").VNode;
+  [TILE_UI]: VNode;
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  (({ householdMembers, overrideAuth }: any) => {
+  ({ householdMembers, overrideAuth }) => {
     // Directly instantiate GmailExtractor with USPS-specific settings (raw mode)
     // This eliminates the need for separate gmail-importer piece + wish()
     const extractor = GmailExtractor({
@@ -446,9 +456,9 @@ export default pattern<PatternInput, PatternOutput>(
     // Count of images to analyze
     const imageCount = computed(() => mailPieceImages?.length || 0);
 
-    const mailPieceAnalyses = mailPieceImages.map((imageInfo) =>
-      analyzeMailPiece(imageInfo)
-    );
+    const mailPieceAnalyses = (
+      mailPieceImages as ReactiveArray<MailPieceImageInfo>
+    ).mapWithPattern(analyzeMailPiece, {});
 
     // Count pending analyses
     const pendingCount = computed(
@@ -463,9 +473,9 @@ export default pattern<PatternInput, PatternOutput>(
         ).length || 0,
     );
 
-    const mailPieces = mailPieceAnalyses.map((analysis) =>
-      extractMailPieceResult(analysis)
-    );
+    const mailPieces = (
+      mailPieceAnalyses as ReactiveArray<MailPieceAnalysisItem>
+    ).mapWithPattern(extractMailPieceResult, {});
 
     // Derived counts from stored mailPieces
     const mailCount = computed(() => mailPieces?.length || 0);
@@ -1254,5 +1264,5 @@ export default pattern<PatternInput, PatternOutput>(
         </cf-screen>
       ),
     };
-  }) as any,
+  },
 );

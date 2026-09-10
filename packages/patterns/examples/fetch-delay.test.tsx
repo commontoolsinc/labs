@@ -2,7 +2,7 @@
 // a mock can return after a fixed real-time delay, so a fetchJson isn't resolved
 // instantly. `runtime.settled()` (driven by `{ settle: true }`) still awaits the
 // delayed fetch, so the result is observed deterministically once it lands.
-import { assert, computed, fetchJson, pattern } from "commonfabric";
+import { assert, computed, fetchJson, pattern, TESTS } from "commonfabric";
 
 export const fetchMocks = [
   {
@@ -18,7 +18,7 @@ export default pattern(() => {
   const fetched = fetchJson<{ v: number }>({ url });
   const result_is_7 = assert(() => fetched.result?.v === 7);
   return {
-    tests: [
+    [TESTS]: [
       { settle: true }, // awaits the delayed fetch to completion
       { assertion: result_is_7 },
     ],

@@ -1,15 +1,55 @@
-import { css, html, LitElement, TemplateResult } from "lit";
-import { property, state } from "lit/decorators.js";
-import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts";
+import {
+  type DebugValueOptions,
+  toCompactDebugString,
+  toIndentedDebugString,
+} from "@commonfabric/data-model";
 import type {
   LoggerMetadata,
   RuntimeTelemetryMarkerResult,
   TimingStats,
 } from "@commonfabric/runtime-client";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+import { css, html, LitElement, TemplateResult } from "lit";
+import { property, state } from "lit/decorators.js";
+
 import type { DebuggerController } from "../lib/debugger-controller.ts";
-import "./SchedulerGraphView.ts"; // Register x-scheduler-graph component
+import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts";
+
+import "./SchedulerGraphView.ts";
+
 import type { Logger, LoggerBreakdown } from "@commonfabric/utils/logger";
+
+/**
+ * Rendering options for a value shown in the debugger: a bounded glimpse on
+ * every axis, since a marker can hold anything a cell can and the search
+ * renders every marker on each keystroke. The replacer keeps an action's
+ * metadata, which it carries as enumerable properties on the function.
+ */
+const DEBUGGER_VALUE_OPTIONS: DebugValueOptions = {
+  maxDepth: 3,
+  maxArrayLength: 5,
+  maxProperties: 20,
+  maxStringLength: 200,
+  replacer: (value) => {
+    if (typeof value === "function") {
+      return { name: value.name || "[anonymous]", ...value };
+    }
+    return value;
+  },
+};
+
+/**
+ * Rendering options for the runs of a non-idempotent report. The panel is an
+ * inspector, so every run and every cell a run read or wrote is shown, deep
+ * enough to reach the values; a long string, or a value nested past the
+ * depth, is still cut.
+ */
+const RUN_DETAIL_OPTIONS: DebugValueOptions = {
+  ...DEBUGGER_VALUE_OPTIONS,
+  maxDepth: 6,
+  maxArrayLength: Infinity,
+  maxProperties: Infinity,
+};
 
 /**
  * Hierarchical topic definitions for filtering telemetry events.
@@ -32,8 +72,6 @@ export const TOPIC_HIERARCHY = {
     subtopics: {
       push: { label: "Push", pattern: "storage.push" },
       pull: { label: "Pull", pattern: "storage.pull" },
-      connection: { label: "Connection", pattern: "storage.connection" },
-      subscription: { label: "Subscriptions", pattern: "storage.subscription" },
     },
   },
   cells: {
@@ -60,8 +98,7 @@ export type SubtopicKey<T extends TopicKey> =
  * - Event expansion for detailed inspection
  * - Performance metrics and statistics
  *
- * Features a resizable drawer interface similar to the Inspector
- * but focused on telemetry events rather than storage operations.
+ * Presented as a resizable drawer.
  */
 export class XDebuggerView extends LitElement {
   static override styles = css`
@@ -767,7 +804,7 @@ export class XDebuggerView extends LitElement {
   accessor debuggerController: DebuggerController | undefined = undefined;
 
   @state()
-  private accessor _activeTab:
+  private accessor activeTab:
     | "events"
     | "scheduler"
     | "loggers"
@@ -776,7 +813,6 @@ export class XDebuggerView extends LitElement {
   @state()
   private accessor activeSubtopics = new Set<string>();
 
-  // Logger stats tracking
   @state()
   private accessor loggerBaseline:
     | Record<string, LoggerBreakdown | number>
@@ -807,7 +843,7 @@ export class XDebuggerView extends LitElement {
   private accessor openDropdowns = new Set<TopicKey>();
 
   @state()
-  private accessor _isRecreatingSpaceRootPattern = false;
+  private accessor isRecreatingSpaceRootPattern = false;
 
   @state()
   private accessor searchText = "";
@@ -835,7 +871,7 @@ export class XDebuggerView extends LitElement {
   @state()
   private accessor diagnosisDurationMs = 5000;
 
-  private resizeController = new ResizableDrawerController(this, {
+  #resizeController = new ResizableDrawerController(this, {
     initialHeight: 300,
     minHeight: 150,
     maxHeightFactor: 0.8,
@@ -843,17 +879,47 @@ export class XDebuggerView extends LitElement {
     storageKey: "debuggerDrawerHeight",
   });
 
+  /**
+   * The worker-logger metadata, the diagnosis panel's render step, and the
+   * three worker-logger handlers, which a test drives directly.
+   */
+  get accessForTestingOnly(): {
+    workerLoggerMetadata: LoggerMetadata | null;
+    renderDiagnosis(): TemplateResult;
+    resetBaseline(): Promise<void>;
+    toggleLogger(name: string): Promise<void>;
+    setLoggerLevel(
+      name: string,
+      level: "debug" | "info" | "warn" | "error",
+    ): Promise<void>;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      get workerLoggerMetadata() {
+        return outerThis.workerLoggerMetadata;
+      },
+      set workerLoggerMetadata(value) {
+        outerThis.workerLoggerMetadata = value;
+      },
+      renderDiagnosis: () => this.#renderDiagnosis(),
+      resetBaseline: () => this.#resetBaseline(),
+      toggleLogger: (name) => this.#toggleLogger(name),
+      setLoggerLevel: (name, level) => this.#setLoggerLevel(name, level),
+    };
+  }
+
   override connectedCallback() {
     super.connectedCallback();
-    document.addEventListener("keydown", this.handleKeyDown);
-    document.addEventListener("click", this.handleDocumentClick);
+    document.addEventListener("keydown", this.#handleKeyDown);
+    document.addEventListener("click", this.#handleDocumentClick);
     // Initialize with all subtopics active
-    this.initializeAllSubtopics();
+    this.#initializeAllSubtopics();
   }
 
   override disconnectedCallback() {
-    document.removeEventListener("keydown", this.handleKeyDown);
-    document.removeEventListener("click", this.handleDocumentClick);
+    document.removeEventListener("keydown", this.#handleKeyDown);
+    document.removeEventListener("click", this.#handleDocumentClick);
     super.disconnectedCallback();
   }
 
@@ -866,7 +932,7 @@ export class XDebuggerView extends LitElement {
     }
   }
 
-  private handleKeyDown = (e: KeyboardEvent) => {
+  #handleKeyDown = (e: KeyboardEvent) => {
     // Clear search on Escape
     if (e.key === "Escape" && this.searchText) {
       e.preventDefault();
@@ -875,11 +941,11 @@ export class XDebuggerView extends LitElement {
     // Toggle pause on Space when debugger is visible
     if (e.key === " " && this.visible && e.target === document.body) {
       e.preventDefault();
-      this.togglePause();
+      this.#togglePause();
     }
   };
 
-  private initializeAllSubtopics() {
+  #initializeAllSubtopics() {
     const allSubtopics = new Set<string>();
     for (const [topicKey, topic] of Object.entries(TOPIC_HIERARCHY)) {
       for (const subtopicKey of Object.keys(topic.subtopics)) {
@@ -889,7 +955,7 @@ export class XDebuggerView extends LitElement {
     this.activeSubtopics = allSubtopics;
   }
 
-  private handleDocumentClick = (e: Event) => {
+  #handleDocumentClick = (e: Event) => {
     // Close dropdowns when clicking outside
     const target = e.target as HTMLElement;
     if (!target.closest(".topic-button-group")) {
@@ -897,7 +963,7 @@ export class XDebuggerView extends LitElement {
     }
   };
 
-  private toggleDropdown(topicKey: TopicKey, e: Event) {
+  #toggleDropdown(topicKey: TopicKey, e: Event) {
     e.stopPropagation();
     const newDropdowns = new Set(this.openDropdowns);
     if (newDropdowns.has(topicKey)) {
@@ -910,7 +976,7 @@ export class XDebuggerView extends LitElement {
     this.openDropdowns = newDropdowns;
   }
 
-  private toggleTopic(topicKey: TopicKey) {
+  #toggleTopic(topicKey: TopicKey) {
     const topic = TOPIC_HIERARCHY[topicKey];
     const subtopicKeys = Object.keys(topic.subtopics);
     const fullKeys = subtopicKeys.map((sk) => `${topicKey}.${sk}`);
@@ -931,7 +997,7 @@ export class XDebuggerView extends LitElement {
     this.activeSubtopics = newSubtopics;
   }
 
-  private toggleSubtopic(topicKey: TopicKey, subtopicKey: string) {
+  #toggleSubtopic(topicKey: TopicKey, subtopicKey: string) {
     const fullKey = `${topicKey}.${subtopicKey}`;
     const newSubtopics = new Set(this.activeSubtopics);
 
@@ -944,7 +1010,7 @@ export class XDebuggerView extends LitElement {
     this.activeSubtopics = newSubtopics;
   }
 
-  private getTopicState(topicKey: TopicKey): "active" | "partial" | "inactive" {
+  #getTopicState(topicKey: TopicKey): "active" | "partial" | "inactive" {
     const topic = TOPIC_HIERARCHY[topicKey];
     const subtopicKeys = Object.keys(topic.subtopics);
     const fullKeys = subtopicKeys.map((sk) => `${topicKey}.${sk}`);
@@ -956,33 +1022,33 @@ export class XDebuggerView extends LitElement {
     return "partial";
   }
 
-  private toggleAllTopics() {
+  #toggleAllTopics() {
     if (this.activeSubtopics.size > 0) {
       // Some selected, deselect all
       this.activeSubtopics = new Set();
     } else {
       // None selected, select all
-      this.initializeAllSubtopics();
+      this.#initializeAllSubtopics();
     }
   }
 
-  private recreateSpaceRootPattern() {
-    if (this._isRecreatingSpaceRootPattern) return;
-    this._isRecreatingSpaceRootPattern = true;
+  #recreateSpaceRootPattern() {
+    if (this.isRecreatingSpaceRootPattern) return;
+    this.isRecreatingSpaceRootPattern = true;
     this.dispatchEvent(
       new CustomEvent("recreate-space-root-pattern", {
         bubbles: true,
         composed: true,
         detail: {
           done: () => {
-            this._isRecreatingSpaceRootPattern = false;
+            this.isRecreatingSpaceRootPattern = false;
           },
         },
       }),
     );
   }
 
-  private clearEvents() {
+  #clearEvents() {
     // Dispatch event to clear telemetry in runtime
     this.dispatchEvent(
       new CustomEvent("clear-telemetry", {
@@ -996,7 +1062,7 @@ export class XDebuggerView extends LitElement {
     this.fullHeightEvents.clear();
   }
 
-  private togglePause() {
+  #togglePause() {
     this.isPaused = !this.isPaused;
     if (!this.isPaused) {
       // When unpausing, update to latest markers
@@ -1004,7 +1070,7 @@ export class XDebuggerView extends LitElement {
     }
   }
 
-  private toggleEventExpand(index: number) {
+  #toggleEventExpand(index: number) {
     const newSet = new Set(this.expandedEvents);
     if (newSet.has(index)) {
       newSet.delete(index);
@@ -1018,7 +1084,7 @@ export class XDebuggerView extends LitElement {
     this.expandedEvents = newSet;
   }
 
-  private toggleJsonFullHeight(index: number) {
+  #toggleJsonFullHeight(index: number) {
     const newSet = new Set(this.fullHeightEvents);
     if (newSet.has(index)) {
       newSet.delete(index);
@@ -1028,7 +1094,7 @@ export class XDebuggerView extends LitElement {
     this.fullHeightEvents = newSet;
   }
 
-  private async copyJson(data: RuntimeTelemetryMarkerResult) {
+  async #copyJson(data: RuntimeTelemetryMarkerResult) {
     try {
       const jsonString = JSON.stringify(data, null, 2);
       await navigator.clipboard.writeText(jsonString);
@@ -1037,14 +1103,14 @@ export class XDebuggerView extends LitElement {
     }
   }
 
-  private formatTime(timestamp: number): string {
+  #formatTime(timestamp: number): string {
     const date = new Date(timestamp);
     return `${date.toLocaleTimeString()}.${
       date.getMilliseconds().toString().padStart(3, "0")
     }`;
   }
 
-  private getEventIcon(marker: RuntimeTelemetryMarkerResult): string {
+  #getEventIcon(marker: RuntimeTelemetryMarkerResult): string {
     const type = marker.type;
 
     // Try to find a matching topic
@@ -1060,7 +1126,7 @@ export class XDebuggerView extends LitElement {
     return "📊";
   }
 
-  private getEventColor(marker: RuntimeTelemetryMarkerResult): string {
+  #getEventColor(marker: RuntimeTelemetryMarkerResult): string {
     const type = marker.type;
 
     // Try to find a matching topic
@@ -1076,7 +1142,7 @@ export class XDebuggerView extends LitElement {
     return "#64748b";
   }
 
-  private matchesActiveTopics(marker: RuntimeTelemetryMarkerResult): boolean {
+  #matchesActiveTopics(marker: RuntimeTelemetryMarkerResult): boolean {
     if (this.activeSubtopics.size === 0) return false;
 
     const type = marker.type;
@@ -1096,24 +1162,28 @@ export class XDebuggerView extends LitElement {
     return false;
   }
 
-  private matchesSearch(marker: RuntimeTelemetryMarkerResult): boolean {
+  #matchesSearch(marker: RuntimeTelemetryMarkerResult): boolean {
     if (!this.searchText) return true;
 
     const searchLower = this.searchText.toLowerCase();
-    // Use truncated stringify to avoid serializing huge objects on every search
-    const markerStr = this.safeJsonStringify(marker, 5000).toLowerCase();
+    // A bounded rendering, so that a search does not render a huge marker
+    // whole each keystroke.
+    const markerStr = toCompactDebugString(marker, {
+      ...DEBUGGER_VALUE_OPTIONS,
+      maxLength: 5000,
+    }).toLowerCase();
     return markerStr.includes(searchLower);
   }
 
-  private getFilteredEvents(): RuntimeTelemetryMarkerResult[] {
+  #getFilteredEvents(): RuntimeTelemetryMarkerResult[] {
     const markers = this.isPaused ? this.pausedMarkers : this.telemetryMarkers;
 
     return markers.filter((marker) =>
-      this.matchesActiveTopics(marker) && this.matchesSearch(marker)
+      this.#matchesActiveTopics(marker) && this.#matchesSearch(marker)
     );
   }
 
-  private renderEventDetails(
+  #renderEventDetails(
     marker: RuntimeTelemetryMarkerResult,
   ): TemplateResult[] {
     const details = [];
@@ -1130,9 +1200,9 @@ export class XDebuggerView extends LitElement {
       const handlerId = typeof eventData.handlerId === "string"
         ? eventData.handlerId
         : undefined;
-      const info = isRecord(eventData.actionInfo)
+      const info = isObjectOrArray(eventData.actionInfo)
         ? eventData.actionInfo
-        : isRecord(eventData.handlerInfo)
+        : isObjectOrArray(eventData.handlerInfo)
         ? eventData.handlerInfo
         : undefined;
 
@@ -1196,8 +1266,8 @@ export class XDebuggerView extends LitElement {
       }
     } else if (type === "cell.update") {
       const change = (rest as Record<string, unknown>).change;
-      if (isRecord(change)) {
-        if (isRecord(change.address)) {
+      if (isObjectOrArray(change)) {
+        if (isObjectOrArray(change.address)) {
           if (change.address?.id) {
             details.push(html`
               <div class="event-detail">
@@ -1257,7 +1327,10 @@ export class XDebuggerView extends LitElement {
                 ? value.toString()
                 : typeof value === "number"
                 ? value.toString()
-                : this.safeJsonStringify(value, 100)}</span>
+                : toCompactDebugString(value, {
+                  ...DEBUGGER_VALUE_OPTIONS,
+                  maxLength: 100,
+                })}</span>
             </div>
           `);
         }
@@ -1267,107 +1340,14 @@ export class XDebuggerView extends LitElement {
     return details;
   }
 
-  /**
-   * Safely stringify a value with size limits to prevent context blowout.
-   * Truncates large strings, arrays, and objects.
-   */
-  private safeJsonStringify(
-    value: unknown,
-    maxLength: number,
-    indent?: number,
-  ): string {
-    const truncatedValue = this.truncateValue(value, 3); // Max depth 3
-    try {
-      const json = JSON.stringify(truncatedValue, null, indent);
-      if (json.length > maxLength) {
-        return json.slice(0, maxLength - 3) + "...";
-      }
-      return json;
-    } catch {
-      return "[Unable to serialize]";
-    }
-  }
-
-  /**
-   * Recursively truncate a value to prevent huge objects from being serialized.
-   * Replaces functions, large strings, large arrays, and deep objects with summaries.
-   */
-  private truncateValue(value: unknown, maxDepth: number): unknown {
-    if (maxDepth <= 0) {
-      return "[...]";
-    }
-
-    if (value === null || value === undefined) {
-      return value;
-    }
-
-    if (typeof value === "function") {
-      // Serialize functions as objects with name + all enumerable properties
-      const fn = value as unknown as
-        & { name?: string }
-        & Record<string, unknown>;
-      const result: Record<string, unknown> = {
-        name: fn.name || "[anonymous]",
-      };
-      // Copy enumerable properties (actions often have metadata attached)
-      for (const key of Object.keys(fn)) {
-        result[key] = this.truncateValue(fn[key], maxDepth - 1);
-      }
-      return result;
-    }
-
-    if (typeof value === "string") {
-      if (value.length > 200) {
-        return value.slice(0, 197) + "...";
-      }
-      return value;
-    }
-
-    if (typeof value === "number" || typeof value === "boolean") {
-      return value;
-    }
-
-    if (Array.isArray(value)) {
-      if (value.length > 10) {
-        return [
-          ...value.slice(0, 5).map((v) => this.truncateValue(v, maxDepth - 1)),
-          `[... ${value.length - 5} more items]`,
-        ];
-      }
-      return value.map((v) => this.truncateValue(v, maxDepth - 1));
-    }
-
-    if (typeof value === "object") {
-      const obj = value as Record<string, unknown>;
-      const keys = Object.keys(obj);
-
-      // Skip huge objects entirely (likely cell values or function metadata)
-      if (keys.length > 20) {
-        return `[Object with ${keys.length} keys]`;
-      }
-
-      const result: Record<string, unknown> = {};
-      for (const key of keys) {
-        result[key] = this.truncateValue(obj[key], maxDepth - 1);
-      }
-      return result;
-    }
-
-    return String(value);
-  }
-
-  // ============================================================
-  // Logger stats methods
-  // ============================================================
-
-  private getLoggerRegistry(): Record<string, Logger> {
+  #getLoggerRegistry(): Record<string, Logger> {
     const global = globalThis as unknown as {
       commonfabric?: { logger?: Record<string, Logger> };
     };
     return global.commonfabric?.logger ?? {};
   }
 
-  private getLoggerBreakdown(): Record<string, LoggerBreakdown | number> {
+  #getLoggerBreakdown(): Record<string, LoggerBreakdown | number> {
     const global = globalThis as unknown as {
       commonfabric?: {
         getLoggerCountsBreakdown?: () => Record<
@@ -1379,7 +1359,7 @@ export class XDebuggerView extends LitElement {
     return global.commonfabric?.getLoggerCountsBreakdown?.() ?? { total: 0 };
   }
 
-  private getBreakdownTotal(
+  #getBreakdownTotal(
     breakdown: Record<string, LoggerBreakdown | number> | null,
   ): number {
     if (!breakdown) return 0;
@@ -1387,7 +1367,7 @@ export class XDebuggerView extends LitElement {
     return typeof total === "number" ? total : 0;
   }
 
-  private async getWorkerLoggerBreakdown(): Promise<{
+  async #getWorkerLoggerBreakdown(): Promise<{
     counts: Record<string, LoggerBreakdown | number> | null;
     timing: Record<string, Record<string, TimingStats>> | null;
   }> {
@@ -1408,7 +1388,7 @@ export class XDebuggerView extends LitElement {
     }
   }
 
-  private mergeLoggerBreakdowns(
+  #mergeLoggerBreakdowns(
     main: Record<string, LoggerBreakdown | number>,
     worker: Record<string, LoggerBreakdown | number> | null,
   ): Record<string, LoggerBreakdown | number> {
@@ -1430,7 +1410,7 @@ export class XDebuggerView extends LitElement {
           (typeof workerVal === "number" ? workerVal : 0);
       } else if (mainVal && workerVal) {
         // Both have LoggerBreakdown - merge them
-        merged[key] = this.mergeBreakdown(mainVal, workerVal);
+        merged[key] = this.#mergeBreakdown(mainVal, workerVal);
       } else {
         // Only one has data
         merged[key] = mainVal ?? workerVal;
@@ -1445,7 +1425,7 @@ export class XDebuggerView extends LitElement {
     return merged;
   }
 
-  private mergeBreakdown(
+  #mergeBreakdown(
     a: LoggerBreakdown,
     b: LoggerBreakdown,
   ): LoggerBreakdown {
@@ -1474,7 +1454,7 @@ export class XDebuggerView extends LitElement {
     return merged;
   }
 
-  private getLoggerTiming(): Record<string, Record<string, TimingStats>> {
+  #getLoggerTiming(): Record<string, Record<string, TimingStats>> {
     const global = globalThis as unknown as {
       commonfabric?: {
         getTimingStatsBreakdown?: () => Record<
@@ -1486,7 +1466,7 @@ export class XDebuggerView extends LitElement {
     return global.commonfabric?.getTimingStatsBreakdown?.() ?? {};
   }
 
-  private mergeLoggerTiming(
+  #mergeLoggerTiming(
     main: Record<string, Record<string, TimingStats>>,
     worker: Record<string, Record<string, TimingStats>> | null,
   ): Record<string, Record<string, TimingStats>> {
@@ -1506,17 +1486,17 @@ export class XDebuggerView extends LitElement {
     return merged;
   }
 
-  private async sampleLoggerCounts(): Promise<void> {
-    const mainCounts = this.getLoggerBreakdown();
-    const workerResult = await this.getWorkerLoggerBreakdown();
-    this.loggerSample = this.mergeLoggerBreakdowns(
+  async #sampleLoggerCounts(): Promise<void> {
+    const mainCounts = this.#getLoggerBreakdown();
+    const workerResult = await this.#getWorkerLoggerBreakdown();
+    this.loggerSample = this.#mergeLoggerBreakdowns(
       mainCounts,
       workerResult.counts,
     );
 
     // Merge timing data
-    const mainTiming = this.getLoggerTiming();
-    this.loggerTimingSample = this.mergeLoggerTiming(
+    const mainTiming = this.#getLoggerTiming();
+    this.loggerTimingSample = this.#mergeLoggerTiming(
       mainTiming,
       workerResult.timing,
     );
@@ -1529,7 +1509,7 @@ export class XDebuggerView extends LitElement {
     });
   }
 
-  private async resetBaseline(): Promise<void> {
+  async #resetBaseline(): Promise<void> {
     // Reset counts baseline
     const global = globalThis as unknown as {
       commonfabric?: {
@@ -1550,7 +1530,7 @@ export class XDebuggerView extends LitElement {
       // Clear local baseline tracking
       this.loggerBaseline = null;
       // Sample to get fresh data
-      await this.sampleLoggerCounts();
+      await this.#sampleLoggerCounts();
     } catch (error) {
       // A disposal race (logout, runtime swap) cancels the op; that is
       // cancellation, not a failure — and this runs fire-and-forget, so an
@@ -1560,8 +1540,8 @@ export class XDebuggerView extends LitElement {
     }
   }
 
-  private async toggleLogger(name: string): Promise<void> {
-    const registry = this.getLoggerRegistry();
+  async #toggleLogger(name: string): Promise<void> {
+    const registry = this.#getLoggerRegistry();
     const logger = registry[name];
     if (logger) {
       // Local logger - toggle directly
@@ -1576,7 +1556,7 @@ export class XDebuggerView extends LitElement {
         try {
           await rt.setLoggerEnabled(!currentEnabled, name);
           // Refresh metadata
-          await this.sampleLoggerCounts();
+          await this.#sampleLoggerCounts();
         } catch (error) {
           // A disposal race cancels the op (fire-and-forget — an un-caught
           // rejection would surface as an unhandled rejection).
@@ -1590,11 +1570,11 @@ export class XDebuggerView extends LitElement {
     }
   }
 
-  private async setLoggerLevel(
+  async #setLoggerLevel(
     name: string,
     level: "debug" | "info" | "warn" | "error",
   ): Promise<void> {
-    const registry = this.getLoggerRegistry();
+    const registry = this.#getLoggerRegistry();
     const logger = registry[name];
     if (logger) {
       // Local logger - set directly
@@ -1608,7 +1588,7 @@ export class XDebuggerView extends LitElement {
         try {
           await rt.setLoggerLevel(level, name);
           // Refresh metadata
-          await this.sampleLoggerCounts();
+          await this.#sampleLoggerCounts();
         } catch (error) {
           // A disposal race cancels the op (fire-and-forget — an un-caught
           // rejection would surface as an unhandled rejection).
@@ -1622,7 +1602,7 @@ export class XDebuggerView extends LitElement {
     }
   }
 
-  private toggleExpandLogger(name: string): void {
+  #toggleExpandLogger(name: string): void {
     if (this.expandedLoggers.has(name)) {
       this.expandedLoggers.delete(name);
     } else {
@@ -1631,16 +1611,16 @@ export class XDebuggerView extends LitElement {
     this.requestUpdate();
   }
 
-  private getDelta(current: number, baseline: number | undefined): number {
+  #getDelta(current: number, baseline: number | undefined): number {
     return current - (baseline ?? 0);
   }
 
-  private formatDelta(delta: number): string {
+  #formatDelta(delta: number): string {
     if (delta === 0) return "0";
     return delta > 0 ? `+${delta}` : `${delta}`;
   }
 
-  private renderTimingHistogram(
+  #renderTimingHistogram(
     _loggerName: string,
     timingData: Record<string, TimingStats>,
   ): TemplateResult {
@@ -1662,13 +1642,13 @@ export class XDebuggerView extends LitElement {
             `;
           }
 
-          return this.renderCDFForKey(key, stats);
+          return this.#renderCDFForKey(key, stats);
         })}
       </div>
     `;
   }
 
-  private handleChartMouseMove(
+  #handleChartMouseMove(
     e: MouseEvent,
     cumulativePointsBlue: Array<{
       latency: number;
@@ -1773,11 +1753,11 @@ export class XDebuggerView extends LitElement {
     }
   }
 
-  private handleChartMouseLeave(): void {
+  #handleChartMouseLeave(): void {
     this.tooltipData = null;
   }
 
-  private renderCDFForKey(
+  #renderCDFForKey(
     key: string,
     stats: TimingStats,
   ): TemplateResult {
@@ -1961,7 +1941,7 @@ export class XDebuggerView extends LitElement {
           height="${height}"
           style="background-color: #0f172a; border-radius: 0.25rem; cursor: crosshair;"
           @mousemove="${(e: MouseEvent) =>
-            this.handleChartMouseMove(
+            this.#handleChartMouseMove(
               e,
               cumulativePoints,
               cumulativePointsDelta,
@@ -1973,7 +1953,7 @@ export class XDebuggerView extends LitElement {
               plotWidth,
               plotHeight,
             )}"
-          @mouseleave="${() => this.handleChartMouseLeave()}"
+          @mouseleave="${() => this.#handleChartMouseLeave()}"
         >
           <!-- Y-axis grid lines and labels -->
           ${yTicks.map((y) => {
@@ -2262,10 +2242,10 @@ export class XDebuggerView extends LitElement {
     `;
   }
 
-  private renderLoggers(): TemplateResult {
-    const sample = this.loggerSample ?? this.getLoggerBreakdown();
+  #renderLoggers(): TemplateResult {
+    const sample = this.loggerSample ?? this.#getLoggerBreakdown();
     const baseline = this.loggerBaseline;
-    const registry = this.getLoggerRegistry();
+    const registry = this.#getLoggerRegistry();
     const loggerNames = Object.keys(sample).filter((k) => k !== "total");
 
     if (loggerNames.length === 0) {
@@ -2276,16 +2256,16 @@ export class XDebuggerView extends LitElement {
       `;
     }
 
-    const sampleTotal = this.getBreakdownTotal(sample);
-    const baselineTotal = this.getBreakdownTotal(baseline);
-    const totalDelta = this.getDelta(sampleTotal, baselineTotal);
+    const sampleTotal = this.#getBreakdownTotal(sample);
+    const baselineTotal = this.#getBreakdownTotal(baseline);
+    const totalDelta = this.#getDelta(sampleTotal, baselineTotal);
 
     return html`
       <div class="loggers-toolbar">
         <button
           type="button"
           class="action-button"
-          @click="${() => this.resetBaseline()}"
+          @click="${() => this.#resetBaseline()}"
           title="Reset baseline to current counts"
         >
           Reset Baseline
@@ -2293,7 +2273,7 @@ export class XDebuggerView extends LitElement {
         <button
           type="button"
           class="action-button"
-          @click="${() => this.sampleLoggerCounts()}"
+          @click="${() => this.#sampleLoggerCounts()}"
           title="Sample current counts"
         >
           Sample
@@ -2305,7 +2285,7 @@ export class XDebuggerView extends LitElement {
                 ? "positive"
                 : totalDelta < 0
                 ? "negative"
-                : ""}">(${this.formatDelta(totalDelta)})</span>
+                : ""}">(${this.#formatDelta(totalDelta)})</span>
             `
             : ""}
         </span>
@@ -2324,12 +2304,12 @@ export class XDebuggerView extends LitElement {
             ? !workerMeta.enabled
             : false;
           const currentLevel = logger?.level ?? workerMeta?.level ?? "info";
-          const delta = this.getDelta(loggerData.total, baselineData?.total);
+          const delta = this.#getDelta(loggerData.total, baselineData?.total);
 
           return html`
             <div class="logger-item ${isDisabled ? "disabled" : ""}">
               <div class="logger-header" @click="${() =>
-                this.toggleExpandLogger(name)}">
+                this.#toggleExpandLogger(name)}">
                 <span class="logger-expand">${isExpanded ? "▼" : "▶"}</span>
                 <span class="logger-name">${name}</span>
                 <span class="logger-count">
@@ -2339,7 +2319,7 @@ export class XDebuggerView extends LitElement {
                         ? "positive"
                         : delta < 0
                         ? "negative"
-                        : ""}">(${this.formatDelta(delta)})</span>
+                        : ""}">(${this.#formatDelta(delta)})</span>
                     `
                     : ""}
                 </span>
@@ -2350,7 +2330,7 @@ export class XDebuggerView extends LitElement {
                     .value="${currentLevel}"
                     @change="${(e: Event) => {
                       const select = e.target as HTMLSelectElement;
-                      this.setLoggerLevel(
+                      this.#setLoggerLevel(
                         name,
                         select.value as "debug" | "info" | "warn" | "error",
                       );
@@ -2369,7 +2349,7 @@ export class XDebuggerView extends LitElement {
                   <button
                     type="button"
                     class="logger-toggle ${isDisabled ? "off" : "on"}"
-                    @click="${() => this.toggleLogger(name)}"
+                    @click="${() => this.#toggleLogger(name)}"
                     title="${isDisabled
                       ? "Logger disabled - click to enable"
                       : "Logger enabled - click to disable"}"
@@ -2398,7 +2378,7 @@ export class XDebuggerView extends LitElement {
                         const baselineCounts = baselineData?.[key] as
                           | typeof c
                           | undefined;
-                        const keyDelta = this.getDelta(
+                        const keyDelta = this.#getDelta(
                           c.total,
                           baselineCounts?.total,
                         );
@@ -2421,7 +2401,7 @@ export class XDebuggerView extends LitElement {
                                       ? "positive"
                                       : keyDelta < 0
                                       ? "negative"
-                                      : ""}">(${this.formatDelta(
+                                      : ""}">(${this.#formatDelta(
                                         keyDelta,
                                       )})</span>
                                   `
@@ -2435,7 +2415,7 @@ export class XDebuggerView extends LitElement {
 
                   ${/* Show timing histogram if available */
                   this.loggerTimingSample?.[name]
-                    ? this.renderTimingHistogram(
+                    ? this.#renderTimingHistogram(
                       name,
                       this.loggerTimingSample[name],
                     )
@@ -2449,21 +2429,21 @@ export class XDebuggerView extends LitElement {
     `;
   }
 
-  private renderTabs() {
+  #renderTabs() {
     return html`
       <div class="tabs-container">
         <button
           type="button"
-          class="tab-button ${this._activeTab === "events" ? "active" : ""}"
-          @click="${() => this._activeTab = "events"}"
+          class="tab-button ${this.activeTab === "events" ? "active" : ""}"
+          @click="${() => this.activeTab = "events"}"
         >
           Events
         </button>
         <button
           type="button"
-          class="tab-button ${this._activeTab === "scheduler" ? "active" : ""}"
+          class="tab-button ${this.activeTab === "scheduler" ? "active" : ""}"
           @click="${() => {
-            this._activeTab = "scheduler";
+            this.activeTab = "scheduler";
             // Request a fresh snapshot when tab is opened
             this.debuggerController?.requestGraphSnapshot();
           }}"
@@ -2472,19 +2452,19 @@ export class XDebuggerView extends LitElement {
         </button>
         <button
           type="button"
-          class="tab-button ${this._activeTab === "loggers" ? "active" : ""}"
+          class="tab-button ${this.activeTab === "loggers" ? "active" : ""}"
           @click="${() => {
-            this._activeTab = "loggers";
+            this.activeTab = "loggers";
             // Sample current counts when tab is opened
-            this.sampleLoggerCounts();
+            this.#sampleLoggerCounts();
           }}"
         >
           Loggers
         </button>
         <button
           type="button"
-          class="tab-button ${this._activeTab === "diagnosis" ? "active" : ""}"
-          @click="${() => this._activeTab = "diagnosis"}"
+          class="tab-button ${this.activeTab === "diagnosis" ? "active" : ""}"
+          @click="${() => this.activeTab = "diagnosis"}"
         >
           Diagnosis
         </button>
@@ -2492,7 +2472,7 @@ export class XDebuggerView extends LitElement {
     `;
   }
 
-  private renderDiagnosis(): TemplateResult {
+  #renderDiagnosis(): TemplateResult {
     const isDiagnosing = this.debuggerController?.getIsDiagnosing() ?? false;
     const result = this.debuggerController?.getDiagnosisResult() ?? null;
 
@@ -2594,7 +2574,10 @@ export class XDebuggerView extends LitElement {
                             </summary>
                             <pre
                               style="margin: 0.25rem 0 0; font-size: 0.625rem; color: #cbd5e1; overflow: auto; max-height: 8rem;"
-                            >${JSON.stringify(report.runs, null, 2)}</pre>
+                            >${toIndentedDebugString(
+                              report.runs,
+                              RUN_DETAIL_OPTIONS,
+                            )}</pre>
                           </details>
                         </div>
                       `,
@@ -2658,8 +2641,8 @@ export class XDebuggerView extends LitElement {
     `;
   }
 
-  private renderEvents() {
-    const events = this.getFilteredEvents();
+  #renderEvents() {
+    const events = this.#getFilteredEvents();
 
     if (events.length === 0) {
       return html`
@@ -2679,27 +2662,27 @@ export class XDebuggerView extends LitElement {
         ${reversedEvents.map((marker, index) => {
           const actualIndex = events.length - 1 - index;
           const isExpanded = this.expandedEvents.has(actualIndex);
-          const color = this.getEventColor(marker);
+          const color = this.#getEventColor(marker);
 
           return html`
             <div
               class="event-item ${isExpanded ? "expanded" : ""}"
-              @click="${() => this.toggleEventExpand(actualIndex)}"
+              @click="${() => this.#toggleEventExpand(actualIndex)}"
             >
               <div class="event-header">
                 <div class="event-main">
                   <span class="event-icon" style="color: ${color}">
-                    ${this.getEventIcon(marker)}
+                    ${this.#getEventIcon(marker)}
                   </span>
                   <div class="event-content">
                     <div class="event-type">${marker.type}</div>
                     <div class="event-details">
-                      ${this.renderEventDetails(marker)}
+                      ${this.#renderEventDetails(marker)}
                     </div>
                   </div>
                 </div>
                 <div class="event-time">
-                  ${this.formatTime(marker.timeStamp)}
+                  ${this.#formatTime(marker.timeStamp)}
                 </div>
               </div>
 
@@ -2716,7 +2699,7 @@ export class XDebuggerView extends LitElement {
                         class="json-control-btn"
                         @click="${(e: Event) => {
                           e.stopPropagation();
-                          this.toggleJsonFullHeight(actualIndex);
+                          this.#toggleJsonFullHeight(actualIndex);
                         }}"
                       >
                         ${this.fullHeightEvents.has(actualIndex)
@@ -2729,13 +2712,16 @@ export class XDebuggerView extends LitElement {
                         title="Copy full untruncated JSON to clipboard"
                         @click="${(e: Event) => {
                           e.stopPropagation();
-                          this.copyJson(marker);
+                          this.#copyJson(marker);
                         }}"
                       >
                         Copy Full
                       </button>
                     </div>
-                    <pre>${this.safeJsonStringify(marker, 10000, 2)}</pre>
+                    <pre>${toIndentedDebugString(
+                      marker,
+                      DEBUGGER_VALUE_OPTIONS,
+                    )}</pre>
                   </div>
                 `
                 : ""}
@@ -2747,11 +2733,11 @@ export class XDebuggerView extends LitElement {
   }
 
   override render() {
-    const containerStyle = `height: ${this.resizeController.drawerHeight}px`;
+    const containerStyle = `height: ${this.#resizeController.drawerHeight}px`;
     const allEvents = this.isPaused
       ? this.pausedMarkers
       : this.telemetryMarkers;
-    const filteredCount = this.visible ? this.getFilteredEvents().length : 0;
+    const filteredCount = this.visible ? this.#getFilteredEvents().length : 0;
 
     return html`
       ${this.visible
@@ -2759,8 +2745,8 @@ export class XDebuggerView extends LitElement {
           <div class="debugger-container" style="${containerStyle}">
             <div
               class="resize-handle"
-              @mousedown="${this.resizeController.handleResizeStart}"
-              @touchstart="${this.resizeController.handleTouchResizeStart}"
+              @mousedown="${this.#resizeController.handleResizeStart}"
+              @touchstart="${this.#resizeController.handleTouchResizeStart}"
             >
               <div class="resize-grip"></div>
             </div>
@@ -2788,17 +2774,17 @@ export class XDebuggerView extends LitElement {
                   type="button"
                   class="action-button"
                   style="background-color: #dc2626; color: white;"
-                  @click="${this.recreateSpaceRootPattern}"
-                  ?disabled="${this._isRecreatingSpaceRootPattern}"
+                  @click="${this.#recreateSpaceRootPattern}"
+                  ?disabled="${this.isRecreatingSpaceRootPattern}"
                 >
-                  ${this._isRecreatingSpaceRootPattern
+                  ${this.isRecreatingSpaceRootPattern
                     ? "Recreating..."
                     : "Recreate Root Pattern"}
                 </button>
               </div>
             </div>
 
-            ${this.renderTabs()} ${this._activeTab === "scheduler"
+            ${this.#renderTabs()} ${this.activeTab === "scheduler"
               ? html`
                 <x-scheduler-graph
                   .debuggerController="${this.debuggerController}"
@@ -2807,20 +2793,20 @@ export class XDebuggerView extends LitElement {
                   style="flex: 1; min-height: 0;"
                 ></x-scheduler-graph>
               `
-              : this._activeTab === "loggers"
+              : this.activeTab === "loggers"
               ? html`
-                <div class="content-area ${this.resizeController.isResizing
+                <div class="content-area ${this.#resizeController.isResizing
                   ? "resizing"
                   : ""}">
-                  ${this.renderLoggers()}
+                  ${this.#renderLoggers()}
                 </div>
               `
-              : this._activeTab === "diagnosis"
+              : this.activeTab === "diagnosis"
               ? html`
-                <div class="content-area ${this.resizeController.isResizing
+                <div class="content-area ${this.#resizeController.isResizing
                   ? "resizing"
                   : ""}">
-                  ${this.renderDiagnosis()}
+                  ${this.#renderDiagnosis()}
                 </div>
               `
               : html`
@@ -2828,7 +2814,7 @@ export class XDebuggerView extends LitElement {
                   <div class="topics-filter">
                     ${Object.entries(TOPIC_HIERARCHY).map(([key, topic]) => {
                       const topicKey = key as TopicKey;
-                      const state = this.getTopicState(topicKey);
+                      const state = this.#getTopicState(topicKey);
                       const subtopicKeys = Object.keys(topic.subtopics);
                       const hasDropdown = subtopicKeys.length > 0; // Show dropdown even for single subtopic
                       const isDropdownOpen = this.openDropdowns.has(topicKey);
@@ -2839,7 +2825,7 @@ export class XDebuggerView extends LitElement {
                             type="button"
                             class="topic-toggle ${state}"
                             style="--topic-color: ${topic.color}"
-                            @click="${() => this.toggleTopic(topicKey)}"
+                            @click="${() => this.#toggleTopic(topicKey)}"
                             title="${topic.label}"
                           >
                             <span class="topic-icon">${topic.icon}</span>
@@ -2862,7 +2848,7 @@ export class XDebuggerView extends LitElement {
                                 class="dropdown-trigger"
                                 style="--topic-color: ${topic.color}"
                                 @click="${(e: Event) =>
-                                  this.toggleDropdown(topicKey, e)}"
+                                  this.#toggleDropdown(topicKey, e)}"
                                 title="Filter subtopics"
                               >
                                 ${isDropdownOpen ? "▲" : "▼"}
@@ -2886,7 +2872,7 @@ export class XDebuggerView extends LitElement {
                                               .checked="${isChecked}"
                                               @change="${(e: Event) => {
                                                 e.stopPropagation();
-                                                this.toggleSubtopic(
+                                                this.#toggleSubtopic(
                                                   topicKey,
                                                   subKey,
                                                 );
@@ -2955,7 +2941,7 @@ export class XDebuggerView extends LitElement {
                     <button
                       type="button"
                       class="action-button"
-                      @click="${this.toggleAllTopics}"
+                      @click="${this.#toggleAllTopics}"
                       title="Toggle all topics"
                     >
                       ${this.activeSubtopics.size > 0 ? "☐" : "☑"}
@@ -2964,7 +2950,7 @@ export class XDebuggerView extends LitElement {
                     <button
                       type="button"
                       class="action-button"
-                      @click="${this.togglePause}"
+                      @click="${this.#togglePause}"
                       title="${this.isPaused ? "Resume" : "Pause"} (Space)"
                     >
                       ${this.isPaused ? "▶" : "⏸"}
@@ -2973,7 +2959,7 @@ export class XDebuggerView extends LitElement {
                     <button
                       type="button"
                       class="action-button"
-                      @click="${this.clearEvents}"
+                      @click="${this.#clearEvents}"
                       title="Clear events"
                     >
                       Clear
@@ -2981,10 +2967,10 @@ export class XDebuggerView extends LitElement {
                   </div>
                 </div>
 
-                <div class="content-area ${this.resizeController.isResizing
+                <div class="content-area ${this.#resizeController.isResizing
                   ? "resizing"
                   : ""}">
-                  ${this.renderEvents()}
+                  ${this.#renderEvents()}
                 </div>
               `}
           </div>

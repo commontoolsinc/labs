@@ -10,6 +10,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { isCell } from "../src/cell.ts";
+import { isModule } from "../src/builder/types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -49,10 +50,12 @@ describe("Pattern Runner - Miscellaneous", () => {
   });
 
   it("should support referenced modules", async () => {
-    runtime.moduleRegistry.addModuleByRef(
-      "double",
-      lift((x: number) => x * 2),
-    );
+    // A lift's declared type is its call signature alone, so the module record
+    // the factory also carries is reached through `isModule()` rather than by
+    // handing the factory straight to a `Module` parameter.
+    const doubler = lift((x: number) => x * 2);
+    if (!isModule(doubler)) throw new Error("lift did not produce a module");
+    runtime.moduleRegistry.addModuleByRef("double", doubler);
 
     const double = byRef("double");
 

@@ -51,6 +51,7 @@ Allowed inside patterns:
 | nested computed with outer-scope reactive vars | Pre-compute with lift or an outer computed |
 | `lift()` closing over reactive deps | Pass dependencies as explicit parameters |
 | cells from composed patterns in `ifElse` | Wrap in a local `computed()` bridge |
+| reactive computation inline in builder-call args, e.g. `join({ x: a ?? b.result })` | Hoist to a body-level const or `computed()` and bind that (the compiler rejects the inline form) |
 
 ### 3. Conditional Rendering
 
@@ -116,7 +117,7 @@ than guessing at unsupported internals.
 | Violation | Fix |
 |-----------|-----|
 | array schema at the root of `generateObject` | Wrap it in an object such as `{ items: T[] }` |
-| accidental `/// <cf-disable-transform />` in a file relying on CTS rewrites | Remove the opt-out or provide explicit runtime forms/schemas |
+| a pattern output field whose type is left to inference | Declare an explicit Output type, `pattern<Input, Output>(...)` |
 | prompt derived from agent-written cells | Split the source cells to avoid loops |
 | invalid model-name format | Use `vendor:model` |
 
@@ -204,10 +205,9 @@ state carry over? If not, it is probably `PerSession<>`.
 
 Findings in this category are warnings, not failures: emit them as `[WARN]`
 lines in the checklist, count them under `Warnings` in the summary, and treat
-severity as `minor`. Skip files under `deprecated/`. The tells below are seed
-examples, not a boundary — the underlying principle is: if a shipped `cf-*`
-component or theme token already expresses the intent, hand-rolling it is a
-warning. Where a tell here overlaps category 6's "arbitrary one-off visual
+severity as `minor`. The tells below are seed examples, not a boundary — the
+underlying principle is: if a shipped `cf-*` component or theme token already
+expresses the intent, hand-rolling it is a warning. Where a tell here overlaps category 6's "arbitrary one-off visual
 overrides" row, report it once, here, as `[WARN]` — not there as `[FAIL]`.
 
 | Look for | Why it's wrong | Use instead |
@@ -216,7 +216,7 @@ overrides" row, report it once, here, as `[WARN]` — not there as `[FAIL]`.
 | `font-size` / `font-weight` inside `style=` (e.g. `"font-size: 0.75rem; color: ..."`) | hand-rolled typography drifts off the type scale | `<cf-text variant="..." tone="...">` |
 | a handler whose entire body is `cell.set(event.detail?.value ?? ...)`, wired to `oncf-input`/`oncf-change` | re-implements two-way binding as boilerplate | `$value` / `$checked` on the control |
 | `if (event?.key === "Enter")` keydown handlers | re-implements submit by hand | `cf-input` emits `cf-submit` on Enter; multi-field forms use `cf-form` + a submit button |
-| `Writable<number>` selection index plus index-adjustment logic when the list mutates | indexes go stale on reorder/insert/remove and force compensation code (see `record.tsx` `trashSubPiece`) | hold the selected item itself in a `Writable<Item \| null>` — the stored link survives reorder and removal |
+| `Writable<number>` selection index plus index-adjustment logic when the list mutates | indexes go stale on reorder/insert/remove and force compensation code | hold the selected item itself in a `Writable<Item \| null>` — the stored link survives reorder and removal |
 | minted identity fields on items: `id: crypto.randomUUID()` / counters / timestamps used to find rows (`findIndex((x) => x.id === id)`) | the data model already assigns array items stable entity identity; user-land ids fight it (in `.map()` callbacks an `id` property is a Cell, not a string, so lookups fail silently) — see `docs/common/concepts/identity.md` and `docs/development/debugging/gotchas/custom-id-property-pitfall.md` | address items by live reference: `items.remove(item)`, `findIndex((x) => equals(x, item))` |
 | string-addressed mutation streams added "for agents" (`removeByText`, `updateByTitle`, id-token APIs) on a NEW pattern/primitive | LLM tool-calls round-trip item references through the serialization layer (`@link`s re-cellify on receipt) — agents send the item like any caller; a parallel string API duplicates identity | expose reference-addressed streams only; an agent grounds words against the data it read, then sends the reference |
 | update handlers that replace an array slot with a fresh object literal (`items.set(current.toSpliced(i, 1, { ...current[i], ...changes }))`, or a `.map()` returning `{ ...i, field }` for the matched item) | a fresh literal re-mints the element's entity identity, orphaning every held reference — selection cells and earlier-read items stop `equals()`-matching, so later mutations with them silently no-op | patch fields through element cells: `items.key(i).key(field).set(value)`; structural remove/clear may still rebuild the array |
@@ -265,6 +265,43 @@ See `docs/common/patterns/multi-user-patterns.md#presenting-identity` and `docs/
   `.get()` — is correct. Do not report a "missing `.get()`"; adding `.get()` on a
   resolved string/number is the actual defect, and `cf check` would reject the
   handler-state type mismatch if the binding were unresolved.
+
+### 17. Cross-Pattern Data Contracts
+
+Review types used to read externally owned data: linked pieces, wish results,
+registry entries, cells passed between independently evolving patterns, and
+similar boundaries. A schema is a runtime projection and binding contract, not
+just a TypeScript annotation. The consumer should name only the fields it reads
+and the live-cell/stream bindings it actually uses.
+
+| Violation | Fix |
+|-----------|-----|
+| another pattern's full `FooInput` or `FooOutput` is imported, aliased, or extended to type external data even though only a subset is used | declare a consumer-owned structural type containing exactly the fields and bindings used |
+| `Pick<FooOutput, ...>` / `Omit<FooOutput, ...>` is used merely to avoid spelling the consumer contract | write the minimal local shape so unrelated producer type changes do not become consumer migrations |
+| a consumer projection names fields it never reads, including `[UI]`, unrelated state, or mutation streams | remove them; undeclared fields are intentionally outside this relationship |
+| a consumer requests a branded live cell (`Writable<>` / `Cell<>`) or stream when it needs only a projected value or does not use the stream | use the plain field type or omit the stream; `Writable<>` and `Cell<>` are equivalent aliases, not different authority levels |
+| a producer's advertised reusable model contains its full pattern state or grows whenever one consumer needs another field | keep/export a shallow role model for the stable shared semantics; let specialized consumers own additional local projections |
+
+This duplication is intentional. Narrow schemas avoid traversing unrelated
+linked data, reduce validation failures across durable-data vintages, avoid
+unnecessary live-cell and stream bindings, and let patterns migrate
+independently. An extra required field whose value is unavailable or
+incompatible invalidates its object; when that object is an array element, one
+invalid element voids the entire array read. See
+`packages/runner/test/traverse-required-links.test.ts` and
+`docs/common/patterns/composition.md#keep-external-data-contracts-narrow`.
+
+Do not flag a genuinely shared protocol (for example, a stream event or enum),
+a cohesive domain model co-owned by one pattern family, a test intentionally
+checking the complete public result, or a wrapper whose stated purpose is to
+forward the complete contract. If the consumer demonstrably uses every field
+and binding, the full contract may be honest. Also do not flag `[UI]` on a
+sub-pattern's own output type: it is required for rendering that sub-pattern in
+another pattern.
+
+Severity is `minor` when the only current effect is unnecessary coupling.
+Raise it to `major` when the oversized contract causes extra traversal,
+validation, or migration failure.
 
 ## Output Format
 

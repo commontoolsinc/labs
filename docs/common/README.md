@@ -25,6 +25,7 @@ on the Common Fabric runtime.
 | Task | Read |
 |------|------|
 | Build a pattern | [ai/pattern-development-guide.md](ai/pattern-development-guide.md) |
+| Build an iframe-first pattern | [plain DOM](ai/iframe-pattern-guide.md), [React](ai/iframe-pattern-react-guide.md), [D3](ai/iframe-pattern-d3-guide.md), [Phaser](ai/iframe-pattern-phaser-guide.md), or [Babylon.js](ai/iframe-pattern-babylon-guide.md) |
 | Write tests | [ai/pattern-testing-guide.md](ai/pattern-testing-guide.md) (mechanics: [workflows/pattern-testing.md](workflows/pattern-testing.md)) |
 | Review / critique a pattern | [ai/pattern-critique-guide.md](ai/pattern-critique-guide.md) |
 | Manual / runtime testing | [ai/manual-testing-guide.md](ai/manual-testing-guide.md) |
@@ -48,6 +49,7 @@ on the Common Fabric runtime.
 - [concepts/self-reference.md](concepts/self-reference.md) — self-referential types with `SELF`
 - [concepts/types-and-schemas/writable.md](concepts/types-and-schemas/writable.md) — `Writable<>` and write access in type signatures
 - [concepts/types-and-schemas/default.md](concepts/types-and-schemas/default.md) — `Default<>` for input defaults
+- [concepts/types-and-schemas/unknown.md](concepts/types-and-schemas/unknown.md) — `unknown` for a reference you compare but never read through
 - [concepts/glossary.md](concepts/glossary.md) — definitions of pattern, piece, cell, space, etc.
 
 ### patterns/ — authoring recipes
@@ -58,6 +60,8 @@ on the Common Fabric runtime.
 - [patterns/view-switching.md](patterns/view-switching.md) — switching between views with `computed()`
 - [patterns/navigation.md](patterns/navigation.md) — navigating to detail views
 - [patterns/composition.md](patterns/composition.md) — composing patterns into reactive graphs
+- [patterns/llm-dialog.md](patterns/llm-dialog.md) — `llmDialog` tool catalog facts: built-in tool injection, reserved built-in tool names, mutation tools as handlers
+- [patterns/held-item-interfaces.md](patterns/held-item-interfaces.md) — shaping what a pattern demands of the pieces it holds, across generations
 - [patterns/primitives.md](patterns/primitives.md) — the composition contract
   for reusable pattern logic and state
 - [patterns/multi-user-patterns.md](patterns/multi-user-patterns.md) — shared spaces, per-user state, collaboration
@@ -82,12 +86,28 @@ on the Common Fabric runtime.
 
 - [capabilities/llm.md](capabilities/llm.md) — `generateText` / `generateObject`; reactive results, no `await`
 - [capabilities/fetch.md](capabilities/fetch.md) — `fetchJson` / `fetchText` / `fetchJsonUnchecked` / `fetchBinary`; reactive results, no `await`
+- [capabilities/sqlite.md](capabilities/sqlite.md) — reading a `SqliteDb` a pattern was given as an input: `db.query`, one statement per database, bounding a query's rows, session-scoped results under a read ceiling
 
 ### workflows/ — CLI and testing mechanics
 
 - [workflows/development.md](workflows/development.md) — `cf` CLI loop: check, deploy, setsrc, inspect, link
 - [workflows/pattern-testing.md](workflows/pattern-testing.md) — writing and running pattern tests
 - [workflows/handlers-cli-testing.md](workflows/handlers-cli-testing.md) — invoking mounted callables from the CLI
+- [workflows/reading-and-writing.md](workflows/reading-and-writing.md) — the tour of reading a piece's cells and writing them: the two cells one piece has and the flag that chooses between them, the shaped read, and why a write recomputes nothing until `cf piece step` observes the piece
+- [workflows/bulk-operations.md](workflows/bulk-operations.md) — the tour of surveying, repairing and retargeting a collection of deployed pieces, walked act by act against the demo that runs it; the contract these operations hold is [features/piece-bulk-operations.md](../features/piece-bulk-operations.md)
+
+### verbs/ — driving a deployed piece through `cf`
+
+Start with the tour if the vocabulary is new; it assumes nothing. Arriving
+without a piece id, start with the agent's entry instead. The other three
+answer narrower questions, and the README says which is which.
+
+- [verbs/README.md](verbs/README.md) — which of the five to read, by the question you are asking
+- [verbs/the-verb-session.md](verbs/the-verb-session.md) — the tour: what a pattern, piece, space and verb are, and a whole session driven through `cf` in thirteen acts. Assumes nothing; read it first
+- [verbs/agents-over-the-cli.md](verbs/agents-over-the-cli.md) — reaching a piece with no id in hand: the discovery surfaces and what bounds each, orienting on an unfamiliar piece, and the conclusions an empty answer does not support
+- [verbs/session-walkthrough.md](verbs/session-walkthrough.md) — the same session priced: byte measurements, the code behind each answer, the caveats, and what the surface still owes. Its companion script under `packages/cli/integration/` runs every step
+- [verbs/over-the-cli.md](verbs/over-the-cli.md) — what a verb hands back: declared results, piece references, idempotent retries, and a runnable walkthrough
+- [verbs/prose-over-the-cli.md](verbs/prose-over-the-cli.md) — how an author's doc comments reach a caller, and which of the two documents `cf` reads carries what
 
 [INTRODUCTION.md](INTRODUCTION.md) is a stub kept for older links; this README
 replaces it.

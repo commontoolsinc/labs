@@ -1,10 +1,20 @@
-import { Default, handler, NAME, pattern, UI, Writable } from "commonfabric";
+import {
+  Default,
+  handler,
+  NAME,
+  pattern,
+  UI,
+  type VNode,
+  Writable,
+} from "commonfabric";
 
 type Input = {
   tags: string[];
 };
 
 export type Result = {
+  [NAME]: string;
+  [UI]: VNode;
   tags: string[] | Default<[]>;
 };
 

@@ -264,7 +264,7 @@ interface Output { result: number }
 export default pattern<{
   patternOperation: PatternFactory<Input, Output>;
   moduleOperation: ModuleFactory<Input, Output>;
-  handlerOperation: HandlerFactory<Input, Output>;
+  handlerOperation: HandlerFactory<Output, Input>;
 }>((input) => ({
   child: pattern<Input>((argument) => ({
     argument,
@@ -465,7 +465,7 @@ interface Output { result: number }
 export default pattern<{
   patternOperation: PatternFactory<Input, Output>;
   moduleOperation: ModuleFactory<Input, Output>;
-  handlerOperation: HandlerFactory<Input, Output>;
+  handlerOperation: HandlerFactory<Output, Input>;
 }>((input) => ({
   child: pattern<Input>((argument) => ({
     patternResult: input.patternOperation(argument),

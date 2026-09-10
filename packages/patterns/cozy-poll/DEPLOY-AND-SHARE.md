@@ -31,7 +31,25 @@ export CF_API_URL=https://<your-toolshed-host>/
 export CF_IDENTITY=/path/to/your-identity.key   # e.g. ~/.config/commonfabric/identity.key
 PIECE=<fid1:… from `cf piece new`>
 SPACE=<your-space>
+
+# Keep this complete set on every source deployment in this guide.
+COZY_POLL_TEST_ARGS=(
+  --test packages/patterns/cozy-poll/main.test.tsx
+  --test packages/patterns/cozy-poll/multi-user.test.tsx
+)
 ```
+
+Before any `piece new` or `piece setsrc` command below, run every authored
+pattern test and stop if one fails:
+
+```bash
+deno task cf test packages/patterns/cozy-poll/main.test.tsx
+deno task cf test packages/patterns/cozy-poll/multi-user.test.tsx
+```
+
+The quoted `"${COZY_POLL_TEST_ARGS[@]}"` expansion below repeats every `--test`
+entry. Deployment packages and type-checks the tests but does not run them,
+which is why both the test commands and the flags are required.
 
 ## Option A — deploy your version onto the shared state (recommended)
 
@@ -41,6 +59,7 @@ empty instance.
 
 ```bash
 deno task cf piece setsrc --piece "$PIECE" -s "$SPACE" \
+  "${COZY_POLL_TEST_ARGS[@]}" \
   packages/patterns/cozy-poll/main.tsx
 ```
 
@@ -65,13 +84,14 @@ experiment without touching the shared poll):
 ```bash
 # 1. Create your own empty piece (note the new ID it prints).
 MINE=$(deno task cf piece new packages/patterns/cozy-poll/main.tsx \
+  "${COZY_POLL_TEST_ARGS[@]}" \
   -s "$SPACE" | grep '^fid1:')
 
 # 2. Copy each PerSpace field from the canonical piece into yours.
 #    `--input` reads/writes the input cell where these live.
 for field in question users options votes adminName; do
-  deno task cf piece get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
-    | deno task cf piece set --piece "$MINE" -s "$SPACE" "$field" --input -q
+  deno task cf cell get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
+    | deno task cf cell set --piece "$MINE" -s "$SPACE" "$field" --input -q
 done
 
 # 3. Recompute so derived values (counts, ranking, nudges) refresh.
@@ -93,7 +113,7 @@ consequences trip everyone up:
    browser (a different passphrase/passkey DID), the browser's `myName` is empty
    — it shows you the join card and won't treat you as host. To act as the same
    person in both, import your CLI key into the browser (`Import CLI Key`); see
-   [`docs/development/SHARED_IDENTITY.md`](../../../docs/development/SHARED_IDENTITY.md).
+   [`docs/features/shared-identity.md`](../../../docs/features/shared-identity.md).
    Verify with `cf id did "$CF_IDENTITY"` and the browser's `shell.identity`
    log.
 
@@ -115,10 +135,10 @@ or seed the shared cells directly, write the input cells. **This mutates shared
 state — coordinate before running against the canonical piece.**
 
 ```bash
-echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" users     --input -q
-echo '""' | deno task cf piece set --piece "$PIECE" -s "$SPACE" adminName --input -q
-echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" options   --input -q
-echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" votes     --input -q
+echo '[]' | deno task cf cell set --piece "$PIECE" -s "$SPACE" users     --input -q
+echo '""' | deno task cf cell set --piece "$PIECE" -s "$SPACE" adminName --input -q
+echo '[]' | deno task cf cell set --piece "$PIECE" -s "$SPACE" options   --input -q
+echo '[]' | deno task cf cell set --piece "$PIECE" -s "$SPACE" votes     --input -q
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 ```
 
@@ -128,7 +148,8 @@ browser identity.
 ## Re-establishing the canonical piece (if it's lost)
 
 ```bash
-deno task cf piece new packages/patterns/cozy-poll/main.tsx -s "$SPACE"
+deno task cf piece new packages/patterns/cozy-poll/main.tsx \
+  "${COZY_POLL_TEST_ARGS[@]}" -s "$SPACE"
 # → prints a new fid1:… — update PIECE above and the "canonical piece" section.
 ```
 
@@ -149,6 +170,7 @@ cell, so the bad reactive state persists. The cure is a fresh process:
 # 1. Confirm it's instance-specific: deploy the same code to a NEW piece and
 #    open it. If the fresh piece works, the old one's process is wedged.
 NEW=$(deno task cf piece new packages/patterns/cozy-poll/main.tsx \
+  "${COZY_POLL_TEST_ARGS[@]}" \
   -s "$SPACE" | grep '^fid1:')
 
 # 2. The data usually survives in the old piece's cells — copy it across with

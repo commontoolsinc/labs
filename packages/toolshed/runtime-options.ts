@@ -5,6 +5,8 @@ import {
   type RuntimeOptions,
   runtimePresets,
 } from "@commonfabric/runner";
+import { publishCfcPosture } from "@/lib/cfc-posture.ts";
+import { publishExperimentalPosture } from "@/lib/experimental-posture.ts";
 import type { env as ToolshedEnv } from "@/env.ts";
 
 /**
@@ -51,6 +53,11 @@ export function createToolshedRuntime(
   const runtime = new Runtime(
     toolshedRuntimeOptions(config, storageManager, envGet),
   );
+  // What `/api/meta` reports, taken from the Runtime that resolved it rather
+  // than re-read from the environment, so a client adopting this deployment's
+  // posture gets the flags actually in effect here.
+  publishExperimentalPosture(runtime.experimental);
+  publishCfcPosture(runtime);
   // Fire-and-forget; the attach itself is exported and unit-tested.
   void attachRuntimeOtelBridge(runtime, config);
   return runtime;
@@ -89,7 +96,10 @@ export async function attachRuntimeOtelBridge(
   try {
     const [{ attachRuntimeTelemetryOtelBridge }, { metrics, trace }] =
       await Promise.all([
+        // The OpenTelemetry bridge loads only for a run that reports.
+        // deno-lint-ignore cf-imports/no-inline-module-import
         import("@commonfabric/runner/telemetry-otel-bridge"),
+        // deno-lint-ignore cf-imports/no-inline-module-import
         import("@opentelemetry/api"),
       ]);
     detach = attachRuntimeTelemetryOtelBridge(runtime.telemetry, {

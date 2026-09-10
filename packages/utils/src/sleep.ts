@@ -7,12 +7,13 @@ export const sleep = (timeout: number) =>
   new Promise((resolve) => setTimeout(resolve, timeout));
 
 /**
- * Detaches a timer from the event loop's ref-count under Deno (`Deno.unrefTimer`),
- * so a long-lived background/diagnostic interval never keeps the process alive
- * or trips Deno's `--trace-leaks` op sanitizer when a unit test constructs the
- * owner or imports the module without a matching teardown. No-op in the browser
- * (no `Deno.unrefTimer`), where such timers run for the real worker/connection
- * lifetime and are cleared explicitly on dispose. Returns the id for chaining.
+ * Detaches a timer from the event loop's ref-count under Deno, via
+ * `Deno.unrefTimer()`, so a long-lived background/diagnostic interval never
+ * keeps the process alive or trips Deno's `--trace-leaks` op sanitizer when a
+ * unit test constructs the owner or imports the module without a matching
+ * teardown. No-op in the browser (no `Deno.unrefTimer`), where such timers run
+ * for the real worker/connection lifetime and are cleared explicitly on
+ * dispose. Returns the id for chaining.
  */
 export const unrefTimer = (
   id: ReturnType<typeof setInterval>,

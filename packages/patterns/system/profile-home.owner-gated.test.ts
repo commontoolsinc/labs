@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-// Host-embedding contract seam 7 (docs/development/HOST_EMBEDDING.md §7): pinning
+// Host-embedding contract seam 7 (docs/features/host-embedding.md §7): pinning
 // an element to a profile is authorized by OWNERSHIP, not by a trusted-UI
 // gesture. The single authorized writer of profile `elements` is
 // `mutateElements` in profile-home.tsx, typed `OwnerProtectedProfileWrite`
@@ -80,6 +80,20 @@ describe("host embedding contract: profile pinning is owner-gated", () => {
       'bio: Default<OwnerProtectedProfileWrite<string, typeof setBio>, "">',
     );
     expect(home).toContain("isEditing: Default<boolean, false>");
+  });
+
+  it("weakens the rendered screen in the consumer view", () => {
+    // The other half of the consumer seam. `ProfileHomeOutput` names the screen
+    // `VNode`, which is what lets a reader of a profile's own result reach the
+    // tree it holds. An argument declaration is checked the other way round: it
+    // has to keep accepting every value it accepted before, and a profile
+    // stored under any earlier vintage of this type has to pass it. Narrowing
+    // this position to `VNode` too would fail pattern-compat at every consumer
+    // that takes a stored profile — `system/profile-picker.tsx` on
+    // `defaultProfile`, `system/profile-create.tsx` on `profiles[]`.
+    expect(home).toContain("[UI]: VNode;");
+    expect(home).toContain("& Omit<ProfileHomeOutput, typeof UI>");
+    expect(home).toContain("& { [UI]: unknown }");
   });
 
   it("recognizes every one of the viewer's profiles as owner-editable", () => {

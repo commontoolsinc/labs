@@ -1,3 +1,21 @@
+/**
+ * These cases drive `numberFromExpression` against a real compiled program
+ * rather than a hand-built node, because one distinction it has to make can
+ * come from nowhere else: whether an identifier naming a non-finite global is
+ * the global or a local rebinding of it, which is a question about the file's
+ * own scope and so is answered by the checker.
+ *
+ * The wrapper cases need no such thing. Seeing through parentheses, `as`, and
+ * `satisfies` is pure syntax, and they are here because unwrapping must not
+ * widen what counts as a number, not because a program is required to test
+ * them.
+ *
+ * The declining cases carry as much weight as the recognizing ones. Folding a
+ * non-numeric expression, or a prefix operator that is not a sign, would put
+ * a fabricated value into a generated schema, which is a worse outcome than
+ * declining to read one at all.
+ */
+
 import { assertEquals, assertStrictEquals } from "@std/assert";
 import ts from "typescript";
 

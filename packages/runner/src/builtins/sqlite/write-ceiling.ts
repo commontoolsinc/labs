@@ -8,13 +8,14 @@
 // is rejected rather than let through unverified. Unlabeled values and columns
 // without a ceiling are unaffected (zero behavior change until `ifc` is used).
 
-import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
-import type { CfcConfClause } from "../../cfc/clause.ts";
 import {
   blankWriteSql,
   parseWriteParamColumns,
   parseWriteTable,
 } from "@commonfabric/memory/sqlite/write-targets";
+
+import type { CfcConfClause } from "../../cfc/clause.ts";
+import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
 
 interface ColumnIfc {
   maxConfidentiality?: readonly CfcConfClause[];

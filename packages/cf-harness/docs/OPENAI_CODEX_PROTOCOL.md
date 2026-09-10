@@ -45,22 +45,43 @@ may rotate the refresh token and must be persisted atomically. Every OAuth and
 Codex API fetch rejects HTTP redirects so credential-bearing bodies, account
 headers, and prompts cannot leave the pinned origins.
 
+The credential document stores credentials and bounded terminal refresh health
+in one versioned transaction. Version-1 documents remain readable without a
+status-side mutation and migrate on the next successful mutation. Successful
+login or refresh clears terminal health; `invalid_grant`, refresh-token reuse,
+and revoked responses persist `reconnect-required` before returning a typed auth
+failure. Transient failures do not change health, and structured status does not
+expose token material, account identifiers, expiry, or raw responses.
+
 ## Pinned Responses contract
 
 - Endpoint: `https://chatgpt.com/backend-api/codex/responses`
 - Required request headers: bearer authorization, `chatgpt-account-id`,
   `originator: cf-harness`, `accept: text/event-stream`, and
   `content-type: application/json`
-- Session affinity: the stable harness run id is sent as `session-id`,
-  `x-client-request-id`, and `prompt_cache_key`
+- Session affinity: `session-id` and `prompt_cache_key` use the bounded stable
+  cache-affinity key (the run id for batch runs and the chat session id for
+  interactive runs); `x-client-request-id` is unique per request
 - Request invariants: `store: false`, `stream: true`,
   `include: ["reasoning.encrypted_content"]`, `tool_choice: "auto"`, and
   `parallel_tool_calls: true`; text verbosity is `low` and function schemas are
   passed through unchanged with `strict: null`
+- Optional reasoning experiments pass `reasoning.effort`. The ChatGPT/Codex
+  backend rejects the API `prompt_cache_options` field, so this provider uses
+  implicit prompt caching with the stable affinity key; cache-mode controls and
+  explicit breakpoints are available only through the compatible API gateway.
 - Tool continuation retains both the public call id and provider function-item
   id, so the corresponding `function_call_output` remains paired after resume.
-- The first transport is SSE. WebSockets, transparent retries, endpoint probing,
-  and client-id fallback are not implemented.
+- The first transport is SSE. WebSockets, endpoint probing, and client-id
+  fallback are not implemented.
+- A transient failure — a transport error, a `429` or `5xx` status, an in-stream
+  `error` event or `response.failed` terminal whose type or code names overload,
+  rate limiting, or a server fault — is issued again under the bounded backoff
+  described in the package README under "Model attempts and transport retry".
+  The provider's stated `type`, `code`, and `message` are recorded on the
+  attempt and carried in the failure the turn ends with. Whatever a failed
+  attempt streamed is discarded with it; nothing reaches the harness until an
+  attempt completes.
 
 Provider-scoped model discovery uses only
 `https://chatgpt.com/backend-api/codex/models?client_version=0.0.0`. It sends
@@ -72,7 +93,10 @@ by this first implementation.
 The response adapter accepts `response.completed`, `response.done`,
 `response.incomplete`, and `response.failed` terminal event spellings because
 the compared clients normalize those terminal forms. It persists encrypted
-reasoning output items only as provider-tagged opaque continuation state.
+reasoning output items only as provider-tagged opaque continuation state. It
+also normalizes response usage details, including cached-input, cache-write,
+output, reasoning, and total token counts. Direct subscription usage is never
+converted to an API-dollar estimate.
 
 Under `store: false` the ChatGPT Codex backend streams each completed item via
 `response.output_item.done` but returns **no assembled output** on the terminal

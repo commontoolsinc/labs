@@ -4,7 +4,7 @@ import {
   assertStrictEquals,
   assertThrows,
 } from "@std/assert";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import {
   createFactoryShell,
   registerFabricFactory,

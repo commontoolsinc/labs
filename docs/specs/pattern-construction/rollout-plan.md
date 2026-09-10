@@ -113,18 +113,18 @@
 
 ## Planned Future Work
 
-- [x] **First-class serializable factories** (see the
+- [ ] **First-class serializable factories** (see the
   [specification](./node-factory-shipping.md) and
-  [executed plan](../../history/plans/first-class-serializable-factories.md))
-  - [x] Extract generic `$patternRef` binding/setup behavior independently of
+  [implementation plan](../../plans/first-class-serializable-factories.md))
+  - [ ] Extract generic `$patternRef` binding/setup behavior independently of
     graph snapshots and reactive-interpreter work
-  - [x] Make pattern, module/lift, and handler factories directly branded
-    `Factory@1` Fabric values
-  - [x] Add factory schemas, symbolic invocation, and generic cold resolution
-  - [x] Add nested-pattern closure conversion with a separate params root and
+  - [ ] Make pattern, module/lift, and handler factories directly branded
+    `Factory@1` `FabricValue`s
+  - [ ] Add factory schemas, symbolic invocation, and generic cold resolution
+  - [ ] Add nested-pattern closure conversion with a separate params root and
     one transformer-only `.curry(params)` operation
-  - [x] Replace `patternTool` consumers with inline wrapper patterns and remove
-    pre-launch compatibility readers under the recorded data-wipe decision
+  - [ ] Replace `patternTool` consumers with inline wrapper patterns and retain
+    compatibility reads
 
 ## Open Questions
 

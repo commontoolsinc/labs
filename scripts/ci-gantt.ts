@@ -5,12 +5,14 @@
 
 // Draw a Gantt chart of a typical CI run from the last N workflow runs on GitHub.
 //
-// For every job (each matrix shard counts as its own job) the chart shows the
-// median start-to-finish bar plus the min and max of the observed start and
-// finish times as whiskers, and the median duration with its min-max range as
-// text. Jobs are grouped into waves ("tiers") inferred from when they start.
-// The output is a PNG whose width scales with run length and whose height scales
-// with the number of jobs.
+// Across several workflow runs, each job (including each matrix shard) shows
+// the median start-to-finish bar plus the min and max of the observed start and
+// finish times as whiskers. A chart of one workflow run instead keeps every
+// execution from every attempt on one row per job. Failed executions end in a
+// red cross, and the blank space between attempts remains visible. Jobs are
+// grouped into waves ("tiers") inferred from when they start. The output is a
+// PNG whose width scales with run length and whose height scales with the number
+// of jobs.
 //
 // Each median bar is split into "setup", "work" and "shutdown" segments so the
 // shared scaffolding around a job (checkout, tool install, cache restore,
@@ -20,7 +22,7 @@
 // phase by the marker emoji its name starts with; the segment widths are the
 // median time spent in each phase, scaled to fill the median bar. The marker
 // vocabulary lives in docs/development/CI_PERFORMANCE.md ("Step phase markers")
-// and is mirrored in PHASE_MARKERS below.
+// and is mirrored in PHASE_MARKERS in tasks/ci-step-phases.ts.
 //
 // Usage:
 //   scripts/ci-gantt.ts [options]
@@ -38,6 +40,8 @@
 //     --run-id ID           chart this workflow run ID, repeatable
 //     --theme NAME          color palette: "default" (light) or "dark"
 //     --colors JSON         override palette keys, e.g. '{"work":"#6ea8fe"}'
+
+import { type Phase, phaseOf } from "../tasks/ci-step-phases.ts";
 
 const args = Deno.args;
 function opt(name: string, def: string): string {
@@ -80,14 +84,15 @@ const MIN_RUNS_OVERRIDE = args.includes("--min-runs")
   : null;
 // Sampled charts use successful jobs by default. Exact-run charts include every
 // non-skipped job.
-const SUCCESS_ONLY = !RUN_IDS.length && !args.includes("--all-conclusions");
+const DEFAULT_SUCCESS_ONLY = !RUN_IDS.length &&
+  !args.includes("--all-conclusions");
 // Restrict to pushes to main (post-land), excluding pre-land pull_request runs.
 const MAIN_ONLY = args.includes("--main-only");
 
-// ---------------------------------------------------------------------------
+//
 // Data fetching: without --input, calls the GitHub REST API directly,
 // authenticated with GH_TOKEN or GITHUB_TOKEN. One of those must be set.
-// ---------------------------------------------------------------------------
+//
 
 const TOKEN = INPUT
   ? undefined
@@ -204,6 +209,7 @@ interface Step {
 }
 
 interface Job {
+  attempt?: number;
   name: string;
   status: string;
   conclusion: string | null;
@@ -216,95 +222,57 @@ interface GanttInput {
   runs: { run: Run; jobs: Job[] }[];
 }
 
-function hasTiming(job: Job): boolean {
-  if (!job.started_at || !job.completed_at) return false;
-  const st = Date.parse(job.started_at);
-  const en = Date.parse(job.completed_at);
-  return Number.isFinite(st) && Number.isFinite(en) && en > st;
+function jobAttempt(job: Job): number {
+  const attempt = job.attempt;
+  return typeof attempt === "number" && Number.isSafeInteger(attempt) &&
+      attempt > 0
+    ? attempt
+    : 1;
 }
 
-// ---------------------------------------------------------------------------
+function failedConclusion(conclusion: string | null): boolean {
+  return conclusion === "failure" || conclusion === "timed_out" ||
+    conclusion === "startup_failure";
+}
+
+function executionKey(job: Job): string {
+  return [
+    job.name,
+    job.started_at ?? "",
+    job.completed_at ?? "",
+  ].join("\u0000");
+}
+
+function latestJobsByName(jobs: Job[]): Job[] {
+  const latest = new Map<string, Job>();
+  for (const job of jobs) {
+    const current = latest.get(job.name);
+    if (!current || jobAttempt(current) <= jobAttempt(job)) {
+      latest.set(job.name, job);
+    }
+  }
+  return [...latest.values()];
+}
+
+//
 // Step phases
 //
 // Every step is placed into a phase from the marker emoji its name begins with.
 // The emoji is load-bearing: workflow and composite-action authors pick one from
-// the vocabulary below, and the chart splits each job bar into these phases
-// without having to recognise step wording. The authoritative table is
-// docs/development/CI_PERFORMANCE.md ("Step phase markers"); keep them in sync.
-// A step whose name carries no known marker lands in "other" and is reported to
-// stderr so a missing marker is easy to spot. In a normal run the only unmarked
-// steps are the ones the runner injects: "Set up job", "Post …" and "Complete
-// job" from GitHub, plus "Set up runner" and "Complete runner" from Blacksmith.
-// Those are classified below by name because their wording is not ours to set.
-// ---------------------------------------------------------------------------
-
-type Phase = "setup" | "work" | "shutdown" | "other";
+// the vocabulary in tasks/ci-step-phases.ts, and the chart splits each job bar
+// into these phases without having to recognize step wording. The authoritative
+// table is docs/development/CI_PERFORMANCE.md ("Step phase markers"); keep them
+// in sync. A step whose name carries no known marker lands in "other" and is
+// reported to stderr so a missing marker is easy to spot. In a normal run the
+// only unmarked steps are the ones the runner injects: "Set up job", "Post …",
+// and "Complete job". The phase classifier also recognizes the "runner" pair
+// present in retained records. Those are classified by name in that module,
+// because their wording is not ours to set.
+//
 
 // Chart order, left to right (matches the order steps run in). "other" trails so
 // an unmarked step stands out at the end of the bar.
 const PHASE_ORDER: Phase[] = ["setup", "work", "shutdown", "other"];
-
-// Marker emoji -> phase. Each emoji maps to exactly one phase; when a step's
-// natural emoji would land it in the wrong phase, the step name is changed to a
-// marker that fits (see docs/development/CI_PERFORMANCE.md). Matching ignores a
-// trailing variation selector, so the base emoji covers both the plain and the
-// selector-suffixed form of a glyph.
-const PHASE_MARKERS: [string, Phase][] = [
-  // setup: fetch code, install tools and dependencies, restore caches,
-  // authenticate, and bring test servers and devices up before the real work.
-  ["📥", "setup"], // checkout / download inputs
-  ["🦕", "setup"], // set up Deno
-  ["🔍", "setup"], // verify lock file & install, resolve refs
-  ["📦", "setup"], // install packages, cache dependencies
-  ["♻️", "setup"], // restore/save build caches
-  ["🛡️", "setup"], // relax sandbox for browser tests
-  ["🔧", "setup"], // enable devices
-  ["⚙️", "setup"], // set up external SDKs
-  ["🔑", "setup"], // authenticate to a cloud
-  ["🔌", "setup"], // start a local server for tests
-  ["⏳", "setup"], // wait for a service to be ready
-  ["💾", "setup"], // restore/save caches
-  ["🧮", "setup"], // compute a cache identity
-  // work: the job's actual purpose.
-  ["🔎", "work"], // checks (format, type, patterns, attestations)
-  ["🚧", "work"], // guard that fails the build on a banned pattern
-  ["🧪", "work"], // run tests
-  ["🧩", "work"], // run integration tests
-  ["🔁", "work"], // replay captured fixtures under today's source
-  ["🧹", "work"], // lint
-  ["🧭", "work"], // check skill facts
-  ["📄", "work"], // type-check docs
-  ["🏗️", "work"], // build binaries/assets
-  ["🏋️", "work"], // run benchmarks
-  ["📊", "work"], // produce performance metrics / status reports
-  ["🧬", "work"], // combine coverage
-  ["📝", "work"], // generate attestations
-  ["🔐", "work"], // sign binaries
-  ["🚀", "work"], // deploy
-  ["💬", "work"], // post a PR comment
-  // shutdown: post-work reports, artifact uploads, log capture, teardown.
-  ["🧾", "shutdown"], // write coverage report
-  ["📤", "shutdown"], // upload artifacts
-  ["📋", "shutdown"], // capture logs on failure
-];
-
-const stripVS = (s: string) => s.replace(/\uFE0F/g, "");
-
-function phaseOf(stepName: string): Phase {
-  const name = stepName.trim();
-  // A leading marker wins, so a step named "💬 Post …" is classified by its
-  // marker rather than the "Post " rule below.
-  const norm = stripVS(name);
-  for (const [emoji, phase] of PHASE_MARKERS) {
-    if (norm.startsWith(stripVS(emoji))) return phase;
-  }
-  // Injected steps carry no marker; their wording is not ours to set. GitHub
-  // adds the "job" pair and the "Post …" steps, Blacksmith the "runner" pair.
-  if (name.startsWith("Post ")) return "shutdown";
-  if (name === "Set up job" || name === "Set up runner") return "setup";
-  if (name === "Complete job" || name === "Complete runner") return "shutdown";
-  return "other";
-}
 
 const JOBS_PER_PAGE = 100;
 async function fetchJobs(path: string): Promise<Job[]> {
@@ -321,9 +289,9 @@ async function fetchJobs(path: string): Promise<Job[]> {
   return jobs;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Statistics
-// ---------------------------------------------------------------------------
+//
 
 interface Stat {
   min: number;
@@ -348,6 +316,16 @@ interface JobAgg {
   count: number;
   mainOnly: boolean; // never observed on a pull_request
   phase: Record<Phase, number>; // median seconds spent in each phase
+  attempts: JobAttempt[];
+}
+
+interface JobAttempt {
+  attempt: number;
+  conclusion: string | null;
+  start: number;
+  end: number;
+  dur: number;
+  phase: Record<Phase, number>;
 }
 
 function shardKeyOf(name: string): string {
@@ -357,9 +335,9 @@ function shardKeyOf(name: string): string {
   return suite ? suite[1] : "";
 }
 
-// ---------------------------------------------------------------------------
+//
 // Formatting
-// ---------------------------------------------------------------------------
+//
 
 function clock(sec: number): string {
   sec = Math.round(sec);
@@ -372,9 +350,9 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// ---------------------------------------------------------------------------
+//
 // Main
-// ---------------------------------------------------------------------------
+//
 
 let runs: Run[];
 let jobsPerRun: GanttInput["runs"];
@@ -384,6 +362,18 @@ if (INPUT) {
     throw new Error("CI Gantt input must contain a runs array.");
   }
   jobsPerRun = input.runs;
+  // Every job of a run with several attempts carries the attempt it ran in.
+  // Input without that describes one attempt of a run that had more.
+  for (const { run, jobs } of jobsPerRun) {
+    if (
+      (run.attempt ?? 1) > 1 &&
+      jobs.some((job) => job.attempt === undefined)
+    ) {
+      throw new Error(
+        `CI Gantt input for run ${run.databaseId} reports ${run.attempt} attempts but has jobs with no attempt.`,
+      );
+    }
+  }
   runs = jobsPerRun.map(({ run }) => run);
   console.error(`Loaded ${runs.length} cached run(s) for ${REPO}.`);
 } else {
@@ -415,31 +405,27 @@ if (INPUT) {
       if ((i + 1) % 10 === 0) {
         console.error(`  ${i + 1}/${completedRuns.length}`);
       }
-      let jobs = await fetchJobs(
-        `/repos/${REPO}/actions/runs/${run.databaseId}/attempts/1/jobs`,
-      );
-      if ((run.attempt ?? 1) > 1) {
-        const latestJobs = await fetchJobs(
-          `/repos/${REPO}/actions/runs/${run.databaseId}/jobs`,
+      const executions = new Map<string, Job>();
+      for (let attempt = 1; attempt <= (run.attempt ?? 1); attempt++) {
+        const attempted = await fetchJobs(
+          `/repos/${REPO}/actions/runs/${run.databaseId}/attempts/${attempt}/jobs`,
         );
-        const latestByName = new Map(
-          latestJobs.map((job) => [job.name, job]),
-        );
-        jobs = jobs.map((job) => {
-          const latest = latestByName.get(job.name);
-          if (latest && !hasTiming(job) && hasTiming(latest)) return latest;
-          return latest
-            ? { ...job, status: latest.status, conclusion: latest.conclusion }
-            : job;
-        });
+        for (const job of attempted) {
+          const execution = executionKey(job);
+          if (!executions.has(execution)) {
+            executions.set(execution, { ...job, attempt });
+          }
+        }
       }
-      return { run, jobs };
+      return { run, jobs: [...executions.values()] };
     },
   );
 }
 
 const completed = runs.filter((run) => run.status === "completed");
 jobsPerRun = jobsPerRun.filter(({ run }) => run.status === "completed");
+const singleRun = jobsPerRun.length === 1;
+const successOnly = singleRun ? false : DEFAULT_SUCCESS_ONLY;
 
 // Accumulate timings keyed by exact job name (each shard is its own key).
 const acc = new Map<
@@ -450,6 +436,7 @@ const acc = new Map<
     dur: number[];
     events: Set<string>;
     phase: Record<Phase, number[]>; // per-run seconds in each phase
+    attempts: JobAttempt[];
   }
 >();
 // Step names that carried no known marker, surfaced at the end so a missing
@@ -465,9 +452,10 @@ for (const { run, jobs } of jobsPerRun) {
     .filter((value) => Number.isFinite(value));
   const t0 = Math.min(...startCandidates);
   if (!Number.isFinite(t0)) continue;
-  for (const j of jobs) {
+  const chartJobs = singleRun ? jobs : latestJobsByName(jobs);
+  for (const j of chartJobs) {
     if (
-      SUCCESS_ONLY ? j.conclusion !== "success" : j.conclusion === "skipped"
+      successOnly ? j.conclusion !== "success" : j.conclusion === "skipped"
     ) {
       continue;
     }
@@ -489,6 +477,7 @@ for (const { run, jobs } of jobsPerRun) {
           dur: [],
           events: new Set(),
           phase: { setup: [], work: [], shutdown: [], other: [] },
+          attempts: [],
         },
       );
     }
@@ -517,11 +506,23 @@ for (const { run, jobs } of jobsPerRun) {
     if (PHASE_ORDER.some((p) => perPhase[p] > 0)) {
       for (const p of PHASE_ORDER) e.phase[p].push(perPhase[p]);
     }
+    if (singleRun) {
+      e.attempts.push({
+        attempt: jobAttempt(j),
+        conclusion: j.conclusion,
+        start: startOff,
+        end: endOff,
+        dur,
+        phase: perPhase,
+      });
+    }
   }
 }
 
 const minRuns = MIN_RUNS_OVERRIDE ??
-  (RUN_IDS.length ? 1 : Math.max(5, Math.round(0.1 * completed.length)));
+  (RUN_IDS.length || singleRun
+    ? 1
+    : Math.max(5, Math.round(0.1 * completed.length)));
 
 const aggregates: JobAgg[] = [];
 for (const [name, e] of acc) {
@@ -533,20 +534,32 @@ for (const [name, e] of acc) {
   for (const p of PHASE_ORDER) {
     phase[p] = e.phase[p].length ? stat(e.phase[p]).med : 0;
   }
+  const attempts = [...e.attempts].sort((a, b) =>
+    a.start - b.start || a.attempt - b.attempt
+  );
+  const firstStart = attempts[0]?.start;
+  const finalEnd = attempts.length
+    ? Math.max(...attempts.map((attempt) => attempt.end))
+    : undefined;
   aggregates.push({
     name,
     base: name.replace(/\s*\([^)]*\)\s*$/, ""),
     shardKey: shardKeyOf(name),
-    start: stat(e.start),
-    end: stat(e.end),
+    start: singleRun && firstStart !== undefined
+      ? { min: firstStart, med: firstStart, max: firstStart }
+      : stat(e.start),
+    end: singleRun && finalEnd !== undefined
+      ? { min: finalEnd, med: finalEnd, max: finalEnd }
+      : stat(e.end),
     dur: stat(e.dur),
-    count: e.start.length,
+    count: singleRun ? 1 : e.start.length,
     // The deploy/attest tail is "main only" relative to PR runs. Exact-run and
     // main-only charts put every job into start-time tiers.
     mainOnly: RUN_IDS.length || MAIN_ONLY
       ? false
       : !e.events.has("pull_request"),
     phase,
+    attempts,
   });
 }
 if (unmarkedSteps.size) {
@@ -601,9 +614,9 @@ const prFinish = Math.max(
   ...(prJobs.length ? prJobs : aggregates).map((j) => j.end.med),
 );
 
-// ---------------------------------------------------------------------------
+//
 // SVG layout
-// ---------------------------------------------------------------------------
+//
 
 const maxEnd = Math.max(...aggregates.map((j) => j.end.max));
 const PAD = 22;
@@ -625,6 +638,38 @@ const chartX0 = NAME_X + LEFT_COL;
 const chartW = maxEnd * pxPerSec;
 const totalW = Math.round(chartX0 + chartW + RIGHT_PAD);
 const x = (sec: number) => chartX0 + sec * pxPerSec;
+const DURATION_LABEL_CHAR_W = 6.2;
+const DURATION_LABEL_LANE_H = 12;
+
+function attemptDurationPlacements(attempts: JobAttempt[]) {
+  const placements: {
+    attempt: JobAttempt;
+    text: string;
+    left: number;
+    right: number;
+    lane: number;
+  }[] = [];
+  for (let index = 0; index < attempts.length; index++) {
+    const attempt = attempts[index];
+    const text = clock(attempt.dur);
+    const left = x(attempt.end) +
+      (failedConclusion(attempt.conclusion) ? 8 : 5);
+    const right = left + text.length * DURATION_LABEL_CHAR_W;
+    const overlapsLaterBar = attempts.slice(index + 1).some((later) =>
+      left < x(later.end) && right > x(later.start)
+    );
+    let lane = overlapsLaterBar ? 1 : 0;
+    while (
+      placements.some((placed) =>
+        placed.lane === lane && left < placed.right && right > placed.left
+      )
+    ) {
+      lane++;
+    }
+    placements.push({ attempt, text, left, right, lane });
+  }
+  return placements;
+}
 
 interface Palette {
   bg: string;
@@ -633,6 +678,7 @@ interface Palette {
   grid: string;
   axis: string;
   main: string; // main-branch-only bars
+  failure: string;
   whisker: string;
   envelope: string; // neutral fill for the min-start..max-end range
   // Phase segment colors. Work is the deep, saturated blue so the job's own work
@@ -652,6 +698,7 @@ const THEMES: Record<string, Palette> = {
     grid: "#e7e7e7",
     axis: "#8a8a8a",
     main: "#8a897f",
+    failure: "#cf222e",
     whisker: "#2a2a2a",
     envelope: "#aab2bd",
     setup: "#6ba7bd",
@@ -666,6 +713,7 @@ const THEMES: Record<string, Palette> = {
     grid: "#23262d",
     axis: "#6a7079",
     main: "#7c828c",
+    failure: "#f85149",
     whisker: "#8a93a5",
     envelope: "#454b54",
     setup: "#345f92",
@@ -711,6 +759,48 @@ const interval = intervals.find((c) => c * pxPerSec >= 70) ?? 1800;
 let y = PAD + TITLE_H + AXIS_H;
 const gridTop = PAD + TITLE_H + AXIS_H - 8;
 
+function drawPhaseBar(
+  top: number,
+  start: number,
+  end: number,
+  phase: Record<Phase, number>,
+  mainOnly: boolean,
+) {
+  const mb = x(start), me = x(end);
+  const barW = Math.max(2, me - mb);
+  const segs = PHASE_ORDER
+    .map((p) => ({ p, sec: phase[p] }))
+    .filter((segment) => segment.sec > 0);
+  const phaseTotal = segs.reduce((sum, segment) => sum + segment.sec, 0);
+  if (phaseTotal > 0) {
+    let cumulative = 0;
+    let previousX = mb;
+    for (const segment of segs) {
+      cumulative += segment.sec;
+      const nextX = mb + (cumulative / phaseTotal) * barW;
+      body.push(
+        `<rect x="${previousX.toFixed(1)}" y="${top}" width="${
+          Math.max(0.5, nextX - previousX).toFixed(1)
+        }" height="${BAR_H}" fill="${C[segment.p]}"/>`,
+      );
+      previousX = nextX;
+    }
+  } else {
+    body.push(
+      `<rect x="${mb.toFixed(1)}" y="${top}" width="${
+        barW.toFixed(1)
+      }" height="${BAR_H}" rx="2" fill="${C.work}"/>`,
+    );
+  }
+  if (mainOnly) {
+    body.push(
+      `<rect x="${mb.toFixed(1)}" y="${top}" width="${
+        barW.toFixed(1)
+      }" height="${BAR_H}" rx="2" fill="url(#hatch)"/>`,
+    );
+  }
+}
+
 function drawSection(title: string, jobs: JobAgg[]) {
   body.push(
     `<text x="${NAME_X}" y="${
@@ -722,74 +812,100 @@ function drawSection(title: string, jobs: JobAgg[]) {
     const top = y;
     const cy = top + BAR_H / 2;
     const xs = x(j.start.min), xe = x(j.end.max);
+    const durationPlacements = singleRun
+      ? attemptDurationPlacements(j.attempts)
+      : [];
 
-    // envelope: full min-start to max-end extent
-    body.push(
-      `<rect x="${xs.toFixed(1)}" y="${top}" width="${
-        Math.max(1, xe - xs).toFixed(1)
-      }" height="${BAR_H}" rx="2" fill="${C.envelope}" fill-opacity="0.25"/>`,
-    );
-    // median bar, split into phase segments. Segment widths are the median time
-    // in each phase, scaled so they fill the median start-to-finish span.
-    const mb = x(j.start.med), me = x(j.end.med);
-    const barW = Math.max(2, me - mb);
-    const segs = PHASE_ORDER
-      .map((p) => ({ p, sec: j.phase[p] }))
-      .filter((s) => s.sec > 0);
-    const phaseTotal = segs.reduce((sum, s) => sum + s.sec, 0);
-    if (phaseTotal > 0) {
-      let cum = 0;
-      let prevX = mb;
-      for (const s of segs) {
-        cum += s.sec;
-        const nextX = mb + (cum / phaseTotal) * barW;
+    if (singleRun) {
+      const failedAttempts: JobAttempt[] = [];
+      for (const placement of durationPlacements) {
+        const attempt = placement.attempt;
         body.push(
-          `<rect x="${prevX.toFixed(1)}" y="${top}" width="${
-            Math.max(0.5, nextX - prevX).toFixed(1)
-          }" height="${BAR_H}" fill="${C[s.p]}"/>`,
+          `<g data-attempt="${attempt.attempt}" data-result="${
+            failedConclusion(attempt.conclusion)
+              ? "failure"
+              : attempt.conclusion === "success"
+              ? "success"
+              : "other"
+          }"><title>Attempt ${attempt.attempt}: ${
+            esc(attempt.conclusion ?? "unknown")
+          }, ${clock(attempt.dur)}</title>`,
         );
-        prevX = nextX;
+        drawPhaseBar(
+          top,
+          attempt.start,
+          attempt.end,
+          attempt.phase,
+          j.mainOnly,
+        );
+        if (failedConclusion(attempt.conclusion)) {
+          failedAttempts.push(attempt);
+        }
+        body.push(
+          `<text class="attempt-duration" x="${placement.left.toFixed(1)}" y="${
+            top + BAR_H + placement.lane * DURATION_LABEL_LANE_H
+          }" font-size="11" fill="${C.text}">${clock(attempt.dur)}</text></g>`,
+        );
+      }
+      for (const attempt of failedAttempts) {
+        const failedAt = x(attempt.end);
+        const radius = 4;
+        body.push(
+          `<g class="attempt-failure" data-attempt="${attempt.attempt}"><title>Attempt ${attempt.attempt}: ${
+            esc(attempt.conclusion ?? "unknown")
+          }, ${clock(attempt.dur)}</title><path d="M ${
+            (failedAt - radius).toFixed(1)
+          } ${(cy - radius).toFixed(1)} L ${(failedAt + radius).toFixed(1)} ${
+            (cy + radius).toFixed(1)
+          } M ${(failedAt + radius).toFixed(1)} ${(cy - radius).toFixed(1)} L ${
+            (failedAt - radius).toFixed(1)
+          } ${
+            (cy + radius).toFixed(1)
+          }" fill="none" stroke="${C.failure}" stroke-width="2" stroke-linecap="round"/></g>`,
+        );
       }
     } else {
-      // No step timing for this job: fall back to a plain work-colored bar.
+      // The envelope covers the full min-start to max-end extent.
       body.push(
-        `<rect x="${mb.toFixed(1)}" y="${top}" width="${
-          barW.toFixed(1)
-        }" height="${BAR_H}" rx="2" fill="${C.work}"/>`,
+        `<rect x="${xs.toFixed(1)}" y="${top}" width="${
+          Math.max(1, xe - xs).toFixed(1)
+        }" height="${BAR_H}" rx="2" fill="${C.envelope}" fill-opacity="0.25"/>`,
       );
+      drawPhaseBar(top, j.start.med, j.end.med, j.phase, j.mainOnly);
     }
-    if (j.mainOnly) {
-      body.push(
-        `<rect x="${mb.toFixed(1)}" y="${top}" width="${
-          barW.toFixed(1)
-        }" height="${BAR_H}" rx="2" fill="url(#hatch)"/>`,
-      );
-    }
-    // whiskers for start and finish ranges: a "<" at the min, a ">" at the max
-    const whisker = (lo: number, hi: number, w: number) => {
-      const a = x(lo), b = x(hi);
-      if (b - a < 1.5) return;
-      const h = 3;
-      const d = Math.min(3, (b - a) / 2);
-      const f = (n: number) => n.toFixed(1);
-      const stroke =
-        `fill="none" stroke="${C.whisker}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"`;
-      body.push(
-        `<line x1="${f(a)}" y1="${f(cy)}" x2="${f(b)}" y2="${
-          f(cy)
-        }" stroke="${C.whisker}" stroke-width="${w}"/>` +
-          `<polyline points="${f(a + d)},${f(cy - h)} ${f(a)},${f(cy)} ${
-            f(a + d)
-          },${f(cy + h)}" ${stroke}/>` +
-          `<polyline points="${f(b - d)},${f(cy - h)} ${f(b)},${f(cy)} ${
-            f(b - d)
-          },${f(cy + h)}" ${stroke}/>`,
-      );
-    };
-    whisker(j.start.min, j.start.max, 0.8);
-    whisker(j.end.min, j.end.max, 1.4);
 
-    // labels: run count and job name on the left, median (min-max) duration right
+    if (!singleRun) {
+      // Whiskers mark the range of observed start and finish times.
+      const whisker = (lo: number, hi: number, width: number) => {
+        const a = x(lo), b = x(hi);
+        if (b - a < 1.5) return;
+        const height = 3;
+        const depth = Math.min(3, (b - a) / 2);
+        const fixed = (value: number) => value.toFixed(1);
+        const stroke =
+          `fill="none" stroke="${C.whisker}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"`;
+        body.push(
+          `<line x1="${fixed(a)}" y1="${fixed(cy)}" x2="${fixed(b)}" y2="${
+            fixed(cy)
+          }" stroke="${C.whisker}" stroke-width="${width}"/>` +
+            `<polyline points="${fixed(a + depth)},${fixed(cy - height)} ${
+              fixed(a)
+            },${fixed(cy)} ${fixed(a + depth)},${
+              fixed(cy + height)
+            }" ${stroke}/>` +
+            `<polyline points="${fixed(b - depth)},${fixed(cy - height)} ${
+              fixed(b)
+            },${fixed(cy)} ${fixed(b - depth)},${
+              fixed(cy + height)
+            }" ${stroke}/>`,
+        );
+      };
+      whisker(j.start.min, j.start.max, 0.8);
+      whisker(j.end.min, j.end.max, 1.4);
+    }
+
+    // Labels show the run count and job name on the left. Aggregate charts
+    // show the median and range.
     body.push(
       `<text x="${PAD + COUNT_COL - 10}" y="${
         (top + BAR_H).toFixed(1)
@@ -800,15 +916,21 @@ function drawSection(title: string, jobs: JobAgg[]) {
         (top + BAR_H).toFixed(1)
       }" font-size="11" fill="${C.text}">${esc(j.name)}</text>`,
     );
-    body.push(
-      `<text x="${(xe + 8).toFixed(1)}" y="${
-        (top + BAR_H).toFixed(1)
-      }" font-size="11" fill="${C.text}">${clock(j.dur.med)}` +
-        `<tspan dx="6" fill="${C.sub}" font-size="10">${clock(j.dur.min)}–${
-          clock(j.dur.max)
-        }</tspan></text>`,
+    if (!singleRun) {
+      body.push(
+        `<text x="${(xe + 8).toFixed(1)}" y="${
+          (top + BAR_H).toFixed(1)
+        }" font-size="11" fill="${C.text}">${clock(j.dur.med)}` +
+          `<tspan dx="6" fill="${C.sub}" font-size="10">${clock(j.dur.min)}–${
+            clock(j.dur.max)
+          }</tspan></text>`,
+      );
+    }
+    const durationLanes = Math.max(
+      0,
+      ...durationPlacements.map((placement) => placement.lane),
     );
-    y += ROW_H;
+    y += ROW_H + durationLanes * DURATION_LABEL_LANE_H;
   }
   y += SECTION_GAP;
 }
@@ -878,7 +1000,26 @@ if (aggregates.some((j) => j.phase.other > 0)) {
   legendBox(C.other, false, "other (unmarked)");
 }
 if (mainJobs.length) legendBox(C.main, true, "main branch only");
-{
+const hasFailedAttempts = aggregates.some((job) =>
+  job.attempts.some((attempt) => failedConclusion(attempt.conclusion))
+);
+if (hasFailedAttempts) {
+  const centerX = lx + 5;
+  const centerY = legendY - 4;
+  const radius = 4;
+  legend.push(
+    `<path d="M ${centerX - radius} ${centerY - radius} L ${centerX + radius} ${
+      centerY + radius
+    } M ${centerX + radius} ${centerY - radius} L ${centerX - radius} ${
+      centerY + radius
+    }" fill="none" stroke="${C.failure}" stroke-width="2" stroke-linecap="round"/>`,
+    `<text x="${
+      lx + 15
+    }" y="${legendY}" font-size="11" fill="${C.sub}">failed attempt</text>`,
+  );
+  lx += 105;
+}
+if (!singleRun) {
   const cyl = legendY - 4, a = lx, b = lx + 22;
   const stroke =
     `fill="none" stroke="${C.whisker}" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"`;
@@ -892,12 +1033,12 @@ if (mainJobs.length) legendBox(C.main, true, "main branch only");
       }" ${stroke}/>`,
   );
   lx = b;
+  legend.push(
+    `<text x="${
+      lx + 6
+    }" y="${legendY}" font-size="11" fill="${C.sub}">&lt; min … max &gt; of start &amp; finish</text>`,
+  );
 }
-legend.push(
-  `<text x="${
-    lx + 6
-  }" y="${legendY}" font-size="11" fill="${C.sub}">&lt; min … max &gt; of start &amp; finish</text>`,
-);
 
 const totalH = Math.round(legendY + 16);
 
@@ -907,27 +1048,30 @@ const runKind = MAIN_ONLY ? "main push" : "run";
 const workflowNames = new Set(
   completed.map((run) => run.workflowName).filter((name) => !!name),
 );
-const workflowLabel = RUN_IDS.length
+const workflowLabel = RUN_IDS.length || singleRun
   ? workflowNames.size === 1 ? [...workflowNames][0] : "selected workflows"
   : WORKFLOW;
-const exactRun = RUN_IDS.length === 1 ? completed[0] : null;
+const exactRun = singleRun ? completed[0] : null;
 const exactBranch = exactRun?.headBranch ? `, ${exactRun.headBranch}` : "";
 const titleScope = exactRun
   ? `run ${exactRun.databaseId} (${exactRun.event}${exactBranch})`
   : RUN_IDS.length
   ? `${completed.length} selected runs`
   : `typical ${runKind}`;
-const titleCount = RUN_IDS.length
+const titleCount = singleRun
+  ? "1 completed run"
+  : RUN_IDS.length
   ? `${completed.length} completed ${completed.length === 1 ? "run" : "runs"}`
   : `median of ${completed.length} completed ${
     MAIN_ONLY ? "main pushes" : "runs"
   }`;
 const title = `${REPO} · ${workflowLabel} — ${titleScope} (${titleCount})`;
-const subtitle =
-  `Bars = median start to finish, split into setup/work/shutdown by step; ` +
-  `whiskers = min/max; text = median (min–max) duration; ` +
-  `${
-    SUCCESS_ONLY ? "successful jobs only" : "all conclusions"
+const subtitle = singleRun
+  ? `Bars = each job attempt from start to finish, split into setup/work/shutdown by step; failed attempts end in ×; all conclusions; ${runKind} finishes ~${
+    clock(prFinish)
+  } · generated ${date}`
+  : `Bars = median start to finish, split into setup/work/shutdown by step; whiskers = min/max; text = median (min–max) duration; ${
+    successOnly ? "successful jobs only" : "all conclusions"
   }; ${runKind} finishes ~${clock(prFinish)} · generated ${date}`;
 
 const svg = [
@@ -946,9 +1090,9 @@ const svg = [
   `</svg>`,
 ].join("\n");
 
-// ---------------------------------------------------------------------------
+//
 // Write output: the raw SVG when --out ends in .svg, otherwise a rasterized PNG.
-// ---------------------------------------------------------------------------
+//
 
 if (OUT.toLowerCase().endsWith(".svg")) {
   await Deno.writeTextFile(OUT, svg);
@@ -956,6 +1100,8 @@ if (OUT.toLowerCase().endsWith(".svg")) {
     `Wrote ${OUT} (${totalW}×${totalH} SVG, ${aggregates.length} jobs)`,
   );
 } else {
+  // The SVG renderer is needed only for PNG output.
+  // deno-lint-ignore cf-imports/no-inline-module-import
   const { Resvg } = await import("npm:@resvg/resvg-js@2.6.2");
   const resvg = new Resvg(svg, {
     fitTo: { mode: "zoom", value: SCALE },

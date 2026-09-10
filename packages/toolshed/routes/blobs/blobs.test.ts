@@ -1,19 +1,20 @@
-import { afterAll, afterEach, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import createApp from "@/lib/create-app.ts";
-import router from "./blobs.index.ts";
-import memory from "@/routes/storage/memory/memory.index.ts";
-import { memoryServer } from "@/routes/storage/memory.ts";
-import env from "@/env.ts";
-import { Identity } from "@commonfabric/identity";
+import { afterAll, afterEach, beforeAll, describe, it } from "@std/testing/bdd";
+
+import { hashOf } from "@commonfabric/data-model";
+import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { JsonEncodingContext } from "@commonfabric/data-model/codec-json";
-import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
+import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
+import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type FabricValue } from "@commonfabric/data-model/fabric-value";
+
+import router from "./blobs.index.ts";
+import env from "@/env.ts";
+import createApp from "@/lib/create-app.ts";
+import { memoryServer } from "@/routes/storage/memory.ts";
+import memory from "@/routes/storage/memory/memory.index.ts";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
@@ -26,7 +27,7 @@ const app = createApp()
 const encodeBlobPayload = (payload: { type: string; body: FabricBytes }) =>
   encodeMemoryBoundary(payload);
 
-const blobUploadEncoding = new JsonEncodingContext();
+const blobUploadCodec = newDefaultJsonCodecEngine();
 
 describe("Blob Routes", () => {
   let server: Deno.HttpServer;
@@ -93,7 +94,7 @@ describe("Blob Routes", () => {
     expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
   });
 
-  it("accepts blob upload encoding from an explicit codec, without ambient data-model flags", async () => {
+  it("accepts blob upload encoding from an explicit codec", async () => {
     const identity = await Identity.fromPassphrase(
       "toolshed-blob-route-explicit-codec",
     );
@@ -109,7 +110,7 @@ describe("Blob Routes", () => {
     const post = await app.request(`/${identity.did()}/blobs/image.gif`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: blobUploadEncoding.encode(contents as FabricValue),
+      body: blobUploadCodec.encode(contents),
     });
     expect(post.status).toBe(201);
     expect(await post.json()).toEqual({

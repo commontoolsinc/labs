@@ -113,7 +113,7 @@ is a no-op.
 **The residual same-DID risk is real, and belongs at the endpoint layer.** Two
 stores now claim one identity, so a mis-pointed client is the hazard. The fix is
 not to change the identity — it is to make the clone unreachable at the prod
-address and loudly labelled at its own. See [Safety rails](#safety-rails).
+address and loudly labeled at its own. See [Safety rails](#safety-rails).
 
 **Interview result:** the July rehearsal used same-DID, and Wilk noticed no
 trouble — caveated that he drove it mostly through an agent, so a mis-point
@@ -403,7 +403,11 @@ Gideon's runbook, made checkable:
 1. **Baseline.** `cf space clone … --verify`; record fingerprint, topic/comment/
    link counts, `max(seq)`. `cf inspect churn` shows a quiet window.
 2. **Serial batches, children first, board last.** Never parallel; the board's
-   result recomputation is what storms.
+   result recomputation is what storms. This order inverts when the update
+   moves the BOARD's own demand: children-first assumes the children must
+   catch up to what the board already requires, so if the new board reads both
+   shapes and the old one cannot read the new children, the board goes first.
+   Decide it by reading the deployed holder's demand, not its source.
 3. **Step and verify each batch.** `--input` for what durably committed,
    `--step` for computed results. An unstepped result read that looks empty is
    not evidence of anything.
@@ -414,9 +418,9 @@ Gideon's runbook, made checkable:
 5. **≥20 s cold-load patience** before calling a health check failed. A first
    production attempt was rolled back on this false negative.
 6. **Post-run.** Counts match; content fingerprint of durable topic content
-   unchanged; a cold board read returns every child; a cold crossref read
-   resolves a linked child; churn returns to baseline and *stays* there — a
-   storm is a steady state, not a spike.
+   unchanged; a cold board read returns every child; a cold index read resolves
+   a linked child; churn returns to baseline and *stays* there — a storm is a
+   steady state, not a spike.
 7. **Rollback manifest.** The pristine snapshot path and the exact reset command,
    written down before the live attempt, not improvised during it.
 8. **Two consecutive clean passes** before the live `setsrc`. Reset between
@@ -459,8 +463,8 @@ live) on PR #5009's review threads; paraphrased.
   [#4950] (Topics workload diagnostics — churn's live-runtime neighbor).
 - The interview: [PR #5009 review threads](https://github.com/commontoolsinc/labs/pull/5009)
   (Wilk; Gideon confirmed live).
-- `docs/plans/pattern-verb-contract-implementation.md` — Risks, the write-storm
-  gate.
+- `docs/history/plans/pattern-verb-contract-implementation.md` — Risks, the
+  write-storm gate.
 - `docs/development/LOCAL_DEV_SERVERS.md` — toolshed over a store dir, port
   offsets.
 

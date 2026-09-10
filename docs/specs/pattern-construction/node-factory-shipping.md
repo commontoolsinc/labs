@@ -88,6 +88,12 @@ ref, schemas, params, scope, and space selector, and context-free decode returns
 an inert callable shell. Runner-owned materialization is the only execution
 chokepoint.
 
+Although `lift()` exposes only its generic call signature, its runtime value is
+an ordinary module factory. Compiler lowering therefore recognizes a trusted
+`lift()` builder call through its resolved builder symbol and derives the
+Factory@1 schema from the callback and any supplied schema. This narrow rule
+does not admit arbitrary bare functions as factories.
+
 Symbolic factory calls lower to reactive dynamic nodes with switch-latest
 replacement and stale-generation fencing. Factories delivered to scheduled
 lift and handler callbacks are materialized to ordinary callables before
@@ -1528,6 +1534,7 @@ underlying storage request cannot be canceled. Exact handler registration also
 releases that scheduler wait immediately, while allowing a broader piece start
 that is already in progress to finish independently. Neither path may hang
 `idle()` or resurrect the settled event.
+
 Readiness waiting is distinct from an authored handler attempt and does not
 consume the event's commit-retry budget, call its final callback, or mint a
 receipt. One parked attempt performs one event-driven artifact preparation; it
@@ -1535,7 +1542,11 @@ does not synthesize commit-style `readyToRetry` errors or use timer backoff
 around a read-only load. Missing/forged/wrong-kind/schema failure, or a
 source-load rejection, fails that attempt closed. Canonical publication's
 artifact-before-ref guarantee above prevents a durable ref from being stranded
-behind a later artifact-only arrival. A resumed list coordinator's separate row
+behind a later artifact-only arrival. A parked speculative child observes its
+origin's durability verdict directly: rejection cancels the park even when the
+ordinary post-commit callback is still waiting for read repair, and a verdict
+that lands between dequeue and readiness registration cannot strand the child.
+A resumed list coordinator's separate row
 pre-sync is recoverable supervisor work: a transient row-sync rejection settles
 the parked attempt without recording the ready key, so the scheduler reruns the
 coordinator and starts a fresh pre-sync. The enclosing handler stream

@@ -7,7 +7,6 @@ type PipelineMode = "double" | "mirror";
  * Arguments controlling the toggled derive pipeline counter.
  * `mode` selects which derive pipeline runs against the sanitized count.
  */
-
 interface TogglePipelineArgs {
   count: Default<number, 0>;
   mode: Default<PipelineMode, "double">;

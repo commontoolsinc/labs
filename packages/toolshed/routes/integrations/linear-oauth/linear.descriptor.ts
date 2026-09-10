@@ -14,8 +14,9 @@
  * Note: Linear's user info requires a GraphQL POST to /graphql which the
  * common handler doesn't support, so userInfoEndpoint is omitted for now.
  */
+
 import env from "@/env.ts";
-import type { ProviderDescriptor } from "../oauth2-common/oauth2-common.types.ts";
+import type { ProviderDescriptor } from "@/routes/integrations/oauth2-common/oauth2-common.types.ts";
 
 export const LinearDescriptor: ProviderDescriptor = {
   name: "linear",

@@ -5,9 +5,9 @@
  *
  * The gate (tasks/coverage-check.ts) runs on the `pull_request` event, where
  * fork PRs only get a read-only token and cannot comment. It writes the intended
- * comment to coverage-comment.json and uploads it as an artifact. The
- * `coverage-comment` workflow_run workflow runs this script from the base-repo
- * context with a write token to actually post it.
+ * comment to coverage-comment.json and uploads it as an artifact. The Pull
+ * Request Comments workflow runs this script from the base-repo context with a
+ * write token to actually post it.
  *
  * No-ops when the file is absent. Keeps a single comment per PR: posts when none
  * exists, otherwise updates the existing one in place. When the payload says
@@ -82,6 +82,7 @@ export async function postCoverageComment(): Promise<void> {
         payload.improvedLines ?? 0,
         payload.groups ?? [],
         payload.overridden ?? false,
+        payload.files ?? [],
       );
       if (updated === marked.body) {
         console.log(

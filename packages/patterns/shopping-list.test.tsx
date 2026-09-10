@@ -22,6 +22,7 @@ import {
   equals,
   handler,
   pattern,
+  TESTS,
   Writable,
 } from "commonfabric";
 import ShoppingList, { removeItem, selectAisle } from "./shopping-list.tsx";
@@ -234,7 +235,7 @@ Fresh vegetables and fruits
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Test 1: Initial empty state ===
       { assertion: assert_initial_empty },
       { assertion: assert_initial_total_zero },

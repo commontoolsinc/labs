@@ -68,6 +68,40 @@ Deno.test("session: vertical scrolling and clamping", () => {
   assertEquals(s.view().top, 0);
 });
 
+Deno.test("session: the mouse wheel scrolls without moving the edit cursor", () => {
+  const text = Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n");
+  const source: EditableSource = {
+    label: null,
+    editable: true,
+    parse: (next) => parseDocument(next),
+    save: () => "",
+  };
+  const session = new Session(
+    parseDocument(text),
+    { color: false, showLineNumbers: false },
+    { width: 30, height: 6 },
+    undefined,
+    source,
+  );
+  press(session, "e");
+  const cursor = session.view().cursor;
+  press(session, "wheel-down");
+  assertEquals(session.view().top, 3);
+  assertEquals(session.view().cursor, cursor);
+  press(session, "wheel-up", "wheel-up");
+  assertEquals(session.view().top, 0);
+  press(session, "ctrl-x", "wheel-down", "z");
+  assertEquals(session.view().message, "", "the wheel cancelled the C-x chord");
+});
+
+Deno.test("session: the mouse wheel scrolls an overlay", () => {
+  const session = makeSession();
+  press(session, "?");
+  assertEquals(session.view().overlay?.scroll, 0);
+  press(session, "wheel-down");
+  assertEquals(session.view().overlay?.scroll, 3);
+});
+
 Deno.test("session: an ordinary file ends at the bottom of the viewport", () => {
   const text = Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n");
   const s = new Session(
@@ -212,10 +246,7 @@ Deno.test("session: a card jump uses the full unannotated width", () => {
     destLine: 0,
     destCol: 4,
   };
-  const jump = s as unknown as {
-    jumpToTarget(target: CardTarget): void;
-  };
-  jump.jumpToTarget(target);
+  s.accessForTestingOnly.jumpToTarget(target);
   assertEquals(s.view().left, 0);
   assertEquals(renderFrame(s.displayDoc(), s.view())[0], "▶abcdX ");
 });
@@ -231,6 +262,122 @@ Deno.test("session: clearing a selection clamps expansion-margin panning", () =>
   const atRightEdge = s.view().left;
   press(s, "l");
   assertEquals(s.view().left, atRightEdge, "right does not move left");
+});
+
+const TOTALS_DIFF = [
+  "diff --git a/a.ts b/a.ts",
+  "index 1111111..2222222 100644",
+  "--- a/a.ts",
+  "+++ b/a.ts",
+  "@@ -1,3 +1,3 @@",
+  " keep",
+  "-old",
+  "+new",
+  "diff --git a/b.ts b/b.ts",
+  "index 3333333..4444444 100644",
+  "--- a/b.ts",
+  "+++ b/b.ts",
+  "@@ -1 +1,2 @@",
+  " x",
+  "+added",
+  "",
+].join("\n");
+
+function totalsSource(editable = false): EditableSource {
+  return {
+    label: null,
+    isDiff: true,
+    editable,
+    parse: (next) => parseDocument(next),
+    save: () => "",
+  };
+}
+
+Deno.test("session: a diff source carries whole-diff totals to the view", () => {
+  const s = new Session(
+    parseDocument(TOTALS_DIFF),
+    { color: false, showLineNumbers: false },
+    { width: 40, height: 6 },
+    undefined,
+    totalsSource(),
+  );
+  assertEquals(s.view().diffTotals, { adds: 2, dels: 1 });
+  const rows = renderFrame(s.displayDoc(), s.view());
+  assert(rows[0].endsWith("+2 −1"), "the first line's corner sums both files");
+
+  const plain = new Session(
+    parseDocument(TOTALS_DIFF),
+    { color: false, showLineNumbers: false },
+    { width: 40, height: 6 },
+  );
+  assertEquals(
+    plain.view().diffTotals,
+    null,
+    "no totals without a diff source",
+  );
+
+  const noFiles = new Session(
+    parseDocument(SAMPLE),
+    { color: false, showLineNumbers: false },
+    { width: 40, height: 6 },
+    undefined,
+    totalsSource(),
+  );
+  assertEquals(noFiles.view().diffTotals, null, "no totals without diff files");
+});
+
+Deno.test("session: edit mode hides the whole-diff totals", () => {
+  const s = new Session(
+    parseDocument(TOTALS_DIFF),
+    { color: false, showLineNumbers: false },
+    { width: 40, height: 8 },
+    undefined,
+    totalsSource(true),
+  );
+  press(s, "e");
+  assert(s.view().cursor, "the text cursor is active");
+  assertEquals(s.view().diffTotals, null);
+  assert(!renderFrame(s.displayDoc(), s.view())[0].includes("+2 −1"));
+  press(s, "escape");
+  assertEquals(s.view().diffTotals, { adds: 2, dels: 1 });
+});
+
+Deno.test("session: a wrapped first line flows around the totals label", () => {
+  const s = new Session(
+    parseDocument(TOTALS_DIFF),
+    { color: false, showLineNumbers: false },
+    { width: 20, height: 6 },
+    undefined,
+    totalsSource(),
+  );
+  press(s, "\\");
+  const rows = renderFrame(s.displayDoc(), s.view());
+  assertEquals(rows[0], "diff --git a/a\\+2 −1");
+  assertEquals(rows[1], ".ts b/a.ts          ");
+});
+
+Deno.test("session: panning reaches content hidden under the totals label", () => {
+  const PAN_DIFF = [
+    "diff --git a/src/app.ts b/src/app.ts",
+    "index 1111111..2222222 100644",
+    "--- a/src/app.ts",
+    "+++ b/src/app.ts",
+    "@@ -1,2 +1,2 @@",
+    " keep",
+    "-old",
+    "+new",
+    "",
+  ].join("\n");
+  const s = expandableSession(PAN_DIFF, 20);
+  press(s, ...Array(4).fill("l"));
+  // The first line is 36 columns; the clamp leaves room to pan its tail out
+  // from under the five-column label: 36 − (20 − 5).
+  assertEquals(s.view().left, 21);
+  assertEquals(
+    renderFrame(s.displayDoc(), s.view())[0],
+    "ts b/src/app.ts+1 −1",
+    "the end of the first line is visible beside the label",
+  );
 });
 
 Deno.test("session: removing the gutter clamps expansion-margin panning", () => {
@@ -721,7 +868,7 @@ Deno.test("session: c cycles the non-printable display mode and reports it", () 
   assertEquals(s.view().displayMode, "pictures", "starts on the first mode");
   press(s, "c");
   assertEquals(s.view().displayMode, "ansi");
-  assert(s.view().message.includes("ANSI colour"), "reports the new mode");
+  assert(s.view().message.includes("ANSI color"), "reports the new mode");
   press(s, "c");
   assertEquals(s.view().displayMode, "hidden");
   press(s, "c");
@@ -874,7 +1021,7 @@ Deno.test("session: Enter in the card opens the selected reference's card", () =
   assertEquals(ov.selectedLine, undefined, "selection reset after navigating");
 });
 
-Deno.test("session: z closes the card and centres the main view on the target", () => {
+Deno.test("session: z closes the card and centers the main view on the target", () => {
   const doc = parseDocument(SAMPLE);
   const s = new Session(
     doc,
@@ -890,7 +1037,7 @@ Deno.test("session: z closes the card and centres the main view on the target", 
   assert(s.view().selected, "a node is selected at the destination");
 });
 
-Deno.test("session: z frames the revealed node (centred when it fits)", () => {
+Deno.test("session: z frames the revealed node (centered when it fits)", () => {
   const doc = parseDocument(SAMPLE);
   const height = 14;
   const s = new Session(
@@ -1043,7 +1190,8 @@ Deno.test("session: the help overlay documents file folding and scrolling", () =
   assert(text.includes("Diff files"), "has a Diff files section");
   assert(/hide\s*\/\s*show/.test(text), "documents hide/show");
   assert(text.includes("hide all files"), "documents hide all");
-  assert(text.includes("hide test"), "documents hiding test files");
+  assert(text.includes("show test"), "documents toggling test files");
+  assert(text.includes("Markdown files"), "documents toggling Markdown files");
   assert(
     text.includes("line wrapping: off / hard / word"),
     "documents line wrapping",

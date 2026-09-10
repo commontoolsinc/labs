@@ -1,36 +1,59 @@
 import { Command, ValidationError } from "@cliffy/command";
 import { HelpCommand } from "@cliffy/command/help";
-import { acl } from "./acl.ts";
-import { check } from "./dev.ts";
-import { completion } from "./completion.ts";
-import { deps } from "./deps.ts";
-import { exec } from "./exec.ts";
-import { fuse } from "./fuse.ts";
-import { init } from "./init.ts";
-import { inspect } from "./inspect.ts";
-import { piece } from "./piece.ts";
-import { space } from "./space.ts";
-import { identity } from "./identity.ts";
-import { test } from "./test-command.ts";
-import { view } from "./view.ts";
-import { wish } from "./wish.ts";
 import ports from "@commonfabric/ports" with { type: "json" };
+
 import { cliName, cliText } from "../lib/cli-name.ts";
 import {
   hasJsonArgument,
   reservesStdoutForCommandOutput,
 } from "../lib/json-output.ts";
+import { acl } from "./acl.ts";
+import { completion } from "./completion.ts";
+import { deps } from "./deps.ts";
+import { check } from "./dev.ts";
+import { exec } from "./exec.ts";
+import { fuse } from "./fuse.ts";
+import { identity } from "./identity.ts";
+import { ingest } from "./ingest.ts";
+import { init } from "./init.ts";
+import { inspect } from "./inspect.ts";
+import { invocationSession } from "./invocation-session.ts";
+import { cell } from "./cell.ts";
+import { piece, pieceDataCommand } from "./piece.ts";
+import { space } from "./space.ts";
+import { sh } from "./sh.ts";
+import { createTestCommand } from "./test-command.ts";
+import { view } from "./view.ts";
+import { wish } from "./wish.ts";
 
 function envStatus(): string {
   const identity = Deno.env.get("CF_IDENTITY");
   const apiUrl = Deno.env.get("CF_API_URL");
-  if (!identity && !apiUrl) return "";
+  const space = Deno.env.get("CF_SPACE");
+  if (!identity && !apiUrl && !space) return "";
   const lines: string[] = ["", "ENVIRONMENT:"];
   if (identity) {
     lines.push(`  CF_IDENTITY = ${identity} (set, no need to pass --identity)`);
   }
   if (apiUrl) {
     lines.push(`  CF_API_URL  = ${apiUrl} (set, no need to pass --api-url)`);
+  }
+  if (space) {
+    // Named rather than promised generally: `ingest`, `fuse` and `check` take
+    // a space and do not read this, so a blanket "no need to pass --space"
+    // would be wrong exactly where a caller is most surprised to be asked.
+    //
+    // `space` is named by subcommand for the same reason, and by the one
+    // subcommand rather than by two: `recreate-root` resolves the target space
+    // and refuses without one, while `clone`, `verify`, `reset` and
+    // `fingerprint` each name their target themselves, and `set-home` acts on
+    // the identity's own home space — it declares the option through the
+    // shared target flags and never reads it. Declaring is not consuming,
+    // which is the way an entry here goes wrong without going missing.
+    lines.push(
+      `  CF_SPACE    = ${space} (set, no need to pass --space on cell, ` +
+        `piece, wish, acl, deps, space recreate-root)`,
+    );
   }
   return lines.join("\n");
 }
@@ -46,6 +69,9 @@ FIRST TIME SETUP:
   cf id new > claude.key            # Create identity key
   export CF_IDENTITY=./claude.key   # Set default identity
   export CF_API_URL=http://localhost:${ports.toolshed}  # Set default API URL
+  export CF_SPACE=my-space          # Default space for cell, piece, wish, acl,
+                                    # deps and space recreate-root
+                                    # (--space overrides)
 
 SHELL COMPLETION:
   source <(cf completion zsh)      # add to ~/.zshrc  (bash: completion bash)
@@ -94,8 +120,11 @@ export const main = new Command()
   .reset()
   // @ts-ignore for the above type issue
   .command("acl", acl)
+  .command("ingest", ingest)
   // @ts-ignore for the above type issue
   .command("piece", piece)
+  // @ts-ignore for the above type issue
+  .command("cell", cell)
   .command("check", check)
   .command("deps", deps)
   // @ts-ignore for the above type issue
@@ -126,6 +155,9 @@ export const main = new Command()
           this.showHelp();
           return;
         }
+        // The FUSE module graph is large and only the mount subcommands
+        // reach it, so every other `cf` invocation skips loading it.
+        // deno-lint-ignore cf-imports/no-inline-module-import
         const { main } = await import("@commonfabric/fuse");
         await main(daemonArgs);
       }),
@@ -136,50 +168,63 @@ export const main = new Command()
       .description(
         "Internal: supervise a background FUSE child process.",
       )
-      .arguments("<mountpoint:string>")
-      .option("--api-url <url:string>", "URL of the fabric instance.")
-      .option("--identity <path:string>", "Path to an identity keyfile.")
-      .option("--exec-cli <path:string>", "Path to the cf exec shim.")
-      .option("--log-file <path:string>", "Path to the FUSE child log file.")
-      .option("--debug", "Enable FUSE debug output.")
-      .option("--allow-other", "Pass allow_other through to the FUSE child.")
-      .option("--noattrcache", "Pass noattrcache through to the FUSE child.")
-      .option(
-        "--attrcache-timeout <seconds:string>",
-        "Pass attrcache-timeout through to the FUSE child.",
-      )
-      .option("--cfc-mode <mode:string>", "FUSE-side CFC mode.")
-      .option("--cfc-annotations", "Publish CFC annotation xattrs.")
-      .option(
-        "--cfc-xattr-namespace <namespace:string>",
-        "CFC xattr namespace.",
-      )
-      .option("--cfc-writeback-xattrs", "Enable CFC writeback xattrs.")
-      .option(
-        "--cfc-writeback-state <path:string>",
-        "CFC writeback state path.",
-      )
-      .option(
-        "--dangerously-allow-incompatible-schema",
-        "Allow incompatible source schema updates.",
-      )
-      .option("--state-path <path:string>", "Mount state file to update.")
-      .option(
-        "--supervisor-status <path:string>",
-        "Child readiness and heartbeat status file.",
-      )
-      .option("-s, --space <name:string>", "Space(s) to connect.", {
-        collect: true,
-      })
-      .action(async (options, mountpoint) => {
-        const { fuseSupervisorOptions, runFuseSupervisor } = await import(
+      .usage("<mountpoint> [options]")
+      // The supervisor argv is parsed once, by the same parser the deno
+      // entrypoint uses, so the compiled binary and `deno run` accept exactly
+      // the same flags.
+      .useRawArgs()
+      .action(async (_options: unknown, ...rawArgs: unknown[]) => {
+        const supervisorArgs = rawArgs.map((arg) => String(arg));
+        // The flag parser sits in the FUSE module graph, which the other
+        // subcommands do not load.
+        // deno-lint-ignore cf-imports/no-inline-module-import
+        const { parseSupervisorArgs, supervisorHelp } = await import(
+          "../lib/fuse-mount-flags.ts"
+        );
+        let parsed;
+        try {
+          parsed = parseSupervisorArgs(supervisorArgs);
+        } catch (error) {
+          throw new ValidationError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+        if (parsed.help) {
+          console.log(supervisorHelp());
+          return;
+        }
+        // The supervisor sits in the FUSE module graph, which the other
+        // subcommands do not load.
+        // deno-lint-ignore cf-imports/no-inline-module-import
+        const { runFuseSupervisor } = await import(
           "../lib/fuse-supervisor.ts"
         );
-        await runFuseSupervisor(fuseSupervisorOptions(options, mountpoint));
+        await runFuseSupervisor(parsed.options);
       }),
   )
   .command("completion", completion)
   .command("id", identity)
   .command("init", init)
-  .command("test", test)
-  .command("wish", wish);
+  .command("invocation-session", invocationSession)
+  .command("sh", sh)
+  .command("test", createTestCommand({ recordResults: true }))
+  .command("wish", wish)
+  // The superseded top-level spellings of the data commands. Each is the one
+  // definition its blessed mount uses, reached under the noun it acts on --
+  // `cf cell get`, `cf cell set`, `cf piece call` -- and kept here, hidden,
+  // so a caller who learned the top-level spelling still works.
+  // @ts-ignore for the above type issue
+  .command(
+    "get",
+    pieceDataCommand("get", { replacedBy: "cell get" }).hidden(),
+  )
+  // @ts-ignore for the above type issue
+  .command(
+    "set",
+    pieceDataCommand("set", { replacedBy: "cell set" }).hidden(),
+  )
+  // @ts-ignore for the above type issue
+  .command(
+    "call",
+    pieceDataCommand("call", { replacedBy: "piece call" }).hidden(),
+  );

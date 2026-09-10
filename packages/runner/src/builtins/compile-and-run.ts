@@ -1,14 +1,17 @@
-import { type BuiltInCompileAndRunParams } from "commonfabric";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
-import type { Runtime } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { Program } from "@commonfabric/js-compiler";
+import { hashOf } from "@commonfabric/data-model";
+import type { RuntimeProgram } from "../harness/types.ts";
 import { CompilerError } from "@commonfabric/js-compiler/errors";
+import { type BuiltInCompileAndRunParams } from "commonfabric";
+
 import type { CellScope } from "../builder/types.ts";
-import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
+import { type Cell } from "../cell.ts";
+import { waveRunContextOf } from "../executor/wave.ts";
+import type { Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
 import { narrowestScope } from "../scope.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { ownedCell } from "./runtime-owned-store.ts";
+import { resolvedCellScope } from "./scope-policy.ts";
 
 /**
  * Compile a pattern/module and run it.
@@ -67,7 +70,7 @@ export function compileAndRun(
     tx.resetNarrowestReadScope();
     // TODO(seefeld): Ideally, this cell already has this schema, because we set
     // it on the node itself.
-    const program: Program = inputsCell.asSchema({
+    const program: RuntimeProgram = inputsCell.asSchema({
       type: "object",
       properties: {
         files: {
@@ -83,6 +86,10 @@ export function compileAndRun(
           default: [],
         },
         main: { type: "string", default: "" },
+        // Named here or dropped: the traverser omits every key the properties
+        // map leaves out, so a field missing from this schema never reaches
+        // the compile however well the parameter type declares it.
+        dataFiles: { type: "array", items: { type: "string" } },
       },
       required: ["files", "main"],
     }).withTx(tx).get();
@@ -96,32 +103,35 @@ export function compileAndRun(
       if (cellsInitialized && cellScope !== outputScope) {
         previousCallHash = undefined;
       }
-      const basePending = runtime.getCell<boolean>(
-        parentCell.space,
+      pending = ownedCell<boolean>(
+        runtime,
+        tx,
+        parentCell,
         { compile: { pending: cause } },
         undefined,
-        tx,
+        outputScope,
       );
-      pending = scopedCell(runtime, tx, basePending, outputScope);
       pending.send(false);
 
-      const baseResult = runtime.getCell<string | undefined>(
-        parentCell.space,
+      result = ownedCell<string | undefined>(
+        runtime,
+        tx,
+        parentCell,
         { compile: { result: cause } },
         undefined,
-        tx,
+        outputScope,
       );
-      result = scopedCell(runtime, tx, baseResult, outputScope);
 
-      const baseError = runtime.getCell<string | undefined>(
-        parentCell.space,
+      error = ownedCell<string | undefined>(
+        runtime,
+        tx,
+        parentCell,
         { compile: { error: cause } },
         undefined,
-        tx,
+        outputScope,
       );
-      error = scopedCell(runtime, tx, baseError, outputScope);
 
-      const baseErrors = runtime.getCell<
+      errors = ownedCell<
         | Array<
           {
             line: number;
@@ -133,12 +143,13 @@ export function compileAndRun(
         >
         | undefined
       >(
-        parentCell.space,
+        runtime,
+        tx,
+        parentCell,
         { compile: { errors: cause } },
         undefined,
-        tx,
+        outputScope,
       );
-      errors = scopedCell(runtime, tx, baseErrors, outputScope);
 
       sendResult(tx, { pending, result, error, errors });
       cellsInitialized = true;
@@ -204,6 +215,25 @@ export function compileAndRun(
 
     // Now we're sure that we have a new file to compile
     pendingWithLog.set(true);
+
+    // Client speculation under EXPERIMENTAL_SERVER_EXECUTION
+    // (server-execution v2 Phase 2): compilation is an EFFECTFUL step,
+    // so `compile-and-run` children are NOT speculable — the branch
+    // keeps its ordinary pending state and reads through until the
+    // authoritative child arrives (builtins.md §3; speculation.md §2;
+    // runtime-mapping N37/N38). Unlike the request-hash builtins, the
+    // compile launches from a floating promise rather than a
+    // post-commit effect, so the overlay destination cannot intercept
+    // it — the gate lives here. A SERVED run (a stamped wave run) is
+    // unaffected: serving compile-and-run is its own port (stage G's
+    // out-of-scope note), and its writebacks refuse under serving
+    // until then.
+    if (
+      runtime.experimental.serverExecution === true &&
+      waveRunContextOf(tx) === undefined
+    ) {
+      return;
+    }
 
     // Capture requestId for this compilation run
     const thisRequestId = requestId;

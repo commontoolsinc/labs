@@ -5,9 +5,12 @@
  * Fabric Default<T,V> from `@commonfabric/api`. A user type named "Default"
  * does not trigger the same special handling.
  */
-import ts from "typescript";
-import { describe, it } from "@std/testing/bdd";
+
 import { assert, assertEquals, assertFalse } from "@std/assert";
+import { describe, it } from "@std/testing/bdd";
+
+import ts from "typescript";
+
 import {
   getImportTypeModuleName,
   isCommonFabricDeclaration,
@@ -17,9 +20,9 @@ import {
   symbolDeclaresCommonFabricDefault,
 } from "../../src/core/common-fabric-symbols.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Test infrastructure
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Build a minimal TypeScript program from an in-memory file map.
@@ -126,9 +129,9 @@ function findFirstNode<T extends ts.Node>(
   return found;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Tests
-// ---------------------------------------------------------------------------
+//
 
 describe("isCommonFabricModuleName", () => {
   it("matches Common Fabric module names", () => {
@@ -333,6 +336,24 @@ describe("symbolDeclaresCommonFabricDefault", () => {
         symbolDeclaresCommonFabricDefault(themeSymbol, checker),
         "Optional property with user-defined Default must NOT be treated as Common Fabric Default",
       );
+    });
+
+    it("returns false for a cycle of referenced types", () => {
+      const { program, checker } = createProgram({
+        "/test.ts": `
+          type First = Second;
+          type Second = First;
+
+          interface Config {
+            theme: First;
+          }
+        `,
+      });
+
+      const sf = program.getSourceFile("/test.ts")!;
+      const themeSymbol = getPropertySymbol(checker, sf, "Config", "theme");
+
+      assertFalse(symbolDeclaresCommonFabricDefault(themeSymbol, checker));
     });
   });
 

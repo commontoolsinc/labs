@@ -1,16 +1,16 @@
 import { JSONSchemaObj, type JSONValue } from "@commonfabric/api";
-import type { CfcConfClause } from "./cfc/clause.ts";
-import { isRecord } from "@commonfabric/utils/types";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { isDeepFrozen } from "@commonfabric/data-model";
+import { internSchema } from "@commonfabric/data-model-schema";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
 import type {
   AsCellEntry,
   CellKind,
   JSONSchema,
   SchemaScope,
 } from "./builder/types.ts";
-import { isSchemaScope } from "./scope.ts";
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import type { CfcConfClause } from "./cfc/clause.ts";
 import { uniqueCfcAtoms } from "./cfc/observation.ts";
 import {
   cfcSchemaChildRoot,
@@ -25,7 +25,13 @@ import {
   resolveCfcSchemaRefsOrThrow,
   selectReferencedCfcSchemaDefs,
 } from "./cfc/schema-refs.ts";
+import { isExternalSchemaRef } from "./schema-decompose.ts";
 import { forEachSubschema } from "./schema-walk.ts";
+import {
+  externalResolutionMissCount,
+  onSchemaRegistryClear,
+} from "./schema-registry.ts";
+import { isSchemaScope, narrowerScopeCap } from "./scope.ts";
 export {
   CFC_ATOM_TYPE,
   CFC_CONCEPT_KIND,
@@ -37,15 +43,21 @@ export {
 type IFCAtom = JSONValue;
 
 // schemaAtPath derivations per deep-frozen schema identity. The derivation is
-// pure given (schema, path, boolean default flags) when no extra
-// confidentiality is passed — instance state never enters it (`lub` delegates
-// to a static and has no subclasses) — and it runs per array element / object
-// property on read and write-diff paths, so identical lookups repeat
-// constantly. Module-level rather than per-instance: several hot paths create
-// a fresh ContextualFlowControl per call (storage pull/watch, traversal
-// contexts), which would leave a per-instance cache permanently cold.
-// Mutable schemas are never cached (in-place edits must be observed).
-const schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
+// pure given (schema, path, the two defaults) when no extra confidentiality is
+// passed — instance state never enters it (`lub` delegates to a static and has
+// no subclasses) — and it runs per array element / object property on read and
+// write-diff paths, so identical lookups repeat constantly. Module-level
+// rather than per-instance: several hot paths create a fresh
+// ContextualFlowControl per call (storage pull/watch, traversal contexts),
+// which would leave a per-instance cache permanently cold. Mutable schemas are
+// never cached (in-place edits must be observed), and neither is a mutable
+// default (see `defaultSchemaTag`).
+let schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
+// Path derivations can embed registry content; the registry clear (last
+// lease out) swaps the cache so an epoch's derivations do not outlive it.
+onSchemaRegistryClear(() => {
+  schemaAtPathCache = new WeakMap();
+});
 const SCHEMA_AT_PATH_CACHE_MAX_ENTRIES = 2_048;
 
 type SymbolicSchemaAtPathClassifier = (part: string) => string;
@@ -79,7 +91,7 @@ const buildSymbolicSchemaAtPathClassifier = (
 ): SymbolicSchemaAtPathClassifier | undefined => {
   if (typeof schema === "boolean") return () => "boolean";
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
-  const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+  const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
   if (rootedSchemaVisitIsActive(active, rootKey, schema)) return undefined;
   const nextActive = { root: rootKey, schema, parent: active };
   {
@@ -215,11 +227,42 @@ const symbolicSchemaAtPathPart = (
     : classifier(part);
 };
 
+/**
+ * A stable token for one of `schemaAtPath`'s two default schemas, or
+ * `undefined` where the default cannot take part in a cache key.
+ *
+ * The defaults are usually the booleans `true` and `false`, which name
+ * themselves. A caller can also pass a schema object instead — that is how a
+ * reader asks to be TOLD that a property was not selected rather than handed
+ * something indistinguishable from a selected one, which is what
+ * `schema-view.ts` does for every property and every element it reads. Such a
+ * default is a module-level frozen constant, so its identity is stable for the
+ * life of the process and a tag minted once names it ever after.
+ *
+ * Deep-frozen is the condition, not a convenience: a mutable object could be
+ * changed after a result was cached under it, and the entry would then answer
+ * for a default it no longer describes.
+ */
+const defaultSchemaTags = new WeakMap<object, string>();
+
+let nextDefaultSchemaTag = 0;
+
+const defaultSchemaTag = (schema: JSONSchema): string | undefined => {
+  if (typeof schema === "boolean") return String(schema);
+  if (!isObjectOrArray(schema) || !isDeepFrozen(schema)) return undefined;
+  let tag = defaultSchemaTags.get(schema);
+  if (tag === undefined) {
+    tag = `#${++nextDefaultSchemaTag}`;
+    defaultSchemaTags.set(schema, tag);
+  }
+  return tag;
+};
+
 const schemaAtPathKey = (
   schema: JSONSchemaObj,
   path: readonly string[],
-  defaultEmptyProperties: boolean,
-  defaultMissingProperty: boolean,
+  defaultEmptyProperties: string,
+  defaultMissingProperty: string,
 ): string => {
   let key = `${defaultEmptyProperties}|${defaultMissingProperty}`;
   if (path.length === 1) {
@@ -232,7 +275,9 @@ const schemaAtPathKey = (
   return key;
 };
 
-// Class for handling cfc rules.
+// The cfc rules. Every member is static: the derivations are pure functions of
+// their arguments, and what caching there is lives in module-level maps keyed
+// by schema identity.
 // The spec's confidentiality model is based on structured atoms.
 export class ContextualFlowControl {
   static uniqueAtoms(atoms: Iterable<unknown>): IFCAtom[] {
@@ -280,7 +325,7 @@ export class ContextualFlowControl {
     // schema `default` fields; plain `JSON.stringify` would silently
     // mis-encode them.
     const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
-    const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+    const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
     const canonical = internSchema(schema) as JSONSchemaObj;
     if (rootedSchemaVisitIsActive(active, rootKey, canonical)) {
       // we've already joined this
@@ -329,8 +374,8 @@ export class ContextualFlowControl {
     return joined;
   }
 
-  // Get the joined confidentiality atoms from the schema.
-  public lubSchema(
+  /** Returns the joined confidentiality atoms from the schema. */
+  static lubSchema(
     schema: JSONSchema,
     extraConfidentiality?: Set<unknown>,
   ): IFCAtom[] | undefined {
@@ -339,20 +384,22 @@ export class ContextualFlowControl {
       : new Set<unknown>();
     ContextualFlowControl.joinSchema(confidentiality, schema);
 
-    return (confidentiality.size === 0) ? undefined : this.lub(confidentiality);
+    return (confidentiality.size === 0)
+      ? undefined
+      : ContextualFlowControl.lub(confidentiality);
   }
 
-  public lub(joined: Set<unknown>): IFCAtom[] {
+  static lub(joined: Set<unknown>): IFCAtom[] {
     return ContextualFlowControl.uniqueAtoms(joined);
   }
 
-  // Return a copy of the schema with joined confidentiality atoms.
-  public schemaWithLub(
+  /** Returns a copy of the schema with joined confidentiality atoms. */
+  static schemaWithLub(
     schema: JSONSchema,
     confidentiality: readonly CfcConfClause[],
   ): JSONSchema {
     const joined = new Set<unknown>(confidentiality);
-    if (isRecord(schema) && schema.ifc !== undefined) {
+    if (isObjectOrArray(schema) && schema.ifc !== undefined) {
       ContextualFlowControl.addIfcAtoms(joined, schema.ifc.confidentiality);
     }
     // If we have no confidentiality, we can leave the schema
@@ -364,7 +411,10 @@ export class ContextualFlowControl {
     const schemaObj = ContextualFlowControl.toSchemaObj(schema);
     const restrictedSchema = {
       ...schemaObj,
-      ifc: { ...schemaObj.ifc, confidentiality: this.lub(joined) },
+      ifc: {
+        ...schemaObj.ifc,
+        confidentiality: ContextualFlowControl.lub(joined),
+      },
     };
     return restrictedSchema;
   }
@@ -406,6 +456,7 @@ export class ContextualFlowControl {
   // the right thing, since those are all at the top level. However, we
   // could have a reference to an anchor (not currently allowed), and
   // for those, if the User is secret, their Address should be too.
+
   /**
    * Resolve a $ref in a schema.
    * This doesn't currently handle $anchor tags or external documents
@@ -450,9 +501,11 @@ export class ContextualFlowControl {
     return resolveCfcSchemaRefsOrThrow(schemaObj, fullSchema);
   }
 
-  // This is a variant of schemaAtPath that allows for an undefined schema.
-  // It will return the empty object instead of true and undefined instead of false.
-  getSchemaAtPath(
+  /**
+   * Like `schemaAtPath()`, except it allows an undefined schema, and returns
+   * the empty object instead of `true` and `undefined` instead of `false`.
+   */
+  static getSchemaAtPath(
     schema: JSONSchema | undefined,
     path: string[],
     extraConfidentiality?: Set<unknown>,
@@ -460,7 +513,11 @@ export class ContextualFlowControl {
     if (schema === undefined) {
       return undefined;
     }
-    const result = this.schemaAtPath(schema, path, extraConfidentiality);
+    const result = ContextualFlowControl.schemaAtPath(
+      schema,
+      path,
+      extraConfidentiality,
+    );
     return result === false ? undefined : result === true ? {} : result;
   }
 
@@ -491,7 +548,7 @@ export class ContextualFlowControl {
    * While we will handle $ref links as needed while getting to the schema,
    * the returned object will retain those $ref links.
    */
-  schemaAtPath(
+  static schemaAtPath(
     schema: JSONSchema,
     path: readonly string[],
     extraConfidentiality?: Set<unknown>,
@@ -501,13 +558,23 @@ export class ContextualFlowControl {
     if (schema === false) return false;
     if (schema === true && extraConfidentiality === undefined) return true;
     // Take defs from schema if available
-    const defs = isRecord(schema) && schema.$defs ? schema.$defs : undefined;
+    const defs = isObjectOrArray(schema) && schema.$defs
+      ? schema.$defs
+      : undefined;
+    // Both defaults take part in the cache key, whether each is a boolean or
+    // a frozen sentinel schema. Refusing to cache the sentinel case turned the
+    // cache off for the whole of `schema-view.ts`, which passes sentinels on
+    // every property and every element it reads — so a view re-derived each
+    // child's schema from scratch, and handed the caller a fresh object that
+    // then cost a content hash to intern. That is the hot path, not a corner
+    // of one: reading a list of N references narrows N times per pass.
+    const emptyTag = defaultSchemaTag(defaultEmptyProperties);
+    const missingTag = defaultSchemaTag(defaultMissingProperty);
     const cacheable = extraConfidentiality === undefined &&
-      typeof defaultEmptyProperties === "boolean" &&
-      typeof defaultMissingProperty === "boolean" &&
-      isRecord(schema) && isDeepFrozen(schema);
+      emptyTag !== undefined && missingTag !== undefined &&
+      isObjectOrArray(schema) && isDeepFrozen(schema);
     if (!cacheable) {
-      return this.schemaAtPathInternal(
+      return ContextualFlowControl.#schemaAtPathInternal(
         schema,
         path,
         defs,
@@ -521,18 +588,14 @@ export class ContextualFlowControl {
       byKey = new Map();
       schemaAtPathCache.set(schema, byKey);
     }
-    const key = schemaAtPathKey(
-      schema,
-      path,
-      defaultEmptyProperties,
-      defaultMissingProperty,
-    );
+    const key = schemaAtPathKey(schema, path, emptyTag, missingTag);
     let result = byKey.get(key);
     if (result === undefined) {
       // Intern the derivation so the cached result is the canonical frozen
       // instance: downstream identity-keyed caches (standardization, value
       // hashing) hit instead of re-walking a fresh anyOf rebuild every time.
-      result = internSchema(this.schemaAtPathInternal(
+      const missesBefore = externalResolutionMissCount();
+      result = internSchema(ContextualFlowControl.#schemaAtPathInternal(
         schema,
         path,
         defs,
@@ -540,13 +603,20 @@ export class ContextualFlowControl {
         defaultEmptyProperties,
         defaultMissingProperty,
       ));
-      if (byKey.size >= SCHEMA_AT_PATH_CACHE_MAX_ENTRIES) byKey.clear();
-      byKey.set(key, result);
+      // Populate-only guard: a derivation during which a `cid:` resolution
+      // missed must not be memoized — the document can arrive later. The
+      // miss counter is exact and walk-free; a schema-content check here
+      // paid a full walk, dormant `$defs` bodies included, on the first
+      // lookup for every schema identity.
+      if (externalResolutionMissCount() === missesBefore) {
+        if (byKey.size >= SCHEMA_AT_PATH_CACHE_MAX_ENTRIES) byKey.clear();
+        byKey.set(key, result);
+      }
     }
     return result;
   }
 
-  private schemaAtPathInternal(
+  static #schemaAtPathInternal(
     schema: JSONSchema,
     path: readonly string[],
     defs: Record<string, JSONSchema> | undefined,
@@ -564,7 +634,7 @@ export class ContextualFlowControl {
       )
     ) {
       // If the cursor is a $ref, get the target location
-      if (isRecord(cursor) && "$ref" in cursor) {
+      if (isObjectOrArray(cursor) && "$ref" in cursor) {
         // Follow the reference
         cursor = ContextualFlowControl.resolveSchemaRefsOrThrow(
           cursor,
@@ -572,12 +642,12 @@ export class ContextualFlowControl {
         );
         // Resolve schema refs can resolve to a fullSchema, in which case we
         // need to replace our defs.
-        if (isRecord(cursor) && cursor.$defs) {
+        if (isObjectOrArray(cursor) && cursor.$defs) {
           defs = cursor.$defs;
         }
       }
       if (
-        isRecord(cursor) &&
+        isObjectOrArray(cursor) &&
         (Array.isArray(cursor.type) || "anyOf" in cursor || "oneOf" in cursor)
       ) {
         const subSchemas = new Set<JSONSchema>();
@@ -588,10 +658,10 @@ export class ContextualFlowControl {
           ? [...cursorObject.anyOf, ...cursorObject.oneOf]
           : cursorObject.anyOf ?? cursorObject.oneOf ?? [];
         for (const entry of options) {
-          const entryDefs = isRecord(entry) && entry.$defs !== undefined
+          const entryDefs = isObjectOrArray(entry) && entry.$defs !== undefined
             ? entry.$defs as Record<string, JSONSchema>
             : defs;
-          const optSchema = this.schemaAtPathInternal(
+          const optSchema = ContextualFlowControl.#schemaAtPathInternal(
             entry,
             path.slice(index),
             entryDefs,
@@ -691,11 +761,11 @@ export class ContextualFlowControl {
         // we can only descend into objects and arrays or unknown
         return false;
       }
-      if (isRecord(cursor) && cursor.$defs) {
+      if (isObjectOrArray(cursor) && cursor.$defs) {
         defs = cursor.$defs;
       }
     }
-    if (isRecord(cursor) && cursor.ifc !== undefined) {
+    if (isObjectOrArray(cursor) && cursor.ifc !== undefined) {
       ContextualFlowControl.addIfcAtoms(joined, cursor.ifc.confidentiality);
     }
     if (typeof cursor === "boolean") {
@@ -709,7 +779,7 @@ export class ContextualFlowControl {
     // If we've encountered any confidentiality atoms while walking down the
     // schema, we need to add them to the returned object.
     const ifc = (joined.size !== 0)
-      ? { ...cursor.ifc, confidentiality: this.lub(joined) }
+      ? { ...cursor.ifc, confidentiality: ContextualFlowControl.lub(joined) }
       : cursor.ifc;
     const selectedDefs = selectReferencedCfcSchemaDefs(cursor, defs);
     const result = { ...cursor, ...(ifc && { ifc }) } as Record<
@@ -721,14 +791,19 @@ export class ContextualFlowControl {
     return result as JSONSchema;
   }
 
-  // Check to see if the specified schema is one of the special values meaning
-  // it should always validate.
+  /**
+   * Returns whether `schema` is one of the special values meaning it should
+   * always validate.
+   */
   static isTrueSchema(schema: JSONSchema): boolean {
     return cfcSchemaIsTrue(schema);
   }
 
-  // We don't need to check ID and ID_FIELD, since they won't be included
-  // in Object.keys return values.
+  /**
+   * Returns whether `key` is an internal schema key. Symbol keys are not
+   * included in `Object.keys()` return values, so no symbol-keyed entry needs
+   * checking here.
+   */
   static isInternalSchemaKey(key: string): boolean {
     return cfcSchemaIsInternalKey(key);
   }
@@ -737,11 +812,14 @@ export class ContextualFlowControl {
     return cfcSchemaIsFalse(schema);
   }
 
-  // Utility function to handle the asCell array tag.
+  /**
+   * Returns the `asCell` entries of `schema`, or none when it has no `asCell`
+   * array.
+   */
   static getAsCellValues(
     schema: JSONSchema | undefined,
   ): readonly AsCellEntry[] {
-    if (isRecord(schema) && Array.isArray(schema.asCell)) {
+    if (isObjectOrArray(schema) && Array.isArray(schema.asCell)) {
       return schema.asCell;
     }
     return [];
@@ -773,7 +851,8 @@ export class ContextualFlowControl {
   static getSchemaScopeCap(
     schema: JSONSchema | undefined,
   ): SchemaScope | undefined {
-    if (!isRecord(schema)) return undefined;
+    if (!isObjectOrArray(schema)) return undefined;
+    schema = resolveExternalRootRefForStructure(schema);
     const entryScope = ContextualFlowControl.getAsCellScope(
       ContextualFlowControl.getAsCellValues(schema).at(0),
     );
@@ -781,4 +860,88 @@ export class ContextualFlowControl {
     if (isSchemaScope(schema.scope)) return schema.scope;
     return undefined;
   }
+
+  /**
+   * The follow cap declared by an `asCell` ENTRY, looking through `anyOf` /
+   * `oneOf` wrappers.
+   *
+   * Two differences from {@link getSchemaScopeCap}, both deliberate:
+   *
+   * - No `schema.scope` fallback. Authors write `scope` on a node to say "this
+   *   value lives at that scope"; reading it as a follow cap at a handle
+   *   boundary invents a restriction nobody asked for.
+   * - It descends into `anyOf`/`oneOf`. A cap wrapped in a compound schema —
+   *   `{anyOf: [{...asCell: [{kind:"cell", scope:"space"}]}, {type:"null"}]}`
+   *   — is a real shape here, and reading only the top level made it a
+   *   one-line cap bypass. Branches that declare no `asCell` at all (a `null`
+   *   alternative) are not handles and are skipped; among those that do, the
+   *   NARROWEST wins, since the runtime value may be any of them.
+   */
+  static getAsCellFollowScopeCap(
+    schema: JSONSchema | undefined,
+  ): SchemaScope | undefined {
+    if (!isObjectOrArray(schema)) return undefined;
+    schema = resolveExternalRootRefForStructure(schema);
+    const entryScope = ContextualFlowControl.getAsCellScope(
+      ContextualFlowControl.getAsCellValues(schema).at(0),
+    );
+    if (isSchemaScope(entryScope)) return entryScope;
+    let cap: SchemaScope | undefined;
+    for (const branches of [schema.anyOf, schema.oneOf]) {
+      if (!Array.isArray(branches)) continue;
+      for (const branch of branches) {
+        const branchCap = ContextualFlowControl.getAsCellFollowScopeCap(
+          branch as JSONSchema,
+        );
+        cap = narrowerScopeCap(cap, branchCap);
+      }
+    }
+    return cap;
+  }
+}
+
+/**
+ * A structural read of a schema position resolves an external reference
+ * first (`docs/specs/content-addressed-schemas.md`): the reference is the
+ * at-rest form of the schema, and declarations like the scope caps above
+ * live on the resolved document. Links are NOT rewritten — the reference
+ * stays the working representation, and each structural consumer resolves
+ * (memoized) at its point of use. A reference whose closure has not
+ * arrived reads as what it degrades to — schemaless, hence no
+ * declarations — matching the binding degradation rule; the traversal's
+ * document loader separately gates data selection on exactly that state.
+ */
+export function resolveExternalRootRefForStructure(
+  schema: JSONSchemaObj,
+): JSONSchemaObj {
+  const ref = schema.$ref;
+  if (typeof ref !== "string" || !isExternalSchemaRef(ref)) return schema;
+  const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
+  if (!isObjectNotArray(resolved)) return schema;
+  // Resolution can mint a member view with the group's `$defs` attached; a
+  // view whose group contributed nothing carries an empty one. Drop it so
+  // consumers compare and combine these structurally as the writer's
+  // sanitized input — but only when nothing in the body names a local
+  // definition, so the strip can never orphan a `#/...` reference. (With an
+  // empty `$defs` such a reference already dangles; the guard states the
+  // invariant instead of inferring it from emptiness.)
+  if (
+    isObjectNotArray(resolved.$defs) &&
+    Object.keys(resolved.$defs).length === 0 &&
+    !hasLocalSchemaRef(resolved)
+  ) {
+    const { $defs: _empty, ...rest } = resolved;
+    return internSchema(rest) as JSONSchemaObj;
+  }
+  return resolved;
+}
+
+/** Whether the schema's body (its `$defs` excluded) names a local `#/...`. */
+function hasLocalSchemaRef(schema: JSONSchema): boolean {
+  const refs = new Set<string>();
+  findCfcSchemaRefs(schema, refs);
+  for (const ref of refs) {
+    if (ref.startsWith("#")) return true;
+  }
+  return false;
 }

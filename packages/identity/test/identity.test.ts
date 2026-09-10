@@ -1,8 +1,14 @@
-import { assert, assertEquals } from "@std/assert";
-import { Identity } from "../src/identity.ts";
+import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
+
+import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
+
 import { decode } from "@commonfabric/utils/encoding";
 import { entropyToMnemonic, mnemonicToEntropy } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
+
+import { NobleEd25519Verifier } from "../src/ed25519/noble.ts";
+import { isNativeEd25519Supported } from "../src/ed25519/utils.ts";
+import { Identity } from "../src/identity.ts";
 
 Deno.test("Identity generates mnemonics", async () => {
   const [identity, mnemonic] = await Identity.generateMnemonic();
@@ -79,7 +85,8 @@ Deno.test("toRaw is asymmetric — byte order is preserved", async () => {
 });
 
 Deno.test("toRaw returns a COPY — mutating it cannot corrupt the identity", async () => {
-  // serialize() hands out the live internal buffer; toRaw must not.
+  // The pair `keyPair` hands out is immutable; `toRaw()` answers with bytes a
+  // caller owns, and so has a copy to make where that one does not.
   const identity = await Identity.fromRaw(new Uint8Array(32).fill(7), {
     implementation: "noble",
   });
@@ -88,10 +95,97 @@ Deno.test("toRaw returns a COPY — mutating it cannot corrupt the identity", as
   assertEquals(identity.toRaw()[0], 7, "the identity's seed must be unchanged");
 });
 
+Deno.test("a native signer's key pair cannot be used to reach it", async () => {
+  // The native arm holds `CryptoKey`s, which are opaque and carry no reachable
+  // material. What remains to check is the pair around them: one instance
+  // serves every call, so a holder able to reassign a key in it would reach
+  // the signer.
+  if (!await isNativeEd25519Supported()) return;
+
+  const identity = await Identity.fromRaw(new Uint8Array(32).fill(7), {
+    implementation: "webcrypto",
+  });
+  const keyPair = identity.keyPair;
+
+  assert(Object.isFrozen(keyPair), "the pair must not be reassignable");
+  assertThrows(
+    () => {
+      (keyPair as { publicCryptoKey: CryptoKey }).publicCryptoKey =
+        keyPair.privateCryptoKey;
+    },
+    TypeError,
+  );
+
+  // The `CryptoKeyPair` record is minted per call, so a caller that reassigns
+  // a member of one alters nothing anyone else reads.
+  const record = keyPair.cryptoKeyPair;
+  record.privateKey = record.publicKey;
+  assertEquals(keyPair.cryptoKeyPair.privateKey, keyPair.privateCryptoKey);
+});
+
+Deno.test("fromKeyPair refuses a pair for another algorithm", async () => {
+  // A pair holding material says which algorithm it is for and is otherwise
+  // indistinguishable from an ed25519 one, both keys being 32 bytes.
+  const seed = new Uint8Array(32).fill(7);
+  const identity = await Identity.fromRaw(seed, { implementation: "noble" });
+  const wrong = new FabricKeyPair(
+    "X25519",
+    identity.keyPair.publicKeyBytes,
+    identity.keyPair.privateKeyBytes,
+  );
+
+  await assertRejects(
+    () => Identity.fromKeyPair(wrong),
+    Error,
+    "X25519",
+  );
+});
+
+Deno.test("a signer copies the key material it is constructed from", async () => {
+  const seed = new Uint8Array(32).fill(7);
+  const identity = await Identity.fromRaw(seed, { implementation: "noble" });
+  seed[0] = 0xff;
+  assertEquals(identity.toRaw()[0], 7, "the signing secret must be unchanged");
+});
+
+Deno.test("a verifier built from raw bytes copies them", async () => {
+  // `fromRaw()` is where a mutable array enters; the constructor itself takes
+  // immutable bytes and so has nothing to defend against.
+  //
+  // The observable is `verify()`, not `did()`: the DID is derived once at
+  // construction and cached, so it cannot drift whatever happens. An aliased
+  // key would instead leave this verifying against mutated material while
+  // still reporting the original DID.
+  const identity = await Identity.fromRaw(new Uint8Array(32).fill(7), {
+    implementation: "noble",
+  });
+  const publicKey = identity.keyPair.publicKeyBytes.slice();
+  const verifier = await NobleEd25519Verifier.fromRaw(publicKey);
+  const payload = new Uint8Array(32).fill(9);
+  const signature = await identity.sign(payload);
+  assert(signature.ok);
+
+  publicKey[0] ^= 0xff;
+
+  const result = await verifier.verify({ signature: signature.ok, payload });
+  assert(result.ok, "verification must be unaffected by the caller's mutation");
+});
+
+Deno.test("two toRaw() callers cannot interfere with each other", async () => {
+  const identity = await Identity.fromRaw(new Uint8Array(32).fill(7), {
+    implementation: "noble",
+  });
+  const first = identity.toRaw();
+  const second = identity.toRaw();
+  assert(first !== second, "each call must yield its own array");
+  first[0] = 0xff;
+  assertEquals(second[0], 7, "one caller must not reach another's seed");
+});
+
 Deno.test("toRaw throws cleanly for a non-noble implementation", async () => {
   // On Firefox ≥136 the DEFAULT (native/WebCrypto) implementation is used, and
   // it cannot export private material. The failure must be an honest error, not
-  // a PKCS8-flavoured red herring, and pairing callers pass NOBLE explicitly to
+  // a PKCS8-flavored red herring, and pairing callers pass NOBLE explicitly to
   // avoid it entirely.
   const identity = await Identity.generate(); // default implementation
   let message = "";

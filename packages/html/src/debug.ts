@@ -7,6 +7,10 @@
  */
 
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
+import {
+  FabricSpecialObject,
+  toCompactDebugString,
+} from "@commonfabric/data-model";
 import { debugVDOMSchema } from "@commonfabric/runner/schemas";
 import { type ActiveRender, getActiveRenders } from "./render.ts";
 
@@ -72,7 +76,7 @@ function readCellAsync<T>(cell: CellHandle<T>): Promise<T | undefined> {
  * Recursively format a VDOM tree node into a readable string.
  * CellHandle props are shown as `<cell>`.
  */
-function formatTree(node: unknown, indent = 0): string {
+export function formatTree(node: unknown, indent = 0): string {
   const pad = "  ".repeat(indent);
 
   if (node == null) return `${pad}(null)`;
@@ -85,6 +89,13 @@ function formatTree(node: unknown, indent = 0): string {
   }
   if (typeof node !== "object") return `${pad}${String(node)}`;
 
+  // A `FabricSpecialObject` is rendered before the vdom-node check below
+  // reads it: one can carry a `name` of its own, as a `FabricError` does,
+  // which would pass for a node's.
+  if (node instanceof FabricSpecialObject) {
+    return `${pad}${toCompactDebugString(node)}`;
+  }
+
   const obj = node as Record<string, unknown>;
 
   // Always follow $UI indirection, matching the render code's behavior
@@ -95,12 +106,8 @@ function formatTree(node: unknown, indent = 0): string {
 
   const name = obj.name as string | undefined;
   if (!name) {
-    // Not a vdom node — try to stringify
-    try {
-      return `${pad}${JSON.stringify(node)}`;
-    } catch {
-      return `${pad}[object]`;
-    }
+    // Not a vdom node.
+    return `${pad}${toCompactDebugString(node)}`;
   }
 
   // Format props
@@ -111,14 +118,8 @@ function formatTree(node: unknown, indent = 0): string {
     for (const [key, value] of Object.entries(props)) {
       if (isCellHandle(value)) {
         propParts.push(`${key}=<cell>`);
-      } else if (typeof value === "string") {
-        propParts.push(`${key}="${value}"`);
       } else {
-        try {
-          propParts.push(`${key}=${JSON.stringify(value)}`);
-        } catch {
-          propParts.push(`${key}=[object]`);
-        }
+        propParts.push(`${key}=${toCompactDebugString(value)}`);
       }
     }
     if (propParts.length > 0) {
@@ -277,9 +278,7 @@ export function createVDomDebugHelpers() {
         rows.push({
           index: i++,
           container: parent,
-          cellId: entry.cell?.ref()?.id ?? "(none)",
-          path: entry.path,
-          renderer: entry.renderer ? "VDomRenderer" : "(legacy)",
+          cellId: entry.cell.ref()?.id ?? "(none)",
         });
       }
       console.table(rows);
@@ -295,10 +294,6 @@ export function createVDomDebugHelpers() {
         console.warn("No active render found.");
         return undefined;
       }
-      if (!target.cell) {
-        console.warn("No cell handle available (legacy render without cell).");
-        return undefined;
-      }
       return await readCellAsync(target.cell.asSchema(debugVDOMSchema));
     },
 
@@ -309,10 +304,6 @@ export function createVDomDebugHelpers() {
       const target = resolveTarget(el);
       if (!target) {
         console.warn("No active render found.");
-        return;
-      }
-      if (!target.cell) {
-        console.warn("No cell handle available (legacy render without cell).");
         return;
       }
       const tree = await readCellAsync(
@@ -326,7 +317,7 @@ export function createVDomDebugHelpers() {
     },
 
     /**
-     * Show node/listener counts per active renderer (worker path only).
+     * Show node/listener counts per active renderer.
      */
     stats() {
       const renders = getActiveRenders();
@@ -337,26 +328,15 @@ export function createVDomDebugHelpers() {
       const rows: Record<string, unknown>[] = [];
       let i = 0;
       for (const [parent, entry] of renders) {
-        if (entry.renderer) {
-          const info = entry.renderer.getApplicator().getDebugInfo();
-          rows.push({
-            index: i,
-            container: parent,
-            nodeCount: info.nodeCount,
-            listenerCount: info.listenerCount,
-            totalListeners: info.totalListeners,
-            rootNodeId: info.rootNodeId,
-          });
-        } else {
-          rows.push({
-            index: i,
-            container: parent,
-            nodeCount: "(legacy)",
-            listenerCount: "(legacy)",
-            totalListeners: "(legacy)",
-            rootNodeId: "(legacy)",
-          });
-        }
+        const info = entry.renderer.getApplicator().getDebugInfo();
+        rows.push({
+          index: i,
+          container: parent,
+          nodeCount: info.nodeCount,
+          listenerCount: info.listenerCount,
+          totalListeners: info.totalListeners,
+          rootNodeId: info.rootNodeId,
+        });
         i++;
       }
       console.table(rows);
@@ -367,8 +347,8 @@ export function createVDomDebugHelpers() {
      */
     nodeForId(id: number, el?: HTMLElement | number): Node | undefined {
       const target = resolveTarget(el);
-      if (!target?.renderer) {
-        console.warn("No worker-path renderer found.");
+      if (!target) {
+        console.warn("No active render found.");
         return undefined;
       }
       return target.renderer.getApplicator().getNode(id);

@@ -6,18 +6,20 @@ import {
   assertThrows,
 } from "@std/assert";
 import { fromFileUrl } from "@std/path/from-file-url";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
+import type { PatchOp } from "@commonfabric/memory/v2";
+
 import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 import type {
   NativeStorageCommit,
   Result,
   StorageTransactionRejected,
   Unit,
 } from "../src/storage/interface.ts";
-import type { PatchOp } from "@commonfabric/memory/v2";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { assertNoIndexedArrayStructuralOps } from "../src/storage/v2-transaction.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-native-commit");
@@ -34,17 +36,11 @@ const captureNativeDrafts = () => {
       transaction: NativeStorageCommit,
       source?: unknown,
     ): Promise<Result<Unit, StorageTransactionRejected>>;
-    commit(
-      transaction: unknown,
-      source?: unknown,
-    ): Promise<Result<Unit, StorageTransactionRejected>>;
   };
   const originalCommitNative = replica.commitNative?.bind(replica);
   assertExists(originalCommitNative);
 
   const drafts: NativeStorageCommit[] = [];
-  replica.commit = () =>
-    Promise.reject(new Error("legacy commit path should not be used"));
   replica.commitNative = async (transaction, source) => {
     drafts.push(structuredClone(transaction));
     return await originalCommitNative(transaction, source);
@@ -476,11 +472,13 @@ Deno.test("memory v2 transactions elide transient nested patches from composed h
       "../../generated-patterns/integration/patterns/counter-nested-handler-composition.pattern.ts",
       import.meta.url,
     );
-    const programResolver = new FileSystemProgramResolver(
-      fromFileUrl(modulePath),
+    const program = await resolveLocalProgram(
+      (resolver) => runtime.harness.resolve(resolver),
+      {
+        main: fromFileUrl(modulePath),
+        mainExport: "counterWithNestedHandlerComposition",
+      },
     );
-    const program = await runtime.harness.resolve(programResolver);
-    program.mainExport = "counterWithNestedHandlerComposition";
     const patternFactory = await runtime.patternManager.compilePattern(program);
 
     const tx = runtime.edit();

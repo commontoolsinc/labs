@@ -19,13 +19,28 @@ The following surfaces show registered pieces:
 | `cf piece search` | Searches the readable input and result data of registered pieces only |
 | `cf piece map` | Compares links among registered pieces only |
 | `wish({ query: "#pieceRegistry" })` | Resolves the piece registry directly rather than running a hashtag search |
-| `PieceManager.getPieceRegistry()` and `PiecesController.getRegisteredPieces()` | Return the piece registry |
+| `PiecesController.getPieceRegistry()` and `PiecesController.getRegisteredPieces()` | Return the piece registry |
 | `RuntimeClient.getPiecesListCell()` | Returns a reactive handle to the piece registry |
 | The FUSE `pieces/` directory | Projects the piece registry as named directories |
 
 These are not storage-wide piece listings. In particular, `cf piece search`
 does not return an unregistered piece just because a registered piece links to
 data owned by it.
+
+## The Slug Index Is the Namespace Root
+
+Slugs have their own discovery boundary, beside the registry's. A slug document
+lives at an ID derived from its name, so nothing can enumerate slugs it was
+never told the names of. The space's **slug index** — one document naming every
+slug assigned through `--slug` or `set-slug` — is what makes the namespace
+enumerable: `cf piece slugs` lists it, resolving each name to where it points —
+the piece it addresses, or, where the name points at a cell inside a piece, that
+piece and the path to the cell. The index records the names only; where a name
+points remains the slug document's own answer. It records assignments made
+since it existed, so a slug written by an older client still resolves but is
+not listed. A slug may
+also name an unregistered piece, which makes the slug listing a discovery path
+the registry does not have.
 
 ## Finding Pieces Outside the Registry
 

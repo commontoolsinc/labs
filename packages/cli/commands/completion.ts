@@ -5,7 +5,7 @@
  * completion callback only `(command, parent)`: no cursor word, and no access
  * to the options already typed. That is enough for a static command tree and
  * nothing more — it cannot answer "the callables of the piece named by the
- * `--piece` on this line". Since the values worth completing in cf are exactly
+ * `--cell` on this line". Since the values worth completing in cf are exactly
  * those context-dependent ones (piece ids, callables, cell paths), this command
  * emits its own thin shell functions that forward the whole line instead.
  */
@@ -38,7 +38,7 @@ REQUIRES '${cliName()}' ON PATH:
   The installed function calls '${cliName()} completion complete' on every Tab,
   and swallows its errors, so without a '${cliName()}' on PATH completion
   silently yields nothing — including for "deno task ${cliName()} <TAB>".
-  mise puts the checkout's bin/ on PATH; otherwise symlink bin/${cliName()}.
+  Put one there once with 'deno task install-cf'.
   See "Installing ${cliName()} on PATH" in packages/cli/README.md.
 
 INSTALL (zsh), in ~/.zshrc after compinit:
@@ -129,6 +129,7 @@ const completeCommand = new Command()
 
       // Resolved lazily: importing the root command pulls in the whole command
       // tree, and doing it inside the guard keeps a failure silent.
+      // deno-lint-ignore cf-imports/no-inline-module-import
       const { main } = await import("./main.ts");
 
       const lines = await complete(

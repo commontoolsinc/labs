@@ -1,5 +1,6 @@
 node_modules
 dist
+.ci-cache
 *.tsbuildinfo
 .DS_Store
 .vscode
@@ -19,6 +20,9 @@ dist/
 .cf/
 .ct/
 .cf-harness-artifacts/
+.cf-harness-console*/
+.cf-harness-hostile-demo*/
+.cf-harness-demo-*/
 claude-research.key
 *.key
 # Backup keys the tailscale share script rotates aside (e.g. cf.key.implicit-trust.bak)
@@ -51,3 +55,15 @@ CLAUDE.local.md
 
 # Temp dir created by docs/check.ts while type-checking doc code blocks
 docs/.doccheck*
+
+# Temp deno configs written at the repo root by `runDenoCheckWithTemporaryConfig`
+# (packages/test-support/src/isolated-deno.ts). It removes each one in a
+# `finally`, so these survive only when a run is interrupted -- at which point
+# `git add -A` will happily commit one, and `deno fmt --check` then rejects it.
+.deno.standard-decorators.*.json
+
+# Uncompiled source written under tasks/ by tasks/write-coverage-lcov.test.ts,
+# which needs a tracked file the Deno cache holds no transpiled form of. It
+# removes each one in a `finally`, so these survive only when a run is
+# interrupted, at which point `git add -A` would otherwise commit one.
+tasks/.write-lcov-uncompiled.*.ts

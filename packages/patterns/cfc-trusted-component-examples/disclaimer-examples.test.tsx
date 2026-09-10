@@ -1,4 +1,4 @@
-import { assert, handler, pattern, Writable } from "commonfabric";
+import { assert, handler, pattern, TESTS, Writable } from "commonfabric";
 import {
   DISCLAIMER_EXAMPLE_COUNT,
   DISCLAIMER_RENDERED_EXAMPLE_COUNT,
@@ -136,7 +136,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: runAck({ suite: influence }) },
       { assertion: assert_influence_disclosure_is_render_only },
       { action: runProvenance({ suite: provenance }) },

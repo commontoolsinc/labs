@@ -4,6 +4,7 @@
  * A direct alias may stay structural, but a later computation over that alias
  * should still lower at its own seam.
  */
+
 import {
   Default,
   pattern,

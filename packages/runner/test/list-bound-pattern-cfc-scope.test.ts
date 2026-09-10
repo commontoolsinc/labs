@@ -22,6 +22,10 @@ import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -147,6 +151,7 @@ describe("bound list factory CFC and scope", () => {
       tx,
     );
     const link = capture.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, link.space);
     tx.writeOrThrow({
       space: link.space,
       scope: link.scope,
@@ -157,7 +162,7 @@ describe("bound list factory CFC and scope", () => {
       value: 2,
       cfc: {
         version: 1,
-        schemaHash: "bound-list-capture",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -182,6 +187,7 @@ describe("bound list factory CFC and scope", () => {
       tx,
     );
     const link = selector.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, link.space);
     tx.writeOrThrow({
       space: link.space,
       scope: link.scope,
@@ -192,7 +198,7 @@ describe("bound list factory CFC and scope", () => {
       value,
       cfc: {
         version: 1,
-        schemaHash: `bound-list-${kind}-selector`,
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -419,6 +425,7 @@ describe("bound list factory CFC and scope", () => {
     );
 
     const mapSelectorLink = mapSelector.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, mapSelectorLink.space);
     tx.writeOrThrow({
       space: mapSelectorLink.space,
       scope: mapSelectorLink.scope,
@@ -429,7 +436,7 @@ describe("bound list factory CFC and scope", () => {
       value: mapSelector.getRaw() as FabricValue,
       cfc: {
         version: 1,
-        schemaHash: "bound-list-map-selector",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{

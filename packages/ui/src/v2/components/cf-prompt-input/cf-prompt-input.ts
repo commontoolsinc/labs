@@ -365,20 +365,27 @@ export class CFPromptInput extends BaseElement {
   declare modelItems: Array<ModelItem | undefined>;
   declare model: CellHandle<string> | string | null;
   declare voice: boolean;
-  // Opt-in: upload File/Blob attachments to the blob store on add (default off,
-  // so existing consumers keep the raw-File pass-through behavior).
+
+  /**
+   * Whether to upload `File`/`Blob` attachments to the blob store on add.
+   * Default off, so a consumer that does not opt in keeps the raw-`File`
+   * pass-through behavior.
+   */
   declare uploadAttachments: boolean;
 
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   accessor theme: CFTheme = defaultTheme;
 
-  // Runtime + space context, consumed the same way cf-file-input does, so the
-  // component can upload attachment bytes itself when uploadAttachments is set.
+  /**
+   * The runtime, consumed so the component can upload attachment bytes itself
+   * when `uploadAttachments` is set.
+   */
   @consume({ context: runtimeContext, subscribe: true })
   @property({ attribute: false })
   accessor runtime: RuntimeClient | undefined = undefined;
 
+  /** The space the runtime uploads into, consumed alongside `runtime`. */
   @consume({ context: spaceContext, subscribe: true })
   @property({ attribute: false })
   accessor space: DID | undefined = undefined;
@@ -386,15 +393,22 @@ export class CFPromptInput extends BaseElement {
   private _textareaElement?: HTMLElement;
   private _modelSelectElement?: HTMLSelectElement;
 
-  // Attachment management
+  /** The attachments, keyed by attachment id. */
   private attachments: Map<string, PromptAttachment> = new Map();
-  // In-flight upload promises, keyed by attachment id, so a submit can wait for
-  // them before emitting (see _handleSend).
+
+  /**
+   * In-flight upload promises, keyed by attachment id, so a submit can wait
+   * for them before emitting (see `_handleSend()`).
+   */
   private _uploadPromises: Map<string, Promise<void>> = new Map();
-  // True while a submit is awaiting in-flight uploads (disables the send btn).
+
+  /**
+   * Whether a submit is awaiting in-flight uploads, which disables the send
+   * button.
+   */
   private _sending = false;
 
-  // Mention controller
+  /** The mention controller. */
   private mentionController = new MentionController(this, {
     onInsert: (markdown, mentionCell) =>
       this._insertMentionAtCursor(markdown, mentionCell),
@@ -402,7 +416,7 @@ export class CFPromptInput extends BaseElement {
     getContent: () => this.value,
   });
 
-  // Model cell controller for binding
+  /** Cell controller for the model binding. */
   private _modelController = createCellController<string>(this, {
     timing: { strategy: "immediate" },
   });

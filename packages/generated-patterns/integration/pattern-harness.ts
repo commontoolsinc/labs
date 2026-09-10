@@ -2,7 +2,7 @@ import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 import { waitFor } from "@commonfabric/integration";
 import { fromFileUrl } from "@std/path";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../../runner/src/storage/cache.deno.ts";
 import {
@@ -34,6 +34,23 @@ export interface PatternIntegrationScenario<TArgument = any> {
   exportName?: string;
   argument?: TArgument;
   steps: TestStep[];
+
+  /**
+   * Data files to store with the pattern, as paths on disk. A file the pattern
+   * reads with `dataFile()` is attached from that call alone and needs no
+   * entry here; this is for a file the source cannot name, such as one read by
+   * a computed path, and for a file that ships with a pattern that does not
+   * read it. Each is stored under its path relative to `dataRoot`.
+   */
+  dataFiles?: readonly string[];
+
+  /**
+   * Root grounding `dataFiles`, and so the paths those files are stored under.
+   * Omitted, it is the common directory containing the module and every data
+   * file — which is the module's own directory only when the data sits beside
+   * or beneath it. Given explicitly, it must contain the module.
+   */
+  dataRoot?: string;
 }
 
 const signer = await Identity.fromPassphrase("pattern integration harness");
@@ -82,11 +99,19 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   }));
 
   const modulePath = resolveModulePath(scenario.module);
-  const programResolver = new FileSystemProgramResolver(modulePath);
-  const program = await runtime.harness.resolve(programResolver);
-  if (scenario.exportName) {
-    program.mainExport = scenario.exportName;
-  }
+  const program = await resolveLocalProgram(
+    (resolver) => runtime.harness.resolve(resolver),
+    {
+      main: modulePath,
+      ...(scenario.dataRoot === undefined ? {} : { root: scenario.dataRoot }),
+      ...(scenario.dataFiles === undefined
+        ? {}
+        : { dataFilePaths: scenario.dataFiles }),
+      ...(scenario.exportName === undefined
+        ? {}
+        : { mainExport: scenario.exportName }),
+    },
+  );
   const patternFactory = await runtime.patternManager.compilePattern(program, {
     space,
   });

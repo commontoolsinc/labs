@@ -135,7 +135,7 @@ const WRAPPED_REACTIVE_PATTERN = WRAPPED_PATTERN
 
 Deno.test("pattern callback lowering transforms through and preserves the params-schema carrier", () => {
   const output = transformWith(WRAPPED_PATTERN, (state) => [
-    new PatternCallbackLoweringTransformer({ mode: "transform", state }),
+    new PatternCallbackLoweringTransformer({ state }),
   ]);
 
   const carrier = getCarrier(findPatternCall(output));
@@ -147,7 +147,7 @@ Deno.test("pattern callback lowering transforms through and preserves the params
 
 Deno.test("pattern schema injection reads through and preserves the params-schema carrier", () => {
   const output = transformWith(WRAPPED_PATTERN, (state) => [
-    new SchemaInjectionTransformer({ mode: "transform", state }),
+    new SchemaInjectionTransformer({ state }),
   ]);
 
   const patternCall = findPatternCall(output);
@@ -159,7 +159,7 @@ Deno.test("pattern schema injection reads through and preserves the params-schem
 
 Deno.test("reactive cause traversal enters a params-schema-wrapped pattern callback", () => {
   const output = transformWith(WRAPPED_REACTIVE_PATTERN, (state) => [
-    new ReactiveVariableForTransformer({ mode: "transform", state }),
+    new ReactiveVariableForTransformer({ state }),
   ]);
 
   const patternCall = findPatternCall(output);

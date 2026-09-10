@@ -3,14 +3,14 @@ import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../../runner/src/builder/factory.ts";
 import type { Cell } from "../../runner/src/builder/types.ts";
-import { PieceManager } from "../src/manager.ts";
+import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("piece registration bench");
 
 type BenchEnv = {
   storageManager: ReturnType<typeof StorageManager.emulate>;
   runtime: Runtime;
-  manager: PieceManager;
+  pieces: PiecesController;
   detachedPieces: Cell<unknown>[];
 };
 
@@ -21,10 +21,14 @@ const createDefaultPattern = () => {
     { piece: Cell<unknown> },
     { pieceRegistry: Cell<Cell<unknown>[]> }
   >(
+    true,
+    {
+      type: "object",
+      properties: { pieceRegistry: { type: "array", asCell: ["cell"] } },
+    },
     ({ piece }, { pieceRegistry }) => {
       pieceRegistry.push(piece);
     },
-    { proxy: true },
   );
   return pattern<{ pieceRegistry: Cell<unknown>[] }>(
     ({ pieceRegistry }) => ({
@@ -38,10 +42,11 @@ const createCounterPattern = () => {
   const { commonfabric } = createBuilder();
   const { handler, pattern } = commonfabric;
   const increment = handler<void, { value: number }>(
+    true,
+    true,
     (_, { value }) => {
       value++;
     },
-    { proxy: true },
   );
   return pattern<{ value: number }>(
     ({ value }) => ({
@@ -63,22 +68,22 @@ async function createBenchEnv(pieceCount: number): Promise<BenchEnv> {
     identity: signer,
     spaceName: `piece-registration-bench-${crypto.randomUUID()}`,
   });
-  const manager = new PieceManager(session, runtime);
-  await manager.synced();
+  const pieces = new PiecesController(session, runtime);
+  await pieces.synced();
 
-  const defaultPatternPiece = await manager.runPersistent(
+  const defaultPatternPiece = await pieces.runPersistent(
     createDefaultPattern(),
     { pieceRegistry: [] },
     "piece-registration-default-pattern",
   );
-  await manager.linkDefaultPattern(defaultPatternPiece);
-  await manager.runtime.idle();
-  await manager.synced();
+  await pieces.linkDefaultPattern(defaultPatternPiece);
+  await pieces.runtime.idle();
+  await pieces.synced();
 
   const counterPattern = createCounterPattern();
   const detachedPieces: Cell<unknown>[] = [];
   for (let index = 0; index < pieceCount; index++) {
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       counterPattern,
       { value: index },
       `piece-registration-${index}`,
@@ -86,10 +91,10 @@ async function createBenchEnv(pieceCount: number): Promise<BenchEnv> {
     detachedPieces.push(piece);
   }
 
-  await manager.runtime.idle();
-  await manager.synced();
+  await pieces.runtime.idle();
+  await pieces.synced();
 
-  return { storageManager, runtime, manager, detachedPieces };
+  return { storageManager, runtime, pieces, detachedPieces };
 }
 
 const cleanup = async (env: BenchEnv) => {
@@ -97,19 +102,19 @@ const cleanup = async (env: BenchEnv) => {
   await env.storageManager.close();
 };
 
-Deno.bench("PieceManager.add(single detached piece)", async () => {
+Deno.bench("PiecesController.add(single detached piece)", async () => {
   const env = await createBenchEnv(1);
   try {
-    await env.manager.add([env.detachedPieces[0]!]);
+    await env.pieces.add([env.detachedPieces[0]!]);
   } finally {
     await cleanup(env);
   }
 });
 
-Deno.bench("PieceManager.add(four detached pieces)", async () => {
+Deno.bench("PiecesController.add(four detached pieces)", async () => {
   const env = await createBenchEnv(4);
   try {
-    await env.manager.add(env.detachedPieces);
+    await env.pieces.add(env.detachedPieces);
   } finally {
     await cleanup(env);
   }

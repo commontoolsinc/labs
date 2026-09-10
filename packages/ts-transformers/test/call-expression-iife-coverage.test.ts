@@ -141,12 +141,13 @@ Deno.test(
   },
 );
 
-// This test covers the `createLiftAppliedCall` sub-path directly: a zero-arg
-// IIFE reading a top-level pattern cell inside an `ifElse` branch, which the
-// array-method tests above never reach.
 Deno.test(
   "zero-arg IIFE reading a top-level cell inside an ifElse branch wraps the whole IIFE in a lift applied to that cell",
   async () => {
+    // This test covers the `createLiftAppliedCall` sub-path directly: a
+    // zero-arg IIFE reading a top-level pattern cell inside an `ifElse` branch,
+    // which the array-method tests above never reach.
+
     const output = parseModule(
       await transformSource(
         `/// <cts-enable />

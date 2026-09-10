@@ -1,13 +1,15 @@
+import { encodeHex } from "@std/encoding/hex";
+
+import { sha256 } from "@commonfabric/content-hash";
+import { cloneIfNecessary, type FabricValue } from "@commonfabric/data-model";
 import {
+  CFC_ENFORCEMENT_MODES,
   type CfcEnforcementMode as RunnerCfcEnforcementMode,
   DEFAULT_CFC_ENFORCEMENT_MODE,
+  isCfcEnforcementMode,
 } from "@commonfabric/runner/cfc";
-import { sha256 } from "@commonfabric/content-hash";
-import {
-  cloneIfNecessary,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
-import { encodeHex } from "@std/encoding/hex";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
 import {
   canonicalCfcJsonStringify,
   type CfcDerivedSlotsAnnotation,
@@ -203,30 +205,44 @@ export function safeReconcileCfcWritebacks(options: {
   }
 }
 
-const CFC_MODES = [
-  "disabled",
-  "observe",
-  "enforce-explicit",
-  "enforce-strict",
-] as const satisfies readonly CfcEnforcementMode[];
-
-export function parseCfcMode(
-  value: string | undefined,
-): CfcEnforcementMode | undefined {
-  return (CFC_MODES as readonly string[]).includes(value ?? "")
-    ? value as CfcEnforcementMode
-    : undefined;
+/**
+ * The mode a source states, checked against the ladder.
+ *
+ * @throws Error when the source states a name the ladder does not hold.
+ */
+function statedCfcMode(
+  value: string,
+  source: string,
+): CfcEnforcementMode {
+  if (!isCfcEnforcementMode(value)) {
+    throw new Error(
+      `${source}=${value} is not a CFC enforcement mode; expected one of ${
+        CFC_ENFORCEMENT_MODES.join(", ")
+      }`,
+    );
+  }
+  return value;
 }
 
+/**
+ * The mode a mount runs its CFC guardrails at.
+ *
+ * `--cfc-mode` decides when it names a mode, `CF_CFC_MODE` decides otherwise,
+ * and a mount that names a mode nowhere runs at
+ * {@link DEFAULT_CFC_ENFORCEMENT_MODE}. An empty value names nothing: the
+ * mount reads an absent flag as one, and so is an exported but unset
+ * environment variable.
+ *
+ * @throws Error when the deciding source names a mode off the ladder, giving
+ * the value, the source that named it, and the accepted names.
+ */
 export function resolveCfcMode(options: {
   cliMode?: string;
   envMode?: string;
-  runtimeMode?: CfcEnforcementMode;
 }): CfcEnforcementMode {
-  return parseCfcMode(options.cliMode) ??
-    parseCfcMode(options.envMode) ??
-    options.runtimeMode ??
-    DEFAULT_CFC_ENFORCEMENT_MODE;
+  if (options.cliMode) return statedCfcMode(options.cliMode, "--cfc-mode");
+  if (options.envMode) return statedCfcMode(options.envMode, "CF_CFC_MODE");
+  return DEFAULT_CFC_ENFORCEMENT_MODE;
 }
 
 export function shouldEnableCfcAnnotations(options: {
@@ -876,14 +892,14 @@ const RECOVERY_STATUSES: CfcPreparedWritebackStatus[] = [
 ];
 
 export class CfcWritebackStore {
-  private prepared = new Map<string, CfcPreparedWriteback>();
-  private records = new Map<string, CfcWritebackRecoveryRecord>();
-  private malformedCounter = 0;
-  private storagePath: string | undefined;
+  #prepared = new Map<string, CfcPreparedWriteback>();
+  #records = new Map<string, CfcWritebackRecoveryRecord>();
+  #malformedCounter = 0;
+  #storagePath: string | undefined;
 
   constructor(options: { storagePath?: string } = {}) {
-    this.storagePath = options.storagePath;
-    this.load();
+    this.#storagePath = options.storagePath;
+    this.#load();
   }
 
   setPreparedXattr(
@@ -895,18 +911,18 @@ export class CfcWritebackStore {
     reason: string;
   } {
     if (normalizeCfcWritebackXattrName(name) !== CFC_WRITEBACK_PREPARE_XATTR) {
-      this.recordMalformed(ino, name, "unsupported writeback xattr");
+      this.#recordMalformed(ino, name, "unsupported writeback xattr");
       return { ok: false, reason: "unsupported writeback xattr" };
     }
     const parsed = parsePreparedWriteback(value);
     if (!parsed) {
-      this.recordMalformed(ino, name, "invalid prepare metadata");
+      this.#recordMalformed(ino, name, "invalid prepare metadata");
       return { ok: false, reason: "invalid prepare metadata" };
     }
-    const key = this.key(ino, parsed.operation, preparedKeyName(parsed));
-    this.prepared.set(key, parsed);
+    const key = this.#key(ino, parsed.operation, preparedKeyName(parsed));
+    this.#prepared.set(key, parsed);
     const now = new Date().toISOString();
-    this.records.set(key, {
+    this.#records.set(key, {
       version: 1,
       key,
       status: "pending-prepare",
@@ -921,7 +937,7 @@ export class CfcWritebackStore {
       createdAt: now,
       updatedAt: now,
     });
-    this.persist();
+    this.#persist();
     return { ok: true, prepared: parsed };
   }
 
@@ -940,7 +956,7 @@ export class CfcWritebackStore {
     }
     const parsed = parseFinalizedWriteback(value);
     if (!parsed) return { ok: false, reason: "invalid finalize metadata" };
-    const names = this.preparedNamesForOperation(ino, parsed.operation);
+    const names = this.#preparedNamesForOperation(ino, parsed.operation);
     if (names.length === 0) {
       this.markFinalizedPendingCleanup(ino, parsed.operation);
       this.deletePrepared(ino, parsed.operation);
@@ -958,7 +974,7 @@ export class CfcWritebackStore {
     operation: CfcWritebackOperation,
     name?: string,
   ): CfcPreparedWriteback | undefined {
-    return this.prepared.get(this.key(ino, operation, name));
+    return this.#prepared.get(this.#key(ino, operation, name));
   }
 
   deletePrepared(
@@ -966,21 +982,21 @@ export class CfcWritebackStore {
     operation: CfcWritebackOperation,
     name?: string,
   ): void {
-    const key = this.key(ino, operation, name);
-    this.prepared.delete(key);
-    this.records.delete(key);
-    this.persist();
+    const key = this.#key(ino, operation, name);
+    this.#prepared.delete(key);
+    this.#records.delete(key);
+    this.#persist();
   }
 
   deleteAllForIno(ino: bigint): void {
     const prefix = `${ino}:`;
-    for (const key of [...this.prepared.keys()]) {
-      if (key.startsWith(prefix)) this.prepared.delete(key);
+    for (const key of [...this.#prepared.keys()]) {
+      if (key.startsWith(prefix)) this.#prepared.delete(key);
     }
-    for (const key of [...this.records.keys()]) {
-      if (key.startsWith(prefix)) this.records.delete(key);
+    for (const key of [...this.#records.keys()]) {
+      if (key.startsWith(prefix)) this.#records.delete(key);
     }
-    this.persist();
+    this.#persist();
   }
 
   markMutationApplied(
@@ -989,7 +1005,7 @@ export class CfcWritebackStore {
     name?: string,
     options: { requestedFields?: CfcMetadataLabelKey[] } = {},
   ): void {
-    const record = this.findRecord(ino, operation, name);
+    const record = this.#findRecord(ino, operation, name);
     if (!record) return;
     const now = new Date().toISOString();
     record.status = "mutation-applied";
@@ -998,7 +1014,7 @@ export class CfcWritebackStore {
     if (options.requestedFields) {
       record.requestedFields = [...options.requestedFields].sort();
     }
-    this.persist();
+    this.#persist();
   }
 
   markRunnerCommitFailed(
@@ -1007,14 +1023,14 @@ export class CfcWritebackStore {
     reason: string,
     name?: string,
   ): void {
-    const record = this.findRecord(ino, operation, name);
+    const record = this.#findRecord(ino, operation, name);
     if (!record) return;
     const now = new Date().toISOString();
     record.status = "runner-commit-failed";
     record.commitFailedAt = now;
     record.updatedAt = now;
     record.diagnostics.push(reason);
-    this.persist();
+    this.#persist();
   }
 
   markReadyForExactRecomputation(
@@ -1022,13 +1038,13 @@ export class CfcWritebackStore {
     operation: CfcWritebackOperation,
     name?: string,
   ): void {
-    const record = this.findRecord(ino, operation, name);
+    const record = this.#findRecord(ino, operation, name);
     if (!record) return;
     const now = new Date().toISOString();
     record.status = "ready-for-exact-recomputation";
     record.readyAt = now;
     record.updatedAt = now;
-    this.persist();
+    this.#persist();
   }
 
   markFinalizedPendingCleanup(
@@ -1036,13 +1052,13 @@ export class CfcWritebackStore {
     operation: CfcWritebackOperation,
     name?: string,
   ): void {
-    const record = this.findRecord(ino, operation, name);
+    const record = this.#findRecord(ino, operation, name);
     if (!record) return;
     const now = new Date().toISOString();
     record.status = "finalized-pending-cleanup";
     record.finalizedAt = now;
     record.updatedAt = now;
-    this.persist();
+    this.#persist();
   }
 
   reconcileTree(tree: FsTree): CfcWritebackReconciliationResult {
@@ -1055,7 +1071,7 @@ export class CfcWritebackStore {
       diagnostics: [],
     };
 
-    for (const record of [...this.records.values()]) {
+    for (const record of [...this.#records.values()]) {
       if (!record.prepared) continue;
       result.inspected++;
       const match = findPreparedNode(tree, record.prepared);
@@ -1066,19 +1082,19 @@ export class CfcWritebackStore {
         continue;
       }
 
-      const reboundKey = this.key(
+      const reboundKey = this.#key(
         match.ino,
         record.prepared.operation,
         preparedKeyName(record.prepared),
       );
       if (record.key !== reboundKey) {
-        this.records.delete(record.key);
-        this.prepared.delete(record.key);
+        this.#records.delete(record.key);
+        this.#prepared.delete(record.key);
         record.key = reboundKey;
         record.ino = match.ino.toString();
         record.updatedAt = new Date().toISOString();
-        this.records.set(reboundKey, record);
-        this.prepared.set(reboundKey, record.prepared);
+        this.#records.set(reboundKey, record);
+        this.#prepared.set(reboundKey, record.prepared);
         result.rebound++;
       }
 
@@ -1087,8 +1103,8 @@ export class CfcWritebackStore {
           record.status === "finalized-pending-cleanup") &&
         isCoherentExactAnnotation(match.annotation)
       ) {
-        this.records.delete(record.key);
-        this.prepared.delete(record.key);
+        this.#records.delete(record.key);
+        this.#prepared.delete(record.key);
         result.finalized++;
         continue;
       }
@@ -1108,12 +1124,12 @@ export class CfcWritebackStore {
       result.reapplied++;
     }
 
-    this.persist();
+    this.#persist();
     return result;
   }
 
   snapshot(): CfcWritebackSnapshot {
-    const records = [...this.records.values()].map((record) =>
+    const records = [...this.#records.values()].map((record) =>
       cloneRecoveryRecord(record, true)
     );
     const counts = Object.fromEntries(
@@ -1124,7 +1140,7 @@ export class CfcWritebackStore {
     }
     return {
       version: 1,
-      storagePath: this.storagePath,
+      storagePath: this.#storagePath,
       records,
       counts,
     };
@@ -1147,7 +1163,7 @@ export class CfcWritebackStore {
     };
   }
 
-  private key(
+  #key(
     ino: bigint,
     operation: CfcWritebackOperation,
     name?: string,
@@ -1155,20 +1171,20 @@ export class CfcWritebackStore {
     return `${ino}:${operation}:${name ?? ""}`;
   }
 
-  private findRecord(
+  #findRecord(
     ino: bigint,
     operation: CfcWritebackOperation,
     name?: string,
   ): CfcWritebackRecoveryRecord | undefined {
-    return this.records.get(this.key(ino, operation, name));
+    return this.#records.get(this.#key(ino, operation, name));
   }
 
-  private preparedNamesForOperation(
+  #preparedNamesForOperation(
     ino: bigint,
     operation: CfcWritebackOperation,
   ): Array<string | undefined> {
     const prefix = `${ino}:${operation}:`;
-    return [...this.prepared.keys()]
+    return [...this.#prepared.keys()]
       .filter((key) => key.startsWith(prefix))
       .map((key) => {
         const name = key.slice(prefix.length);
@@ -1176,10 +1192,10 @@ export class CfcWritebackStore {
       });
   }
 
-  private recordMalformed(ino: bigint, name: string, reason: string): void {
+  #recordMalformed(ino: bigint, name: string, reason: string): void {
     const now = new Date().toISOString();
-    const key = `malformed:${ino}:${this.malformedCounter++}`;
-    this.records.set(key, {
+    const key = `malformed:${ino}:${this.#malformedCounter++}`;
+    this.#records.set(key, {
       version: 1,
       key,
       status: "malformed-prepare",
@@ -1189,14 +1205,14 @@ export class CfcWritebackStore {
       createdAt: now,
       updatedAt: now,
     });
-    this.persist();
+    this.#persist();
   }
 
-  private load(): void {
-    if (!this.storagePath) return;
+  #load(): void {
+    if (!this.#storagePath) return;
     let text: string;
     try {
-      text = Deno.readTextFileSync(this.storagePath);
+      text = Deno.readTextFileSync(this.#storagePath);
     } catch {
       return;
     }
@@ -1205,35 +1221,43 @@ export class CfcWritebackStore {
     try {
       parsed = JSON.parse(text);
     } catch {
-      this.recordMalformed(0n, this.storagePath, "invalid recovery store JSON");
+      this.#recordMalformed(
+        0n,
+        this.#storagePath,
+        "invalid recovery store JSON",
+      );
       return;
     }
     if (
-      !isRecord(parsed) || parsed.version !== 1 ||
+      !isObjectNotArray(parsed) || parsed.version !== 1 ||
       !Array.isArray(parsed.records)
     ) {
-      this.recordMalformed(0n, this.storagePath, "unsupported recovery store");
+      this.#recordMalformed(
+        0n,
+        this.#storagePath,
+        "unsupported recovery store",
+      );
       return;
     }
     for (const record of parsed.records) {
       if (!isRecoveryRecord(record)) continue;
       const cloned = cloneRecoveryRecord(record, false);
-      this.records.set(cloned.key, cloned);
-      if (cloned.prepared) this.prepared.set(cloned.key, cloned.prepared);
+      this.#records.set(cloned.key, cloned);
+      if (cloned.prepared) this.#prepared.set(cloned.key, cloned.prepared);
     }
   }
 
-  private persist(): void {
-    if (!this.storagePath) return;
-    const slash = this.storagePath.lastIndexOf("/");
+  #persist(): void {
+    if (!this.#storagePath) return;
+    const slash = this.#storagePath.lastIndexOf("/");
     if (slash > 0) {
-      Deno.mkdirSync(this.storagePath.slice(0, slash), { recursive: true });
+      Deno.mkdirSync(this.#storagePath.slice(0, slash), { recursive: true });
     }
     Deno.writeTextFileSync(
-      this.storagePath,
+      this.#storagePath,
       canonicalCfcJsonStringify({
         version: 1,
-        records: [...this.records.values()],
+        records: [...this.#records.values()],
       }),
     );
   }
@@ -1246,12 +1270,12 @@ function parsePreparedWriteback(value: string): CfcPreparedWriteback | null {
   } catch {
     return null;
   }
-  if (!isRecord(parsed)) return null;
+  if (!isObjectNotArray(parsed)) return null;
   if (parsed.version !== 1) return null;
   if (!isOperation(parsed.operation)) return null;
   if (typeof parsed.expectedGeneration !== "string") return null;
-  if (!isRecord(parsed.target)) return null;
-  if (!isRecord(parsed.labels)) return null;
+  if (!isObjectNotArray(parsed.target)) return null;
+  if (!isObjectNotArray(parsed.labels)) return null;
   return parsed as CfcPreparedWriteback;
 }
 
@@ -1262,7 +1286,7 @@ function parseFinalizedWriteback(value: string): CfcFinalizedWriteback | null {
   } catch {
     return null;
   }
-  if (!isRecord(parsed)) return null;
+  if (!isObjectNotArray(parsed)) return null;
   if (parsed.version !== 1) return null;
   if (!isOperation(parsed.operation)) return null;
   if (typeof parsed.committedGeneration !== "string") return null;
@@ -1394,7 +1418,7 @@ function cloneRecoveryRecord(
 function isRecoveryRecord(
   value: unknown,
 ): value is CfcWritebackRecoveryRecord {
-  if (!isRecord(value)) return false;
+  if (!isObjectNotArray(value)) return false;
   if (value.version !== 1) return false;
   if (typeof value.key !== "string") return false;
   if (!RECOVERY_STATUSES.includes(value.status as CfcPreparedWritebackStatus)) {
@@ -1418,10 +1442,6 @@ function isOperation(value: unknown): value is CfcWritebackOperation {
     value === "unlink" || value === "rmdir" ||
     value === "rename-source" || value === "rename-destination" ||
     value === "symlink" || value === "setattr-metadata";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function preparedGeneration(prepared: CfcPreparedWriteback): string {

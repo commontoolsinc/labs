@@ -1,18 +1,21 @@
-// ci duration: median wall-clock of recent completed runs, with a trend
-// sparkline. One factory builds both the labs and loom instances against their
-// own repo + workflow. Both instances drill down to their repository's history
-// on /bench. The labs instance owns the Gantt image route. The Gantt view
-// exposes scripts/ci-gantt.ts controls for both repositories.
+/**
+ * Reports the median wall-clock time of recent completed CI runs, with a trend
+ * sparkline. One factory builds both the labs and loom instances against their
+ * own repository and workflow, and both drill down to that repository's
+ * history on /bench. The labs instance owns the Gantt image route, whose view
+ * exposes the scripts/ci-gantt.ts controls for both repositories.
+ */
+
 import { fromFileUrl } from "@std/path";
 import {
-  runSource,
   type Route,
   type Run,
+  runSource,
   type Status,
   type Tile,
   type TileView,
 } from "../types.ts";
-import { escapeHtml, friendlyError, SPARK_FADE, sparkline } from "../lib.ts";
+import { escapeHtml, friendlyError, median, sparkline } from "../lib.ts";
 import {
   CI_WORKFLOW,
   DUR_GOOD,
@@ -24,10 +27,8 @@ import {
   REPO,
 } from "../config.ts";
 import {
-  CI_FETCH_PROGRESS_STYLES,
   ciCommitGanttProgressResponse,
   ciFetchProgressPanel,
-  type CiGanttInput,
   type CiGanttOptions,
   ciGanttOptions,
   ciGanttProgressResponse,
@@ -38,17 +39,31 @@ import {
   collectCommitCiGanttInput,
   GANTT_MAX_RUNS,
 } from "../ci-job-history.ts";
-import { performanceViewNav } from "../performance-views.ts";
+import {
+  PERFORMANCE_VIEW_STYLES,
+  performanceViewNav,
+} from "../performance-views.ts";
+import {
+  CHART_HIGHLIGHT,
+  CHART_LINE,
+  DASHBOARD_THEME_CLIENT,
+  DASHBOARD_THEME_HEAD,
+  dashboardThemeToggle,
+} from "../theme.ts";
 
 const CIGANTT = fromFileUrl(
   new URL("../../../scripts/ci-gantt.ts", import.meta.url),
 );
 const GANTT_REFRESH_MS = 30 * 60_000;
 
+// Writes the renderer's input to `destination` and reports how many runs it
+// holds. The chart is written a run at a time rather than returned, so a
+// hundred and fifty runs of job and step timings never sit in this process.
 export type CiGanttDataProvider = (
   source: CiHistorySource,
   options: CiGanttOptions,
-) => Promise<CiGanttInput>;
+  destination: string,
+) => Promise<number>;
 
 export async function renderGantt(
   p: URLSearchParams,
@@ -61,7 +76,11 @@ export async function renderGantt(
   let out: string | undefined;
   let input: string | undefined;
   try {
-    const data = await dataProvider(source, options);
+    input = await Deno.makeTempFile({
+      prefix: "ci-gantt-input-",
+      suffix: ".json",
+    });
+    const runCount = await dataProvider(source, options, input);
     if (signal?.aborted) {
       return new Response(null, {
         status: 204,
@@ -69,11 +88,6 @@ export async function renderGantt(
       });
     }
     out = await Deno.makeTempFile({ prefix: "ci-gantt-", suffix: ".svg" });
-    input = await Deno.makeTempFile({
-      prefix: "ci-gantt-input-",
-      suffix: ".json",
-    });
-    await Deno.writeTextFile(input, JSON.stringify(data));
     const args = [
       "run",
       `--allow-read=${input}`,
@@ -88,7 +102,7 @@ export async function renderGantt(
       "--limit",
       String(limit),
       "--theme",
-      "dark",
+      p.get("theme") === "light" ? "default" : "dark",
       "--out",
       out,
     ];
@@ -101,10 +115,10 @@ export async function renderGantt(
       ? 1
       : mainOnly
       ? 2
-      : Math.max(5, Math.round(0.1 * data.runs.length));
+      : Math.max(5, Math.round(0.1 * runCount));
     args.push(
       "--min-runs",
-      String(Math.min(defaultMinimum, Math.max(1, data.runs.length))),
+      String(Math.min(defaultMinimum, Math.max(1, runCount))),
     );
     const { success, stderr } = await new Deno.Command(Deno.execPath(), {
       args,
@@ -174,41 +188,33 @@ export function ciGanttPage(url: URL): string {
     stat,
   });
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CI run Gantt</title>
+${DASHBOARD_THEME_HEAD}
 <style>
-  body{margin:0;background:#0d0e11;color:#e7e9ee;font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:18px 20px 26px;max-width:1100px;margin:0 auto}
-  .top{display:flex;align-items:baseline;gap:10px;margin-bottom:12px;flex-wrap:wrap}
-  .top b{font-size:16px;font-weight:600}.top span{font-size:12px;color:#6f757f}
-  a.back{color:#6ea8fe;text-decoration:none;font-size:13px}
-  .views{display:flex;gap:6px;margin:0 0 14px}
-  .views a{font-size:13px;color:#c7ccd4;text-decoration:none;border:1px solid #2f333c;border-radius:6px;padding:4px 10px}
-  .views a.on{background:#6ea8fe;border-color:#6ea8fe;color:#0d0e11}
-  .controls{display:flex;flex-wrap:wrap;gap:20px;align-items:center;background:#16181d;border:1px solid #23262d;border-radius:12px;padding:14px 16px;margin-bottom:14px}
-  .controls label{font-size:13px;color:#c7ccd4;display:flex;align-items:center;gap:8px;flex:none}
-  .controls input[type=range]{width:200px}
-  .controls select{background:#0d0e11;color:#e7e9ee;border:1px solid #2f333c;border-radius:6px;padding:3px 6px}
-  ${CI_FETCH_PROGRESS_STYLES}
-  .imgwrap{background:#0c0d11;border:1px solid #23262d;border-radius:12px;padding:10px;overflow:auto;min-height:60px}
+  ${PERFORMANCE_VIEW_STYLES}
+  .imgwrap{background:var(--surface-deep);border:1px solid var(--border);border-radius:12px;padding:10px;overflow:auto;min-height:60px}
   #g{width:100%;height:auto;display:none}
-  .hint{font-size:11px;color:#666c76;margin-top:12px}
-  @media(max-width:640px){.controls{gap:14px}.controls label{flex:1 1 100%}.controls input[type=range]{width:auto;min-width:0;flex:1}}
 </style></head><body>
   <div class="top"><a class="back" href="/">← dashboard</a><b>Performance history</b><span>${
     escapeHtml(source.repo)
-  } · ${escapeHtml(source.workflow)} · scripts/ci-gantt.ts</span></div>
+  } · ${
+    escapeHtml(source.workflow)
+  } · scripts/ci-gantt.ts</span></div>
   ${viewNav}
   <div class="controls">
-    <label>repository <select id="repo"><option value="labs"${
+    <label class="field" for="repo">repository <select id="repo"><option value="labs"${
     source.key === "labs" ? " selected" : ""
   }>labs</option><option value="loom"${
     source.key === "loom" ? " selected" : ""
   }>loom</option></select></label>
-    <label>runs to include <input type="range" id="limit" min="1" max="150" step="1" value="60"><b id="limitv">60</b></label>
-    <label><input type="checkbox" id="mainOnly" checked> main pushes only</label>
-    <label><input type="checkbox" id="allConcl"> include failed/cancelled in timing</label>
+    <label class="field" for="limit">runs to include <output id="limitv" for="limit">60</output><input type="range" id="limit" min="1" max="150" step="1" value="60"></label>
+    <label class="check"><input type="checkbox" id="mainOnly" checked> main pushes only</label>
+    <label class="check"><input type="checkbox" id="allConcl"> include failed/cancelled in timing</label>
   </div>
   ${ciFetchProgressPanel(undefined, { ariaLabel: "CI Gantt fetch progress" })}
   <div class="imgwrap"><img id="g" alt="CI Gantt chart"></div>
-  <p class="hint">Run, job, and step timings share the persistent server cache used by CI history. Regeneration reads cached past runs and fetches only missing runs or newer attempts.</p>
+  <p class="note">Run, job, and step timings share the persistent server cache used by CI history. Regeneration reads cached past runs and fetches only missing runs or newer attempts.</p>
+${dashboardThemeToggle()}
+${DASHBOARD_THEME_CLIENT}
 <script>
   const $ = (id) => document.getElementById(id);
   const g = $('g'), fetchProgress = $('fetch-progress'), title = $('fetch-title'), total = $('fetch-total'), detail = $('fetch-detail'), bar = $('fetch-bar');
@@ -222,6 +228,7 @@ export function ciGanttPage(url: URL): string {
   }
   function imageUrl(){
     const p = parameters();
+    p.set('theme', document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
     p.set('t', Date.now());
     return '/bench/gantt.svg?' + p.toString();
   }
@@ -385,6 +392,7 @@ export function ciGanttPage(url: URL): string {
   $('limit').addEventListener('input', () => { $('limitv').textContent = $('limit').value; });
   $('limit').addEventListener('change', regen);
   ['mainOnly','allConcl'].forEach((id) => $(id).addEventListener('change', regen));
+  addEventListener('dashboardthemechange', regen);
   regen();
   setInterval(() => {
     if (document.visibilityState === 'visible') regen();
@@ -447,6 +455,7 @@ export function ciCommitGanttPage(url: URL): string {
   const chart = document.getElementById('g');
   let collectionWarning = '';
   let chartSettled = false;
+  let chartLoad = 0;
   const stream = new EventSource(${JSON.stringify(progressUrl)});
   const idle = (message, warning = '', error = false) => {
     fetchProgress.classList.remove('error', 'warning');
@@ -504,9 +513,11 @@ export function ciCommitGanttPage(url: URL): string {
     idle('Progress connection closed; collection continues on the server.', '', true);
   };
   let chartSrc = '';
-  fetch(${
-      JSON.stringify(imageUrl)
-    }, { cache: 'no-store' }).then(async (response) => {
+  const loadChart = () => {
+    const load = ++chartLoad;
+    const url = new URL(${JSON.stringify(imageUrl)}, location.href);
+    url.searchParams.set('theme', document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
+    fetch(url, { cache: 'no-store' }).then(async (response) => {
     if (!response.ok) throw new Error((await response.text()).trim());
     const src = URL.createObjectURL(await response.blob());
     return await new Promise((resolve, reject) => {
@@ -518,20 +529,26 @@ export function ciCommitGanttPage(url: URL): string {
       };
       image.src = src;
     });
-  }).then((src) => {
+    }).then((src) => {
+    if (load !== chartLoad) { URL.revokeObjectURL(src); return; }
     chartSettled = true;
     stream.close();
+    if (chartSrc) URL.revokeObjectURL(chartSrc);
     chartSrc = src;
     chart.src = src;
     chart.style.display = 'block';
     idle('Chart includes ${runCount} successful run${
       runCount === 1 ? "" : "s"
     } for this commit.', collectionWarning);
-  }).catch((error) => {
+    }).catch((error) => {
+    if (load !== chartLoad) return;
     chartSettled = true;
     stream.close();
     idle('Last collection stopped: ' + (error.message || 'failed to generate chart'), '', true);
-  });
+    });
+  };
+  addEventListener('dashboardthemechange', loadChart);
+  loadChart();
   window.addEventListener('pagehide', () => {
     stream.close();
     if (chartSrc) URL.revokeObjectURL(chartSrc);
@@ -541,34 +558,40 @@ export function ciCommitGanttPage(url: URL): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CI Gantt · ${
     escapeHtml(shortSha)
   }</title>
+${DASHBOARD_THEME_HEAD}
 <style>
-  body{margin:0;background:#0d0e11;color:#e7e9ee;font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:18px 20px 26px;max-width:1400px;margin:0 auto}
+  ${PERFORMANCE_VIEW_STYLES}
+  body{max-width:1400px}
   .top{display:flex;align-items:baseline;gap:10px;margin-bottom:14px;flex-wrap:wrap}
-  .top b{font-size:16px;font-weight:600}.top span{font-size:12px;color:#6f757f}
-  a{color:#6ea8fe;text-decoration:none}.back{font-size:13px}.commit{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-  ${CI_FETCH_PROGRESS_STYLES}
-  .imgwrap{background:#0c0d11;border:1px solid #23262d;border-radius:12px;padding:10px;overflow:auto;min-height:60px}
+  a{color:var(--accent);text-decoration:none}.back{font-size:13px}.commit{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .imgwrap{background:var(--surface-deep);border:1px solid var(--border);border-radius:12px;padding:10px;overflow:auto;min-height:60px}
   #g{width:100%;height:auto;display:none}
-  .empty{background:#16181d;border:1px solid #2f333c;border-radius:12px;padding:18px;color:#9aa0ab}
+  .empty{background:var(--surface);border:1px solid var(--border-strong);border-radius:12px;padding:18px;color:var(--text-muted)}
 </style></head><body>
   <div class="top"><a class="back" href="/">← dashboard</a><b>CI Gantt</b><span>${
     escapeHtml(source.repo)
   } · <a class="commit" href="${
     escapeHtml(commitUrl)
-  }" target="_blank" rel="noopener">${escapeHtml(shortSha)} ↗</a></span></div>
+  }" target="_blank" rel="noopener">${
+    escapeHtml(shortSha)
+  } ↗</a></span></div>
   ${
     ciFetchProgressPanel(undefined, {
       ariaLabel: "Commit CI Gantt fetch progress",
     })
   }
   ${chart}
+  ${dashboardThemeToggle()}
+  ${DASHBOARD_THEME_CLIENT}
   ${script}
 </body></html>`;
 }
 
-function commitGanttUrl(url: URL): URL | null {
+export function commitGanttUrl(url: URL): URL | null {
   const parameters = commitGanttParameters(url);
   if (!parameters) return null;
+  const theme = url.searchParams.get("theme");
+  if (theme === "dark" || theme === "light") parameters.set("theme", theme);
   const normalized = new URL(url);
   normalized.search = parameters.toString();
   return normalized;
@@ -666,35 +689,44 @@ function makeCiDuration(
           hint: opts.hint,
         };
       }
-      // Only runs that passed end to end: a failed/cancelled/timed-out run's
-      // wall-clock time isn't a representative CI duration.
-      const passed = runs.filter((r) =>
-        r.status === "completed" && r.conclusion === "success"
-      );
-      const durMins = (r: Run) =>
-        (Date.parse(r.updated_at) - Date.parse(r.run_started_at)) / 60000;
+      // Only complete, successful push runs with a usable landing-to-finish
+      // span contribute to the duration.
+      const passed = runs.flatMap((run) => {
+        if (
+          run.event !== "push" || run.status !== "completed" ||
+          run.conclusion !== "success"
+        ) {
+          return [];
+        }
+        const landedAt = Date.parse(run.created_at);
+        const finishedAt = Date.parse(run.updated_at);
+        if (
+          !Number.isFinite(landedAt) || !Number.isFinite(finishedAt) ||
+          finishedAt <= landedAt
+        ) {
+          return [];
+        }
+        return [{ landedAt, durationMins: (finishedAt - landedAt) / 60_000 }];
+      });
       // Median window = the successful runs in the last DUR_MAX_AGE_HOURS, or the
       // most recent DUR_MIN_RUNS — whichever has more runs.
       const cutoff = Date.now() - DUR_MAX_AGE_HOURS * 3_600_000;
-      const inTimeCount =
-        passed.filter((r) => Date.parse(r.run_started_at) >= cutoff).length;
+      const inTimeCount = passed.filter((run) => run.landedAt >= cutoff).length;
       const usingTime = inTimeCount >= DUR_MIN_RUNS; // time window wins when it has enough runs
       // A count-based prefix (not the filter set itself) so the median runs are
       // always the newest slice of passed — which is what the sparkline
       // highlights. passed is created-at ordered, so a re-run can otherwise
       // make the filter set non-contiguous with the front.
       const window = passed.slice(0, usingTime ? inTimeCount : DUR_MIN_RUNS);
-      const durs = window.map(durMins).sort((a, b) => a - b);
+      const durs = window.map((run) => run.durationMins).sort((a, b) => a - b);
       const medianMins = Math.round(median(durs));
       // The sparkline spans every successful run (oldest -> newest). window is
       // always the newest slice of passed, so the runs feeding the median are the
       // trailing window.length points — drawn brighter over the dimmer long-run
       // trend.
-      const series = [...passed].reverse().map(durMins);
+      const series = [...passed].reverse().map((run) => run.durationMins);
       // How long the sparkline spans (oldest to newest run), for the corner label.
-      const times = passed.map((r) => Date.parse(r.run_started_at)).filter((
-        t,
-      ) => !Number.isNaN(t));
+      const times = passed.map((run) => run.landedAt);
       const spanMs = times.length >= 2
         ? Math.max(...times) - Math.min(...times)
         : 0;
@@ -712,28 +744,16 @@ function makeCiDuration(
         sub: usingTime
           ? `median · ${window.length} passing runs in the last ${DUR_MAX_AGE_HOURS}h`
           : `median · last ${window.length} passing runs`,
-        extra: sparkline(series, "#727882", {
+        extra: sparkline(series, CHART_LINE, {
           count: window.length,
-          color: "#c7ccd4",
-        }, SPARK_FADE[s]),
+          color: CHART_HIGHLIGHT,
+        }, true),
         duration: spanMs,
         href: opts.href,
         hint: opts.hint,
       };
     },
   };
-}
-
-// The middle of a sorted series. An even count has no single middle run, so it is
-// the mean of the two: taking the upper one alone reports a duration no run had,
-// and always the higher of the pair. The default window is 20 runs, so even is the
-// normal case rather than the edge. Exported for unit testing.
-export function median(sorted: number[]): number {
-  if (sorted.length === 0) return 0;
-  const mid = sorted.length / 2;
-  return sorted.length % 2
-    ? sorted[Math.floor(mid)]
-    : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 export const labsCiDuration = makeCiDuration({

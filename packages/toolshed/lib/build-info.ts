@@ -9,45 +9,54 @@
 // explicit toolshed override if present, otherwise the source-run COMMIT_SHA
 // fallback, so `/api/meta` presents the same field as a compiled binary.
 
+import {
+  type BuildInfo,
+  normalize,
+  readBuildInfoFrom,
+} from "@commonfabric/utils/build-info";
 import env from "@/env.ts";
+
+export { type BuildInfo, normalize, readBuildInfoFrom };
 
 const COMPILED_PATH = new URL("../COMPILED", import.meta.url);
 
-export interface BuildInfo {
-  commitSha: string | null;
-  builtAt: string | null;
-}
+export const buildInfo: BuildInfo = readBuildInfoFrom(COMPILED_PATH);
 
-export function normalize(s: string | null | undefined): string | null {
-  const trimmed = s?.trim();
-  return trimmed ? trimmed : null;
-}
-
-export function readBuildInfoFrom(path: URL | string): BuildInfo {
+/**
+ * The raw `EXPERIMENTAL_SERVER_EXECUTION` value present in the build
+ * environment when this binary was built — the value the browser shell
+ * BAKED as its esbuild define (packages/shell/felt.config.ts; the shell
+ * has no serve-time override) — or null when it was unset (the shell then
+ * follows `SERVER_EXECUTION_DEFAULT_ENABLED`) and in a source run. Same
+ * failure posture as `readBuildInfoFrom`: an unreadable or malformed
+ * marker reads as null. Surfaced on `/api/meta` as
+ * `shellServerExecutionDefine` so CI's server-execution lanes can verify
+ * the posture the binary they run actually carries
+ * (docs/specs/server-side-execution/testing.md §2).
+ */
+export function readShellServerExecutionDefineFrom(
+  path: URL | string,
+): string | null {
   let raw: string;
   try {
     raw = Deno.readTextFileSync(path);
   } catch {
-    return { commitSha: null, builtAt: null };
+    return null;
   }
-  if (!raw.trim()) return { commitSha: null, builtAt: null };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { commitSha: null, builtAt: null };
+    return null;
   }
-  if (typeof parsed !== "object" || parsed === null) {
-    return { commitSha: null, builtAt: null };
-  }
-  const obj = parsed as Partial<BuildInfo>;
-  return {
-    commitSha: normalize(obj.commitSha),
-    builtAt: normalize(obj.builtAt),
-  };
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const value = (parsed as { shellServerExecutionDefine?: unknown })
+    .shellServerExecutionDefine;
+  return typeof value === "string" ? normalize(value) : null;
 }
 
-export const buildInfo: BuildInfo = readBuildInfoFrom(COMPILED_PATH);
+export const shellServerExecutionDefine: string | null =
+  readShellServerExecutionDefineFrom(COMPILED_PATH);
 
 /**
  * Pure precedence function used by `resolveGitSha()`. Exposed so it can be

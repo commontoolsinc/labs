@@ -1,17 +1,19 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createRef, entityIdFrom, getEntityId } from "../src/create-ref.ts";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { hashOf } from "@commonfabric/data-model";
 import {
   entityRefToString,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { createRef, entityIdFrom, getEntityId } from "../src/create-ref.ts";
+import { Runtime } from "../src/runtime.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -176,28 +178,6 @@ describe("cell-map", () => {
 
       // Also verify the cells are equal
       expect(retrievedCell.equals(c)).toBe(true);
-    });
-  });
-
-  describe("cells as JSON", () => {
-    it("should serialize the entity ID", () => {
-      const c = runtime.getCell<{ value: number }>(
-        space,
-        "test-json",
-        undefined,
-        tx,
-      );
-      c.set({ value: 42 });
-
-      // toJSON returns sigil format with space for cross-space resolution
-      const json = JSON.parse(JSON.stringify(c));
-      expect(json["/"]).toBeDefined();
-      expect(json["/"][LINK_V1_TAG]).toBeDefined();
-      expect(json["/"][LINK_V1_TAG].id).toContain(
-        entityRefToString(c.entityId),
-      );
-      expect(json["/"][LINK_V1_TAG].path).toEqual([]);
-      expect(json["/"][LINK_V1_TAG].space).toEqual(space);
     });
   });
 });

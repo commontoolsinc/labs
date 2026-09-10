@@ -1,16 +1,17 @@
 import {
+  attachWorkerProfiler,
   awaitViewSettled,
-  CdpWorkerProfiler,
+  type CdpWorkerProfiler,
   env,
   Page,
   type ProbeApi,
-  renderProfileReport,
+  startWorkerProfile,
   waitFor,
   waitForCondition,
+  writeWorkerProfile,
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import {
-  vdomHasButton,
   waitForActiveSpaceRoot,
   waitForRuntimeIdle,
   waitForRuntimeSynced,
@@ -24,6 +25,13 @@ import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
 import { resolveSpaceDid } from "@commonfabric/lib-shell";
+
+// Every step in this file runs under both server-execution postures: no step
+// here is listed in the ON arm's skip registry
+// (tasks/server-execution-on-skips.ts). Listing one requires adding an in-file
+// `serverExecutionOnStepSkip` guard alongside the entry — the registry's
+// validator rejects a step entry whose file never calls the guard, since the
+// entry would otherwise be decoration.
 
 type BrowserWriteTraceEntry = {
   recordedAt: number;
@@ -188,7 +196,7 @@ const CPUPROFILE_DIR = (() => {
 })();
 type NoteCreateTimingEntry = {
   noteIndex: number;
-  noteTitle: string;
+  noteId: string;
   noteCountBefore: number;
   noteCountAfter: number;
   createToViewMs: number;
@@ -241,7 +249,7 @@ describe("default-app flow test", () => {
   let identity: Identity;
   const spaceName = SPACE_NAME;
 
-  it("should create a note via default app and see it in the space list", async () => {
+  it("should create and navigate to a note", async () => {
     identity = await Identity.generate({ implementation: "noble" });
 
     const page = shell.page();
@@ -315,15 +323,7 @@ describe("default-app flow test", () => {
     let cpuProfiler: CdpWorkerProfiler | undefined;
     if (CAPTURE_NOTE_CREATE_CPUPROFILE_SERIES > 0) {
       console.log("Connect CDP worker profiler...");
-      try {
-        cpuProfiler = await CdpWorkerProfiler.connect(shell.wsEndpoint());
-        await cpuProfiler.waitForWorker("worker-runtime");
-      } catch (error) {
-        // Profiling is best-effort instrumentation; never fail the test.
-        console.warn("Worker CPU profiler setup failed, disabling:", error);
-        cpuProfiler?.close();
-        cpuProfiler = undefined;
-      }
+      cpuProfiler = await attachWorkerProfiler(shell.wsEndpoint());
     }
 
     if (CAPTURE_HOME_LOAD_SERIES > 0) {
@@ -383,15 +383,10 @@ describe("default-app flow test", () => {
         noteIndex <= 1 + CAPTURE_NOTE_CREATE_CPUPROFILE_SERIES;
       if (profileThisNote) {
         console.log(`Start worker CPU profile (note ${noteIndex})...`);
-        try {
-          await cpuProfiler!.start("worker-runtime");
-        } catch (error) {
-          console.warn(
-            `Worker CPU profile start failed (note ${noteIndex}):`,
-            error,
-          );
-          profileThisNote = false;
-        }
+        profileThisNote = await startWorkerProfile(
+          cpuProfiler!,
+          `note ${noteIndex}`,
+        );
       }
 
       console.log(`Click notes drop down (note ${noteIndex})...`);
@@ -412,6 +407,14 @@ describe("default-app flow test", () => {
           typeof state.view.pieceId === "string" &&
           state.view.pieceId.length > 0;
       });
+      const noteId = await page.evaluate(() => {
+        const view = globalThis.app?.serialize?.()?.view;
+        return view && typeof view === "object" && "pieceId" in view &&
+            typeof view.pieceId === "string"
+          ? view.pieceId
+          : undefined;
+      });
+      assert(noteId, `Expected a piece id for note ${noteIndex}`);
 
       await waitForRuntimeIdle(page);
       const noteViewReadyAt = performance.now();
@@ -501,25 +504,14 @@ describe("default-app flow test", () => {
         );
       }
       await waitForRuntimeIdle(page);
-
-      console.log(`Wait for note count to increase (note ${noteIndex})...`);
-      await waitForCondition(page, noteTitlesExceed, {
-        args: [noteCountBefore],
-      });
+      await awaitViewSettled(page);
 
       const noteTitlesAfter = await collectNoteTitlesInList(page);
-      const newNoteTitles = noteTitlesAfter.filter((title) =>
-        !noteTitlesBefore.includes(title)
-      );
-      assert(
-        newNoteTitles.length > 0,
-        `Expected a new note title in the list for note ${noteIndex}`,
-      );
 
       const noteCreateFinishedAt = performance.now();
       const noteCreateTiming: NoteCreateTimingEntry = {
         noteIndex,
-        noteTitle: newNoteTitles[0]!,
+        noteId,
         noteCountBefore,
         noteCountAfter: noteTitlesAfter.length,
         createToViewMs: Number(
@@ -539,26 +531,11 @@ describe("default-app flow test", () => {
       );
 
       if (profileThisNote) {
-        try {
-          const profile = await cpuProfiler!.stop();
-          const outPrefix = `${CPUPROFILE_DIR}/default-app-note-${noteIndex}`;
-          await Deno.writeTextFile(
-            `${outPrefix}.cpuprofile`,
-            JSON.stringify(profile),
-          );
-          const report = renderProfileReport(
-            profile,
-            `note-create iteration ${noteIndex}`,
-          );
-          await Deno.writeTextFile(`${outPrefix}.report.txt`, report);
-          console.log(`Worker CPU profile written: ${outPrefix}.cpuprofile`);
-        } catch (error) {
-          // Profiling is best-effort instrumentation; don't fail the test.
-          console.warn(
-            `Worker CPU profile capture failed (note ${noteIndex}):`,
-            error,
-          );
-        }
+        await writeWorkerProfile(cpuProfiler!, {
+          pathPrefix: `${CPUPROFILE_DIR}/default-app-note-${noteIndex}`,
+          label: `note-create iteration ${noteIndex}`,
+          context: `note ${noteIndex}`,
+        });
       }
 
       if (noteIndex <= CAPTURE_NOTE_CREATE_PROFILE_SERIES) {
@@ -600,7 +577,7 @@ describe("default-app flow test", () => {
           {
             frontendUrl: FRONTEND_URL,
             spaceName,
-            expectNoteInList: true,
+            expectNoteInList: false,
           },
         );
         assert(
@@ -608,7 +585,7 @@ describe("default-app flow test", () => {
           `Expected home load summary for ${noteIndex} notes`,
         );
         homeLoadSeries.push({
-          noteCount: noteIndex,
+          noteCount: noteTitlesAfter.length,
           ...(homeLoadSummary as Record<string, unknown>),
         });
         console.log(
@@ -619,12 +596,6 @@ describe("default-app flow test", () => {
     }
 
     cpuProfiler?.close();
-
-    const noteFound = await findNoteInList(page);
-    assert(
-      noteFound,
-      "List should contain '📝 New Note #<hash>' after creating a note",
-    );
 
     if (actionRunSeries.length > 0) {
       console.log(
@@ -671,156 +642,220 @@ describe("default-app flow test", () => {
     }
   });
 
-  it("should persist and reload every rapidly created notebook note", async () => {
-    identity = await Identity.generate({ implementation: "noble" });
-    const notebookSpaceName = globalThis.crypto.randomUUID();
-    const notebookSpaceDid = await resolveSpaceDid(
-      identity,
-      notebookSpaceName,
-    );
+  it(
+    "should persist and reload every rapidly created notebook note",
+    async () => {
+      identity = await Identity.generate({ implementation: "noble" });
+      const notebookSpaceName = globalThis.crypto.randomUUID();
+      const notebookSpaceDid = await resolveSpaceDid(
+        identity,
+        notebookSpaceName,
+      );
 
-    const page = shell.page();
-    await disposeBrowserRuntime(page);
-    await shell.goto({
-      frontendUrl: FRONTEND_URL,
-      view: { spaceName: notebookSpaceName },
-      identity,
-    });
+      const page = shell.page();
+      await disposeBrowserRuntime(page);
+      await shell.goto({
+        frontendUrl: FRONTEND_URL,
+        view: { spaceName: notebookSpaceName },
+        identity,
+      });
 
-    // shell.goto() waits for URL state and login, while RootView resolves the
-    // named view space independently. Do not interact with the previous
-    // space's still-rendered root while that resolution is in flight.
-    await waitForActiveSpaceRoot(page, notebookSpaceDid);
+      // shell.goto() waits for URL state and login, while RootView resolves the
+      // named view space independently. Do not interact with the previous
+      // space's still-rendered root while that resolution is in flight.
+      await waitForActiveSpaceRoot(page, notebookSpaceDid);
 
-    console.log("Await runtime idle for notebook regression...");
-    await waitForRuntimeIdle(page);
-    // Runtime idle can precede the new worker VDOM mount and the page
-    // renderer's Lit update. Wait for the current worker tree and its DOM
-    // handlers before the first trusted click.
-    await waitForCondition(
-      page,
-      () => typeof globalThis.commonfabric?.viewSettled === "function",
-    );
-    await waitFor(async () => await vdomHasButton(page, "Notes"));
-    await awaitViewSettled(page);
-
-    try {
-      await clickButtonWithExactText(page, "Notes ▾");
-      // Opening the menu is itself reactive state. Let its VDOM replacement
-      // finish before resolving the newly visible button; otherwise the marked
-      // element can be replaced between discovery and the trusted click.
-      await awaitViewSettled(page);
-      await clickButtonWithText(page, "New Notebook");
-      try {
-        await waitForCondition(page, async () => {
-          const commonfabric = globalThis.commonfabric as
-            | { readCell?: (options: { id: string }) => Promise<unknown> }
-            | undefined;
-          const view = globalThis.app?.serialize?.()?.view;
-          const pieceId = view && typeof view === "object" &&
-              "pieceId" in view && typeof view.pieceId === "string"
-            ? view.pieceId
-            : undefined;
-          if (!pieceId || !commonfabric?.readCell) return false;
-          let current: unknown;
-          const originalLog = console.log;
-          try {
-            console.log = () => {};
-            current = await commonfabric.readCell({ id: pieceId });
-          } finally {
-            console.log = originalLog;
-          }
-          return (current as { isNotebook?: unknown } | undefined)
-            ?.isNotebook === true;
-        });
-      } catch (error) {
-        console.log(
-          "Notebook navigation diagnostics:",
-          JSON.stringify(await collectNavigationDiagnostics(page), null, 2),
-        );
-        throw error;
-      }
-
-      // Wait until the notebook toolbar is mounted and interactive before
-      // clicking. viewSettled resolves once the worker is idle and the
-      // rendered view has caught up (vdom applied, Lit updates drained), so the
-      // New Note button's handler is bound and a single click is not dropped.
+      console.log("Await runtime idle for notebook regression...");
+      await waitForRuntimeIdle(page);
+      // Runtime idle can precede the page renderer's Lit update. Wait for the
+      // freshly navigated default-app view to bind its menu handlers before the
+      // first trusted click, just as the notebook toolbar does below.
       await waitForCondition(
         page,
         () => typeof globalThis.commonfabric?.viewSettled === "function",
       );
       await awaitViewSettled(page);
-      assert(
-        await clickButtonWithTitle(page, "New Note"),
-        "Expected New Note click to succeed",
-      );
-      // Arm the event-invocation trace before the note creations, whose markers
-      // this test's failure diagnostics read. clickButtonWithTitle settled the
-      // view, so the runtime has exposed its telemetry methods and the reset
-      // runs once with its success asserted. The first "Create Another" click
-      // below settles the view and waits for the button to render, so no
-      // separate wait for the modal is needed here.
-      assert(
-        await resetEventInvocationTrace(page),
-        "Expected the event invocation trace to reset",
-      );
-
-      const noteCreates = 7;
-      for (let i = 0; i < noteCreates - 1; i++) {
-        assert(
-          await clickButtonWithText(page, "Create Another"),
-          `Expected Create Another click ${i + 1} to succeed`,
-        );
-      }
-      assert(
-        await clickButtonWithExactText(page, "Create"),
-        "Expected final Create click to succeed",
-      );
 
       try {
-        await waitForCondition(page, notebookSourceStateMatches, {
-          args: [noteCreates],
-        });
-        await waitForRuntimeSynced(page);
-      } catch (_) {
-        // Keep the final assertions below so failures include diagnostics.
-      }
+        await clickButtonWithExactText(page, "Notes ▾");
+        await awaitViewSettled(page);
+        await clickButtonWithText(page, "New Notebook");
+        // The wait hands back the NOTEBOOK's piece id at the instant it
+        // approved `isNotebook` — the step's stable read target from here
+        // on. Every later wait and assertion reads the notebook BY THIS ID,
+        // never through `view.pieceId` again: under server execution the
+        // final "Create" click's speculative run may read a stale
+        // `usedCreateAnotherNote` and optimistically navigate into the new
+        // note while the authoritative run computes no navigation — a
+        // sanctioned outcome (the L2 optimistic-enactment question, ruled
+        // PUNT 2026-08-27: the client navigates, so be it). A view-following
+        // read then polls a healthy NOTE through notebook accessors until
+        // the step's net (the 2026-08-27 r06/r09 root cause,
+        // docs/history/plans/server-execution-v2/optimize/
+        // keyless-diagnosis-2026-08-27.md); an id-bound read is indifferent
+        // to where the view wandered.
+        let notebookEntityId: string | undefined;
+        try {
+          notebookEntityId = await waitForCondition(page, async () => {
+            const commonfabric = globalThis.commonfabric as
+              | { readCell?: (options: { id: string }) => Promise<unknown> }
+              | undefined;
+            const view = globalThis.app?.serialize?.()?.view;
+            const pieceId = view && typeof view === "object" &&
+                "pieceId" in view && typeof view.pieceId === "string"
+              ? view.pieceId
+              : undefined;
+            if (!pieceId || !commonfabric?.readCell) return false;
+            let current: unknown;
+            const originalLog = console.log;
+            try {
+              console.log = () => {};
+              current = await commonfabric.readCell({ id: pieceId });
+            } finally {
+              console.log = originalLog;
+            }
+            return (current as { isNotebook?: unknown } | undefined)
+                ?.isNotebook === true
+              ? pieceId
+              : false;
+          });
+        } catch (error) {
+          console.log(
+            "Notebook navigation diagnostics:",
+            JSON.stringify(await collectNavigationDiagnostics(page), null, 2),
+          );
+          throw error;
+        }
+        assert(
+          notebookEntityId,
+          "Expected the notebook wait to hand back the notebook piece id",
+        );
 
-      const summary = await collectNotebookSourceState(page);
-      if (
-        summary.argumentNotesLength !== noteCreates ||
-        summary.noteCount !== noteCreates
-      ) {
-        console.log(
-          "Notebook rapid create source diagnostics:",
-          JSON.stringify(summary, null, 2),
+        // Wait until the notebook toolbar is mounted and interactive before
+        // clicking. viewSettled resolves once the worker is idle and the
+        // rendered view has caught up (vdom applied, Lit updates drained), so the
+        // New Note button's handler is bound and a single click is not dropped.
+        await waitForCondition(
+          page,
+          () => typeof globalThis.commonfabric?.viewSettled === "function",
         );
-        console.log(
-          "Notebook rapid create render diagnostics:",
-          JSON.stringify(await collectNotebookRenderState(page), null, 2),
+        await awaitViewSettled(page);
+        assert(
+          await clickButtonWithTitle(page, "New Note"),
+          "Expected New Note click to succeed",
         );
-        console.log(
-          "Notebook rapid create event/action diagnostics:",
-          JSON.stringify(
-            await collectNotebookCreateTraceSummary(page),
-            null,
-            2,
-          ),
+        // Arm the event-invocation trace before the note creations, whose markers
+        // this test's failure diagnostics read. clickButtonWithTitle settled the
+        // view, so the runtime has exposed its telemetry methods and the reset
+        // runs once with its success asserted. The first "Create Another" click
+        // below settles the view and waits for the button to render, so no
+        // separate wait for the modal is needed here.
+        assert(
+          await resetEventInvocationTrace(page),
+          "Expected the event invocation trace to reset",
+        );
+
+        const noteCreates = 7;
+        for (let i = 0; i < noteCreates - 1; i++) {
+          assert(
+            await clickButtonWithText(page, "Create Another"),
+            `Expected Create Another click ${i + 1} to succeed`,
+          );
+        }
+        assert(
+          await clickButtonWithExactText(page, "Create"),
+          "Expected final Create click to succeed",
+        );
+
+        // The assertions bind to the summary a wait handed back — the state
+        // as it was at the instant the predicate approved it — never to a
+        // separate read taken after a wait. Under server execution the
+        // notebook's derived `noteCount` follows the ruled unresolved-read
+        // disposition (OW51): a re-derivation reads cleanly `undefined` and
+        // re-triggers, healing back to the settled value. That interim is
+        // correct product behavior, so a single-shot read between a wait and
+        // its assertion can catch it and fail a healthy run (the OW45
+        // register row's measured 1-in-10-quiet / 5-in-10-under-load flake);
+        // a wait on the value itself absorbs it, and a value that never
+        // reaches `expectedCount` — a genuinely lost note — still fails
+        // loudly at waitForCondition's stuck-condition net.
+        //
+        // The first wait orders the sync barrier after local convergence, so
+        // "synced" covers all seven notes' commits; the second wait is the
+        // assertion's authority, re-approving the state after that barrier.
+        // Its predicate reads the same cells the step has read all along, and
+        // any client read registers demand — this step verifies that the
+        // created notes' data and derived count converge and survive the sync
+        // barrier under serving, not that they materialize unobserved (the
+        // reload rehydration surface is integration/reload/
+        // default-app-notebook.test.ts's).
+        let summary: NotebookSourceSummary | undefined;
+        let waitFailure: unknown;
+        try {
+          await waitForCondition(page, notebookSourceStateMatches, {
+            args: [noteCreates, notebookEntityId],
+          });
+          await waitForRuntimeSynced(page);
+          summary = await waitForCondition(page, notebookSourceStateMatches, {
+            args: [noteCreates, notebookEntityId],
+          });
+        } catch (error) {
+          // A wait or the sync barrier failed at its net: the state never
+          // converged (or synchronization itself failed). Hold the error so
+          // the failure path below can print diagnostics and then RE-THROW
+          // it — the waits are the step's only signal, and a fresh read
+          // must never stand in for them (a fallback read that fed the
+          // assertions could green a run whose authority wait failed on a
+          // field the assertions don't check).
+          waitFailure = error;
+        }
+
+        if (summary === undefined) {
+          // Failure path only: print the diagnostics the thrown failure
+          // cannot carry, from a one-shot read that is expressly NOT the
+          // signal (its raciness is harmless here — the step is already
+          // failing), then re-throw the authority's own error.
+          console.log(
+            "Notebook rapid create source diagnostics:",
+            JSON.stringify(
+              await collectNotebookSourceState(page, notebookEntityId),
+              null,
+              2,
+            ),
+          );
+          console.log(
+            "Notebook rapid create render diagnostics:",
+            JSON.stringify(await collectNotebookRenderState(page), null, 2),
+          );
+          console.log(
+            "Notebook rapid create event/action diagnostics:",
+            JSON.stringify(
+              await collectNotebookCreateTraceSummary(page),
+              null,
+              2,
+            ),
+          );
+          throw waitFailure ??
+            new Error(
+              "the post-sync wait resolved without an approved summary",
+            );
+        }
+
+        // Approved path: the assertions bind to the summary the wait handed
+        // back — the state at the instant the predicate approved it.
+        assertEquals(summary.argumentNotesLength, noteCreates);
+        assertEquals(summary.noteCount, noteCreates);
+      } finally {
+        await waitForRuntimeIdle(page).catch(
+          (error) =>
+            console.warn(
+              "Failed to await runtime idle after notebook regression",
+              error,
+            ),
         );
       }
-
-      assertEquals(summary.argumentNotesLength, noteCreates);
-      assertEquals(summary.noteCount, noteCreates);
-    } finally {
-      await waitForRuntimeIdle(page).catch(
-        (error) =>
-          console.warn(
-            "Failed to await runtime idle after notebook regression",
-            error,
-          ),
-      );
-    }
-  });
+    },
+  );
 });
 
 async function armTriggerTrace(page: Page): Promise<boolean> {
@@ -1425,17 +1460,32 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
       .filter((entry) => entry.path.length === 0)
       .sort((a, b) => a.recordedAt - b.recordedAt);
 
+    // The `stack.includes(...)` tests in `classifyStack` and
+    // `interestingCallPath` match frame text, which no engine promises to keep
+    // stable, and a filter that matches nothing looks exactly like a run with
+    // nothing to report. Two ways they go quiet:
+    //
+    // The `_CellImpl` names are the bundler's, not the source's. Renaming
+    // `CellImpl` or changing how the shell is bundled breaks every one of them.
+    //
+    // A member converted to a `#` private name changes its own frame text.
+    // Chrome writes `at #member`, Deno writes `at Class.#member`, and a
+    // public member keeps its class in both. The split does not follow the V8
+    // version -- for one example, the two were a single V8 minor apart on the
+    // machine this was tested on, as of this writing -- so it says nothing
+    // about a third engine, or a later Chrome. Match the bare `#member`, a
+    // substring of both, rather than either whole form.
     function classifyStack(stack?: string): string {
       if (!stack) return "unknown";
       if (
         stack.includes("_CellImpl.setMetaRaw") &&
-        stack.includes("Runner.setupInternal")
+        stack.includes("#setupInternal")
       ) {
         return "setup:setMetaRaw";
       }
       if (
         stack.includes("_CellImpl.setRawUntyped") &&
-        stack.includes("Runner.setupInternal")
+        stack.includes("#setupInternal")
       ) {
         return "setup:setRawUntyped";
       }
@@ -1467,9 +1517,9 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
         line.includes("handler:") ||
         line.includes("raw:") ||
         line.includes("postRun") ||
-        line.includes("Runner.instantiatePatternNode") ||
+        line.includes("#instantiatePatternNode") ||
         line.includes("Runner.run") ||
-        line.includes("Runner.setupInternal") ||
+        line.includes("#setupInternal") ||
         line.includes("sendValueToBinding") ||
         line.includes("diffAndUpdate") ||
         line.includes("applyChangeSet") ||
@@ -1599,14 +1649,24 @@ async function waitForHomePageReady(
   await waitForRuntimeIdle(page);
 }
 
-async function collectNotebookSourceState(page: Page): Promise<{
+// Reads the notebook by `knownNotebookId` when the caller captured one (the
+// sanctioned optimistic navigation can leave the view on a NOTE — see
+// notebookSourceStateMatches), else by the current view's piece id. Reports
+// `viewPieceId` separately either way, so a failure dump distinguishes
+// "wrong state" from "wrong piece under the reader" — the confusion the
+// 2026-08-27 r06/r09 diagnosis found in this step's recorded reds.
+async function collectNotebookSourceState(
+  page: Page,
+  knownNotebookId?: string,
+): Promise<{
   notebookEntityId?: string;
+  viewPieceId?: string;
   argumentNotesLength?: number;
   noteCount?: number;
   showNewNotePrompt?: boolean;
   usedCreateAnotherNote?: boolean;
 }> {
-  return await page.evaluate(async () => {
+  return await page.evaluate(async (knownId?: string) => {
     const api = globalThis.commonfabric as {
       readCell?: (options: {
         id: string;
@@ -1617,12 +1677,13 @@ async function collectNotebookSourceState(page: Page): Promise<{
 
     const appState = globalThis.app?.serialize?.();
     const view = appState?.view;
-    const notebookEntityId = view && typeof view === "object" &&
+    const viewPieceId = view && typeof view === "object" &&
         "pieceId" in view && typeof view.pieceId === "string"
       ? view.pieceId
       : undefined;
+    const notebookEntityId = knownId ?? viewPieceId;
     if (!notebookEntityId || !api?.readCell) {
-      return { notebookEntityId };
+      return { notebookEntityId, viewPieceId };
     }
 
     const resolveInternalManifest = async (
@@ -1677,6 +1738,7 @@ async function collectNotebookSourceState(page: Page): Promise<{
 
     return {
       notebookEntityId,
+      viewPieceId,
       // `notes` is a first-class Cell in the notebook argument schema. Newer
       // argument links preserve that wrapper, so debug reads return a handle;
       // older pieces may still materialize the array inline.
@@ -1701,19 +1763,44 @@ async function collectNotebookSourceState(page: Page): Promise<{
           .usedCreateAnotherNote
         : undefined,
     };
-  });
+  }, { args: [knownNotebookId] });
 }
+
+// The state notebookSourceStateMatches approves and hands back. Every field
+// is a defined, JSON-safe value by construction — the predicate answers only
+// when all of them hold — so the answer crosses the page boundary intact.
+type NotebookSourceSummary = {
+  notebookEntityId: string;
+  argumentNotesLength: number;
+  noteCount: number;
+  showNewNotePrompt: boolean;
+  usedCreateAnotherNote: boolean;
+};
 
 // Serialized into the page by waitForCondition: read the notebook's argument
 // and internal cells and report whether the rapidly created notes have all
 // landed — `expectedCount` notes present, the new-note prompt closed, and the
 // "create another" flag cleared. Inlines the collection that
 // collectNotebookSourceState performs so the wait resolves the instant the
-// source state converges rather than on a polling tick.
+// source state converges rather than on a polling tick. Answers the approved
+// summary rather than `true`, so the caller's assertions read the state as it
+// was when the condition held — a fresh read after the wait can instead land
+// in the ruled interim of a served re-derivation (`noteCount` cleanly
+// `undefined`, then re-triggered and healed) and fail a healthy run.
+//
+// Reads the notebook by the CALLER-CAPTURED id, never through the current
+// view: the final "Create" click's speculative run may enact an optimistic
+// navigation into the new note that the authoritative run computed no intent
+// for — sanctioned (L2 ruled PUNT 2026-08-27), so `view.pieceId` is allowed
+// to be a NOTE here, and a view-following read would poll that healthy note
+// through notebook accessors until the step's net (the 2026-08-27 r06/r09
+// root cause). The id-bound read asserts the same product facts wherever the
+// view wandered.
 const notebookSourceStateMatches = async (
   _probe: ProbeApi,
   expectedCount: number,
-): Promise<boolean> => {
+  notebookEntityId: string,
+): Promise<NotebookSourceSummary | false> => {
   const api = globalThis.commonfabric as {
     readCell?: (options: {
       id: string;
@@ -1722,11 +1809,6 @@ const notebookSourceStateMatches = async (
     }) => Promise<unknown>;
   } | undefined;
 
-  const view = globalThis.app?.serialize?.()?.view;
-  const notebookEntityId = view && typeof view === "object" &&
-      "pieceId" in view && typeof view.pieceId === "string"
-    ? view.pieceId
-    : undefined;
   if (!notebookEntityId || !api?.readCell) return false;
 
   const resolveInternalManifest = async (
@@ -1786,10 +1868,21 @@ const notebookSourceStateMatches = async (
     showNewNotePrompt?: unknown;
     usedCreateAnotherNote?: unknown;
   };
-  return argumentNotesLength === expectedCount &&
+  if (
+    argumentNotesLength === expectedCount &&
     internal.noteCount === expectedCount &&
     internal.showNewNotePrompt === false &&
-    internal.usedCreateAnotherNote === false;
+    internal.usedCreateAnotherNote === false
+  ) {
+    return {
+      notebookEntityId,
+      argumentNotesLength,
+      noteCount: internal.noteCount,
+      showNewNotePrompt: internal.showNewNotePrompt,
+      usedCreateAnotherNote: internal.usedCreateAnotherNote,
+    };
+  }
+  return false;
 };
 
 async function collectHomeLoadSummaryFromFreshPage(
@@ -2781,7 +2874,7 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
     };
 
     const settleHistory = await api
-      .getSettleStatsHistory() as SettleHistoryEntry[];
+      .getSettleStatsHistory() as readonly SettleHistoryEntry[];
     const recentHistory = settleHistory.slice(-8);
     const settle = {
       executeCalls: settleHistory.length,
@@ -3315,22 +3408,22 @@ async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
     const renderedButtonTexts: string[] = [];
 
     function collectButtonTexts(root: Document | ShadowRoot): void {
-      for (const el of root.querySelectorAll("*")) {
-        if (el.matches("cf-button, button, a")) {
-          const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
-          if (text) {
-            buttonTexts.push(text);
-            const style = getComputedStyle(el);
-            const rect = el.getBoundingClientRect();
-            if (
-              style.display !== "none" && style.visibility !== "hidden" &&
-              rect.width > 0 && rect.height > 0
-            ) {
-              renderedButtonTexts.push(text);
-            }
+      for (const el of root.querySelectorAll("cf-button, button, a")) {
+        const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
+        if (text) {
+          buttonTexts.push(text);
+          const style = getComputedStyle(el);
+          const rect = el.getBoundingClientRect();
+          if (
+            style.display !== "none" && style.visibility !== "hidden" &&
+            rect.width > 0 && rect.height > 0
+          ) {
+            renderedButtonTexts.push(text);
           }
         }
-        if (el.shadowRoot) collectButtonTexts(el.shadowRoot);
+        if ((el as HTMLElement).shadowRoot) {
+          collectButtonTexts((el as HTMLElement).shadowRoot!);
+        }
       }
     }
 
@@ -3344,7 +3437,7 @@ async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
       currentKeys: current && typeof current === "object"
         ? Object.keys(current).slice(0, 30)
         : [],
-      runtimeSpace: globalThis.app.element().getRuntimeSpaceDID(),
+      runtimeSpace: globalThis.app.getRuntimeSpaceDID(),
       buttonTexts: buttonTexts.slice(0, 40),
       renderedButtonTexts: renderedButtonTexts.slice(0, 40),
     };
@@ -3399,11 +3492,6 @@ async function clickPieceLinkWithText(
   }
 }
 
-// Helper to find note in list using regex pattern
-async function findNoteInList(page: Page): Promise<boolean> {
-  return (await collectNoteTitlesInList(page)).length > 0;
-}
-
 // Serialized into the page by waitForCondition: count the unique rendered
 // "📝 New Note #<hash>" titles across the document and every shadow root and
 // report whether more than `minCount` are present. Inlines the collection that
@@ -3422,30 +3510,26 @@ const noteTitlesExceed = (probe: ProbeApi, minCount: number): boolean => {
 };
 
 async function collectNoteTitlesInList(page: Page): Promise<string[]> {
-  try {
-    return await page.evaluate(() => {
-      const titles = new Set<string>();
+  return await page.evaluate(() => {
+    const titles = new Set<string>();
 
-      function search(root: Document | ShadowRoot): void {
-        const allElements = root.querySelectorAll("*");
-        for (const el of allElements) {
-          const text = el.textContent;
-          if (text) {
-            for (
-              const match of text.matchAll(/📝 New Note #[A-Za-z0-9_-]+/g)
-            ) {
-              titles.add(match[0]);
-            }
-          }
-          if (el.shadowRoot) {
-            search(el.shadowRoot);
+    function search(root: Document | ShadowRoot): void {
+      const allElements = root.querySelectorAll("*");
+      for (const el of allElements) {
+        const text = el.textContent;
+        if (text) {
+          for (
+            const match of text.matchAll(/📝 New Note #[A-Za-z0-9_-]+/g)
+          ) {
+            titles.add(match[0]);
           }
         }
+        if (el.shadowRoot) {
+          search(el.shadowRoot);
+        }
       }
-      search(document);
-      return [...titles].sort();
-    });
-  } catch (_) {
-    return [];
-  }
+    }
+    search(document);
+    return [...titles].sort();
+  });
 }

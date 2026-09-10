@@ -1,25 +1,27 @@
+/**
+ * Reactivity over `FabricPrimitive` arguments, observed through a compiled
+ * pattern rather than through a cell.
+ *
+ * The distinction is load-bearing, and is why this file exists alongside
+ * `fabric-primitive-cell-update.test.ts`. A schemaless cell read with `sink()`
+ * takes a different route through change detection than a pattern argument
+ * declared with its real type: the former is compared as a whole value, the
+ * latter as a shape. Only the pattern route reaches the shape comparison, so
+ * only tests written this way can observe whether it re-fires.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   FabricBytes,
-  FabricEpochDays,
+  FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
 } from "@commonfabric/data-model/fabric-primitives";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-
-// Reactivity over `FabricPrimitive` arguments, observed through a compiled
-// pattern rather than through a cell.
-//
-// The distinction is load-bearing, and is why this file exists alongside
-// `fabric-primitive-cell-update.test.ts`. A schemaless cell read with `sink()`
-// takes a different route through change detection than a pattern argument
-// declared with its real type: the former is compared as a whole value, the
-// latter as a shape. Only the pattern route reaches the shape comparison, so
-// only tests written this way can observe whether it re-fires.
 
 const signer = await Identity.fromPassphrase(
   "fabric primitive pattern reactivity",
@@ -131,10 +133,10 @@ const primitiveCases = [
     secondSeen: "2000",
   },
   {
-    name: "FabricEpochDays",
+    name: "FabricEpochDay",
     read: "String(args.v?.value ?? -1n)",
-    first: new FabricEpochDays(10n),
-    second: new FabricEpochDays(20n),
+    first: new FabricEpochDay(10n),
+    second: new FabricEpochDay(20n),
     firstSeen: "10",
     secondSeen: "20",
   },
@@ -167,10 +169,11 @@ describe("pattern reactivity over a changing argument", () => {
     });
   }
 
-  // The same value and the same read, declared `any` rather than as its class.
-  // This pins the asymmetry: it is the declared type, not the value, that
-  // decides whether the change is observed.
   it("re-runs a computed over a changed value declared `any`", async () => {
+    // The same value and the same read, declared `any` rather than as its
+    // class. This pins the asymmetry: it is the declared type, not the value,
+    // that decides whether the change is observed.
+
     const [firstSeen, secondSeen] = await observeAcrossUpdate(
       "any",
       "any",

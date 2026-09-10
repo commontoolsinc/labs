@@ -17,8 +17,8 @@ occurrences.
 3. `lift()` → `computed()` or refactor
 4. `handler()` for simple operations → inline handlers
 5. `.equals()` method → `Writable.equals(a, b)`
-6. Unnecessary `[ID]` usage → use `Writable.equals()` instead for
-   finding/removing items
+6. `[ID]` usage → the symbol no longer exists; array elements are anchored into
+   documents automatically, and `Writable.equals()` finds/removes items
 
 ## Remaining Occurrences
 
@@ -50,8 +50,8 @@ occurrences.
 - [ ] Update pattern input types to use `Writable<T>` for cells used in inline
       handlers
 - [ ] Replace `.equals()` with `Writable.equals(a, b)`
-- [ ] Review `[ID]` usage - remove if only doing finding/removing (use
-      `Writable.equals()` instead). Keep only for item reordering scenarios.
+- [ ] Remove any `[ID]` usage - the symbol no longer exists (anchoring is
+      automatic; use `Writable.equals()` for finding/removing).
 - [ ] Test the updated pattern
 - [ ] Verify no TypeScript errors
 - [ ] Deploy and verify functionality

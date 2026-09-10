@@ -7,10 +7,12 @@ import {
   type ConversationFixture,
   disableMockMode,
   enableMockMode,
+  failureHint,
   LLMClient,
   LLMStreamError,
   loadConversationFixture,
   normalizeLLMResponse,
+  readLLMStream,
   resetMockMode,
   setMockResponseGate,
 } from "./client.ts";
@@ -31,14 +33,8 @@ function streamFromChunks(chunks: string[]): ReadableStream<Uint8Array> {
   });
 }
 
-function runClientStream(client: LLMClient, chunks: string[]) {
-  return (client as unknown as {
-    stream(
-      body: ReadableStream<Uint8Array>,
-      id: string,
-      callback?: (text: string) => void,
-    ): Promise<unknown>;
-  }).stream(streamFromChunks(chunks), "trace-1", () => {});
+function runClientStream(chunks: string[]) {
+  return readLLMStream(streamFromChunks(chunks), "trace-1", () => {});
 }
 
 describe("LLMClient test-environment guard", () => {
@@ -434,7 +430,7 @@ describe("LLMClient test-environment guard", () => {
       ]
     ) {
       try {
-        await runClientStream(client, chunks);
+        await runClientStream(chunks);
       } catch (error) {
         expect(error).toBeInstanceOf(LLMStreamError);
         expect((error as Error).message).toBe("boom");
@@ -454,7 +450,7 @@ describe("LLMClient test-environment guard", () => {
       sources: [{ url: "https://example.com" }],
     }];
 
-    const result = await runClientStream(client, [
+    const result = await runClientStream([
       JSON.stringify({ type: "text-delta", textDelta: "searched" }) + "\n",
       JSON.stringify({
         type: "finish",
@@ -478,7 +474,7 @@ describe("LLMClient test-environment guard", () => {
     };
 
     try {
-      const result = await runClientStream(client, [
+      const result = await runClientStream([
         JSON.stringify("hello") + "\n",
         "not json\n",
         "not final json",
@@ -590,6 +586,49 @@ describe("mock response gate", () => {
       expect(response.content).toBe("ungated");
     } finally {
       resetMockMode();
+    }
+  });
+});
+
+describe("failureHint", () => {
+  const PARAMETERS = "messages, prompt, model, etc.";
+
+  //
+  // The failure hint
+  //
+  // The hint is the first thing a developer reads in the console when a request
+  // fails, and for most of a working day the failure is not theirs. Each status
+  // class has to send them to the right place.
+  //
+
+  it("sends a rate-limited caller away to wait rather than to their arguments", () => {
+    for (const status of [429, 503]) {
+      const hint = failureHint(status, PARAMETERS);
+      expect(hint).toContain("again later");
+      expect(hint).not.toContain(PARAMETERS);
+    }
+  });
+
+  it("tells a caller a server failure was not their doing", () => {
+    for (const status of [500, 502, 504]) {
+      const hint = failureHint(status, PARAMETERS);
+      expect(hint).toContain("was not the problem");
+      expect(hint).not.toContain(PARAMETERS);
+    }
+  });
+
+  it("names the arguments to check when the request was rejected", () => {
+    for (const status of [400, 422]) {
+      expect(failureHint(status, PARAMETERS)).toContain(PARAMETERS);
+    }
+  });
+
+  it("claims nothing about a status it does not recognize", () => {
+    for (const status of [401, 403, 404, 418]) {
+      const hint = failureHint(status, PARAMETERS);
+      expect(hint).not.toContain(PARAMETERS);
+      expect(hint).not.toContain("again later");
+      expect(hint).not.toContain("was not the problem");
     }
   });
 });

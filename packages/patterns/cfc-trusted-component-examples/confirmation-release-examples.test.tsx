@@ -1,4 +1,4 @@
-import { assert, handler, pattern } from "commonfabric";
+import { assert, handler, pattern, TESTS } from "commonfabric";
 import {
   CustomerSupportRecipientConfirmExample,
   FinanceRecipientConfirmExample,
@@ -74,7 +74,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: runRecipientConfirm({ suite: finance }) },
       { assertion: assert_finance_confirmed },
       { action: runSupportConfirm({ suite: support }) },

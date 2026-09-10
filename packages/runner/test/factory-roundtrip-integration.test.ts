@@ -1,18 +1,18 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import {
-  jsonFromValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import {
   factoryStateOf,
   type FactoryStateV1,
   isAdmittedFabricFactory,
   sealFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
@@ -87,7 +87,7 @@ type PersistedFactoryValues = {
 // to one in-process server. This catches false "fresh runtime" tests that keep
 // using a writer's warm StorageManager cache.
 class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
+  static override connectTo(
     server: MemoryV2Server.Server,
     options: Omit<Options, "memoryHost" | "spaceHostMap">,
   ): SharedServerStorageManager {
@@ -171,10 +171,10 @@ describe("Factory@1 runner round trips", () => {
     const states = factories.map((factory) =>
       sealFactoryState(factory)
     ) as unknown as StoredFactories["states"];
-    const encoded = jsonFromValue({
+    const encoded = jsonFromFabricValue({
       nested: { factories: [...factories] },
     } as FabricValue);
-    const decoded = valueFromJson(encoded) as {
+    const decoded = fabricFromJsonValue(encoded) as {
       nested: { factories: FactoryTuple };
     };
     return {
@@ -208,7 +208,11 @@ describe("Factory@1 runner round trips", () => {
   it("context-free decodes all kinds inertly and warm-materializes nested values", async () => {
     const { encoded, factories, shells, states } = await storeFactories();
 
-    expect(jsonFromValue({ nested: { factories: [...shells] } } as FabricValue))
+    expect(
+      jsonFromFabricValue(
+        { nested: { factories: [...shells] } } as FabricValue,
+      ),
+    )
       .toBe(encoded);
     for (let index = 0; index < shells.length; index++) {
       expect(typeof shells[index]).toBe("function");
@@ -431,8 +435,8 @@ describe("Factory@1 runner round trips", () => {
       identity,
       "patternFactory",
     ) as PatternFactory<unknown, unknown>;
-    const shell = valueFromJson(
-      jsonFromValue(live as unknown as FabricValue),
+    const shell = fabricFromJsonValue(
+      jsonFromFabricValue(live as unknown as FabricValue),
     ) as PatternFactory<unknown, unknown>;
     const tx = writer.edit();
     const result = writer.getCell<{ result: number }>(
@@ -459,8 +463,8 @@ describe("Factory@1 runner round trips", () => {
       identity,
       "patternFactory",
     ) as PatternFactory<unknown, unknown>;
-    const shell = valueFromJson(
-      jsonFromValue(live as unknown as FabricValue),
+    const shell = fabricFromJsonValue(
+      jsonFromFabricValue(live as unknown as FabricValue),
     ) as PatternFactory<unknown, unknown>;
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -580,7 +584,10 @@ describe("Factory@1 runner round trips", () => {
     await expect(
       writer.setup(undefined, rawHandlerDescriptor as never, {}, result),
     ).resolves.toBe(result);
-    expect(result.getMetaRaw("patternIdentity")).toBeDefined();
+    // The descriptor remains accepted by the legacy setup boundary, but its
+    // keyless identity is session-only and therefore never written as durable
+    // piece metadata.
+    expect(result.getMetaRaw("patternIdentity")).toBeUndefined();
   });
 
   it("preserves modifier state, including anonymous and link-mapped selectors", async () => {
@@ -593,9 +600,12 @@ describe("Factory@1 runner round trips", () => {
     ) as PatternFactory<unknown, unknown>;
 
     for (const carried of [anonymous, cellSelected]) {
-      const encoded = jsonFromValue(carried as FabricValue);
-      const shell = valueFromJson(encoded) as PatternFactory<unknown, unknown>;
-      expect(jsonFromValue(shell as FabricValue)).toBe(encoded);
+      const encoded = jsonFromFabricValue(carried as FabricValue);
+      const shell = fabricFromJsonValue(encoded) as PatternFactory<
+        unknown,
+        unknown
+      >;
+      expect(jsonFromFabricValue(shell as FabricValue)).toBe(encoded);
       const materialized = materializeFactory(shell, {
         runtime: writer,
         artifactSpace: sourceSpace,
@@ -615,18 +625,30 @@ describe("Factory@1 runner round trips", () => {
     }
   });
 
-  it("loads a replicated by-value factory from its containing space while retaining its execution selector", async () => {
+  it("publishes an inline factory through its containing write while retaining its execution selector", async () => {
     const { identity, factories, shells, states } = await storeFactories();
-    expect(() => writer.getImmutableCell(destinationSpace, factories[0]))
-      .toThrow(`is not available in space ${destinationSpace}`);
+    const inline = writer.getImmutableCell(destinationSpace, factories[0]);
+    expect(
+      writer.patternManager.isArtifactAvailableInSpace(
+        identity,
+        destinationSpace,
+      ),
+    ).toBe(false);
 
-    await writer.patternManager.ensureArtifactClosureInSpace(
-      identity,
-      sourceSpace,
+    const tx = writer.edit();
+    writer.getCell(
       destinationSpace,
-    );
-    expect(() => writer.getImmutableCell(destinationSpace, factories[0])).not
-      .toThrow();
+      "inline-factory-containing-write",
+      undefined,
+      tx,
+    ).set(inline.getRaw());
+    expect((await tx.commit()).error).toBeUndefined();
+    expect(
+      writer.patternManager.isArtifactAvailableInSpace(
+        identity,
+        destinationSpace,
+      ),
+    ).toBe(true);
 
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -1001,22 +1023,25 @@ describe("Factory@1 runner round trips", () => {
       destinationSpace,
       "causal-cold-publication-intermediate",
     ).getRaw()! as unknown as { factories: FactoryTuple };
-    const loadStarted = Promise.withResolvers<void>();
-    let loadAttempts = 0;
-    const managerInternals = follower.patternManager as unknown as {
-      loadVerifiedArtifactClosure: (
-        ...args: unknown[]
-      ) => Promise<unknown>;
-    };
-    const loadVerifiedArtifactClosure = managerInternals
-      .loadVerifiedArtifactClosure.bind(follower.patternManager);
-    managerInternals.loadVerifiedArtifactClosure = (...args) => {
-      if (args[0] === destinationSpace) {
-        loadAttempts += 1;
-        loadStarted.resolve();
-      }
-      return loadVerifiedArtifactClosure(...args);
-    };
+    const preparationStarted = Promise.withResolvers<void>();
+    const followerPrepareArtifactPublication = follower.patternManager
+      .prepareArtifactPublication.bind(follower.patternManager);
+    follower.patternManager.prepareArtifactPublication = ((
+      identity,
+      fromSpace,
+      toSpace,
+      sourcePublication,
+      onPrepared,
+    ) => {
+      if (fromSpace === destinationSpace) preparationStarted.resolve();
+      return followerPrepareArtifactPublication(
+        identity,
+        fromSpace,
+        toSpace,
+        sourcePublication,
+        onPrepared,
+      );
+    }) as typeof follower.patternManager.prepareArtifactPublication;
 
     const secondTx = follower.edit();
     const destination = follower.getCell<{ factories: FactoryTuple }>(
@@ -1032,7 +1057,7 @@ describe("Factory@1 runner round trips", () => {
       secondSettled = true;
       return result;
     });
-    await loadStarted.promise;
+    await preparationStarted.promise;
     await Promise.resolve();
     const secondSettledBeforeRelease = secondSettled;
 
@@ -1041,13 +1066,10 @@ describe("Factory@1 runner round trips", () => {
     const secondResult = await observedSecondCommit;
     publisher.patternManager.prepareArtifactPublication =
       prepareArtifactPublication;
-    managerInternals.loadVerifiedArtifactClosure = loadVerifiedArtifactClosure;
+    follower.patternManager.prepareArtifactPublication =
+      followerPrepareArtifactPublication;
 
     expect(secondSettledBeforeRelease).toBe(false);
-    // One durable probe misses while the source is speculative. Confirmation
-    // carries the verified in-process closure proof, so no racy second storage
-    // read is needed before publishing onward.
-    expect(loadAttempts).toBe(1);
     expect(firstResult.error).toBeUndefined();
     expect(secondResult.error).toBeUndefined();
     expect(destination.getRaw()).toEqual(onward);
@@ -1109,22 +1131,25 @@ describe("Factory@1 runner round trips", () => {
       destinationSpace,
       "rejected-causal-publication-intermediate",
     ).getRaw()! as unknown as { factories: FactoryTuple };
-    const loadStarted = Promise.withResolvers<void>();
-    let loadAttempts = 0;
-    const managerInternals = follower.patternManager as unknown as {
-      loadVerifiedArtifactClosure: (
-        ...args: unknown[]
-      ) => Promise<unknown>;
-    };
-    const loadVerifiedArtifactClosure = managerInternals
-      .loadVerifiedArtifactClosure.bind(follower.patternManager);
-    managerInternals.loadVerifiedArtifactClosure = (...args) => {
-      if (args[0] === destinationSpace) {
-        loadAttempts += 1;
-        loadStarted.resolve();
-      }
-      return loadVerifiedArtifactClosure(...args);
-    };
+    const preparationStarted = Promise.withResolvers<void>();
+    const followerPrepareArtifactPublication = follower.patternManager
+      .prepareArtifactPublication.bind(follower.patternManager);
+    follower.patternManager.prepareArtifactPublication = ((
+      identity,
+      fromSpace,
+      toSpace,
+      sourcePublication,
+      onPrepared,
+    ) => {
+      if (fromSpace === destinationSpace) preparationStarted.resolve();
+      return followerPrepareArtifactPublication(
+        identity,
+        fromSpace,
+        toSpace,
+        sourcePublication,
+        onPrepared,
+      );
+    }) as typeof follower.patternManager.prepareArtifactPublication;
 
     const secondTx = follower.edit();
     follower.getCell<{ factories: FactoryTuple }>(
@@ -1134,8 +1159,7 @@ describe("Factory@1 runner round trips", () => {
       secondTx,
     ).set(onward);
     const secondCommit = secondTx.commit();
-    await loadStarted.promise;
-    const loadAttemptsBeforeRelease = loadAttempts;
+    await preparationStarted.promise;
 
     releaseRejectedPreparation.resolve();
     const [firstResult, secondResult] = await Promise.all([
@@ -1144,7 +1168,8 @@ describe("Factory@1 runner round trips", () => {
     ]);
     publisher.patternManager.prepareArtifactPublication =
       prepareArtifactPublication;
-    managerInternals.loadVerifiedArtifactClosure = loadVerifiedArtifactClosure;
+    follower.patternManager.prepareArtifactPublication =
+      followerPrepareArtifactPublication;
 
     expect(firstResult.error?.message).toContain(
       "forced source publication rejection",
@@ -1152,8 +1177,6 @@ describe("Factory@1 runner round trips", () => {
     expect(secondResult.error?.message).toContain(
       "forced source publication rejection",
     );
-    expect(loadAttemptsBeforeRelease).toBe(1);
-    expect(loadAttempts).toBe(1);
   });
 });
 
@@ -1203,8 +1226,8 @@ describe("Factory@1 fresh-runtime value round trip", () => {
         },
       );
       expect(entryIdentity).toBeDefined();
-      const shell = valueFromJson(
-        jsonFromValue(live as unknown as FabricValue),
+      const shell = fabricFromJsonValue(
+        jsonFromFabricValue(live as unknown as FabricValue),
       ) as PatternFactory<unknown, unknown>;
       const compiledFactory = await seedRuntime.harness.compileToRecordGraph(
         factoryProgram,

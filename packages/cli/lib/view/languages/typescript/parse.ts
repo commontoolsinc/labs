@@ -9,12 +9,13 @@
  * plain text so the pager remains usable.
  *
  * Three products come out of one parse:
- *   1. Per-line coloured {@link Span}s (full-fidelity: every character is
+ *   1. Per-line colored {@link Span}s (full-fidelity: every character is
  *      classified, via a deep token walk plus trivia gap-filling).
  *   2. A {@link StructureNode} tree (sections, functions, closures, builders,
  *      schemas, bindings) for navigation and folding.
  *   3. A name -> {@link Definition} index for go-to-definition peeks.
  */
+
 import ts from "typescript";
 import type {
   Definition,
@@ -197,7 +198,7 @@ function parseTypeScriptDocument(text: string, fileName: string): Document {
 }
 
 /**
- * Just the coloured lines for `text` — the syntax highlighting — without the
+ * Just the colored lines for `text` — the syntax highlighting — without the
  * structure tree, definitions or comment nodes. This is the work that has to
  * stay correct on every keystroke; it is a fraction of a full {@link
  * parseDocument} (the structure build over the whole AST is the expensive part),
@@ -244,7 +245,7 @@ function scriptKindFor(fileName: string): ts.ScriptKind {
 /**
  * A conventional quoted string remains one token when an edit changes only its
  * unescaped contents. Replacing only that span preserves the complete-file
- * colours and bracket depths of every other token on the line.
+ * colors and bracket depths of every other token on the line.
  */
 export function highlightLineEditLocally(
   before: Line,
@@ -689,16 +690,16 @@ function tokenAt(sf: ts.SourceFile, pos: number): ts.Node {
   }
 }
 
-/** Leaf tokens whose start lies in [from, to). The walk prunes subtrees that do
- * not overlap the range, so it costs the range size, not the document size. */
 /** Whether `kind` is a JSDoc node. The token walk does not descend into these:
  * a `{@link Name}` tag parses `Name` as an Identifier leaf, which would split
- * the comment and leave the text after it uncoloured — a JSDoc comment stays
- * trivia, coloured whole by {@link classifyTrivia}. */
+ * the comment and leave the text after it uncolored — a JSDoc comment stays
+ * trivia, colored whole by {@link classifyTrivia}. */
 function isJSDocNode(kind: ts.SyntaxKind): boolean {
   return kind >= SK.FirstJSDocNode && kind <= SK.LastJSDocNode;
 }
 
+/** Leaf tokens whose start lies in [from, to). The walk prunes subtrees that do
+ * not overlap the range, so it costs the range size, not the document size. */
 function collectTokensInRange(
   sf: ts.SourceFile,
   from: number,
@@ -798,7 +799,9 @@ function lineEq(a: Line, b: Line): boolean {
   return true;
 }
 
-// --- Tokenisation ------------------------------------------------------------
+//
+// Tokenisation
+//
 
 function collectLeafTokens(sf: ts.SourceFile): RawToken[] {
   const tokens: RawToken[] = [];
@@ -1137,7 +1140,7 @@ function inSchema(node: ts.Node, schemaSet: Set<ts.Node>): boolean {
   return false;
 }
 
-/** Object literals that materialise a `… satisfies …JSONSchema`. */
+/** Object literals that materialize a `… satisfies …JSONSchema`. */
 function collectSchemaObjects(sf: ts.SourceFile): Set<ts.Node> {
   const set = new Set<ts.Node>();
   const walk = (node: ts.Node) => {
@@ -1175,7 +1178,9 @@ function isFunctionLike(node: ts.Node): boolean {
     ts.isSetAccessorDeclaration(node);
 }
 
-// --- Structure tree ----------------------------------------------------------
+//
+// Structure tree
+//
 
 interface BuildCtx {
   sf: ts.SourceFile;
@@ -1189,7 +1194,7 @@ interface BuildCtx {
 /**
  * One classification result. `recurseInto` lists the *child source nodes*
  * {@link buildNode} descends into for sub-structure — chosen explicitly rather
- * than taken from `forEachChild`. A recognised shape narrows or suppresses its
+ * than taken from `forEachChild`. A recognized shape narrows or suppresses its
  * children: an import, schema, type alias, interface or enum lists none; a
  * builder lists only its arguments; a closure or function its body. A generic
  * (unclassified) node lists all its children, so the whole AST stays navigable.
@@ -1198,8 +1203,10 @@ interface Desc {
   kind: StructureKind;
   label: string;
   name?: string;
+
   /** Char offset of the declared identifier, when the node names one. */
   nameOffset?: number;
+
   recurseInto: readonly ts.Node[];
   meta?: NodeMeta;
 }
@@ -1208,7 +1215,7 @@ interface Desc {
  * Build a structure node for `node` and, recursively, every AST node beneath it
  * — the whole tree is navigable. Special shapes (functions, schemas, builders,
  * patterns, …) keep their rich label and card metadata via {@link classify};
- * everything else becomes a generic node labelled by its source. Nodes that
+ * everything else becomes a generic node labeled by its source. Nodes that
  * share `node`'s exact source range are merged into this one (so the user never
  * lands on two nodes that look identical), and every merged AST kind is recorded
  * for the info card.
@@ -1250,7 +1257,7 @@ function buildNode(node: ts.Node, depth: number, ctx: BuildCtx): StructureNode {
   };
   if (desc.name) registerDefinition(ctx, desc, sn);
   // Descend only into the child source nodes the classification chose. A
-  // recognised shape narrows or suppresses its children here — an import,
+  // recognized shape narrows or suppresses its children here — an import,
   // schema, type literal or other fold lists no children, a builder lists only
   // its arguments — so the navigable tree stops at the fold instead of
   // expanding into raw AST. A generic (unclassified) node lists all its
@@ -1277,8 +1284,8 @@ function generatedOriginOf(desc: Desc): string | undefined {
 }
 
 /**
- * The classification for a merged chain: the most specific recognised shape
- * among the layers (outermost first), else a generic node labelled by its first
+ * The classification for a merged chain: the most specific recognized shape
+ * among the layers (outermost first), else a generic node labeled by its first
  * source line.
  */
 function describeMerged(layers: ts.Node[], ctx: BuildCtx): Desc {
@@ -1300,7 +1307,7 @@ function describeMerged(layers: ts.Node[], ctx: BuildCtx): Desc {
 
 /**
  * A short label for a generic AST node. Chained calls and member accesses are
- * labelled by the distinguishing segment (`.version(…)`, `.name`) rather than
+ * labeled by the distinguishing segment (`.version(…)`, `.name`) rather than
  * the shared left-hand prefix, which a raw first-line slice would show for every
  * link in a fluent chain.
  */
@@ -1499,10 +1506,10 @@ function registerDefinition(
  *
  *   - Every statement is a node, its kind refined by its content.
  *   - In expression position, the reactive/structural shapes (closures,
- *     recognised builder/pattern/registered/synthetic calls, JSON-schema object
+ *     recognized builder/pattern/registered/synthetic calls, JSON-schema object
  *     literals) are nodes too.
  *
- * `recurseInto` chooses each shape's child source nodes: a recognised shape
+ * `recurseInto` chooses each shape's child source nodes: a recognized shape
  * narrows or suppresses them (an import or schema lists none, a builder lists
  * its arguments), while a statement wrapping an expression lists that
  * expression so the call or closure inside stays its own node.
@@ -1510,7 +1517,7 @@ function registerDefinition(
 function classify(node: ts.Node, ctx: BuildCtx): Desc | null {
   const { sf } = ctx;
 
-  // --- declarations (also statements) ---
+  // declarations (also statements)
   if (ts.isImportDeclaration(node)) {
     return {
       kind: "import",
@@ -1614,11 +1621,11 @@ function classify(node: ts.Node, ctx: BuildCtx): Desc | null {
     };
   }
 
-  // --- variable statements & declarations ---
-  // A single binding is represented by the whole statement (so the `variable`
-  // node covers `export const … ;`); a multi-declarator statement stays generic
-  // and each declaration becomes its own binding node. The single declaration
-  // itself stays generic to avoid labelling one binding at two nesting levels.
+  // variable statements & declarations: A single binding is represented by the
+  // whole statement (so the `variable` node covers `export const … ;`); a
+  // multi-declarator statement stays generic and each declaration becomes its
+  // own binding node. The single declaration itself stays generic to avoid
+  // labeling one binding at two nesting levels.
   if (ts.isVariableStatement(node)) {
     const decls = node.declarationList.declarations;
     if (decls.length === 1) return bindingDesc(decls[0], ctx);
@@ -1632,7 +1639,7 @@ function classify(node: ts.Node, ctx: BuildCtx): Desc | null {
     return bindingDesc(node, ctx);
   }
 
-  // --- other statements ---
+  // other statements
   if (ts.isExpressionStatement(node)) {
     return expressionStatementDesc(node.expression, ctx);
   }
@@ -1685,7 +1692,7 @@ function classify(node: ts.Node, ctx: BuildCtx): Desc | null {
     };
   }
 
-  // --- significant expressions (in argument / body / return position) ---
+  // significant expressions (in argument / body / return position)
   if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
     return {
       kind: "closure",
@@ -1809,7 +1816,7 @@ function expressionStatementDesc(expr: ts.Expression, ctx: BuildCtx): Desc {
   };
 }
 
-/** Build a builder/pattern node from a recognised reactive call. */
+/** Build a builder/pattern node from a recognized reactive call. */
 function callDesc(
   call: ts.CallExpression,
   callee: string,
@@ -1916,7 +1923,9 @@ function calleeName(call: ts.CallExpression, sf: ts.SourceFile): string {
   return nodeFirstLine(e, sf, 16);
 }
 
-// --- Metadata extraction (best-effort; never throws) -------------------------
+//
+// Metadata extraction (best-effort; never throws)
+//
 
 type FnLike =
   | ts.ArrowFunction
@@ -2090,8 +2099,10 @@ interface SchemaProps {
   properties?: ts.ObjectLiteralExpression;
   required: string[];
   items?: ts.ObjectLiteralExpression;
+
   /** True when the literal spells `items: false` (a closed tuple). */
   itemsFalse?: boolean;
+
   prefixItems?: ts.ArrayLiteralExpression;
 }
 
@@ -2285,7 +2296,7 @@ function describeInitializer(
   init: ts.Expression | undefined,
   sf: ts.SourceFile,
 ): string {
-  if (!init) return "(uninitialised)";
+  if (!init) return "(uninitialized)";
   return nodeFirstLine(init, sf, 56);
 }
 
@@ -2391,8 +2402,8 @@ function firstLine(text: string, max: number): string {
 /**
  * The first source line of a node, trimmed and capped at `max`, read straight
  * from the source between the node's offsets. Unlike `node.getText()` it never
- * materialises the whole (possibly multi-line, possibly huge) node text, so
- * labelling every node in the full-AST tree stays linear instead of quadratic.
+ * materializes the whole (possibly multi-line, possibly huge) node text, so
+ * labeling every node in the full-AST tree stays linear instead of quadratic.
  */
 function nodeFirstLine(node: ts.Node, sf: ts.SourceFile, max: number): string {
   const text = sf.text;
@@ -2408,7 +2419,9 @@ function nodeFirstLine(node: ts.Node, sf: ts.SourceFile, max: number): string {
   return firstLine(text.slice(start, stop), max);
 }
 
-// --- Sections ----------------------------------------------------------------
+//
+// Sections
+//
 
 interface SectionMark {
   name: string;
@@ -2469,7 +2482,9 @@ function attachSections(
   return sectionNodes;
 }
 
-// --- Lines -------------------------------------------------------------------
+//
+// Lines
+//
 
 function spansToLines(
   text: string,

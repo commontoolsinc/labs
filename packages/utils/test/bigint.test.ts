@@ -1,9 +1,17 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import {
+  fromBase64url,
+  toUnpaddedBase64url,
+} from "@commonfabric/utils/base64url";
 import {
   bigintFromMinimalTwosComplement,
+  bigintFromUnpaddedBase64url,
   bigintToMinimalTwosComplement,
+  bigintToUnpaddedBase64url,
 } from "@commonfabric/utils/bigint";
+
 import {
   bigintFromMtcDirect,
   bigintToMtcDirect,
@@ -12,10 +20,6 @@ import {
   bigintFromMtcHex,
   bigintToMtcHex,
 } from "../src/bigint-uint8-hex-string.ts";
-import {
-  fromBase64url,
-  toUnpaddedBase64url,
-} from "@commonfabric/utils/base64url";
 
 //
 // Reference encoder
@@ -62,7 +66,11 @@ function referenceEncode(value: bigint): Uint8Array {
 }
 
 //
-// Fixtures, both main and reference
+// Fixtures, and the check that pins the oracle
+//
+// Both fixture sets — the main ones the per-function loops consume, and the
+// hand-written reference bytes — and then the block that pins
+// `referenceEncode()` against those bytes.
 //
 
 interface Fixture {
@@ -131,9 +139,7 @@ function fixtureLabel(v: bigint, encoded: Uint8Array): string {
   return `${sign}0x${hex.slice(0, 12)}... (${encoded.length} bytes)`;
 }
 
-/**
- * Makes a fixture, optionally calculating the encoded form.
- */
+/** Makes a fixture, optionally calculating the encoded form. */
 function makeFixture(value: bigint, preEncoded?: number[]): Fixture {
   let encoded: Uint8Array;
 
@@ -222,15 +228,12 @@ const referenceFixtures: readonly Fixture[] = [
   ),
 ];
 
-//
-// Tests to validate reference encoder
-//
-
-// A small set of explicit byte-level assertions that pin `referenceEncode`
-// against the spec. The rest of the suite trusts it as an oracle, so it
-// matters that these can't both be wrong in the same way.
 describe("`referenceEncode()` (test oracle)", () => {
   it("encodes all reference fixtures as expected", () => {
+    // A small set of explicit byte-level assertions that pin `referenceEncode`
+    // against the spec. The rest of the suite trusts it as an oracle, so it
+    // matters that these can't both be wrong in the same way.
+
     for (const { value, encoded, label } of referenceFixtures) {
       try {
         expect(referenceEncode(value)).toEqual(new Uint8Array(encoded));
@@ -264,7 +267,7 @@ for (
     const sliceLabel = `fixtures ${at}..${at + slice.length - 1}`;
 
     describe(`${biToMtc.name}()`, () => {
-      it(`correctly encodes ${sliceLabel}`, () => {
+      it(`encodes ${sliceLabel}`, () => {
         for (let i = 0; i < slice.length; i++) {
           const { value, encoded, label } = slice[i]!;
           try {
@@ -277,7 +280,7 @@ for (
     });
 
     describe(`${biFromMtc.name}()`, () => {
-      it(`correctly decodes ${sliceLabel}`, () => {
+      it(`decodes ${sliceLabel}`, () => {
         for (let i = 0; i < slice.length; i++) {
           const { value, encoded, label } = slice[i]!;
           try {
@@ -289,21 +292,25 @@ for (
       });
     });
 
-    describe(`${biToMtc.name}()->${biFromMtc.name}() round trip through base64url`, () => {
-      it(`correctly round-trips ${sliceLabel}`, () => {
-        for (let i = 0; i < slice.length; i++) {
-          const { value, label } = slice[i]!;
-          const bytes = biToMtc(value);
-          const b64 = toUnpaddedBase64url(bytes);
-          const decodedBytes = fromBase64url(b64);
-          try {
-            expect(biFromMtc(decodedBytes)).toBe(value);
-          } catch (e) {
-            throw new Error(`Failed on ${label}.`, { cause: e });
+    describe(
+      `\`${biToMtc.name}()\` -> \`${biFromMtc.name}()\` round trip ` +
+        `through base64url`,
+      () => {
+        it(`round-trips ${sliceLabel}`, () => {
+          for (let i = 0; i < slice.length; i++) {
+            const { value, label } = slice[i]!;
+            const bytes = biToMtc(value);
+            const b64 = toUnpaddedBase64url(bytes);
+            const decodedBytes = fromBase64url(b64);
+            try {
+              expect(biFromMtc(decodedBytes)).toBe(value);
+            } catch (e) {
+              throw new Error(`Failed on ${label}.`, { cause: e });
+            }
           }
-        }
-      });
-    });
+        });
+      },
+    );
   }
 
   //
@@ -318,3 +325,86 @@ for (
     });
   });
 }
+
+//
+// The base64url-string convenience pair
+//
+
+/**
+ * Fixtures for the base64url convenience functions. The strings are written
+ * out directly, so that neither `toUnpaddedBase64url()` nor the reference
+ * encoder above is trusted to produce them.
+ */
+const base64urlFixtures: readonly { value: bigint; encoded: string }[] = [
+  { value: 0n, encoded: "AA" },
+  { value: 1n, encoded: "AQ" },
+  { value: -1n, encoded: "_w" },
+  { value: 42n, encoded: "Kg" },
+  { value: 127n, encoded: "fw" },
+  { value: 128n, encoded: "AIA" },
+  { value: -128n, encoded: "gA" },
+  { value: -129n, encoded: "_38" },
+  { value: 255n, encoded: "AP8" },
+  { value: 256n, encoded: "AQA" },
+  { value: -256n, encoded: "_wA" },
+  { value: 0x0123_4567_89ab_cdefn, encoded: "ASNFZ4mrze8" },
+];
+
+describe("bigintToUnpaddedBase64url()", () => {
+  it("encodes all base64url fixtures as expected", () => {
+    for (const { value, encoded } of base64urlFixtures) {
+      try {
+        expect(bigintToUnpaddedBase64url(value)).toBe(encoded);
+      } catch (e) {
+        throw new Error(`Failed on ${value}n.`, { cause: e });
+      }
+    }
+  });
+
+  it("encodes all fixtures as the reference encoding does, in base64url", () => {
+    for (const { value, encoded, label } of fixtures) {
+      try {
+        expect(bigintToUnpaddedBase64url(value))
+          .toBe(toUnpaddedBase64url(encoded));
+      } catch (e) {
+        throw new Error(`Failed on ${label}.`, { cause: e });
+      }
+    }
+  });
+});
+
+describe("bigintFromUnpaddedBase64url()", () => {
+  it("decodes all base64url fixtures as expected", () => {
+    for (const { value, encoded } of base64urlFixtures) {
+      try {
+        expect(bigintFromUnpaddedBase64url(encoded)).toBe(value);
+      } catch (e) {
+        throw new Error(`Failed on ${value}n.`, { cause: e });
+      }
+    }
+  });
+
+  it("decodes all fixtures from the reference encoding, via base64url", () => {
+    for (const { value, encoded, label } of fixtures) {
+      try {
+        expect(bigintFromUnpaddedBase64url(toUnpaddedBase64url(encoded)))
+          .toBe(value);
+      } catch (e) {
+        throw new Error(`Failed on ${label}.`, { cause: e });
+      }
+    }
+  });
+
+  it("accepts padded input", () => {
+    expect(bigintFromUnpaddedBase64url("AA==")).toBe(0n);
+    expect(bigintFromUnpaddedBase64url("AP8=")).toBe(255n);
+  });
+
+  it("throws on an empty string", () => {
+    expect(() => bigintFromUnpaddedBase64url("")).toThrow("empty input");
+  });
+
+  it("throws on a non-base64url character", () => {
+    expect(() => bigintFromUnpaddedBase64url("A/8")).toThrow();
+  });
+});

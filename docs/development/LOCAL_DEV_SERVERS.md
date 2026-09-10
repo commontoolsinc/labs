@@ -19,11 +19,12 @@
 ./scripts/share-pattern-via-tailscale.sh --down                                 # Tear that down
 ```
 
-To make source-run build metadata describe the checkout the same way compiled
-binaries do, pass the current revision into the start script:
+Source-run build metadata describes the checkout the same way compiled
+binaries do: `start-local-dev.sh` defaults `COMMIT_SHA` to the checkout's
+current HEAD, and an explicit value in the environment overrides that default:
 
 ```bash
-COMMIT_SHA="$(git rev-parse HEAD)" ./scripts/start-local-dev.sh --bg-updater
+COMMIT_SHA="<some-other-sha>" ./scripts/start-local-dev.sh --bg-updater
 ```
 
 The script's children inherit the value: toolshed uses it as the source-run
@@ -33,6 +34,25 @@ deployed shell selects the immutable `/builds/<sha>` namespace. `COMMIT_SHA` is
 descriptive metadata, not a system-pattern update gate. The updater instead
 compiles the downloaded source/import closure and requires its entry identity
 to equal `?identity` before changing the persisted root.
+
+The cf CLI resolves its own commit the same way (baked build metadata for
+compiled binaries, the checkout's HEAD for source runs) and compares it
+against the server's self-reported commit on every server-touching command,
+warning on stderr when the two differ. The server side rides the `/_health`
+response the CLI's health check already fetches (the same value `/api/meta`
+reports), so the check adds no request of its own.
+
+The warning is graded, because the two directions are different problems. A
+cf newer than its server is the normal local-dev state (the checkout moved
+on; the server kept running) and prints nothing on a command that succeeds —
+its note is held, and appears only when a command fails, as context naming
+how far behind the server is. A cf **older** than its server is the
+dangerous direction — the server speaks a protocol this cf predates — and
+gets a loud OUTDATED warning immediately, success or not. Direction is proven by git ancestry in the checkout's
+history, so it is available to source runs whose history contains the
+server's commit; diverged or unorderable pairs (including compiled binaries)
+get the undirected wording. Set `CF_SKIP_VERSION_CHECK=1` to skip the check
+when running mismatched versions on purpose.
 
 To let teammates interact with a locally-hosted pattern (e.g. "host latest-main
 `<pattern>` locally with `--inspect` and export it over Tailscale"), use
@@ -44,20 +64,42 @@ browsers.
 
 `start-local-dev.sh` validates required commands before launching anything and
 waits for both servers to bind their ports and return HTTP 200 before reporting
-success. Set `LOCAL_DEV_STARTUP_TIMEOUT` to adjust the readiness timeout in
-seconds.
+success. It then waits on the toolshed's `/`, the page a browser loads, which
+the toolshed answers by fetching the shell dev server and passing the result
+back; that is the one probe covering the hop between the two servers, which
+can be broken while each of them answers on its own port. Set
+`LOCAL_DEV_STARTUP_TIMEOUT` to adjust the readiness timeout in seconds.
 
 **Exit codes (`start-local-dev.sh`):**
 | Code | Meaning |
 |------|---------|
 | `0` | Both servers started and became ready. |
 | `3` | A server could not bind because its port is already in use; retry on a different port offset. |
+| `4` | A requested port is one clients refuse to connect to; change the port offset. |
 | other non-zero | Any other startup failure (build error, crash, readiness timeout). |
 
 Code `3` is reported only when a server's actual bind fails, not from a port
 pre-check, so it carries no check-then-bind race. The toolshed and the shell dev
 server exit with the same code, and `deno task integration` relies on it to
 retry a generated offset on a collision while aborting on any other failure.
+
+Code `4` is a pre-check, and binding is not what it is about. Browsers and
+Deno's `fetch` both implement the WHATWG bad-port list, and reject a request to
+a port on it before opening a connection. A server binds such a port normally:
+it starts, logs that it is listening, and answers the `curl` health check the
+script uses. Every client that matters then refuses it — the browser cannot load
+the page, and toolshed's proxy hop to the shell dev server fails, so toolshed
+serves its "Failed to proxy" text in place of the app. `ports.json` records the
+list; `start-local-dev.sh` checks the shell and toolshed ports against it always
+and the inspector port when `--inspect` is passed, and `deno task integration`
+leaves every offset that reaches one out of the range it generates from. Within
+the offsets that command generates, `827` puts the shell dev server on `6000`
+and `851` puts the inspector on `10080`.
+
+`restart-local-dev.sh` makes the same check on the ports it was asked for,
+before it stops a server or acts on `--clear-cache` or
+`--dangerously-clear-all-spaces`, so an offset the start it ends with would
+refuse costs nothing on the way to that refusal.
 
 **URLs:**
 | What | URL |
@@ -99,13 +141,13 @@ It is a shared, publicly-derivable key — every developer who derives it gets
 the same DID. Never use it against a server other people use, and don't deploy
 your own work as it even locally: it collapses you into the server principal
 (and into one identity for user counting — see
-[`active-user-counting.md`](./active-user-counting.md)). Full policy:
-[`SHARED_IDENTITY.md`](./SHARED_IDENTITY.md).
+[`active-user-counting.md`](../features/active-user-counting.md)). Full policy:
+[`shared-identity.md`](../features/shared-identity.md).
 
 For workflows that touch `PerUser`, `PerSession`, favorites, or home-space
 state, use one shared identity in both browser and CLI. The browser login screen
 can import a CLI PKCS8/PEM key via `Import CLI Key`. See
-[`SHARED_IDENTITY.md`](./SHARED_IDENTITY.md).
+[`shared-identity.md`](../features/shared-identity.md).
 
 **First-time browser login:**
 
@@ -164,8 +206,11 @@ ss -tlnp 'sport = :5173'  # Shell
 ```
 
 This checks both process presence and HTTP health, exiting non-zero if
-anything is wrong. It supports the same `--port-offset`, `--shell-port`, and
-`--toolshed-port` flags as the other scripts.
+anything is wrong. It reports three things: the toolshed on its own port, the
+shell on its own port, and the shell through the toolshed — the last being the
+page a browser loads, which can fail while the other two are healthy. It
+supports the same `--port-offset`, `--shell-port`, and `--toolshed-port` flags
+as the other scripts.
 
 When `--port-offset` changes the toolshed port, `start-local-dev.sh` also sets
 toolshed's internal `API_URL` and `MEMORY_URL` to the offset toolshed URL unless
@@ -327,4 +372,4 @@ Or use the `<cf-updater>` component in your piece's UI.
 | `AuthorizationError` on system space | System space not yet bootstrapped | Register a piece (e.g., via OAuth) to auto-create it, or run optional `add-admin-piece` |
 | Piece not polling | Not registered | Register via `/api/integrations/bg` |
 
-See `packages/background-piece-service/CLAUDE.md` for more details.
+See `packages/background-piece-service/AGENTS.md` for more details.

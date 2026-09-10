@@ -22,13 +22,13 @@ export const CORE_TABLE_NAMES: readonly string[] = [
   "blob_store",
   "authorization",
   "invocation",
-  "scheduler_observation",
-  "scheduler_observation_replay",
-  "scheduler_action_snapshot",
-  "scheduler_action_state",
-  "scheduler_context_floor",
-  "scheduler_read_index",
-  "scheduler_write_index",
+  "op_field_epoch",
+  "op_submission",
+  "op_integrated",
+  "op_checkpoint",
+  "scheduler_basis",
+  "execution_lease",
+  "execution_outbox",
   "_cf_commit_watermark",
 ];
 
@@ -37,12 +37,16 @@ export type StatementKind = "select" | "write" | "other";
 export type StatementClassification = {
   /** Leading-keyword classification. */
   kind: StatementKind;
+
   /** More than one statement (after dropping a trailing `;`). */
   multiple: boolean;
+
   /** A schema-qualified table reference (`db.table`) in a table position. */
   qualified: boolean;
+
   /** Contains a forbidden verb: PRAGMA / ATTACH / DETACH. */
   forbidden: boolean;
+
   /** References a core engine table name. */
   coreRef: boolean;
 };

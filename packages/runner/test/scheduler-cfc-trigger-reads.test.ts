@@ -1,22 +1,19 @@
-import { describe, expect, it } from "./scheduler-test-utils.ts";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+
 import { Runtime } from "../src/runtime.ts";
-import { SchedulerTriggerIndex } from "../src/scheduler/trigger-index.ts";
+import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
 import {
+  addInvalidCause,
   markInvalid,
+  processStorageNotification,
   type StorageNotificationState,
 } from "../src/scheduler/invalidation.ts";
-import { processStorageNotification } from "../src/scheduler/invalidation.ts";
-import {
-  runSchedulerAction,
-  type SchedulerActionRunState,
-  watchReactiveActionCommit,
-} from "../src/scheduler/run.ts";
-import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
 import { NodeRegistry } from "../src/scheduler/node-record.ts";
-import { RetryWhenReady } from "../src/scheduler/retry-when-ready.ts";
+import { watchReactiveActionCommit } from "../src/scheduler/run.ts";
+import { SchedulerTriggerIndex } from "../src/scheduler/trigger-index.ts";
 import type { Action } from "../src/scheduler/types.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -25,10 +22,17 @@ import type {
   IStorageTransaction,
   StorageNotification,
 } from "../src/storage/interface.ts";
-import type { MemorySpace } from "@commonfabric/memory/interface";
+import { describe, expect, it } from "./scheduler-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("scheduler-cfc-trigger-reads");
 const space = signer.did() as MemorySpace;
+
+// Identity entity keys resolve scoped addresses against (stage E).
+const TEST_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+const identityThunk = () => TEST_IDENTITY;
 
 function makeChange(
   address: Partial<IMemoryChange["address"]> & { id: string },
@@ -82,7 +86,7 @@ describe("invalid cause dedup keys", () => {
       },
     );
 
-    expect(record.invalidCauses.length).toBe(3);
+    expect(record.invalidCauses.size).toBe(3);
   });
 });
 
@@ -115,6 +119,7 @@ function makeNotificationState(args: {
       return record?.status === "invalid" || record?.status === "never-ran";
     },
     materializerIndex: {
+      scopeKeyIdentity: identityThunk,
       materializersByEntity: new Map(),
       effects: new Set(),
       getMaterializerWriteEnvelopes: () => undefined,
@@ -149,7 +154,7 @@ function makeCommitNotification(
 }
 
 function makeTriggerIndexFor(action: Action): SchedulerTriggerIndex {
-  const triggerIndex = new SchedulerTriggerIndex();
+  const triggerIndex = new SchedulerTriggerIndex(identityThunk);
   const read: IMemorySpaceAddress = {
     space,
     scope: "space",
@@ -176,7 +181,7 @@ describe("trigger reads follow the scheduling decision", () => {
 
       process(state, makeCommitNotification(sourceTx));
 
-      expect(state.nodes.get(action)?.invalidCauses.length).toBe(0);
+      expect(state.nodes.get(action)?.invalidCauses.size).toBe(0);
     });
 
     it(`${mode}: skip-same-change-group records no trigger read`, () => {
@@ -193,7 +198,7 @@ describe("trigger reads follow the scheduling decision", () => {
 
       process(state, makeCommitNotification(sourceTx));
 
-      expect(state.nodes.get(action)?.invalidCauses.length).toBe(0);
+      expect(state.nodes.get(action)?.invalidCauses.size).toBe(0);
     });
 
     it(`${mode}: a scheduling change records the trigger read`, () => {
@@ -205,10 +210,9 @@ describe("trigger reads follow the scheduling decision", () => {
 
       process(state, makeCommitNotification({} as IStorageTransaction));
 
-      const causes = state.nodes.get(action)?.invalidCauses;
-      expect(causes).toBeDefined();
-      expect(causes!.length).toBe(1);
-      expect(causes![0]).toMatchObject({
+      const causes = [...state.nodes.get(action)!.invalidCauses.values()];
+      expect(causes.length).toBe(1);
+      expect(causes[0]).toMatchObject({
         space,
         id: "of:cell",
         path: [],
@@ -233,9 +237,8 @@ describe("trigger reads survive failed runs", () => {
         ReturnType<IExtendedStorageTransaction["commit"]>
       >,
     );
-    watchReactiveActionCommit({
+    return watchReactiveActionCommit({
       action,
-      generation: 0,
       tx,
       log: { reads: [], shallowReads: [], writes: [] },
       retries: args.retries ?? new WeakMap(),
@@ -247,11 +250,6 @@ describe("trigger reads survive failed runs", () => {
       queueExecution: () => args.onQueueExecution?.(),
       getActionId: () => "test-action",
       restoreInvalidCauses: args.onRestore,
-      isActionGenerationCurrent: () => true,
-    });
-    return commitPromise.then(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
     });
   }
 
@@ -333,9 +331,6 @@ describe("trigger reads survive failed runs", () => {
       onMarkInvalid: () => calls.push("dirty"),
       onQueueExecution: () => calls.push("queue"),
     });
-    // The rejected readiness gate adds microtask hops before the re-queue; a
-    // macrotask flush drains them so the assertion sees the final state.
-    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
   });
 
@@ -356,7 +351,6 @@ describe("trigger reads survive failed runs", () => {
       onMarkInvalid: () => calls.push("dirty"),
       onQueueExecution: () => calls.push("queue"),
     });
-    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
   });
 
@@ -393,67 +387,6 @@ describe("trigger reads survive failed runs", () => {
   });
 });
 
-describe("trigger reads survive readiness parking", () => {
-  it("restores CFC provenance when reactive dependencies are coalesced", async () => {
-    const storageManager = StorageManager.emulate({ as: signer });
-    const runtime = new Runtime({
-      apiUrl: new URL("https://example.com"),
-      storageManager,
-    });
-    try {
-      const readiness = Promise.withResolvers<void>();
-      const action: Action = () => {
-        throw new RetryWhenReady(
-          readiness.promise,
-          "coalesce ordinary dependencies without dropping CFC provenance",
-          { keepDependenciesWhileWaiting: false },
-        );
-      };
-      const scheduler = runtime.scheduler as unknown as {
-        createActionRunState(): SchedulerActionRunState;
-      };
-      const baseState = scheduler.createActionRunState();
-      const triggerRead: IMemorySpaceAddress = {
-        space,
-        scope: "space",
-        id: "of:readiness-trigger",
-        path: ["value"],
-      };
-      const nodes = new NodeRegistry();
-      const record = nodes.register(action, "effect");
-      markInvalid(nodes, action, triggerRead);
-      let running: Promise<unknown> | undefined;
-      const state: SchedulerActionRunState = {
-        ...baseState,
-        nodes,
-        getRunningPromise: () => running,
-        setRunningPromise: (promise) => {
-          running = promise;
-        },
-        markActionHasRun: () => {},
-        markNodeHasRun: () => {},
-        resubscribe: () => {},
-        clearDirty: () => {},
-        markInvalid: (target) => markInvalid(nodes, target),
-        pending: new Set(),
-        queueExecution: () => {},
-      };
-
-      await runSchedulerAction(state, action);
-      expect(record.invalidCauses).toEqual([]);
-
-      readiness.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(record.invalidCauses).toEqual([triggerRead]);
-    } finally {
-      await runtime.dispose();
-      await storageManager.close();
-    }
-  });
-});
-
 describe("unsubscribe clears pending trigger reads", () => {
   it("drops the pending set so re-subscriptions start clean", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
@@ -470,21 +403,20 @@ describe("unsubscribe clears pending trigger reads", () => {
       );
       await runtime.idle();
 
-      const nodes = (runtime.scheduler as unknown as {
-        nodes: NodeRegistry;
-      }).nodes;
+      const nodes = runtime.scheduler.accessForTestingOnly.nodes;
       const record = nodes.get(action);
       expect(record).toBeDefined();
-      record!.invalidCauses = [{
+      addInvalidCause(record!, {
         space,
         scope: "space",
         id: "of:stale",
         path: ["value"],
-      }];
+      });
+      expect(record!.invalidCauses.size).toBe(1);
 
       runtime.scheduler.unsubscribe(action);
 
-      expect(record!.invalidCauses.length).toBe(0);
+      expect(record!.invalidCauses.size).toBe(0);
     } finally {
       await runtime.dispose();
       await storageManager.close();

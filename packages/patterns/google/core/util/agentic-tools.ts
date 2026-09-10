@@ -101,10 +101,13 @@ export function defineItemSchema<T extends Record<string, PropertyDef>>(
 export interface ListToolConfig<Fields extends string> {
   /** Cell containing the list of items */
   items: any; // Accepts pattern input cells (OpaqueCell, etc.)
+
   /** Fields that make up the dedup key - MUST be valid field names from schema */
   dedupe: Fields[];
+
   /** Prefix for generated IDs (default: "item") */
   idPrefix?: string;
+
   /** Field name for the timestamp - MUST be a valid field name or new field */
   timestamp?: string;
 }
@@ -183,12 +186,12 @@ export const listToolHandler = handler(
       resultMessage = `Saved new item`;
     }
 
-    // Write result for LLM
+    // Write result for LLM. The result cell is the tool's declared channel;
+    // a plain return here would be silently discarded (and is a transformer
+    // error under the verb contract unless the handler declares a result).
     if (input.result) {
       input.result.set({ success: true, message: resultMessage });
     }
-
-    return { success: true, message: resultMessage };
   },
 );
 

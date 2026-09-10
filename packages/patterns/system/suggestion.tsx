@@ -16,12 +16,7 @@ import {
   type WishState,
   Writable,
 } from "commonfabric";
-import {
-  bash,
-  fetchAndRunPattern,
-  listMentionable,
-  listRecent,
-} from "./common-fabric.tsx";
+import { bash, fetchAndRunPattern, listMentionable } from "./common-fabric.tsx";
 import {
   searchPattern as summarySearchPattern,
   type SummaryIndexEntry,
@@ -118,7 +113,6 @@ export default pattern<
   const mentionable = wish<MentionablePiece[]>({
     query: "#mentionable",
   }).result;
-  const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
   const { entries: summaryEntries } = wish<{
     entries: SummaryIndexEntry[];
   }>({ query: "#summaryIndex" }).result!;
@@ -195,9 +189,6 @@ Use the user context above to personalize your suggestions when relevant.`;
       searchHistory: suggestionHistory.search,
       listMentionable: pattern((_input: Record<string, never>) =>
         listMentionable({ mentionable })
-      ),
-      listRecent: pattern((_input: Record<string, never>) =>
-        listRecent({ recentPieces })
       ),
       askUserQuestion: {
         handler: setQuestion({ pendingQuestion }),

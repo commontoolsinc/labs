@@ -4,7 +4,6 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   computeModuleHashes,
@@ -23,62 +22,27 @@ import {
   loadSourceClosure,
   loadVerifiedSourceClosure,
   ROOT_LINK_SPECIFIER,
-  setCompileCacheRuntimeVersionForTesting,
   type SourceDoc,
   sourceDocKey,
   verifySourceDocs,
   writeCompiledDocs,
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { observeCacheWriteBacks } from "./support/telemetry-observers.ts";
 
 import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
 import { buildCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
 import { PatternCoverageCollector } from "../src/pattern-coverage.ts";
 import { pattern } from "../src/builder/pattern.ts";
+import {
+  dataFileSpecifier,
+  sourceRootSpecifier,
+} from "../src/sandbox/module-record-compiler.ts";
 
 // These tests drive the sync parse internals directly (below the async flow
 // boundaries that normally load the deferred compiler stack), so load it here.
 await ensureCompilerStack();
-
-// ---------------------------------------------------------------------------
-// Shared-server helper: two managers with DIFFERENT signers over ONE in-process
-// memory server. Modelled after cross-space-value-read.test.ts. The shared
-// server is closed once by the test's afterEach — each manager's override()
-// returns the same instance without the base class closing it twice.
-// ---------------------------------------------------------------------------
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager._sharedServer = server;
-    return manager;
-  }
-
-  private _sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this._sharedServer;
-  }
-  // NOTE: super.close() checks its private `#server` field (never set by this
-  // override), so closing a SharedServerStorageManager only tears down the
-  // per-space client sessions — the shared server is closed once by the test.
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
 
 const signer = await Identity.fromPassphrase("cell-cache test");
 const resolvedRuntimeVersion = await getCompileCacheRuntimeVersion();
@@ -273,6 +237,162 @@ describe("cell-cache: verifySourceDocs (Merkle self-verification)", () => {
     const v = verifySourceDocs(entryIdentity, docs);
     expect(v.ok).toBe(false);
     expect(v.missing).toContain(identityOf(PROGRAM, "/util.ts"));
+  });
+
+  it("rejects removing a source-package root edge", () => {
+    const files = [
+      { name: "/main.tsx", contents: "export default 1;" },
+      { name: "/main.test.tsx", contents: "export default 2;" },
+    ];
+    const rootSpecifier = sourceRootSpecifier("/main.test.tsx");
+    const identities = computeModuleHashes(
+      { main: "/main.tsx", files },
+      {
+        additionalInternalDeps: new Map([
+          [
+            "/main.tsx",
+            [{ specifier: rootSpecifier, target: "/main.test.tsx" }],
+          ],
+        ]),
+      },
+    );
+    const entryIdentity = identities.get("/main.tsx")!;
+    const testIdentity = identities.get("/main.test.tsx")!;
+    const docs = buildSourceDocs(
+      [
+        {
+          identity: entryIdentity,
+          filename: "/main.tsx",
+          source: files[0].contents,
+          js: "",
+          imports: [{
+            specifier: rootSpecifier,
+            targetIdentity: testIdentity,
+          }],
+        },
+        {
+          identity: testIdentity,
+          filename: "/main.test.tsx",
+          source: files[1].contents,
+          js: "",
+          imports: [],
+        },
+      ],
+      entryIdentity,
+    );
+    expect(verifySourceDocs(entryIdentity, docs).ok).toBe(true);
+
+    const tampered = new Map(docs);
+    tampered.set(entryIdentity, {
+      ...docs.get(entryIdentity)!,
+      imports: [],
+    });
+    const verification = verifySourceDocs(entryIdentity, tampered);
+    expect(verification.ok).toBe(false);
+    expect(verification.mismatches).toContain(entryIdentity);
+  });
+
+  it("rejects removing a source-package data-file edge", () => {
+    // The data file's bytes parse as an import in TypeScript. Verification must
+    // hash it as a leaf, or its identity will not reproduce.
+    const files = [
+      { name: "/main.tsx", contents: "export default 1;" },
+      { name: "/notes.txt", contents: 'import x from "./main.tsx";' },
+    ];
+    const dataSpecifier = dataFileSpecifier("/notes.txt");
+    const identities = computeModuleHashes(
+      { main: "/main.tsx", files },
+      {
+        additionalInternalDeps: new Map([
+          ["/main.tsx", [{ specifier: dataSpecifier, target: "/notes.txt" }]],
+        ]),
+        dataFiles: new Set(["/notes.txt"]),
+      },
+    );
+    const entryIdentity = identities.get("/main.tsx")!;
+    const dataIdentity = identities.get("/notes.txt")!;
+    const docs = buildSourceDocs(
+      [
+        {
+          identity: entryIdentity,
+          filename: "/main.tsx",
+          source: files[0].contents,
+          js: "",
+          imports: [{
+            specifier: dataSpecifier,
+            targetIdentity: dataIdentity,
+          }],
+        },
+        {
+          identity: dataIdentity,
+          filename: "/notes.txt",
+          source: files[1].contents,
+          js: "",
+          imports: [],
+        },
+      ],
+      entryIdentity,
+    );
+    expect(verifySourceDocs(entryIdentity, docs).ok).toBe(true);
+
+    const tampered = new Map(docs);
+    tampered.set(entryIdentity, {
+      ...docs.get(entryIdentity)!,
+      imports: [],
+    });
+    const verification = verifySourceDocs(entryIdentity, tampered);
+    expect(verification.ok).toBe(false);
+    expect(verification.mismatches).toContain(entryIdentity);
+  });
+
+  it("rejects tampering with an attached data file's bytes", () => {
+    const files = [
+      { name: "/main.tsx", contents: "export default 1;" },
+      { name: "/data.json", contents: '{"a": 1}' },
+    ];
+    const dataSpecifier = dataFileSpecifier("/data.json");
+    const identities = computeModuleHashes(
+      { main: "/main.tsx", files },
+      {
+        additionalInternalDeps: new Map([
+          ["/main.tsx", [{ specifier: dataSpecifier, target: "/data.json" }]],
+        ]),
+        dataFiles: new Set(["/data.json"]),
+      },
+    );
+    const entryIdentity = identities.get("/main.tsx")!;
+    const dataIdentity = identities.get("/data.json")!;
+    const docs = buildSourceDocs(
+      [
+        {
+          identity: entryIdentity,
+          filename: "/main.tsx",
+          source: files[0].contents,
+          js: "",
+          imports: [{
+            specifier: dataSpecifier,
+            targetIdentity: dataIdentity,
+          }],
+        },
+        {
+          identity: dataIdentity,
+          filename: "/data.json",
+          source: files[1].contents,
+          js: "",
+          imports: [],
+        },
+      ],
+      entryIdentity,
+    );
+
+    const tampered = new Map(docs);
+    tampered.set(dataIdentity, {
+      ...docs.get(dataIdentity)!,
+      code: '{"a": 2}',
+    });
+    const verification = verifySourceDocs(entryIdentity, tampered);
+    expect(verification.ok).toBe(false);
+    expect(verification.mismatches).toContain(dataIdentity);
   });
 
   it("is entry-point independent (util identity is stable across entries)", () => {
@@ -471,47 +591,6 @@ describe("cell-cache: source-set store (per space, link-following)", () => {
     );
     // Loaded closure self-verifies (recomputed identities match the keys).
     expect(verifySourceDocs(entryIdentity, loaded).ok).toBe(true);
-  });
-
-  it("stores synthetic closure roots separately from identity-bearing imports", async () => {
-    const entryIdentity = "source-entry-with-synthetic-root";
-    const rootIdentity = "source-synthetic-root";
-    const modules: CacheableModule[] = [{
-      identity: entryIdentity,
-      filename: "/entry.ts",
-      source: `export const entry = true;`,
-      js: "/* compiled entry */",
-      imports: [],
-    }, {
-      identity: rootIdentity,
-      filename: "/generated.ts",
-      source: `export const generated = true;`,
-      js: "/* compiled generated root */",
-      imports: [],
-    }];
-    const tx = runtime.edit();
-    writeSourceDocs(runtime, spaceA, modules, entryIdentity, tx);
-
-    const stored = runtime.getCell(
-      spaceA,
-      sourceDocKey(entryIdentity),
-      undefined,
-      tx,
-    ).get() as { imports?: unknown[]; roots?: unknown[] } | undefined;
-    expect(stored?.imports).toEqual([]);
-    expect(stored?.roots).toHaveLength(1);
-
-    const loaded = await loadSourceClosure(
-      runtime,
-      spaceA,
-      entryIdentity,
-      tx,
-    );
-    expect(loaded?.get(entryIdentity)?.imports).toEqual([{
-      specifier: `${ROOT_LINK_SPECIFIER}${rootIdentity}`,
-      identity: rootIdentity,
-    }]);
-    expect(loaded?.has(rootIdentity)).toBe(true);
   });
 
   it("loads duplicate source import links once", async () => {
@@ -778,7 +857,6 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "cell-cache-test",
         actingPrincipal: signer.did(),
@@ -924,50 +1002,81 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
       .toBeUndefined();
   });
 
-  it("stores compiled synthetic roots separately and reconstructs cold reachability", async () => {
-    const entryIdentity = "compiled-entry-with-synthetic-root";
-    const rootIdentity = "compiled-synthetic-root";
-    const modules: CacheableModule[] = [{
-      identity: entryIdentity,
-      filename: "/entry.ts",
-      source: `export const entry = true;`,
-      js: "export const entry = true;",
-      imports: [],
-    }, {
-      identity: rootIdentity,
-      filename: "/generated.ts",
-      source: `export const generated = true;`,
-      js: "export const generated = true;",
-      imports: [],
-    }];
+  it("round-trips builder source sites and drops malformed debug metadata", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const sidecar = {
+      formatVersion: 1 as const,
+      sites: {
+        default: { line: 4, col: 15 },
+        named: { line: 7, col: 2, bindingName: "named" },
+      },
+    };
+    modules[0] = { ...modules[0]!, builderSourceSites: sidecar };
     const wtx = runtime.edit();
     writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+    wtx.prepareCfc();
+    await wtx.commit();
 
+    const load = async () => {
+      const rtx = runtime.edit();
+      const loaded = await loadCompiledClosure(
+        runtime,
+        spaceA,
+        entryIdentity,
+        opts(),
+        rtx,
+      );
+      rtx.abort?.();
+      return loaded.get(entryIdentity)?.builderSourceSites;
+    };
+
+    const inspectTx = runtime.edit();
     const stored = runtime.getCell(
       spaceA,
       compiledDocKey(RTVER, entryIdentity),
       compiledDocWriteSchema(),
-      wtx,
-    ).get() as { imports?: unknown[]; roots?: unknown[] } | undefined;
-    expect(stored?.imports).toEqual([]);
-    expect(stored?.roots).toHaveLength(1);
-    wtx.prepareCfc();
-    await wtx.commit();
+      inspectTx,
+    ).get() as Record<string, unknown>;
+    expect(typeof stored.builderSourceSitesJson).toBe("string");
+    expect(stored.builderSourceSites).toBeUndefined();
+    inspectTx.abort?.();
+    expect(await load()).toEqual(sidecar);
 
-    const rtx = runtime.edit();
-    const loaded = await loadCompiledClosure(
-      runtime,
-      spaceA,
-      entryIdentity,
-      opts(),
-      rtx,
-    );
-    rtx.abort?.();
-    expect(loaded.get(entryIdentity)?.imports).toEqual([{
-      specifier: `${ROOT_LINK_SPECIFIER}${rootIdentity}`,
-      identity: rootIdentity,
-    }]);
-    expect(loaded.has(rootIdentity)).toBe(true);
+    const replace = async (value: Record<string, unknown>) => {
+      const tx = runtime.edit();
+      const previousIdentity = tx.getCfcState().implementationIdentity;
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "compile-cache",
+      });
+      try {
+        const cell = runtime.getCell(
+          spaceA,
+          compiledDocKey(RTVER, entryIdentity),
+          compiledDocWriteSchema(),
+          tx,
+        );
+        const next = { ...(cell.get() as Record<string, unknown>) };
+        delete next.builderSourceSitesJson;
+        delete next.builderSourceSites;
+        cell.set({ ...next, ...value });
+      } finally {
+        tx.setCfcImplementationIdentity(previousIdentity);
+      }
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    };
+
+    await replace({
+      builderSourceSitesJson: JSON.stringify({
+        ...sidecar,
+        sites: { named: { line: 0, col: 2 } },
+      }),
+    });
+    expect(await load()).toBeUndefined();
+
+    await replace({ builderSourceSites: sidecar });
+    expect(await load()).toBeUndefined();
   });
 
   it("persists and cold-loads verified policy manifests without module evaluation", async () => {
@@ -1509,32 +1618,19 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     expect(runtime.patternManager.getArtifactEntryRef(keyed)).toEqual(ref);
     expect(runtime.patternManager.getArtifactEntryRef(keyless)).toBeUndefined();
 
-    const manager = runtime.patternManager as unknown as {
-      replicateClosures(
-        entryIdentity: string,
-        fromSpace: string,
-        toSpace: string,
-      ): Promise<void>;
-    };
-    const originalReplicateClosures = manager.replicateClosures;
-    let replicationCalls = 0;
-    manager.replicateClosures = () => {
-      replicationCalls++;
-      return Promise.resolve();
-    };
-    try {
-      runtime.patternManager.replicatePatternToSpace(keyed, spaceA, spaceA);
-      runtime.patternManager.replicatePatternToSpace(
-        keyless,
-        "did:key:z6MkCellCacheKeylessReplicationTarget",
-        spaceA,
-      );
-
-      await runtime.patternManager.flushCompileCacheWrites();
-      expect(replicationCalls).toBe(0);
-    } finally {
-      manager.replicateClosures = originalReplicateClosures;
-    }
+    // An issued replication registers in the manager's write set at once,
+    // so the set's size says whether either call issued one.
+    const writes =
+      runtime.patternManager.accessForTestingOnly.compileCacheWrites;
+    const before = writes.size;
+    runtime.patternManager.replicatePatternToSpace(keyed, spaceA, spaceA);
+    runtime.patternManager.replicatePatternToSpace(
+      keyless,
+      "did:key:z6MkCellCacheKeylessReplicationTarget",
+      spaceA,
+    );
+    expect(writes.size).toBe(before);
+    await runtime.patternManager.flushCompileCacheWrites();
   });
 
   it("replicates fabric dependencies without importing authority", async () => {
@@ -1592,13 +1688,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     wtx.prepareCfc();
     await wtx.commit();
 
-    const manager = runtime.patternManager as unknown as {
-      replicateClosures(
-        entryIdentity: string,
-        fromSpace: string,
-        toSpace: string,
-      ): Promise<void>;
-    };
+    const manager = runtime.patternManager.accessForTestingOnly;
     await manager.replicateClosures(importerIdentity, spaceA, spaceB);
 
     const rtx = runtime.edit();
@@ -1742,14 +1832,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
   it("rejects replication from an incomplete origin closure", async () => {
     const targetSpace = "did:key:z6MkCellCacheIncompleteReplicationTarget";
     const { modules, entryIdentity } = toModules(PROGRAM);
-    const manager = runtime.patternManager as unknown as {
-      replicateClosures(
-        entryIdentity: string,
-        fromSpace: string,
-        toSpace: string,
-        visited?: Set<string>,
-      ): Promise<void>;
-    };
+    const manager = runtime.patternManager.accessForTestingOnly;
 
     const visitKey = `${spaceA}\0${targetSpace}\0${entryIdentity}`;
     await expect(
@@ -1786,7 +1869,6 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     const coverageRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: coverageStorageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "cell-cache-coverage-replication-test",
         actingPrincipal: signer.did(),
@@ -1817,13 +1899,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
       writeTx.prepareCfc();
       expect((await writeTx.commit()).error).toBeUndefined();
 
-      const manager = coverageRuntime.patternManager as unknown as {
-        replicateClosures(
-          entryIdentity: string,
-          fromSpace: string,
-          toSpace: string,
-        ): Promise<void>;
-      };
+      const manager = coverageRuntime.patternManager.accessForTestingOnly;
       await expect(
         manager.replicateClosures(entryIdentity, spaceA, targetSpace),
       ).rejects.toThrow("coverage spans unavailable in origin space");
@@ -1839,15 +1915,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     const requiredDelegations = new Map([
       [entryIdentity, new Set(["required-predecessor"])],
     ]);
-    const manager = runtime.patternManager as unknown as {
-      hasStoredCompileCacheClosure(
-        space: string,
-        modules: readonly CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-        moduleDelegations: ReadonlyMap<string, ReadonlySet<string>>,
-      ): Promise<boolean>;
-    };
+    const manager = runtime.patternManager.accessForTestingOnly;
 
     const initialWrite = runtime.edit();
     writeSourceDocs(
@@ -1965,7 +2033,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     ).toBe(true);
   });
 
-  it("retains additive roots for closures that share an entry module", async () => {
+  it("distinguishes persisted closures that share an entry module", async () => {
     const targetSpace = "did:key:z6MkCellCacheSharedEntryTarget";
     const main = {
       name: "/main.ts",
@@ -1987,14 +2055,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     });
     expect(second.entryIdentity).toBe(first.entryIdentity);
 
-    const manager = runtime.patternManager as unknown as {
-      persistCompileCacheTracked(
-        space: string,
-        modules: CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-      ): Promise<void>;
-    };
+    const manager = runtime.patternManager.accessForTestingOnly;
     await manager.persistCompileCacheTracked(
       targetSpace,
       first.modules,
@@ -2024,7 +2085,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     readTx.abort?.();
 
     expect(loaded.has(secondExtraIdentity)).toBe(true);
-    expect(loaded.has(firstExtraIdentity)).toBe(true);
+    expect(loaded.has(firstExtraIdentity)).toBe(false);
 
     await manager.persistCompileCacheTracked(
       targetSpace,
@@ -2042,7 +2103,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     );
     replayTx.abort?.();
     expect(replayed.has(firstExtraIdentity)).toBe(true);
-    expect(replayed.has(secondExtraIdentity)).toBe(true);
+    expect(replayed.has(secondExtraIdentity)).toBe(false);
   });
 
   it("tracks a queued replacement write before its predecessor completes", async () => {
@@ -2065,22 +2126,8 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
         { name: "/second.ts", contents: "export const second = 2;" },
       ],
     });
-    const manager = runtime.patternManager as unknown as {
-      persistCompileCacheTracked(
-        space: string,
-        modules: CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-      ): Promise<void>;
-      writeBackCompileCache(
-        space: string,
-        modules: CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-      ): Promise<void>;
-      pendingCacheWriteBacks: Set<Promise<unknown>>;
-    };
-    const originalWriteBack = manager.writeBackCompileCache;
+    const manager = runtime.patternManager.accessForTestingOnly;
+    const writeBacks = observeCacheWriteBacks(runtime);
     const firstStarted = Promise.withResolvers<void>();
     const releaseFirst = Promise.withResolvers<void>();
     const secondStarted = Promise.withResolvers<void>();
@@ -2088,7 +2135,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     let writeCount = 0;
     let firstWrite: Promise<void> | undefined;
     let secondWrite: Promise<void> | undefined;
-    manager.writeBackCompileCache = async () => {
+    manager.compileCacheWriter = async () => {
       writeCount++;
       if (writeCount === 1) {
         firstStarted.resolve();
@@ -2114,7 +2161,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
         { runtimeVersion },
       );
 
-      expect(manager.pendingCacheWriteBacks.size).toBe(2);
+      expect(writeBacks.inFlight()).toBe(2);
       releaseFirst.resolve();
       await secondStarted.promise;
       releaseSecond.resolve();
@@ -2128,29 +2175,15 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
           (write): write is Promise<void> => write !== undefined,
         ),
       );
-      manager.writeBackCompileCache = originalWriteBack;
+      writeBacks.restore();
+      manager.compileCacheWriter = undefined;
     }
   });
 
   it("retains persistence entries for the runner session", async () => {
     const { modules, entryIdentity } = toModules(PROGRAM);
-    const manager = runtime.patternManager as unknown as {
-      persistCompileCacheTracked(
-        space: string,
-        modules: CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-      ): Promise<void>;
-      writeBackCompileCache(
-        space: string,
-        modules: CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-      ): Promise<void>;
-      persistedCompileCacheClosures: Map<string, string>;
-    };
-    const originalWriteBack = manager.writeBackCompileCache;
-    manager.writeBackCompileCache = () => Promise.resolve();
+    const manager = runtime.patternManager.accessForTestingOnly;
+    manager.compileCacheWriter = () => Promise.resolve();
     try {
       for (let index = 0; index <= 1000; index++) {
         await manager.persistCompileCacheTracked(
@@ -2161,7 +2194,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
         );
       }
     } finally {
-      manager.writeBackCompileCache = originalWriteBack;
+      manager.compileCacheWriter = undefined;
     }
 
     expect(manager.persistedCompileCacheClosures.size).toBe(1001);
@@ -2176,15 +2209,16 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     ).toBe(true);
   });
 
-  // Regression: before bd98e01a4, compiled docs were stamped with a per-user
-  // `cf-compiled-by:<did>` atom. A second user's cold-compile writeback of the
-  // SAME content into the same space was rejected by the CFC label merge
-  // ("addIntegrity cannot be weakened at /") because the deployer's per-DID
-  // atom was already present and could not be merged with a different user's
-  // atom. The constant system-compiler atom (COMPILED_INTEGRITY_ATOM) makes
-  // the cache shared: a re-write of the same content by any user merges
-  // cleanly because both sides carry the identical atom.
   it("second user's writeback of the same content commits cleanly (per-user DID collision regression)", async () => {
+    // Regression: before bd98e01a4, compiled docs were stamped with a per-user
+    // `cf-compiled-by:<did>` atom. A second user's cold-compile writeback of
+    // the SAME content into the same space was rejected by the CFC label merge
+    // ("addIntegrity cannot be weakened at /") because the deployer's per-DID
+    // atom was already present and could not be merged with a different user's
+    // atom. The constant system-compiler atom (COMPILED_INTEGRITY_ATOM) makes
+    // the cache shared: a re-write of the same content by any user merges
+    // cleanly because both sides carry the identical atom.
+
     const { modules, entryIdentity } = toModules(PROGRAM);
 
     // First writer (the deployer) populates the cache.
@@ -2231,9 +2265,9 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // End-to-end: two runtimes with DISTINCT user identities over shared storage
-// ---------------------------------------------------------------------------
+//
 
 // Two distinct signers for the two "users" in the e2e describe.
 // Declared at module level so top-level await applies.
@@ -2263,19 +2297,18 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
   };
 
   let server: MemoryV2Server.Server;
-  let smA: SharedServerStorageManager;
-  let smB: SharedServerStorageManager;
+  let smA: EmulatedStorageManager;
+  let smB: EmulatedStorageManager;
   let rtA: Runtime;
   let rtB: Runtime;
 
   beforeEach(() => {
     server = newSharedServer();
-    smA = SharedServerStorageManager.connectTo(server, { as: e2eSignerA });
-    smB = SharedServerStorageManager.connectTo(server, { as: e2eSignerB });
+    smA = EmulatedStorageManager.connectTo(server, { as: e2eSignerA });
+    smB = EmulatedStorageManager.connectTo(server, { as: e2eSignerB });
     rtA = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: smA,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "e2e-user-a",
         actingPrincipal: e2eSignerA.did(),
@@ -2284,7 +2317,6 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
     rtB = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: smB,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "e2e-user-b",
         actingPrincipal: e2eSignerB.did(),
@@ -2300,218 +2332,8 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
     await server?.close();
   });
 
-  it("retains additive synthetic-root reachability across publication topologies", async () => {
-    const restoreRuntimeVersion = setCompileCacheRuntimeVersionForTesting(
-      "cross-topology-roots-v1",
-    );
-    const sourceSpace = e2eSignerB.did();
-    const factorySource = [
-      "import { pattern } from 'commonfabric';",
-      "export const factory = pattern(() => ({ result: 1 }));",
-      "export default factory;",
-    ].join("\n");
-    const dependencyProgram: RuntimeProgram = {
-      main: "/wrapper.tsx",
-      files: [{
-        name: "/wrapper.tsx",
-        contents: [
-          "import { pattern } from 'commonfabric';",
-          "import factory from './factory.tsx';",
-          "export default pattern(() => ({ child: factory({}) }));",
-        ].join("\n"),
-      }, { name: "/factory.tsx", contents: factorySource }],
-    };
-    const entryProgram: RuntimeProgram = {
-      main: "/factory.tsx",
-      files: [{ name: "/factory.tsx", contents: factorySource }],
-    };
-    const compiledDependency = await rtB.harness.compileToRecordGraph(
-      dependencyProgram,
-    );
-    const compiledEntry = await rtB.harness.compileToRecordGraph(entryProgram);
-    const identityFor = (
-      compiled: typeof compiledDependency,
-      filename: string,
-    ): string =>
-      compiled.modules.find((module) => module.filename === filename)!
-        .identity;
-    const entryIdentity = identityFor(compiledDependency, "/factory.tsx");
-    expect(identityFor(compiledEntry, "/factory.tsx")).toBe(entryIdentity);
-    const syntheticRootIdentity = identityFor(compiledEntry, "cfc.ts");
-
-    try {
-      // As a dependency, this factory's independently rooted forward closure
-      // does not contain the entry program's generated cfc.ts root.
-      await rtB.patternManager.compilePattern(dependencyProgram, {
-        space: sourceSpace,
-      });
-      await rtB.patternManager.flushCompileCacheWrites();
-      await rtB.patternManager.ensureArtifactClosureInSpace(
-        entryIdentity,
-        sourceSpace,
-        sharedSpace,
-      );
-
-      // As the entry, the identical factory module gains the generated cfc.ts
-      // synthetic root in both source and runtime-versioned compiled docs. A
-      // fresh manager must detect that the valid destination is only a subset,
-      // add the root edge/docs, and retain cold reachability through both sets.
-      await rtB.patternManager.compilePattern(entryProgram, {
-        space: sourceSpace,
-      });
-      await rtB.patternManager.flushCompileCacheWrites();
-      await rtA.patternManager.ensureArtifactClosureInSpace(
-        entryIdentity,
-        sourceSpace,
-        sharedSpace,
-      );
-
-      const readTx = rtA.edit();
-      const loadedSource = await loadVerifiedSourceClosure(
-        rtA,
-        sharedSpace,
-        entryIdentity,
-        readTx,
-      );
-      const loadedCompiled = await loadCompiledClosure(
-        rtA,
-        sharedSpace,
-        entryIdentity,
-        { runtimeVersion: "cross-topology-roots-v1" },
-        readTx,
-      );
-      readTx.abort?.();
-      expect(loadedSource?.has(entryIdentity)).toBe(true);
-      expect(loadedSource?.has(syntheticRootIdentity)).toBe(true);
-      expect(loadedCompiled.has(entryIdentity)).toBe(true);
-      expect(loadedCompiled.get(entryIdentity)?.imports).toContainEqual({
-        specifier: `${ROOT_LINK_SPECIFIER}${syntheticRootIdentity}`,
-        identity: syntheticRootIdentity,
-      });
-      expect(loadedCompiled.has(syntheticRootIdentity)).toBe(true);
-    } finally {
-      restoreRuntimeVersion();
-    }
-  });
-
-  it("cold recompiles the authored topology when roots retain two ambient generations", async () => {
-    const sourceSpace = e2eSignerB.did();
-    const program: RuntimeProgram = {
-      main: "/factory.tsx",
-      files: [{
-        name: "/factory.tsx",
-        contents: [
-          "import { pattern } from 'commonfabric';",
-          "export const factory = pattern<{ value: number }>(({ value }) => ({ result: value }));",
-          "export default factory;",
-        ].join("\n"),
-      }],
-    };
-    const { modules, entryIdentity } = toModules(program);
-    const ambient = (generation: string): CacheableModule => {
-      const ambientProgram: RuntimeProgram = {
-        main: "cfc.ts",
-        files: [{
-          name: "cfc.ts",
-          contents: `export const generation = ${JSON.stringify(generation)};`,
-        }],
-      };
-      return {
-        ...toModules(ambientProgram).modules[0],
-        js: `export const generation = ${JSON.stringify(generation)};`,
-      };
-    };
-
-    const generations = [{
-      version: "ambient-generation-old",
-      root: ambient("old"),
-    }, {
-      version: "ambient-generation-new",
-      root: ambient("new"),
-    }];
-
-    for (const { version, root } of generations) {
-      const tx = rtB.edit();
-      writeSourceDocs(
-        rtB,
-        sourceSpace,
-        [...modules, root],
-        entryIdentity,
-        tx,
-      );
-      writeCompiledDocs(
-        rtB,
-        sourceSpace,
-        [...modules, root],
-        entryIdentity,
-        { runtimeVersion: version },
-        tx,
-      );
-      tx.prepareCfc();
-      const result = await tx.commit();
-      expect(result.error).toBeUndefined();
-    }
-
-    const inspectTx = rtA.edit();
-    const retained = await loadVerifiedSourceClosure(
-      rtA,
-      sourceSpace,
-      entryIdentity,
-      inspectTx,
-    );
-    inspectTx.abort?.();
-    expect(
-      [...(retained?.values() ?? [])].filter((doc) =>
-        doc.filename === "cfc.ts"
-      ),
-    ).toHaveLength(2);
-
-    // A version with a compiled set selects that version's matching source
-    // topology even though the global source roots retain an older generation.
-    const restoreCurrentVersion = setCompileCacheRuntimeVersionForTesting(
-      "ambient-generation-new",
-    );
-    try {
-      await rtA.patternManager.ensureArtifactClosureInSpace(
-        entryIdentity,
-        sourceSpace,
-        sourceSpace,
-      );
-    } finally {
-      restoreCurrentVersion();
-    }
-
-    // A future version has no compiled set and must recompile only the authored
-    // import view. The compiler injects its own current ambient helper; neither
-    // retained generation belongs in its source-file input.
-    const restoreFutureVersion = setCompileCacheRuntimeVersionForTesting(
-      "ambient-generation-future",
-    );
-    const compileResolved = rtA.harness.compileResolvedToRecordGraph.bind(
-      rtA.harness,
-    );
-    let coldSourceNames: string[] = [];
-    rtA.harness.compileResolvedToRecordGraph = ((sources, ...args) => {
-      coldSourceNames = sources.map((source) => source.name);
-      return compileResolved(sources, ...args);
-    }) as typeof rtA.harness.compileResolvedToRecordGraph;
-    try {
-      const artifact = await rtA.patternManager.loadArtifactByIdentity(
-        entryIdentity,
-        "factory",
-        sourceSpace,
-      );
-      expect(artifact).toBeDefined();
-      expect(coldSourceNames.filter((name) => name === "cfc.ts")).toEqual([]);
-      await rtA.patternManager.flushCompileCacheWrites();
-    } finally {
-      rtA.harness.compileResolvedToRecordGraph = compileResolved;
-      restoreFutureVersion();
-    }
-  });
-
   it("runtime B warms from A's cache write and B's cold-compile writeback commits without error", async () => {
-    // --- Session A: cold compile + write-back ---
+    // Session A: cold compile + write-back
     const pmA = rtA.patternManager;
     const txA = rtA.edit();
     await pmA.compilePattern(E2E_PROGRAM, { space: sharedSpace, tx: txA });
@@ -2526,7 +2348,7 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
       byIdentityHits: 0,
     });
 
-    // --- Session B: should warm-hit A's committed cache ---
+    // Session B: should warm-hit A's committed cache
     // smB has its own per-space client replicas, so it must fetch from the
     // shared server. compilePattern drives the storage read-through internally.
     const pmB = rtB.patternManager;

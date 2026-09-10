@@ -1,4 +1,5 @@
 /// <reference path="./clock.d.ts" />
+
 /**
  * A message added while a dialog turn is already running is dropped, and how
  * `addMessage` decides a turn is still running depends on who is running it.

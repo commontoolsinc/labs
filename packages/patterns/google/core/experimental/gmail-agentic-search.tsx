@@ -473,8 +473,7 @@ const searchGmailHandler = handler<
     if (input.result) {
       input.result.set(authErrorResult);
     }
-    state.progress.set({
-      ...currentProgress,
+    state.progress.update({
       status: "auth_error",
       authError: "Authentication required",
     });
@@ -502,8 +501,7 @@ const searchGmailHandler = handler<
     if (input.result) {
       input.result.set(limitResult);
     }
-    state.progress.set({
-      ...currentProgress,
+    state.progress.update({
       status: "limit_reached",
     });
     return limitResult;
@@ -524,8 +522,7 @@ const searchGmailHandler = handler<
   }
 
   // Update progress: starting new search
-  state.progress.set({
-    ...currentProgress,
+  state.progress.update({
     currentQuery: input.query,
     status: "searching",
   });
@@ -733,9 +730,7 @@ const searchGmailHandler = handler<
       // token refresh. If we still get here with a 401, the refresh failed
       // (possibly because auth cell is derived/read-only, or no refresh token)
       if (errorStr.includes("401")) {
-        const updatedProgress = state.progress.get();
-        state.progress.set({
-          ...updatedProgress,
+        state.progress.update({
           status: "auth_error",
           authError:
             "Gmail token expired and refresh failed. Please re-authenticate.",
@@ -1038,9 +1033,11 @@ const GmailAgenticSearch = pattern<
     // AUTH HANDLING
     // ========================================================================
 
-    // Check if we have direct auth input.
-    const directAuth = inputAuth ?? null;
-    const hasDirectAuth = directAuth !== null;
+    // Direct auth is detected by value: the optional input materializes as a
+    // present cell whether or not a parent wired it, so a token in the cell —
+    // not the cell itself — is the signal that direct auth was provided.
+    const directAuthValue = computed(() => inputAuth?.get());
+    const hasDirectAuth = !!directAuthValue?.token;
 
     // Local writable cell for account type selection
     // Input `accountType` may be read-only (Default cells are read-only when using default value)
@@ -1094,8 +1091,7 @@ const GmailAgenticSearch = pattern<
           const currentCount = tracker[queryId] || 0;
           const newCount = currentCount + 1;
 
-          foundItemsTracker.set({
-            ...tracker,
+          foundItemsTracker.update({
             [queryId]: newCount,
           });
 
@@ -1148,7 +1144,7 @@ const GmailAgenticSearch = pattern<
     // When hasDirectAuth is false, we use wishedAuth from the utility.
     // This means inputAuth must be passed as a live cell reference, not derived.
     // See: community-docs/superstitions/2025-12-03-derive-creates-readonly-cells-use-property-access.md
-    const auth = hasDirectAuth ? directAuth : wishedAuth;
+    const auth = inputAuth && hasDirectAuth ? inputAuth : wishedAuth;
 
     // ========================================================================
     // CROSS-PIECE TOKEN REFRESH

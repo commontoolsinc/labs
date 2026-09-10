@@ -64,8 +64,8 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 - Setup merges defaults into the argument cell, materializes
   `derivedInternalCells` into result-relative internal cells, and binds the
   serialized pattern graph via `unwrapOneLevelAndBindToDoc`.
-- `startWithTx` iterates serialized nodes, resolves modules, and calls
-  `instantiateNode`, turning aliases into real `Cell` instances through
+- `Runner.#startWithTx()` iterates serialized nodes, resolves modules, and
+  calls `instantiateNode`, turning aliases into real `Cell` instances through
   `sendValueToBinding`. The scheduler maintains reactivity.
 - Handlers can emit new patterns; lifts that return patterns spawn fresh graphs
   and register teardown hooks.
@@ -158,7 +158,7 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 
 - Builder APIs (`pattern`, `lift`, `handler`, helper exports).
 - Runtime cell creation, alias resolution, and pattern instantiation.
-- Serialization (`json-utils.ts`, pattern manager persistence, result metadata).
+- Serialization (`to-encodable-form.ts`, pattern manager persistence, result metadata).
 - Tests and tooling that assume path-based aliases or reactive-only helpers.
 
 ## Implementation Plan
@@ -192,7 +192,7 @@ snapshots or the reactive-interpreter rollout. See
 [executed plan](../../history/plans/first-class-serializable-factories.md).
 
 1. Make pattern, module/lift, and handler factory functions directly branded
-   `Factory@1` Fabric values.
+   `Factory@1` `FabricValue`s.
 2. Generalize ref binding, cold resolution, and symbolic invocation across
    factory kinds.
 3. Closure-convert and hoist nested patterns, binding callback argument 1 with

@@ -1,22 +1,11 @@
 import type ts from "typescript";
 // Typescript-free contract module (see engine.ts) — safe to import eagerly
 // without pulling the compiler stack onto this module's graph.
-import { sourceHasIgnoredDisableDirective } from "@commonfabric/ts-transformers/runtime-contract";
 import { compilerStack } from "./deferred-compiler-stack.ts";
 import { RuntimeProgram } from "./types.ts";
 
-export function pretransformProgram(
-  program: RuntimeProgram,
-  id: string,
-): RuntimeProgram {
-  program = transformInjectHelperModule(program);
-  program = transformProgramWithPrefix(program, id);
-  return program;
-}
-
 // For each source file in the program, inject the internal helper import used
-// by the AST transformer by default. Files can explicitly opt out with
-// `/// <cf-disable-transform />`.
+// by the AST transformer. Every file is transformed.
 //
 // `tolerateStoredLegacyEnvelope` (CT-1838): pre-#4158 pipelines persisted the
 // helper-INJECTED form as the source-of-record, so re-injecting a stored
@@ -28,7 +17,7 @@ export function pretransformProgram(
 // reach `transformCfDirective`, so the guard never fires for them. Set this
 // ONLY for storage-fetched, Merkle-verified input (the engine's cold
 // recovery path and fabric mounts). Authoring paths
-// (`pretransformProgram(ForModules)`) never set it — authored source
+// (`pretransformProgramForModules`) never set it — authored source
 // containing `__cfHelpers` keeps throwing, so the poison can never be
 // WRITTEN again; tolerance exists only for what history already stored.
 // Skipping `normalizeMixedModuleImports` for these files is safe: the
@@ -41,10 +30,11 @@ export function transformInjectHelperModule(
   // Deferred compiler stack (parses + prints): pretransform only runs on
   // compile flows, which await ensureCompilerStack() at their entry.
   const { isLegacyInjectedEnvelope, transformCfDirective } = compilerStack();
+  const dataFiles = new Set(program.dataFiles ?? []);
   return {
     main: program.main,
     files: program.files.map((source) => {
-      if (source.name.endsWith(".d.ts")) {
+      if (source.name.endsWith(".d.ts") || dataFiles.has(source.name)) {
         return { name: source.name, contents: source.contents };
       }
       // CT-1838 tolerance: an exact legacy-envelope stored doc passes
@@ -57,17 +47,6 @@ export function transformInjectHelperModule(
       ) {
         return { name: source.name, contents: source.contents };
       }
-      // `/// <cf-disable-transform />` disables the transform only at column
-      // zero (matching TypeScript's triple-slash directives). An indented
-      // first-line lookalike is silently ignored — the file transforms as
-      // usual — so warn an author who meant to opt this file out.
-      if (sourceHasIgnoredDisableDirective(source.contents)) {
-        console.warn(
-          `${source.name}: an indented "/// <cf-disable-transform />" is ` +
-            `ignored; the directive disables the transform only at column ` +
-            `zero. Move it to the start of the line to opt this file out.`,
-        );
-      }
       return {
         name: source.name,
         contents: normalizeMixedModuleImports(
@@ -76,42 +55,14 @@ export function transformInjectHelperModule(
       };
     }),
     mainExport: program.mainExport,
+    sourceRoots: program.sourceRoots,
+    dataFiles: program.dataFiles,
   };
 }
 
-// Adds `id` as a prefix to all files in the program.
-// Injects a new entry at root `/index.ts` to re-export
-// the entry contents because otherwise `typescript`
-// flattens the output, eliding the common prefix.
-export function transformProgramWithPrefix(
-  program: RuntimeProgram,
-  id: string,
-): RuntimeProgram {
-  const main = program.main;
-  const exportNameds = `export * from "${prefix(main, id)}";`;
-  const exportDefault = `export { default } from "${prefix(main, id)}";`;
-  const hasDefault = !program.mainExport || program.mainExport === "default";
-  const files = [
-    ...program.files.map((source) => ({
-      name: prefix(source.name, id),
-      contents: source.contents,
-    })),
-    {
-      name: `/index.ts`,
-      contents: `${exportNameds}${hasDefault ? `\n${exportDefault}` : ""}`,
-    },
-  ];
-  return {
-    main: `/index.ts`,
-    files,
-  };
-}
-
-// ESM variant: inject the helper import and prefix files with `id` (so source
-// locations / identity match the AMD path), but DO NOT add the synthetic
-// `/index.ts` re-export. That index exists only to defeat `outFile` prefix
-// flattening in the AMD bundler; a per-module ESM graph has no bundle, so the
-// program entry is simply the prefixed main module.
+// Inject the helper import and prefix every file with `id`, which namespaces
+// this load's source-map and diagnostic coordinates. The program entry is the
+// prefixed main module.
 export function pretransformProgramForModules(
   program: RuntimeProgram,
   id: string,
@@ -125,6 +76,12 @@ export function pretransformProgramForModules(
     })),
     ...(program.mainExport !== undefined
       ? { mainExport: program.mainExport }
+      : {}),
+    ...(program.sourceRoots !== undefined
+      ? { sourceRoots: program.sourceRoots.map((root) => prefix(root, id)) }
+      : {}),
+    ...(program.dataFiles !== undefined
+      ? { dataFiles: program.dataFiles.map((data) => prefix(data, id)) }
       : {}),
   };
 }

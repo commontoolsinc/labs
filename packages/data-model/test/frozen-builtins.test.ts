@@ -1,3 +1,16 @@
+/**
+ * Immutable counterparts to `Map` and `Set`, and the key equality they carry
+ * over.
+ *
+ * The cases that matter are the ones where key identity is not obvious:
+ * signed zeros and the non-finite values, where a collection's notion of "the
+ * same key" is not `===` and has to be preserved rather than quietly improved
+ * upon.
+ *
+ * The set additionally carries the algebra -- union, intersection, difference
+ * -- which an immutable receiver can only express by producing a new set.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -20,7 +33,7 @@ describe("frozen-builtins", () => {
       expect(Object.isFrozen(fm)).toBe(true);
     });
 
-    it("supports read operations", () => {
+    it("reads back what it was constructed with", () => {
       const fm = new FrozenMap<string, number>([["a", 1], ["b", 2]]);
       expect(fm.size).toBe(2);
       expect(fm.get("a")).toBe(1);
@@ -35,38 +48,44 @@ describe("frozen-builtins", () => {
 
     it("throws on `set()`", () => {
       const fm = new FrozenMap<string, number>([["a", 1]]);
-      expect(() => fm.set("b", 2)).toThrow("Cannot mutate a FrozenMap");
+      expect(() => fm.set("b", 2)).toThrow("Cannot mutate a `FrozenMap`");
     });
 
     it("throws on `delete()`", () => {
       const fm = new FrozenMap<string, number>([["a", 1]]);
-      expect(() => fm.delete("a")).toThrow("Cannot mutate a FrozenMap");
+      expect(() => fm.delete("a")).toThrow("Cannot mutate a `FrozenMap`");
     });
 
     it("throws on `clear()`", () => {
       const fm = new FrozenMap<string, number>([["a", 1]]);
-      expect(() => fm.clear()).toThrow("Cannot mutate a FrozenMap");
+      expect(() => fm.clear()).toThrow("Cannot mutate a `FrozenMap`");
     });
 
-    it("rejects intrinsic `Map` mutators", () => {
+    it("throws from the intrinsic `Map` mutators", () => {
       const fm = new FrozenMap<string, number>([["a", 1]]);
       expect(() => Map.prototype.set.call(fm, "b", 2)).toThrow();
       expect(fm.has("b")).toBe(false);
     });
 
-    it("rejects a receiver that has no backing store", () => {
+    it("throws for a receiver that has no backing store", () => {
       const foreign = Object.create(FrozenMap.prototype) as FrozenMap<
         string,
         number
       >;
 
-      expect(() => foreign.get("a")).toThrow("Incompatible FrozenMap receiver");
-      expect(() => foreign.has("a")).toThrow("Incompatible FrozenMap receiver");
-      expect(() => foreign.size).toThrow("Incompatible FrozenMap receiver");
-      expect(() => foreign.keys()).toThrow("Incompatible FrozenMap receiver");
-      expect(() => foreign.values()).toThrow("Incompatible FrozenMap receiver");
+      expect(() => foreign.get("a")).toThrow(
+        "Incompatible `FrozenMap` receiver",
+      );
+      expect(() => foreign.has("a")).toThrow(
+        "Incompatible `FrozenMap` receiver",
+      );
+      expect(() => foreign.size).toThrow("Incompatible `FrozenMap` receiver");
+      expect(() => foreign.keys()).toThrow("Incompatible `FrozenMap` receiver");
+      expect(() => foreign.values()).toThrow(
+        "Incompatible `FrozenMap` receiver",
+      );
       expect(() => foreign.entries()).toThrow(
-        "Incompatible FrozenMap receiver",
+        "Incompatible `FrozenMap` receiver",
       );
     });
 
@@ -83,7 +102,9 @@ describe("frozen-builtins", () => {
           number
         >
         & MutableMapExtensions<string, number>;
-      expect(() => fm.getOrInsert("b", 2)).toThrow("Cannot mutate a FrozenMap");
+      expect(() => fm.getOrInsert("b", 2)).toThrow(
+        "Cannot mutate a `FrozenMap`",
+      );
       expect(fm.has("b")).toBe(false);
     });
 
@@ -100,46 +121,47 @@ describe("frozen-builtins", () => {
           invoked = true;
           return 2;
         })
-      ).toThrow("Cannot mutate a FrozenMap");
+      ).toThrow("Cannot mutate a `FrozenMap`");
       expect(invoked).toBe(false);
       expect(fm.has("b")).toBe(false);
     });
 
-    it("supports forEach iteration", () => {
+    it("visits every entry in order under `forEach()`", () => {
       const fm = new FrozenMap([["x", 10], ["y", 20]]);
       const entries: [string, number][] = [];
       fm.forEach((v, k) => entries.push([k, v]));
       expect(entries).toEqual([["x", 10], ["y", 20]]);
     });
 
-    it("supports empty construction", () => {
+    it("has a size of `0` when constructed with no argument", () => {
       const fm = new FrozenMap();
       expect(fm.size).toBe(0);
     });
 
-    it("supports `null` entries argument", () => {
+    it("has a size of `0` when constructed with `null`", () => {
       const fm = new FrozenMap(null);
       expect(fm.size).toBe(0);
     });
 
-    it("rejects builder writes after `finish()`", () => {
+    it("throws on a builder write after `finish()`", () => {
       const builder = FrozenMap.createBuilder<string, number>();
       builder.set("a", 1);
 
       const fm = builder.finish();
 
       expect(() => builder.set("b", 2)).toThrow(
-        "Cannot mutate a finalized FrozenMap builder",
+        "Cannot mutate a finalized `FrozenMap` builder",
       );
       expect([...fm.entries()]).toEqual([["a", 1]]);
     });
 
-    // Keys go through `Map.prototype.set`, which carries the same signed-zero
-    // normalization as `Set.prototype.add`. This is a separate construction
-    // site from `FrozenSet`'s, so the equivalent `FrozenSet` cases below do
-    // not reach it -- see the rationale on that block for why the behavior is
-    // deliberate rather than a defect.
     describe("non-finite and signed-zero keys", () => {
+      // Keys go through `Map.prototype.set`, which carries the same signed-zero
+      // normalization as `Set.prototype.add`. This is a separate construction
+      // site from `FrozenSet`'s, so the equivalent `FrozenSet` cases below do
+      // not reach it -- see the rationale on that block for why the behavior is
+      // deliberate rather than a defect.
+
       it("normalizes a `-0` key to `+0`, as `Map` does", () => {
         const fm = new FrozenMap<number, string>([[-0, "a"]]);
 
@@ -186,7 +208,7 @@ describe("frozen-builtins", () => {
       expect(Object.isFrozen(fs)).toBe(true);
     });
 
-    it("supports read operations", () => {
+    it("reads back what it was constructed with", () => {
       const fs = new FrozenSet<number>([1, 2, 3]);
       expect(fs.size).toBe(3);
       expect(fs.has(1)).toBe(true);
@@ -196,34 +218,36 @@ describe("frozen-builtins", () => {
 
     it("throws on `add()`", () => {
       const fs = new FrozenSet<number>([1]);
-      expect(() => fs.add(2)).toThrow("Cannot mutate a FrozenSet");
+      expect(() => fs.add(2)).toThrow("Cannot mutate a `FrozenSet`");
     });
 
     it("throws on `delete()`", () => {
       const fs = new FrozenSet<number>([1]);
-      expect(() => fs.delete(1)).toThrow("Cannot mutate a FrozenSet");
+      expect(() => fs.delete(1)).toThrow("Cannot mutate a `FrozenSet`");
     });
 
     it("throws on `clear()`", () => {
       const fs = new FrozenSet<number>([1]);
-      expect(() => fs.clear()).toThrow("Cannot mutate a FrozenSet");
+      expect(() => fs.clear()).toThrow("Cannot mutate a `FrozenSet`");
     });
 
-    it("rejects intrinsic `Set` mutators", () => {
+    it("throws from the intrinsic `Set` mutators", () => {
       const fs = new FrozenSet<number>([1]);
       expect(() => Set.prototype.add.call(fs, 2)).toThrow();
       expect(fs.has(2)).toBe(false);
     });
 
-    it("rejects a receiver that has no backing store", () => {
+    it("throws for a receiver that has no backing store", () => {
       const foreign = Object.create(FrozenSet.prototype) as FrozenSet<number>;
 
-      expect(() => foreign.has(1)).toThrow("Incompatible FrozenSet receiver");
-      expect(() => foreign.size).toThrow("Incompatible FrozenSet receiver");
-      expect(() => foreign.keys()).toThrow("Incompatible FrozenSet receiver");
-      expect(() => foreign.values()).toThrow("Incompatible FrozenSet receiver");
+      expect(() => foreign.has(1)).toThrow("Incompatible `FrozenSet` receiver");
+      expect(() => foreign.size).toThrow("Incompatible `FrozenSet` receiver");
+      expect(() => foreign.keys()).toThrow("Incompatible `FrozenSet` receiver");
+      expect(() => foreign.values()).toThrow(
+        "Incompatible `FrozenSet` receiver",
+      );
       expect(() => foreign.entries()).toThrow(
-        "Incompatible FrozenSet receiver",
+        "Incompatible `FrozenSet` receiver",
       );
     });
 
@@ -243,31 +267,31 @@ describe("frozen-builtins", () => {
       expect([...fs.keys()]).toEqual([1, 2]);
     });
 
-    it("supports forEach iteration", () => {
+    it("visits every element in order under `forEach()`", () => {
       const fs = new FrozenSet([10, 20, 30]);
       const values: number[] = [];
       fs.forEach((v) => values.push(v));
       expect(values).toEqual([10, 20, 30]);
     });
 
-    it("supports empty construction", () => {
+    it("has a size of `0` when constructed with no argument", () => {
       const fs = new FrozenSet();
       expect(fs.size).toBe(0);
     });
 
-    it("supports `null` values argument", () => {
+    it("has a size of `0` when constructed with `null`", () => {
       const fs = new FrozenSet(null);
       expect(fs.size).toBe(0);
     });
 
-    it("rejects builder writes after `finish()`", () => {
+    it("throws on a builder write after `finish()`", () => {
       const builder = FrozenSet.createBuilder<number>();
       builder.add(1);
 
       const fs = builder.finish();
 
       expect(() => builder.add(2)).toThrow(
-        "Cannot mutate a finalized FrozenSet builder",
+        "Cannot mutate a finalized `FrozenSet` builder",
       );
       expect([...fs.values()]).toEqual([1]);
     });
@@ -320,7 +344,7 @@ describe("frozen-builtins", () => {
         expect([...result]).toEqual([1, 2, 3]);
       });
 
-      it("handles an empty operand on both sides", () => {
+      it("computes set algebra with an empty operand on either side", () => {
         const empty = new FrozenSet<number>();
 
         expect([...empty.union(new Set([1]))]).toEqual([1]);
@@ -332,10 +356,11 @@ describe("frozen-builtins", () => {
         expect(empty.isDisjointFrom(new Set([1]))).toBe(true);
       });
 
-      // `Set.prototype.intersection` iterates whichever operand is smaller,
-      // so the result's iteration order follows that operand rather than
-      // always following the receiver.
       it("takes `intersection()` order from the smaller operand", () => {
+        // `Set.prototype.intersection` iterates whichever operand is smaller,
+        // so the result's iteration order follows that operand rather than
+        // always following the receiver.
+
         const fs = new FrozenSet<number>([1, 2, 3, 4, 5]);
         expect([...fs.intersection(new Set([5, 1]))]).toEqual([5, 1]);
       });
@@ -345,12 +370,13 @@ describe("frozen-builtins", () => {
         expect([...fs.intersection(new Set([1, 2, 3, 4, 5]))]).toEqual([5, 1]);
       });
 
-      // Equal sizes are the boundary between the two branches, and the
-      // intrinsic iterates the receiver there. The operands below share their
-      // elements but not their order, so the result distinguishes which side
-      // was iterated -- which an equal-size case with coinciding orders
-      // cannot.
       it("takes `intersection()` order from itself on equal sizes", () => {
+        // Equal sizes are the boundary between the two branches, and the
+        // intrinsic iterates the receiver there. The operands below share their
+        // elements but not their order, so the result distinguishes which side
+        // was iterated -- which an equal-size case with coinciding orders
+        // cannot.
+
         const fs = new FrozenSet<number>([1, 2]);
         expect([...fs.intersection(new Set([2, 1]))]).toEqual([1, 2]);
       });
@@ -376,6 +402,7 @@ describe("frozen-builtins", () => {
       //
       // `toBe()` compares with `Object.is()`, which tells `-0` from `+0`.
       // `toEqual()` does not, and would make these assertions vacuous.
+
       it("normalizes `-0` to `+0` on insertion, as `Set` does", () => {
         const fs = new FrozenSet<number>([-0]);
 

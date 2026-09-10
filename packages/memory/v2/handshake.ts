@@ -1,14 +1,16 @@
+import { toCompactDebugString } from "@commonfabric/data-model";
+
 import {
   compatibleMemoryProtocolFlags,
   getMemoryProtocolFlags,
   type HelloMessage,
   type HelloOkMessage,
   MEMORY_PROTOCOL,
+  type MemoryProtocolFlags,
   parseMemoryProtocolFlags,
   type ServerMessage,
   wireMemoryProtocolFlags,
 } from "../v2.ts";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 type TypedError = {
   name: string;
@@ -20,8 +22,10 @@ const toError = (name: string, message: string): TypedError => ({
   message,
 });
 
-export const respondToHello = (message: HelloMessage): ServerMessage => {
-  const expectedFlags = getMemoryProtocolFlags();
+export const respondToHello = (
+  message: HelloMessage,
+  expectedFlags: MemoryProtocolFlags = getMemoryProtocolFlags(),
+): ServerMessage => {
   if (message.protocol !== MEMORY_PROTOCOL) {
     return {
       type: "response",

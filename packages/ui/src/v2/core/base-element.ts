@@ -2,6 +2,7 @@
  * Minimal base class for web components using Lit
  * Provides the emit() helper for consistent custom events
  */
+
 import { css, CSSResult, LitElement } from "lit";
 import { variablesCSS } from "../styles/variables.ts";
 import { DebugController } from "./debug-controller.ts";
@@ -11,7 +12,7 @@ import { DebugController } from "./debug-controller.ts";
 const DEBUG_RENDERER = false;
 
 export abstract class BaseElement extends LitElement {
-  #_debugController = new DebugController(this, DEBUG_RENDERER);
+  #_debugController = DEBUG_RENDERER ? new DebugController(this) : null;
 
   /**
    * Get base styles including CSS variables

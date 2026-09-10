@@ -45,10 +45,10 @@ describe("plain-data sandbox helper", () => {
     expect((nested as ReadonlySet<number>).has(2)).toBe(true);
 
     expect(() => (result as Map<unknown, unknown>).set("next", true)).toThrow(
-      "Cannot mutate a FrozenMap",
+      "Cannot mutate a `FrozenMap`",
     );
     expect(() => (nested as Set<number>).add(3)).toThrow(
-      "Cannot mutate a FrozenSet",
+      "Cannot mutate a `FrozenSet`",
     );
     expect(() =>
       Map.prototype.set.call(result as Map<unknown, unknown>, "next", true)
@@ -108,6 +108,25 @@ describe("plain-data sandbox helper", () => {
     expect(() => assertPlainData(new Date())).toThrow(
       "Unsupported object prototype 'Date'",
     );
+  });
+
+  it("re-roots a null-prototype record in the snapshot", () => {
+    // Validation admits one, a null-prototype object being an ordinary way to
+    // build a dictionary. The snapshot is where it becomes canonical, so what
+    // reaches a pattern stays inside `FabricValue`, which a null-prototype
+    // record is not.
+    const inner = Object.create(null) as Record<string, unknown>;
+    inner.v = 42;
+    const source = Object.create(null) as Record<string, unknown>;
+    source.child = inner;
+
+    const result = freezeVerifiedPlainData(source) as Record<string, unknown>;
+
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+    const child = result.child as Record<string, unknown>;
+    expect(Object.getPrototypeOf(child)).toBe(Object.prototype);
+    expect(child.v).toBe(42);
+    expect(Object.isFrozen(result)).toBe(true);
   });
 
   it("rejects values whose own property descriptors disappear", () => {

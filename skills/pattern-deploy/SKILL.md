@@ -43,37 +43,61 @@ With `CF_API_URL` and `CF_IDENTITY` exported (see the cf skill), you can drop
 deno task cf check pattern.tsx --no-run
 ```
 
+**Run and collect automated pattern tests:**
+
+```bash
+deno task cf test packages/patterns/[name]/main.test.tsx
+```
+
+New or changed pattern behavior must have automated coverage. Find every
+authored `*.test.tsx` entry, run each one, and repeat `--test` for each entry in
+the deployment commands below. Manual handler checks do not replace this step.
+
 **Deploy new pattern (first time only):**
 
 ```bash
-deno task cf piece new packages/patterns/[name]/main.tsx --identity cf.key --api-url $CF_API_URL --space <space>
+deno task cf piece new packages/patterns/[name]/main.tsx --test packages/patterns/[name]/main.test.tsx --identity cf.key --api-url $CF_API_URL --space <space>
 # Output: Created piece bafyreia... <- SAVE this piece ID
 ```
 
 **Update deployed pattern (all subsequent iterations):**
 
 ```bash
-deno task cf piece setsrc packages/patterns/[name]/main.tsx --piece <ID> --identity cf.key --api-url $CF_API_URL --space <space>
+deno task cf piece setsrc packages/patterns/[name]/main.tsx --test packages/patterns/[name]/main.test.tsx --cell <ID> --identity cf.key --api-url $CF_API_URL --space <space>
 ```
 
-`--piece` is required for `setsrc` — never "update" by re-running `piece new`,
+`--cell` is required for `setsrc` — never "update" by re-running `piece new`,
 which creates a duplicate piece.
+
+`--test` packages and type-checks a test but does not run it. Every `setsrc`
+defines the complete source revision, so repeat all test flags on every update
+or the new revision will omit those test roots.
+
+A pattern reads a file that is not code — a fixture, a lookup table — with
+`dataFile(path)` from `commonfabric`, naming it relative to the module that
+reads it. That call is the declaration, so `new`, `setsrc`, `check` and `test`
+all attach the file without being told. Its bytes are stored verbatim and never
+parsed, compiled, or importable; it must be UTF-8 text inside the deployment
+root. Repeatable `--datafile <path>` remains for a file the source cannot name:
+one read by a computed path, or one that ships with a pattern that does not read
+it. The same complete-revision rule applies to those, so repeat every data-file
+flag on each update too.
 
 **Inspect piece state:**
 
 ```bash
-deno task cf piece inspect --piece <ID> --identity cf.key --api-url $CF_API_URL --space <space>
+deno task cf piece inspect --cell <ID> --identity cf.key --api-url $CF_API_URL --space <space>
 ```
 
 **Test handler via CLI:**
 
 ```bash
-deno task cf piece call handlerName --piece PIECE_ID
-deno task cf piece step --piece PIECE_ID    # Required! Triggers recomputation
-deno task cf piece inspect --piece PIECE_ID  # Now shows updated state
+deno task cf piece call --cell PIECE_ID handlerName
+deno task cf piece step --cell PIECE_ID    # Required! Triggers recomputation
+deno task cf piece inspect --cell PIECE_ID  # Now shows updated state
 ```
 
-**Important:** Always run `piece step` after `piece call` or `piece set`.
+**Important:** Always run `piece step` after `cf piece call` or `cf cell set`.
 Without it, computed values remain stale and `inspect`/`get` return old data.
 
 ## When Deploy Fails
@@ -81,7 +105,7 @@ Without it, computed values remain stale and `inspect`/`get` return old data.
 - If `piece new` or `setsrc` errors, re-run `deno task cf check` locally first.
 - Verify `CF_API_URL` is reachable (see the cf skill's troubleshooting table).
 - If you accidentally ran `new` twice, remove the duplicate with
-  `deno task cf piece rm --piece <ID> ...` before continuing.
+  `deno task cf piece rm --cell <ID> ...` before continuing.
 - Never retry `new` to "fix" a failed `setsrc`.
 
 ## Get Help
@@ -94,5 +118,7 @@ deno task cf piece --help
 ## Done When
 
 - Piece deploys without errors
+- Every automated pattern test passes
+- Every authored test entry is attached to the deployed source revision
 - State inspects correctly
 - Handlers respond to CLI calls

@@ -1,26 +1,33 @@
-import { describe, it } from "@std/testing/bdd";
-import type { CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
+import { describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commonfabric/identity";
+
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
 import { parseLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-label-metadata");
 
-// Inv-12 Stage 0 (SC-14/SC-25 prerequisite; docs/specs/
-// cfc-label-metadata-confidentiality.md §3): the carried `cfcLabelView` on a
-// link write round-trips through the main thread (worker →
-// `CellHandle.deserialize` → `mapCellRefsToSigilLinks` → worker) and is
-// main-thread-influenceable. `prepareBoundaryCommit` must therefore treat an
-// inbound view as an untrusted display artifact and persist link-origin
-// labels from the worker-authoritative source — the link source's STORED
-// label map — so a tampered/redacted/incomplete view cannot WEAKEN what the
-// stored metadata provides (the round-trip hazard confirmed on the labs#4622
-// review thread: response-side redaction would otherwise persist redacted,
-// under-labeled views on copy-forward writes).
 describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
+  // Inv-12 Stage 0 (SC-14/SC-25 prerequisite; docs/specs/
+  // cfc-label-metadata-confidentiality.md §3): the carried `cfcLabelView` on a
+  // link write round-trips through the main thread (worker →
+  // `CellHandle.deserialize` → `mapCellRefsToSigilLinks` → worker) and is
+  // main-thread-influenceable. `prepareBoundaryCommit` must therefore treat an
+  // inbound view as an untrusted display artifact and persist link-origin
+  // labels from the worker-authoritative source — the link source's STORED
+  // label map — so a tampered/redacted/incomplete view cannot WEAKEN what the
+  // stored metadata provides (the round-trip hazard confirmed on the labs#4622
+  // review thread: response-side redaction would otherwise persist redacted,
+  // under-labeled views on copy-forward writes).
+
   type PersistedEntry = {
     path: string[];
     origin?: string;
@@ -35,7 +42,6 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
 
     // Seed a source doc whose STORED cfc metadata is the authoritative label
@@ -48,6 +54,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
     ).id!;
     const fullCaveat = cfcAtom.caveat("derived-from", "did:key:alice");
     const seed = runtime.edit();
+    writeSeedEnvelopeDoc(seed, signer.did());
     seed.writeOrThrow({
       space: signer.did(),
       scope: "space",
@@ -57,7 +64,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
       value: { secret: "classified", plain: "public" },
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [
@@ -243,7 +250,6 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const sourceId = parseLink(
@@ -251,6 +257,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
           .getAsLink(),
       ).id!;
       const seed = runtime.edit();
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -260,7 +267,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
         value: { attested: "x" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{

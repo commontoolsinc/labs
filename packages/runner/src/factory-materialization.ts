@@ -7,13 +7,13 @@ import {
   sealFactoryState,
   tryFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
-import { factorySchemasEqual } from "@commonfabric/data-model/schema-utils";
+import { factorySchemasEqual } from "@commonfabric/data-model-schema";
 import {
   type FabricValue,
   valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import {
   getFrameworkProvidedPaths,
@@ -596,7 +596,8 @@ export function materializeFactoryForSchema(
   schema: JSONSchema | undefined,
   context: Omit<FactoryMaterializationContext, "expected">,
 ): unknown {
-  const resolvedSchema = isRecord(schema) && typeof schema.$ref === "string"
+  const resolvedSchema = isObjectNotArray(schema) &&
+      typeof schema.$ref === "string"
     ? ContextualFlowControl.resolveSchemaRefsOrThrow(schema, schema)
     : schema;
   const expected = factoryContractFromSchema(resolvedSchema);

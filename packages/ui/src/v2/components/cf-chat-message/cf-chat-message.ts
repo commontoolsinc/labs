@@ -1,11 +1,14 @@
+import { consume } from "@lit/context";
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { consume } from "@lit/context";
+
 import { BaseElement } from "../../core/base-element.ts";
+
 import "../cf-tool-call/index.ts";
 import "../cf-button/index.ts";
 import "../cf-copy-button/index.ts";
 import "../cf-markdown/index.ts";
+
 import type {
   BuiltInLLMContent,
   BuiltInLLMTextPart,
@@ -13,6 +16,7 @@ import type {
   BuiltInLLMToolResultPart,
 } from "@commonfabric/api";
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
+
 import {
   applyThemeToElement,
   type CFTheme,

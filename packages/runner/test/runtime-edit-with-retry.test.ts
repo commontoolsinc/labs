@@ -123,19 +123,7 @@ describe("Runtime.editWithRetry", () => {
     expect(cell.get()).toBe(0);
   });
 
-  it("prepares relevant transactions before committing in enforcing modes", async () => {
-    await runtime.dispose();
-    await storageManager.close();
-
-    storageManager = StorageManager.emulate({
-      as: signer,
-    });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-      cfcEnforcementMode: "enforce-explicit",
-    });
-
+  it("prepares relevant transactions before committing", async () => {
     let committedTx: IExtendedStorageTransaction | undefined;
     const { ok, error } = await runtime.editWithRetry((t) => {
       committedTx = t;
@@ -164,18 +152,6 @@ describe("Runtime.editWithRetry", () => {
   });
 
   it("recomputes prepare on each retry with fresh transactions", async () => {
-    await runtime.dispose();
-    await storageManager.close();
-
-    storageManager = StorageManager.emulate({
-      as: signer,
-    });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-      cfcEnforcementMode: "enforce-explicit",
-    });
-
     const attempts: IExtendedStorageTransaction[] = [];
     const { ok, error } = await runtime.editWithRetry((t) => {
       attempts.push(t);
@@ -221,7 +197,6 @@ describe("Runtime.editWithRetry", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: `trust-${++snapshotCalls}`,
         actingPrincipal: signer.did(),

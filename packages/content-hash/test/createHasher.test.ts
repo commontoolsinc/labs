@@ -1,3 +1,17 @@
+/**
+ * This file runs the fixture corpus against every hasher implementation
+ * rather than against whichever one `createHasher()` selects here, so that a
+ * platform resolving to a different implementation cannot yield a different
+ * hash for the same bytes. `createHasher()` is separately pinned to be one of
+ * those implementations and not a fourth thing.
+ *
+ * Each implementation is also held to the base class's post-`digest()`
+ * refusal in all three ways an instance can be misused: a small `update()`,
+ * an `update()` too large for the small-chunk buffer, and a second
+ * `digest()`. Those are three distinct paths rather than one, because an
+ * implementation may sit behind the buffering layer.
+ */
+
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromBase64url } from "@commonfabric/utils/base64url";
@@ -39,27 +53,66 @@ for (const createFunc of createFuncs) {
     let testId = -1;
     let oneLength = 10; // For multi-byte variety; updated pseudorandomly.
 
+    it("quotes an unknown encoding name safely, backticks and all", () => {
+      // A caller-supplied encoding name reaches the message, so a name holding
+      // a backtick must not break the span around it.
+
+      const hasher = createFunc();
+      hasher.update(new Uint8Array([1, 2, 3]));
+      expect(() => hasher.digest("a`b" as "base64url"))
+        .toThrow("Unknown encoding: ``a`b``");
+    });
+
+    describe("after `digest()`", () => {
+      const alreadyDone = /`digest\(\)` already done/;
+
+      it("throws given a small `update()`", () => {
+        // A small update is the interesting case: implementations that buffer
+        // small writes can satisfy one without consulting the underlying
+        // hasher.
+
+        const hasher = createFunc();
+        hasher.update(new Uint8Array([1, 2, 3]));
+        hasher.digest();
+        expect(() => hasher.update(new Uint8Array([4]))).toThrow(alreadyDone);
+      });
+
+      it("throws given an `update()` too large to buffer", () => {
+        const hasher = createFunc();
+        hasher.update(new Uint8Array([1, 2, 3]));
+        hasher.digest();
+        expect(() => hasher.update(new Uint8Array(4096))).toThrow(alreadyDone);
+      });
+
+      it("throws given a second `digest()`", () => {
+        const hasher = createFunc();
+        hasher.update(new Uint8Array([1, 2, 3]));
+        hasher.digest();
+        expect(() => hasher.digest()).toThrow(alreadyDone);
+      });
+    });
+
     for (const { bytes, sha256: hashStr } of FIXTURES) {
       const hashMsg = `\`${hashStr.slice(0, 8)}...\``;
       const hashBytes = fromBase64url(hashStr);
       testId++;
 
       describe(`for fixture #${testId}, hash ${hashMsg}`, () => {
-        it("one-shot use produces expected string hash", () => {
+        it("produces the expected string hash from one-shot use", () => {
           const hasher = createFunc();
           hasher.update(bytes);
           const got = hasher.digest("base64url");
           expect(got).toBe(hashStr);
         });
 
-        it("one-shot use produces expected byte-array hash", () => {
+        it("produces the expected byte-array hash from one-shot use", () => {
           const hasher = createFunc();
           hasher.update(bytes);
           const got = hasher.digest();
           expect(got).toEqual(hashBytes);
         });
 
-        it("byte-at-a-time use produces expected byte-array hash", () => {
+        it("produces the expected byte-array hash from byte-at-a-time use", () => {
           const hasher = createFunc();
           for (let i = 0; i < bytes.length; i++) {
             hasher.update(bytes.subarray(i, i + 1));
@@ -68,7 +121,7 @@ for (const createFunc of createFuncs) {
           expect(got).toEqual(hashBytes);
         });
 
-        it("multi-byte variety use produces expected byte-array hash", () => {
+        it("produces the expected byte-array hash from varied multi-byte use", () => {
           const hasher = createFunc();
           let i = 0;
           while (i < bytes.length) {
@@ -83,7 +136,7 @@ for (const createFunc of createFuncs) {
       });
     }
 
-    it("can operate concurrently", () => {
+    it("produces the expected hashes from interleaved instances", () => {
       const CONCURRENT_COUNT = 10;
       let inProgress: {
         hasher: IncrementalHasher;

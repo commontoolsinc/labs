@@ -43,6 +43,14 @@ export const ingest = createRoute({
       },
       description: "Invalid request",
     },
+    // Reachable only with a correct token, so it leaks nothing to a guesser.
+    [HttpStatusCodes.FORBIDDEN]: {
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+      description:
+        "Valid token, but the channel is revoked, rotated, or expired",
+    },
     [413]: {
       content: {
         "application/json": { schema: z.object({ error: z.string() }) },

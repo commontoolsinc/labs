@@ -2,11 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { Source } from "@commonfabric/js-compiler";
-import {
-  type CompiledModuleArtifact,
-  compileSourcesToRecords,
-  type ModuleRecordCache,
-} from "../src/sandbox/module-record-compiler.ts";
+import { compileSourcesToRecords } from "../src/sandbox/module-record-compiler.ts";
 import {
   importModuleGraphNow,
   runtimeModuleRecords,
@@ -17,21 +13,6 @@ import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
 // These tests drive the sync parse internals directly (below the async flow
 // boundaries that normally load the deferred compiler stack), so load it here.
 await ensureCompilerStack();
-
-class MapRecordCache implements ModuleRecordCache {
-  store = new Map<string, CompiledModuleArtifact>();
-  hits = 0;
-  misses = 0;
-  get(hash: string): CompiledModuleArtifact | undefined {
-    const v = this.store.get(hash);
-    if (v) this.hits++;
-    else this.misses++;
-    return v;
-  }
-  set(hash: string, artifact: CompiledModuleArtifact): void {
-    this.store.set(hash, artifact);
-  }
-}
 
 function files(map: Record<string, string>): Source[] {
   return Object.entries(map).map(([name, contents]) => ({ name, contents }));
@@ -201,59 +182,18 @@ export const ok = (): number => 7;`,
     expect(ns.value).toBe("hi world");
   });
 
-  it("populates the per-module cache on a miss and reuses it on a hit", () => {
-    const sources = files({ "/main.ts": `export const x = () => 1;` });
-    const cache = new MapRecordCache();
-
-    compileSourcesToRecords(sources, { recordCache: cache });
-    expect(cache.misses).toBe(1);
-    expect(cache.store.size).toBe(1);
-
-    // Second compile of identical sources hits the cache (no recompile).
-    compileSourcesToRecords(sources, { recordCache: cache });
-    expect(cache.hits).toBe(1);
-  });
-
-  it("prefers a precompiled body over a cached (bare-transpiled) one", () => {
+  it("uses a precompiled body instead of the bare transpile", () => {
     const sources = files({
       "/main.ts": `export const run = (): number => 1;`,
     });
-    const cache = new MapRecordCache();
-    // Seed the cache with a stale bare-transpiled artifact.
-    compileSourcesToRecords(sources, { recordCache: cache });
-    expect(cache.store.size).toBe(1);
-
-    // With a precompiled body provided, the cache must be ignored (different
-    // compilation mode) and the precompiled body used.
+    // A body distinguishable from what transpiling the source would produce.
     const precompiledBodies = new Map([[
       "/main.ts",
       `Object.defineProperty(exports, "__esModule", { value: true });\nexports.run = () => 99;`,
     ]]);
+
     const { records, specifierByPath } = compileSourcesToRecords(sources, {
-      recordCache: cache,
       precompiledBodies,
-    });
-    const ns = importModuleGraphNow(specifierByPath.get("/main.ts")!, {
-      records,
-    }) as { run(): number };
-    expect(ns.run()).toBe(99);
-  });
-
-  it("uses the cached compiled artifact (cache is authoritative on hit)", () => {
-    const sources = files({
-      "/main.ts": `export const run = (): number => 1;`,
-    });
-    // Pre-seed the cache with a sentinel artifact so we can prove it is used.
-    const cache = new MapRecordCache();
-    const { specifierByPath: probe } = compileSourcesToRecords(sources);
-    const hash = probe.get("/main.ts")!.replace("cf:module/", "");
-    cache.store.set(hash, {
-      exports: ["run"],
-      compiled: `exports.run = function () { return 99; };`,
-    });
-
-    const { records, specifierByPath } = compileSourcesToRecords(sources, {
-      recordCache: cache,
     });
     const ns = importModuleGraphNow(specifierByPath.get("/main.ts")!, {
       records,

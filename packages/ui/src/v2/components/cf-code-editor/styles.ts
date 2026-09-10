@@ -308,8 +308,9 @@ export const styles = css`
     position: relative;
   }
 
-  /* Collapsed pill view - complete backlink with ID (click to navigate) */
-  .cm-backlink-pill {
+  /* Collapsed pill view - a resolved mention in either form (click to navigate) */
+  .cm-backlink-pill,
+  .cm-mention-ref-pill {
     background-color: var(
       --cf-code-editor-color-primary-100,
       hsla(212, 100%, 47%, 0.15)
@@ -325,11 +326,22 @@ export const styles = css`
       var(--cf-code-editor-transition-ease, ease);
   }
 
-  .cm-backlink-pill:hover {
+  .cm-backlink-pill:hover,
+  .cm-mention-ref-pill:hover {
     background-color: var(
       --cf-code-editor-color-primary-200,
       hsla(212, 100%, 47%, 0.25)
     );
+  }
+
+  /* The member name a mention's destination publishes, beside its label.
+    Generated content, because the document's own text is the label alone:
+    a reference's spelling is computed where it is read and never stored. */
+  .cm-mention-ref-pill[data-short-name]::after {
+    content: attr(data-short-name);
+    margin-left: 0.375rem;
+    opacity: 0.65;
+    font-variant-numeric: tabular-nums;
   }
 
   /* Pending pill - incomplete backlink without ID */

@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   entityRefFromString,
   entityRefToString,
@@ -12,9 +12,9 @@ type MockDoc = {
   getEntityId: () => unknown;
 };
 
-// Create a mock environment for testing reference detection
 describe("Piece reference detection", () => {
-  // Test the core logic of direct reference finding without maybeGetCellLink
+  // The core logic of direct reference finding, without maybeGetCellLink.
+
   it("should find all direct references in an argument structure", () => {
     // Create mock data with multiple references
     const mockData = {
@@ -53,7 +53,8 @@ describe("Piece reference detection", () => {
 
       // Check if the value is a cell-link reference (EntityRef cell + path)
       if (
-        isRecord(value) && isEntityRef(value.cell) && value.path !== undefined
+        isObjectOrArray(value) && isEntityRef(value.cell) &&
+        value.path !== undefined
       ) {
         const addr = entityRefToString(value.cell);
         if (!foundRefs.includes(addr)) {
@@ -62,7 +63,7 @@ describe("Piece reference detection", () => {
       }
 
       // Recursively search objects and arrays
-      if (isRecord(value)) {
+      if (isObjectOrArray(value)) {
         // Check all properties of objects
         if (!Array.isArray(value)) {
           for (const key in value) {
@@ -104,7 +105,6 @@ describe("Piece reference detection", () => {
     assertEquals(foundPiece2, true, "Should find reference to piece2");
   });
 
-  // Test specifically the issue where only one reference is found when there are multiple
   it("should find multiple references in argument data that matches the reported issue", () => {
     // Mock the scenario where a piece's argument refers to two other pieces
     const mockPiece1Id = entityRefFromString("piece-1-id");
@@ -148,7 +148,7 @@ describe("Piece reference detection", () => {
       const seenIds = new Set<string>();
 
       const traverse = (value: unknown): void => {
-        if (!isRecord(value)) return;
+        if (!isObjectOrArray(value)) return;
 
         // Check for direct cell reference
         if (isEntityRef(value.cell) && value.path !== undefined) {
@@ -160,7 +160,7 @@ describe("Piece reference detection", () => {
         }
 
         // Check for $alias reference
-        if (isRecord(value.$alias) && isEntityRef(value.$alias.cell)) {
+        if (isObjectOrArray(value.$alias) && isEntityRef(value.$alias.cell)) {
           const addr = entityRefToString(value.$alias.cell);
           if (!seenIds.has(addr)) {
             refs.push(addr);
@@ -218,7 +218,6 @@ describe("Piece reference detection", () => {
     // references are found first, potentially causing some to be missed
   });
 
-  // Test for n-depth reference detection
   it("should follow result metadata chains to find deeply nested references", () => {
     // Mock test data
     const mockPiece1Id = entityRefFromString("piece-1-source");
@@ -281,12 +280,12 @@ describe("Piece reference detection", () => {
       const value = (doc as MockDoc).get?.();
 
       // If document has a metadata-linked result cell, follow it
-      if (isRecord(value) && value.resultCell) {
+      if (isObjectOrArray(value) && value.resultCell) {
         return followMetadataToResult(value.resultCell, visited, depth + 1);
       }
 
       // If we've reached the end and have result metadata, return it
-      if (isRecord(value) && isRecord(value.result)) {
+      if (isObjectOrArray(value) && isObjectOrArray(value.result)) {
         return value.result.cell;
       }
 

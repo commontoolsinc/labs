@@ -31,6 +31,19 @@ shared pattern documentation.
 
 ## Mapped Children
 
+- Graph size is a hint; settle time under the real workload is the verdict.
+  Three lunch-poll experiments (September 2026, `--production` probe) each cut
+  graph nodes and none cut vote latency: paging the composed cards halved the
+  graph but a page index cannot be per-session without leaving session-scoped
+  links in the shared collection, and a shared index moves every viewer's page
+  at once; handing each card a derived "my vote" color from the parent's ranked
+  tallies re-ran about three times as many nodes per vote as letting the card
+  find its own vote in the shared list; and moving the per-card art generator to
+  one parent-owned editor removed a fifth of the nodes while a card with no
+  nested sub-pattern then settled option adds slower than one nesting a dormant
+  generator. Vote latency in this poll is set by the runtime's per-settle schema
+  traversal of the rendered tree (see the runbook's performance notes), not by
+  the pattern's own wiring.
 - When instantiating a sub-pattern inside `array.map(...)`, make every child
   field read explicit in the map body. Passing a reactive item object through
   without touching its fields can produce a narrowed element schema that omits
@@ -68,9 +81,13 @@ shared pattern documentation.
 - Validate against populated existing state before deploying over a live piece.
   Fresh local state can miss regressions involving existing votes, joined
   identities, and stored history.
-- After `setsrc`, verify the piece's state reads back as expected. Browser
-  console probes are useful when CLI reads do not subscribe or a remote
-  websocket is unreliable.
+- Run `cf piece setsrc --check` with the exact target and packaging flags before
+  every live apply. After `setsrc`, require both a zero exit status and a
+  successful `cf piece render`; the commit receipt only proves that source was
+  saved. Verify the piece's input state separately.
+- A link serialized by `cf cell get` is not a backup that `cf cell set` can
+  necessarily restore. Prove link-bearing copy and recovery procedures on a
+  disposable piece before clearing the original cell.
 
 ## Documentation
 

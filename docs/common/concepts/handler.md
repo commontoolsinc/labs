@@ -170,24 +170,30 @@ const clearAll = handler<void, { items: Writable<Item[]> }>(
 clearAll({ items }).send();
 ```
 
+An event arrives deeply frozen: neither it nor anything nested inside it can be
+modified. Derive a new value rather than editing one in place. Sorting an array
+the event carries is the case that catches people out, because the method that
+reads most naturally is the one that mutates: `event.items.sort()` throws a
+`TypeError`, where `[...event.items].sort()` sorts a copy and hands it back.
+
 ## CLI Testing
 
 Export handlers to test them via CLI during development:
 
 ```bash
-# Call a handler with JSON payload
-deno task cf piece call addItem '{"title": "Test"}' --piece <ID>
+# Call a handler with JSON payload (flags go before the callable name)
+deno task cf piece call --cell <ID> addItem '{"title": "Test"}'
 
 # Step to process
-deno task cf piece step --piece <ID>
+deno task cf piece step --cell <ID>
 
 # Verify state
-deno task cf piece inspect --piece <ID>
+deno task cf piece inspect --cell <ID>
 ```
 
 See [Testing Handlers via CLI](../workflows/handlers-cli-testing.md) for the full workflow.
 Runtime code that needs to invoke a handler stream directly should follow
-[Invoking Handlers from Outside a Pattern](../../development/handlers/invocation-outside-pattern.md).
+[Invoking Handlers from Outside a Pattern](../../features/invoking-handlers-outside-a-pattern.md).
 
 ## Summary
 

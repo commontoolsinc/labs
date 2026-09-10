@@ -1,10 +1,15 @@
 #!/usr/bin/env -S deno run -A
 
-import { deepEqual, Runtime } from "@commonfabric/runner";
+import {
+  deepEqual,
+  experimentalOptionsFromEnv,
+  type JSONSchema,
+  Runtime,
+  withServerExecutionDefault,
+} from "@commonfabric/runner";
 import { Identity, IdentityCreateConfig } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type JSONSchema } from "@commonfabric/runner";
 import { env } from "@commonfabric/integration";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 const { API_URL } = env;
 
 // Create test identity
@@ -15,12 +20,21 @@ const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
 console.log("\n=== TEST: Simple object persistence ===");
 
-const TIMEOUT_MS = 180000; // 3 minutes timeout
-
 async function test() {
   // First runtime - save data
   const runtime1 = new Runtime({
     apiUrl: new URL(API_URL),
+    // The posture this client runs (server-execution v2, testing.md §2):
+    // resolved exactly like a deployed entry point — the canonical env
+    // mapping, else the first-party default (ON since the flip) — so this
+    // process runs the arm the lane's toolshed runs: the DEFAULT lane's
+    // unset flag resolves ON, the OFF regression-guard lane's explicit
+    // `false` the OFF arm. A bare construction resolves the AMBIENT
+    // baseline instead, which post-flip is the P7 review's finding-7
+    // mixed posture.
+    experimental: withServerExecutionDefault(
+      experimentalOptionsFromEnv(Deno.env.get),
+    ),
     storageManager: StorageManager.open({
       as: identity,
       memoryHost: new URL(API_URL),
@@ -52,6 +66,17 @@ async function test() {
   // Second runtime - fetch data
   const runtime2 = new Runtime({
     apiUrl: new URL(API_URL),
+    // The posture this client runs (server-execution v2, testing.md §2):
+    // resolved exactly like a deployed entry point — the canonical env
+    // mapping, else the first-party default (ON since the flip) — so this
+    // process runs the arm the lane's toolshed runs: the DEFAULT lane's
+    // unset flag resolves ON, the OFF regression-guard lane's explicit
+    // `false` the OFF arm. A bare construction resolves the AMBIENT
+    // baseline instead, which post-flip is the P7 review's finding-7
+    // mixed posture.
+    experimental: withServerExecutionDefault(
+      experimentalOptionsFromEnv(Deno.env.get),
+    ),
     storageManager: StorageManager.open({
       as: identity,
       memoryHost: new URL(API_URL),
@@ -86,20 +111,7 @@ async function runTest() {
 
 Deno.test({
   name: "basic persistence test",
-  fn: async () => {
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-      }, TIMEOUT_MS);
-    });
-
-    try {
-      await Promise.race([runTest(), timeoutPromise]);
-    } finally {
-      clearTimeout(timeoutHandle!);
-    }
-  },
+  fn: runTest,
   sanitizeResources: false,
   sanitizeOps: false,
 });

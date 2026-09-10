@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
 import { Runtime } from "../src/runtime.ts";
 import { isCell } from "../src/cell.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
@@ -99,7 +100,7 @@ describe("compiled pattern node alias schemas", () => {
   }
 
   function nodeAliasSchema(pattern: CompiledPattern) {
-    return pattern.nodes[0].inputs.$alias.schema;
+    return resolvedSchema(pattern.nodes[0].inputs.$alias.schema) as any;
   }
 
   function linkedFolderArrayItems(schema: any) {

@@ -41,6 +41,936 @@ const oldPattern = pattern(
 );
 
 describe("piece schema compatibility", () => {
+  it("accepts a recompile that only changes writeAuthorizedBy moduleIdentity", () => {
+    // A CFC write authorization (`TrustedActionWrite`) lowers to an
+    // `ifc.writeAuthorizedBy.__ctWriterIdentityOf` whose `moduleIdentity` is
+    // the content-addressed hash of the authoring module. Editing that module
+    // at all — a type annotation, a comment, whitespace — rehashes it, so
+    // `moduleIdentity` changes while `file`, `path`, and the `uiContract` stay
+    // identical. That is a recompile of the same authorization, not a narrowed
+    // contract, so the backward-compatibility check accepts it: the
+    // content-addressed identity is normalized out of the `ifc` comparison. The
+    // ten baselined patterns that carry a CFC write (system/home,
+    // system/profile-*, lobby, and the cfc-* demos) depend on this to stay
+    // editable.
+
+    const resultSchema = (moduleIdentity: string): JSONSchema => ({
+      type: "object",
+      properties: {
+        flag: {
+          type: "boolean",
+          ifc: {
+            writeAuthorizedBy: {
+              __ctWriterIdentityOf: {
+                file: "/packages/patterns/demo/main.tsx",
+                path: ["setFlag"],
+                moduleIdentity,
+              },
+            },
+            uiContract: {
+              helper: "UiAction",
+              action: "SetFlag",
+              trustedPattern: "DemoSurface",
+              requiredEventIntegrity: ["DemoSurface"],
+            },
+          },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, resultSchema("UVJh2ChHuLkknYrVet0Iu")),
+        pattern({ type: "object" }, resultSchema("DCTZZ89BogydamlP301Qx")),
+      )
+    ).not.toThrow();
+  });
+
+  // The identity fields excluded from the comparison are the content hashes
+  // (moduleIdentity/bundleId) and the resolver-dependent file spelling. The
+  // binding path and the whole uiContract still name the real consumer-facing
+  // contract, so a change to either of them must still be rejected. These build
+  // two result schemas that differ in exactly one such field and assert the
+  // update is refused.
+  const trustedWriteResult = (
+    identity: Record<string, unknown>,
+    uiContract: Record<string, unknown>,
+  ): JSONSchema => ({
+    type: "object",
+    properties: {
+      flag: {
+        type: "boolean",
+        ifc: {
+          writeAuthorizedBy: { __ctWriterIdentityOf: identity },
+          uiContract,
+        },
+      },
+    },
+  });
+
+  const baselineIdentity = {
+    file: "/packages/patterns/demo/main.tsx",
+    path: ["setFlag"],
+    moduleIdentity: "UVJh2ChHuLkknYrVet0Iu",
+  };
+  const baselineUiContract: Record<string, unknown> = {
+    helper: "UiAction",
+    action: "SetFlag",
+    trustedPattern: "DemoSurface",
+    requiredEventIntegrity: ["DemoSurface"],
+  };
+
+  it("also treats the legacy bundleId as recompile-volatile", () => {
+    const withBundleId = (bundleId: string): JSONSchema =>
+      trustedWriteResult(
+        { file: baselineIdentity.file, path: baselineIdentity.path, bundleId },
+        baselineUiContract,
+      );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, withBundleId("bundle-old")),
+        pattern({ type: "object" }, withBundleId("bundle-new")),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts a cross-resolver recompile that only re-spells the writeAuthorizedBy file", () => {
+    // A writer claim's `file` is the module's source-file spelling, and that
+    // spelling is resolver-dependent: the same module compiles to a different
+    // `file` under piece-deploy staging, a piece manifest, and HTTP resolution,
+    // while its content-addressed `moduleIdentity` agrees everywhere
+    // (labs#4772). The runtime authorizes a write on `moduleIdentity` plus the
+    // binding `path` and never on `file`, so a cross-resolver recompile that
+    // re-spells only the `file` — same `moduleIdentity`, same `path`, same
+    // `uiContract` — is the same authorization, and the update is accepted.
+
+    const respelled = (file: string): JSONSchema =>
+      trustedWriteResult({ ...baselineIdentity, file }, baselineUiContract);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, respelled("/api/patterns/demo/main.tsx")),
+        pattern({ type: "object" }, respelled("/patterns/demo/main.tsx")),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts a writeAuthorizedBy binding file change", () => {
+    // `file` carries no authorization signal beyond the content-addressed
+    // `moduleIdentity` (which the runtime re-verifies live) and the binding
+    // `path`, so it is normalized out of the comparison entirely rather than
+    // made spelling-tolerant. Any `file` change is accepted while the `path`
+    // and `uiContract` are unchanged.
+
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(
+          { type: "object" },
+          trustedWriteResult(baselineIdentity, baselineUiContract),
+        ),
+        pattern(
+          { type: "object" },
+          trustedWriteResult(
+            { ...baselineIdentity, file: "/packages/patterns/other/main.tsx" },
+            baselineUiContract,
+          ),
+        ),
+      )
+    ).not.toThrow();
+  });
+
+  // A floored path is authored to mint the atom it floors, because the write
+  // floor tests the integrity of the value being written and a mint on the
+  // entries below the path does not reach a floor declared on the path itself.
+  // A pattern that declares a floor and mints nothing has to gain the mint
+  // before any write to it can conform. The mint names the derived per-value
+  // component (CFC §8.12.8), which the monotone constraint behind this
+  // comparison does not govern, so gaining one is not a contract change.
+  const flooredList = (ifc: Record<string, unknown>): JSONSchema => ({
+    type: "object",
+    properties: {
+      admins: { type: "array", items: { type: "string" }, ifc },
+    },
+  });
+  const floorOnly = { requiredIntegrity: ["group-chat-admin"] };
+  const floorAndMint = {
+    requiredIntegrity: ["group-chat-admin"],
+    addIntegrity: ["group-chat-admin"],
+  };
+
+  it("accepts a floored path that gains the mint its own floor names", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flooredList(floorOnly), { type: "object" }),
+        pattern(flooredList(floorAndMint), { type: "object" }),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts a floored path that loses its mint", () => {
+    // The derived component is replace-on-overwrite, not a ratchet, so this
+    // comparison has no opinion either way. A pattern whose writes stop
+    // satisfying its own floor fails at the write, where its tests are.
+
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flooredList(floorAndMint), { type: "object" }),
+        pattern(flooredList(floorOnly), { type: "object" }),
+      )
+    ).not.toThrow();
+  });
+
+  it("compares a writeAuthorizedBy claim carrying no writer identity whole", () => {
+    // Normalization reaches inside `__ctWriterIdentityOf`. A claim without one
+    // has nothing volatile to remove, so two such claims compare equal.
+    // The two sides differ by a mint, which is dropped, so what is left to
+    // compare is the claim itself. Comparing two schemas that are equal all
+    // the way down would settle before reaching it.
+
+    const claimWith = (mint: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        flag: {
+          type: "boolean",
+          ifc: {
+            writeAuthorizedBy: {},
+            ...(mint ? { addIntegrity: ["reviewed"] } : {}),
+          },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, claimWith(true)),
+        pattern({ type: "object" }, claimWith(false)),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts a claim that gains only the volatile identity fields", () => {
+    // Same binding path, same uiContract, and a content hash and file spelling
+    // the runtime re-derives rather than holds fixed. That is a recompile of
+    // one authorization, so it is accepted.
+
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(
+          { type: "object" },
+          trustedWriteResult({ path: ["setFlag"] }, baselineUiContract),
+        ),
+        pattern(
+          { type: "object" },
+          trustedWriteResult(baselineIdentity, baselineUiContract),
+        ),
+      )
+    ).not.toThrow();
+  });
+
+  it("finds owner evidence nested inside a mint, as the runtime does", () => {
+    // `literalDidSubjectsForPrincipalClaim` walks arrays and object values, so
+    // an atom nested inside another structure still authorizes the write.
+    // Losing it has to read as a change here rather than slip through.
+
+    const ownerNode = (withEvidence: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        bio: {
+          type: "string",
+          ifc: {
+            ownerPrincipal: { __ctCurrentPrincipal: true },
+            addIntegrity: [
+              {
+                kind: "delegated",
+                via: withEvidence
+                  ? {
+                    kind: "represents-principal",
+                    subject: { __ctCurrentPrincipal: true },
+                  }
+                  : { kind: "unrelated" },
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(ownerNode(true), { type: "object" }),
+        pattern(ownerNode(false), { type: "object" }),
+      )
+    ).toThrow(/ifc changed/);
+  });
+
+  it("reads no owner evidence out of a mint that is not a list of atoms", () => {
+    // A malformed mint carries no represents-principal atom, so there is
+    // nothing for the owner check to match and nothing for this comparison to
+    // hold. It reduces the same as a node that mints nothing at all.
+
+    const ownerNode = (withMint: boolean): JSONSchema =>
+      JSON.parse(
+        `{"type":"object","properties":{"bio":{"type":"string","ifc":{` +
+          `"ownerPrincipal":{"__ctCurrentPrincipal":true}` +
+          (withMint ? `,"addIntegrity":"not-a-list"` : "") +
+          `}}}}`,
+      );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(ownerNode(true), { type: "object" }),
+        pattern(ownerNode(false), { type: "object" }),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts dropping an atom the owner check does not read", () => {
+    // Only `represents-principal` evidence feeds the owner check. An atom
+    // beside it is a label nothing consults, so losing it leaves the write
+    // authorized exactly as before and is not a contract change.
+
+    const ownerNode = (extra: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        bio: {
+          type: "string",
+          ifc: {
+            ownerPrincipal: { __ctCurrentPrincipal: true },
+            addIntegrity: [
+              {
+                kind: "represents-principal",
+                subject: { __ctCurrentPrincipal: true },
+              },
+              ...(extra ? ["profile-reviewed"] : []),
+            ],
+          },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(ownerNode(true), { type: "object" }),
+        pattern(ownerNode(false), { type: "object" }),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts losing the last mint into an empty ifc", () => {
+    // The reduction leaves nothing behind on one side and finds an already
+    // empty extension on the other. Both say the same thing, so they compare
+    // equal rather than reading as a change.
+
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flooredList({ addIntegrity: ["group-chat-admin"] }), {
+          type: "object",
+        }),
+        pattern(flooredList({}), { type: "object" }),
+      )
+    ).not.toThrow();
+  });
+
+  it("still compares the mint on a node that authorizes by owner principal", () => {
+    // Beside an `ownerPrincipal`, the mint supplies the represents-principal
+    // atom the runtime matches against the owner before authorizing a write.
+    // Losing it there refuses writes that used to be accepted, so the mint is
+    // part of the contract on such a node rather than a derived label.
+
+    const ownerNode = (mint: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        bio: {
+          type: "string",
+          ifc: {
+            ownerPrincipal: { __ctCurrentPrincipal: true },
+            ...(mint
+              ? {
+                addIntegrity: [{
+                  kind: "represents-principal",
+                  subject: { __ctCurrentPrincipal: true },
+                }],
+              }
+              : {}),
+          },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(ownerNode(true), { type: "object" }),
+        pattern(ownerNode(false), { type: "object" }),
+      )
+    ).toThrow(/ifc changed/);
+  });
+
+  it("still rejects a change to the floor the path requires", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flooredList(floorAndMint), { type: "object" }),
+        pattern(
+          flooredList({
+            requiredIntegrity: ["group-chat-owner"],
+            addIntegrity: ["group-chat-admin"],
+          }),
+          { type: "object" },
+        ),
+      )
+    ).toThrow(/ifc changed/);
+  });
+
+  it("still rejects a change to the integrity a path declares it holds", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flooredList({ integrity: ["group-chat-admin"] }), {
+          type: "object",
+        }),
+        pattern(flooredList({ integrity: ["group-chat-owner"] }), {
+          type: "object",
+        }),
+      )
+    ).toThrow(/ifc changed/);
+  });
+
+  it("still rejects a writeAuthorizedBy binding path change", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(
+          { type: "object" },
+          trustedWriteResult(baselineIdentity, baselineUiContract),
+        ),
+        pattern(
+          { type: "object" },
+          trustedWriteResult(
+            { ...baselineIdentity, path: ["setOtherFlag"] },
+            baselineUiContract,
+          ),
+        ),
+      )
+    ).toThrow(/flag: ifc changed/);
+  });
+
+  it("still rejects a uiContract change", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(
+          { type: "object" },
+          trustedWriteResult(baselineIdentity, baselineUiContract),
+        ),
+        pattern(
+          { type: "object" },
+          trustedWriteResult(baselineIdentity, {
+            ...baselineUiContract,
+            action: "ClearFlag",
+          }),
+        ),
+      )
+    ).toThrow(/flag: ifc changed/);
+  });
+
+  it("still rejects a change to the builtin writeAuthorizedBy list", () => {
+    const withBuiltins = (builtins: readonly string[]): JSONSchema => ({
+      type: "object",
+      properties: {
+        flag: {
+          type: "boolean",
+          ifc: { writeAuthorizedBy: builtins },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, withBuiltins(["trustedBuiltin"])),
+        pattern({ type: "object" }, withBuiltins(["trustedBuiltin"])),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, withBuiltins(["otherBuiltin"])),
+        pattern({ type: "object" }, withBuiltins(["trustedBuiltin"])),
+      )
+    ).toThrow(/flag: ifc changed/);
+  });
+
+  // `allOf` and `oneOf` are not taken apart by the subset proof, so what
+  // decides them is whether the two sides say the same thing. A write
+  // authorization under one of them is read with the same reduction the
+  // comparison applies to one written on a property, so a recompile of the
+  // authoring module is accepted wherever the authorization sits. Without
+  // that, a pattern carrying a claim there would freeze on the first edit to
+  // the module that authorizes it.
+  //
+  // The schema generator emits neither keyword — an intersection merges into
+  // one object schema and a union emits `anyOf` — so nothing reaches these
+  // through that route today. The gate does not only see generated schemas:
+  // one can be written into a space by anything, and `validateSchemaDefinition`
+  // admits both keywords, which is what these pin.
+  const compositeWrite = (
+    keyword: "allOf" | "oneOf",
+    identity: Record<string, unknown>,
+    uiContract: Record<string, unknown> = baselineUiContract,
+  ): JSONSchema => ({
+    type: "object",
+    properties: {
+      flag: {
+        [keyword]: [{
+          type: "boolean",
+          ifc: {
+            writeAuthorizedBy: { __ctWriterIdentityOf: identity },
+            uiContract,
+          },
+        }],
+      },
+    },
+  });
+
+  for (const keyword of ["allOf", "oneOf"] as const) {
+    it(`accepts a recompile under ${keyword}`, () => {
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(
+            { type: "object" },
+            compositeWrite(keyword, baselineIdentity),
+          ),
+          pattern(
+            { type: "object" },
+            compositeWrite(keyword, {
+              ...baselineIdentity,
+              moduleIdentity: "DCTZZ89BogydamlP301Qx",
+            }),
+          ),
+        )
+      ).not.toThrow();
+    });
+
+    it(`accepts a cross-resolver re-spelling under ${keyword}`, () => {
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(
+            { type: "object" },
+            compositeWrite(keyword, baselineIdentity),
+          ),
+          pattern(
+            { type: "object" },
+            compositeWrite(keyword, {
+              ...baselineIdentity,
+              file: "/api/patterns/demo/main.tsx",
+            }),
+          ),
+        )
+      ).not.toThrow();
+    });
+
+    it(`still rejects a binding path change under ${keyword}`, () => {
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(
+            { type: "object" },
+            compositeWrite(keyword, baselineIdentity),
+          ),
+          pattern(
+            { type: "object" },
+            compositeWrite(keyword, {
+              ...baselineIdentity,
+              path: ["setOtherFlag"],
+            }),
+          ),
+        )
+      ).toThrow(new RegExp(`flag: ${keyword} changed`));
+    });
+
+    it(`still rejects a uiContract change under ${keyword}`, () => {
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(
+            { type: "object" },
+            compositeWrite(keyword, baselineIdentity),
+          ),
+          pattern(
+            { type: "object" },
+            compositeWrite(keyword, baselineIdentity, {
+              ...baselineUiContract,
+              action: "ClearFlag",
+            }),
+          ),
+        )
+      ).toThrow(new RegExp(`flag: ${keyword} changed`));
+    });
+  }
+
+  it("reads a nested ifc the same way under every keyword that holds schemas", () => {
+    // The keywords the subset proof cannot take apart are not only `allOf` and
+    // `oneOf`. `if`/`then` and `not` are compared whole as well, and each is
+    // read with the same reduction, so a recompile is accepted there too.
+    const conditional = (
+      identity: Record<string, unknown>,
+      uiContract: Record<string, unknown> = baselineUiContract,
+    ): JSONSchema => ({
+      type: "object",
+      properties: {
+        flag: {
+          if: { type: "boolean" },
+          then: {
+            ifc: {
+              writeAuthorizedBy: { __ctWriterIdentityOf: identity },
+              uiContract,
+            },
+          },
+          not: {
+            const: null,
+            ifc: { writeAuthorizedBy: { __ctWriterIdentityOf: identity } },
+          },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, conditional(baselineIdentity)),
+        pattern(
+          { type: "object" },
+          conditional({
+            ...baselineIdentity,
+            moduleIdentity: "DCTZZ89BogydamlP301Qx",
+          }),
+        ),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, conditional(baselineIdentity)),
+        pattern(
+          { type: "object" },
+          conditional(baselineIdentity, {
+            ...baselineUiContract,
+            action: "ClearFlag",
+          }),
+        ),
+      )
+    ).toThrow(/flag: (if|then|not) changed/);
+  });
+
+  it("reads a claim reached through a recursive definition", () => {
+    // A definition that names itself is what the walk has to terminate on, and
+    // the claim sits under `allOf` inside it, so reaching it means descending
+    // both the reference and the composite keyword. The recompile is accepted
+    // and the binding path change is not.
+    const recursive = (identity: Record<string, unknown>): JSONSchema => ({
+      type: "object",
+      $defs: {
+        Node: {
+          type: "object",
+          properties: {
+            child: { $ref: "#/$defs/Node" },
+            flag: {
+              allOf: [{
+                type: "boolean",
+                ifc: {
+                  writeAuthorizedBy: { __ctWriterIdentityOf: identity },
+                  uiContract: baselineUiContract,
+                },
+              }],
+            },
+          },
+        },
+      },
+      properties: { root: { $ref: "#/$defs/Node" } },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, recursive(baselineIdentity)),
+        pattern(
+          { type: "object" },
+          recursive({
+            ...baselineIdentity,
+            moduleIdentity: "DCTZZ89BogydamlP301Qx",
+          }),
+        ),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, recursive(baselineIdentity)),
+        pattern(
+          { type: "object" },
+          recursive({ ...baselineIdentity, path: ["setOtherFlag"] }),
+        ),
+      )
+    ).toThrow(/allOf changed/);
+  });
+
+  it("reads a claim under a composite keyword when proving a link", () => {
+    // `assertSchemaSubset` proves a durable link between two separate pieces
+    // rather than two versions of one contract, and it reaches the same
+    // comparison. A differing writer identity is read the same way there as it
+    // is on a property, while the binding path is still compared.
+    const linked = (identity: Record<string, unknown>): JSONSchema => ({
+      allOf: [{
+        type: "boolean",
+        ifc: {
+          writeAuthorizedBy: { __ctWriterIdentityOf: identity },
+          uiContract: baselineUiContract,
+        },
+      }],
+    });
+    expect(() =>
+      assertSchemaSubset(
+        linked(baselineIdentity),
+        linked({
+          ...baselineIdentity,
+          moduleIdentity: "DCTZZ89BogydamlP301Qx",
+        }),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(
+        linked(baselineIdentity),
+        linked({ ...baselineIdentity, path: ["setOtherFlag"] }),
+      )
+    ).toThrow(/allOf changed/);
+  });
+
+  it("reads a claim under a keyword the checker has no other rule for", () => {
+    // `unevaluatedProperties` holds a schema, but no rule in this comparison
+    // names it, so a difference in it is reported by the unknown-keyword check
+    // at the end. That check reads it with the same rule as everything else, so
+    // a recompile under it is accepted and a binding path change under it is
+    // not.
+    const unevaluated = (identity: Record<string, unknown>): JSONSchema => ({
+      type: "object",
+      properties: {
+        bag: {
+          type: "object",
+          unevaluatedProperties: {
+            type: "string",
+            ifc: {
+              writeAuthorizedBy: { __ctWriterIdentityOf: identity },
+            },
+          },
+        },
+      },
+    } as unknown as JSONSchema);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, unevaluated(baselineIdentity)),
+        pattern(
+          { type: "object" },
+          unevaluated({
+            ...baselineIdentity,
+            moduleIdentity: "DCTZZ89BogydamlP301Qx",
+          }),
+        ),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, unevaluated(baselineIdentity)),
+        pattern(
+          { type: "object" },
+          unevaluated({ ...baselineIdentity, path: ["setOtherFlag"] }),
+        ),
+      )
+    ).toThrow(/bag: unevaluatedProperties changed/);
+  });
+
+  it("resolves a reference under a keyword it has no other rule for", () => {
+    // `unevaluatedProperties` holds a schema that this comparison has no
+    // subset rule for, so the unknown-keyword check decides it. Two identical
+    // `$ref`s say the same thing only while the definitions they name do; the
+    // check resolves them against each contract's own root rather than reading
+    // the reference string as the constraint.
+    const referenced = (definition: string): JSONSchema => ({
+      type: "object",
+      $defs: { Entry: { type: definition } },
+      properties: {
+        bag: {
+          type: "object",
+          unevaluatedProperties: { $ref: "#/$defs/Entry" },
+        },
+      },
+    } as unknown as JSONSchema);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, referenced("string")),
+        pattern({ type: "object" }, referenced("string")),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, referenced("string")),
+        pattern({ type: "object" }, referenced("number")),
+      )
+    ).toThrow(/bag: unevaluatedProperties changed/);
+  });
+
+  it("compares a sparse subschema list by index", () => {
+    // `validateSchemaDefinition` requires a dense array for the four list
+    // keywords it names, so a hole reaches this comparison only under a
+    // keyword it has no rule for. `unevaluatedProperties` is such a keyword,
+    // and the walk descends it. A hole and a stored `undefined` are different
+    // values, so a list whose missing entry the candidate fills carries a
+    // constraint the baseline did not, and the array iteration methods would
+    // step over exactly that difference.
+    const list = (holed: boolean): unknown[] => {
+      const entries: unknown[] = [];
+      if (!holed) entries[0] = { type: "string" };
+      entries[1] = { type: "string" };
+      return entries;
+    };
+    const bag = (holed: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        a: {
+          type: "object",
+          unevaluatedProperties: { allOf: list(holed) },
+        },
+      },
+    } as unknown as JSONSchema);
+    // Refused whichever side carries the hole, so the answer does not depend
+    // on which contract is named first.
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(bag(true), { type: "object" }),
+        pattern(bag(false), { type: "object" }),
+      )
+    ).toThrow(/a: unevaluatedProperties changed/);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(bag(false), { type: "object" }),
+        pattern(bag(true), { type: "object" }),
+      )
+    ).toThrow(/a: unevaluatedProperties changed/);
+  });
+
+  it("still rejects a conjunct added or removed beside a nested writer claim", () => {
+    // Reading the `ifc` inside an `allOf` means comparing the two lists, and
+    // a list of a different length is a different list. Both directions are
+    // refused, because this comparison proves nothing about `allOf` either
+    // way: it decides the keyword by whether the two sides say the same thing,
+    // so a candidate that widens by dropping a conjunct is refused alongside
+    // one that narrows by adding one.
+    const conjuncts = (extra: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        label: {
+          allOf: [
+            {
+              type: "string",
+              ifc: {
+                writeAuthorizedBy: { __ctWriterIdentityOf: baselineIdentity },
+              },
+            },
+            ...(extra ? [{ maxLength: 32 }] : []),
+          ],
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(conjuncts(false), { type: "object" }),
+        pattern(conjuncts(true), { type: "object" }),
+      )
+    ).toThrow(/label: allOf changed/);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(conjuncts(true), { type: "object" }),
+        pattern(conjuncts(false), { type: "object" }),
+      )
+    ).toThrow(/label: allOf changed/);
+  });
+
+  it("still rejects a constraint change beside a nested writer claim", () => {
+    // The reduction reaches the `ifc` and nothing else. A branch that narrows
+    // what it accepts is still a narrowed contract, whether or not the same
+    // branch carries a write authorization.
+    const narrowing = (maxLength: number): JSONSchema => ({
+      type: "object",
+      properties: {
+        label: {
+          allOf: [{
+            type: "string",
+            maxLength,
+            ifc: {
+              writeAuthorizedBy: { __ctWriterIdentityOf: baselineIdentity },
+            },
+          }],
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(narrowing(64), { type: "object" }),
+        pattern(narrowing(32), { type: "object" }),
+      )
+    ).toThrow(/label: allOf changed/);
+  });
+
+  it("compares a Fabric default beside a nested writer claim by content", () => {
+    // The reduction is applied in place: the comparison walks both schemas and
+    // reads the `ifc` it meets, and never rebuilds a node. A `default` holding
+    // a Fabric value is compared as it stands, by content hash, so two such
+    // values that differ are still a change and two that agree are still not
+    // one — beside a writer claim whose module was recompiled or not.
+    const seeded = (
+      seed: FabricBytes,
+      moduleIdentity: string,
+    ): JSONSchema => ({
+      type: "object",
+      properties: {
+        token: {
+          allOf: [{
+            type: "FabricBytes",
+            default: seed,
+            ifc: {
+              writeAuthorizedBy: {
+                __ctWriterIdentityOf: { ...baselineIdentity, moduleIdentity },
+              },
+            },
+          }],
+        },
+      },
+    } as unknown as JSONSchema);
+    const seed = () => new FabricBytes(new Uint8Array([1, 2, 3]));
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, seeded(seed(), "UVJh2ChHuLkknYrVet0Iu")),
+        pattern({ type: "object" }, seeded(seed(), "DCTZZ89BogydamlP301Qx")),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, seeded(seed(), "UVJh2ChHuLkknYrVet0Iu")),
+        pattern(
+          { type: "object" },
+          seeded(new FabricBytes(new Uint8Array([9])), "UVJh2ChHuLkknYrVet0Iu"),
+        ),
+      )
+    ).toThrow(/token: allOf changed/);
+  });
+
+  it("accepts a mint gained under a keyword the subset proof compares whole", () => {
+    // The `ifc` reduction drops the derived per-value keys as well, and it
+    // drops them wherever the extension sits. A floored path that gains the
+    // mint its own floor names is not a contract change under `allOf` any more
+    // than it is on the property itself.
+    const floored = (ifc: Record<string, unknown>): JSONSchema => ({
+      type: "object",
+      properties: {
+        admins: {
+          allOf: [{ type: "array", items: { type: "string" }, ifc }],
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(floored(floorOnly), { type: "object" }),
+        pattern(floored(floorAndMint), { type: "object" }),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(floored(floorOnly), { type: "object" }),
+        pattern(
+          floored({ requiredIntegrity: ["group-chat-owner"] }),
+          { type: "object" },
+        ),
+      )
+    ).toThrow(/admins: allOf changed/);
+  });
+
   it("accepts named Fabric projection fields through an open link target", () => {
     const source: JSONSchema = {
       type: "object",
@@ -192,6 +1122,151 @@ describe("piece schema compatibility", () => {
       additionalProperties: false,
     };
     expect(() => assertSchemaSubset(stableSource, stableTarget)).not.toThrow();
+
+    const constrainedSameNodeDefault: JSONSchema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            refsOut: { type: "array", items: { type: "string" } },
+          },
+          required: ["refsOut"],
+        },
+        { type: "undefined" },
+      ],
+      default: { refsOut: [] },
+    };
+    expect(() =>
+      assertSchemaSubset(
+        constrainedSameNodeDefault,
+        constrainedSameNodeDefault,
+      )
+    ).not.toThrow();
+
+    const disjointCompositionWithDescendantDefault: JSONSchema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: { x: { type: "number", default: 0 } },
+        },
+        { type: "undefined" },
+      ],
+    };
+    expect(() =>
+      assertSchemaSubset(
+        disjointCompositionWithDescendantDefault,
+        disjointCompositionWithDescendantDefault,
+      )
+    ).not.toThrow();
+
+    const disjointOneOfWithDescendantDefault: JSONSchema = {
+      oneOf: [
+        {
+          type: "array",
+          items: { type: "number", default: 0 },
+        },
+        { type: "string" },
+      ],
+    };
+    expect(() =>
+      assertSchemaSubset(
+        disjointOneOfWithDescendantDefault,
+        disjointOneOfWithDescendantDefault,
+      )
+    ).not.toThrow();
+
+    const impossibleAlternativeWithDescendantDefault: JSONSchema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: { x: { type: "number", default: 0 } },
+        },
+        false,
+      ],
+    };
+    expect(() =>
+      assertSchemaSubset(
+        impossibleAlternativeWithDescendantDefault,
+        impossibleAlternativeWithDescendantDefault,
+      )
+    ).not.toThrow();
+
+    const overlappingCompositionWithDescendantDefault: JSONSchema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: { x: { type: "number", default: 0 } },
+        },
+        { type: "object" },
+      ],
+    };
+    expect(() =>
+      assertSchemaSubset(
+        overlappingCompositionWithDescendantDefault,
+        overlappingCompositionWithDescendantDefault,
+      )
+    ).toThrow(/not stable under default insertion/);
+
+    for (
+      const alternatives of [
+        [
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 0 } },
+          },
+          true,
+        ],
+        [
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 0 } },
+          },
+          { properties: {} },
+        ],
+        [
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 0 } },
+          },
+          { type: "unknown" },
+        ],
+        [
+          {
+            type: "number",
+            default: 0,
+          },
+          { type: "integer" },
+        ],
+        [
+          {
+            type: "integer",
+            default: 0,
+          },
+          { type: "number" },
+        ],
+        [
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 0 } },
+          },
+          { type: "FabricBytes" },
+        ],
+      ] as JSONSchema[][]
+    ) {
+      const unprovableComposition: JSONSchema = { anyOf: alternatives };
+      expect(() =>
+        assertSchemaSubset(unprovableComposition, unprovableComposition)
+      ).toThrow(/not stable under default insertion/);
+    }
+
+    const invalidSameNodeDefault: JSONSchema = {
+      oneOf: [{ type: "number" }, { minimum: 0 }],
+      default: 1,
+    };
+    expect(() =>
+      assertSchemaSubset(invalidSameNodeDefault, invalidSameNodeDefault)
+    ).toThrow(/not stable under default insertion/);
+
     expect(() =>
       assertSchemaSubset(
         { ...stableSource, minProperties: 1 },
@@ -726,8 +1801,8 @@ describe("piece schema compatibility", () => {
       .toThrow(/result\.doubled/);
   });
 
-  it("rejects removing existing argument or result fields", () => {
-    const missingArgument = pattern(
+  it("accepts dropping an argument field the pattern no longer reads", () => {
+    const droppedArgument = pattern(
       {
         type: "object",
         properties: { value: { type: "number" } },
@@ -736,9 +1811,28 @@ describe("piece schema compatibility", () => {
       oldPattern.resultSchema,
     );
     expect(() =>
-      assertPatternSchemasBackwardCompatible(oldPattern, missingArgument)
-    ).toThrow(/argument\.format: existing argument field was removed/);
+      assertPatternSchemasBackwardCompatible(oldPattern, droppedArgument)
+    ).not.toThrow();
+  });
 
+  it("rejects dropping an argument field a closed candidate cannot hold", () => {
+    const droppedArgument = pattern(
+      {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+        additionalProperties: false,
+      },
+      oldPattern.resultSchema,
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(oldPattern, droppedArgument)
+    ).toThrow(
+      /argument\.format: source field is rejected by the target object/,
+    );
+  });
+
+  it("rejects removing an existing result field", () => {
     const missingResult = pattern(
       oldPattern.argumentSchema,
       {
@@ -896,6 +1990,24 @@ describe("piece schema compatibility", () => {
     expect(() =>
       assertPatternSchemasBackwardCompatible(unconstrained, introducedConst)
     ).toThrow(/enum\/const became more restrictive/);
+  });
+
+  it("treats `FabricPrimitive` types as subtypes of object (one-way)", () => {
+    // A "FabricBytes" source widens safely into an "object" target; the
+    // reverse narrows and must be flagged. Same-type stays compatible.
+
+    expect(() =>
+      assertSchemaSubset({ type: "FabricBytes" }, { type: "object" })
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset({ type: "FabricBytes" }, { type: "FabricBytes" })
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset({ type: "object" }, { type: "FabricBytes" })
+    ).toThrow(/type object is not accepted/);
+    expect(() =>
+      assertSchemaSubset({ type: "FabricBytes" }, { type: "FabricHash" })
+    ).toThrow(/type FabricBytes is not accepted/);
   });
 
   it("compares Fabric enum and const values canonically", () => {
@@ -1440,7 +2552,7 @@ describe("piece schema compatibility", () => {
     ).toThrow(/argument/);
   });
 
-  it("preserves required result guarantees and defaults new required results", () => {
+  it("preserves required result guarantees and allows new required results", () => {
     const optionalized = pattern(
       oldPattern.argumentSchema,
       {
@@ -1484,7 +2596,7 @@ describe("piece schema compatibility", () => {
         oldPattern,
         newRequiredWithoutDefault,
       )
-    ).toThrow(/result\.summary: newly required result field has no default/);
+    ).not.toThrow();
     expect(() =>
       assertPatternSchemasBackwardCompatible(oldPattern, newRequiredWithDefault)
     ).not.toThrow();
@@ -1894,5 +3006,427 @@ describe("piece schema compatibility", () => {
       expect(() => assertPatternSchemasBackwardCompatible(previous, candidate))
         .toThrow(/invalid schema/i);
     }
+  });
+
+  describe("`FabricPrimitive` schema vocabulary transitions", () => {
+    // The schema generator used to describe a `FabricSpecialObject`
+    // structurally: an object schema whose `required` carries the
+    // `FabricSpecialObject` nominal brand key. It now emits the
+    // `FabricPrimitive` type name instead. That transition is refused, for
+    // pattern evolution too: the structural schema admits values by shape
+    // (a plain record carrying the brand key as an own property, or a
+    // primitive of another class whose members cover `required`), the
+    // `FabricPrimitive`-typed schema matches by prototype, and a pattern
+    // update rewrites stored data verbatim -- so any such value would
+    // survive the update only to be rejected by every subsequent read.
+    // See the note in `schemaSubsetIssue`.
+
+    const brand = "@commonfabric/FabricSpecialObject";
+    const oldBytes: JSONSchema = {
+      type: "object",
+      properties: { length: { type: "number" } },
+      required: ["length", brand],
+    };
+    const newBytes: JSONSchema = { type: "FabricBytes" };
+    const withField = (schema: JSONSchema): JSONSchema => ({
+      type: "object",
+      properties: { blob: schema },
+      required: ["blob"],
+    });
+
+    it("refuses an argument field moving from the brand-marked structural emission to its `FabricPrimitive` type", () => {
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(withField(oldBytes), true),
+          pattern(withField(newBytes), true),
+        )
+      ).toThrow(/type object is not accepted/);
+    });
+
+    it("accepts a result field moving from the brand-marked structural emission to its `FabricPrimitive` type", () => {
+      // The result direction proves candidate-within-previous: the new
+      // schema's population is prototype-matched primitives, and every one
+      // satisfies the old structural contract (`FabricPrimitive` types are
+      // subtypes of "object", members are present via `in`, and the brand
+      // is exempt for instances). Nothing is stranded, so no allowance is
+      // involved -- this holds through the ordinary subset machinery.
+
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(true, withField(oldBytes)),
+          pattern(true, withField(newBytes)),
+        )
+      ).not.toThrow();
+    });
+
+    it("refuses the epoch-shaped structural emission against either epoch class", () => {
+      const oldEpoch: JSONSchema = {
+        type: "object",
+        properties: { value: { type: "integer" } },
+        required: ["value", brand],
+      };
+      for (const epochType of ["FabricEpochNsec", "FabricEpochDay"]) {
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(withField(oldEpoch), true),
+            pattern(withField({ type: epochType } as JSONSchema), true),
+          )
+        ).toThrow(/type object is not accepted/);
+      }
+    });
+
+    it("refuses a plain object schema without the brand against a `FabricPrimitive` type", () => {
+      const plainObject: JSONSchema = {
+        type: "object",
+        properties: { length: { type: "number" } },
+        required: ["length"],
+      };
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(withField(plainObject), true),
+          pattern(withField(newBytes), true),
+        )
+      ).toThrow(/type object is not accepted/);
+    });
+
+    it("keeps durable-link subset proofs strict about the transition", () => {
+      expect(() => assertSchemaSubset(oldBytes, newBytes))
+        .toThrow(/type object is not accepted/);
+    });
+  });
+});
+
+describe("verb event closed-world transitions", () => {
+  // A verb node is `{$ref → event, asCell: ["stream"]}` in recorded
+  // contracts (or the event inline beside the marker). Below one, a boolean
+  // additionalProperties is an enforcement dial, not a data contract: the
+  // runtime schema-strips undeclared event fields before any handler runs,
+  // so open→closed surfaces silent loss as rule 1's typed rejection
+  // (accepted-and-STRIPPED was never contract, decided 2026-08-03), and
+  // closed→open must stay free for `never`-derived closure cleanup.
+
+  const verbPattern = (event: JSONSchema, viaRef = true): Pattern => {
+    const argument: JSONSchema = viaRef
+      ? {
+        type: "object",
+        properties: {
+          addComment: { $ref: "#/$defs/Ev", asCell: ["stream"] },
+        },
+        $defs: { Ev: event },
+      }
+      : {
+        type: "object",
+        properties: {
+          addComment: { ...(event as object), asCell: ["stream"] },
+        },
+      };
+    return pattern(argument, { type: "object", properties: {} });
+  };
+
+  const openEvent: JSONSchema = {
+    type: "object",
+    properties: { body: { type: "string" } },
+  };
+  const closedEvent: JSONSchema = {
+    ...openEvent,
+    additionalProperties: false,
+  };
+
+  it("lets a verb event close (ref-marked stream)", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbPattern(openEvent),
+        verbPattern(closedEvent),
+      )
+    ).not.toThrow();
+  });
+
+  it("lets a verb event close (inline-marked stream)", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbPattern(openEvent, false),
+        verbPattern(closedEvent, false),
+      )
+    ).not.toThrow();
+  });
+
+  it("lets a verb event reopen (never-derived closure cleanup)", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbPattern(closedEvent),
+        verbPattern(openEvent),
+      )
+    ).not.toThrow();
+  });
+
+  it("carries the exemption through the event's nested objects", () => {
+    const nested = (extra: Record<string, unknown>): JSONSchema => ({
+      type: "object",
+      properties: {
+        payload: {
+          type: "object",
+          properties: { note: { type: "string" } },
+          ...extra,
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbPattern(nested({})),
+        verbPattern(nested({ additionalProperties: false })),
+      )
+    ).not.toThrow();
+  });
+
+  it("still refuses closing a plain argument object", () => {
+    const settings = (extra: Record<string, unknown>): Pattern =>
+      pattern({
+        type: "object",
+        properties: {
+          settings: {
+            type: "object",
+            properties: { theme: { type: "string" } },
+            ...extra,
+          },
+        },
+      }, { type: "object", properties: {} });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        settings({}),
+        settings({ additionalProperties: false }),
+      )
+    ).toThrow(
+      /additional properties accepted previously would now be rejected/,
+    );
+  });
+
+  it("does not exempt a node only one contract marks as a stream", () => {
+    const demoted = pattern({
+      type: "object",
+      properties: { addComment: { ...(closedEvent as object) } },
+    }, { type: "object", properties: {} });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(verbPattern(openEvent), demoted)
+    ).toThrow(/asCell changed/);
+  });
+
+  it("still compares schema-valued additionalProperties on a verb event", () => {
+    const shaped: JSONSchema = {
+      ...openEvent,
+      additionalProperties: { type: "string" },
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbPattern(shaped),
+        verbPattern(closedEvent),
+      )
+    ).toThrow(
+      /additional properties accepted previously would now be rejected/,
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbPattern(openEvent),
+        verbPattern(shaped),
+      )
+    ).toThrow(/additional properties are now constrained/);
+  });
+
+  it("closed verb events still gain optional fields (evolution policy)", () => {
+    const widened: JSONSchema = {
+      type: "object",
+      properties: { body: { type: "string" }, tag: { type: "string" } },
+      additionalProperties: false,
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbPattern(closedEvent),
+        verbPattern(widened),
+      )
+    ).not.toThrow();
+  });
+});
+
+describe("verb event required-field transitions", () => {
+  // A verb node sits in the RESULT, which the checker compares covariantly
+  // because a pattern produces its result. The event below it inverts that:
+  // the caller supplies the value, so requiring a field the previous event
+  // did not is a demand on every call already written, each refused at
+  // dispatch once the update lands. Distinct from the closed-world rule
+  // above — that one is free in both directions, this one is not.
+
+  const verbInResult = (event: JSONSchema): Pattern =>
+    pattern({ type: "object", properties: {} }, {
+      type: "object",
+      properties: { setLabel: { $ref: "#/$defs/Ev", asCell: ["stream"] } },
+      $defs: { Ev: event },
+    });
+
+  const oneRequired: JSONSchema = {
+    type: "object",
+    properties: { label: { type: "string" } },
+    required: ["label"],
+  };
+
+  it("refuses an event field the candidate newly requires", () => {
+    const twoRequired: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" }, color: { type: "string" } },
+      required: ["label", "color"],
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(oneRequired),
+        verbInResult(twoRequired),
+      )
+    ).toThrow(/newly required verb event field has no default/);
+  });
+
+  it("accepts an event field that becomes required while keeping its default", () => {
+    const withDefault = (required: string[]): JSONSchema => ({
+      type: "object",
+      properties: {
+        label: { type: "string" },
+        color: { type: "string", default: "none" },
+      },
+      required,
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(withDefault(["label"])),
+        verbInResult(withDefault(["label", "color"])),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts an event field added as optional", () => {
+    const widened: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" }, color: { type: "string" } },
+      required: ["label"],
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(oneRequired),
+        verbInResult(widened),
+      )
+    ).not.toThrow();
+  });
+
+  it("reaches a required field nested inside the event", () => {
+    const nested = (required: string[]): JSONSchema => ({
+      type: "object",
+      properties: {
+        payload: {
+          type: "object",
+          properties: { note: { type: "string" }, kind: { type: "string" } },
+          required,
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(nested(["note"])),
+        verbInResult(nested(["note", "kind"])),
+      )
+    ).toThrow(/newly required verb event field has no default/);
+  });
+
+  it("accepts an event field that stops being required", () => {
+    const twoRequired: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" }, color: { type: "string" } },
+      required: ["label", "color"],
+    };
+    const oneOfTwo: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" }, color: { type: "string" } },
+      required: ["label"],
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        verbInResult(twoRequired),
+        verbInResult(oneOfTwo),
+      )
+    ).not.toThrow();
+  });
+
+  it("still refuses an ordinary result field that stops being required", () => {
+    const result = (required: string[]): Pattern =>
+      pattern({ type: "object", properties: {} }, {
+        type: "object",
+        properties: { total: { type: "number" }, label: { type: "string" } },
+        required,
+      });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        result(["total", "label"]),
+        result(["total"]),
+      )
+    ).toThrow(/result field is no longer required/);
+  });
+
+  it("still lets an ordinary result field become newly required", () => {
+    const result = (required: string[]): Pattern =>
+      pattern({ type: "object", properties: {} }, {
+        type: "object",
+        properties: { total: { type: "number" }, label: { type: "string" } },
+        required,
+      });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        result(["total"]),
+        result(["total", "label"]),
+      )
+    ).not.toThrow();
+  });
+});
+
+describe("listing marks are annotation-class", () => {
+  // `tier: "wrapper"` and standard `deprecated: true` shape only what
+  // `cf piece verbs` shows by default (verb contract WS-F); neither
+  // constrains a value, so both must ADD and REMOVE freely across pattern
+  // updates. Classified before the generator emits them — the checker
+  // equality-compares unknown keywords, so an unclassified mark would be
+  // refused in both directions: the C3 append-only lesson.
+
+  const verbArgument = (marks: Record<string, unknown>): Pattern =>
+    pattern(
+      {
+        type: "object",
+        properties: {
+          submitTopic: {
+            type: "object",
+            properties: { body: { type: "string" } },
+            asCell: ["stream"],
+            ...marks,
+          },
+        },
+      },
+      { type: "object", properties: {} },
+    );
+
+  const unmarked = verbArgument({});
+  const marked = verbArgument({ tier: "wrapper", deprecated: true });
+
+  it("lets both marks arrive on a recorded verb", () => {
+    expect(() => assertPatternSchemasBackwardCompatible(unmarked, marked)).not
+      .toThrow();
+  });
+
+  it("lets both marks leave again", () => {
+    expect(() => assertPatternSchemasBackwardCompatible(marked, unmarked)).not
+      .toThrow();
+  });
+
+  it("still refuses a genuinely unknown keyword (control)", () => {
+    // The pin proves classification, not a checker that stopped looking:
+    // an unclassified key on the same node is refused exactly as before.
+
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        unmarked,
+        verbArgument({ mysteryDial: 7 }),
+      )
+    ).toThrow(/mysteryDial|unknown/i);
   });
 });

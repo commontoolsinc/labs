@@ -1,10 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Record and mapped types", () => {
-  const transformer = createSchemaTransformerV2();
+  const transformer = new SchemaGenerator();
 
   it("should generate correct schemas for Default<Record<union, primitive>>", async () => {
     const { type, checker, typeNode } = await getTypeFromCode(

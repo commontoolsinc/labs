@@ -6,6 +6,7 @@ export type AddCancel = (cancel: Cancel | undefined | null) => void;
 export type DeferredCancelOwnership = {
   cancel: Cancel;
   isCancelled: () => boolean;
+
   /** Records the exact cancel installed by this attempt; returns cancellation. */
   markInstalled: (installedCancel: Cancel | undefined) => boolean;
 };

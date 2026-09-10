@@ -1,14 +1,6 @@
 import { BuiltInLLMDialogState } from "@commonfabric/api";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { createNodeFactory, lift } from "./module.ts";
-import type {
-  FactoryInput,
-  JSONSchema,
-  NodeFactory,
-  Reactive,
-  Schema,
-} from "./types.ts";
-import type { Cell as CellType } from "./types.ts";
+import { internSchema } from "@commonfabric/data-model-schema";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type {
   BuiltInCompileAndRunParams,
   BuiltInCompileAndRunState,
@@ -18,6 +10,7 @@ import type {
   BuiltInLLMGenerateObjectState,
   BuiltInLLMParams,
   BuiltInLLMState,
+  CellFromUrlFunction,
   ConfLabelQuery,
   FetchBinaryResult,
   FetchOptions,
@@ -29,11 +22,20 @@ import type {
   WishParams,
   WishState,
 } from "commonfabric";
-import { h } from "@commonfabric/html";
-import { isRecord } from "@commonfabric/utils/types";
-import { isCell } from "../cell.ts";
-import { sqliteQueryNodeFactory } from "../builtins/sqlite/query-node.ts";
+
 import { LLMDialogResultSchema } from "../builtins/llm-schemas.ts";
+import { sqliteQueryNodeFactory } from "../builtins/sqlite/query-node.ts";
+import { isCell } from "../cell.ts";
+import { h } from "./h.ts";
+import { createNodeFactory } from "./module.ts";
+import type {
+  Cell as CellType,
+  FactoryInput,
+  JSONSchema,
+  NodeFactory,
+  Reactive,
+  Schema,
+} from "./types.ts";
 
 const WISH_ARGUMENT_SCHEMA = internSchema({
   type: "object",
@@ -168,6 +170,11 @@ export const fetchJson = createNodeFactory({
     result?: T;
   }>,
 ) => Reactive<{ pending: boolean; result: T; error?: unknown }>;
+
+export const cellFromUrl = createNodeFactory({
+  type: "ref",
+  implementation: "cellFromUrl",
+}) as CellFromUrlFunction;
 
 export const fetchJsonUnchecked = createNodeFactory({
   type: "ref",
@@ -447,7 +454,7 @@ export function wish<T = unknown>(
   let param;
   let resultSchema;
 
-  if (schema !== undefined && isRecord(target) && !isCell(target)) {
+  if (schema !== undefined && isObjectOrArray(target) && !isCell(target)) {
     param = {
       schema,
       ...target, // Pass in after, so schema here overrides any schema in target
@@ -467,27 +474,25 @@ export function wish<T = unknown>(
   })(param);
 }
 
+const strFactory = createNodeFactory<
+  { strings: string[]; values: unknown[] },
+  string
+>({
+  type: "ref",
+  implementation: "str",
+});
+
 // Example:
 // str`Hello, ${name}!`
 //
-// TODO(seefeld): This should be a built-in module
 export function str(
   strings: TemplateStringsArray,
   ...values: unknown[]
 ): Reactive<string> {
-  const interpolatedString = ({
-    strings,
-    values,
-  }: {
-    strings: TemplateStringsArray;
-    values: unknown[];
-  }) =>
-    strings.reduce(
-      (result, str, i) => result + str + (i < values.length ? values[i] : ""),
-      "",
-    );
-
-  return lift(interpolatedString)({ strings, values });
+  // Spread the template strings into a plain array: a `TemplateStringsArray`
+  // carries a `raw` property that the binding walk does not preserve, and the
+  // interpolation reads only the indexed chunks.
+  return strFactory({ strings: [...strings], values });
 }
 
 /**

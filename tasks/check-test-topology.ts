@@ -1,0 +1,546 @@
+#!/usr/bin/env -S deno run --allow-read --allow-env --allow-net
+
+/**
+ * Whether the topology still accounts for everything.
+ *
+ * The topology is only worth having if it stays complete: a test surface
+ * nobody registered would vanish from the full run, which is a worse
+ * failure than the workflow edit it replaced. A surface goes missing in
+ * three ways, and a check answers each.
+ *
+ * The tree half needs no store and runs on every pull request. It walks
+ * the tree for things that look like tests and fails on any that no
+ * suite accounts for, or that two suites claim under the same record
+ * surface and variant. This is what catches a pull request adding a test
+ * surface nobody registered, at the moment it is added.
+ *
+ * The workflow half runs beside it, over the step definitions under
+ * `.github`. A step can wrap a command in `run-recorded`. The three
+ * words after it are the command's identity, and every record the
+ * command writes carries that identity. The topology is the other place
+ * an identity is written down. A lane builds its commands from the
+ * topology, so a step whose identity no suite holds runs while that step
+ * stands and stops when a lane takes over the job holding it. Nothing in
+ * the tree carries such an identity, which is what puts it out of the
+ * tree half's reach.
+ *
+ * The store half runs on `main`. It reads a run's records and fails on
+ * any identity no suite recognizes, or that more than one suite claims.
+ * This catches the subtler case: a surface that is registered and whose
+ * files enumerate, but whose recorded names or configuration do not map
+ * back to the topology, which would leave those tests running in the
+ * full run and never selectable on a pull request.
+ *
+ * The reverse direction is reported rather than failed. A unit the
+ * topology holds that no run has ever recorded is either a test that
+ * never runs or a mapping that is wrong, and both are worth knowing
+ * about without blocking anybody.
+ *
+ *   deno task check-test-topology            # tree and workflows
+ *   deno task check-test-topology --records <file>...   # those and the store
+ */
+
+import * as path from "@std/path";
+import {
+  loadAliasResolver,
+  parseReportGroups,
+  type TestIdentity,
+  testIdentityKey,
+} from "@commonfabric/test-support/records";
+import {
+  commandWords,
+  withoutComments,
+  withoutContinuations,
+} from "./ci-workflow.ts";
+import { isLaneMeasurement } from "./lane-measurement.ts";
+import { dayOf } from "./test-selection/build.ts";
+import { DENO_TEST_FILE } from "./test-topology/deno-task.ts";
+import { claimsFor, loadTopology } from "./test-topology.ts";
+import { type Suite, unavailableUnits } from "./test-topology/suite.ts";
+
+/**
+ * What the tree half looks at. The same rule the topology enumerates a
+ * member's tests by, so a file one of them treats as a test cannot be a
+ * file the other passes over.
+ */
+const TEST_FILE = DENO_TEST_FILE;
+
+/** Directories that hold no test surface of their own. */
+const SKIPPED = new Set([
+  ".git",
+  "node_modules",
+  "vendor",
+  "coverage",
+  "dist",
+  "target",
+]);
+
+/** Roots the walk starts from. Everything else holds no tests. */
+const ROOTS = ["packages", "tasks", "scripts", "tools"];
+
+/** Every path in the tree that looks like a test surface. */
+export async function candidateSurfaces(root: string): Promise<string[]> {
+  const found: string[] = [];
+  const walk = async (relative: string): Promise<void> => {
+    // The entries are read before any of them is followed, and only that
+    // read is allowed to answer "no such directory". A catch around the
+    // recursion as well would let one directory that vanished mid-walk —
+    // a temporary one a running test made and removed — end the walk at
+    // every level above it, silently shortening the list the guard
+    // checks against. That is the guard failing while reporting success.
+    let entries: Deno.DirEntry[];
+    try {
+      entries = await Array.fromAsync(Deno.readDir(path.join(root, relative)));
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) return;
+      throw error;
+    }
+    for (const entry of entries) {
+      const at = `${relative}/${entry.name}`;
+      if (entry.isDirectory) {
+        if (!SKIPPED.has(entry.name)) await walk(at);
+        continue;
+      }
+      if (!entry.isFile) continue;
+      if (TEST_FILE.test(entry.name)) found.push(at);
+      else if (
+        entry.name.endsWith(".sh") && relative.endsWith("/integration")
+      ) {
+        found.push(at);
+      }
+    }
+  };
+  for (const start of ROOTS) await walk(start);
+  return found.sort();
+}
+
+/**
+ * Paths that look like tests and are not: fixtures a test drives rather
+ * than tests of their own. Each says why, and an entry that stops
+ * applying fails, so the list cannot go stale unnoticed.
+ */
+const NOT_A_TEST_SURFACE: ReadonlyArray<{ path: string; reason: string }> = [
+  {
+    path: "packages/deno-web-test/test/broken-config-project/pass.test.ts",
+    reason: "a project the harness runs to prove it reports a bad config",
+  },
+  {
+    path: "packages/deno-web-test/test/bundle-project/bundled.test.ts",
+    reason: "a project the harness runs to prove it bundles before serving",
+  },
+  {
+    path: "packages/deno-web-test/test/project-with-config/ed25519.test.ts",
+    reason: "a project the harness runs to prove it reads a project config",
+  },
+  {
+    path: "packages/deno-web-test/test/success-project/add.test.ts",
+    reason: "a project the harness runs to prove a passing run reports green",
+  },
+  {
+    path: "packages/deno-web-test/test/timeout-project/hang.test.ts",
+    reason: "a project the harness runs to prove it reports a wedged test",
+  },
+  {
+    path: "packages/cli/integration/bulk-ops-demo.sh",
+    reason: "a tour of the bulk commands, quoted by the documentation the " +
+      "verb-session gate holds to it rather than run as a test",
+  },
+  {
+    path: "packages/cli/integration/read-write-demo.sh",
+    reason: "a tour of the read and write commands, quoted by the " +
+      "documentation the verb-session gate holds to it",
+  },
+  {
+    path: "packages/cli/integration/verb-session-demo.sh",
+    reason: "the walkthrough the verb-session gate holds the documentation " +
+      "to, read rather than run",
+  },
+];
+
+/** Where the steps continuous integration runs are defined. */
+const CI_DEFINITIONS = ".github";
+
+/** The words that introduce a recording step, in the order they read. */
+const RUN_RECORDED = ["deno", "task", "run-recorded"];
+
+/** One recording step: the identity it writes, and the file holding it. */
+export interface WorkflowRecord {
+  test: TestIdentity;
+  where: string;
+}
+
+/**
+ * The identities the words of one file record. `deno task run-recorded`
+ * is followed by the three parts of an identity, so the three words
+ * after it are the identity. A step whose parts are quoted, or whose
+ * identity holds a workflow expression the run resolves, gives an
+ * identity no suite claims, and the check that reads it fails.
+ */
+function recordedIdentities(text: string, where: string): WorkflowRecord[] {
+  const words = commandWords(withoutContinuations(withoutComments(text)));
+  const found: WorkflowRecord[] = [];
+  for (let at = 0; at + RUN_RECORDED.length < words.length; at++) {
+    if (RUN_RECORDED.some((word, index) => words[at + index] !== word)) {
+      continue;
+    }
+    const [k, s, n] = words.slice(at + RUN_RECORDED.length).slice(0, 3);
+    if (k === undefined || s === undefined || n === undefined) {
+      throw new Error(`${where} ends in the middle of a recording step`);
+    }
+    found.push({ test: { k, s, n }, where });
+  }
+  return found;
+}
+
+/** Every identity a step under `.github` records by hand. */
+export async function workflowRecords(
+  root: string,
+): Promise<WorkflowRecord[]> {
+  const found: WorkflowRecord[] = [];
+  const walk = async (relative: string): Promise<void> => {
+    // As in the tree walk, only the read of a directory's own entries
+    // answers "no such directory". A directory that vanishes deeper in
+    // the walk raises.
+    let entries: Deno.DirEntry[];
+    try {
+      entries = await Array.fromAsync(Deno.readDir(path.join(root, relative)));
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) return;
+      throw error;
+    }
+    entries.sort((left, right) => left.name < right.name ? -1 : 1);
+    for (const entry of entries) {
+      const at = `${relative}/${entry.name}`;
+      if (entry.isDirectory) {
+        await walk(at);
+        continue;
+      }
+      if (!entry.isFile || !/\.ya?ml$/.test(entry.name)) continue;
+      const text = await Deno.readTextFile(path.join(root, at));
+      found.push(...recordedIdentities(text, at));
+    }
+  };
+  await walk(CI_DEFINITIONS);
+  return found;
+}
+
+/** One thing the check found. */
+export interface Finding {
+  /** Whether it fails the check or is only reported. */
+  fails: boolean;
+  message: string;
+}
+
+/** Every path a suite accounts for exactly, and every one it contains. */
+function claimsOf(
+  suite: Suite,
+): { exact: Set<string>; containers: string[] } {
+  const exact = new Set<string>(suite.sources ?? []);
+  const containers: string[] = [];
+  for (const unit of suite.units) {
+    if (TEST_FILE.test(unit)) exact.add(unit);
+    else containers.push(unit);
+  }
+  for (const entry of suite.unavailable) exact.add(entry.unit);
+  return { exact, containers };
+}
+
+/**
+ * The tree half: everything that looks like a test is claimed by some
+ * suite, and no two suites claim one path under the same variant.
+ */
+export function checkTree(
+  suites: readonly Suite[],
+  candidates: readonly string[],
+  declared: {
+    fixtures?: ReadonlyArray<{ path: string; reason: string }>;
+  } = {},
+): Finding[] {
+  const findings: Finding[] = [];
+  const claims = suites.map((suite) => ({ suite, ...claimsOf(suite) }));
+  const fixtures = new Map(
+    (declared.fixtures ?? []).map((entry) => [entry.path, entry.reason]),
+  );
+  const held = new Set<string>();
+  for (const candidate of candidates) {
+    const exact = claims.filter((claim) => claim.exact.has(candidate));
+    // A default suite and a non-default suite may claim one source
+    // file: they are distinct execution surfaces with separate
+    // histories. Two suites sharing a variant may not.
+    const byVariant = new Map<string, string[]>();
+    for (const claim of exact) {
+      const variant = claim.suite.variant ?? "";
+      byVariant.set(variant, [
+        ...byVariant.get(variant) ?? [],
+        claim.suite.id,
+      ]);
+    }
+    for (const [variant, ids] of byVariant) {
+      if (ids.length > 1) {
+        findings.push({
+          fails: true,
+          message: `${candidate} is claimed by ${ids.join(" and ")}` +
+            (variant === "" ? "" : ` under variant ${variant}`),
+        });
+      }
+    }
+    if (exact.length > 0) {
+      const reason = fixtures.get(candidate);
+      if (reason !== undefined) {
+        findings.push({
+          fails: true,
+          message: `${candidate} is claimed by a suite and is still listed ` +
+            `as a fixture: ${reason}`,
+        });
+      }
+      continue;
+    }
+    if (fixtures.has(candidate)) {
+      held.add(candidate);
+      continue;
+    }
+    // A suite whose units are coarser than a file — a workspace member
+    // that runs whole, a directory one task owns — accounts for what it
+    // contains.
+    const containing = claims.filter((claim) =>
+      claim.containers.some((unit) => candidate.startsWith(`${unit}/`))
+    );
+    // Containment is coarse and legitimately overlapping: a workspace
+    // member that runs whole contains a directory another suite owns,
+    // and a type-check group's unit is a scope name that reads as a
+    // directory prefix. Only an exact claim is exclusive.
+    if (containing.length > 0) continue;
+    findings.push({
+      fails: true,
+      message: `${candidate} is claimed by no suite`,
+    });
+  }
+  for (const path of fixtures.keys()) {
+    if (held.has(path)) continue;
+    if (candidates.includes(path)) continue;
+    findings.push({
+      fails: true,
+      message: `${path} is listed as a fixture and the tree no longer holds it`,
+    });
+  }
+  return findings;
+}
+
+/**
+ * The workflow half: every identity a workflow step records by hand is
+ * claimed by exactly one suite.
+ */
+export function checkWorkflows(
+  suites: readonly Suite[],
+  records: readonly WorkflowRecord[],
+): Finding[] {
+  const findings: Finding[] = [];
+  const seen = new Set<string>();
+  for (const record of records) {
+    const key = testIdentityKey(record.test);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const claims = claimsFor(suites, record);
+    if (claims.length === 1) continue;
+    findings.push({
+      fails: true,
+      message: claims.length === 0
+        ? `no suite claims ${key}, which ${record.where} records`
+        : `${claims.map((claim) => claim.suite.id).join(" and ")} ` +
+          `both claim ${key}, which ${record.where} records`,
+    });
+  }
+  return findings;
+}
+
+/** A record as the store half reads one. */
+export interface StoredIdentity {
+  test: TestIdentity;
+  file?: string;
+}
+
+/**
+ * The store half: every recorded identity is claimed by exactly one
+ * suite, and every unit some run recorded is reported when no run did.
+ */
+export function checkStore(
+  suites: readonly Suite[],
+  records: readonly StoredIdentity[],
+): Finding[] {
+  const findings: Finding[] = [];
+  const seen = new Set<string>();
+  const recorded = new Set<string>();
+  for (const record of records) {
+    const key = testIdentityKey(record.test);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // The lane measures its own setup and batches through the same
+    // record machinery every test uses. Those are not test surfaces —
+    // nothing enumerates them and no lane can be asked to run one — so
+    // no suite claims them and none should.
+    if (isLaneMeasurement(record.test)) continue;
+    const claims = claimsFor(suites, record);
+    if (claims.length === 0) {
+      findings.push({
+        fails: true,
+        message: `no suite claims the recorded identity ${key}`,
+      });
+      continue;
+    }
+    if (claims.length > 1) {
+      findings.push({
+        fails: true,
+        message: `${claims.map((claim) => claim.suite.id).join(" and ")} ` +
+          `both claim the recorded identity ${key}`,
+      });
+      continue;
+    }
+    const claim = claims[0]!;
+    if (claim.unit !== undefined) {
+      recorded.add(`${claim.suite.id}\t${claim.unit}`);
+    }
+  }
+  for (const suite of suites) {
+    // A leaf declared unavailable leaves its unit expected to record,
+    // because every other identity in that unit still runs.
+    const unavailable = unavailableUnits(suite);
+    for (const unit of suite.units) {
+      if (unavailable.has(unit)) continue;
+      if (recorded.has(`${suite.id}\t${unit}`)) continue;
+      findings.push({
+        fails: false,
+        message: `${suite.id} enumerates ${unit}, which this run never ` +
+          "recorded: either it never runs or its mapping is wrong",
+      });
+    }
+  }
+  return findings;
+}
+
+/** Reads a run's records out of the files named on the command line. */
+export async function readRecords(
+  paths: readonly string[],
+): Promise<StoredIdentity[]> {
+  const resolver = await loadAliasResolver();
+  const records: StoredIdentity[] = [];
+  for (const at of paths) {
+    const text = await Deno.readTextFile(at);
+    for (const group of parseReportGroups(text)) {
+      // An alias applies only to records from days before the rename, so
+      // the day the report was written is what resolution is asked
+      // against. A report with no context is one this cannot date, and
+      // its identities resolve as written.
+      const day = group.context === undefined
+        ? "9999-12-31"
+        : dayOf(group.context.startedAt);
+      for (const record of group.records) {
+        const resolved = resolver.resolve(record.test, day);
+        records.push({
+          test: resolved,
+          ...(record.file === undefined ? {} : { file: record.file }),
+        });
+      }
+    }
+  }
+  return records;
+}
+
+/** What the check was asked to do. */
+export interface CheckOptions {
+  /** The tree to walk. */
+  root: string;
+
+  /** Files holding a run's records, for the store half. */
+  records?: readonly string[];
+}
+
+/** Reads the command line into what the check should do. */
+export function parseCheckArgs(
+  args: readonly string[],
+  root: string,
+): CheckOptions {
+  const records: string[] = [];
+  let reading = false;
+  for (const arg of args) {
+    if (arg === "--records") {
+      reading = true;
+      continue;
+    }
+    if (reading) records.push(arg);
+  }
+  return records.length === 0 ? { root } : { root, records };
+}
+
+/**
+ * Runs whichever halves the options ask for. The tree and workflow
+ * halves always run, because they need nothing but the checkout; the
+ * store half runs when a run's records are named.
+ */
+export async function check(
+  options: CheckOptions,
+): Promise<{ findings: Finding[]; suites: number }> {
+  const suites = await loadTopology(options.root);
+  const findings = checkTree(
+    suites,
+    await candidateSurfaces(options.root),
+    { fixtures: NOT_A_TEST_SURFACE },
+  );
+  findings.push(
+    ...checkWorkflows(suites, await workflowRecords(options.root)),
+  );
+  if (options.records !== undefined) {
+    findings.push(...checkStore(suites, await readRecords(options.records)));
+  }
+  // The count travels with the findings because loading the topology
+  // walks every workspace member and every test file, and doing that a
+  // second time to print one number is the enumeration twice over.
+  return { findings, suites: suites.length };
+}
+
+/** Prints what was found, and says whether anything failed. */
+export function report(
+  findings: readonly Finding[],
+  suites: number,
+  write: { out: (line: string) => void; err: (line: string) => void } = {
+    out: console.log,
+    err: console.error,
+  },
+): boolean {
+  for (const finding of findings) {
+    const line = `${
+      finding.fails ? "topology" : "topology (reported)"
+    }: ${finding.message}`;
+    if (finding.fails) write.err(line);
+    else write.out(line);
+  }
+  const failures = findings.filter((finding) => finding.fails).length;
+  if (failures === 0) {
+    write.out(
+      `Topology accounts for every test surface (${suites} suites).`,
+    );
+    return true;
+  }
+  write.err(
+    `${failures} test surface(s) the topology does not account for.`,
+  );
+  return false;
+}
+
+/**
+ * Runs the check the way the command line runs it, and answers with the
+ * status it would exit with. Zero when the topology accounts for
+ * everything, and one when it does not: a surface nobody registered has
+ * to stop a build, or the guard is a log line nobody reads.
+ */
+export async function main(
+  args: readonly string[] = Deno.args,
+  root: string = Deno.cwd(),
+): Promise<number> {
+  const { findings, suites } = await check(parseCheckArgs(args, root));
+  return report(findings, suites) ? 0 : 1;
+}
+
+// `Deno.exitCode` rather than `Deno.exit`, which would end the process
+// before the unload handlers run — and one of those is what writes a
+// test run's name map into its spool.
+if (import.meta.main) Deno.exitCode = await main();

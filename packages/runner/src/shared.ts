@@ -4,12 +4,28 @@
  * /!\ interfaces and utilities.
  */
 
+export { refuseFabricInstance } from "@commonfabric/data-model";
 export {
-  isAliasBinding,
+  isStoredArgumentSchemaRefusal,
+  STORED_ARGUMENT_SCHEMA_REFUSAL,
+  storedArgumentRefusalDetail,
+} from "./stored-argument-refusal.ts";
+export {
+  addressKey,
+  CELL_SCOPE_VALUES,
+  createLLMFriendlyLink,
+  encodeJsonPointer,
+  isPieceHandle,
   isSigilLink,
+  linkPathSegmentToCellPathSegment,
+  matchLLMFriendlyLink,
   type NormalizedFullLink,
   parseLLMFriendlyLink,
+  parseReferenceParts,
+  parseScopedIdSegment,
+  type ReferenceParts,
 } from "./link-types.ts";
+export { type AliasBinding, isAliasBinding } from "./alias-binding.ts";
 export {
   isLinkRef,
   type LinkRef,
@@ -28,7 +44,8 @@ export {
 } from "./sigil-types.ts";
 export {
   CHIP_UI,
-  ID,
+  FRAMEWORK_RESULT_KEYS,
+  type JSONObject,
   type JSONSchema,
   type JSONValue,
   NAME,
@@ -38,6 +55,7 @@ export {
   UI,
 } from "./builder/types.ts";
 export { type Cancel, useCancelGroup } from "./cancel.ts";
+export { parseFabricRef } from "./sandbox/fabric-import-specifier.ts";
 export type {
   CycleReport,
   NonIdempotentReport,

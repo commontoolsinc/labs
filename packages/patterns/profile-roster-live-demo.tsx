@@ -40,6 +40,7 @@ export type ParticipantProfileCell = Cell<
 export interface Participant {
   /** Live link to the contributor's profile cell — stable identity + live data. */
   profile: ParticipantProfileCell;
+
   /** Display name, snapshotted at join time (durable label; survives even if the live cell is momentarily unresolved on first render). */
   name: string;
   joinedAt: number;

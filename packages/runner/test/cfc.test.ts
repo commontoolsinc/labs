@@ -1,10 +1,29 @@
-import { describe, it } from "@std/testing/bdd";
+/**
+ * Schema traversal as contextual flow control needs it, where the recurring
+ * hazard is scope. A `$defs` block is visible to what sits under it and not to
+ * what sits beside it, so descending through a `$ref` changes which
+ * definitions are in scope, and a traversal carrying the wrong root either
+ * resolves a name it should not see or fails to resolve one it should.
+ *
+ * Two narrower ways that goes wrong get their own cases. An inherited property
+ * name is not a declared definition, however much it looks like one to a bare
+ * property read. And a definition the derived schema cannot reach is dropped
+ * rather than carried along -- not merely left unresolved, but neither
+ * enumerated nor read.
+ *
+ * The label side is here too, and its point is that the lattice is open: a
+ * join preserves whatever confidentiality atoms it is given rather than
+ * rounding them to fixed levels.
+ */
+
 import { expect } from "@std/expect";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
-import { schemaHasIfc } from "../src/schema.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import { describe, it } from "@std/testing/bdd";
+
 import type { JSONSchemaObj } from "@commonfabric/api";
+import { deepFreeze } from "@commonfabric/data-model";
+
+import type { JSONSchema } from "../src/builder/types.ts";
+import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
 import {
   findCfcSchemaRefs,
   pruneCfcSchemaDefinitions,
@@ -13,28 +32,25 @@ import {
   selectReferencedCfcSchemaDefs,
 } from "../src/cfc/schema-refs.ts";
 import { validateSchemaValue } from "../src/cfc/schema-sanitization.ts";
+import { resolveSchema, schemaHasIfc } from "../src/schema.ts";
 
 describe("ContextualFlowControl.schemaAtPath", () => {
   it("rejects leading-zero array index like '01'", () => {
-    const cfc = new ContextualFlowControl();
-
     const schema: JSONSchema = {
       type: "array",
       items: { type: "string" },
     };
 
     // "01" is not a valid array index (leading zero), should return false
-    const result01 = cfc.schemaAtPath(schema, ["01"]);
+    const result01 = ContextualFlowControl.schemaAtPath(schema, ["01"]);
     // "1" is a valid array index, should return the items schema
-    const result1 = cfc.schemaAtPath(schema, ["1"]);
+    const result1 = ContextualFlowControl.schemaAtPath(schema, ["1"]);
 
     expect(result01).toBe(false);
     expect(result1).toEqual({ type: "string" });
   });
 
   it("does not collide cached paths whose segments contain NUL bytes", () => {
-    const cfc = new ContextualFlowControl();
-
     // Deep-frozen so the schemaAtPath memo engages; "a\0b" as a single
     // property name must not share a cache entry with the nested path
     // ["a", "b"].
@@ -51,15 +67,14 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       }),
     }) as JSONSchema;
 
-    const flat = cfc.schemaAtPath(schema, ["a\0b"]);
-    const nested = cfc.schemaAtPath(schema, ["a", "b"]);
+    const flat = ContextualFlowControl.schemaAtPath(schema, ["a\0b"]);
+    const nested = ContextualFlowControl.schemaAtPath(schema, ["a", "b"]);
 
     expect(flat).toEqual({ type: "number" });
     expect(nested).toEqual({ type: "string" });
   });
 
   it("does not treat inherited property names as declared properties", () => {
-    const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {
       type: "object",
       properties: {
@@ -67,8 +82,8 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       },
     };
 
-    expect(cfc.schemaAtPath(schema, ["toString"])).toBe(true);
-    expect(cfc.schemaAtPath({
+    expect(ContextualFlowControl.schemaAtPath(schema, ["toString"])).toBe(true);
+    expect(ContextualFlowControl.schemaAtPath({
       type: "object",
       properties: Object.fromEntries([
         ["toString", { type: "string" }],
@@ -77,7 +92,6 @@ describe("ContextualFlowControl.schemaAtPath", () => {
   });
 
   it("classifies frozen root refs and unions without mixing path results", () => {
-    const cfc = new ContextualFlowControl();
     const schema = deepFreeze({
       $ref: "#/$defs/Root",
       $defs: {
@@ -101,19 +115,22 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       },
     } as JSONSchemaObj);
 
-    expect(cfc.schemaAtPath(schema, ["0"])).toEqual({
+    expect(ContextualFlowControl.schemaAtPath(schema, ["0"])).toEqual({
       anyOf: [{ type: "number" }, { type: "boolean" }],
     });
-    const homogeneous = cfc.schemaAtPath(schema, ["1"]);
+    const homogeneous = ContextualFlowControl.schemaAtPath(schema, ["1"]);
     expect(homogeneous).toEqual({ type: "string" });
-    expect(cfc.schemaAtPath(schema, ["1"])).toBe(homogeneous);
-    expect(cfc.schemaAtPath(schema, ["2000"])).toBe(homogeneous);
-    expect(cfc.schemaAtPath(schema, ["named"])).toEqual({ type: "null" });
-    expect(cfc.schemaAtPath(schema, ["missing"])).toBe(false);
+    expect(ContextualFlowControl.schemaAtPath(schema, ["1"])).toBe(homogeneous);
+    expect(ContextualFlowControl.schemaAtPath(schema, ["2000"])).toBe(
+      homogeneous,
+    );
+    expect(ContextualFlowControl.schemaAtPath(schema, ["named"])).toEqual({
+      type: "null",
+    });
+    expect(ContextualFlowControl.schemaAtPath(schema, ["missing"])).toBe(false);
   });
 
   it("classifies combined unions with boolean branches", () => {
-    const cfc = new ContextualFlowControl();
     const schema = deepFreeze({
       anyOf: [{
         type: "array",
@@ -122,11 +139,10 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       oneOf: [true],
     } as JSONSchemaObj);
 
-    expect(cfc.schemaAtPath(schema, ["0"])).toBe(true);
+    expect(ContextualFlowControl.schemaAtPath(schema, ["0"])).toBe(true);
   });
 
   it("falls back when composition branches contain an indirect ref cycle", () => {
-    const cfc = new ContextualFlowControl();
     const schema = deepFreeze({
       $ref: "#/$defs/A",
       $defs: {
@@ -139,29 +155,27 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       },
     } as JSONSchemaObj);
 
-    expect(cfc.schemaAtPath(schema, ["value"])).toBe(true);
+    expect(ContextualFlowControl.schemaAtPath(schema, ["value"])).toBe(true);
   });
 
   it("falls back when a union classifier cannot resolve a ref", () => {
-    const cfc = new ContextualFlowControl();
     const schema = deepFreeze({
       anyOf: [{ $ref: "#/$defs/Missing" }],
       $defs: { Present: { type: "string" } },
     } as JSONSchemaObj);
 
-    expect(() => cfc.schemaAtPath(schema, ["value"]))
+    expect(() => ContextualFlowControl.schemaAtPath(schema, ["value"]))
       .toThrow(/Failed to resolve \$ref/);
   });
 
   it("falls back when a type-array classifier contains an unresolved union", () => {
-    const cfc = new ContextualFlowControl();
     const schema = deepFreeze({
       type: ["object", "undefined"],
       anyOf: [{ $ref: "#/$defs/Missing" }],
       $defs: { Present: { type: "string" } },
     } as JSONSchemaObj);
 
-    expect(() => cfc.schemaAtPath(schema, ["value"]))
+    expect(() => ContextualFlowControl.schemaAtPath(schema, ["value"]))
       .toThrow(/Failed to resolve \$ref/);
   });
 
@@ -238,7 +252,6 @@ describe("ContextualFlowControl.schemaAtPath", () => {
   });
 
   it("uses nested property $defs while traversing through array item refs", () => {
-    const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {
       type: "object",
       properties: {
@@ -265,7 +278,14 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       },
     };
 
-    expect(cfc.schemaAtPath(schema, ["argument", "items", "0", "values"]))
+    expect(
+      ContextualFlowControl.schemaAtPath(schema, [
+        "argument",
+        "items",
+        "0",
+        "values",
+      ]),
+    )
       .toEqual({
         type: "array",
         items: { type: "number" },
@@ -273,7 +293,6 @@ describe("ContextualFlowControl.schemaAtPath", () => {
   });
 
   it("uses each anyOf branch's local definitions", () => {
-    const cfc = new ContextualFlowControl();
     const schema = deepFreeze({
       anyOf: [
         {
@@ -300,16 +319,19 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       $defs: { Obj: { type: "null" } },
     } as JSONSchemaObj);
 
-    expect(cfc.schemaAtPath(schema, ["a"], undefined, true, false)).toEqual({
+    expect(
+      ContextualFlowControl.schemaAtPath(schema, ["a"], undefined, true, false),
+    ).toEqual({
       type: "string",
     });
-    expect(cfc.schemaAtPath(schema, ["b"], undefined, true, false)).toEqual({
+    expect(
+      ContextualFlowControl.schemaAtPath(schema, ["b"], undefined, true, false),
+    ).toEqual({
       type: "number",
     });
   });
 
   it("descends through object and array type unions containing undefined", () => {
-    const cfc = new ContextualFlowControl();
     const objectSchema = deepFreeze({
       type: ["object", "undefined"],
       properties: { x: { type: "string" } },
@@ -319,12 +341,15 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       items: { type: "number" },
     } as JSONSchemaObj);
 
-    expect(cfc.schemaAtPath(objectSchema, ["x"])).toEqual({ type: "string" });
-    expect(cfc.schemaAtPath(arraySchema, ["0"])).toEqual({ type: "number" });
+    expect(ContextualFlowControl.schemaAtPath(objectSchema, ["x"])).toEqual({
+      type: "string",
+    });
+    expect(ContextualFlowControl.schemaAtPath(arraySchema, ["0"])).toEqual({
+      type: "number",
+    });
   });
 
   it("drops definitions that the derived schema cannot reach", () => {
-    const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {
       type: "object",
       properties: {
@@ -338,13 +363,12 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       },
     };
 
-    expect(cfc.schemaAtPath(schema, ["title"])).toEqual({
+    expect(ContextualFlowControl.schemaAtPath(schema, ["title"])).toEqual({
       type: "string",
     });
   });
 
   it("keeps the transitive definition closure for a derived schema", () => {
-    const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {
       type: "array",
       items: { $ref: "#/$defs/Entry" },
@@ -360,7 +384,7 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       },
     };
 
-    expect(cfc.schemaAtPath(schema, ["0"])).toEqual({
+    expect(ContextualFlowControl.schemaAtPath(schema, ["0"])).toEqual({
       $ref: "#/$defs/Entry",
       $defs: {
         Entry: {
@@ -375,7 +399,6 @@ describe("ContextualFlowControl.schemaAtPath", () => {
   });
 
   it("does not enumerate or read unreachable definitions", () => {
-    const cfc = new ContextualFlowControl();
     const definitions = new Proxy<Record<string, JSONSchema>>(
       {
         Used: { type: "string" },
@@ -399,14 +422,13 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       $defs: definitions,
     };
 
-    expect(cfc.schemaAtPath(schema, ["0"])).toEqual({
+    expect(ContextualFlowControl.schemaAtPath(schema, ["0"])).toEqual({
       $ref: "#/$defs/Used",
       $defs: { Used: { type: "string" } },
     });
   });
 
   it("keeps refs resolved from a reached definition body", () => {
-    const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {
       type: "array",
       items: { $ref: "#/$defs/Entry" },
@@ -425,7 +447,7 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       },
     };
 
-    expect(cfc.schemaAtPath(schema, ["0"])).toEqual({
+    expect(ContextualFlowControl.schemaAtPath(schema, ["0"])).toEqual({
       $ref: "#/$defs/Entry",
       $defs: {
         Entry: {
@@ -443,7 +465,6 @@ describe("ContextualFlowControl.schemaAtPath", () => {
   });
 
   it("keeps cyclic and JSON-pointer-escaped definition references", () => {
-    const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {
       type: "array",
       items: { $ref: "#/$defs/a~1b~0c" },
@@ -454,7 +475,7 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       },
     };
 
-    expect(cfc.schemaAtPath(schema, ["17"])).toEqual({
+    expect(ContextualFlowControl.schemaAtPath(schema, ["17"])).toEqual({
       $ref: "#/$defs/a~1b~0c",
       $defs: {
         "a/b~c": { $ref: "#/$defs/Back" },
@@ -464,7 +485,6 @@ describe("ContextualFlowControl.schemaAtPath", () => {
   });
 
   it("does not mix nested and inherited definition scopes", () => {
-    const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {
       type: "object",
       properties: {
@@ -482,7 +502,7 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       },
     };
 
-    expect(cfc.schemaAtPath(schema, ["nested"])).toEqual({
+    expect(ContextualFlowControl.schemaAtPath(schema, ["nested"])).toEqual({
       $ref: "#/$defs/Inner",
       $defs: {
         Inner: { type: "string" },
@@ -493,7 +513,6 @@ describe("ContextualFlowControl.schemaAtPath", () => {
 
 describe("ContextualFlowControl atom joins", () => {
   it("preserves arbitrary confidentiality atoms instead of collapsing through fixed lattice levels", () => {
-    const cfc = new ContextualFlowControl();
     const caveatAtom = cfcAtom.caveat("prompt-influence", "of:prompt-source");
     const provenanceAtom = cfcAtom.resource(
       "SourceProvenance",
@@ -513,8 +532,11 @@ describe("ContextualFlowControl atom joins", () => {
     const joined = new Set<unknown>();
     ContextualFlowControl.joinSchema(joined, schema);
 
-    expect(cfc.lub(joined)).toEqual([caveatAtom, provenanceAtom]);
-    expect(cfc.schemaAtPath(schema, ["body"])).toMatchObject({
+    expect(ContextualFlowControl.lub(joined)).toEqual([
+      caveatAtom,
+      provenanceAtom,
+    ]);
+    expect(ContextualFlowControl.schemaAtPath(schema, ["body"])).toMatchObject({
       type: "string",
       ifc: {
         confidentiality: [caveatAtom, provenanceAtom],
@@ -740,7 +762,6 @@ describe("CFC schema reference discovery", () => {
   });
 
   it("preserves nested definition scope boundaries while pruning", () => {
-    const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {
       type: "object",
       properties: {
@@ -763,9 +784,115 @@ describe("CFC schema reference discovery", () => {
       },
       $defs: { Outer: { type: "string" } },
     });
-    expect(cfc.schemaAtPath(pruned, ["child"])).toEqual(
-      cfc.schemaAtPath(schema, ["child"]),
+    expect(ContextualFlowControl.schemaAtPath(pruned, ["child"])).toEqual(
+      ContextualFlowControl.schemaAtPath(schema, ["child"]),
     );
+  });
+
+  it("carries a boolean subschema through a namespaced ref site", () => {
+    // A ref site whose target opens its own definition scope has its siblings
+    // namespaced, which walks and rewrites every subschema beside the `$ref`.
+    // `true` and `false` are schemas with nothing to rename, and the walk hands
+    // them to that rewrite like any other.
+    const schema: JSONSchemaObj = {
+      $ref: "#/$defs/Target",
+      properties: { flag: true },
+      $defs: {
+        Target: {
+          type: "object",
+          $defs: { Inner: { type: "string" } },
+          additionalProperties: { $ref: "#/$defs/Inner" },
+        },
+      },
+    };
+
+    const resolved = resolveCfcSchemaRefs(schema) as JSONSchemaObj;
+
+    expect(resolved.properties?.flag).toBe(true);
+    // The ref site's own `Target` name is renamed out of the way of the
+    // target's scope, which keeps `Inner` for itself.
+    expect(Object.keys(resolved.$defs!).toSorted()).toEqual([
+      "Inner",
+      "__cfc_ref_site_0_Target",
+    ]);
+    expect(resolved.additionalProperties).toEqual({ $ref: "#/$defs/Inner" });
+  });
+
+  describe("a keyword holding a value that is not a schema", () => {
+    // A schema reaching the runtime has not necessarily come from the schema
+    // generator, so a keyword can hold a value no schema can be. Pruning walks
+    // every subschema-bearing keyword, so each one is a way in.
+
+    const MALFORMED: [label: string, schema: JSONSchema][] = [
+      ["additionalProperties", {
+        type: "object",
+        properties: { a: { type: "number" } },
+        additionalProperties: null,
+      } as unknown as JSONSchema],
+      [
+        "properties",
+        { type: "object", properties: "ab" } as unknown as JSONSchema,
+      ],
+      [
+        "a properties entry",
+        { type: "object", properties: { a: null } } as unknown as JSONSchema,
+      ],
+      ["items", { type: "array", items: null } as unknown as JSONSchema],
+      [
+        "prefixItems",
+        { type: "array", prefixItems: "ab" } as unknown as JSONSchema,
+      ],
+      [
+        "a prefixItems entry",
+        { type: "array", prefixItems: [null] } as unknown as JSONSchema,
+      ],
+      ["allOf", { allOf: null } as unknown as JSONSchema],
+      ["an anyOf entry", { anyOf: [7] } as unknown as JSONSchema],
+      ["oneOf", { oneOf: "ab" } as unknown as JSONSchema],
+      ["not", { not: 3 } as unknown as JSONSchema],
+      ["patternProperties", { patternProperties: 4 } as unknown as JSONSchema],
+      ["$defs", { $defs: null } as unknown as JSONSchema],
+    ];
+
+    for (const [label, schema] of MALFORMED) {
+      it(`prunes a schema whose ${label} holds one`, () => {
+        expect(pruneCfcSchemaDefinitions(schema)).toEqual(schema);
+        expect(pruneCfcSchemaDefinitions(deepFreeze(schema))).toEqual(schema);
+        const refs = new Set<string>();
+        findCfcSchemaRefs(schema, refs);
+        expect(refs.size).toBe(0);
+        expect(selectReferencedCfcSchemaDefs(schema)).toBeUndefined();
+      });
+    }
+
+    it("prunes around one, keeping the definitions its siblings reach", () => {
+      const schema = {
+        type: "object",
+        properties: { bad: null, good: { $ref: "#/$defs/Kept" } },
+        additionalProperties: "ab",
+        $defs: { Kept: { type: "string" }, Dropped: { type: "number" } },
+      } as unknown as JSONSchema;
+
+      expect(pruneCfcSchemaDefinitions(schema)).toEqual({
+        type: "object",
+        properties: { bad: null, good: { $ref: "#/$defs/Kept" } },
+        additionalProperties: "ab",
+        $defs: { Kept: { type: "string" } },
+      });
+    });
+
+    it("leaves a $ref at a definition holding one unresolved", () => {
+      const schema = {
+        $ref: "#/$defs/Broken",
+        $defs: { Broken: null },
+      } as unknown as JSONSchemaObj;
+
+      expect(resolveCfcSchemaRef(schema, "#/$defs/Broken")).toBeUndefined();
+      expect(resolveCfcSchemaRefs(schema)).toBeUndefined();
+      // A schema the runtime cannot read matches nothing, rather than letting
+      // the raw value through.
+      expect(resolveSchema(schema)).toBe(false);
+    });
   });
 });
 

@@ -36,22 +36,16 @@ describe("Engine implementation identity", () => {
     await storageManager?.close();
   });
 
-  // The reload-stable, content-addressed MODULE identity is what action
-  // identity now roots on (the scheduler fingerprint was re-rooted off `.src`
-  // onto content-addressed provenance). We assert it via `canonicalModuleSource`
-  // — the live canonicalizer that maps a per-program bundle path onto the
-  // per-module `cf:module/<hash>/<path>` identity. That is exactly the
-  // `moduleHashByPrefixedSource` machinery the (removed) `implementationHashForSource`
-  // reduced, so this preserves the invariant without the dead `.src`-reduction path.
+  // Read the reload-stable, content-addressed module identity directly from the
+  // compiled record graph rather than routing it through debug-source state.
   async function loadAndResolve(
     program: RuntimeProgram,
     modulePath: string,
   ): Promise<{ id: string; moduleIdentity: string | undefined }> {
-    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+    const { id, graph } = await engine.compileToRecordGraph(
       program,
     );
-    engine.evaluateRecordGraph(id, graph, mainSpecifier, program.files);
-    const moduleIdentity = engine.canonicalModuleSource(`/${id}${modulePath}`);
+    const moduleIdentity = graph.specifierByPath.get(`/${id}${modulePath}`);
     return { id, moduleIdentity };
   }
 
@@ -91,8 +85,10 @@ describe("Engine implementation identity", () => {
   });
 
   it("hashes module identity over PRISTINE authored source, not the helper-injected form (CT-1740)", async () => {
-    // module-loading.md:204-207, 531-535, 543: a module's identity is over its
-    // AUTHORED TypeScript, BEFORE the pretransform helper-injection decoration,
+    // module-loading.md §"Module Identity: Merkle hash over the import graph"
+    // (`normSrc`) and §"Stability and sensitivity properties": a module's
+    // identity is over its AUTHORED TypeScript, BEFORE the pretransform
+    // helper-injection decoration,
     // so it is TCB-version independent. Folding in the injection (the bug)
     // rotates a module's identity whenever the decoration changes between
     // compiles — which is the CT-1740 `writeAuthorizedBy` stamp divergence
@@ -144,7 +140,7 @@ describe("Engine implementation identity", () => {
       compiled.id,
       compiled.graph,
       compiled.mainSpecifier,
-      program.files,
+      program,
     );
     const findWriterIdentity = (
       value: unknown,
@@ -200,9 +196,5 @@ describe("Engine implementation identity", () => {
     );
 
     expect(after.moduleIdentity).not.toBe(before.moduleIdentity);
-  });
-
-  it("returns undefined for a source path with no loaded module", () => {
-    expect(engine.canonicalModuleSource("/unknown/x.tsx")).toBe(undefined);
   });
 });

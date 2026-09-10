@@ -1,9 +1,6 @@
 import type { NormalizedFullLink } from "../src/link-utils.ts";
 import { SpeculationLineage } from "../src/scheduler/lineage.ts";
-import type {
-  EventHandlerRegistration,
-  QueuedEvent,
-} from "../src/scheduler/types.ts";
+import type { QueuedEvent } from "../src/scheduler/types.ts";
 import type {
   CommitError,
   IExtendedStorageTransaction,
@@ -72,27 +69,19 @@ function createOriginTx(
   return origin as TestOriginTx;
 }
 
+let nextEnqueueSeq = 1;
+
 function queuedEvent(
   id: string,
   originTx?: IExtendedStorageTransaction,
 ): QueuedEvent {
-  const handler = () => {};
-  const handlerRegistration: EventHandlerRegistration = {
-    ref: eventLink,
-    handler,
-    generation: 1,
-    active: true,
-    readinessCancels: new Set(),
-  };
   return {
     id,
-    sequence: 0,
+    enqueueSeq: nextEnqueueSeq++,
     originTx,
     eventLink,
     action: () => {},
-    handler,
-    handlerRegistration,
-    handlerGeneration: handlerRegistration.generation,
+    handler: () => {},
     event: { id },
     retry: false,
   };

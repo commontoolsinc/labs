@@ -1,5 +1,6 @@
-import { AsyncResult, DID, DIDKey } from "./interface.ts";
 import { VerifierIdentity } from "@commonfabric/identity";
+
+import { AsyncResult, DID, DIDKey } from "./interface.ts";
 
 const DID_PREFIX = "did:";
 const DID_KEY_PREFIX = `did:key:`;

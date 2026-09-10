@@ -5,12 +5,14 @@ function at(b: EditBuffer): [number, number] {
   return [b.row, b.col];
 }
 
-// --- constructor / setText: the line-splitting paths -----------------------
+//
+// constructor / setText: the line-splitting paths
 //
 // `String.split("\n")` always yields an array of length >= 1 (even for the
 // empty string it yields `[""]`), so the constructor and setText need no
 // empty-buffer guard after the split. These tests pin that: the split supplies
 // at least one line, and the cursor placement that follows stays in range.
+//
 
 Deno.test("editbuffer: constructor splits every input into at least one line", () => {
   // The empty string still produces a single empty line — the split, not the

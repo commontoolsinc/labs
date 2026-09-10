@@ -2,7 +2,7 @@ import type { Cell, IExtendedStorageTransaction } from "@commonfabric/runner";
 import { stampExternalIngest } from "@commonfabric/runner/cfc";
 import { sha256 } from "@commonfabric/content-hash";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
-import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
+import { cloneIfNecessary } from "@commonfabric/data-model";
 import type { FabricValue } from "@commonfabric/api";
 
 /**
@@ -22,7 +22,7 @@ import type { FabricValue } from "@commonfabric/api";
  * `sendToStream` (a transient, unmarked overwrite — see `webhooks.utils.ts`).
  * Moving webhooks onto a marked, durable trail is the planned `stream`-sink
  * follow-on of the ingest-channel work, not something this file already does —
- * see docs/development/proposals/ingest-channels-journal-sink.md.
+ * see docs/plans/ingest-channels-journal-sink.md.
  *
  * The split-mint runs here: the payload is written under the ordinary member
  * identity (so the runtime gate strips any provenance atom an attacker smuggled
@@ -30,7 +30,7 @@ import type { FabricValue } from "@commonfabric/api";
  * *verified channel metadata* — channel, audience, receive time, and a digest
  * of the bytes we wrote — from which it mints the trusted mark. The two never
  * share an authoring identity. See
- * docs/development/proposals/vouched-ingest-channel-mint-design.md.
+ * docs/features/vouched-ingest-channel-mint.md.
  *
  * Honest limit: v1 is operator-trusted. This runtime is `as: identity` and sees
  * the plaintext; the split-mint protects the *mark*, not the *bytes*.
@@ -38,6 +38,7 @@ import type { FabricValue } from "@commonfabric/api";
 export type VouchedChannel = {
   /** The ingest channel — its dedicated space DID. Recorded on every mark. */
   readonly channel: string;
+
   /**
    * The stable per-source identifier the grant was vouched to. Recorded for
    * audit/display; NOT enforced (audience-binding is the federation PR5
@@ -65,8 +66,9 @@ const digestOf = (payload: unknown): string =>
 
 // A fresh, independent deep-mutable copy of a cell value, so an in-place
 // `mutate` callback can't touch the transaction's working copy before the
-// explicit `set`. Uses the canonical fabric-value clone (force-copy everything,
-// leave it mutable); never a JSON round-trip, which mangles fabric primitives.
+// explicit `set`. Uses the canonical `FabricValue` clone (force-copy
+// everything, leave it mutable); never a JSON round-trip, which mangles a
+// `FabricPrimitive`.
 const cloneValue = <T>(value: T | undefined): T | undefined =>
   value === undefined ? undefined : cloneIfNecessary(value as FabricValue, {
     frozen: false,

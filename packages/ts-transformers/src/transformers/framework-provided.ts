@@ -1,7 +1,7 @@
 import ts from "typescript";
 import type { JSONSchema } from "@commonfabric/api";
-import { addRequiredSchemaPaths } from "@commonfabric/data-model/schema-utils";
-import { createSchemaTransformerV2 } from "@commonfabric/schema-generator";
+import { addRequiredSchemaPaths } from "@commonfabric/data-model-schema";
+import { SchemaGenerator } from "@commonfabric/schema-generator";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 
 import {
@@ -122,7 +122,7 @@ function buildTransitiveFactoryContract(
   );
   if (!inputType && contract.inputSchema === undefined) return undefined;
   const baseSchema = contract.inputSchema as JSONSchema | undefined ??
-    createSchemaTransformerV2().generateSchema(
+    new SchemaGenerator().generateSchema(
       inputType!,
       context.checker,
       contract.inputTypeNode,

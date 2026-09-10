@@ -174,6 +174,25 @@ export interface HarnessSkillRecord {
   diagnostics: HarnessSkillDiagnostic[];
 }
 
+/** Where the skills tree a run scanned came from. */
+export type HarnessSkillsRootSource = "configured" | "checkout-default";
+
+/**
+ * The skills tree a run scanned, and how it was arrived at. A run that names
+ * no tree still gets one, so which tree a child's skills came from is a fact
+ * about the run rather than a restatement of the operator's flags.
+ */
+export interface HarnessSkillsRootRecord {
+  type: "cf-harness.skills-root-record";
+  source: HarnessSkillsRootSource;
+  hostPath: string;
+}
+
+/** A skills-root record as an operator message names it. */
+export const describeHarnessSkillsRoot = (
+  record: HarnessSkillsRootRecord,
+): string => `${record.source} ${record.hostPath}`;
+
 export interface HarnessSkillRegistry {
   type: typeof HARNESS_SKILL_REGISTRY_TYPE;
   version: 1;
@@ -188,19 +207,83 @@ export type HarnessSkillActivationSource =
   | "cli-preload"
   | "model-tool"
   | "user-explicit"
-  | "subagent-inherit";
+  | "subagent-inherit"
+  | "skill-handle";
+
+/**
+ * Where a handle-delivered skill's text was fetched from, as the trusted host
+ * recorded it at acquisition. Every field is host-computed or host-observed:
+ * none is read out of the fetched bytes, which is what lets a reader treat
+ * this as provenance rather than as a claim the skill makes about itself.
+ *
+ * It grants nothing. Its job is to make acting under an externally acquired
+ * skill's influence a legible event, so a reader of the activation record can
+ * name the commit whose bytes shaped the run.
+ */
+export interface HarnessSkillAcquisition {
+  /** Discovery id the pin was resolved from, in `owner/repo/slug` form. */
+  registryId: string;
+
+  /** Full commit SHA of the immutable tree the bytes were read from. */
+  commitSha: string;
+
+  /** The exact pinned URL fetched. */
+  sourceUrl: string;
+
+  /** How the address was pinned. */
+  verification: "git-commit-sha";
+
+  /** Digest the host computed over the fetched bytes. */
+  valueDigest: string;
+
+  /** Host wall-clock time the bytes were received (ISO 8601). */
+  receivedAt: string;
+}
 
 export interface HarnessSkillActivation {
   name: string;
   source: HarnessSkillActivationSource;
   runId: string;
-  skillPath: string;
-  skillDir: string;
-  sandboxSkillPath: string;
-  sandboxSkillDir: string;
+
+  /**
+   * The registry path of a directory-backed skill. This and the three paths
+   * below it are absent for a `skill-handle` activation, whose text came from
+   * a cell rather than a registry directory — {@link
+   * HarnessSkillActivation.handleToken} carries its provenance instead.
+   */
+  skillPath?: string;
+
+  /** The registry directory that path sits in. */
+  skillDir?: string;
+
+  /** The same path, as the sandbox sees it. */
+  sandboxSkillPath?: string;
+
+  /** The same directory, as the sandbox sees it. */
+  sandboxSkillDir?: string;
+
   digest: string;
   activatedAt: string;
   cfcPromptRole: HarnessSkillCfcPromptRole;
+
+  /**
+   * The parent-held handle token a `skill-handle` activation's text was
+   * materialized through. With {@link digest} it says which reference
+   * supplied the skill and the exact text it resolved to at activation time —
+   * the whole provenance for a handle the harness did not fetch. Where the
+   * handle came from an acquisition, {@link HarnessSkillActivation.acquisition}
+   * carries the rest of it, and a reader after the external source wants that
+   * field rather than this one.
+   */
+  handleToken?: string;
+
+  /**
+   * Where the skill text came from, for a `skill-handle` activation whose
+   * handle was minted by an external acquisition. Absent when the handle
+   * names a cell this harness did not fetch — an operator-seeded skill cell,
+   * say — where there is no external source to name.
+   */
+  acquisition?: HarnessSkillAcquisition;
 }
 
 export interface HarnessSkillActivations {

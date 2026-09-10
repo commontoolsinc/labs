@@ -1,21 +1,23 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import { Engine } from "../src/harness/engine.ts";
-import { PatternCoverageCollector } from "../src/pattern-coverage.ts";
-import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Identity } from "@commonfabric/identity";
 import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
+
 import { buildCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
+import { Engine } from "../src/harness/engine.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
+import { PatternCoverageCollector } from "../src/pattern-coverage.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
-// Phase D3.2: the Engine ESM compile path (compileToRecordGraph) runs the real
-// CF transformer pipeline, emits per-module CommonJS, assembles content-
-// addressed records + runtime records, and security-verifies every body.
 describe("Engine.compileToRecordGraph", () => {
+  // Phase D3.2: the Engine ESM compile path (compileToRecordGraph) runs the
+  // real CF transformer pipeline, emits per-module CommonJS, assembles content-
+  // addressed records + runtime records, and security-verifies every body.
+
   let runtime: Runtime;
   let engine: Engine;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -113,11 +115,13 @@ describe("Engine.compileToRecordGraph", () => {
     await expect(engine.compileToRecordGraph(program)).rejects.toThrow();
   });
 
-  // Step 5 (option C): per-module identities (`cf:module/<hash>`) are
-  // entry-point independent — the whole-program `/<id>` prefix is stripped for
-  // identity computation, so a byte-identical module shared by two different
-  // programs gets the SAME identity (content-addressed cross-program dedup).
   describe("entry-point-independent module identities", () => {
+    // Step 5 (option C): per-module identities (`cf:module/<hash>`) are
+    // entry-point independent — the whole-program `/<id>` prefix is stripped
+    // for identity computation, so a byte-identical module shared by two
+    // different programs gets the SAME identity (content-addressed
+    // cross-program dedup).
+
     const depContents = "export const base = (): number => 20;";
 
     const specifierFor = async (
@@ -170,9 +174,11 @@ describe("Engine.compileToRecordGraph", () => {
     });
   });
 
-  // Step 4.3.4: compileToRecordGraph returns serializable per-module artifacts
-  // and accepts a full set of cached bodies to skip the TypeScript compile.
   describe("precompiled-module seam", () => {
+    // Step 4.3.4: compileToRecordGraph returns serializable per-module
+    // artifacts and accepts a full set of cached bodies to skip the TypeScript
+    // compile.
+
     const MULTI: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -321,7 +327,7 @@ describe("Engine.compileToRecordGraph", () => {
         compiled.id,
         compiled.graph,
         compiled.mainSpecifier,
-        MULTI.files,
+        MULTI,
       );
       expect((main as { total(): number }).total()).toBe(42);
       expect(coverage.report().totals.coveredRuntimeLines).toBeGreaterThan(0);
@@ -347,7 +353,7 @@ describe("Engine.compileToRecordGraph", () => {
         compiled.id,
         compiled.graph,
         compiled.mainSpecifier,
-        MULTI.files,
+        MULTI,
       );
       expect((main as { total(): number }).total()).toBe(42);
       const report = coverage.report();

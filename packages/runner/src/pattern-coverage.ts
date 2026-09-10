@@ -7,7 +7,7 @@ import { FABRIC_MOUNT_ROOT } from "./sandbox/module-record-compiler.ts";
 
 export type { PatternCoverageKind, PatternCoverageSpan };
 
-export interface PatternCoverageFileReport {
+export type PatternCoverageFileReport = {
   path: string;
   spans: (PatternCoverageSpan & { count: number })[];
   totals: {
@@ -20,9 +20,9 @@ export interface PatternCoverageFileReport {
     coveredRuntime: number[];
     uncoveredRuntime: number[];
   };
-}
+};
 
-export interface PatternCoverageReport {
+export type PatternCoverageReport = {
   version: 1;
   generatedAt: string;
   files: PatternCoverageFileReport[];
@@ -31,12 +31,12 @@ export interface PatternCoverageReport {
     coveredRuntimeLines: number;
     uncoveredRuntimeLines: number;
   };
-}
+};
 
-export interface PatternCoverageReportOptions {
+export type PatternCoverageReportOptions = {
   root?: string;
   includeTestFiles?: boolean;
-}
+};
 
 /**
  * A collector's raw spans and per-span hit counts in a plain-JSON shape that
@@ -46,10 +46,10 @@ export interface PatternCoverageReportOptions {
  * {@link PatternCoverageCollector.ingest}ed into a collector in another (the
  * test process) with matching `(fileName, id)` keys.
  */
-export interface PatternCoverageData {
+export type PatternCoverageData = {
   spans: PatternCoverageSpan[];
   hits: { fileName: string; id: number; count: number }[];
-}
+};
 
 /** Default LCOV test name for pattern-coverage records (see {@link isPatternRuntimeTestName} in the gate). */
 export const PATTERN_COVERAGE_TEST_NAME = "pattern-runtime";

@@ -12,33 +12,50 @@
 // Built in one reconstruction pass over the space (buildAllDetails) so link
 // targets and owner→child names resolve against the whole space.
 
+import {
+  isObjectNotArray,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
+
 import type { SpaceDb } from "./db.ts";
 import {
   annotate,
-  type DecodedLink,
+  decodedLinkOf,
+  linksWithPaths,
+  type LinkWalkBounds,
   parseSigilLink,
   summarize,
 } from "./decode.ts";
-import { reconstructDocument } from "./reconstruct.ts";
+import { reconstructOutcome } from "./reconstruct.ts";
 import type { EntityDocument } from "./reconstruct.ts";
 import {
+  absentEntity,
   classifyDocument,
   type EntityKind,
   isModuleValue,
   type ModuleEntry,
+  type ScanExtent,
+  scanLimit,
+  visibleEntityRows,
 } from "./model.ts";
 
 /** A resolved reference to another entity (or a cross-space target). */
 export interface LinkRef {
   id: string;
+
   /** Resolved label of the target (if in this space). */
   label?: string;
+
   kind?: EntityKind;
+
   /** Cross-space target space DID. */
   space?: string;
+
   path?: string[];
+
   /** True when the target is in another space (not resolvable locally). */
   external?: boolean;
+
   /** Where this link sits in the source value (a JSON path), for "links" lists. */
   at?: string;
 }
@@ -66,30 +83,44 @@ export interface EntityDetail {
   kind: EntityKind;
   regime: string;
   owned: boolean;
+
   /** Context-aware label (key-name / import specifier / $NAME / module file). */
   label: string;
+
   /** Short human role, e.g. "input cell", "owned stream", "module import". */
   role: string;
+
   /** The key in the owner piece that names this entity, if any. */
   contextName?: string;
+
   /** Top-level document paths present (the control plane). */
   paths: string[];
+
   valueShape: string;
+
   /** The annotated value (links/streams normalized; depth-bounded). */
   value: unknown;
+
   valuePreview: string;
+
   /** The result JSONSchema (annotated), if the entity carries one. Streams and
    * named owned cells get their DECLARED schema resolved from the owner piece. */
   schema?: unknown;
+
   schemaKeys?: string[];
+
   /** Where `schema` came from when it isn't the entity's own (e.g. owner piece). */
   schemaSource?: string;
+
   /** True when the declared schema is a stream payload (`asCell:["stream"]`). */
   streamPayload?: boolean;
+
   /** IFC labels from a schema-as-value entity, if present. */
   ifc?: unknown;
+
   /** Parsed CFC labels from the `cfc` meta path, if present. */
   cfc?: CfcSummary;
+
   revisions: number;
   headSeq: number | null;
   firstSeq: number | null;
@@ -103,23 +134,22 @@ export interface EntityDetail {
     argument?: LinkRef;
     internal?: LinkRef[];
     owner?: LinkRef;
+
     /** Legacy regime: the result cell a process cell produces (`resultRef`). */
     result?: LinkRef;
   };
+
   /** Outgoing data links found in the value, resolved to target labels. */
   outLinks: LinkRef[];
+
   /** Module source (only on module entities). */
   code?: string;
-}
-
-function isObj(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
 /** A `{ link, specifier }` cell is a module-import entry. */
 function importSpecifier(v: unknown): string | undefined {
   if (
-    isObj(v) && typeof v.specifier === "string" && "link" in v &&
+    isObjectNotArray(v) && typeof v.specifier === "string" && "link" in v &&
     Object.keys(v).length === 2
   ) return v.specifier;
   return undefined;
@@ -132,7 +162,7 @@ function importSpecifier(v: unknown): string | undefined {
  * note at the top of model.ts for the full removal checklist.
  */
 function legacyResultId(v: unknown): string | undefined {
-  if (isObj(v) && "$TYPE" in v && "resultRef" in v) {
+  if (isObjectNotArray(v) && "$TYPE" in v && "resultRef" in v) {
     return parseSigilLink(v.resultRef)?.id;
   }
   return undefined;
@@ -148,13 +178,15 @@ function legacyName(
 ): string | undefined {
   const rid = legacyResultId(v);
   const rv = rid ? docs.get(rid)?.value : undefined;
-  return isObj(rv) && typeof rv.$NAME === "string" ? rv.$NAME : undefined;
+  return isObjectNotArray(rv) && typeof rv.$NAME === "string"
+    ? rv.$NAME
+    : undefined;
 }
 
 /** Render a CFC atom (string sigil, or an object atom) to a short string. */
 function atomLabel(a: unknown): string {
   if (typeof a === "string") return a;
-  if (isObj(a)) {
+  if (isObjectNotArray(a)) {
     const t = typeof a.type === "string" ? a.type.split("/").pop() : "atom";
     const extra = a.name ?? a.subject ?? a.class ?? a.symbol;
     return extra ? `${t}:${extra}` : String(t);
@@ -163,16 +195,18 @@ function atomLabel(a: unknown): string {
 }
 
 function parseCfc(cfc: unknown): CfcSummary | undefined {
-  if (!isObj(cfc)) return undefined;
+  if (!isObjectNotArray(cfc)) return undefined;
   const out: CfcSummary = {
     schemaHash: typeof cfc.schemaHash === "string" ? cfc.schemaHash : undefined,
     entries: [],
   };
   const lm = cfc.labelMap;
-  const entries = isObj(lm) && Array.isArray(lm.entries) ? lm.entries : [];
+  const entries = isObjectNotArray(lm) && Array.isArray(lm.entries)
+    ? lm.entries
+    : [];
   for (const e of entries) {
-    if (!isObj(e)) continue;
-    const label = isObj(e.label) ? e.label : {};
+    if (!isObjectNotArray(e)) continue;
+    const label = isObjectNotArray(e.label) ? e.label : {};
     out.entries.push({
       path: Array.isArray(e.path) ? (e.path as string[]).join("/") : "",
       confidentiality: Array.isArray(label.confidentiality)
@@ -191,29 +225,28 @@ function parseCfc(cfc: unknown): CfcSummary | undefined {
  * A stream / owned cell carries no schema of its own — its DECLARED schema (a
  * stream's event payload, a cell's value type) is attached where it is NAMED in
  * its owner piece, under the key `<key>`. Two sources, link-first:
- *   1. the inline `schema` on the LINK itself (`value[key]."/"."link@N".schema`)
- *      — present even when the result schema omits the handler (e.g. addFavorite),
+ *   1. the inline `schema` on the LINK itself, in either at-rest form — present
+ *      even when the result schema omits the handler (e.g. addFavorite),
  *   2. else the owner's `schema.properties[<key>]`, following a `$ref` into `$defs`.
  */
 function declaredSchemaFor(
   ownerDoc: EntityDocument | undefined,
   key: string,
 ): { schema: unknown; keys?: string[]; via: string } | undefined {
-  // 1. inline schema carried on the naming link.
-  const linkRaw = isObj(ownerDoc?.value)
+  // 1. inline schema carried on the naming link, in either at-rest form.
+  const naming = isObjectNotArray(ownerDoc?.value)
     ? (ownerDoc!.value as Record<string, unknown>)[key]
     : undefined;
-  if (isObj(linkRaw) && isObj(linkRaw["/"])) {
-    const slash = linkRaw["/"] as Record<string, unknown>;
-    const linkKey = Object.keys(slash).find((k) => k.startsWith("link@"));
-    const inner = linkKey ? slash[linkKey] : undefined;
-    if (isObj(inner) && isObj(inner.schema)) {
-      return {
-        schema: annotate(inner.schema),
-        keys: Object.keys(inner.schema),
-        via: "link",
-      };
-    }
+  const linkSchema = decodedLinkOf(naming)?.schema;
+  if (linkSchema !== undefined) {
+    return {
+      schema: annotate(linkSchema),
+      // A boolean schema has no keys to list, and `true` in particular is the
+      // one that constrains nothing — reporting it is the point, since the
+      // owner's declaration would otherwise stand in for it.
+      keys: isObjectNotArray(linkSchema) ? Object.keys(linkSchema) : undefined,
+      via: "link",
+    };
   }
   // 2. fallback: owner's result-schema property ($ref into $defs).
   // NOTE: this is a deliberately NARROW resolver — a single top-level
@@ -224,14 +257,14 @@ function declaredSchemaFor(
   // here would pull a heavy live-runtime dep into the offline tool; until that's
   // worth it, a nested/escaped ref simply shows its raw `{ $ref }`.
   const osch = ownerDoc?.schema;
-  if (isObj(osch) && isObj(osch.properties)) {
+  if (isObjectNotArray(osch) && isObjectNotArray(osch.properties)) {
     const prop = osch.properties[key];
-    if (isObj(prop)) {
-      let resolved: Record<string, unknown> = prop;
+    if (isObjectNotArray(prop)) {
+      let resolved: ReadonlyRecord = prop;
       const ref = typeof prop.$ref === "string" ? prop.$ref : undefined;
-      if (ref?.startsWith("#/$defs/") && isObj(osch.$defs)) {
+      if (ref?.startsWith("#/$defs/") && isObjectNotArray(osch.$defs)) {
         const def = osch.$defs[ref.slice("#/$defs/".length)];
-        if (isObj(def)) resolved = def;
+        if (isObjectNotArray(def)) resolved = def;
       }
       return {
         schema: annotate(resolved),
@@ -243,36 +276,26 @@ function declaredSchemaFor(
   return undefined;
 }
 
-/** Collect every sigil link in a value, with its JSON path. */
-function linksWithPaths(
-  v: unknown,
-  base: string[] = [],
-  out: { link: DecodedLink; at: string }[] = [],
-  depth = 10,
-): { link: DecodedLink; at: string }[] {
-  if (depth < 0) return out;
-  const link = parseSigilLink(v);
-  if (link) {
-    out.push({ link, at: base.join("/") });
-    return out;
-  }
-  if (isObj(v)) {
-    for (const [k, val] of Object.entries(v)) {
-      linksWithPaths(val, [...base, k], out, depth - 1);
-    }
-  } else if (Array.isArray(v)) {
-    v.forEach((val, i) =>
-      linksWithPaths(val, [...base, String(i)], out, depth - 1)
-    );
-  }
-  return out;
-}
+/**
+ * How far a detail's link walks reach. A detail describes ONE entity for a
+ * reader, and the rendering it feeds is itself depth-bounded, so a link past
+ * ten levels of nesting is one no reader of this output would have seen
+ * anyway. That depth is small enough to bound the walk's work on its own —
+ * see `LinkWalkBounds` for why a larger one would not be — so no node count is
+ * imposed on top of it.
+ */
+const DETAIL_LINK_WALK: LinkWalkBounds = {
+  maxDepth: 10,
+  maxNodes: Number.POSITIVE_INFINITY,
+};
 
 interface DetailContext {
   ownDid: string;
   labelOf: Map<string, { kind: EntityKind; label: string }>;
+
   /** entityId → { ownerId, key } naming it in its owner piece's value. */
   nameOf: Map<string, { owner: string; key: string }>;
+
   moduleIndex: Map<string, ModuleEntry>;
   docs: Map<string, EntityDocument>;
 }
@@ -298,7 +321,7 @@ function detailFromDoc(
   const spec = importSpecifier(value);
   const named = ctx.nameOf.get(id);
 
-  // --- context-aware label + role ----------------------------------------
+  // context-aware label + role
   // Label comes from the shared index (it already folds in import/context/legacy
   // refinements); role is computed here.
   let label = ctx.labelOf.get(id)?.label ?? c.label;
@@ -316,17 +339,25 @@ function detailFromDoc(
     role = roleFor(c.kind, c.owned);
   }
 
-  // --- lineage, resolved to target labels --------------------------------
+  // lineage, resolved to target labels
   const lineage: EntityDetail["lineage"] = {};
   if (c.lineage.argument) {
     lineage.argument = refTo(c.lineage.argument, ctx);
   }
   if (c.lineage.owner) lineage.owner = refTo(c.lineage.owner, ctx);
   // Legacy: surface the result cell + the owned-cell manifest from the value.
-  if (c.kind === "piece" && c.regime === "legacy" && isObj(value)) {
+  if (c.kind === "piece" && c.regime === "legacy" && isObjectNotArray(value)) {
     const rid = legacyResultId(value);
     if (rid) lineage.result = refTo(rid, ctx);
-    const internalIds = linksWithPaths(value.internal)
+    // The links alone. A detail is a rendering bounded to a depth its own
+    // output would not have shown past, so `tooDeep` and `budgetExhausted`
+    // change nothing a reader could act on. `opaque` is not covered by that
+    // argument — a `ProblematicValue` holds the state it wrapped out of a
+    // structural walk's reach, so a link inside one is missing from this list
+    // and nothing here says so. Reporting it needs a field on `EntityDetail`
+    // and a place in what renders it, which is a change to the detail rather
+    // than to the walk.
+    const internalIds = linksWithPaths(value.internal, DETAIL_LINK_WALK).links
       .map((l) => l.link.id).filter((x): x is string => !!x);
     if (internalIds.length) {
       lineage.internal = internalIds.map((cid) => refTo(cid, ctx)!);
@@ -352,28 +383,34 @@ function detailFromDoc(
     lineage.pattern = ref;
   }
 
-  // --- outgoing links, resolved ------------------------------------------
-  const outLinks: LinkRef[] = linksWithPaths(value).map(({ link, at }) => {
-    const external = !!link.space && link.space !== ctx.ownDid &&
-      link.space !== `did:key:${ctx.ownDid}`;
-    return {
-      id: link.id ?? "?",
-      label: link.id ? ctx.labelOf.get(link.id)?.label : undefined,
-      kind: link.id ? ctx.labelOf.get(link.id)?.kind : undefined,
-      space: link.space,
-      path: link.path ? [...link.path] : undefined,
-      external,
-      at,
-    };
-  });
+  // outgoing links, resolved. The links alone, for the reason above — and
+  // with the same gap: a link inside a value the walk could read only in part
+  // is absent from this list without the list saying so.
+  const outLinks: LinkRef[] = linksWithPaths(value, DETAIL_LINK_WALK).links.map(
+    ({ link, at }) => {
+      const external = !!link.space && link.space !== ctx.ownDid &&
+        link.space !== `did:key:${ctx.ownDid}`;
+      return {
+        id: link.id ?? "?",
+        label: link.id ? ctx.labelOf.get(link.id)?.label : undefined,
+        kind: link.id ? ctx.labelOf.get(link.id)?.kind : undefined,
+        space: link.space,
+        path: link.path ? [...link.path] : undefined,
+        external,
+        at: at.join("/"),
+      };
+    },
+  );
 
-  // --- module source -----------------------------------------------------
+  // module source
   let code: string | undefined;
   if (isModuleValue(value)) code = value.code;
 
-  // --- schema / ifc / cfc ------------------------------------------------
+  // schema / ifc / cfc
   let schema = doc.schema !== undefined ? annotate(doc.schema) : undefined;
-  let schemaKeys = isObj(doc.schema) ? Object.keys(doc.schema) : undefined;
+  let schemaKeys = isObjectNotArray(doc.schema)
+    ? Object.keys(doc.schema)
+    : undefined;
   let schemaSource: string | undefined;
   let streamPayload: boolean | undefined;
   // A stream / named owned cell has no own schema — resolve the DECLARED one
@@ -389,7 +426,9 @@ function detailFromDoc(
         : `declared in owner schema · ${named.key}`;
     }
   }
-  const ifc = isObj(value) && "ifc" in value ? annotate(value.ifc) : undefined;
+  const ifc = isObjectNotArray(value) && "ifc" in value
+    ? annotate(value.ifc)
+    : undefined;
   const cfc = parseCfc(doc.cfc);
 
   return {
@@ -439,6 +478,14 @@ function roleFor(kind: EntityKind, owned: boolean): string {
   }
 }
 
+/** A capped detail pass over a space, with how far its scan reached. */
+export interface DetailListing {
+  /** The entities detailed, at most `extent.limit` of them. */
+  details: EntityDetail[];
+
+  extent: ScanExtent;
+}
+
 /**
  * Build rich details for every entity in a space — one reconstruction pass,
  * resolving link-target labels and owner→child context names space-wide.
@@ -446,32 +493,37 @@ function roleFor(kind: EntityKind, owned: boolean): string {
 export function buildAllDetails(
   space: SpaceDb,
   opts: { branch?: string; scope?: string; limit?: number } = {},
-): EntityDetail[] {
+): DetailListing {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const limit = opts.limit ?? 5000;
+  const limit = scanLimit(opts.limit);
   const ownDid = (space.path.split("/").pop() ?? "").replace(/\.sqlite$/, "");
 
-  const rows = space.db
-    .prepare(
-      `SELECT id, count(*) revisions FROM revision
-       WHERE branch = ? AND scope_key = ?
-       GROUP BY id ORDER BY revisions DESC LIMIT ?`,
-    )
-    .all<{ id: string; revisions: number }>(branch, scope, limit);
+  // The entities a read on this branch can see, tombstones already dropped —
+  // the same set the pass below describes, so `extent.total` counts what a
+  // complete pass would return and truncation is a fact rather than an
+  // inference from a count landing on the cap.
+  const rows = visibleEntityRows(space, { branch, scope });
+  const truncated = rows.length > limit;
+  const scanned = truncated ? rows.slice(0, limit) : rows;
+  let unreadable = 0;
 
   // Pass 1: reconstruct + module index + base labels.
   const docs = new Map<string, EntityDocument>();
   const moduleIndex = new Map<string, ModuleEntry>();
   const labelOf = new Map<string, { kind: EntityKind; label: string }>();
-  for (const r of rows) {
-    let doc: EntityDocument | undefined;
-    try {
-      doc = reconstructDocument(space, { id: r.id, branch, scope });
-    } catch {
-      doc = undefined;
+  for (const r of scanned) {
+    const outcome = reconstructOutcome(space, { id: r.id, branch, scope });
+    if (outcome.status !== "present") {
+      // Enumerated but not described: counted, never silently dropped, or a pass
+      // that skipped it would report itself complete over a smaller set. It
+      // still earns a label, so a link INTO it resolves to why it cannot be
+      // read rather than to nothing.
+      labelOf.set(r.id, absentEntity(outcome.status));
+      unreadable++;
+      continue;
     }
-    if (!doc) continue;
+    const doc = outcome.document;
     docs.set(r.id, doc);
     const v = doc.value;
     if (isModuleValue(v)) {
@@ -494,9 +546,11 @@ export function buildAllDetails(
     // Only MODERN piece result values carry semantic names as keys (createProfile,
     // profiles, …). A legacy PROCESS cell's top-level keys are control-plane
     // ($TYPE/resultRef/internal/argument) — naming children by those is noise.
-    if (c.kind === "piece" && c.regime === "modern" && isObj(doc.value)) {
+    if (
+      c.kind === "piece" && c.regime === "modern" && isObjectNotArray(doc.value)
+    ) {
       for (const [key, val] of Object.entries(doc.value)) {
-        const tid = parseSigilLink(val)?.id;
+        const tid = decodedLinkOf(val)?.id;
         if (tid && !nameOf.has(tid)) nameOf.set(tid, { owner: id, key });
       }
     }
@@ -516,21 +570,26 @@ export function buildAllDetails(
 
   const ctx: DetailContext = { ownDid, labelOf, nameOf, moduleIndex, docs };
 
-  // Pass 3: per-entity detail + version log.
+  // Pass 3: per-entity detail + version log, read from the branch that OWNS the
+  // entity's visible row. An entity a child branch INHERITED has its writes on
+  // the parent, so local-only rows would describe it with no history at all;
+  // one the child OVERRODE has a parent log the child's value never came
+  // through, and reporting it would credit this entity with revisions no read
+  // from here can reach. Both are the same rule — nearest branch wins — which
+  // `visibleEntityRows` already resolved, so each row carries its own link.
+  const ownerOf = new Map(scanned.map((r) => [r.id, r.link]));
   const versionStmt = space.db.prepare(
     `SELECT r.seq, r.op, c.session_id, c.created_at
      FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
-     WHERE r.branch = ? AND r.id = ? AND r.scope_key = ?
+     WHERE r.branch = ? AND r.id = ? AND r.scope_key = ? AND r.seq <= ?
      ORDER BY r.seq ASC, r.op_index ASC`,
   );
   const out: EntityDetail[] = [];
   for (const [id, doc] of docs) {
-    const versions = versionStmt
-      .all<{ seq: number; op: string; session_id: string; created_at: string }>(
-        branch,
-        id,
-        scope,
-      )
+    const owner = ownerOf.get(id);
+    const versions = (owner === undefined ? [] : versionStmt.all<
+      { seq: number; op: string; session_id: string; created_at: string }
+    >(owner.branch, id, scope, owner.atSeq))
       .map((v) => ({
         seq: v.seq,
         op: v.op,
@@ -548,8 +607,17 @@ export function buildAllDetails(
     "owned-cell": 4,
     "free-cell": 5,
     unknown: 6,
+    deleted: 7,
   };
-  return out.sort(
-    (a, b) => order[a.kind] - order[b.kind] || (b.revisions - a.revisions),
-  );
+  return {
+    details: out.sort(
+      (a, b) => order[a.kind] - order[b.kind] || (b.revisions - a.revisions),
+    ),
+    extent: {
+      limit,
+      total: rows.length,
+      truncated,
+      unreadable,
+    },
+  };
 }

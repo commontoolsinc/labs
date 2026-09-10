@@ -1,18 +1,22 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assertRejects } from "@std/assert";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
-import { defer } from "@commonfabric/utils/defer";
+import type { MIME, URI } from "@commonfabric/memory/interface";
+import {
+  type ClientCommit,
+  type SessionSync,
+  toDocumentPath,
+} from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import type { Server as MemoryV2Server } from "@commonfabric/memory/v2/server";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import {
-  type SessionFactory,
-  setConflictAdmissionEnabled,
-  setConflictAdmissionMode,
-  StorageManager as V2StorageManager,
-} from "../src/storage/v2.ts";
+import { defer } from "@commonfabric/utils/defer";
+import { getLogger } from "@commonfabric/utils/logger";
+
 import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { registerCommitRejectionListener } from "../src/storage/reactivity-log.ts";
 import type {
   IExtendedStorageTransaction,
   IReadActivity,
@@ -20,8 +24,12 @@ import type {
   StorageNotification,
   StorageTransactionRejected,
 } from "../src/storage/interface.ts";
-import type { MIME, URI } from "@commonfabric/memory/interface";
-import type { SessionSync } from "@commonfabric/memory/v2";
+import {
+  type SessionFactory,
+  setConflictAdmissionEnabled,
+  type SpaceReplica,
+  StorageManager as V2StorageManager,
+} from "../src/storage/v2.ts";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
 import { testSessionOpenAuthFactory } from "./memory-v2-test-utils.ts";
 
@@ -102,29 +110,6 @@ const staleReadSource = (uri: URI, seq: number) => ({
   },
 });
 
-type RetryRepairHarness = {
-  noteCaughtUpLocalSeq(localSeq: number | undefined): void;
-  waitForCaughtUpLocalSeq(localSeq: number): Promise<void>;
-  rejectCaughtUpLocalSeqWaiters(error: Error): void;
-  closeNow(): void;
-  waitForConflictReadRepair(
-    rejection: StorageTransactionRejected,
-  ): Promise<void>;
-};
-
-type WatchRefreshHarness = {
-  closeNow(): void;
-  refreshWatchSet(
-    entries: Iterable<[
-      { id: URI; type: MIME; scope?: string },
-      { path: string[]; schema: false },
-    ]>,
-  ): Promise<{ ok?: unknown; error?: { message?: string } }>;
-};
-
-const retryRepairHarness = (replica: unknown): RetryRepairHarness =>
-  replica as RetryRepairHarness;
-
 const syntheticConflict = (
   uri: URI,
   readyToRetry: () => Promise<void>,
@@ -132,20 +117,14 @@ const syntheticConflict = (
   name: "ConflictError",
   message: "synthetic conflict",
   transaction: {
-    iss: space,
-    cmd: "/memory/transact",
-    sub: space,
-    args: { changes: {} },
-    prf: [],
+    localSeq: 0,
+    reads: { confirmed: [], pending: [] },
+    operations: [],
   },
   conflict: {
     space,
     the: "application/json",
     of: uri,
-    expected: null,
-    actual: null,
-    existsInHistory: false,
-    history: [],
   },
   readyToRetry,
 });
@@ -588,13 +567,6 @@ describe("Memory v2 storage notifications", () => {
       ) => Promise<{ ok?: unknown; error?: unknown }>;
     };
     const repairStarted = defer<void>();
-    const repairHarness = retryRepairHarness(replica);
-    const originalWaitForConflictReadRepair = repairHarness
-      .waitForConflictReadRepair.bind(repairHarness);
-    repairHarness.waitForConflictReadRepair = async (rejection) => {
-      repairStarted.resolve();
-      await originalWaitForConflictReadRepair(rejection);
-    };
     const firstUri = `of:memory-v2-close-retry-a-${Date.now()}` as URI;
     const secondUri = `of:memory-v2-close-retry-b-${Date.now()}` as URI;
     const factAddress = { id: firstUri, type: "application/json" as MIME };
@@ -625,6 +597,11 @@ describe("Memory v2 storage notifications", () => {
       ],
     });
 
+    // The push path notifies the rejection's sources and then finalizes the
+    // rejection, which reaches the read-repair wait with no await between,
+    // so the listener fires as the repair starts.
+    const source = staleReadSource(firstUri, 1);
+    registerCommitRejectionListener(source, () => repairStarted.resolve());
     const commitPromise = replica.commitNative({
       operations: [{
         op: "set",
@@ -632,7 +609,7 @@ describe("Memory v2 storage notifications", () => {
         type: "application/json",
         value: { value: { version: 3 } },
       }],
-    }, staleReadSource(firstUri, 1));
+    }, source);
     expect(replica.get(factAddress)?.is).toEqual({ value: { version: 3 } });
 
     // Close only after the server conflict has reached the read-repair path.
@@ -655,7 +632,8 @@ describe("Memory v2 storage notifications", () => {
 
   it("rejects pending caught-up waiters when storage closes", async () => {
     const provider = storageManager.open(space);
-    const harness = retryRepairHarness(provider.replica);
+    const replica = provider.replica as SpaceReplica;
+    const harness = replica.accessForTestingOnly;
 
     const readyAtTwo = harness.waitForCaughtUpLocalSeq(2);
     const readyAtThree = harness.waitForCaughtUpLocalSeq(3);
@@ -663,7 +641,7 @@ describe("Memory v2 storage notifications", () => {
 
     harness.noteCaughtUpLocalSeq(2);
     await readyAtTwo;
-    harness.closeNow();
+    replica.closeNow();
     await rejectsAtThree;
 
     await assertRejects(
@@ -675,7 +653,7 @@ describe("Memory v2 storage notifications", () => {
 
   it("swallows a rejecting readyToRetry during read repair", async () => {
     const provider = storageManager.open(space);
-    const harness = retryRepairHarness(provider.replica);
+    const harness = (provider.replica as SpaceReplica).accessForTestingOnly;
     const retryError = new Error("retry unavailable");
     let called = 0;
 
@@ -696,144 +674,6 @@ describe("Memory v2 storage notifications", () => {
     expect(called).toBe(1);
   });
 
-  it("hold-mode local check flags only provably-stale confirmed reads", async () => {
-    const provider = storageManager.open(space);
-    const replica = provider.replica as unknown as {
-      commitReadsStaleLocally: (commit: unknown) => boolean;
-    };
-    const uri = `of:hold-check-${Date.now()}` as URI;
-
-    // Establish a confirmed record with seq > 0.
-    await remoteSession.transact({
-      localSeq: remoteLocalSeq++,
-      reads: { confirmed: [], pending: [] },
-      operations: [{ op: "set", id: uri, value: { value: { v: 1 } } }],
-    });
-    await provider.sync(uri);
-
-    const read = (seq: number) => ({
-      reads: { confirmed: [{ id: uri, path: [], seq }], pending: [] },
-      operations: [],
-    });
-    // seq 0 is below the confirmed base -> provably stale.
-    expect(replica.commitReadsStaleLocally(read(0))).toBe(true);
-    // a seq at/above the confirmed base -> not provably stale, so it is sent.
-    expect(replica.commitReadsStaleLocally(read(Number.MAX_SAFE_INTEGER))).toBe(
-      false,
-    );
-  });
-
-  it("hold mode reverts a held commit only when its read is actually stale", async () => {
-    setConflictAdmissionMode("hold");
-    try {
-      const provider = storageManager.open(space);
-      const replica = provider.replica as typeof provider.replica & {
-        commitNative: (
-          transaction: unknown,
-          source?: unknown,
-        ) => Promise<{ ok?: unknown; error?: { name?: string } }>;
-        recordStaleFloor: (commit: unknown, localSeq: number) => void;
-        noteCaughtUpLocalSeq: (localSeq: number | undefined) => void;
-      };
-      const uri = `of:hold-revert-${Date.now()}` as URI;
-
-      await remoteSession.transact({
-        localSeq: remoteLocalSeq++,
-        reads: { confirmed: [], pending: [] },
-        operations: [{ op: "set", id: uri, value: { value: { v: 1 } } }],
-      });
-      await provider.sync(uri);
-
-      // Floor uri so a new commit reading it is held until caughtUpLocalSeq>=5.
-      replica.recordStaleFloor({
-        localSeq: 5,
-        reads: { confirmed: [{ id: uri, path: [], seq: 0 }], pending: [] },
-        operations: [{ op: "set", id: uri, value: { value: { v: 1 } } }],
-      }, 5);
-
-      const commitPromise = replica.commitNative({
-        operations: [{
-          op: "set",
-          id: uri,
-          type: "application/json",
-          value: { value: { v: 2 } },
-        }],
-      }, staleReadSource(uri, 0));
-
-      // Held: not sent, not settled, until we observe the catch-up seq.
-      let settled = false;
-      void commitPromise.then(() => {
-        settled = true;
-      });
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(settled).toBe(false);
-
-      replica.noteCaughtUpLocalSeq(5);
-      const result = await commitPromise;
-      // Read seq 0 is below the confirmed base, so the local check reverts it
-      // (instead of sending a doomed commit).
-      expect(result.ok).toBeFalsy();
-      expect(result.error?.name).toBe("ConflictError");
-    } finally {
-      setConflictAdmissionMode(undefined);
-    }
-  });
-
-  it("public close settles a commit held by conflict admission", async () => {
-    setConflictAdmissionMode("hold");
-    try {
-      const provider = storageManager.open(space);
-      const replica = provider.replica as typeof provider.replica & {
-        commitNative: (
-          transaction: unknown,
-          source?: unknown,
-        ) => Promise<{ ok?: unknown; error?: { name?: string } }>;
-        recordStaleFloor: (commit: unknown, localSeq: number) => void;
-      };
-      const uri = `of:hold-close-${Date.now()}` as URI;
-
-      replica.recordStaleFloor({
-        localSeq: 5,
-        reads: { confirmed: [{ id: uri, path: [], seq: 0 }], pending: [] },
-        operations: [{ op: "set", id: uri, value: { value: { v: 1 } } }],
-      }, 5);
-
-      const commitPromise = replica.commitNative({
-        operations: [{
-          op: "set",
-          id: uri,
-          type: "application/json",
-          value: { value: { v: 2 } },
-        }],
-      }, staleReadSource(uri, 0));
-
-      let settled = false;
-      void commitPromise.then(() => {
-        settled = true;
-      });
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(settled).toBe(false);
-
-      const closeAndCommit = Promise.all([
-        storageManager.close(),
-        commitPromise,
-      ]);
-      const [, result] = await Promise.race([
-        closeAndCommit,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("close timed out")), 250)
-        ),
-      ]);
-
-      expect(result.ok).toBeFalsy();
-      expect(result.error?.name).toBe("ConflictError");
-    } finally {
-      setConflictAdmissionMode(undefined);
-    }
-  });
-
   it("closes a watch refresh view that resolves after replica close", async () => {
     const sync: SessionSync = {
       type: "sync",
@@ -846,8 +686,16 @@ describe("Memory v2 storage notifications", () => {
     const client = {
       close: () => Promise.resolve(),
     } as unknown as MemoryV2Client.Client;
+    const watchStarted = Promise.withResolvers<void>();
+    const watchResponse = Promise.withResolvers<{
+      view: MemoryV2Client.WatchView;
+      sync: SessionSync;
+    }>();
     const session = {
-      watchAddSync: () => Promise.resolve({ view, sync }),
+      watchAddSync: () => {
+        watchStarted.resolve();
+        return watchResponse.promise;
+      },
     } as unknown as MemoryV2Client.SpaceSession;
     const sessionFactory: SessionFactory = {
       create: () => Promise.resolve({ client, session }),
@@ -859,61 +707,106 @@ describe("Memory v2 storage notifications", () => {
     }
     const testStorageManager = new TestStorageManager();
     const provider = testStorageManager.open(space);
-    const replica = provider.replica as unknown as WatchRefreshHarness;
+    const replica = provider.replica as SpaceReplica;
 
-    replica.closeNow();
-    const result = await replica.refreshWatchSet([[
+    const refresh = replica.accessForTestingOnly.refreshWatchSet([[
       { id: "of:late-refresh" as URI, type: "application/json" as MIME },
       { path: [], schema: false },
     ]]);
+    await watchStarted.promise;
+    replica.closeNow();
+    watchResponse.resolve({ view, sync });
+    const result = await refresh;
 
     expect(result.error?.message).toBe("memory replica closed");
     expect((await view.subscribeSync().next()).done).toBe(true);
     await testStorageManager.closeNow();
   });
 
+  it("records a refresh's request span when the request itself fails", async () => {
+    // The refresh's sub-spans record in `finally` blocks, like its `total`:
+    // a failed refresh paid for its request, and a success-only span would
+    // leave that cost in `total` alone, so the halves would not add up
+    // across outcomes. Counts only — a duration is a property of the
+    // machine.
+    const timing = getLogger("storage.v2");
+    const counts = () => ({
+      watchAdd: timing.getTimeStats("watchRefresh", "watchAddSync")?.count ??
+        0,
+      apply: timing.getTimeStats("watchRefresh", "applySessionSync")?.count ??
+        0,
+      total: timing.getTimeStats("watchRefresh", "total")?.count ?? 0,
+    });
+    const client = {
+      close: () => Promise.resolve(),
+    } as unknown as MemoryV2Client.Client;
+    const session = {
+      watchAddSync: () => Promise.reject(new Error("scripted watch failure")),
+    } as unknown as MemoryV2Client.SpaceSession;
+    const sessionFactory: SessionFactory = {
+      create: () => Promise.resolve({ client, session }),
+    };
+    class TestStorageManager extends V2StorageManager {
+      constructor() {
+        super({ as: signer, memoryHost: new URL("memory://") }, sessionFactory);
+      }
+    }
+    const testStorageManager = new TestStorageManager();
+    const provider = testStorageManager.open(space);
+    const replica = provider.replica as SpaceReplica;
+
+    const before = counts();
+    const result = await replica.accessForTestingOnly.refreshWatchSet([[
+      { id: "of:failed-refresh" as URI, type: "application/json" as MIME },
+      { path: [], schema: false },
+    ]]);
+    const after = counts();
+
+    expect(result.error?.message).toBe("scripted watch failure");
+    expect(after.watchAdd - before.watchAdd).toBe(1);
+    expect(after.apply - before.apply).toBe(0);
+    expect(after.total - before.total).toBe(1);
+    await testStorageManager.closeNow();
+  });
+
   it("admission control records, thresholds, and prunes a stale floor", () => {
     const provider = storageManager.open(space);
-    const replica = provider.replica as unknown as {
-      recordStaleFloor: (commit: unknown, localSeq: number) => void;
-      preemptThreshold: (commit: unknown) => number | undefined;
-      noteCaughtUpLocalSeq: (localSeq: number | undefined) => void;
-      reset: () => void;
-    };
-    const uri = `of:admission-floor-${Date.now()}`;
-    const reading = {
+    const replica = provider.replica as SpaceReplica;
+    const admission = replica.accessForTestingOnly;
+    const uri = `of:admission-floor-${Date.now()}` as URI;
+    const reading: ClientCommit = {
       localSeq: 9,
-      reads: { confirmed: [{ id: uri, path: [], seq: 0 }], pending: [] },
+      reads: {
+        confirmed: [{ id: uri, path: toDocumentPath([]), seq: 0 }],
+        pending: [],
+      },
       operations: [{ op: "set", id: uri, value: { value: { v: 2 } } }],
     };
 
     // Nothing stale yet -> the read is admitted.
-    expect(replica.preemptThreshold(reading)).toBeUndefined();
+    expect(admission.preemptThreshold(reading)).toBeUndefined();
 
     // A conflict at localSeq 7 marks uri stale until caughtUpLocalSeq >= 7.
-    replica.recordStaleFloor(reading, 7);
-    expect(replica.preemptThreshold(reading)).toBe(7);
+    admission.recordStaleFloor(reading, 7);
+    expect(admission.preemptThreshold(reading)).toBe(7);
 
     // Catching up to the floor makes the id fresh again -> admitted.
-    replica.noteCaughtUpLocalSeq(7);
-    expect(replica.preemptThreshold(reading)).toBeUndefined();
+    admission.noteCaughtUpLocalSeq(7);
+    expect(admission.preemptThreshold(reading)).toBeUndefined();
 
     // A reset starts a new replica epoch; stale floors from the old epoch must
     // not hold or pre-empt post-reset commits that read the same id.
-    replica.recordStaleFloor(reading, 8);
-    expect(replica.preemptThreshold(reading)).toBe(8);
+    admission.recordStaleFloor(reading, 8);
+    expect(admission.preemptThreshold(reading)).toBe(8);
     replica.reset();
-    expect(replica.preemptThreshold(reading)).toBeUndefined();
+    expect(admission.preemptThreshold(reading)).toBeUndefined();
   });
 
   it("reset rejects caught-up waiters from the previous replica epoch", async () => {
     const provider = storageManager.open(space);
-    const replica = provider.replica as unknown as {
-      waitForCaughtUpLocalSeq: (localSeq: number) => Promise<void>;
-      reset: () => void;
-    };
+    const replica = provider.replica as SpaceReplica;
 
-    const wait = replica.waitForCaughtUpLocalSeq(3);
+    const wait = replica.accessForTestingOnly.waitForCaughtUpLocalSeq(3);
     replica.reset();
 
     await expect(wait).rejects.toThrow("memory replica reset");
@@ -930,15 +823,17 @@ describe("Memory v2 storage notifications", () => {
         ) => Promise<
           { ok?: unknown; error?: { name?: string; message?: string } }
         >;
-        recordStaleFloor: (commit: unknown, localSeq: number) => void;
-        noteCaughtUpLocalSeq: (localSeq: number | undefined) => void;
+        accessForTestingOnly: SpaceReplica["accessForTestingOnly"];
       };
       const uri = `of:admission-preempt-${Date.now()}` as URI;
 
       // Simulate a prior conflict that marked uri stale until caughtUpLocalSeq>=5.
-      replica.recordStaleFloor({
+      replica.accessForTestingOnly.recordStaleFloor({
         localSeq: 5,
-        reads: { confirmed: [{ id: uri, path: [], seq: 0 }], pending: [] },
+        reads: {
+          confirmed: [{ id: uri, path: toDocumentPath([]), seq: 0 }],
+          pending: [],
+        },
         operations: [{ op: "set", id: uri, value: { value: { version: 1 } } }],
       }, 5);
 
@@ -961,7 +856,7 @@ describe("Memory v2 storage notifications", () => {
       await Promise.resolve();
       expect(settled).toBe(false);
 
-      replica.noteCaughtUpLocalSeq(5);
+      replica.accessForTestingOnly.noteCaughtUpLocalSeq(5);
       const result = await commitPromise;
       expect(result.ok).toBeFalsy();
       expect(result.error?.name).toBe("ConflictError");
@@ -1005,6 +900,41 @@ describe("Memory v2 storage notifications", () => {
       schema: false,
     });
     expect(subscription.pulls).toHaveLength(1);
+  });
+
+  it("times the replica's application of a pushed frame under its own key", async () => {
+    // `watchRefresh/applySessionSync` covers the frames a refresh brought
+    // back; frames the server PUSHES apply off the subscription iterator
+    // under `watchPush/applySessionSync`. Both keys are named in
+    // docs/development/debugging/profiling.md; this pins the push one.
+    const subscription = new Subscription();
+    storageManager.subscribe(subscription);
+    const uri = `of:memory-v2-push-timing-${Date.now()}` as URI;
+    const write = (n: number) =>
+      remoteSession.transact({
+        localSeq: remoteLocalSeq++,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: uri, value: { value: { n } } }],
+      });
+    await write(1);
+    const provider = storageManager.open(space);
+    await provider.sync(uri, { path: [], schema: true });
+
+    const timing = getLogger("storage.v2");
+    const pushApplies = () =>
+      timing.getTimeStats("watchPush", "applySessionSync")?.count ?? 0;
+    const before = pushApplies();
+    await write(2);
+    await waitFor(
+      () =>
+        subscription.notifications.some((notification) =>
+          notification.type === "integrate" &&
+          "changes" in notification &&
+          [...notification.changes].some((change) => change.address.id === uri)
+        ),
+      1_000,
+    );
+    expect(pushApplies() - before).toBeGreaterThanOrEqual(1);
   });
 
   it("expands subscribed graph state to previously existing hidden docs after a root retarget", async () => {

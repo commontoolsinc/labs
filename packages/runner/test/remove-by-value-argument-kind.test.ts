@@ -15,7 +15,7 @@ import { Runtime } from "../src/runtime.ts";
 //
 // These cases pin the distinction for object elements, and pin that an element
 // with no deterministic address is still removable through its positional cell.
-// See docs/development/migrating-collection-writes.md.
+// See docs/features/migrating-collection-writes.md.
 
 const signer = await Identity.fromPassphrase("remove-by-value-argument-kind");
 const space = signer.did();

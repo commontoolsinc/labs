@@ -1,14 +1,20 @@
-import { describe, it } from "@std/testing/bdd";
-import type { CfcAtom } from "@commonfabric/api/cfc";
-import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import type { CfcAtom } from "@commonfabric/api/cfc";
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
+
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { atomPropagationClass } from "../src/cfc/atom-classes.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-flow-integrity");
 const space = signer.did();
@@ -24,17 +30,19 @@ const certified = (policy: string) => ({
   policy,
 });
 
-// S16 phase C: integrity propagation through the default transition —
-// class-aware hereditary meet (§8.9.3/§3.1.6.2: an output is certified only
-// when every observed input was) plus runtime-minted TransformedBy
-// derivation provenance.
 describe("CFC flow labels: integrity propagation (phase C)", () => {
+  // S16 phase C: integrity propagation through the default transition —
+  // class-aware hereditary meet (§8.9.3/§3.1.6.2: an output is certified only
+  // when every observed input was) plus runtime-minted TransformedBy derivation
+  // provenance.
+
   const makeRuntime = () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      // Persisting flow labels is what writes the `origin: "derived"` entries
+      // that `derivedIntegrity` reads back in every test here.
       cfcFlowLabels: "persist",
     });
     return { storageManager, runtime };
@@ -48,11 +56,12 @@ describe("CFC flow labels: integrity propagation (phase C)", () => {
     const seed = runtime.edit();
     const cell = runtime.getCell(space, cause, undefined, seed);
     const id = cell.getAsNormalizedFullLink().id;
+    writeSeedEnvelopeDoc(seed, space);
     seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
       value: { n: 1 },
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{ path: [], label: { integrity } }],
@@ -152,18 +161,24 @@ describe("CFC flow labels: integrity propagation (phase C)", () => {
     try {
       await seedDoc(runtime, "flow-wl-a", [certified("p1")]);
       // Doc B carries a confidentiality label (so it resolves) but NO
-      // certification.
+      // certification. The clause names this space, the audience a document
+      // living in it already reaches, so the label flows onto the output
+      // without that output declaring a ceiling of its own.
       const seed = runtime.edit();
       const bCell = runtime.getCell(space, "flow-wl-b", undefined, seed);
       const bId = bCell.getAsNormalizedFullLink().id;
+      writeSeedEnvelopeDoc(seed, space);
       seed.writeOrThrow({ space, scope: "space", id: bId, path: [] }, {
         value: { n: 2 },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
-            entries: [{ path: [], label: { confidentiality: ["plain"] } }],
+            entries: [{
+              path: [],
+              label: { confidentiality: [cfcAtom.space(space)] },
+            }],
           },
         },
       });
@@ -188,7 +203,7 @@ describe("CFC flow labels: integrity propagation (phase C)", () => {
       const conf = entriesOf(storageManager, out.getAsNormalizedFullLink().id)
         .filter((e) => e.origin === "derived")
         .flatMap((e) => e.label.confidentiality ?? []);
-      expect(conf).toContainEqual("plain");
+      expect(conf).toContainEqual(cfcAtom.space(space));
     } finally {
       await runtime.dispose();
       await storageManager.close();

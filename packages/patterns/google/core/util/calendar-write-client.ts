@@ -68,22 +68,31 @@ export interface CalendarWriteClientConfig {
 export interface CreateEventParams {
   /** Calendar ID (use "primary" for main calendar) */
   calendarId: string;
+
   /** Event title/summary (required) */
   summary: string;
+
   /** Start time - ISO datetime string or Date object */
   start: string | Date;
+
   /** End time - ISO datetime string or Date object */
   end: string | Date;
+
   /** Event description (optional) */
   description?: string;
+
   /** Location (optional) */
   location?: string;
+
   /** Attendee email addresses (optional) */
   attendees?: string[];
+
   /** Whether to send email updates to attendees */
   sendUpdates?: "all" | "externalOnly" | "none";
+
   /** For all-day events, use date instead of dateTime */
   isAllDay?: boolean;
+
   /**
    * Recurrence rules in RFC 5545 RRULE format.
    * Example: ["RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;UNTIL=20240531T235959Z"]
@@ -94,16 +103,22 @@ export interface CreateEventParams {
 export interface UpdateEventParams {
   /** Event title/summary */
   summary?: string;
+
   /** Start time - ISO datetime string or Date object */
   start?: string | Date;
+
   /** End time - ISO datetime string or Date object */
   end?: string | Date;
+
   /** Event description */
   description?: string;
+
   /** Location */
   location?: string;
+
   /** Attendee email addresses (replaces existing) */
   attendees?: string[];
+
   /** For all-day events */
   isAllDay?: boolean;
 }
@@ -120,14 +135,19 @@ export type RSVPStatus = "accepted" | "declined" | "tentative";
 export interface BatchProgress {
   /** Total events to process */
   total: number;
+
   /** Events processed so far */
   processed: number;
+
   /** Events successfully created */
   succeeded: number;
+
   /** Events that failed */
   failed: number;
+
   /** Percentage complete (0-100) */
   percentComplete: number;
+
   /** Current event being processed */
   currentEvent?: string;
 }
@@ -138,10 +158,13 @@ export interface BatchProgress {
 export interface BatchEventResult {
   /** Client-provided event ID (for correlation) */
   clientId: string;
+
   /** Whether the event was created successfully */
   success: boolean;
+
   /** The created event (if successful) */
   event?: CalendarEventResult;
+
   /** Error message (if failed) */
   error?: string;
 }
@@ -152,33 +175,46 @@ export interface BatchEventResult {
 export interface BatchCreateEventsParams {
   /** Calendar ID (use "primary" for main calendar) */
   calendarId: string;
+
   /** Events to create */
   events: Array<{
     /** Client-provided ID for correlation in results */
     clientId: string;
+
     /** Event title/summary */
     summary: string;
+
     /** Start time - ISO datetime string or Date object */
     start: string | Date;
+
     /** End time - ISO datetime string or Date object */
     end: string | Date;
+
     /** Event description */
     description?: string;
+
     /** Location */
     location?: string;
+
     /** Attendee email addresses */
     attendees?: string[];
+
     /** For all-day events */
     isAllDay?: boolean;
+
     /** Recurrence rules in RFC 5545 RRULE format */
     recurrence?: string[];
   }>;
+
   /** Whether to send email updates to attendees */
   sendUpdates?: "all" | "externalOnly" | "none";
+
   /** Batch size (default: 10, max: 50) */
   batchSize?: number;
+
   /** Delay between batches in ms (default: 100) */
   batchDelayMs?: number;
+
   /** Progress callback */
   onProgress?: (progress: BatchProgress) => void;
 }
@@ -189,10 +225,13 @@ export interface BatchCreateEventsParams {
 export interface BatchCreateEventsResult {
   /** Total events processed */
   total: number;
+
   /** Number of events successfully created */
   succeeded: number;
+
   /** Number of events that failed */
   failed: number;
+
   /** Per-event results */
   results: BatchEventResult[];
 }
@@ -200,28 +239,36 @@ export interface BatchCreateEventsResult {
 export interface CalendarEventResult {
   /** Event ID */
   id: string;
+
   /** Event status */
   status: string;
+
   /** HTML link to the event */
   htmlLink: string;
+
   /** Event summary/title */
   summary?: string;
+
   /** Event description */
   description?: string;
+
   /** Event location */
   location?: string;
+
   /** Start time */
   start?: {
     dateTime?: string;
     date?: string;
     timeZone?: string;
   };
+
   /** End time */
   end?: {
     dateTime?: string;
     date?: string;
     timeZone?: string;
   };
+
   /** Attendees */
   attendees?: Array<{
     email: string;

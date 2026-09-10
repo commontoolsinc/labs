@@ -145,6 +145,13 @@ action detects the scheme before its normal `parseLink`):
    its `value.id`, and the server registry key are the same string); the source
    descriptor (`{ disk: { path } }`) is **server-side registration state keyed by
    `(space, id)`** (`DiskSourceRegistry`), never the cell's readable value.
+   Create-if-absent is literal: a re-link leaves a handle that already carries
+   an `id` exactly as it stands, and reports on stderr how many tables it kept.
+   `tables[].ifc` holds the per-column read labels, which are monotone (§8.12.1)
+   — re-seeding the empty contract over a declared one would lower every
+   column's label, and a contract-less query returns its rows unlabeled rather
+   than refusing, so the downgrade would be silent. `owner` (which resolves
+   `dbOwner()` row admission), `scope`, and `rev` are preserved with it.
 2. `cf` registers the source over the session
    (`sqlite.register-disk-source` → the server canonicalizes the path and
    rejects any path inside the engine store directory), then writes a **normal

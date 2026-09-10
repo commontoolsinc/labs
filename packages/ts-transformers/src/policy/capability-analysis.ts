@@ -1,8 +1,11 @@
-import ts from "typescript";
 import {
   MERGEABLE_OP_METHODS,
   type MergeableOpMethodKind,
 } from "@commonfabric/api";
+import { type CellBrand } from "@commonfabric/schema-generator/cell-brand";
+import { detectTrustedFactoryType } from "@commonfabric/schema-generator";
+import ts from "typescript";
+
 import {
   classifyArrayCallbackContainerCall,
   getNodeText,
@@ -17,11 +20,14 @@ import {
   type UnreadableCellArgument,
 } from "../core/mod.ts";
 import { isBrandedCellType } from "../transformers/cell-type.ts";
-import { type CellBrand } from "@commonfabric/schema-generator/cell-brand";
-import { detectTrustedFactoryType } from "@commonfabric/schema-generator";
-import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
+import {
+  isTransparentWrapper,
+  outermostTransparentWrapper,
+  unwrapAssertCapture,
+  unwrapExpression,
+} from "../utils/expression.ts";
 import { decodePath, encodePath } from "../utils/path-serialization.ts";
-import { unwrapExpression } from "../utils/expression.ts";
+import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
 import {
   createMergeablePushClassifier,
   type MergeableCollectionSite,
@@ -40,6 +46,7 @@ export interface CapabilityAnalysisOptions {
   readonly includeNestedCallbacks?: boolean;
   readonly summaryCache?: WeakMap<ts.Node, FunctionCapabilitySummary>;
   readonly inProgress?: WeakSet<ts.Node>;
+
   /**
    * Transformer-known types for nodes the checker can't resolve. Required for
    * synthetic callbacks (e.g. the destructure-lowered lift-applied param, whose
@@ -48,6 +55,7 @@ export interface CapabilityAnalysisOptions {
    * capability summary mis-shapes or drops inputs. Consulted before the checker.
    */
   readonly typeRegistry?: WeakMap<ts.Node, ts.Type>;
+
   /**
    * Optional sink for the read-then-mergeable-`push` misuse check. When set,
    * the analysis reports each `Cell.push` whose receiver collection path the
@@ -74,14 +82,17 @@ interface MutableCapabilityState {
   readonly rawOpaquePaths: Set<string>;
   passthrough: boolean;
   wildcard: boolean;
+
   /** Static path prefixes at which unknown (wildcard) accesses occurred.
    * `[]` means the whole root. Lets the identity-path filter erase only
    * identity paths the unknown access can actually cover, instead of
    * blanket-erasing every capture sharing this root state (#4714). */
   readonly wildcardPaths: Set<string>;
+
   hasIdentityUse: boolean;
   hasNonIdentityUse: boolean;
   hasNonIdentityRootUse: boolean;
+
   /**
    * Write-exhaustiveness is unverifiable for this parameter. Set by an
    * unrecognized or dynamic (`cell[m]()`) method call on a cell-like
@@ -767,6 +778,26 @@ function isTopmostMemberNode(node: ts.Node): boolean {
   );
 }
 
+/**
+ * True when the member/call spine `resolveSourceRef` walks to reach a root
+ * passes through a call — `table.find(matches)?.mentionedBy`, say, but not
+ * `table.rows.first`.
+ *
+ * Ref resolution consumes that spine without descending into it, so a caller
+ * that resolves a ref in place of visiting the expression leaves whatever
+ * hangs off a call on it — an array method's callback above all — unanalyzed.
+ */
+function memberSpineContainsCall(expression: ts.Expression): boolean {
+  let current = unwrapExpression(expression);
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    current = unwrapExpression(current.expression);
+  }
+  return ts.isCallExpression(current);
+}
+
 function isDeclarationIdentifier(node: ts.Identifier): boolean {
   const parent = node.parent;
   if (!parent) return false;
@@ -800,14 +831,7 @@ function isBooleanConditionUsage(expression: ts.Expression): boolean {
   const parent = expression.parent;
   if (!parent) return false;
 
-  if (
-    (ts.isParenthesizedExpression(parent) ||
-      ts.isAsExpression(parent) ||
-      ts.isTypeAssertionExpression(parent) ||
-      ts.isSatisfiesExpression(parent) ||
-      ts.isNonNullExpression(parent)) &&
-    parent.expression === expression
-  ) {
+  if (isTransparentWrapper(parent) && parent.expression === expression) {
     return isBooleanConditionUsage(parent);
   }
 
@@ -851,52 +875,8 @@ function isBooleanConditionUsage(expression: ts.Expression): boolean {
   return false;
 }
 
-function unwrapIdentifierUsageSite(node: ts.Identifier): ts.Expression {
-  let current: ts.Expression = node;
-  while (true) {
-    const parent = current.parent;
-    if (!parent) {
-      return current;
-    }
-    if (
-      (ts.isParenthesizedExpression(parent) ||
-        ts.isAsExpression(parent) ||
-        ts.isTypeAssertionExpression(parent) ||
-        ts.isSatisfiesExpression(parent) ||
-        ts.isNonNullExpression(parent)) &&
-      parent.expression === current
-    ) {
-      current = parent;
-      continue;
-    }
-    return current;
-  }
-}
-
-function unwrapExpressionUsageSite(node: ts.Expression): ts.Expression {
-  let current = node;
-  while (true) {
-    const parent = current.parent;
-    if (!parent) {
-      return current;
-    }
-    if (
-      (ts.isParenthesizedExpression(parent) ||
-        ts.isAsExpression(parent) ||
-        ts.isTypeAssertionExpression(parent) ||
-        ts.isSatisfiesExpression(parent) ||
-        ts.isNonNullExpression(parent)) &&
-      parent.expression === current
-    ) {
-      current = parent;
-      continue;
-    }
-    return current;
-  }
-}
-
 function isPassThroughIdentifierUsage(node: ts.Identifier): boolean {
-  const usage = unwrapIdentifierUsageSite(node);
+  const usage = outermostTransparentWrapper(node);
   const parent = usage.parent;
   if (!parent) return false;
 
@@ -989,14 +969,7 @@ function isOptionalAliasInitializerMemberUsage(usage: ts.Expression): boolean {
       current = parent;
       continue;
     }
-    if (
-      (ts.isParenthesizedExpression(parent) ||
-        ts.isAsExpression(parent) ||
-        ts.isTypeAssertionExpression(parent) ||
-        ts.isSatisfiesExpression(parent) ||
-        ts.isNonNullExpression(parent)) &&
-      parent.expression === current
-    ) {
+    if (isTransparentWrapper(parent) && parent.expression === current) {
       current = parent;
       continue;
     }
@@ -1018,12 +991,7 @@ function getIdentityArrayLocalNameForElementUsage(
   while (current.parent) {
     const parentNode = current.parent;
     if (
-      (ts.isParenthesizedExpression(parentNode) ||
-        ts.isAsExpression(parentNode) ||
-        ts.isTypeAssertionExpression(parentNode) ||
-        ts.isSatisfiesExpression(parentNode) ||
-        ts.isNonNullExpression(parentNode)) &&
-      parentNode.expression === current
+      isTransparentWrapper(parentNode) && parentNode.expression === current
     ) {
       current = parentNode;
       continue;
@@ -2395,8 +2363,7 @@ export function analyzeFunctionCapabilities(
       }
       if (
         ts.isBinaryExpression(current) &&
-        current.operatorToken.kind ===
-          ts.SyntaxKind.AmpersandAmpersandToken
+        current.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
       ) {
         // The truthy RHS can become the retained payload; the LHS remains a
         // normal control read (its falsy values are primitive payloads).
@@ -2654,7 +2621,7 @@ export function analyzeFunctionCapabilities(
           const suppressOrdinaryRead = () => {
             handled.add(index);
             signatureCapabilityArgumentUses.add(
-              unwrapExpressionUsageSite(argument.expression),
+              outermostTransparentWrapper(argument.expression),
             );
           };
           if (spreadSource) {
@@ -2738,7 +2705,7 @@ export function analyzeFunctionCapabilities(
 
         handled.add(index);
         signatureCapabilityArgumentUses.add(
-          unwrapExpressionUsageSite(capabilityArgument),
+          outermostTransparentWrapper(capabilityArgument),
         );
 
         if (source.dynamic) {
@@ -2855,7 +2822,8 @@ export function analyzeFunctionCapabilities(
         return;
       }
 
-      const callbackArg = call.arguments[0];
+      const callbackArg = call.arguments[0] &&
+        unwrapExpression(call.arguments[0]);
       if (!callbackArg || !isCapabilityAnalyzableFunction(callbackArg)) {
         return;
       }
@@ -2916,6 +2884,17 @@ export function analyzeFunctionCapabilities(
             } else {
               trackReadRef(leftRef);
             }
+            // Resolving the ref stood in for walking the operand, so a call on
+            // its spine has gone unvisited and the reads inside that call's
+            // arguments are still unrecorded — the ref for
+            // `table.find((row) => equals(self, row.topic))?.mentionedBy ?? []`
+            // records `mentionedBy` and drops both `self` and each row's
+            // `topic`, shrinking them out of the schema. Walk it, as the for..of
+            // iterable below does for the same reason; the read tracked above is
+            // a set entry, so recording it twice costs nothing.
+            if (memberSpineContainsCall(node.left)) {
+              visit(node.left);
+            }
           } else {
             visit(node.left);
           }
@@ -2974,7 +2953,7 @@ export function analyzeFunctionCapabilities(
           const source = aliases.get(node.text);
           if (source && !isMemberRootIdentifier(node)) {
             const resolvedSource = materializeSourceRef(source);
-            const usage = unwrapIdentifierUsageSite(node);
+            const usage = outermostTransparentWrapper(node);
             const parent = usage.parent;
             if (!parent) {
               // Synthetic identifiers can temporarily be detached from parent links.
@@ -3134,16 +3113,16 @@ export function analyzeFunctionCapabilities(
       ) {
         if (isTopmostMemberNode(node)) {
           const parent = node.parent;
-          const isCallCallee = parent && ts.isCallExpression(parent) &&
-            parent.expression === node;
           if (
-            (!isCallCallee || isFirstClassFactoryExpression(node, checker)) &&
+            (!(parent && ts.isCallExpression(parent) &&
+              parent.expression === node) ||
+              isFirstClassFactoryExpression(node, checker)) &&
             !isOptionalAliasInitializerMemberUsage(node) &&
             // A member-access argument (e.g. `state.auth`) whose callee parameter
             // type already supplied the capability is accounted for, same as a
             // destructured identifier; don't add a second read here.
             !signatureCapabilityArgumentUses.has(
-              unwrapExpressionUsageSite(node),
+              outermostTransparentWrapper(node),
             )
           ) {
             const ref = resolveSourceRef(node);
@@ -3311,7 +3290,16 @@ export function analyzeFunctionCapabilities(
           ts.isPropertyAccessExpression(node.expression) ||
           ts.isElementAccessExpression(node.expression)
         ) {
-          const directReceiver = resolveSourceRef(node.expression.expression);
+          // The expression the method is called on, with an `assert` body's
+          // operand recording read through. Recording the receiver of a method
+          // call puts a call where the member access the author wrote used to
+          // be, and both questions asked of it here — which source it was read
+          // from, and whether it is cell-like — are about the value the
+          // recording hands back rather than about the recording.
+          const receiverExpression = unwrapAssertCapture(
+            node.expression.expression,
+          );
+          const directReceiver = resolveSourceRef(receiverExpression);
           const receiver = directReceiver ??
             resolveConservativeCallReceiverRef(node);
           if (receiver) {
@@ -3325,7 +3313,7 @@ export function analyzeFunctionCapabilities(
               // like the unknown-named fallback below.
               if (
                 !checker ||
-                isCellLikeExpression(node.expression.expression)
+                isCellLikeExpression(receiverExpression)
               ) {
                 markUnverifiedCellUse(receiver.root);
               }
@@ -3346,7 +3334,7 @@ export function analyzeFunctionCapabilities(
               if (argPath.dynamic) {
                 markWildcard(receiver.root, receiver.path);
               } else {
-                const keyUsage = unwrapExpressionUsageSite(node);
+                const keyUsage = outermostTransparentWrapper(node);
                 const keyUsageParent = keyUsage.parent;
                 const isChainedIntoMemberAccess = !!(
                   keyUsageParent &&
@@ -3428,7 +3416,7 @@ export function analyzeFunctionCapabilities(
               OPAQUE_DERIVATION_METHODS.has(methodName) &&
               (
                 !checker ||
-                isCellLikeExpression(node.expression.expression)
+                isCellLikeExpression(receiverExpression)
               )
             ) {
               // These methods are available on opaque cells and return opaque
@@ -3450,20 +3438,14 @@ export function analyzeFunctionCapabilities(
               // receivers (e.g. array methods on a `.get()` snapshot) cannot
               // write through the cell and stay reads.
               const receiverIsCellLike = !checker ||
-                isCellLikeExpression(node.expression.expression);
+                isCellLikeExpression(receiverExpression);
               const copiesCompleteArrayElements =
                 FULL_SHAPE_ARRAY_COPY_METHODS.has(methodName) &&
-                isArrayLikeExpression(node.expression.expression);
-              if (
-                !checker ||
-                receiverIsCellLike
-              ) {
+                isArrayLikeExpression(receiverExpression);
+              if (!checker || receiverIsCellLike) {
                 markUnverifiedCellUse(receiver.root);
               }
               if (shouldTrackFullShape || copiesCompleteArrayElements) {
-                // Array copy methods such as `snapshot.toSpliced(...)` retain
-                // complete source elements in their result. Keep the complete
-                // payload schema; root-only shrinking would materialize holes.
                 trackFullShapeReadRef(receiver);
                 if (copiesCompleteArrayElements) {
                   for (let index = 0; index < node.arguments.length; index++) {

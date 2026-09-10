@@ -11,7 +11,7 @@
  *
  * Run: deno task cf test packages/patterns/simple-list/simple-list.test.tsx --verbose
  */
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import SimpleListModule from "./simple-list.tsx";
 
 export default pattern(() => {
@@ -173,7 +173,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // Initial state
       { assertion: assert_initial_empty },
 

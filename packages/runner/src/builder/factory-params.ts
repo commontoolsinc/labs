@@ -5,8 +5,8 @@ import {
 import {
   factorySchemasEqual,
   resolveLocalSchemaRef,
-} from "@commonfabric/data-model/schema-utils";
-import { isRecord } from "@commonfabric/utils/types";
+} from "@commonfabric/data-model-schema";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import { validateAgainstSchema } from "../cfc/schema-sanitization.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -21,7 +21,7 @@ import { isTrustedBuilderArtifact } from "./pattern-metadata.ts";
 import { isReactive, type JSONSchema } from "./types.ts";
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (!isRecord(value) || Array.isArray(value)) return false;
+  if (!isObjectNotArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
@@ -146,7 +146,7 @@ function producingFactoryResultSchema(value: unknown): JSONSchema | undefined {
     const path = exported.path.slice(output.path.length).map(String);
     const schema = path.length === 0
       ? resultSchema
-      : new ContextualFlowControl().getSchemaAtPath(
+      : ContextualFlowControl.getSchemaAtPath(
         resultSchema,
         path,
       );
@@ -165,14 +165,16 @@ function withLiveResultIfc(
   if (
     liveSchema === true || liveSchema === false ||
     Object.keys(liveSchema).some((key) => key !== "ifc") ||
-    !isRecord(liveSchema.ifc) ||
+    !isObjectNotArray(liveSchema.ifc) ||
     Object.keys(liveSchema.ifc).some((key) => key !== "confidentiality")
   ) {
     return liveSchema;
   }
 
-  const cfc = new ContextualFlowControl();
-  return cfc.schemaWithLub(contract, cfc.lubSchema(liveSchema) ?? []);
+  return ContextualFlowControl.schemaWithLub(
+    contract,
+    ContextualFlowControl.lubSchema(liveSchema) ?? [],
+  );
 }
 
 function symbolicSchema(value: unknown): JSONSchema | undefined {
@@ -238,7 +240,7 @@ function withoutNestedAsCell(schema: JSONSchema): JSONSchema {
   if (schema === true || schema === false) return schema;
   const visit = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(visit);
-    if (!isRecord(value)) return value;
+    if (!isObjectNotArray(value)) return value;
     return Object.fromEntries(
       Object.entries(value)
         .filter(([key]) => key !== "asCell")
@@ -252,7 +254,9 @@ function asCellEntry(value: unknown):
   | { kind: string; scope?: string }
   | undefined {
   if (typeof value === "string") return { kind: value };
-  if (!isRecord(value) || typeof value.kind !== "string") return undefined;
+  if (!isObjectNotArray(value) || typeof value.kind !== "string") {
+    return undefined;
+  }
   return {
     kind: value.kind,
     scope: typeof value.scope === "string" ? value.scope : undefined,
@@ -273,7 +277,7 @@ function symbolicCellEntries(
     ? source.scope
     : undefined;
   const exportedCell = isCell(value) ? value.export() : undefined;
-  const isStreamCell = isRecord(exportedCell?.value) &&
+  const isStreamCell = isObjectNotArray(exportedCell?.value) &&
     exportedCell.value.$stream === true;
   return isStreamCell
     ? [{ kind: "stream", scope: sourceScope ?? exportedCell?.scope }]
@@ -327,23 +331,24 @@ function sourceSchemaContainsExpected(
 ): boolean {
   if (
     expectedRoot === undefined &&
-    (typeof expected === "boolean" || isRecord(expected))
+    (typeof expected === "boolean" || isObjectNotArray(expected))
   ) {
     expectedRoot = expected as JSONSchema;
   }
   if (
     sourceRoot === undefined &&
-    (typeof source === "boolean" || isRecord(source))
+    (typeof source === "boolean" || isObjectNotArray(source))
   ) {
     sourceRoot = source as JSONSchema;
   }
   if (
-    isRecord(expected) && typeof expected.$ref === "string" &&
+    isObjectNotArray(expected) && typeof expected.$ref === "string" &&
     expected.$ref.startsWith("#/") && expectedRoot !== undefined
   ) {
-    const sourceRef = isRecord(source) && typeof source.$ref === "string"
-      ? source.$ref
-      : "<inline>";
+    const sourceRef =
+      isObjectNotArray(source) && typeof source.$ref === "string"
+        ? source.$ref
+        : "<inline>";
     const refPair = `expected:${expected.$ref}|source:${sourceRef}`;
     if (seenRefs.has(refPair)) return true;
     const resolved = schemaAtRef(expected as JSONSchema, expectedRoot);
@@ -360,10 +365,11 @@ function sourceSchemaContainsExpected(
     );
   }
   if (
-    isRecord(source) && typeof source.$ref === "string" &&
+    isObjectNotArray(source) && typeof source.$ref === "string" &&
     source.$ref.startsWith("#/") && sourceRoot !== undefined
   ) {
-    const expectedRef = isRecord(expected) && typeof expected.$ref === "string"
+    const expectedRef = isObjectNotArray(expected) &&
+        typeof expected.$ref === "string"
       ? expected.$ref
       : "<inline>";
     const refPair = `expected:${expectedRef}|source:${source.$ref}`;
@@ -385,7 +391,7 @@ function sourceSchemaContainsExpected(
   if (source === false) return true;
   if (expected === false) return expected === source;
   if (source === true) {
-    return isRecord(expected) &&
+    return isObjectNotArray(expected) &&
       Object.keys(expected).every((key) =>
         key === "$defs" || key === "definitions"
       );
@@ -407,8 +413,8 @@ function sourceSchemaContainsExpected(
         )
       );
   }
-  if (isRecord(expected)) {
-    if (!isRecord(source) || Array.isArray(source)) return false;
+  if (isObjectNotArray(expected)) {
+    if (!isObjectNotArray(source)) return false;
     const expectedSchema = expected as JSONSchema;
     const validationRoot = expectedRoot ?? expectedSchema;
     if (
@@ -491,8 +497,10 @@ function symbolicFailure(
   );
   if (cellKindFailure !== undefined) return cellKindFailure;
   const expectedContent = withoutAsCell(rootedSchema);
-  const resolvedSourceSchema = schemaAtRef(sourceSchema, sourceSchema) ??
-    sourceSchema;
+  const resolvedSourceSchema = isObjectNotArray(sourceSchema)
+    ? ContextualFlowControl.resolveSchemaRefs(sourceSchema, sourceSchema) ??
+      schemaAtRef(sourceSchema, sourceSchema) ?? sourceSchema
+    : sourceSchema;
   const sourceContent = withoutAsCell(
     schemaWithRootDefinitions(resolvedSourceSchema, sourceSchema),
   );
@@ -657,7 +665,7 @@ function validateSymbolicValue(
       if (schema.additionalProperties === false) {
         return `additional property ${key}`;
       }
-      if (isRecord(schema.additionalProperties)) {
+      if (isObjectNotArray(schema.additionalProperties)) {
         const failure = validateSymbolicValue(
           schema.additionalProperties as JSONSchema,
           value[key],

@@ -1,13 +1,14 @@
 import { assertEquals } from "@std/assert";
-import { WorkerReconciler } from "../src/worker/reconciler.ts";
-import type { WorkerVNode } from "../src/worker/types.ts";
+
+import { Identity } from "@commonfabric/identity";
+import { KeepAsCell, Runtime } from "@commonfabric/runner";
+import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import type { VDomOp } from "../src/vdom-ops.ts";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { KeepAsCell, Runtime } from "@commonfabric/runner";
-import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
+import { WorkerReconciler } from "../src/worker/reconciler.ts";
+import type { WorkerVNode } from "../src/worker/types.ts";
 
 /**
  * Helper to collect ops emitted by the reconciler.
@@ -40,7 +41,6 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
   const runtime = new Runtime({
     storageManager,
     apiUrl: new URL("http://localhost"),
-    cfcEnforcementMode: "observe",
   });
 
   try {
@@ -56,7 +56,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
 
     // MockCell extending CellImpl for basic Cell behavior
     class MockCell extends (CellImplConstructor as any) {
-      private subscribers = new Set<(value: any) => void>();
+      #subscribers = new Set<(value: any) => void>();
 
       constructor(public value: any) {
         super(runtime, undefined, undefined, false, undefined, "cell");
@@ -64,16 +64,16 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
       }
 
       sink(callback: (value: any) => void) {
-        this.subscribers.add(callback);
+        this.#subscribers.add(callback);
         callback(this.value);
         return () => {
-          this.subscribers.delete(callback);
+          this.#subscribers.delete(callback);
         };
       }
 
       set(newValue: any) {
         this.value = newValue;
-        for (const sub of this.subscribers) {
+        for (const sub of this.#subscribers) {
           sub(newValue);
         }
       }
@@ -89,38 +89,38 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
      */
     class MockPropsCell extends MockCell {
       static nextId = 0;
-      private propCells = new Map<string, MockPropCell>();
-      private readonly linkId = `test-props-${++MockPropsCell.nextId}`;
-      private rawValue: any;
+      #propCells = new Map<string, MockPropCell>();
+      readonly #linkId = `test-props-${++MockPropsCell.nextId}`;
+      #rawValue: any;
 
       constructor(value: any, rawValue: any = value) {
         super(value);
-        this.rawValue = rawValue;
+        this.#rawValue = rawValue;
       }
 
       key(propName: string) {
-        if (!this.propCells.has(propName)) {
-          this.propCells.set(
+        if (!this.#propCells.has(propName)) {
+          this.#propCells.set(
             propName,
             new MockPropCell(this.value?.[propName], this, propName),
           );
         }
-        return this.propCells.get(propName)!;
+        return this.#propCells.get(propName)!;
       }
 
       getRawUntyped() {
-        return this.rawValue;
+        return this.#rawValue;
       }
 
       getAsNormalizedFullLink() {
-        return { space: "test-space", id: this.linkId, path: [] };
+        return { space: "test-space", id: this.#linkId, path: [] };
       }
 
       override set(newValue: any) {
         super.set(newValue);
-        this.rawValue = newValue;
+        this.#rawValue = newValue;
         // Propagate updates to existing child prop cells
-        for (const [k, propCell] of this.propCells) {
+        for (const [k, propCell] of this.#propCells) {
           propCell.set(newValue?.[k]);
         }
       }
@@ -131,13 +131,13 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
      * Supports asSchema(), resolveAsCell(), getAsNormalizedFullLink().
      */
     class MockPropCell extends MockCell {
-      private parentCell?: MockPropsCell;
-      private propKey?: string;
+      #parentCell?: MockPropsCell;
+      #propKey?: string;
 
       constructor(value: any, parentCell?: MockPropsCell, propKey?: string) {
         super(value);
-        this.parentCell = parentCell;
-        this.propKey = propKey;
+        this.#parentCell = parentCell;
+        this.#propKey = propKey;
       }
 
       asSchema(_schema: any) {
@@ -147,8 +147,8 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
       resolveAsCell() {
         // Read live value from parent (matches real Cell.key().resolveAsCell()
         // which navigates the live data, not a stale cache)
-        const liveValue = this.parentCell
-          ? this.parentCell.value?.[this.propKey!]
+        const liveValue = this.#parentCell
+          ? this.#parentCell.value?.[this.#propKey!]
           : this.value;
         if (
           liveValue && typeof liveValue === "object" && "sink" in liveValue
@@ -163,8 +163,8 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
       }
 
       getRawUntyped() {
-        return this.parentCell
-          ? this.parentCell.value?.[this.propKey!]
+        return this.#parentCell
+          ? this.#parentCell.value?.[this.#propKey!]
           : this.value;
       }
     }
@@ -175,7 +175,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     class MockStream extends MockCell {
       static nextId = 0;
       public sent: unknown[] = [];
-      private readonly linkId = `test-stream-${++MockStream.nextId}`;
+      readonly #linkId = `test-stream-${++MockStream.nextId}`;
 
       constructor() {
         super(undefined);
@@ -195,7 +195,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
       }
 
       getAsNormalizedFullLink() {
-        return { space: "test-space", id: this.linkId, path: [] };
+        return { space: "test-space", id: this.#linkId, path: [] };
       }
 
       public usedTx: unknown;
@@ -205,8 +205,6 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
       reconciler: WorkerReconciler,
       rootCell: MockCell,
     ): () => void => reconciler.mount(rootCell as any);
-
-    // --- Test cases ---
 
     await t.step("Cell<Props> renders primitive props", async () => {
       const collector = createOpsCollector();
@@ -750,7 +748,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     );
 
     await t.step(
-      "Cell<Props> event handler is removed after unmount acknowledgement",
+      "Cell<Props> event handler is removed after unmount acknowledgment",
       async () => {
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
@@ -995,6 +993,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           },
           children: [],
         });
+        runtime.prepareTxForCommit(tx);
         const commitResult = await tx.commit();
         assertEquals(commitResult.ok !== undefined, true);
 
@@ -1075,6 +1074,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           props: {},
           children: [linkedChild.getAsLink({ keepAsCell: KeepAsCell.All })],
         });
+        runtime.prepareTxForCommit(tx);
         const commitResult = await tx.commit();
         assertEquals(commitResult.ok !== undefined, true);
 
@@ -1143,6 +1143,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
             ],
           }],
         });
+        runtime.prepareTxForCommit(tx);
         const commitResult = await tx.commit();
         assertEquals(commitResult.ok !== undefined, true);
 
@@ -1519,7 +1520,6 @@ Deno.test(
     const runtime = new Runtime({
       storageManager,
       apiUrl: new URL("http://localhost"),
-      cfcEnforcementMode: "observe",
     });
     let tx = runtime.edit();
 

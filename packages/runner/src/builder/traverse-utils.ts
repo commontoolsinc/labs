@@ -1,16 +1,19 @@
-import { isRecord } from "@commonfabric/utils/types";
-import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+import {
+  FabricInstance,
+  FabricSpecialObject,
+  refuseFabricInstance,
+} from "@commonfabric/data-model";
 import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
-import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { type FactoryInput, isPattern, isReactive } from "./types.ts";
 import { noteDerivedCopy } from "./pattern-metadata.ts";
+import { isCell } from "../cell.ts";
+import { isCellResultForDereferencing } from "../query-result-proxy.ts";
 import {
   createFactoryTraversalContext,
   type FactoryTraversalContext,
   mapFactoryForTraversal,
 } from "./factory-traversal.ts";
-import { isCell } from "../cell.ts";
-import { isCellResultForDereferencing } from "../query-result-proxy.ts";
 
 /**
  * Traverse a value, _not_ entering cells
@@ -59,26 +62,46 @@ export function traverseValue(
     );
   }
 
-  // Fabric-special values are atomic codec values. Their observable state is
-  // owned by the data model, not by enumerable runner graph properties.
-  if (value instanceof FabricSpecialObject) return value;
-
   // Prevent infinite recursion
   if (seen.has(value) || seen.has(result)) return value;
-  if (isRecord(result)) seen.add(result);
-  else if (isRecord(unprocessedValue)) seen.add(unprocessedValue);
+  if (isObjectOrArray(result)) seen.add(result);
+  else if (isObjectOrArray(unprocessedValue)) seen.add(unprocessedValue);
 
-  // Traverse value. A `FabricPrimitive` is an atomic value whose state lives in
-  // private fields (zero enumerable own-props); descending into one would
+  // A `FabricInstance` is NOT a leaf. It is a container reached by its codec
+  // contents rather than by property name, which this walk cannot do, so the
+  // rebuild below would hand back a bare `{}` -- and whatever `fn` was looking
+  // for inside it would go unseen. It refuses instead of doing that quietly.
+  //
+  // This sits after `fn`, not before it, for the same reason the primitive
+  // guard does: an instance is a value `fn` gets to see and may replace, and
+  // only descending into one is refused.
+  //
+  // Nothing reaches this in production today, de facto rather than by
+  // construction: a `FabricError` is exposed to pattern authors and ungated, so
+  // what keeps this safe is that no caller yet puts one in a builder value.
+  //
+  // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
+  // point this becomes a walk rather than a refusal.
+  if ((value as object) instanceof FabricInstance) {
+    refuseFabricInstance(
+      value as FabricInstance,
+      "when traversing a builder value",
+    );
+  }
+
+  // Traverse value. A `FabricPrimitive` is an atomic value whose state lives
+  // in private fields (zero enumerable own-props); descending into one would
   // rebuild it as `{}`, corrupting it. It has already been shown to `fn` above
   // like any other leaf — here we just decline to descend, so the original
-  // instance passes through intact.
+  // value passes through intact. The test names the base class rather than
+  // that one: an instance is refused above, so the two select the same values
+  // here, and the class this walk declines to descend is the wider one.
   if (
     !isReactive(value) &&
     !isCell(value) &&
     !isCellResultForDereferencing(value) &&
-    !((value as object) instanceof FabricPrimitive) &&
-    (isRecord(value) || isPattern(value))
+    !((value as object) instanceof FabricSpecialObject) &&
+    (isObjectOrArray(value) || isPattern(value))
   ) {
     if (Array.isArray(value)) {
       return (value as Array<any>).map((v) =>
@@ -98,7 +121,7 @@ export function traverseValue(
       // `resolveOriginal`/`getArtifactEntryRef` would be severed, which is how
       // a pattern passed as an `op` is later identified by
       // `{ identity, symbol }`. Mirrors the registration in
-      // `toJSONWithAliasBindings`.
+      // `withAliasBindings`.
       if (isPattern(value)) noteDerivedCopy(copy, value);
       return copy;
     }

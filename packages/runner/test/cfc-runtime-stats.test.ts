@@ -27,11 +27,12 @@ describe("CFC runtime stats", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
 
     expect(runtime.getCfcStats()).toEqual({
       cfcRelevantTx: 0,
+      flowLabelProbesComputed: 0,
+      flowLabelProbeMemoHits: 0,
       cfcPreparedTx: 0,
       cfcPrepareRejects: 0,
       cfcDigestInvalidations: 0,
@@ -50,7 +51,6 @@ describe("CFC runtime stats", () => {
     });
 
     const preparedTx = runtime.edit();
-    preparedTx.setCfcEnforcementMode("enforce-explicit");
     preparedTx.markCfcRelevant("stats-prepared");
     const preparedCell = runtime.getCell(
       space,
@@ -86,7 +86,6 @@ describe("CFC runtime stats", () => {
     expect(preparedFlushCount).toBe(1);
 
     const rejectTx = runtime.edit();
-    rejectTx.setCfcEnforcementMode("enforce-explicit");
     rejectTx.markCfcRelevant("stats-reject");
     const rejectCell = runtime.getCell(
       space,
@@ -110,7 +109,6 @@ describe("CFC runtime stats", () => {
     );
 
     const invalidationTx = runtime.edit();
-    invalidationTx.setCfcEnforcementMode("enforce-explicit");
     invalidationTx.markCfcRelevant("stats-invalidation");
     const invalidationCell = runtime.getCell(
       space,
@@ -166,6 +164,13 @@ describe("CFC runtime stats", () => {
 
     expect(runtime.getCfcStats()).toEqual({
       cfcRelevantTx: 4,
+      // Two gates keep the probe from running here. It runs only on a
+      // transaction nothing has marked relevant, and every transaction above
+      // calls markCfcRelevant before it commits; it also runs only when the
+      // flow-labels dial is not "off", and this runtime leaves it off. The
+      // probe's own counters are exercised in cfc-flow-probe-memo.test.ts.
+      flowLabelProbesComputed: 0,
+      flowLabelProbeMemoHits: 0,
       cfcPreparedTx: 3,
       cfcPrepareRejects: 1,
       cfcDigestInvalidations: 1,

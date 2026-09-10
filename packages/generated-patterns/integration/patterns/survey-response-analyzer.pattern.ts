@@ -16,7 +16,7 @@ interface SurveyResponseArgs {
 interface SurveyResponseInput {
   respondent?: string;
   demographic?: string;
-  answers?: Record<string, unknown>;
+  answers?: Record<string, number>;
 }
 
 interface SurveyResponse {
@@ -42,7 +42,7 @@ interface DemographicSummary {
 interface RecordResponseEvent {
   respondent?: string;
   demographic?: string;
-  answers?: Record<string, unknown>;
+  answers?: Record<string, number>;
 }
 
 const defaultDemographic = "general";

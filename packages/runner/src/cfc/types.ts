@@ -1,10 +1,11 @@
-import type { CellScope, JSONSchema } from "../builder/types.ts";
-import type { CfcConfClause } from "./clause.ts";
 import type { FabricValue } from "@commonfabric/api";
 import type { CfcModulePolicyRefAtom } from "@commonfabric/api/cfc";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { Immutable } from "@commonfabric/utils/types";
+
+import type { CellScope, JSONSchema } from "../builder/types.ts";
 import type { Metadata } from "../storage/interface.ts";
+import type { CfcConfClause } from "./clause.ts";
 import type {
   CfcLabelView,
   IFCLabel,
@@ -12,6 +13,7 @@ import type {
   LabelObservationClass,
 } from "./label-view-core.ts";
 import type { PolicySnapshot } from "./policy.ts";
+import type { CfcRefusalDetail } from "./refusal-detail.ts";
 import type { SinkMaxConfidentiality } from "./sink-inventory.ts";
 import type { CfcTrustConfig } from "./trust.ts";
 
@@ -33,6 +35,69 @@ export const CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION =
 // fully enforced.
 export const CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION =
   "runtime.setup.seed-materialization";
+
+// A store the runtime owns: a document it materializes to hold a piece's
+// machinery rather than data an author named. Four kinds carry it — a piece's
+// argument, result and internal documents, minted by the runner from the
+// piece's result cause; the state documents a builtin mints from its own
+// node's cause; the per-event documents a builtin mints inside one
+// transaction; and the documents anchoring splits out of a value written into
+// any of those. `target` is that document; `sources` is the document the
+// runtime derived it from. The prepare gate reads it for the §8.12.5 route-2
+// declaration described in `docs/specs/cfc-enforcement-matrix.md` §4, and
+// takes it only where `target` names a whole document AND the input was
+// recorded under {@link runtimeWritePolicyAuthorization}.
+//
+// The marker names the store for one transaction. A store written outside the
+// transaction that minted it is enrolled beside it
+// (`IExtendedStorageTransaction.enrollRuntimeOwnedStore`), which lasts for the
+// runtime's life.
+export const CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE =
+  "runtime.owned-store";
+
+/**
+ * Marks a write-policy input as one the runtime itself recorded.
+ *
+ * `recordCfcWritePolicyInput` is on the public transaction interface, and
+ * pattern-authored code runs in the runtime's own realm holding runtime cells,
+ * so it reaches `cell.tx` and can record an input naming whatever it likes.
+ * An input a gate ACTS on — rather than one a gate measures — therefore has to
+ * say who recorded it. This is the mark, and it works the way
+ * `rawMetaWriteAuthorization` does: a symbol cannot be named by a module that
+ * did not import it, and the sandbox hands pattern code the builder namespace
+ * rather than the runner's modules.
+ */
+export const RUNTIME_WRITE_POLICY_INPUT: unique symbol = Symbol(
+  "runtime-write-policy-input",
+);
+
+/** The authorization a runtime-recorded write-policy input carries. */
+export interface RuntimeWritePolicyAuthorization {
+  readonly [RUNTIME_WRITE_POLICY_INPUT]: true;
+}
+
+/**
+ * The authorization the runtime passes beside an input a gate acts on.
+ *
+ * It travels as an argument of the one call that carries it, so it marks that
+ * input and no other — including no input recorded on the same transaction in
+ * the meantime.
+ *
+ * In-package callers only: `cfc/mod.ts` re-exports the type and not this
+ * value, so it stays out of the package's public entry points, and holding it
+ * is what naming a store the runtime owns takes.
+ */
+export const runtimeWritePolicyAuthorization: RuntimeWritePolicyAuthorization =
+  Object.freeze(
+    { [RUNTIME_WRITE_POLICY_INPUT]: true } as RuntimeWritePolicyAuthorization,
+  );
+
+/** Whether an authorization argument carries the runtime's mark. */
+export const runtimeWritePolicyAuthorized = (value: unknown): boolean =>
+  typeof value === "object" && value !== null &&
+  (value as Partial<RuntimeWritePolicyAuthorization>)[
+      RUNTIME_WRITE_POLICY_INPUT
+    ] === true;
 
 export type CfcEnforcementMode =
   | "disabled"
@@ -253,6 +318,7 @@ export type LabelMapEntry = {
   path: readonly string[];
   label: IFCLabel;
   origin?: LabelEntryOrigin;
+
   /**
    * Payload consumption classes, or — on `origin:"label-metadata"`
    * population templates only (Stage B) — the `labelMetadata` class, which
@@ -262,6 +328,18 @@ export type LabelMapEntry = {
   observes?: LabelObservationClass | LabelMetadataObservationClass;
 };
 
+/**
+ * `schemaHash` names the envelope's ROOT schema document. The root may be
+ * self-contained (the inline form) or reference further documents through
+ * `$ref: cid:` members (the decomposed form) — one read policy covers
+ * both: every external reference must resolve, verified against its own
+ * address, and a member that cannot is an unreadable envelope (fail
+ * closed). The storage commit boundary validates the whole closure at
+ * write time, so a committed envelope's references are always backed. A
+ * `version` outside this union is an envelope the build cannot
+ * interpret, and every reader fails closed on it rather than treating
+ * the document as unlabeled.
+ */
 export type CfcMetadata = {
   version: 1;
   schemaHash: string;
@@ -295,6 +373,7 @@ export type ConsumedRead =
   & Immutable<{
     meta?: Metadata;
     nonRecursive?: boolean;
+
     /**
      * Position on the transaction's activity clock (shared with write
      * attempts — see `OrderedWriteAttempt`). Part of the prepared digest:
@@ -362,14 +441,17 @@ export type ImplementationIdentity =
   | { kind: "builtin"; builtinId: string }
   | {
     kind: "verified";
+
     /**
      * Content-addressed module identity (prefix-free `cf:module/<hash>`
      * hash) — reload-stable and robust to unrelated module changes in the
      * same program.
      */
     moduleIdentity?: string;
+
     /** Export/`__cfReg` symbol of the registered factory, when module-scope. */
     symbol?: string;
+
     sourceFile?: string;
     bindingPath?: string[];
     codeHash?: string;
@@ -402,6 +484,15 @@ export type WritePolicyInput =
     readonly target: CfcAddress;
     readonly schemaHash?: string;
     readonly schema?: JSONSchema;
+
+    /**
+     * Present only when this schema describes a generated output of the
+     * running module. Such outputs may introduce required fields without
+     * defaults because the module materializes them. Absence is deliberately
+     * strict: inputs and ordinary document writes must preserve values already
+     * at rest.
+     */
+    readonly schemaRole?: "output";
   }
   | {
     readonly kind: "structural-provenance";
@@ -469,6 +560,7 @@ export type PreparedDigestInput = {
   readonly consumedReads: readonly ConsumedRead[];
   readonly attemptedWrites: readonly AttemptedWrite[];
   readonly writes: readonly AttemptedWrite[];
+
   /**
    * The ordered write-attempt log (see `OrderedWriteAttempt`). Mandatory in
    * the digest: `consumedReads`/`writes` are canonicalized by address-sort,
@@ -479,13 +571,16 @@ export type PreparedDigestInput = {
    * shape; docs/specs/cfc-write-prefix-provenance.md §6).
    */
   readonly writeAttemptLog: readonly OrderedWriteAttempt[];
+
   readonly dereferenceTraces: readonly CfcDereferenceTrace[];
   readonly triggerReads: readonly CfcAddress[];
   readonly writePolicyInputs: readonly WritePolicyInput[];
   readonly implementationIdentity?: ImplementationIdentity;
   readonly trustSnapshot?: TrustSnapshot;
+
   /** Update-authority aliases consulted by writeAuthorizedBy verification. */
   readonly moduleDelegations?: readonly ModuleDelegationSnapshotEntry[];
+
   // Digest of the policy snapshot the boundary decisions evaluated under
   // (Epic B5): anything that can change a boundary decision must be in the
   // digest, so a decision made under one rule set cannot be committed under
@@ -509,7 +604,27 @@ export type PostCommitSideEffect = {
   id: string;
   kind: string;
   idempotencyKey?: string;
+
+  /** The client-effect nonce this enactment carries (server-execution v2
+   * Phase 4, protocol.md §5) — set by `navigateTo` under the flag so the
+   * speculation overlay's OPTIMISTIC enactment records the SAME nonce the
+   * authoritative intent arrives with, and the effects channel converges
+   * on it instead of re-enacting (T2.Q7). Absent everywhere else. */
+  nonce?: string;
+
   flush(tx: unknown): void | Promise<void>;
+
+  /**
+   * Called instead of {@link flush} when the work this effect stands for will
+   * not happen: the transaction carrying it was rejected and whoever owns its
+   * retries has stopped. Exactly one of the two runs, so this is where a
+   * builtin ends a request that was staged and never sent.
+   *
+   * Not called when the effect is handed to a seal destination, which runs it
+   * elsewhere — that clears the outbox too, and it is a handover rather than
+   * an ending.
+   */
+  abandon?(error: unknown): void;
 };
 
 export type CfcPrepareState =
@@ -555,6 +670,23 @@ export const DEFAULT_CFC_WRITE_FLOOR_MODE: CfcWriteFloorMode = "off";
 export type CfcTriggerReadGating = boolean;
 
 export const DEFAULT_CFC_TRIGGER_READ_GATING: CfcTriggerReadGating = false;
+
+/**
+ * Whether the envelope persist path stores the DECOMPOSED spelling: the
+ * metadata's `schemaHash` names a root document whose `$defs` members are
+ * separate content-addressed documents (see {@link CfcMetadata}). Off
+ * preserves the merged schema's interned spelling — which may itself
+ * carry references a reference-form declared schema left. Reading
+ * resolves references whenever the stored root carries them, in either
+ * setting. Ships behind
+ * a flag because a runner that predates reference resolution walks a
+ * decomposed root's `$ref: cid:` members as inert schema content and
+ * silently under-labels: every deployed reader must resolve (or fail
+ * closed) before any space sees a decomposed write.
+ */
+export type CfcDecomposedEnvelopes = boolean;
+
+export const DEFAULT_CFC_DECOMPOSED_ENVELOPES: CfcDecomposedEnvelopes = false;
 
 /**
  * Exchange-rule policy evaluation dial (Epic B5, spec §4.4.5/§5.3),
@@ -636,6 +768,7 @@ export type CfcTxState = {
   flowLabelsMode: CfcFlowLabelsMode;
   writeFloorMode: CfcWriteFloorMode;
   triggerReadGating: CfcTriggerReadGating;
+  decomposedEnvelopes: CfcDecomposedEnvelopes;
   policyEvaluationMode: CfcPolicyEvaluationMode;
   labelMetadataProtectionMode: CfcLabelMetadataProtectionMode;
   declaredMonotonicityMode: CfcDeclaredMonotonicityMode;
@@ -738,4 +871,12 @@ export type CfcTxState = {
   // PreparedDigestInput. Only labeled observations are recorded (empty =
   // public = nothing to derive, gate, or bind).
   labelMetadataObservations: CfcLabelMetadataObservation[];
+  // Structured descriptions of the refusals this transaction's gates
+  // recorded (`cfc/refusal-detail.ts`): which boundary refused, which atoms
+  // it refused, and which reads carried them. Recorded in every enforcement
+  // mode; the commit boundary keeps only the ones whose reason survived into
+  // the refusal, so an observe-mode diagnostic never rides out as a verdict.
+  // Never folded into the prepared digest — a description of a decision is
+  // not an input to it.
+  refusalDetails: CfcRefusalDetail[];
 };

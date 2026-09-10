@@ -1,10 +1,9 @@
 /**
  * T7 (CT-1838, appendix Layer 1 test plan): end-to-end PIECE layer over a
  * space whose DEFAULT PATTERN is stored in the pre-#4158 legacy-envelope
- * form. This is the exact field failure: the space's piece registry
- * (`allPieces`) and `addPiece` live INSIDE the default-pattern piece, so a
- * default pattern that cannot cold-load bricks `getPieceRegistry` (detached
- * "empty-pieces" placeholder) and every `cf piece new`.
+ * form. The piece registry and `addPiece` live inside the default-pattern
+ * piece, so a default pattern that cannot cold-load bricks `getPieceRegistry`
+ * and every `cf piece new`.
  *
  * The fixture simulates the pre-#4158 writer (stored source = helper-
  * INJECTED bytes, identities over the injected bytes, no compiled set for
@@ -13,6 +12,7 @@
  * CT-1838 in production: the compiled set misses, and only the legacy
  * source docs remain to cold-load from.
  */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
@@ -29,14 +29,15 @@ import {
   setCompileCacheRuntimeVersionForTesting,
   writeSourceDocs,
 } from "../../runner/src/compilation-cache/cell-cache.ts";
-import { pieceId, PieceManager } from "../src/manager.ts";
+import { pieceId } from "../src/piece-id.ts";
+import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase(
   "legacy envelope default pattern",
 );
 
-// A minimal transformed default pattern with the retired registry export:
-// `allPieces` plus the `addPiece` handler stream `PieceManager.add` sends into.
+// A minimal transformed default pattern with the registry export and the
+// `addPiece` handler stream `PiecesController.add` sends into.
 const defaultPatternProgram: RuntimeProgram = {
   main: "/main.tsx",
   files: [
@@ -47,15 +48,15 @@ const defaultPatternProgram: RuntimeProgram = {
         "type Piece = { title?: string };",
         "const addPiece = handler<",
         "  { piece: Piece },",
-        "  { allPieces: Writable<Piece[]> }",
-        ">((event, { allPieces }) => {",
+        "  { pieceRegistry: Writable<Piece[]> }",
+        ">((event, { pieceRegistry }) => {",
         "  const piece = event?.piece;",
         "  if (!piece) return;",
-        "  allPieces.push(piece);",
+        "  pieceRegistry.push(piece);",
         "});",
-        "export default pattern<{ allPieces: Piece[] }>(({ allPieces }) => ({",
-        "  allPieces,",
-        "  addPiece: addPiece({ allPieces }),",
+        "export default pattern<{ pieceRegistry: Piece[] }>(({ pieceRegistry }) => ({",
+        "  pieceRegistry,",
+        "  addPiece: addPiece({ pieceRegistry }),",
         "}));",
       ].join("\n"),
     },
@@ -153,12 +154,12 @@ describe("piece layer over a legacy-envelope default pattern (CT-1838)", () => {
   it("T7: getPieceRegistry returns the registry and add succeeds after a pin bump", async () => {
     const spaceName = "legacy-envelope-default-" + crypto.randomUUID();
 
-    // --- Session 1: build the poisoned space. ---
+    // Session 1: build the poisoned space.
     const runtime1 = newRuntime();
     const session1 = await createSession({ identity: signer, spaceName });
-    const manager1 = new PieceManager(session1, runtime1);
-    await manager1.synced();
-    const space = manager1.getSpace();
+    const pieces1 = new PiecesController(session1, runtime1);
+    await pieces1.synced();
+    const space = pieces1.getSpace();
 
     // Persist the default pattern in LEGACY form (injected bytes, injected
     // identities — what a pre-#4158 pipeline stored).
@@ -186,49 +187,49 @@ describe("piece layer over a legacy-envelope default pattern (CT-1838)", () => {
       space,
     );
     expect(typeof healed).toBe("function");
-    const defaultPiece = await manager1.runPersistent(
+    const defaultPiece = await pieces1.runPersistent(
       healed!,
-      { allPieces: [] },
+      { pieceRegistry: [] },
       "legacy-default-pattern-piece",
     );
-    await manager1.linkDefaultPattern(defaultPiece);
-    await manager1.runtime.idle();
-    await manager1.synced();
+    await pieces1.linkDefaultPattern(defaultPiece);
+    await pieces1.runtime.idle();
+    await pieces1.synced();
 
     // Register one regular piece through the (healed) default pattern.
     const simple = await runtime1.patternManager.compilePattern(
       simplePieceProgram,
       { space },
     );
-    const persisted = await manager1.runPersistent(
+    const persisted = await pieces1.runPersistent(
       simple,
       { value: 42 },
       "persisted-piece-t7",
     );
-    await manager1.add([persisted]);
-    await manager1.runtime.idle();
-    await manager1.synced();
+    await pieces1.add([persisted]);
+    await pieces1.runtime.idle();
+    await pieces1.synced();
     await runtime1.patternManager.flushCompileCacheWrites();
     await runtime1.storageManager.synced();
     const persistedId = pieceId(persisted)!;
     expect(persistedId).toBeDefined();
 
-    // --- Session 2: fresh runtime under a BUMPED runtimeVersion (the pin
+    // Session 2: fresh runtime under a BUMPED runtimeVersion (the pin
     // bump): the compiled set written by session 1's heal is a miss, so the
-    // default pattern must COLD-load from the legacy source docs. ---
+    // default pattern must COLD-load from the legacy source docs.
     const restore = setCompileCacheRuntimeVersionForTesting(
       "cf-test-bumped-runtime-version-t7",
     );
     try {
       const runtime2 = newRuntime();
       const session2 = await createSession({ identity: signer, spaceName });
-      const manager2 = new PieceManager(session2, runtime2);
-      await manager2.synced();
+      const pieces2 = new PiecesController(session2, runtime2);
+      await pieces2.synced();
 
       // The CT-1838 headline symptom was getPieceRegistry degrading to the
       // detached "empty-pieces" placeholder. With tolerance, the registry
       // loads.
-      const piecesCell = await manager2.getPieceRegistry();
+      const piecesCell = await pieces2.getPieceRegistry();
       const ids = piecesCell.get().map((piece) => pieceId(piece)).filter(
         Boolean,
       );
@@ -241,16 +242,16 @@ describe("piece layer over a legacy-envelope default pattern (CT-1838)", () => {
         simplePieceProgram,
         { space },
       );
-      const added = await manager2.runPersistent(
+      const added = await pieces2.runPersistent(
         simple2,
         { value: 7 },
         "added-after-bump-t7",
       );
-      await manager2.add([added]);
-      await manager2.runtime.idle();
-      await manager2.synced();
+      await pieces2.add([added]);
+      await pieces2.runtime.idle();
+      await pieces2.synced();
 
-      const afterAdd = await manager2.getPieceRegistry();
+      const afterAdd = await pieces2.getPieceRegistry();
       const afterIds = afterAdd.get().map((piece) => pieceId(piece)).filter(
         Boolean,
       );

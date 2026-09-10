@@ -46,7 +46,7 @@ parent passes.
 
 A **pattern** is source code — a template. A **piece** is an instance of a
 pattern living in a space. Top-level deployment through `cf piece new` or the
-shell does roughly this (see `packages/piece/src/manager.ts`):
+shell does roughly this (see `packages/piece/src/ops/pieces-controller.ts`):
 
 1. The pattern source is compiled and registered, so the space knows the
    program (not just its output).
@@ -91,6 +91,26 @@ independently deployed programs. Under the hood it writes a **link** (a
 serialized cell reference) into the viewer's argument cell; the runtime
 resolves links transparently on read (Chapter 8). This is the payoff of the
 whole design: integration between programs is a pointer, not an API project.
+
+The target path must be selected by the viewer's current input schema. A declared
+optional input, an array slot, or a key selected by `additionalProperties` can
+be linked before it has a value with `--allow-non-existing`. Without the flag,
+both endpoint paths must have values. If the pattern does not declare the input,
+update the consumer with `cf piece setsrc` before linking. `--allow-non-existing`
+allows missing pieces and endpoint values; it does not expose undeclared inputs.
+A refused link writes no binding and reports no successful link receipt.
+
+Whole-input and targeted `cf cell get --input` reads use the same input
+projection. Targeted `cf cell set --input` writes and piece input edits require
+the current input schema to select their path. A write can activate another
+schema branch; reads expose the branches selected by the resulting value.
+
+An old link stored under an undeclared input remains in the raw argument
+document, but a targeted piece-input read refuses that path. Updating the pattern
+to select the input makes that link visible without rewriting it.
+`cf piece setsrc --check` checks the candidate projection and uses runtime setup's
+stored-argument validation, including deferral of unreadable linked values; it
+does not change the stored arguments or the piece's source identity.
 
 ## Navigation
 

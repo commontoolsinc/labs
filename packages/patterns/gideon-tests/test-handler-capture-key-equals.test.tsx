@@ -11,7 +11,7 @@
  * Run:
  *   deno task cf test packages/patterns/gideon-tests/test-handler-capture-key-equals.test.tsx --verbose
  */
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import {
   CellInboxItemCapturePattern,
   WritableInboxItemCapturePattern,
@@ -82,7 +82,7 @@ export default pattern(() => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_writable_initial_handlers },
       { assertion: assert_writable_initial_items },
       { action: action_remove_middle_writable },

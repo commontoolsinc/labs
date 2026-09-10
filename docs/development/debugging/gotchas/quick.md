@@ -16,6 +16,8 @@ Contents:
 - [Stream subscribe doesn't exist](#stream-subscribe-doesnt-exist)
 - [Binding the whole item instead of a property](#binding-the-whole-item-instead-of-a-property)
 - [Writable array element types](#writable-array-element-types)
+- [Nested Writable types](#nested-writable-types)
+- [Handler state typed any unwraps Writables](#handler-state-typed-any-unwraps-writables)
 - [Performance quick tips](#performance-quick-tips)
 
 ## .get() is not a function
@@ -297,6 +299,39 @@ const removeItem = handler<
 ```
 
 See [@writable](../../../common/concepts/types-and-schemas/writable.md).
+
+## Nested Writable types
+
+**Symptom:** A field typed `Writable<Writable<T>>` doesn't behave as a
+writable holding a writable — reads and writes land on the wrong layer.
+
+**Why:** Directly nesting `Writable` in `Writable` is not a supported shape.
+(This is distinct from `Writable<Array<Writable<T>>>`, which is supported —
+see [Writable array element types](#writable-array-element-types).)
+
+**Fix:** Box the inner writable in an object:
+
+```typescript
+// Shown for illustration only.
+// ❌ Directly nested
+current: Writable<Writable<Item> | null>;
+
+// ✅ Boxed in an object
+current: Writable<{ active: Writable<Item> | null }>;
+// initialized with { active: null }
+```
+
+## Handler state typed any unwraps Writables
+
+**Symptom:** Inside a handler, `.get()`/`.set()` fail on a state field that is
+a `Writable<>` at the binding site — the handler received the plain value.
+
+**Why:** The transformer generates a schema from the handler's declared state
+type. `any` yields a schema with no shape, so the runtime cannot tell which
+fields are writable references and resolves everything to plain values.
+
+**Fix:** Give handler state a precise type. If the handler mutates, name the
+field `Writable<T>` (or `Cell<T>` for links); `any` never preserves cell-ness.
 
 ## Performance quick tips
 

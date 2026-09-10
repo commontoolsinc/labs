@@ -1,11 +1,12 @@
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import type { CfcConfClause } from "./clause.ts";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import { encodePointer, parsePointer } from "../../../memory/v2/path.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
+import type { CfcConfClause } from "./clause.ts";
 import { clauseAlternatives } from "./clause.ts";
 import {
   cfcEntryHasDerivedContainment,
@@ -124,6 +125,7 @@ export type ConfLabelConsumedObservation = {
 
 export type ConfLabelQueryEvaluation = {
   result: InspectConfLabelResult;
+
   /**
    * Joined population-rule confidentiality of every labeled metadata
    * observation the evaluation consumed (per-field consultations and
@@ -132,6 +134,7 @@ export type ConfLabelQueryEvaluation = {
    * the shared constant), so nothing protected flowed to the caller.
    */
   consumedConfidentiality: readonly CfcConfClause[];
+
   /**
    * The same consumption, one record per consulted concrete metadata path
    * (paths are unique by construction — clause/alternative indices plus
@@ -171,7 +174,6 @@ export const parseConfLabelTargetPath = (
   return canonical;
 };
 
-// ---------------------------------------------------------------------------
 // The §4.6.4.2 population rule: persisted templates as the carrier, the
 // interim rule computed from the entry in hand as source and fallback.
 
@@ -291,7 +293,7 @@ const atomProjectionLabel = (
         walk(element, contextAtom, [...valuePath, String(index)])
       );
     }
-    if (!isRecord(value)) {
+    if (!isObjectOrArray(value)) {
       return true;
     }
     if (isCfcFieldCommitment(value)) {
@@ -355,8 +357,9 @@ const atomProjectionLabel = (
   return consumed;
 };
 
-// ---------------------------------------------------------------------------
+//
 // Query evaluation.
+//
 
 /**
  * The atom field each §4.6.4.1 query predicate tests, plus the atom FAMILY
@@ -377,6 +380,7 @@ const QUERY_PREDICATES: Record<
   keyof ConfLabelQuery,
   {
     readonly field: string;
+
     /** Absent = family-generic. Input is the record atom's `type` field. */
     readonly familyTypes?: readonly (string | undefined)[];
   }
@@ -487,7 +491,7 @@ export const evaluateConfLabelQuery = (
         ];
         let matched = true;
         for (const { field, familyTypes, expected } of predicates) {
-          if (!isRecord(atom)) {
+          if (!isObjectOrArray(atom)) {
             // A bare string atom is a type-only atom: its entire content is
             // its (public) type tag, so `atomType` equality applies to the
             // atom itself; every other field is absent (no match, shape-only

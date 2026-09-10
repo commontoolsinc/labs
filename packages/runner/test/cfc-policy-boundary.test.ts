@@ -1,21 +1,23 @@
-import { describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import { internSchema } from "@commonfabric/data-model-schema";
+import { Identity } from "@commonfabric/identity";
+
+import type { JSONSchema } from "../src/builder/types.ts";
+import { preparedDigestFor } from "../src/cfc/canonical.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
+import type { CfcPolicyRecordInput, ExchangeRule } from "../src/cfc/policy.ts";
+import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import type { PreparedDigestInput } from "../src/cfc/types.ts";
+import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
   ExtendedStorageTransaction,
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
-import { Runtime } from "../src/runtime.ts";
-import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
-import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
-import type { CfcPolicyRecordInput, ExchangeRule } from "../src/cfc/policy.ts";
-import { preparedDigestFor } from "../src/cfc/canonical.ts";
-import type { PreparedDigestInput } from "../src/cfc/types.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-policy-boundary");
 
@@ -160,9 +162,10 @@ const withRuntime = async (
   const runtime = new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
-    cfcEnforcementMode: "enforce-explicit",
     cfcSinkMaxConfidentiality: { fetchJson: [USER_ALICE] },
     cfcPolicyRecords: opts.policyRecords ?? POLICY,
+    // Each case names the policy-evaluation rung it is about, and asserts the
+    // decision or the diagnostic that rung produces over one fixture.
     cfcPolicyEvaluation: opts.policyEvaluation ?? "off",
   });
   try {
@@ -361,6 +364,9 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
   describe("input-requirement maxConfidentiality gate", () => {
     const sinkSchema = {
       type: "object",
+      // The write target holds values derived from the Space-labeled cell,
+      // so its root declares that clause as the audience it keeps.
+      ifc: { confidentiality: [SPACE_ATOM] },
       properties: {
         out: {
           type: "string",
@@ -597,6 +603,9 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
           "mode-change-probe",
           {
             type: "object",
+            // The second prepare below reads back the label the first one
+            // persisted, so the root declares the clause `value` carries.
+            ifc: { confidentiality: ["x"] },
             properties: {
               value: { type: "string", ifc: { confidentiality: ["x"] } },
             },

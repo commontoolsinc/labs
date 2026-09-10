@@ -1,5 +1,8 @@
-// The main-build tile's streak: how long the tip conclusion has held on main.
-// Canned runs, no network. See tiles.test.ts for the rest of this tile's contract.
+/**
+ * The main-build tile's streak: how long the tip conclusion has held on main.
+ * Canned runs, no network. See tiles.test.ts for the rest of this tile's contract.
+ */
+
 import {
   assertEquals,
   assertRejects,
@@ -20,6 +23,7 @@ function ctx(runs: Run[]): Ctx {
 let nextRunId = 1;
 
 function run(over: Partial<Run>): Run {
+  const startedAt = new Date(Date.now() - 3_600_000).toISOString();
   return {
     id: nextRunId++,
     status: "completed",
@@ -28,7 +32,8 @@ function run(over: Partial<Run>): Run {
     event: "push",
     head_sha: "sha",
     display_title: "t",
-    run_started_at: new Date(Date.now() - 3_600_000).toISOString(),
+    created_at: startedAt,
+    run_started_at: startedAt,
     updated_at: new Date().toISOString(),
     html_url: "",
     head_commit: { message: "t (#1)" },

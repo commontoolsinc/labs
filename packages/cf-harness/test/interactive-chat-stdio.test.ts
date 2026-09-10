@@ -14,6 +14,11 @@ import {
 } from "../src/contracts/interactive-chat.ts";
 import { HARNESS_BROWSER_ACCESS_LEASE_TYPE } from "../src/contracts/browser-access.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
+import { DEFAULT_PARENT_TOOL_IDS } from "../src/contracts/tool-descriptor.ts";
+import {
+  parseHostMountSpecs,
+  resolveInteractiveProvisioning,
+} from "../src/host-mounts.ts";
 import {
   HarnessInteractiveChatService,
   type HarnessInteractivePromptLoopFactory,
@@ -23,6 +28,8 @@ import {
   parseHarnessInteractiveChatStdioCliOptions,
   runHarnessInteractiveChatNdjsonTransport,
   runHarnessInteractiveChatStdio,
+  runHarnessInteractiveChatStdioCli,
+  type RunHarnessInteractiveChatStdioOptions,
 } from "../src/interactive-chat-stdio.ts";
 import type { HarnessPromptLoopResult } from "../src/prompt-loop.ts";
 
@@ -1056,6 +1063,44 @@ Deno.test("interactive NDJSON transport accepts valid policy prompt slots", asyn
   );
 });
 
+Deno.test("interactive NDJSON transport accepts a policy naming the run's default tools", async () => {
+  // The default parent surface is what a run advertises, so a client that
+  // submits it back must be understood — including whichever tools were added
+  // to that surface most recently.
+  const output: string[] = [];
+  await runHarnessInteractiveChatNdjsonTransport({
+    lines: [
+      JSON.stringify({
+        type: HARNESS_CHAT_REQUEST_TYPE,
+        protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+        requestId: "req-default-tools",
+        method: "start_session",
+        params: {
+          sessionId: "session-1",
+          workspace: { hostPath: "/workspace" },
+          policy: {
+            type: "cf-harness.chat-policy",
+            toolMode: "workspace-write",
+            allowedToolIds: [...DEFAULT_PARENT_TOOL_IDS],
+            allowedSubagentProfiles: [],
+          },
+        },
+      }),
+    ],
+    writeLine: (line) => {
+      output.push(line);
+    },
+  });
+
+  const response = decodeLines(output).find((envelope) =>
+    "ok" in envelope && envelope.requestId === "req-default-tools"
+  );
+  assertEquals(
+    response !== undefined && "ok" in response ? response.ok : false,
+    true,
+  );
+});
+
 Deno.test("interactive NDJSON transport rejects malformed Browser Access leases", async () => {
   const output: string[] = [];
   await runHarnessInteractiveChatNdjsonTransport({
@@ -1153,5 +1198,214 @@ Deno.test("interactive NDJSON transport rejects invalid Browser Access profile m
   assertEquals(
     "ok" in response && response.ok === false ? response.error.code : "",
     "invalid_request",
+  );
+});
+
+Deno.test("interactive stdio CLI help returns without starting the transport", async () => {
+  assertEquals(await runHarnessInteractiveChatStdioCli(["--help"]), undefined);
+});
+
+Deno.test("interactive stdio CLI accepts the batch entrypoint's provisioning flags", () => {
+  // The interactive host used to parse three flags and throw on everything
+  // else, so an embedder could provision a batch run and not a chat session.
+  // Loom shipped cf-harness chat on that gap: no loom mount, no Page RPC, so
+  // page authoring silently vanished from chat.
+  assertEquals(
+    parseHarnessInteractiveChatStdioCliOptions([
+      "--host-mount",
+      "name=loom,source=/tmp,target=/loom,mode=readonly",
+      "--host-mount=name=gtd,source=/tmp,target=/gtd,mode=writable",
+      "--max-model-turns",
+      "64",
+    ], {}),
+    {
+      hostMountSpecs: [
+        "name=loom,source=/tmp,target=/loom,mode=readonly",
+        "name=gtd,source=/tmp,target=/gtd,mode=writable",
+      ],
+      maxModelTurns: 64,
+      help: false,
+    },
+  );
+});
+
+Deno.test("interactive stdio CLI accepts the inline --flag=value spelling", () => {
+  // Both spellings exist for every other flag on this parser, so both are part
+  // of the contract; only the space-separated form was covered.
+  assertEquals(
+    parseHarnessInteractiveChatStdioCliOptions([
+      "--max-model-turns=48",
+      "--host-mount=name=gtd,source=/tmp,target=/gtd,mode=writable",
+    ], {}),
+    {
+      hostMountSpecs: ["name=gtd,source=/tmp,target=/gtd,mode=writable"],
+      maxModelTurns: 48,
+      help: false,
+    },
+  );
+  assertThrows(
+    () =>
+      parseHarnessInteractiveChatStdioCliOptions(["--max-model-turns=0"], {}),
+    Error,
+    "requires a positive integer",
+  );
+});
+
+Deno.test("interactive stdio CLI rejects a zero model-turn budget", () => {
+  // 0 would mean "no model turns", which is not a smaller budget, it is a
+  // session that cannot answer.
+  assertThrows(
+    () =>
+      parseHarnessInteractiveChatStdioCliOptions(
+        ["--max-model-turns", "0"],
+        {},
+      ),
+    Error,
+    "requires a positive integer",
+  );
+});
+
+Deno.test("interactive stdio CLI still rejects unknown arguments", () => {
+  assertThrows(
+    () => parseHarnessInteractiveChatStdioCliOptions(["--not-a-flag"], {}),
+    Error,
+    "unsupported interactive chat stdio argument",
+  );
+});
+
+Deno.test("the standalone stdio entrypoint applies the flags it advertises", async () => {
+  // The first version of this change wired only the Loom-local host, so the
+  // standalone entrypoint parsed --host-mount, printed it in its usage text and
+  // dropped it — the same "second entrypoint, no provisioning" defect this PR
+  // exists to remove, one layer in. Both entrypoints now resolve through
+  // resolveInteractiveProvisioning.
+  const source = await Deno.makeTempDir();
+  try {
+    const seen: RunHarnessInteractiveChatStdioOptions[] = [];
+    await runHarnessInteractiveChatStdioCli(
+      [
+        "--host-mount",
+        `name=loom,source=${source},target=/loom,mode=readonly`,
+        "--max-model-turns",
+        "64",
+      ],
+      Deno.cwd(),
+      (options) => {
+        seen.push(options);
+        return Promise.resolve();
+      },
+    );
+    assertEquals(seen.length, 1);
+    const base = seen[0].basePromptLoopOptions;
+    assertEquals(base?.maxModelTurns, 64);
+    assertEquals(base?.additionalMounts?.length, 1);
+    assertEquals(base?.additionalMounts?.[0].sandboxPath, "/loom");
+    assertEquals(base?.additionalMounts?.[0].readOnly, true);
+  } finally {
+    await Deno.remove(source, { recursive: true });
+  }
+});
+
+Deno.test("a typo in a host-mount field is refused, not silently defaulted", async () => {
+  // `mdoe=writable` used to fall through to the readonly default and provision
+  // a mount the caller believed was writable.
+  const source = await Deno.makeTempDir();
+  try {
+    await assertRejects(
+      () =>
+        parseHostMountSpecs(
+          [`name=loom,source=${source},target=/loom,mdoe=writable`],
+          Deno.cwd(),
+        ),
+      Error,
+      "--host-mount field unknown: mdoe",
+    );
+  } finally {
+    await Deno.remove(source, { recursive: true });
+  }
+});
+
+Deno.test("no provisioning flags leaves the run options untouched", async () => {
+  // The other half of the standalone-entrypoint contract: adding these flags
+  // must not change what happens when nobody passes them, or every existing
+  // embedder gets a behaviour change for free.
+  assertEquals(await resolveInteractiveProvisioning({}, Deno.cwd()), {});
+
+  const seen: RunHarnessInteractiveChatStdioOptions[] = [];
+  await runHarnessInteractiveChatStdioCli(
+    ["--chat-max-in-memory-events", "8"],
+    Deno.cwd(),
+    (options) => {
+      seen.push(options);
+      return Promise.resolve();
+    },
+  );
+  assertEquals(seen.length, 1);
+  assertEquals(seen[0].basePromptLoopOptions, undefined);
+  assertEquals(seen[0].maxInMemoryEvents, 8);
+});
+
+Deno.test("resolveInteractiveProvisioning carries a turn budget without mounts", async () => {
+  assertEquals(
+    await resolveInteractiveProvisioning({ maxModelTurns: 32 }, Deno.cwd()),
+    { maxModelTurns: 32 },
+  );
+});
+
+Deno.test("interactive NDJSON transport reports a failed event write as a transport error", async () => {
+  const written: string[] = [];
+  const requests = [
+    JSON.stringify({
+      type: HARNESS_CHAT_REQUEST_TYPE,
+      protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+      requestId: "req-1",
+      method: "start_session",
+      params: { sessionId: "session-1", workspace: { hostPath: "/workspace" } },
+    }),
+    JSON.stringify({
+      type: HARNESS_CHAT_REQUEST_TYPE,
+      protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+      requestId: "req-2",
+      method: "start_turn",
+      params: {
+        sessionId: "session-1",
+        turnId: "turn-1",
+        input: { text: "Hi" },
+      },
+    }),
+  ];
+
+  await assertRejects(
+    () =>
+      runHarnessInteractiveChatNdjsonTransport({
+        lines: requests,
+        writeLine: (line: string) => {
+          // Stands in for a peer that has gone away mid-session.
+          if (line.includes("turn_completed")) {
+            throw new Error("broken pipe");
+          }
+          written.push(line);
+        },
+        createService: (onEvent, onEventDeliveryError) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: () => ({
+              runTranscript: (options) =>
+                Promise.resolve({
+                  model: "gpt-test",
+                  finalAssistantText: "Done.",
+                  transcript: [...options.transcript, {
+                    role: "assistant" as const,
+                    content: "Done.",
+                  }],
+                  modelTurns: 1,
+                  runState: {} as HarnessPromptLoopResult["runState"],
+                }),
+            }),
+            onEvent,
+            onEventDeliveryError,
+          }),
+      }),
+    Error,
+    "broken pipe",
   );
 });

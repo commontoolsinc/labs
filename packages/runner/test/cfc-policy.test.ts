@@ -195,7 +195,7 @@ describe("CFC policy records (B2a)", () => {
         /must be an object/,
       ],
       [
-        // A Map passes `isRecord` but exposes no own string keys, so
+        // A Map passes `isObjectOrArray` but exposes no own string keys, so
         // field-by-field validation would read no guards — must fail closed
         // (cubic P1 on #4562).
         "Map-shaped record",

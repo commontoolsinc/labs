@@ -1,10 +1,11 @@
+import { type CellHandle } from "@commonfabric/runtime-client";
 import { css, html, PropertyValues } from "lit";
+
 import { BaseElement } from "../../core/base-element.ts";
 import {
   createArrayCellController,
   createCellController,
 } from "../../core/cell-controller.ts";
-import { type CellHandle } from "@commonfabric/runtime-client";
 
 // TODO(v2-token-migration): Migrate this component to component-level tokens,
 // matching the prior phase-1 token migration pattern.

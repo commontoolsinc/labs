@@ -1,16 +1,20 @@
+import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import { consume } from "@lit/context";
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { consume } from "@lit/context";
+
 import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
+
 import "../cf-chat-message/index.ts";
 import "../cf-tool-call/index.ts";
+
 import type {
   BuiltInLLMMessage,
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
 } from "@commonfabric/api";
+
 import {
   applyThemeToElement,
   type CFTheme,
@@ -85,10 +89,6 @@ export class CFChat extends BaseElement {
       }
 
       .message-item.last-in-group {
-        margin-bottom: var(--cf-spacing-4, 1rem);
-      }
-
-      .message-item.system {
         margin-bottom: var(--cf-spacing-4, 1rem);
       }
 
@@ -173,7 +173,7 @@ export class CFChat extends BaseElement {
     `,
   ];
 
-  /* ---------- Cell controller for messages binding ---------- */
+  /** Cell controller for messages binding */
   private _cellController = createCellController<BuiltInLLMMessage[]>(this, {
     timing: { strategy: "immediate" },
     onChange: () => {
@@ -197,12 +197,15 @@ export class CFChat extends BaseElement {
   @property({ type: Object })
   accessor theme: any = {}; // Accept any theme object (partial or full)
 
-  // Consume theme from provider (preferred). If no direct theme prop, use this.
+  /**
+   * The theme consumed from the provider. This is used when there is no
+   * direct `theme` prop.
+   */
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   accessor parentTheme: CFTheme = defaultTheme;
 
-  // Internal computed theme for applying CSS variables locally
+  /** Internal computed theme, for applying CSS variables locally. */
   @property({ type: Object, attribute: false })
   accessor _computedTheme: CFTheme = defaultTheme;
 
@@ -233,23 +236,21 @@ export class CFChat extends BaseElement {
   private _updateThemeProperties() {
     // Apply standard theme properties with custom spacing for chat-specific needs
     applyThemeToElement(this, this._computedTheme, {
-      additionalSpacing: {
-        "message-bottom": getSemanticSpacing(
-          this._computedTheme.density,
-          "sm",
-          "tight",
-        ),
-        "padding-bubble": getSemanticSpacing(
-          this._computedTheme.density,
-          "lg",
-          "normal",
-        ),
-        "padding-bubble-horizontal": getSemanticSpacing(
-          this._computedTheme.density,
-          "xl",
-          "normal",
-        ),
-      },
+      "message-bottom": getSemanticSpacing(
+        this._computedTheme.density,
+        "sm",
+        "tight",
+      ),
+      "padding-bubble": getSemanticSpacing(
+        this._computedTheme.density,
+        "lg",
+        "normal",
+      ),
+      "padding-bubble-horizontal": getSemanticSpacing(
+        this._computedTheme.density,
+        "xl",
+        "normal",
+      ),
     });
   }
 
@@ -298,20 +299,12 @@ export class CFChat extends BaseElement {
 
     const classes = ["message-item"];
 
-    // System messages are never grouped
-    if (currentMessage.role === "system") {
-      classes.push("system");
-      return classes.join(" ");
-    }
-
     // Check if this message should be grouped with the previous one
     const shouldGroupWithPrev = prevMessage &&
-      prevMessage.role !== "system" &&
       this._isSameGroup(prevMessage.role, currentMessage.role);
 
     // Check if this message should be grouped with the next one
     const shouldGroupWithNext = nextMessage &&
-      nextMessage.role !== "system" &&
       this._isSameGroup(currentMessage.role, nextMessage.role);
 
     if (shouldGroupWithPrev || shouldGroupWithNext) {

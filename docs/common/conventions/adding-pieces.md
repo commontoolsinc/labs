@@ -116,17 +116,11 @@ wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
 The `addPiece` handler is defined in `default-app.tsx` and exported as a
 `Stream<{ piece: MentionablePiece }>`. Internally it checks for duplicates
 and writes to the owned `pieceRegistry` Writable. The runtime infrastructure
-(`PieceManager.add()`) also uses this handler — patterns should follow the
+(`PiecesController.add()`) also uses this handler — patterns should follow the
 same approach.
 
-The `#allPieces` wish target and `allPieces` output have been removed. Use
-`pieceRegistry` and `#pieceRegistry`.
-
-The default app retains the old `allPieces` owned-cell cause for a one-time
-migration. When `pieceRegistry` is empty, it copies the legacy list and marks
-the migration complete. Existing canonical data wins when both cells contain
-data. `#pieceRegistry` and `PieceManager` can read the retired registry from a
-provenance-free legacy default-app root that remains pinned to its old source.
+Use the `addPiece` handler for registry writes. To read registry entries, wish
+for `#pieceRegistry`; do not request `pieceRegistry` as a Writable.
 
 See [handler()](../concepts/handler.md) for handler mechanics and
 [wish()](wish.md) for wish usage.

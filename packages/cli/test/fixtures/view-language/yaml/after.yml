@@ -1,0 +1,4 @@
+name: CI
+jobs:
+  go:
+    runs-on: macos-latest

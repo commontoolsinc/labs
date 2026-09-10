@@ -1,4 +1,4 @@
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 
 function incrementCount(count: Writable<number>): void {
   count.set(count.get() + 1);
@@ -19,10 +19,10 @@ function isBobName(name: Writable<string>): boolean {
 export const singlePattern = pattern(() => {
   const count = new Writable(0);
   const increment = action(() => incrementCount(count));
-  const isOne = computed(() => countIsOne(count));
+  const isOne = assert(() => countIsOne(count));
 
   return {
-    tests: [
+    [TESTS]: [
       { action: increment },
       { assertion: isOne },
     ],
@@ -31,18 +31,18 @@ export const singlePattern = pattern(() => {
 
 export const alice = pattern(() => {
   const name = new Writable("alice");
-  const isAlice = computed(() => isAliceName(name));
+  const isAlice = assert(() => isAliceName(name));
 
   return {
-    tests: [{ assertion: isAlice }],
+    [TESTS]: [{ assertion: isAlice }],
   };
 });
 
 export const bob = pattern(() => {
   const name = new Writable("bob");
-  const isBob = computed(() => isBobName(name));
+  const isBob = assert(() => isBobName(name));
 
   return {
-    tests: [{ assertion: isBob }],
+    [TESTS]: [{ assertion: isBob }],
   };
 });

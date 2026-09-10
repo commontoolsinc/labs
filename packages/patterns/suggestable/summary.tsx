@@ -32,10 +32,12 @@ export type SummaryOutput = {
  * instantiated across many different contexts.
  */
 const Summary = pattern<SummaryInput, SummaryOutput>(({ topic, context }) => {
-  // Build the prompt dynamically based on topic and context
+  // An empty prompt holds the request back: `generateText` clears its state
+  // and makes no call until one arrives. A summary with no topic has nothing
+  // to condense, so the model is asked only once a caller names the subject.
   const prompt = computed(() => {
-    const t = topic || "the following";
-    return `Please provide a concise, well-structured summary of ${t}`;
+    if (!topic) return "";
+    return `Please provide a concise, well-structured summary of ${topic}`;
   });
 
   // Generate the summary

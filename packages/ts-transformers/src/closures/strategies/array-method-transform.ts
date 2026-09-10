@@ -5,6 +5,7 @@ import {
   getLoweredArrayMethodName,
   getTypeAtLocationWithFallback,
   preserveLineage,
+  preserveSourceMapRange,
   registerSyntheticCallType,
   typeToTypeNodeWithRegistry,
 } from "../../ast/mod.ts";
@@ -23,7 +24,10 @@ import {
 import { CaptureCollector } from "../capture-collector.ts";
 import { buildCaptureParamsObject } from "../utils/capture-scaffold.ts";
 import { PatternBuilder } from "../utils/pattern-builder.ts";
-import { SchemaFactory } from "../utils/schema-factory.ts";
+import {
+  createArrayMethodCallbackSchema,
+  createHandlerStateSchema,
+} from "../utils/schema-factory.ts";
 import {
   analyzeElementBinding,
   rewriteCallbackBody,
@@ -91,17 +95,20 @@ function lowerMapReceiverMemberAccess(
     return expression;
   }
 
-  return context.factory.createCallExpression(
-    context.factory.createPropertyAccessExpression(
-      context.factory.createIdentifier(current.text),
-      context.factory.createIdentifier("key"),
+  return preserveSourceMapRange(
+    context.factory.createCallExpression(
+      context.factory.createPropertyAccessExpression(
+        context.factory.createIdentifier(current.text),
+        context.factory.createIdentifier("key"),
+      ),
+      undefined,
+      segments,
     ),
-    undefined,
-    segments,
+    expression,
   );
 }
 
-function createPatternCall(
+function createPatternCallWithParams(
   methodCall: ts.CallExpression,
   callback: ts.ArrowFunction | ts.FunctionExpression,
   transformedBody: ts.ConciseBody,
@@ -192,29 +199,27 @@ function createPatternCall(
   const newCallback = builder.buildPatternCallback(callback, rewrittenBody);
   context.markAsArrayMethodCallback(newCallback);
 
-  const schemaFactory = new SchemaFactory(context);
-  const callbackParamTypeNode = schemaFactory.createArrayMethodCallbackSchema(
+  const callbackParamTypeNode = createArrayMethodCallbackSchema(
     methodCall,
     elemParam,
     indexParam,
     arrayParam,
+    context,
   );
 
   const { checker } = context;
-  const typeRegistry = context.options.state?.typeRegistry;
+  const typeRegistry = context.state.typeRegistry;
   let resultTypeNode: ts.TypeNode | undefined;
 
   if (callback.type) {
     resultTypeNode = callback.type;
-    if (typeRegistry) {
-      const type = getTypeAtLocationWithFallback(
-        callback.type,
-        checker,
-        typeRegistry,
-      );
-      if (type) {
-        typeRegistry.set(callback.type, type);
-      }
+    const type = getTypeAtLocationWithFallback(
+      callback.type,
+      checker,
+      typeRegistry,
+    );
+    if (type) {
+      typeRegistry.set(callback.type, type);
     }
   } else {
     const signature = checker.getSignatureFromDeclaration(callback);
@@ -256,7 +261,7 @@ function createPatternCall(
         context.cfHelpers.createHelperCall(
           "toSchema",
           callback,
-          [schemaFactory.createHandlerStateSchema(filteredCaptureTree)],
+          [createHandlerStateSchema(filteredCaptureTree, undefined, context)],
           [],
         ),
       ],
@@ -304,31 +309,17 @@ function createPatternCall(
     factory.createIdentifier(targetMethodName),
   );
 
-  const args: ts.Expression[] = [boundPattern];
-  if (methodCall.arguments.length > 1) {
-    const thisArg = ts.visitNode(
-      methodCall.arguments[1],
-      visitor,
-      ts.isExpression,
-    );
-    if (thisArg) {
-      args.push(thisArg);
-    }
-  }
-
   const mapWithPatternCall = preserveLineage(
     factory.createCallExpression(
       mapWithPatternAccess,
       methodCall.typeArguments,
-      args,
+      [boundPattern],
     ),
     methodCall,
   );
 
-  if (typeRegistry) {
-    const mapResultType = context.checker.getTypeAtLocation(methodCall);
-    registerSyntheticCallType(mapWithPatternCall, mapResultType, typeRegistry);
-  }
+  const mapResultType = context.checker.getTypeAtLocation(methodCall);
+  registerSyntheticCallType(mapWithPatternCall, mapResultType, typeRegistry);
 
   return mapWithPatternCall;
 }
@@ -374,7 +365,7 @@ export function transformArrayMethodCallback(
     visitor,
   ) as ts.ConciseBody;
 
-  return createPatternCall(
+  return createPatternCallWithParams(
     methodCall,
     callback,
     transformedBody,

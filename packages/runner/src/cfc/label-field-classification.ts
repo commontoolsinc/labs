@@ -1,5 +1,5 @@
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 /**
  * Cross-space label-metadata representation classes (inv-12 / SC-14 / SC-25;
@@ -40,6 +40,7 @@ export type LabelAtomFamily =
 
 export type LabelFieldClassificationEntry = {
   readonly family: LabelAtomFamily;
+
   /**
    * Path of the classified field inside the atom, e.g. `["source"]` or
    * `["identity", "sourceFile"]`. Family-scoped: a Caveat's `source` is
@@ -48,6 +49,7 @@ export type LabelFieldClassificationEntry = {
    * walks, so nesting needs no extra rows.
    */
   readonly field: readonly string[];
+
   readonly class: LabelFieldRepresentationClass;
 };
 
@@ -198,7 +200,7 @@ export const classifyAtomField = (
   atom: unknown,
   field: readonly string[],
 ): LabelFieldRepresentationClass | undefined => {
-  if (!isRecord(atom)) {
+  if (!isObjectOrArray(atom)) {
     return undefined;
   }
   if (typeof atom.type === "string") {

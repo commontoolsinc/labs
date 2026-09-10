@@ -28,29 +28,10 @@ const headersGetter: TextMapGetter<Headers> = {
   get: (carrier, key) => carrier.get(key) ?? undefined,
 };
 
-export interface OtelConfig {
-  /**
-   * Whether to include the request body in the trace
-   * @default false
-   */
-  includeRequestBody?: boolean;
-
-  /**
-   * Whether to include the response body in the trace
-   * @default false
-   */
-  includeResponseBody?: boolean;
-
-  /**
-   * Custom attributes to add to the span
-   */
-  additionalAttributes?: Record<string, string | number | boolean>;
-}
-
 /**
  * Creates a middleware that adds OpenTelemetry tracing to all routes
  */
-export function otelTracing(config: OtelConfig = {}): MiddlewareHandler {
+export function otelTracing(): MiddlewareHandler {
   return async (c, next) => {
     const path = c.req.path;
     const method = c.req.method;
@@ -83,28 +64,6 @@ export function otelTracing(config: OtelConfig = {}): MiddlewareHandler {
             span.setAttribute("http.request_id", requestId);
           }
 
-          // Add custom attributes if configured
-          if (config.additionalAttributes) {
-            Object.entries(config.additionalAttributes).forEach(
-              ([key, value]) => {
-                span.setAttribute(key, value);
-              },
-            );
-          }
-
-          // Include request body if configured
-          if (config.includeRequestBody) {
-            try {
-              const bodyClone = c.req.raw.clone();
-              const body = await bodyClone.text();
-              if (body) {
-                span.setAttribute("http.request.body", body);
-              }
-            } catch (_) {
-              /* swallow */
-            }
-          }
-
           try {
             // Execute the downstream handlers while this span is active
             await next();
@@ -112,19 +71,6 @@ export function otelTracing(config: OtelConfig = {}): MiddlewareHandler {
             // Capture status code from response if available
             if (c.res?.status) {
               span.setAttribute("http.status_code", c.res.status);
-            }
-
-            // Include response body if configured
-            if (config.includeResponseBody && c.res?.body) {
-              try {
-                const clonedResponse = c.res.clone();
-                const text = await clonedResponse.text();
-                if (text) {
-                  span.setAttribute("http.response.body", text);
-                }
-              } catch (_) {
-                /* swallow */
-              }
             }
           } catch (error) {
             span.setAttribute("error", true);

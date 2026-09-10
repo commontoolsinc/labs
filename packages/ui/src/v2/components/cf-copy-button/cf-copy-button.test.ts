@@ -1,6 +1,7 @@
 /**
  * Tests for CFCopyButton component
  */
+
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { CFCopyButton } from "./index.ts";

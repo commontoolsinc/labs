@@ -110,11 +110,14 @@ export type SharedProfilesCell = Writable<SharedProfilesValue>;
 export type TrustedChatRoom = ChatRoom<SharedChatMessage>;
 
 export type ChatAdminList = RequiresIntegrity<
-  TrustedActionWrite<
-    ChatAdminRole[],
-    typeof commitTrustedAdminToggle,
-    typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
-    typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
+  AddIntegrity<
+    TrustedActionWrite<
+      ChatAdminRole[],
+      typeof commitTrustedAdminToggle,
+      typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+      typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
+    >,
+    readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
   >,
   readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
 >;
@@ -156,11 +159,14 @@ export type ChatAdminRegistryValue =
 export type ChatAdminRegistryCell = Writable<ChatAdminRegistryValue>;
 
 export type SharedRoomList = RequiresIntegrity<
-  TrustedActionWrite<
-    TrustedChatRoom[],
-    typeof commitTrustedRoomAdd,
-    typeof TRUSTED_GROUP_CHAT_ADD_ROOM_ACTION,
-    typeof TRUSTED_GROUP_CHAT_ROOM_SURFACE
+  AddIntegrity<
+    TrustedActionWrite<
+      TrustedChatRoom[],
+      typeof commitTrustedRoomAdd,
+      typeof TRUSTED_GROUP_CHAT_ADD_ROOM_ACTION,
+      typeof TRUSTED_GROUP_CHAT_ROOM_SURFACE
+    >,
+    readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
   >,
   readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
 >;

@@ -7,7 +7,7 @@ import {
   type SessionSync,
   type SessionSyncUpsert,
 } from "@commonfabric/memory/v2";
-import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
+import type { IStorageProvider } from "../src/storage/interface.ts";
 import {
   ScriptedSessionTransport,
   type ScriptedTransportMessage,
@@ -18,7 +18,7 @@ import {
 const signer = await Identity.fromPassphrase("memory-v2-watch-refresh-race");
 const space = signer.did();
 
-type TestProvider = IStorageProviderWithReplica & {
+type TestProvider = IStorageProvider & {
   get(uri: URI): EntityDocument | undefined;
   sync(
     uri: URI,
@@ -147,14 +147,17 @@ class DelayedWatchAddTransport extends ScriptedSessionTransport {
 }
 
 class IncrementalEffectTransport extends ScriptedSessionTransport {
+  readonly #docs: Map<URI, SessionSyncUpsert["doc"]>;
+
   constructor(
-    private readonly docs: Map<URI, SessionSyncUpsert["doc"]>,
+    docs: Map<URI, SessionSyncUpsert["doc"]>,
   ) {
     super({
       name: "incremental-effect",
       sessionId: "session:incremental-effect",
       space,
     });
+    this.#docs = docs;
   }
 
   protected override ackServerSeq(): number {
@@ -175,7 +178,7 @@ class IncrementalEffectTransport extends ScriptedSessionTransport {
             serverSeq: roots.length,
             sync: fullSync(
               roots.length,
-              roots.map((id, index) => doc(id, index + 1, this.docs.get(id))),
+              roots.map((id, index) => doc(id, index + 1, this.#docs.get(id))),
             ),
           },
         });
@@ -605,8 +608,9 @@ Deno.test("memory v2 runner integrates watch deltas without re-diffing cold watc
 Deno.test("memory v2 runner never moves a confirmed doc backwards on a stale watch refresh", async () => {
   // Watch refreshes can arrive after local confirmations; an upsert whose
   // seq is below the confirmed base must be skipped (pending replay depends
-  // on monotonic bases). Pins the applySessionSync guard directly — its
-  // only other coverage was an incidental race in unrelated tests.
+  // on monotonic bases). Pins the `SpaceReplica.#applySessionSync()` guard
+  // directly — its only other coverage was an incidental race in unrelated
+  // tests.
   const docA = `of:watch-stale-a-${crypto.randomUUID()}` as URI;
   const docB = `of:watch-stale-b-${crypto.randomUUID()}` as URI;
   const transport = new IncrementalEffectTransport(

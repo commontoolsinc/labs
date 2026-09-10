@@ -20,13 +20,12 @@
  *  - **audience** (`aud`): the invocation must carry this server's audience
  *    identity. An open signed for host A cannot be replayed to host B.
  */
-import { hashOf } from "@commonfabric/data-model/value-hash";
+
+import { hashOf } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { fromDID } from "../util.ts";
 import { MEMORY_PROTOCOL, type SessionOpenChallenge } from "../v2.ts";
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
 
 /**
  * Build an `AuthorizationError`. Pass `retriable: true` for the anti-replay
@@ -49,14 +48,24 @@ export const authorizationError = (
 
 const sameSessionDescriptor = (
   left: Record<string, unknown>,
-  right: { sessionId?: string; seenSeq?: number; sessionToken?: string },
+  right: {
+    sessionId?: string;
+    seenSeq?: number;
+    sessionToken?: string;
+    actingAs?: string;
+  },
 ): boolean =>
   (typeof left.sessionId === "string" ? left.sessionId : undefined) ===
     right.sessionId &&
   (typeof left.seenSeq === "number" ? left.seenSeq : undefined) ===
     right.seenSeq &&
   (typeof left.sessionToken === "string" ? left.sessionToken : undefined) ===
-    right.sessionToken;
+    right.sessionToken &&
+  // The delegated READ binding (OW31) is part of the signed descriptor:
+  // a message-level marker that disagrees with the signed one is a
+  // mismatch, so the binding cannot be injected or stripped in transit.
+  (typeof left.actingAs === "string" ? left.actingAs : undefined) ===
+    right.actingAs;
 
 export type SessionOpenMessage = {
   space: string;
@@ -72,7 +81,7 @@ export type SessionOpenMessage = {
  * {@link wireAuthorizationOf} may produce this type.
  *
  * The signature crosses the wire as a `FabricBytes` -- the canonical binary
- * fabric value -- not as the `Uint8Array`-derived `Signature<T>` used
+ * `FabricValue` -- not as the `Uint8Array`-derived `Signature<T>` used
  * in-process.
  */
 export type WireSessionOpenAuthorization = {
@@ -87,7 +96,7 @@ export type WireSessionOpenAuthorization = {
 export const wireAuthorizationOf = (
   authorization: unknown,
 ): WireSessionOpenAuthorization | undefined => {
-  if (!isRecord(authorization)) return undefined;
+  if (!isObjectNotArray(authorization)) return undefined;
   const { signature } = authorization;
   return signature instanceof FabricBytes ? { signature } : undefined;
 };
@@ -95,10 +104,13 @@ export const wireAuthorizationOf = (
 export type VerifySessionOpenOptions = {
   /** This server's own audience identity. */
   audience: string;
+
   /** The challenge issued to this connection. */
   challenge: SessionOpenChallenge;
+
   /** Current unix time in seconds (defaults to now). Injectable for tests. */
   nowSeconds?: number;
+
   /** Grace window for `exp` to tolerate client/server clock skew. */
   clockSkewSeconds?: number;
 };
@@ -115,7 +127,7 @@ export const verifySessionOpenAuthorization = async (
 ): Promise<string> => {
   const wireAuthorization = wireAuthorizationOf(message.authorization);
   const signature = wireAuthorization?.signature.slice() ?? null;
-  if (!isRecord(message.invocation) || signature === null) {
+  if (!isObjectNotArray(message.invocation) || signature === null) {
     throw authorizationError("memory session.open requires authorization");
   }
 
@@ -124,9 +136,9 @@ export const verifySessionOpenAuthorization = async (
     typeof invocation.iss !== "string" ||
     invocation.cmd !== "session.open" ||
     invocation.sub !== message.space ||
-    !isRecord(invocation.args) ||
+    !isObjectNotArray(invocation.args) ||
     invocation.args.protocol !== MEMORY_PROTOCOL ||
-    !isRecord(invocation.args.session) ||
+    !isObjectNotArray(invocation.args.session) ||
     !sameSessionDescriptor(invocation.args.session, message.session)
   ) {
     throw authorizationError("memory session.open authorization mismatch");

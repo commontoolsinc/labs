@@ -1,3 +1,15 @@
+/**
+ * A `Map` as a `FabricInstance`, which is at present only half a value.
+ *
+ * Native conversion is the part that works: a frozen form is produced on
+ * request, an already-frozen one is handed back rather than rebuilt, and a
+ * mutable form is copied only when what it holds is frozen.
+ *
+ * The freeze protocols and the codec are stubs that throw, and these cases
+ * assert the throwing deliberately. An unimplemented member asserted to throw
+ * is a recorded gap; one that is merely never called is a gap nobody can see.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -5,19 +17,20 @@ import { FabricInstance, type FabricValue } from "@/interface.ts";
 import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
-} from "@/fabric-instances/BaseFabricInstance.ts";
-import { CODEC } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
+import { CODEC } from "@/codec-interface/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import { FrozenMap } from "@/frozen-builtins.ts";
-import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
+import { deepFreeze, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("FabricMap", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
   // rule (they don't fit a single member, aren't construction mechanics).
+
   it("implements `FabricInstance`", () => {
     const sm = new FabricMap(new Map());
     expect(sm instanceof FabricInstance).toBe(true);
@@ -61,59 +74,73 @@ describe("FabricMap", () => {
         expect(result).not.toBe(fm);
         expect(result).toBeInstanceOf(Map);
         expect(result).not.toBeInstanceOf(FrozenMap);
-        expect(result.get("a" as FabricValue)).toBe(1);
+        expect(result.get("a")).toBe(1);
       });
     });
 
-    // FabricMap deliberately keeps throwing stubs for the protocol methods
-    // (per Dan's PR #3612 review: not yet used, reworked separately).
-    describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
-      it("via dispatch: `[DEEP_FREEZE]` throws not-yet-implemented", () => {
-        const fm = new FabricMap(
-          new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
-        );
-        expect(() => deepFreeze(fm)).toThrow("FabricMap: not yet implemented");
+    describe("[DEEP_FREEZE]", () => {
+      // The protocol methods are unimplemented stubs that throw, which these
+      // cases pin at both entry points: dispatch and direct invocation.
+
+      describe("via dispatch", () => {
+        it("throws not-yet-implemented", () => {
+          const fm = new FabricMap(
+            new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
+          );
+          expect(() => deepFreeze(fm)).toThrow(
+            "`FabricMap`: not yet implemented",
+          );
+        });
       });
 
-      it("via dispatch: `[IS_DEEP_FROZEN]` throws not-yet-implemented (via type guard)", () => {
-        const fm = new FabricMap(
-          new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
-        );
-        Object.freeze(fm);
-        expect(() => isDeepFrozenFabricValue(fm)).toThrow(
-          "FabricMap: not yet implemented",
-        );
+      describe("via direct member invocation", () => {
+        it("throws not-yet-implemented", () => {
+          const fm = new FabricMap(
+            new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
+          );
+          expect(() => fm[DEEP_FREEZE](subFreeze)).toThrow(
+            "`FabricMap`: not yet implemented",
+          );
+        });
+      });
+    });
+
+    describe("[IS_DEEP_FROZEN]", () => {
+      describe("via dispatch", () => {
+        it("throws not-yet-implemented (via type guard)", () => {
+          const fm = new FabricMap(
+            new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
+          );
+          Object.freeze(fm);
+          expect(() => isValidDeepFrozenFabricValue(fm)).toThrow(
+            "`FabricMap`: not yet implemented",
+          );
+        });
       });
 
-      it("via direct member invocation: `[DEEP_FREEZE]` throws not-yet-implemented", () => {
-        const fm = new FabricMap(
-          new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
-        );
-        expect(() => fm[DEEP_FREEZE](subFreeze)).toThrow(
-          "FabricMap: not yet implemented",
-        );
-      });
-
-      it("via direct member invocation: `[IS_DEEP_FROZEN]` throws not-yet-implemented", () => {
-        const fm = new FabricMap(
-          new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
-        );
-        Object.freeze(fm);
-        expect(() => fm[IS_DEEP_FROZEN](subIsDeepFrozen)).toThrow(
-          "FabricMap: not yet implemented",
-        );
+      describe("via direct member invocation", () => {
+        it("throws not-yet-implemented", () => {
+          const fm = new FabricMap(
+            new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
+          );
+          Object.freeze(fm);
+          expect(() => fm[IS_DEEP_FROZEN](subIsDeepFrozen)).toThrow(
+            "`FabricMap`: not yet implemented",
+          );
+        });
       });
     });
   });
 
   describe("static members", () => {
-    // Nominal coverage: the codec exists and reports its wire tag and claims
-    // its instances, but `encode()` / `decode()` are throwing stubs until
-    // `Map` support is implemented.
     describe("[CODEC]", () => {
+      // Nominal coverage: the codec exists and reports its wire tag and claims
+      // its instances, but `encode()` / `decode()` are throwing stubs until
+      // `Map` support is implemented.
+
       const codec = FabricMap[CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Map;
-      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Map` wire type tag", () => {
@@ -130,15 +157,25 @@ describe("FabricMap", () => {
 
       describe("encode()", () => {
         it("throws (stub)", () => {
-          expect(() => codec.encode(new FabricMap(new Map()))).toThrow(
+          expect(() => codec.encode(new FabricMap(new Map()), env)).toThrow(
             "not yet implemented",
           );
         });
       });
 
+      describe("canDecode()", () => {
+        it("returns `true` for any state (stub)", () => {
+          // Accepting is what leaves the refusal to `decode()`, where "not
+          // yet implemented" is the honest account of it. A stub that refused
+          // here would report the payload as the thing at fault.
+          expect(codec.canDecode(null)).toBe(true);
+          expect(codec.canDecode([["k", "v"]])).toBe(true);
+        });
+      });
+
       describe("decode()", () => {
         it("throws (stub)", () => {
-          expect(() => codec.decode(expectedTag, null, context)).toThrow(
+          expect(() => codec.decode(expectedTag, null, env)).toThrow(
             "not yet implemented",
           );
         });

@@ -1,7 +1,11 @@
-// Tile tests: each tile is a pure collect(ctx) -> TileView, exercised with a
-// hand-made Ctx. No server, no network, no subprocess — the CI tiles get canned
-// runs and the token-gated tiles get an empty env (their gray-out contract).
+/**
+ * Tile tests: each tile is a pure collect(ctx) -> TileView, exercised with a
+ * hand-made Ctx. No server, no network, no subprocess — the CI tiles get canned
+ * runs and the token-gated tiles get an empty env (their gray-out contract).
+ */
+
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { TILE_LAYOUT_FIXTURES } from "./tile-layout-fixtures.ts";
 import { runSource, type Ctx, type Run } from "./types.ts";
 import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO } from "./config.ts";
 import { labsCi, loomCi } from "./tiles/main-build.ts";
@@ -9,6 +13,7 @@ import { labsCiTrust, loomCiTrust } from "./tiles/ci-trust.ts";
 import { labsCiDuration, loomCiDuration } from "./tiles/ci-duration.ts";
 import { commitGanttHref, recentRuns } from "./tiles/recent-runs.ts";
 import { dau, foldSeries, parseExcludes } from "./tiles/dau.ts";
+import { coverageDebt } from "./tiles/coverage-debt.ts";
 import { githubMembers } from "./tiles/github-members.ts";
 import { buildSnapshot, discordOnline } from "./tiles/discord-online.ts";
 import { gcpSpend } from "./tiles/gcp-spend.ts";
@@ -43,6 +48,7 @@ function ctx(
 let nextRunId = 1;
 
 function run(over: Partial<Run>): Run {
+  const startedAt = new Date(Date.now() - 3_600_000).toISOString();
   return {
     id: nextRunId++,
     status: "completed",
@@ -51,7 +57,8 @@ function run(over: Partial<Run>): Run {
     event: "push",
     head_sha: "sha",
     display_title: "t",
-    run_started_at: new Date(Date.now() - 3_600_000).toISOString(),
+    created_at: startedAt,
+    run_started_at: startedAt,
     updated_at: new Date().toISOString(),
     html_url: "",
     head_commit: { message: "t (#1)" },
@@ -95,23 +102,36 @@ Deno.test("labs ci trust: only first-attempt success counts as green", async () 
 });
 
 Deno.test(
-  "labs ci trust grid: every run in the latest 200-run window has a cell",
+  "labs ci trust grid: every run in the latest 160-run window has a cell",
   async () => {
+    const createdAt = (index: number) => new Date(index * 1_000).toISOString();
     const runs = [
-      run({ status: "in_progress", conclusion: null }),
-      ...Array.from({ length: 199 }, () => run({ conclusion: "success" })),
-      run({ conclusion: "failure" }),
+      run({
+        status: "in_progress",
+        conclusion: null,
+        created_at: createdAt(160),
+      }),
+      ...Array.from({ length: 159 }, (_, index) =>
+        run({
+          conclusion: "success",
+          created_at: createdAt(159 - index),
+        })),
+      run({ conclusion: "failure", created_at: createdAt(0) }),
     ];
     const view = await labsCiTrust.collect(ctx(runs));
     const cells = (view.extra ?? "").match(/class="cell"/g)?.length ?? 0;
-    assertEquals(cells, 200);
+    assertEquals(cells, 160);
+    assertStringIncludes(
+      view.extra ?? "",
+      'class="cells labeled"',
+    );
     assertEquals(
       view.sub,
-      "first-try green · 199 of last 200 runs",
+      "first-try green · 159 of last 160 runs",
     );
     assert(
-      !(view.extra ?? "").includes("#e2504a"),
-      "the 201st run must be outside the grid and percentage window",
+      !(view.extra ?? "").includes("var(--status-bad)"),
+      "the 161st run must be outside the grid and percentage window",
     );
   },
 );
@@ -128,19 +148,49 @@ Deno.test("labs ci trust grid: cell colors match trust scoring", async () => {
   ];
   const view = await labsCiTrust.collect(ctx(runs));
   const colors = [
-    ...(view.extra ?? "").matchAll(/background:(#[0-9a-f]+)/g),
+    ...(view.extra ?? "").matchAll(/background:(var\(--[^)]+\))/g),
   ].map((match) => match[1]);
   assertEquals(view.value, "25.0%");
-  assertEquals(colors.filter((color) => color === "#43c574").length, 1);
-  assertEquals(colors.filter((color) => color === "#e2504a").length, 3);
-  assertEquals(colors.filter((color) => color === "#6ea8fe").length, 1);
-  assertEquals(colors.filter((color) => color === "#7c828c").length, 2);
+  assertEquals(colors.filter((color) => color === "var(--status-good)").length, 1);
+  assertEquals(colors.filter((color) => color === "var(--status-bad)").length, 3);
+  assertEquals(colors.filter((color) => color === "var(--running)").length, 1);
+  assertEquals(
+    colors.filter((color) => color === "var(--status-unknown)").length,
+    2,
+  );
+});
+
+Deno.test("labs ci trust grid: duration spans the displayed runs", async () => {
+  const now = Date.now();
+  const runs = [
+    run({ created_at: new Date(now).toISOString() }),
+    run({ created_at: new Date(now - 2 * 86_400_000).toISOString() }),
+    run({ created_at: new Date(now - 5 * 86_400_000).toISOString() }),
+  ];
+  const view = await labsCiTrust.collect(ctx(runs));
+  assertEquals(view.duration, 5 * 86_400_000);
+  assertStringIncludes(view.extra ?? "", 'class="cells labeled"');
+
+  const malformed = await labsCiTrust.collect(ctx([
+    runs[0],
+    run({ created_at: "not a timestamp" }),
+    runs[2],
+  ]));
+  assertEquals(malformed.duration, 0);
+  assert(!(malformed.extra ?? "").includes("cells labeled"));
+
+  const window = Array.from({ length: 161 }, (_, i) =>
+    run({ created_at: new Date(now - i * 86_400_000).toISOString() })
+  );
+  const limited = await labsCiTrust.collect(ctx(window));
+  assertEquals(limited.duration, 159 * 86_400_000);
 });
 
 Deno.test("ci-duration window: the 6h window when it has >= 20 runs, else the most recent 20", async () => {
   const now = Date.now();
   const at = (minsAgo: number) =>
     run({
+      created_at: new Date(now - minsAgo * 60_000).toISOString(),
       run_started_at: new Date(now - minsAgo * 60_000).toISOString(),
       updated_at: new Date(now - minsAgo * 60_000 + 5 * 60_000).toISOString(),
     });
@@ -165,6 +215,7 @@ Deno.test("ci-duration: only runs that passed end to end count", async () => {
   const now = Date.now();
   const at = (i: number, over: Partial<Run>) =>
     run({
+      created_at: new Date(now - i * 60_000).toISOString(),
       run_started_at: new Date(now - i * 60_000).toISOString(),
       updated_at: new Date(now - i * 60_000 + 5 * 60_000).toISOString(),
       ...over,
@@ -175,12 +226,47 @@ Deno.test("ci-duration: only runs that passed end to end count", async () => {
     at(1, { conclusion: "cancelled" }),
     at(2, { conclusion: "timed_out" }),
     at(3, { status: "in_progress", conclusion: null }),
+    at(4, { event: "workflow_dispatch", conclusion: "success" }),
   ];
-  // Only the 20 successful runs are counted; the rest are ignored.
+  // Only the 20 successful push runs are counted; the rest are ignored.
   assertStringIncludes(
     (await labsCiDuration.collect(ctx(runs))).sub ?? "",
     "20 passing runs in the last 6h",
   );
+});
+
+Deno.test("ci-duration: a run without a usable landing span is dropped", async () => {
+  const now = Date.now();
+  const usable = run({
+    created_at: new Date(now - 10 * 60_000).toISOString(),
+    run_started_at: new Date(now - 10 * 60_000).toISOString(),
+    updated_at: new Date(now).toISOString(),
+  });
+  // A final update at or before the landing trigger, and a landing trigger that
+  // does not parse. Both would otherwise reach the median as a duration of zero
+  // or NaN minutes.
+  const endsBeforeItLands = run({
+    created_at: new Date(now).toISOString(),
+    run_started_at: new Date(now).toISOString(),
+    updated_at: new Date(now - 60_000).toISOString(),
+  });
+  const unparseableLanding = run({
+    created_at: "the fourteenth of never",
+    run_started_at: new Date(now - 20 * 60_000).toISOString(),
+    updated_at: new Date(now).toISOString(),
+  });
+
+  const mixed = await labsCiDuration.collect(
+    ctx([usable, endsBeforeItLands, unparseableLanding]),
+  );
+  assertEquals(mixed.value, "10m");
+  assertStringIncludes(mixed.sub ?? "", "last 1 passing runs");
+
+  const none = await labsCiDuration.collect(
+    ctx([endsBeforeItLands, unparseableLanding]),
+  );
+  assertEquals(none.status, "unknown");
+  assertEquals(none.value, "—");
 });
 
 Deno.test("recent-runs: wide, failure tip -> bad, rows link to the landing PR", async () => {
@@ -292,10 +378,14 @@ Deno.test("recent runs: duration opens every successful run for the commit", asy
 
 Deno.test("tile labels: the labs/loom ci family is renamed and paired", async () => {
   const one = ctx([run({ conclusion: "success" })]);
+  const labsTrust = await labsCiTrust.collect(one);
+  const loomTrust = await loomCiTrust.collect(one);
   assertEquals((await labsCi.collect(one)).label, "labs ci");
   assertEquals((await loomCi.collect(one)).label, "loom ci");
-  assertEquals((await labsCiTrust.collect(one)).label, "labs ci trust");
-  assertEquals((await loomCiTrust.collect(one)).label, "loom ci trust");
+  assertEquals(labsTrust.label, "labs ci trust");
+  assertEquals(loomTrust.label, "loom ci trust");
+  assertEquals(labsTrust.alignChartBottom, true);
+  assertEquals(loomTrust.alignChartBottom, true);
   assertEquals((await labsCiDuration.collect(one)).label, "labs ci duration");
   assertEquals((await loomCiDuration.collect(one)).label, "loom ci duration");
 });
@@ -402,6 +492,7 @@ Deno.test("gated tiles gray out cleanly without their env", async () => {
     [benchmark, "GH_TOKEN"],
     [dau, "SIGNOZ_URL"],
     [githubMembers, "GH_TOKEN"],
+    [coverageDebt, "GH_TOKEN"],
   ] as const;
   for (const [tile, needle] of cases) {
     const v = await tile.collect(ctx([]));
@@ -563,10 +654,10 @@ Deno.test("benchmark: fewer than a week of days claims no trend", () => {
   assertEquals(trendPct(t([100, 500, 2000]), [100, 500, 2000]), 0);
 });
 
-Deno.test("benchmark: Theil–Sen trend ignores a lone spike", () => {
+Deno.test("benchmark: the trend ignores a lone spike", () => {
   const flat = [100, 100, 100, 100, 100, 100, 100, 100];
   const spiked = [...flat];
-  spiked[3] = 400; // a 4x outlier — least squares would flag it, the median slope doesn't
+  spiked[3] = 400; // a 4x outlier — a median level does not move to meet it
   const times = flat.map((_, i) => i * 86_400_000);
   assertEquals(trendStatus(trendPct(times, spiked)), "good");
 });
@@ -585,4 +676,31 @@ Deno.test("registry: unique ids and positive intervals", () => {
   for (const t of TILES) {
     assert(t.intervalMs > 0, `${t.id} needs a positive intervalMs`);
   }
+});
+
+Deno.test("every tile's drill-down link reaches a route the wall serves", () => {
+  // An unrecognized path falls through to the wall itself, so a tile linking
+  // at a page nobody serves lands the viewer back where they started.
+  const served = new Set(
+    TILES.flatMap((tile) => tile.routes ?? []).map((route) => route.path),
+  );
+  for (const { id, view } of TILE_LAYOUT_FIXTURES) {
+    if (view.href === undefined || /^https?:/.test(view.href)) continue;
+    const path = new URL(view.href, "http://wall").pathname;
+    assert(
+      served.has(path),
+      `${id} links to ${path}, which no registered tile serves`,
+    );
+  }
+});
+
+Deno.test("layout fixtures cover every registered tile in registry order", () => {
+  assertEquals(
+    TILE_LAYOUT_FIXTURES.map(({ id }) => id),
+    TILES.map(({ id }) => id),
+  );
+  assertEquals(
+    TILE_LAYOUT_FIXTURES.filter(({ wide }) => wide).map(({ id }) => id),
+    TILES.filter(({ wide }) => wide).map(({ id }) => id),
+  );
 });

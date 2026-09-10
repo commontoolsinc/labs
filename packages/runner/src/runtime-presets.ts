@@ -13,7 +13,7 @@
  * single-user runner did; client CLIs running patterns against the builder's
  * hardcoded-localhost `patternEnvironment` fallback.
  *
- * How the seal works — three gates, all in this file:
+ * How the seal works — four gates, all in this file:
  *
  * 1. {@link RUNTIME_OPTION_KEYS} is a type-gated exhaustive registry of
  *    `keyof RuntimeOptions`. Adding an option to `RuntimeOptions` without
@@ -23,7 +23,13 @@
  *    for `ExperimentalOptions`, type-gated the same way. A flag that is
  *    deliberately not env-reachable is declared `null` here instead of being
  *    silently absent from one wiring.
- * 3. Every preset composes the same {@link coreOptions}, so the invariant
+ * 3. {@link EXPERIMENTAL_FLAG_AUTHORITY} says, per flag, whether a client
+ *    that is not built alongside its server follows the deployment or runs
+ *    its own value — type-gated the same way, because a `cf` binary silently
+ *    disagreeing with the server it talks to is the same drift one release
+ *    further out. {@link experimentalOptionsForDeployedClient} is what such
+ *    a client calls instead of {@link experimentalOptionsFromEnv}.
+ * 4. Every preset composes the same {@link coreOptions}, so the invariant
  *    posture (today: the CFC dials) is written once. The conformance test
  *    (`runner/test/runtime-presets.test.ts`) pins each preset's full output
  *    as a golden, so any change to fleet posture is a visible diff there.
@@ -44,14 +50,27 @@
  * |                            | its identity/session, are the caller's domain)   |
  * | experimental               | per-site (required param — pass                  |
  * |                            | `experimentalOptionsFromEnv(...)`, host data, or |
- * |                            | an explicit `{}`; requiredness is the seal)      |
+ * |                            | an explicit `{}`; requiredness is the seal).     |
+ * |                            | productionServer/remoteClient resolve an unset   |
+ * |                            | `serverExecution` to the first-party default     |
+ * |                            | constant; the single-process presets keep the    |
+ * |                            | constructor default (OFF). A deployed CLIENT     |
+ * |                            | passes what                                      |
+ * |                            | `experimentalOptionsForDeployedClient` resolved  |
+ * |                            | from the server it talks to (Gate 3)             |
  * | cfcEnforcementMode         | core-pinned `"enforce-explicit"`; overridable in |
  * |                            | patternTest/unitTest (per-test laxer mode) and   |
- * |                            | browserWorker (host-controlled rollout)          |
- * | cfcFlowLabels              | core-default (off); browserWorker delta          |
- * | cfcWriteFloor              | core-default (off) — flip in coreOptions when a  |
+ * |                            | remoteClient/browserWorker (host-controlled      |
+ * |                            | rollout)                                         |
+ * | cfcFlowLabels              | core-default (off); remoteClient / browserWorker |
+ * |                            | delta (host-controlled rollout)                  |
+ * | cfcWriteFloor              | core-default (off); remoteClient delta           |
+ * |                            | (host-controlled rollout) — flip in coreOptions  |
+ * |                            | when a first-party rollout begins                |
+ * | cfcTriggerReadGating       | core-default (off) — flip in coreOptions when a  |
  * |                            | first-party rollout begins                       |
- * | cfcTriggerReadGating       | core-default (off) — same                        |
+ * | cfcDecomposedEnvelopes     | core-default (off) — flip after every deployed   |
+ * |                            | reader resolves stored roots' references         |
  * | cfcPolicyEvaluation        | core-default (off) — same                        |
  * | cfcLabelMetadataProtection | core-default (off) — same (inv-12 Stage 1        |
  * |                            | rollout: observe first, then enforce)            |
@@ -62,6 +81,11 @@
  * |                            | deployment (value-level provenance Stage 0)      |
  * | cfcTrustConfig             | core-default (none declared) — same              |
  * | cfcSinkMaxConfidentiality  | core-default (none declared) — same              |
+ * | cfcReadMaxConfidentiality  | core-default (none — the owner view); delta on   |
+ * |                            | remoteClient / browserWorker (a per-run or       |
+ * |                            | per-device read ceiling is the host's to set)    |
+ * | cfcReadOnExceed            | core-default (`fail`); delta on the same two,    |
+ * |                            | beside the ceiling it qualifies                  |
  * | patternEnvironment         | pinned from apiUrl in productionServer /         |
  * |                            | remoteClient / browserWorker (patterns fetch     |
  * |                            | against the real deployment, not the builder's   |
@@ -77,6 +101,14 @@
  * | patternCoverage            | delta (patternTest, remoteClient, browserWorker) |
  * |                            | — test/CI statement-coverage collection, unset   |
  * |                            | elsewhere                                        |
+ * | onPatternInstantiated      | delta (patternTest, remoteClient) — the vintage  |
+ * |                            | capture learns which patterns a run materialized |
+ * |                            | and where; cf-harness's client session learns    |
+ * |                            | whether the piece `run_pattern` created carries  |
+ * |                            | a session-only pattern pointer. Observation      |
+ * |                            | only: a runtime behaves identically whether or   |
+ * |                            | not one is installed, and no serving runtime     |
+ * |                            | (productionServer, browserWorker) is offered one |
  * | trustSnapshotProvider      | delta (remoteClient, browserWorker)              |
  * | spaceHostMap               | delta (browserWorker only — federation routing   |
  * |                            | is decided by the shell host)                    |
@@ -84,13 +116,37 @@
  * |                            | shrink the backoff window)                       |
  * | debug                      | core-default everywhere                          |
  * | hideInternalStackFrames    | core-default everywhere                          |
+ * | servingPosture             | core-default (false) — NEVER set by a preset:    |
+ * |                            | only the SpaceServer's runtime factory (the      |
+ * |                            | toolshed ExecutorHost wiring and the executor    |
+ * |                            | test harnesses) marks the serving posture, and   |
+ * |                            | it hand-rolls its options deliberately           |
+ *
+ * One named departure a caller can opt into: `cfcPosture: "max-enforcement"`
+ * (a `CoreParams` field) swaps the core-default CFC dial rows above for the
+ * {@link MAX_ENFORCEMENT_CFC_OPTIONS} bundle, for that one runtime. The
+ * per-preset host dials (`cfcEnforcementMode`, `cfcFlowLabels`,
+ * `cfcWriteFloor`) still apply over the bundle, so a session-level raise wins
+ * either way, and a session that wants the floor's `observe` rung rather than
+ * the bundle's `enforce` asks for it the same way.
  */
 
-import type {
-  CfcEnforcementMode,
-  CfcFlowLabelsMode,
-  TrustSnapshot,
+import { toCompactDebugString } from "@commonfabric/data-model";
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
+import {
+  type CfcConfClause,
+  type CfcEnforcementMode,
+  type CfcFlowLabelsMode,
+  type CfcReadOnExceed,
+  type CfcWriteFloorMode,
+  sinkCeilingsOf,
+  type SinkGovernanceRegistry,
+  type SinkMaxConfidentiality,
+  type TrustSnapshot,
+  ungatedSink,
 } from "./cfc/mod.ts";
+import { parseFlagValue } from "./experimental-posture.ts";
+import { STANDARD_PROMPT_CAVEAT_POLICY } from "./cfc/mod.ts";
 import type { CommitBackpressurePolicy } from "./scheduler/backpressure.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import type { IStorageManager } from "./storage/interface.ts";
@@ -101,14 +157,15 @@ import type {
   ExperimentalOptions,
   ModuleByteCache,
   NavigateCallback,
+  PatternInstantiationObserver,
   PieceCreatedCallback,
   RuntimeFetch,
   RuntimeOptions,
 } from "./runtime.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Gate 1: the exhaustive option registry.
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Every key of `RuntimeOptions`, by hand. The `satisfies` clause rejects
@@ -134,6 +191,7 @@ export const RUNTIME_OPTION_KEYS = [
   "cfcFlowLabels",
   "cfcWriteFloor",
   "cfcTriggerReadGating",
+  "cfcDecomposedEnvelopes",
   "cfcPolicyEvaluation",
   "cfcLabelMetadataProtection",
   "cfcDeclaredMonotonicity",
@@ -141,12 +199,16 @@ export const RUNTIME_OPTION_KEYS = [
   "cfcPrefixProvenanceStats",
   "cfcTrustConfig",
   "cfcSinkMaxConfidentiality",
+  "cfcReadMaxConfidentiality",
+  "cfcReadOnExceed",
   "trustSnapshotProvider",
   "hideInternalStackFrames",
   "commitBackpressure",
   "moduleByteCache",
   "patternCoverage",
+  "onPatternInstantiated",
   "fetch",
+  "servingPosture",
 ] as const satisfies readonly (keyof RuntimeOptions)[];
 
 export type RuntimeOptionKey = (typeof RUNTIME_OPTION_KEYS)[number];
@@ -158,9 +220,14 @@ type MissingOptionKeys = Exclude<keyof RuntimeOptions, RuntimeOptionKey>;
 // the missing key(s).
 const _unclassifiedOptions: never[] = [] as MissingOptionKeys[];
 
-// ---------------------------------------------------------------------------
+//
 // Gate 2: the canonical experimental-flag env mapping.
-// ---------------------------------------------------------------------------
+//
+
+// The parse itself lives in the slim `experimental-posture.ts` module, so
+// the browser shell's build-define reading imports no more of this module's
+// dependency graph; it is re-exported here beside the mapping it parses.
+export { parseFlagValue };
 
 /** Reads one environment variable; pass `Deno.env.get` in Deno contexts. */
 export type EnvReader = (name: string) => string | undefined;
@@ -181,16 +248,27 @@ export type EnvReader = (name: string) => string | undefined;
  */
 export const EXPERIMENTAL_ENV_VARS = {
   modernCellRep: "EXPERIMENTAL_MODERN_CELL_REP",
-  persistentSchedulerState: "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
-  eagerSourceAnnotation: "EXPERIMENTAL_EAGER_SOURCE_ANNOTATION",
+  // Content-addressed schemas (Phases 1 and 2) are default-on; env-reachable
+  // so a process can opt out with an explicit "false" while the flag exists.
+  contentAddressedSchemas: "EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS",
   // Scheduler-v2 lineage (#4090) is default-on. Keep a programmatic rollback
   // override while the flag exists; no environment exposure is needed.
   commitPreconditions: null,
-  // Verb-contract WS-C: env-reachable so the CLI invocation-protocol work can
-  // enable it per process during the integration proof.
+  // Verb-contract WS-C: default-on since the invocation-protocol integration
+  // proof (#5244); env-reachable so a process can opt out with an explicit
+  // "false" while the flag exists.
   plainResultReceipts: "EXPERIMENTAL_PLAIN_RESULT_RECEIPTS",
-  systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
+  lazyMaterialization: "EXPERIMENTAL_LAZY_MATERIALIZATION",
+  // Reader precedence at link crossings is default-on; env-reachable so a
+  // process can opt out with an explicit "false" while the flag exists.
+  readerSchemaPrecedence: "EXPERIMENTAL_READER_SCHEMA_PRECEDENCE",
+  // Server-execution v2 (docs/specs/server-side-execution/): the
+  // deployed-topology presets below resolve an unset flag to
+  // `SERVER_EXECUTION_DEFAULT_ENABLED`, so such a process always runs a
+  // declared arm. Env-reachable so every server-side process can be flipped
+  // either way, and an explicit value always wins over the constant.
+  serverExecution: "EXPERIMENTAL_SERVER_EXECUTION",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 
 /**
@@ -212,27 +290,423 @@ export function experimentalOptionsFromEnv(
     if (envVar === null) continue;
     const raw = env(envVar);
     if (raw === undefined) continue;
-    if (raw === "true" || raw === "false") {
-      opts[key] = raw === "true";
-    } else {
-      console.warn(
-        `[runtime-presets] Ignoring ${envVar}="${raw}" — ` +
-          `expected "true" or "false" (unset = default).`,
-      );
-    }
+    const parsed = parseFlagValue(raw, envVar);
+    if (parsed !== undefined) opts[key] = parsed;
   }
   return opts;
 }
 
-// ---------------------------------------------------------------------------
-// Gate 3: the shared core all presets compose.
-// ---------------------------------------------------------------------------
+//
+// Gate 3: which flags a deployed client takes from the server it talks to.
+//
+
+/**
+ * Where a client resolves one flag when it is not built alongside the server
+ * it talks to.
+ *
+ * - `"server"` — the deployment decides. The client adopts the value the
+ *   server publishes (see {@link experimentalOptionsForDeployedClient}). Use
+ *   this for a flag whose value is visible on the wire, in what gets stored,
+ *   or in which side runs what: peers that disagree either refuse each other
+ *   or, worse, quietly write data shaped for two different postures.
+ * - `"client"` — the flag governs in-process behavior with no wire, storage,
+ *   or division-of-labor consequence, so a client is free to run its own
+ *   value. Justify the reasoning in a comment beside the entry: over-adopting
+ *   costs nothing but a client that diverges where it should not is a silent
+ *   corruption.
+ */
+export type ExperimentalFlagAuthority = "server" | "client";
+
+/**
+ * The authority for every flag in {@link ExperimentalOptions}, type-gated the
+ * same way as {@link EXPERIMENTAL_ENV_VARS}: a new flag does not compile
+ * until it is classified here, so "does a `cf` binary follow the deployment
+ * on this?" is a decision on record rather than whatever the default happened
+ * to be.
+ *
+ * Every flag is server-authoritative today. That is the safe direction rather
+ * than a coincidence — each one is visible in what gets written (the link and
+ * entity-id encodings, receipt contents, schema references), in what the
+ * server admits (commit preconditions, per-class admission), in which side
+ * runs the compute at all, or in which documents a subscription ships.
+ * `"client"` is here for the flag that gates a purely local experiment;
+ * nothing qualifies yet.
+ */
+export const EXPERIMENTAL_FLAG_AUTHORITY = {
+  // Link serialization: the two encodings are a hard mismatch, which the
+  // memory handshake already refuses to connect across.
+  modernCellRep: "server",
+  // An emission gate whose rollout is fleet-wide and one-way: a deployment
+  // turns it on only once every client of it reads references, and an
+  // explicit `false` is how it rolls back. A client still emitting after that
+  // writes the form the deployment decided to stop producing.
+  contentAddressedSchemas: "server",
+  // The server enforces the preconditions this flag makes a commit carry.
+  commitPreconditions: "server",
+  // Decides what a verb's receipt holds. Under server execution the SERVER
+  // runs the handler, so a client on the other value reads back a receipt
+  // shaped by a rule it does not share.
+  plainResultReceipts: "server",
+  // Entity-id minting: a peer predating the `computed:` scheme throws on such
+  // ids arriving via sync, so the scheme has to be fleet-wide.
+  computedCellIds: "server",
+  // Changes which paths a lift's argument read, and the consumed-read set is
+  // what a commit declares and the server admits against.
+  lazyMaterialization: "server",
+  // The whole point of the flag is which side computes what is stored.
+  serverExecution: "server",
+  // The server's traversal decides what a subscription loads, tracks, and
+  // ships; a client resolving hops under the other combine rule expects
+  // documents the server did not send (or ignores ones it did). The arms
+  // read the same stored data, so adoption is safe either way — but both
+  // sides must run the same one.
+  readerSchemaPrecedence: "server",
+} as const satisfies Record<
+  keyof ExperimentalOptions,
+  ExperimentalFlagAuthority
+>;
+
+/**
+ * Where a server publishes the experimental posture its own Runtime resolved.
+ * Same document as the deployment's DID and commit, so a client that already
+ * asks who it is talking to learns the posture in the same breath.
+ */
+export const SERVER_EXPERIMENTAL_PATH = "/api/meta";
+
+/**
+ * Set to `"false"` to keep a client on its own posture and ignore whatever
+ * the server publishes. The escape hatch for a deployment publishing
+ * something a client cannot run — per-flag `EXPERIMENTAL_*` overrides handle
+ * the case where you know WHICH flag, this one the case where you do not.
+ */
+export const ADOPT_SERVER_FLAGS_ENV = "CF_ADOPT_SERVER_FLAGS";
+
+/**
+ * Read a server's published posture into `ExperimentalOptions`.
+ *
+ * Deliberately incurious about anything it does not recognize. A key this
+ * build has no flag for is a NEWER server and entirely normal; a non-boolean
+ * value is a malformed declaration and is dropped with a warning rather than
+ * coerced. Neither is grounds for refusing to run — a client that cannot read
+ * the posture keeps its built-in defaults, which is what it did before the
+ * server published anything at all.
+ *
+ * The one asymmetry is `readerSchemaPrecedence`: a pre-flag document shape —
+ * a posture record without the field, or a meta document with no
+ * `experimental` field at all — reads as the legacy declared `false`, since
+ * such a server necessarily runs the strict combine (the in-function comment
+ * draws the full line, `experimental: null` included).
+ */
+export function parseServerExperimentalOptions(
+  declared: unknown,
+): ExperimentalOptions {
+  // Field presence decides the legacy arm. A server that published a
+  // posture RECORD but declares no readerSchemaPrecedence in it predates
+  // the flag and necessarily runs the strict combine: that absence adopts
+  // as the legacy `false` until the compatibility window closes. A meta
+  // document with NO experimental field at all — handed in as `undefined`
+  // — is the same pre-flag document shape and takes the legacy arm too.
+  // An explicit `experimental: null` is different: toolshed publishes
+  // null until a Runtime exists, so the server is not pre-flag, it just
+  // has no posture yet — that adopts nothing, as does a malformed
+  // declaration. A client that could not reach the server never calls
+  // this at all and keeps its built-in defaults.
+  if (declared === null) return {};
+  if (typeof declared !== "object") {
+    return declared === undefined ? { readerSchemaPrecedence: false } : {};
+  }
+  const opts: ExperimentalOptions = { readerSchemaPrecedence: false };
+  for (const key of Object.keys(EXPERIMENTAL_FLAG_AUTHORITY)) {
+    const value = (declared as Record<string, unknown>)[key];
+    if (value === undefined) continue;
+    if (typeof value !== "boolean") {
+      console.warn(
+        `[runtime-presets] Ignoring server-published ${key}=` +
+          `${
+            toCompactDebugString(value, { backtickQuote: true })
+          } — expected a boolean.`,
+      );
+      continue;
+    }
+    opts[key as keyof ExperimentalOptions] = value;
+  }
+  return opts;
+}
+
+/**
+ * Resolve one client's posture from what the server published and what its
+ * own environment says, in that order of increasing authority:
+ *
+ * 1. an explicit `EXPERIMENTAL_*` wins outright — it is the documented
+ *    rollback lever and CI's way to pin a lane, and a server able to overrule
+ *    it would leave neither mechanism working;
+ * 2. otherwise a `"server"` flag takes the published value;
+ * 3. otherwise the flag stays unset and the built-in default governs, which
+ *    is exactly what an unreachable server or a `"client"` flag leaves
+ *    behind. An OLD server is not that case for `readerSchemaPrecedence`:
+ *    {@link parseServerExperimentalOptions} reads a pre-flag posture's
+ *    silence on it as the legacy declared `false`, so rule 2 adopts it as a
+ *    published value.
+ */
+export function adoptServerExperimentalOptions(
+  server: ExperimentalOptions,
+  env: ExperimentalOptions,
+  /**
+   * The classification to resolve against. Defaults to the registry, and is
+   * a parameter so the `"client"` arm stays exercised while no first-party
+   * flag carries it.
+   */
+  authorities: Record<
+    keyof ExperimentalOptions,
+    ExperimentalFlagAuthority
+  > = EXPERIMENTAL_FLAG_AUTHORITY,
+): ExperimentalOptions {
+  const opts: ExperimentalOptions = { ...env };
+  for (
+    const [key, authority] of Object.entries(authorities) as [
+      keyof ExperimentalOptions,
+      ExperimentalFlagAuthority,
+    ][]
+  ) {
+    if (authority !== "server") continue;
+    if (opts[key] !== undefined) continue;
+    const published = server[key];
+    if (published !== undefined) opts[key] = published;
+  }
+  return opts;
+}
+
+export interface DeployedClientExperimentalParams {
+  /** The deployment this client runs against. */
+  apiUrl: URL;
+
+  /** Reads this process's environment; pass `Deno.env.get` in Deno contexts. */
+  env: EnvReader;
+
+  /**
+   * Cancels the request. A caller whose startup is cancellable must pass its
+   * signal: without one, a deployment that accepts the connection and then
+   * says nothing holds the caller here for as long as it stays silent, and
+   * no shutdown can reach it.
+   */
+  signal?: AbortSignal;
+
+  /** Injectable for tests; the real `fetch` otherwise. */
+  fetch?: typeof globalThis.fetch;
+}
+
+/**
+ * The posture a client that is NOT built alongside its server should run:
+ * the deployment's own, with this process's explicit `EXPERIMENTAL_*`
+ * overriding it flag by flag.
+ *
+ * Call it in place of {@link experimentalOptionsFromEnv} wherever a runtime
+ * talks to a deployed API — `cf`, the pieces controller, the agents host, the
+ * admin CLIs. The presets that run against LOCAL emulated storage have no
+ * server to ask and keep reading the environment alone; the browser shell
+ * reads its build-time defines and never fetches a posture.
+ *
+ * An unreachable server or a body that will not parse resolves to the
+ * environment alone — the caller is about to fail loudly on its real work if
+ * the server is genuinely down, and failing here first would only obscure
+ * that. A server that ANSWERS with a pre-flag document — a meta document
+ * without an `experimental` field, or a posture record silent on
+ * `readerSchemaPrecedence` — is different: it necessarily runs the strict
+ * combine, so that flag adopts as the legacy declared `false`
+ * ({@link parseServerExperimentalOptions}). For every other flag, absence of
+ * a declaration is not a declaration.
+ *
+ * An aborted `signal` is the one case that does NOT resolve: the caller
+ * asked to stop, so this throws the abort reason rather than handing back a
+ * posture nobody is going to use. That holds whether the abort arrives before
+ * the call, while the request is in flight, or while its body is being read —
+ * every one of those paths ends at the same throw.
+ */
+export async function experimentalOptionsForDeployedClient(
+  params: DeployedClientExperimentalParams,
+): Promise<ExperimentalOptions> {
+  // Before anything else, including the opt-out below: a caller that has
+  // already stopped gets the abort, not a posture.
+  params.signal?.throwIfAborted();
+  const env = experimentalOptionsFromEnv(params.env);
+  const raw = params.env(ADOPT_SERVER_FLAGS_ENV);
+  if (
+    raw !== undefined && parseFlagValue(raw, ADOPT_SERVER_FLAGS_ENV) === false
+  ) {
+    return env;
+  }
+  const fetchImpl = params.fetch ?? globalThis.fetch;
+  let declared: unknown;
+  try {
+    // The signal rides the request, which is what makes the BODY read below
+    // cancellable too: aborting a signal passed to `fetch` terminates the
+    // ongoing fetch and errors the response's stream, so a stalled
+    // `response.json()` rejects rather than hanging, and lands in the catch.
+    const response = await fetchImpl(
+      new URL(SERVER_EXPERIMENTAL_PATH, params.apiUrl),
+      params.signal !== undefined ? { signal: params.signal } : {},
+    );
+    if (!response.ok) {
+      // Discard the body rather than leaving the connection holding an
+      // unread stream. An error page is not a posture even when it parses
+      // as one.
+      await response.body?.cancel();
+      return env;
+    }
+    declared = ((await response.json()) as { experimental?: unknown })
+      ?.experimental;
+  } catch {
+    // A cancelled startup is the caller's decision, not a server that failed
+    // to answer: propagate it instead of resolving a posture into a runtime
+    // construction the caller is abandoning.
+    params.signal?.throwIfAborted();
+    return env;
+  }
+  return adoptServerExperimentalOptions(
+    parseServerExperimentalOptions(declared),
+    env,
+  );
+}
+
+//
+// The max-enforcement CFC posture (CT-2075's named bundle).
+//
+
+/**
+ * Names of the CFC posture bundles a preset caller can opt into. One posture
+ * exists today; the type is here so the next one is an addition, not a
+ * redesign.
+ */
+export type CfcPosture = "max-enforcement";
+
+/**
+ * How the max-enforcement posture governs every known sink — total over the
+ * sink registry, so a sink added to the inventory without a decision here is
+ * a compile error rather than a sink that silently releases ungated.
+ *
+ * Every network-fetch egress sink is public-only (an empty ceiling admits no
+ * confidentiality atom), so labeled data cannot leave through them. The
+ * llm-class sinks release ungated, carrying the reason, the owner, and the
+ * condition that retires the gap ({@link SINK_UNGATED_RATIONALES} in the
+ * runner's sink inventory): under this posture, llm-sink release is
+ * ungoverned — any confidentiality, a secret as much as a risk caveat,
+ * reaches them without a policy evaluation running. The posture record
+ * publishes that as a deviation rather than leaving it to be inferred from a
+ * sink's absence from a ceiling list. Building the mechanism that retires the
+ * gap is planned in `docs/plans/cfc-llm-sink-admission.md`.
+ *
+ * Until the §8.12.5 route-2 widening, one path was gated anyway, by accident:
+ * a pattern calling `llm(...)` staged its request in the transaction that also
+ * wrote the builtin's own result store, that store declared nothing, and the
+ * writer-fit misfit refused the commit. It fired on every such call, so under
+ * this posture an llm call over caveated content did not work at all — the
+ * opposite of what the rationale above says the sink is for. The store now
+ * declares what flows into it, so the ungoverned statement holds of the
+ * builtin path too. `max-enforcement-posture.test.ts` pins the hand-staged
+ * request and `builtin-abandoned-request.test.ts` the builtin one; both flip
+ * to asserting the refusal when the admission mechanism lands.
+ */
+export const MAX_ENFORCEMENT_SINK_GOVERNANCE: SinkGovernanceRegistry = Object
+  .freeze({
+    fetchBinary: { ceiling: Object.freeze([]) },
+    fetchText: { ceiling: Object.freeze([]) },
+    fetchJson: { ceiling: Object.freeze([]) },
+    fetchJsonUnchecked: { ceiling: Object.freeze([]) },
+    fetchProgram: { ceiling: Object.freeze([]) },
+    streamData: { ceiling: Object.freeze([]) },
+    llm: ungatedSink("llm"),
+    llmDialog: ungatedSink("llmDialog"),
+    generateText: ungatedSink("generateText"),
+    generateObject: ungatedSink("generateObject"),
+  });
+
+/**
+ * The ceilings {@link MAX_ENFORCEMENT_SINK_GOVERNANCE} declares, in the
+ * open-map shape `Runtime` takes: an ungated sink is absent, which is what
+ * "no ceiling, therefore no gate" is in `SinkMaxConfidentiality`.
+ */
+export const MAX_ENFORCEMENT_SINK_CEILINGS: SinkMaxConfidentiality =
+  sinkCeilingsOf(MAX_ENFORCEMENT_SINK_GOVERNANCE);
+
+/**
+ * The max-enforcement CFC posture: every staged-rollout enforcement dial at
+ * its enforcing value, as one named opt-in bundle (CT-2075 ran them together
+ * and found they co-exist as one system; this is that experiment's dial set,
+ * landed at the seam it designated). A preset caller opts in through
+ * {@link CoreParams.cfcPosture}; the fleet posture in {@link coreOptions}
+ * is unchanged.
+ *
+ * Deliberately NOT in the bundle:
+ * - `cfcEnforcementMode` — the core pin (`enforce-explicit`) stands; a host
+ *   raises one session to `enforce-strict` through its own preset dial
+ *   (remoteClient/browserWorker), and the bundle's `persist` flow labels are
+ *   what make that raise conform (strict requires persist).
+ * - `cfcDecomposedEnvelopes` — gated on every deployed reader resolving
+ *   stored roots' references, a readiness question, not an enforcement one.
+ * - `cfcTrustConfig` — deployment-specific declarations; nothing generic to
+ *   bundle.
+ * - `cfcPrefixProvenanceStats` — measurement, not enforcement.
+ */
+export const MAX_ENFORCEMENT_CFC_OPTIONS = Object.freeze(
+  {
+    cfcFlowLabels: "persist",
+    cfcWriteFloor: "enforce",
+    cfcTriggerReadGating: true,
+    cfcPolicyEvaluation: "enforce",
+    cfcPolicyRecords: Object.freeze([...STANDARD_PROMPT_CAVEAT_POLICY]),
+    cfcDeclaredMonotonicity: "enforce",
+    cfcLabelMetadataProtection: "enforce",
+    cfcSinkMaxConfidentiality: MAX_ENFORCEMENT_SINK_CEILINGS,
+  } as const,
+) satisfies Partial<RuntimeOptions>;
+
+/** The CFC dials a preset caller may state for one runtime. */
+export interface PresetCfcParams {
+  cfcPosture?: CfcPosture;
+  cfcEnforcementMode?: CfcEnforcementMode;
+  cfcFlowLabels?: CfcFlowLabelsMode;
+}
+
+/**
+ * The CFC options a preset composes for `params`: the core pin, then the
+ * named posture bundle where one is selected, then the host dials over both.
+ *
+ * Exported because a host sometimes has to know the posture of a runtime it
+ * has not built yet — cf-harness records the posture of a session whose
+ * runtime is built lazily, and its console prints one at startup. Reading it
+ * from here (and resolving what remains through `resolveCfcDials`) is what
+ * keeps that projection from being a second, drifting statement of the same
+ * resolution.
+ */
+export const presetCfcOptions = (
+  params: PresetCfcParams,
+): Partial<RuntimeOptions> => ({
+  // Pinned, not defaulted: several sites pinned this individually so that a
+  // changed constructor default could not silently relax them; the pin now
+  // lives once. Same value as the constructor default today.
+  cfcEnforcementMode: "enforce-explicit",
+  ...(params.cfcPosture === "max-enforcement"
+    ? MAX_ENFORCEMENT_CFC_OPTIONS
+    : {}),
+  ...(params.cfcEnforcementMode !== undefined
+    ? { cfcEnforcementMode: params.cfcEnforcementMode }
+    : {}),
+  ...(params.cfcFlowLabels !== undefined
+    ? { cfcFlowLabels: params.cfcFlowLabels }
+    : {}),
+});
+
+//
+// Gate 4: the shared core all presets compose.
+//
 
 interface CoreParams {
   /** Base URL of the memory/API service this runtime talks to. */
   apiUrl: URL;
+
   /** Storage backend — `StorageManager.open(...)` against a deployment, or `.emulate(...)` in-memory. */
   storageManager: IStorageManager;
+
   /**
    * Experimental flags. Required on purpose: pass
    * `experimentalOptionsFromEnv(Deno.env.get)` where the environment should
@@ -241,6 +715,15 @@ interface CoreParams {
    * where an omitted field was silent drift.
    */
   experimental: ExperimentalOptions;
+
+  /**
+   * Opt this runtime into a named CFC posture bundle
+   * ({@link MAX_ENFORCEMENT_CFC_OPTIONS}). Applied in {@link coreOptions},
+   * under the per-preset host dials, so a host that raises
+   * `cfcEnforcementMode` or `cfcFlowLabels` for one session still wins.
+   * Unset means the fleet posture: the core pin plus constructor defaults.
+   */
+  cfcPosture?: CfcPosture;
 }
 
 /**
@@ -248,27 +731,65 @@ interface CoreParams {
  * modes) get flipped HERE, in one reviewed place, for every preset user at
  * once — the constructor defaults then only govern non-preset constructions.
  */
+
+/**
+ * The first-party server-execution default for the DEPLOYED-TOPOLOGY
+ * presets (server-execution v2, docs/plans/server-execution-v2.md Phase
+ * 7's flip): `productionServer` and `remoteClient` run against a serving
+ * toolshed, so an UNSET flag resolves to
+ * `SERVER_EXECUTION_DEFAULT_ENABLED` — explicit in the returned options,
+ * which claims the process's ambient flag through the Runtime's enabler.
+ * An explicit value (env "false" — the OFF arm / rollback lever) always
+ * wins. The single-process presets (`patternTest`, `localDev`,
+ * `unitTest`) deliberately do NOT apply it: an emulated-storage runtime
+ * has no serving host, so it runs the derive-and-commit model (the
+ * ambient baseline, OFF) by construction — see
+ * `docs/development/EXPERIMENTAL_OPTIONS.md`.
+ *
+ * Exported for the deployed-topology test clients that construct a bare
+ * `Runtime` against a lane's toolshed (the runner integration tests, the
+ * runtime-client integration host): they resolve the posture with exactly
+ * this rule — the canonical env mapping, else the first-party default —
+ * so the DEFAULT CI lane's test processes run the arm the lane's server
+ * runs (testing.md §2's uniform posture; a raw env read resolves unset to
+ * the AMBIENT baseline instead, which under default-ON is the P7 review's
+ * finding-7 mixed posture, resurrected by the flip).
+ */
+export function withServerExecutionDefault(
+  experimental: ExperimentalOptions,
+): ExperimentalOptions {
+  return {
+    ...experimental,
+    serverExecution: experimental.serverExecution ??
+      SERVER_EXECUTION_DEFAULT_ENABLED,
+  };
+}
+
 function coreOptions(params: CoreParams): RuntimeOptions {
   return {
     apiUrl: params.apiUrl,
     storageManager: params.storageManager,
     experimental: params.experimental,
-    // Pinned, not defaulted: several sites pinned this individually so that a
-    // changed constructor default could not silently relax them; the pin now
-    // lives once. Same value as the constructor default today.
-    cfcEnforcementMode: "enforce-explicit",
     // cfcFlowLabels / cfcWriteFloor / cfcTriggerReadGating /
+    // cfcDecomposedEnvelopes /
     // cfcPolicyEvaluation / cfcLabelMetadataProtection /
     // cfcDeclaredMonotonicity / cfcPolicyRecords /
-    // cfcTrustConfig / cfcSinkMaxConfidentiality ride the constructor
+    // cfcTrustConfig / cfcSinkMaxConfidentiality /
+    // cfcReadMaxConfidentiality / cfcReadOnExceed ride the constructor
     // defaults (off / none) — deliberately absent here until a first-party
-    // rollout begins.
+    // rollout begins. A caller that opts into `cfcPosture` gets the named
+    // bundle's values instead, for this one runtime.
+    ...presetCfcOptions({
+      ...(params.cfcPosture !== undefined
+        ? { cfcPosture: params.cfcPosture }
+        : {}),
+    }),
   };
 }
 
-// ---------------------------------------------------------------------------
+//
 // The presets.
-// ---------------------------------------------------------------------------
+//
 
 export interface ProductionServerPresetParams extends CoreParams {
   /**
@@ -277,6 +798,7 @@ export interface ProductionServerPresetParams extends CoreParams {
    * `apiUrl` carries MEMORY_URL.
    */
   patternApiUrl?: URL;
+
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   telemetry?: RuntimeTelemetry;
@@ -285,38 +807,98 @@ export interface ProductionServerPresetParams extends CoreParams {
 export interface RemoteClientPresetParams extends CoreParams {
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
+
+  /**
+   * Records what this client materializes; cf-harness's fabric session passes
+   * one so `run_pattern` can tell whether the piece it created carries a
+   * session-only pattern pointer.
+   */
+  onPatternInstantiated?: PatternInstantiationObserver;
+
   /** Shared compiled-module-byte cache (integration suites). */
   moduleByteCache?: ModuleByteCache;
+
   /** Trust provenance for CFC-relevant writes (pieces controller). */
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
+
   /** Statement-coverage collector for the pattern integration harness. */
   patternCoverage?: PatternCoverageCollector;
+
+  /**
+   * Host-controlled rollout dial, on the browserWorker precedent: a client
+   * host (cf-harness's fabric session) may raise enforcement for one session
+   * without moving the fleet posture in `coreOptions`.
+   */
+  cfcEnforcementMode?: CfcEnforcementMode;
+
+  /** The other such dial: flow-label persistence, on the same terms. */
+  cfcFlowLabels?: CfcFlowLabelsMode;
+
+  /**
+   * A third: the write-side `requiredIntegrity` floor, which the pattern
+   * integration harness sets per session. It is also how a caller reaches the
+   * floor's `observe` rung, since the `max-enforcement` posture names only
+   * `enforce`.
+   */
+  cfcWriteFloor?: CfcWriteFloorMode;
+
+  /**
+   * The runtime-wide read ceiling for this one session's `db.query` reads
+   * (`RuntimeOptions.cfcReadMaxConfidentiality`): a harness running one
+   * pattern under one clearance sets it here.
+   */
+  cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+
+  /** The read ceiling's fallback `onExceed`, beside the ceiling it qualifies. */
+  cfcReadOnExceed?: CfcReadOnExceed;
 }
 
 export interface PatternTestPresetParams extends CoreParams {
   /** Mock fetch honoring test-declared `fetchMocks` (CT-1768). */
   fetch?: RuntimeFetch;
+
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
   moduleByteCache?: ModuleByteCache;
+
   /** Per-test laxer mode; defaults to the shared core pin. */
   cfcEnforcementMode?: CfcEnforcementMode;
+
   /** Statement-coverage collector for `cf test` and the pattern harnesses. */
   patternCoverage?: PatternCoverageCollector;
+
+  /** Records what a run materializes; see the vintage capture. */
+  onPatternInstantiated?: PatternInstantiationObserver;
 }
 
 export interface BrowserWorkerPresetParams extends CoreParams {
-  /** Space DID → host base URL map (federation); decided by the shell host. */
+  /** Map from space DIDs to HTTP or HTTPS origins selected by the shell host. */
   spaceHostMap?: Record<string, string>;
-  /** Host-controlled rollout dials, from `InitializationData`. */
+
+  /** Host-controlled rollout dial, from `InitializationData`. */
   cfcEnforcementMode?: CfcEnforcementMode;
+
+  /** The other such dial, from the same source. */
   cfcFlowLabels?: CfcFlowLabelsMode;
+
+  /**
+   * The runtime-wide read ceiling for this worker's `db.query` reads
+   * (`RuntimeOptions.cfcReadMaxConfidentiality`), from `InitializationData`:
+   * a worker is one device's runtime, so a ceiling set here is per device
+   * by construction and never touches the space.
+   */
+  cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+
+  /** The read ceiling's fallback `onExceed`, from the same source. */
+  cfcReadOnExceed?: CfcReadOnExceed;
+
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
   telemetry?: RuntimeTelemetry;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
   pieceCreatedCallback?: PieceCreatedCallback;
+
   /** Statement-coverage collector, set only on the coverage-collecting shell build. */
   patternCoverage?: PatternCoverageCollector;
 }
@@ -324,12 +906,35 @@ export interface BrowserWorkerPresetParams extends CoreParams {
 export interface UnitTestPresetParams extends Omit<CoreParams, "experimental"> {
   /** Optional here (unlike the first-party presets): unit tests default to no flags. */
   experimental?: ExperimentalOptions;
+
   fetch?: RuntimeFetch;
   errorHandlers?: ErrorHandler[];
   moduleByteCache?: ModuleByteCache;
   cfcEnforcementMode?: CfcEnforcementMode;
+
   /** Scheduler tests shrink the backoff/retry window. */
   commitBackpressure?: Partial<CommitBackpressurePolicy>;
+}
+
+/**
+ * Helper for the host-controlled presets, which passes a read ceiling and its
+ * `onExceed` through as the options the constructor validates: each only
+ * when set, so an unset one stays the constructor default.
+ */
+function readCeilingOptions(
+  params: Pick<
+    RemoteClientPresetParams,
+    "cfcReadMaxConfidentiality" | "cfcReadOnExceed"
+  >,
+): Partial<RuntimeOptions> {
+  return {
+    ...(params.cfcReadMaxConfidentiality !== undefined
+      ? { cfcReadMaxConfidentiality: params.cfcReadMaxConfidentiality }
+      : {}),
+    ...(params.cfcReadOnExceed !== undefined
+      ? { cfcReadOnExceed: params.cfcReadOnExceed }
+      : {}),
+  };
 }
 
 export const runtimePresets = {
@@ -340,7 +945,10 @@ export const runtimePresets = {
    */
   productionServer(params: ProductionServerPresetParams): RuntimeOptions {
     return {
-      ...coreOptions(params),
+      ...coreOptions({
+        ...params,
+        experimental: withServerExecutionDefault(params.experimental),
+      }),
       patternEnvironment: { apiUrl: params.patternApiUrl ?? params.apiUrl },
       ...(params.consoleHandler !== undefined
         ? { consoleHandler: params.consoleHandler }
@@ -361,8 +969,21 @@ export const runtimePresets = {
    */
   remoteClient(params: RemoteClientPresetParams): RuntimeOptions {
     return {
-      ...coreOptions(params),
+      ...coreOptions({
+        ...params,
+        experimental: withServerExecutionDefault(params.experimental),
+      }),
       patternEnvironment: { apiUrl: params.apiUrl },
+      ...(params.cfcEnforcementMode !== undefined
+        ? { cfcEnforcementMode: params.cfcEnforcementMode }
+        : {}),
+      ...(params.cfcFlowLabels !== undefined
+        ? { cfcFlowLabels: params.cfcFlowLabels }
+        : {}),
+      ...(params.cfcWriteFloor !== undefined
+        ? { cfcWriteFloor: params.cfcWriteFloor }
+        : {}),
+      ...readCeilingOptions(params),
       ...(params.errorHandlers !== undefined
         ? { errorHandlers: params.errorHandlers }
         : {}),
@@ -377,6 +998,9 @@ export const runtimePresets = {
         : {}),
       ...(params.patternCoverage !== undefined
         ? { patternCoverage: params.patternCoverage }
+        : {}),
+      ...(params.onPatternInstantiated !== undefined
+        ? { onPatternInstantiated: params.onPatternInstantiated }
         : {}),
     };
   },
@@ -407,6 +1031,9 @@ export const runtimePresets = {
       ...(params.patternCoverage !== undefined
         ? { patternCoverage: params.patternCoverage }
         : {}),
+      ...(params.onPatternInstantiated !== undefined
+        ? { onPatternInstantiated: params.onPatternInstantiated }
+        : {}),
     };
   },
 
@@ -434,6 +1061,7 @@ export const runtimePresets = {
       ...(params.cfcFlowLabels !== undefined
         ? { cfcFlowLabels: params.cfcFlowLabels }
         : {}),
+      ...readCeilingOptions(params),
       ...(params.trustSnapshotProvider !== undefined
         ? { trustSnapshotProvider: params.trustSnapshotProvider }
         : {}),

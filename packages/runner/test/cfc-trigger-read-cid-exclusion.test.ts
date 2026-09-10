@@ -1,6 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { Identity } from "@commonfabric/identity";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
@@ -11,7 +16,7 @@ const signer = await Identity.fromPassphrase("runner-cfc-trigger-cid");
 
 type StoredEntry = {
   path: string[];
-  label: { confidentiality?: string[]; integrity?: unknown[] };
+  label: { confidentiality?: unknown[]; integrity?: unknown[] };
   origin?: string;
 };
 
@@ -27,21 +32,29 @@ const replicaEntries = (
   return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
 };
 
-// §8.9.2 trigger reads name runtime-surface documents only by accident or
-// forgery: `addCfcTriggerReads` drops them at ingest (`flowReadExcluded` on
-// the raw notification path), and `forEachFlowObservation` keeps an id-based
-// `cid:` skip as defense in depth for entries that arrive by other
-// construction paths. That second layer matters because `cid:` schema docs
-// live on an unverified write path any same-space writer can reach (audit
-// S5): a poisoned labelMap on one must not join the flow derivation through
-// a smuggled trigger entry.
 describe("CFC trigger reads: cid: exclusion", () => {
   it("keeps cid: trigger reads out of the flow derivation even when they bypass ingest filtering", async () => {
+    // §8.9.2 trigger reads name runtime-surface documents only by accident or
+    // forgery: `addCfcTriggerReads` drops them at ingest (`flowReadExcluded` on
+    // the raw notification path), and `forEachFlowObservation` keeps an
+    // id-based `cid:` skip as defense in depth for entries that arrive by other
+    // construction paths. That second layer matters because `cid:` schema docs
+    // live on an unverified write path any same-space writer can reach (audit
+    // S5): a poisoned labelMap on one must not join the flow derivation through
+    // a smuggled trigger entry.
+
     const storageManager = StorageManager.emulate({ as: signer });
+    // The legitimate source's confidentiality names this space's
+    // readers, the audience of everything the space stores. A write
+    // carrying it fits the out doc's write ceiling, so the out doc
+    // declares no policy of its own and the join reaches its label
+    // map as a `derived` entry.
+    const sourceAtom = cfcAtom.space(signer.did());
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      // Persisting flow labels is what stamps the `derived` entry
+      // this test reads back off the out doc.
       cfcFlowLabels: "persist",
     });
     try {
@@ -56,6 +69,7 @@ describe("CFC trigger reads: cid: exclusion", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -65,12 +79,12 @@ describe("CFC trigger reads: cid: exclusion", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
               path: ["secret"],
-              label: { confidentiality: ["secret"] },
+              label: { confidentiality: [sourceAtom] },
             }],
           },
         },
@@ -159,7 +173,7 @@ describe("CFC trigger reads: cid: exclusion", () => {
       const join = deriveFlowJoin(smuggledTx);
       // The legitimate trigger's label joins; the poisoned cid: one is
       // skipped by the derivation-side guard.
-      expect(join.confidentiality).toContainEqual("secret");
+      expect(join.confidentiality).toContainEqual(sourceAtom);
       expect(join.confidentiality).not.toContainEqual("cid-secret");
 
       // The transaction reads nothing — only the triggers connect it to the
@@ -179,7 +193,9 @@ describe("CFC trigger reads: cid: exclusion", () => {
       const derived = entries.find((e) => e.origin === "derived");
       // The legitimate trigger joined…
       expect(derived).toBeDefined();
-      expect(derived!.label.confidentiality).toContainEqual("secret");
+      expect(derived!.label.confidentiality).toContainEqual(
+        sourceAtom,
+      );
       // …the poisoned cid: trigger did not — on ANY entry of the out doc.
       for (const entry of entries) {
         expect(entry.label.confidentiality ?? []).not.toContainEqual(

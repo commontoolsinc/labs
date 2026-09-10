@@ -85,7 +85,7 @@ Deno.test("markdown rendered view formats blocks and inline content", () => {
   );
   assert(
     lines[2].spans.some((span) => span.cls === "string"),
-    "inline code has code colour",
+    "inline code has code color",
   );
   assert(
     lines[6].spans.some((span) => span.bold),

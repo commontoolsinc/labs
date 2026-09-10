@@ -1,22 +1,28 @@
 import { assertEquals } from "@std/assert";
+
 import type { CfcAtom } from "@commonfabric/api/cfc";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { Identity } from "@commonfabric/identity";
 import {
   isCell as isRuntimeCell,
   KeepAsCell,
   Runtime,
 } from "@commonfabric/runner";
-import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { cfcAtom } from "@commonfabric/api/cfc";
 import {
   createRenderConfidentialityResolver,
   type SpaceMembershipProvider,
 } from "@commonfabric/runner/cfc";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "../../runner/test/cfc-seed-envelope.ts";
+import type { VDomOp } from "../src/vdom-ops.ts";
+import { WorkerReconciler } from "../src/worker/reconciler.ts";
 import type { WorkerVNode } from "../src/worker/types.ts";
 import { normalizeRenderDeclassificationPolicy } from "../src/worker/types.ts";
-import { WorkerReconciler } from "../src/worker/reconciler.ts";
-import type { VDomOp } from "../src/vdom-ops.ts";
 
 function createOpsCollector() {
   const allOps: VDomOp[] = [];
@@ -82,6 +88,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       tx,
     );
     const secretLink = secret.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, signer.did());
     tx.writeOrThrow({
       space: signer.did(),
       id: secretLink.id!,
@@ -91,7 +98,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       value: "Sensitive diagnosis: migraine",
       cfc: {
         version: 1,
-        schemaHash: "test-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -108,6 +115,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       tx,
     );
     const structuredSecretLink = structuredSecret.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, signer.did());
     tx.writeOrThrow({
       space: signer.did(),
       id: structuredSecretLink.id!,
@@ -117,7 +125,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       value: "Structured atom record",
       cfc: {
         version: 1,
-        schemaHash: "test-structured-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -134,6 +142,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       tx,
     );
     const signedReleaseTextLink = signedReleaseText.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, signer.did());
     tx.writeOrThrow({
       space: signer.did(),
       id: signedReleaseTextLink.id!,
@@ -143,7 +152,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       value: "Verified release note",
       cfc: {
         version: 1,
-        schemaHash: "test-signed-release-text-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -169,6 +178,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       tx,
     );
     const representedProfileLink = representedProfile.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, signer.did());
     tx.writeOrThrow({
       space: signer.did(),
       id: representedProfileLink.id!,
@@ -178,7 +188,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       value: { name: "Alice" },
       cfc: {
         version: 1,
-        schemaHash: "test-represented-profile-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -198,6 +208,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
     const authoredByProfileTextLink = authoredByProfileText
       .getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, signer.did());
     tx.writeOrThrow({
       space: signer.did(),
       id: authoredByProfileTextLink.id!,
@@ -207,7 +218,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       value: "Profile-authored note",
       cfc: {
         version: 1,
-        schemaHash: "test-authored-by-profile-text-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -256,21 +267,21 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     const CellImplConstructor = dummyCell.constructor;
 
     class MockCell extends (CellImplConstructor as any) {
-      private subscribers = new Set<(value: unknown) => void>();
+      #subscribers = new Set<(value: unknown) => void>();
 
       constructor(public value: unknown) {
         super(runtime, undefined, undefined, false, undefined, "cell");
       }
 
       sink(callback: (value: unknown) => void) {
-        this.subscribers.add(callback);
+        this.#subscribers.add(callback);
         callback(this.value);
-        return () => this.subscribers.delete(callback);
+        return () => this.#subscribers.delete(callback);
       }
 
       set(newValue: unknown) {
         this.value = newValue;
-        for (const subscriber of this.subscribers) {
+        for (const subscriber of this.#subscribers) {
           subscriber(newValue);
         }
       }
@@ -281,62 +292,70 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     }
 
     class MockPropsCell extends MockCell {
-      private propCells = new Map<string, MockPropCell>();
+      #propCells = new Map<string, MockPropCell>();
 
-      constructor(value: unknown, private rawValue: unknown = value) {
+      #rawValue: unknown;
+
+      constructor(value: unknown, rawValue: unknown = value) {
         super(value);
+        this.#rawValue = rawValue;
       }
 
       key(propName: string) {
-        if (!this.propCells.has(propName)) {
-          this.propCells.set(propName, new MockPropCell(this, propName));
+        if (!this.#propCells.has(propName)) {
+          this.#propCells.set(propName, new MockPropCell(this, propName));
         }
-        return this.propCells.get(propName)!;
+        return this.#propCells.get(propName)!;
       }
 
       getRawUntyped() {
-        return this.rawValue;
+        return this.#rawValue;
       }
 
       override set(newValue: unknown) {
-        this.rawValue = newValue;
+        this.#rawValue = newValue;
         super.set(newValue);
-        for (const propCell of this.propCells.values()) {
+        for (const propCell of this.#propCells.values()) {
           propCell.refresh();
         }
       }
     }
 
     class DeferredInitialPropsCell extends MockPropsCell {
-      private ready = false;
-      private propsSubscribers = new Set<(value: unknown) => void>();
+      #ready = false;
+      #propsSubscribers = new Set<(value: unknown) => void>();
 
       override sink(callback: (value: unknown) => void) {
-        this.propsSubscribers.add(callback);
-        if (this.ready) {
+        this.#propsSubscribers.add(callback);
+        if (this.#ready) {
           callback(this.value);
         }
-        return () => this.propsSubscribers.delete(callback);
+        return () => this.#propsSubscribers.delete(callback);
       }
 
       override getRawUntyped() {
-        if (!this.ready) {
+        if (!this.#ready) {
           throw new Error("props not loaded yet");
         }
         return super.getRawUntyped();
       }
 
       flushInitial() {
-        this.ready = true;
-        for (const subscriber of this.propsSubscribers) {
+        this.#ready = true;
+        for (const subscriber of this.#propsSubscribers) {
           subscriber(this.value);
         }
       }
     }
 
     class MockPropCell extends MockCell {
-      constructor(private parentCell: MockPropsCell, private propKey: string) {
+      #parentCell: MockPropsCell;
+      #propKey: string;
+
+      constructor(parentCell: MockPropsCell, propKey: string) {
         super((parentCell.value as Record<string, unknown>)?.[propKey]);
+        this.#parentCell = parentCell;
+        this.#propKey = propKey;
       }
 
       asSchema(_schema: unknown) {
@@ -349,8 +368,8 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       }
 
       getRawUntyped() {
-        return (this.parentCell.value as Record<string, unknown> | undefined)
-          ?.[this.propKey];
+        return (this.#parentCell.value as Record<string, unknown> | undefined)
+          ?.[this.#propKey];
       }
 
       refresh() {
@@ -1181,6 +1200,14 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
+    //
+    // Strict text integrity over child text
+    //
+    // Whether a text node's own integrity lets it render: matching and
+    // mismatched integrity, authorship derived from a represented profile,
+    // and the treatment of unsigned and literal text.
+    //
+
     await t.step(
       "strict text integrity renders child text with matching integrity",
       async () => {
@@ -1452,20 +1479,19 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // Nested authorship text-integrity boundaries. These assert the INTENDED
-    // composed semantics and are EXPECTED TO FAIL on current main until the
-    // childRenderPolicyForNode composition fix lands.
-    // (tracking: CT-1796 / branch
-    // gideon/ct-1796-nested-cf-cfc-authorship-text-integrity-boundaries-dont)
     //
-    // A text-integrity boundary must compose monotonically: nesting can only
+    // Nested authorship text-integrity boundaries (CT-1796)
+    //
+    // A text-integrity boundary composes monotonically: nesting can only
     // tighten the requirement (requiredIntegrity composes as the union of all
     // enclosing boundaries; allowLiteralText composes as parent && inner, so an
     // inner boundary can never relax an enclosing one), and an enclosing
-    // boundary's textIntegrityState="ok" must mean every node it transitively
-    // encloses met its bar. Neither holds on main today: childRenderPolicyForNode
-    // REPLACES parentPolicy.textIntegrity at an inner boundary, and a block is
-    // attributed to (and refreshed for) only the nearest boundary.
+    // boundary's textIntegrityState="ok" means every node it transitively
+    // encloses met its bar. These pin that composition, and that a block is
+    // attributed to and refreshed for every enclosing boundary rather than the
+    // nearest.
+    //
+
     await t.step(
       "nested text integrity propagates a block to every enclosing boundary",
       async () => {
@@ -1516,9 +1542,9 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           // The inner boundary sees the mismatch and blocks the text.
           assertEquals(lastTextIntegrityStateFor(innerId), "blocked");
           // Composed semantics: the enclosing boundary transitively encloses
-          // content that fails its own (X) requirement, so it must ALSO report
-          // blocked. (Red on main today: the block is attributed only to the
-          // inner boundary, so the outer stays "ok".)
+          // content that fails its own (X) requirement, so it ALSO reports
+          // blocked — the block is attributed to every enclosing boundary, not
+          // only the innermost.
           assertEquals(lastTextIntegrityStateFor(outerId), "blocked");
 
           // The failing text is hidden.
@@ -1584,9 +1610,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
 
           // Composed semantics (option i): allowLiteralText composes as
           // parent && inner, so the inner cannot re-enable literals the outer
-          // forbade. The attacker-shaped literal must be hidden, not rendered.
-          // (Red on main today: the inner replaces the outer's policy, so the
-          // literal renders clean.)
+          // forbade. The attacker-shaped literal is hidden, not rendered.
           const renderedText = collector.getOpsOfType("create-text")
             .map((op) => op.text);
           assertEquals(renderedText.includes(attackerText), false);
@@ -1595,9 +1619,8 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             true,
           );
 
-          // Both boundaries must report blocked: the enclosing boundary's
-          // stricter literal-text rule applies transitively through the inner.
-          // (Red on main today: both stay "ok".)
+          // Both boundaries report blocked: the enclosing boundary's stricter
+          // literal-text rule applies transitively through the inner.
           assertEquals(lastTextIntegrityStateFor(innerId), "blocked");
           assertEquals(lastTextIntegrityStateFor(outerId), "blocked");
         } finally {
@@ -1608,7 +1631,9 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
 
     // Reactive-update companions to the two mount-time tests above. They guard
     // the composed semantics across cell updates: a block must reach every
-    // enclosing boundary, and an unblock must clear every enclosing boundary.
+    // enclosing boundary, an unblock must clear every enclosing boundary, and
+    // an inner boundary that stops verifying must make the enclosing one
+    // recompute.
     const nestedAuthorshipTree = (innerChild: unknown) => ({
       type: "vnode",
       name: "div",
@@ -1793,6 +1818,14 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
+    //
+    // Strict text integrity over visible props
+    //
+    // The same integrity applied to the props a node renders rather than to
+    // its child text, and what becomes of the blocked state as children and
+    // policy change around it.
+    //
+
     await t.step(
       "strict text integrity allows matching visible content props",
       async () => {
@@ -1972,6 +2005,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           tx,
         );
         const messageLink = message.getAsNormalizedFullLink();
+        writeSeedEnvelopeDoc(tx, signer.did());
         tx.writeOrThrow({
           space: signer.did(),
           id: messageLink.id!,
@@ -1983,7 +2017,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           },
           cfc: {
             version: 1,
-            schemaHash: "test-linked-message-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{
@@ -2069,6 +2103,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           tx,
         );
         const messageLink = message.getAsNormalizedFullLink();
+        writeSeedEnvelopeDoc(tx, signer.did());
         tx.writeOrThrow({
           space: signer.did(),
           id: messageLink.id!,
@@ -2080,7 +2115,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           },
           cfc: {
             version: 1,
-            schemaHash: "test-aliased-message-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{
@@ -2196,6 +2231,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           tx,
         );
         const messagesLink = messages.getAsNormalizedFullLink();
+        writeSeedEnvelopeDoc(tx, signer.did());
         tx.writeOrThrow({
           space: signer.did(),
           id: messagesLink.id!,
@@ -2208,7 +2244,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           ],
           cfc: {
             version: 1,
-            schemaHash: "test-sibling-label-message-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{
@@ -2652,10 +2688,14 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // --- Default render ceiling (spec §8.10.6, S16 phase D) ---------------
-    // A host-supplied root ceiling gates labeled cells with NO authored
-    // boundary in the tree: atoms render only when listed exactly or when
-    // they are Caveat atoms of an allow-listed kind.
+    //
+    // The default ceiling
+    //
+    // What a host-supplied root ceiling (spec §8.10.6, S16 phase D) admits
+    // and blocks on its own, and how an authored boundary narrows it. With no
+    // authored boundary in the tree, atoms render only when listed exactly,
+    // or when they are Caveat atoms of an allow-listed kind.
+    //
 
     const PROMPT_INFLUENCE_KIND =
       "https://commonfabric.org/cfc/concepts/prompt-influence";
@@ -2673,6 +2713,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       caveatTx,
     );
     const influencedLink = influenced.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(caveatTx, signer.did());
     caveatTx.writeOrThrow({
       space: signer.did(),
       id: influencedLink.id!,
@@ -2682,7 +2723,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       value: "Influenced draft text",
       cfc: {
         version: 1,
-        schemaHash: "test-influence-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -2823,11 +2864,20 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // The mounted root cell is an egress like any descendant cell: its own
-    // label must pass the root policy before its resolved content renders.
+    //
+    // A ceiling over a labeled cell
+    //
+    // The ceiling as it applies to a labeled cell: mounted as the root,
+    // absent entirely, shaped as an acting-user DID or backed by a resolver,
+    // and failing closed on a read-failure marker or a malformed ceiling.
+    //
+
     await t.step(
       "default ceiling gates a labeled cell mounted as the root",
       async () => {
+        // The mounted root cell is an egress like any descendant cell: its own
+        // label must pass the root policy before its resolved content renders.
+
         const blocked = createOpsCollector();
         const blockedReconciler = new WorkerReconciler({
           onOps: blocked.onOps,
@@ -2890,15 +2940,16 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // Epic H3a: the shell's initial ceiling profile (spec §8.10.6, mirrors
-    // lib-shell's defaultRenderConfidentialityCeiling) uses the acting user's
-    // DID *string* as the exact-match identity atom. Pin that the string form
-    // gates correctly: the same ceiling admits the acting user's own content
-    // and fail-closes an identity atom it omits (another user's). Exchange
-    // resolution (PersonalSpace/HasRole forms) is H3b.
     await t.step(
       "acting-user DID-string ceiling admits own content, blocks another user's",
       async () => {
+        // Epic H3a: the shell's initial ceiling profile (spec §8.10.6, mirrors
+        // lib-shell's defaultRenderConfidentialityCeiling) uses the acting
+        // user's DID *string* as the exact-match identity atom. Pin that the
+        // string form gates correctly: the same ceiling admits the acting
+        // user's own content and fail-closes an identity atom it omits (another
+        // user's). Exchange resolution (PersonalSpace/HasRole forms) is H3b.
+
         const otherUserDid = "did:key:z6MkOtherUserOutsideCeiling";
         const seedTx = runtime.edit();
         const seedUserScoped = (id: string, value: string, atom: string) => {
@@ -2909,6 +2960,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             seedTx,
           );
           const link = cell.getAsNormalizedFullLink();
+          writeSeedEnvelopeDoc(seedTx, signer.did());
           seedTx.writeOrThrow({
             space: signer.did(),
             id: link.id!,
@@ -2918,7 +2970,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             value,
             cfc: {
               version: 1,
-              schemaHash: "test-user-scoped-schema",
+              schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
               labelMap: {
                 version: 1,
                 entries: [{
@@ -2976,13 +3028,15 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // Epic H3b: the render gate resolves §15.2 principal shapes through the
-    // runner-side exchange evaluator (spec §8.10.6) before the fit check. The
-    // reconciler consumes the resolved label; a display-class BoundaryContext
-    // and the acting user's HasRole membership facts drive resolution.
     await t.step(
       "H3b resolver admits User/Space-via-HasRole and blocks the unresolvable",
       async () => {
+        // Epic H3b: the render gate resolves §15.2 principal shapes through the
+        // runner-side exchange evaluator (spec §8.10.6) before the fit check.
+        // The reconciler consumes the resolved label; a display-class
+        // BoundaryContext and the acting user's HasRole membership facts drive
+        // resolution.
+
         const seedTx = runtime.edit();
         const seedLabeled = (id: string, value: string, atom: CfcAtom) => {
           const cell = runtime.getCell<string>(
@@ -2992,6 +3046,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             seedTx,
           );
           const link = cell.getAsNormalizedFullLink();
+          writeSeedEnvelopeDoc(seedTx, signer.did());
           seedTx.writeOrThrow({
             space: signer.did(),
             id: link.id!,
@@ -3001,7 +3056,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             value,
             cfc: {
               version: 1,
-              schemaHash: "test-h3b-schema",
+              schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
               labelMap: {
                 version: 1,
                 entries: [{ path: [], label: { confidentiality: [atom] } }],
@@ -3074,13 +3129,15 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // With the resolver active, the clause-aware fit still routes each
-    // still-offending clause through the same per-clause admission as the H3a
-    // path: the read-failure marker stays ungrantable (audit item 22), an
-    // allow-listed caveat kind renders, and an author-declassified atom renders.
     await t.step(
       "resolved-path fit honors marker / caveat-kind / declassification",
       async () => {
+        // With the resolver active, the clause-aware fit still routes each
+        // still-offending clause through the same per-clause admission as the
+        // H3a path: the read-failure marker stays ungrantable (audit item 22),
+        // an allow-listed caveat kind renders, and an author-declassified atom
+        // renders.
+
         const resolver = createRenderConfidentialityResolver({
           actingPrincipal: signer.did(),
           memberSpaces: [signer.did()],
@@ -3102,6 +3159,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             seedTx,
           );
           const link = cell.getAsNormalizedFullLink();
+          writeSeedEnvelopeDoc(seedTx, signer.did());
           seedTx.writeOrThrow({
             space: signer.did(),
             id: link.id!,
@@ -3111,7 +3169,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             value,
             cfc: {
               version: 1,
-              schemaHash: "test-h3b-branch-schema",
+              schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
               labelMap: {
                 version: 1,
                 entries: [{ path: [], label: { confidentiality: [atom] } }],
@@ -3240,13 +3298,14 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // Audit item 22 (ungrantable marker): "cfc:label-read-failed" means
-    // "the label could not be read", so it must never fit a render policy —
-    // even one that names the exported marker string — in either the
-    // ceiling or the declassification direction.
     await t.step(
       "neither ceiling nor declassification admits the read-failure marker",
       async () => {
+        // Audit item 22 (ungrantable marker): "cfc:label-read-failed" means
+        // "the label could not be read", so it must never fit a render policy —
+        // even one that names the exported marker string — in either the
+        // ceiling or the declassification direction.
+
         const seedTx = runtime.edit();
         const markerCellSeed = runtime.getCell<string>(
           signer.did(),
@@ -3255,6 +3314,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           seedTx,
         );
         const markerLink = markerCellSeed.getAsNormalizedFullLink();
+        writeSeedEnvelopeDoc(seedTx, signer.did());
         seedTx.writeOrThrow({
           space: signer.did(),
           id: markerLink.id!,
@@ -3264,7 +3324,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           value: "Label-read-failed content",
           cfc: {
             version: 1,
-            schemaHash: "test-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{
@@ -3332,12 +3392,13 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // The ceiling crosses the postMessage seam unvalidated; a malformed
-    // shape must fail CLOSED (empty ceiling — public-only rendering), never
-    // crash the mount and never fail open to unbounded.
     await t.step(
       "a malformed ceiling fails closed instead of crashing the mount",
       async () => {
+        // The ceiling crosses the postMessage seam unvalidated; a malformed
+        // shape must fail CLOSED (empty ceiling — public-only rendering), never
+        // crash the mount and never fail open to unbounded.
+
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
           onOps: collector.onOps,
@@ -3362,15 +3423,24 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // §4.9.3 Stage 2 (reactive upgrade): a cell labeled Space(X) where X's ACL
-    // has not yet synced fails closed (Stage 1); when the membership provider
-    // later reports X grants the acting user READ and fires its subscription,
-    // the cell re-renders and admits — WITHOUT a new value on the cell. Proves
-    // the reconciler wires the provider's ACL-change subscription into the
-    // cell's cancel group and re-evaluates the render gate on change.
+    //
+    // Re-rendering when access changes
+    //
+    // A ceiling resolved against a real principal or ACL rather than a literal
+    // list, and what happens when the answer changes after the mount.
+    //
+
     await t.step(
       "reactively re-renders a Space(X) cell once its ACL grants READ",
       async () => {
+        // §4.9.3 Stage 2 (reactive upgrade): a cell labeled Space(X) where X's
+        // ACL has not yet synced fails closed (Stage 1); when the membership
+        // provider later reports X grants the acting user READ and fires its
+        // subscription, the cell re-renders and admits — WITHOUT a new value on
+        // the cell. Proves the reconciler wires the provider's ACL-change
+        // subscription into the cell's cancel group and re-evaluates the render
+        // gate on change.
+
         const teamSpace = "did:key:z6MkTeamSpaceStage4Reactive";
         const seedTx = runtime.edit();
         const teamCell = runtime.getCell<string>(
@@ -3380,6 +3450,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           seedTx,
         );
         const teamLink = teamCell.getAsNormalizedFullLink();
+        writeSeedEnvelopeDoc(seedTx, signer.did());
         seedTx.writeOrThrow({
           space: signer.did(),
           id: teamLink.id!,
@@ -3389,7 +3460,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           value: "Team note",
           cfc: {
             version: 1,
-            schemaHash: "test-stage4-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{
@@ -3521,11 +3592,12 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // The root-mounted cell is an egress too (codex P2): a Space(X) cell
-    // mounted AS the root gets the same reactive upgrade as a descendant.
     await t.step(
       "reactively re-renders a root-mounted Space(X) cell once its ACL grants READ",
       async () => {
+        // The root-mounted cell is an egress too (codex P2): a Space(X) cell
+        // mounted AS the root gets the same reactive upgrade as a descendant.
+
         const teamSpace = "did:key:z6MkTeamSpaceStage4Root";
         const seedTx = runtime.edit();
         const teamCell = runtime.getCell<string>(
@@ -3535,6 +3607,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           seedTx,
         );
         const teamLink = teamCell.getAsNormalizedFullLink();
+        writeSeedEnvelopeDoc(seedTx, signer.did());
         seedTx.writeOrThrow({
           space: signer.did(),
           id: teamLink.id!,
@@ -3544,7 +3617,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           value: "Root team note",
           cfc: {
             version: 1,
-            schemaHash: "test-stage4-root-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{

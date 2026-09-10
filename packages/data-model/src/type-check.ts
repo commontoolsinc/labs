@@ -1,184 +1,239 @@
-import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
-import { isPlainObjectWithOnlyEnumerableStringKeys } from "@commonfabric/utils/objects";
-import { isPlainObject } from "@commonfabric/utils/types";
+/**
+ * The narrowings that ask a shape question of a value already typed as a
+ * `FabricValue`, and the container questions a structural walk asks of an
+ * `unknown`. Whether a value belongs to the `FabricValue` type at all is
+ * `validity-check.ts`'s question, and none of these asks it.
+ *
+ * The narrowings are looser than membership on purpose. Most are asked of a
+ * value whose type already claims to be a `FabricValue`, and answer only
+ * whether it may be read by name; where one accepts something membership
+ * refuses, the difference is stated on that narrowing rather than here.
+ *
+ * The `isKeyable*` and `isWalkable*` pairs are the exception on both counts.
+ * They take `unknown`, because a structural walk holds whatever its caller
+ * passed -- a schema node, a pattern binding, a builder artifact -- and asking
+ * it to prove membership first would be asking a different question than the
+ * one it needs answered. Outside the `FabricValue` type they subtract nothing:
+ * a `Date`, a `Map`, a `Cell` and a query-result proxy over one all still
+ * return `true`, which is what leaves a walk's treatment of them where it
+ * found it. Inside the type, a `FabricPrimitive` and any other special object
+ * that is not a `FabricInstance` returns `false`, having no own properties to
+ * read.
+ *
+ * The four differ on a `FabricInstance`, and nowhere else. `isKeyable*`
+ * returns `false` for one, reporting that the asking walk cannot reach what it
+ * holds; `isWalkable*` refuses one, for a walk that would carry a `false`
+ * forward as an empty record. Each pair settles the array question in its
+ * name.
+ */
 
 import {
+  isPlainContainer,
+  isPlainObject,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
+
+import {
+  type FabricArray,
+  type FabricContainerValue,
+  FabricInstance,
   type FabricPlainObject,
   FabricSpecialObject,
   type FabricValue,
-  type FabricValueLayer,
 } from "./interface.ts";
-import { isAdmittedFabricFactory } from "./fabric-factory.ts";
-import { BaseFabricInstance } from "./fabric-instances/BaseFabricInstance.ts";
-import { BaseFabricPrimitive } from "./fabric-primitives/BaseFabricPrimitive.ts";
+import { refuseFabricInstance } from "./refuseFabricInstance.ts";
 
 /**
- * Indicates whether the value is a fabric value, accepting
- * `FabricSpecialObject`s (both `FabricInstance` and `FabricPrimitive`),
- * admitted `FabricFactory` callables, `undefined`, and arrays with `undefined`
- * elements or sparse holes -- in addition to the base fabric types (`null`,
- * boolean, number, string, plain objects, dense arrays).
+ * Indicates whether a value's contents are reachable by property name: a
+ * non-`null` object, an array included, that is not a `FabricSpecialObject`.
  *
- * This function is a TypeScript type guard for `FabricValueLayer`.
+ * This is the container question, and the question `isObjectOrArray()` gets
+ * wrong. A special object keeps its state in private fields and has no own
+ * properties at all, so `isObjectOrArray()` calls it a record and a walk then
+ * works on an empty one: it merges to `{}`, compares vacuously equal, descends
+ * and finds nothing, or grafts a property onto a frozen value. A `false`
+ * result says the value has no keys to reach, which is the whole story for a
+ * `FabricPrimitive` and any further subclass, and for a class extending
+ * `FabricSpecialObject` directly.
+ *
+ * A `FabricInstance` returns `false` here as well, and that answer is
+ * incomplete rather than wrong: an instance holds other `FabricValue`s, so a
+ * path below one addresses something that exists and this reports it as
+ * unreachable. Reach for this where that is the honest thing to report, and
+ * record what it under-reports where the report lands -- a walk that decides
+ * what a path finds, or what a change triggers, is reporting an absence rather
+ * than handing back a wrong value. Reach for {@link isWalkableObjectOrArray}
+ * instead where a `false` would make the walk hand back a wrong value rather
+ * than report an absence; that one refuses an instance for exactly that
+ * reason. The two differ on an instance and nowhere else.
+ *
+ * TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
+ * point this returns `true` and a path below one stops reading as absent.
+ *
+ * `isFabricPlainContainer()` asks the container question of a value the type
+ * system already says is a `FabricValue`; this takes `unknown`, which is what
+ * a structural walk holds, and so still admits a `Date`, a `Map`, a `Cell` and
+ * a query-result proxy over one.
+ *
+ * Like its `utils` counterparts, the name settles the array question, and the
+ * sibling {@link isKeyableObjectNotArray} is the same test with arrays
+ * removed. This is a structural predicate, so it narrows in one direction only
+ * and is overloaded accordingly; see the header of `@commonfabric/utils/types`
+ * for what that means. The narrowed type is read-only, these callers only
+ * reading what they narrow.
  */
-export function isFabricValueLayer(
+export function isKeyableObjectOrArray(value: ReadonlyRecord): boolean;
+export function isKeyableObjectOrArray(
   value: unknown,
-): value is FabricValueLayer {
-  switch (typeof value) {
-    case "boolean":
-    case "string":
-    case "number":
-    case "bigint":
-    case "undefined": {
-      return true;
-    }
-
-    case "object": {
-      if (value === null) {
-        return true;
-      }
-      // `FabricSpecialObject` -- already a valid `FabricValue`.
-      if (value instanceof FabricSpecialObject) {
-        return true;
-      }
-      if (Array.isArray(value)) {
-        // Arrays with `undefined` elements and sparse holes are accepted, but
-        // not arrays carrying named or symbol-keyed properties.
-        return isArrayWithOnlyIndexProperties(value);
-      }
-      // Plain objects are accepted; class instances are not (except
-      // `FabricSpecialObject`, handled above). `FabricPlainObject` is keyed by
-      // `string`, so a symbol key has no representation either, and neither
-      // does a non-enumerable string key.
-      return isPlainObjectWithOnlyEnumerableStringKeys(value);
-    }
-
-    case "symbol": {
-      // Registry-interned symbols are valid fabric values; unique ones are not.
-      return Symbol.keyFor(value) !== undefined;
-    }
-
-    case "function": {
-      return isAdmittedFabricFactory(value);
-    }
-
-    default: {
-      return false;
-    }
-  }
+): value is ReadonlyRecord;
+export function isKeyableObjectOrArray(value: unknown): boolean {
+  return typeof value === "object" && value !== null &&
+    !(value instanceof FabricSpecialObject);
 }
 
 /**
- * Indicates whether the value is a `FabricValue` -- a recursive check of exact
- * structural membership in the `FabricValue` type, independent of frozen-ness.
+ * Indicates whether a value's contents are reachable by property name and it
+ * is not an array: {@link isKeyableObjectOrArray} with arrays removed, and
+ * `isObjectNotArray()` with the fabric special objects removed.
  *
- * Returns `true` for any scalar (`null`, `undefined`, `boolean`, `number`
- * -- including `-0`, `NaN`, and `±Infinity` -- `string`, `bigint`, and
- * registry-interned (`Symbol.for(...)`) symbols), any `FabricInstance` or
- * `FabricPrimitive`, an admitted `FabricFactory`, an array of `FabricValue`s
- * with no named or symbol-keyed properties, `length` aside (sparse holes
- * allowed), or a plain object whose values are all
- * `FabricValue`s. Returns `false` for a `function` or a unique (uninterned)
- * symbol -- whether the value itself or reached anywhere within it -- and for
- * any other class instance (`Date`, `Map`, ...) not representable as a
- * `FabricValue`. Handles circular references.
- *
- * This is a *membership* check, not a frozen-ness check: a structurally-valid
- * but unfrozen object or array is still a `FabricValue`. For the deep-frozen
- * question, see `isDeepFrozenFabricValue()`. A fabric instance is a member by
- * type (it is a `FabricSpecialObject`); this does not recurse into its private
- * interior, whose contents are `FabricValue`s by the instance's construction
- * contract and are reachable only via frozen-semantic protocols that a
- * membership check must not invoke.
- *
- * Contrast the shallow, single-level sibling `isFabricValueLayer()` and
- * `isFabricCompatible()` (which additionally accepts native values *convertible*
- * to fabric form).
+ * A walk asks this one where an array is not merely a different shape but
+ * something it must not treat as a record -- a property merge, a
+ * record-versus-array container reset.
  */
-export function isFabricValue(value: unknown): value is FabricValue {
-  // Fast leaf paths first, so a function or a primitive answers without
-  // allocating the cycle-tracking set or the recursion closure below.
-  if (typeof value === "function") {
-    return isAdmittedFabricFactory(value);
-  } else if (typeof value === "symbol") {
-    // Only registry-interned symbols are `FabricValue`s; unique (uninterned)
-    // symbols are not portable across realms and are rejected, matching
-    // `isFabricValueLayer()`.
-    return Symbol.keyFor(value) !== undefined;
-  } else if (value === null || typeof value !== "object") {
-    // A non-function, non-symbol primitive -- a direct `FabricValue` member.
-    return true;
-  }
-
-  // We have object structure to walk. Allocate the cycle-tracking set and build
-  // the recursion callback once here, reusing the same closure at every layer.
-  const seen = new Set<object>();
-  const check = (item: unknown): boolean => {
-    if (typeof item === "function") return isAdmittedFabricFactory(item);
-    if (typeof item === "symbol") return Symbol.keyFor(item) !== undefined;
-    if (item === null || typeof item !== "object") {
-      // A non-function, non-symbol primitive.
-      return true;
-    } else if (seen.has(item)) {
-      // Already being validated higher in the recursion; treat as a member for
-      // the rest of this walk (a cycle back to an in-progress value).
-      return true;
-    }
-
-    seen.add(item);
-
-    if (BaseFabricPrimitive.isInstance(item)) {
-      // A `FabricPrimitive` is a `FabricValue` with no outbound references.
-      return true;
-    } else if (BaseFabricInstance.isInstance(item)) {
-      // A fabric instance is a `FabricValue` by type. Its logical contents are
-      // private and reachable only through the frozen-semantic
-      // `[IS_DEEP_FROZEN]`/`[DEEP_FREEZE]` protocols, which a pure membership
-      // check must not invoke; the instance's construction contract already
-      // guarantees its interior holds `FabricValue`s. So membership trusts the
-      // type and does not recurse.
-      return true;
-    } else if (Array.isArray(item)) {
-      // Arrays with named (non-index) or symbol-keyed properties have no
-      // fabric representation.
-      if (!isArrayWithOnlyIndexProperties(item)) return false;
-      for (let i = 0; i < item.length; i++) {
-        if (!(i in item)) continue; // sparse hole
-        if (!check(item[i])) return false;
-      }
-      return true;
-    } else if (isPlainObject(item)) {
-      // Symbol-keyed and non-enumerable string-keyed properties have no fabric
-      // representation, the same as an array's non-index properties.
-      if (!isPlainObjectWithOnlyEnumerableStringKeys(item)) return false;
-      const record = item as Record<string, unknown>;
-      for (const key of Object.keys(record)) {
-        if (!check(record[key])) return false;
-      }
-      return true;
-    } else {
-      // An instance of a class not covered by the `FabricValue` type.
-      return false;
-    }
-  };
-
-  return check(value);
+export function isKeyableObjectNotArray(value: ReadonlyRecord): boolean;
+export function isKeyableObjectNotArray(
+  value: unknown,
+): value is ReadonlyRecord;
+export function isKeyableObjectNotArray(value: unknown): boolean {
+  return isKeyableObjectOrArray(value) && !Array.isArray(value);
 }
 
 /**
- * Indicates whether a fabric value is a plain object, an array, or a
- * `FabricSpecialObject` -- everything a `typeof value === "object"` test
- * accepts, minus `null`. The name spells out the array case because "object"
- * alone reads as excluding it.
+ * Indicates whether a value's contents are reachable by property name, with a
+ * `FabricInstance` refused rather than reported as having none:
+ * {@link isKeyableObjectOrArray} for every other value.
  *
- * The runtime behavior matches a bare `isRecord()` exactly. The difference is
- * static: `isRecord()` narrows to `Record<string | number | symbol, unknown>`,
- * which discards the fact that the value is a `FabricValue` -- so a guarded
- * value can no longer be handed to a `FabricValue` API. This keeps that half.
+ * This is the question a structural walk asks before it reads, rebuilds,
+ * merges, or descends a value by its keys, and it differs from its sibling on
+ * exactly the value where a `false` would be a claim rather than a report. An
+ * instance is a container a walk is meant to descend, so a walk that takes
+ * `false` for an answer carries it forward as an empty record and loses what
+ * it holds. "Not yet" is not a boolean, and the refusal is what carries it.
+ *
+ * A walk that would merely fail to find something below an instance, and whose
+ * own marker records that, wants {@link isKeyableObjectOrArray} instead. So
+ * does a walk running where a throw cannot be delivered -- under a storage
+ * subscription that has to keep delivering, say.
+ *
+ * The refusal is the one every other walk in the tree raises; "Flag-gated
+ * tripwires" in `docs/development/EXPERIMENTAL_OPTIONS.md` governs them all.
+ * Its strength here is de facto rather than by construction: no flag stands
+ * between an instance and this predicate, and a `FabricError` is ungated and
+ * exposed to pattern authors, so nothing but the absence of such a call keeps
+ * it from firing.
+ *
+ * `docs/development/DEVELOPMENT.md` under "Walking or comparing a value" says
+ * which of the four a walk reaches for, including where a caller with a better
+ * answer than a throw tests for an instance ahead of this one.
+ *
+ * The walk-side half of admitting special objects is
+ * {@link isKeyableObjectOrArray} and this disposition toward an instance; the
+ * compare-side half is `fabricAwareEqual()`.
+ *
+ * @throws If given a `FabricInstance`.
+ */
+export function isWalkableObjectOrArray(value: ReadonlyRecord): boolean;
+export function isWalkableObjectOrArray(
+  value: unknown,
+): value is ReadonlyRecord;
+export function isWalkableObjectOrArray(value: unknown): boolean {
+  // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
+  // point this becomes a walk rather than a refusal.
+  if (value instanceof FabricInstance) {
+    refuseFabricInstance(value, "in a structural walk");
+  }
+
+  return isKeyableObjectOrArray(value);
+}
+
+/**
+ * Indicates whether a value's contents are reachable by property name and it
+ * is not an array: {@link isWalkableObjectOrArray} with arrays removed.
+ *
+ * A walk asks this one where an array is not merely a different shape but
+ * something it must not treat as a record. It refuses a `FabricInstance` for
+ * the same reason its sibling does.
+ *
+ * @throws If given a `FabricInstance`.
+ */
+export function isWalkableObjectNotArray(value: ReadonlyRecord): boolean;
+export function isWalkableObjectNotArray(
+  value: unknown,
+): value is ReadonlyRecord;
+export function isWalkableObjectNotArray(value: unknown): boolean {
+  return isWalkableObjectOrArray(value) && !Array.isArray(value);
+}
+
+/**
+ * Narrows to the container arms of `FabricValue` -- a plain object, an array,
+ * or a `FabricInstance` -- that is, the values that hold other `FabricValue`s.
+ *
+ * Contrast `isFabricObjectOrArray()`, which is one arm wider: it also accepts
+ * a `FabricSpecialObject` that is not a `FabricInstance`, an object that is
+ * not a container. The two are not interchangeable where the result decides a
+ * descent.
+ */
+export function isFabricContainerValue(
+  value: FabricValue,
+): value is FabricContainerValue {
+  return isPlainContainer(value) || value instanceof FabricInstance;
+}
+
+/**
+ * Narrows to the two *plain* container arms of `FabricValue` -- an array or a
+ * plain object -- the values whose contents are reachable by index or property
+ * name. This is the question to ask before addressing into a value by key.
+ *
+ * Contrast `isFabricContainerValue()`, which is one arm wider: a
+ * `FabricInstance` is a container, but it holds its contents privately, so a
+ * key means nothing against one. Assigning through a value this rejects and
+ * that one accepts puts an own property on an instance, which is a state no
+ * `FabricInstance` has.
+ */
+export function isFabricPlainContainer(
+  value: FabricValue,
+): value is FabricArray | FabricPlainObject {
+  return isPlainContainer(value);
+}
+
+/**
+ * Narrows to the array arm of `FabricValue` (`FabricArray`). This asks a shape
+ * question of a value the type already says is a `FabricValue`, so an `Array`
+ * subclass instance passes as readily as a direct one; the looseness costs
+ * nothing, the input being out of contract either way.
+ */
+export function isFabricArray(value: FabricValue): value is FabricArray {
+  return Array.isArray(value);
+}
+
+/**
+ * Indicates whether a `FabricValue` is a plain object, an array, or a
+ * `FabricSpecialObject` -- everything a `typeof value === "object"` test
+ * accepts, minus `null`. The name states the array case because "object" alone
+ * reads as excluding it.
+ *
+ * The runtime behavior matches a bare `isObjectOrArray()` exactly. The
+ * difference is static: `isObjectOrArray()` narrows to `Record<string,
+ * unknown>`, which discards the fact that the value is a `FabricValue` -- so a
+ * guarded value can no longer be handed to a `FabricValue` API. This keeps that
+ * half.
  *
  * Contrast `isFabricPlainObject()`, which is strictly narrower at RUNTIME: it
  * accepts only plain objects, rejecting arrays and `FabricSpecialObject`s. The
- * two are not interchangeable.
+ * two are not interchangeable. Between them sit
+ * `isFabricContainerValue()`, which rejects every `FabricSpecialObject` that
+ * is not a `FabricInstance`, and `isFabricPlainContainer()`, which rejects all
+ * of them.
  */
 export function isFabricObjectOrArray(
   value: FabricValue,
@@ -187,12 +242,23 @@ export function isFabricObjectOrArray(
 }
 
 /**
- * Narrows to the plain-record arm of `FabricValue` (`FabricPlainObject`): an object
- * whose prototype is `Object.prototype` or `null`. This rejects arrays,
+ * Narrows to the plain-record arm of `FabricValue` (`FabricPlainObject`): an
+ * object whose prototype is `Object.prototype` or `null`. This rejects arrays,
  * `FabricSpecialObject`s, and other class instances (`Date`, `Map`, …), none of
- * which are representable as a `FabricPlainObject`. Unlike a bare `isRecord()` check,
- * it preserves the value type — `FabricPlainObject`'s string index of `FabricValue`
- * keeps an indexed value typed as a `FabricValue`.
+ * which are representable as a `FabricPlainObject`. Unlike a bare
+ * `isObjectOrArray()` check, it preserves the value type —
+ * `FabricPlainObject`'s string index of `FabricValue` keeps an indexed value
+ * typed as a `FabricValue`.
+ *
+ * This asks a shape question -- "may I read this by property name?" -- of a
+ * value the type already says is a `FabricValue`, and a null-prototype object
+ * answers yes as readily as any other record. That makes it deliberately looser
+ * than membership: a `FabricPlainObject` is `Object.prototype`-rooted, so
+ * `isValidFabricValue()` refuses the null-prototype object this accepts. The
+ * looseness costs nothing, the input being out of contract either way, and it
+ * keeps callers holding un-validated values from losing a reader they can use.
+ * For the membership question asked of an `unknown`, see
+ * `isValidFabricPlainObject()`.
  */
 export function isFabricPlainObject(
   value: FabricValue,

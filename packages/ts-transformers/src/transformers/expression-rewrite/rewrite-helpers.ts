@@ -1,16 +1,54 @@
 import ts from "typescript";
 
 import {
+  classifyArrayMethodCall,
   detectCallKind,
+  isSyntheticNode,
   type NormalizedDataFlow,
   preserveSourceMapRange,
   setParentPointers,
   typeToTypeNodeWithRegistry,
 } from "../../ast/mod.ts";
 import { isModuleScopedDeclaration } from "../../ast/scope-analysis.ts";
-import { CF_HELPERS_IDENTIFIER } from "../../core/cf-helpers.ts";
+import { unwrapTransparentWrapperOnce } from "../../utils/expression.ts";
 import { TransformationContext } from "../../core/mod.ts";
 import { createLiftAppliedCall } from "../builtins/lift-applied.ts";
+
+/**
+ * True when `node` is the receiver an array-method call is made on, looking
+ * through any transparent wrappers between the two: `xs`, `(xs)`, and
+ * `(xs as T[])!` are all the receiver of `.map(...)`.
+ *
+ * The walk runs outward through parents and checks at each step that it is on
+ * the wrapper's `expression` spine, so a node sitting in a wrapper's *type*
+ * position is not mistaken for the value being wrapped.
+ */
+export function isArrayMethodReceiverExpression(node: ts.Node): boolean {
+  let current: ts.Node = node;
+  let parent = current.parent;
+  while (parent) {
+    const wrapped = unwrapTransparentWrapperOnce(parent);
+    if (!wrapped) break;
+    if (wrapped !== current) return false;
+    current = parent;
+    parent = parent.parent;
+  }
+
+  if (
+    !parent ||
+    (
+      !ts.isPropertyAccessExpression(parent) &&
+      !ts.isElementAccessExpression(parent)
+    ) ||
+    parent.expression !== current
+  ) {
+    return false;
+  }
+
+  const call = parent.parent;
+  return !!call && ts.isCallExpression(call) && call.expression === parent &&
+    !!classifyArrayMethodCall(call);
+}
 
 function getCaptureRootExpression(expression: ts.Expression): ts.Expression {
   let current = expression;
@@ -29,7 +67,7 @@ function isNestedFunctionLocalCapture(
   wrappedExpression: ts.Expression,
   checker: ts.TypeChecker,
 ): boolean {
-  const wrappedSourceNode = wrappedExpression.pos >= 0
+  const wrappedSourceNode = !isSyntheticNode(wrappedExpression)
     ? wrappedExpression
     : ts.getOriginalNode(wrappedExpression);
   const root = getCaptureRootExpression(expression);
@@ -143,7 +181,7 @@ export function createReactiveWrapperForExpression(
     resultTypeNode = typeToTypeNodeWithRegistry(
       resultType,
       { checker, factory, sourceFile },
-      context.options.state?.typeRegistry,
+      context.state.typeRegistry,
     );
   } catch {
     resultTypeNode = undefined;
@@ -200,9 +238,9 @@ export function createReactiveWrapperForExpression(
   );
 
   // Register types for both the TypeNode and the lift-applied CallExpression
-  if (resultTypeNode && resultType && context.options.state?.typeRegistry) {
-    context.options.state?.typeRegistry.set(resultTypeNode, resultType);
-    context.options.state?.typeRegistry.set(liftAppliedCall, resultType);
+  if (resultTypeNode && resultType) {
+    context.state.typeRegistry.set(resultTypeNode, resultType);
+    context.state.typeRegistry.set(liftAppliedCall, resultType);
   }
 
   // CRITICAL: Set parent pointers and connect to parent chain
@@ -237,14 +275,6 @@ function unionWithEnclosingScopeFreeIdentifiers(
   expression: ts.Expression,
   checker: ts.TypeChecker,
 ): ts.Expression[] {
-  // Helper namespaces are compiler lexical dependencies, never graph inputs.
-  // Synthetic dataflow analysis can occasionally surface `__cfHelpers` as the
-  // root of a generated builder call; transporting it would produce invalid
-  // Fabric state and hide the authored capture that the wrapper actually needs.
-  const portableRefs = refs.filter((ref) =>
-    getRootIdentifier(ref)?.text !== CF_HELPERS_IDENTIFIER
-  );
-
   // Build a set of identifier names already represented by the dataflow refs
   // so we don't add them again. We key by name rather than by symbol because
   // dataflow refs are sometimes synthesized expressions whose root identifier
@@ -252,7 +282,7 @@ function unionWithEnclosingScopeFreeIdentifiers(
   // single expression, TypeScript scoping makes name → binding unambiguous,
   // so name-based dedup is safe here.
   const alreadyCoveredNames = new Set<string>();
-  for (const ref of portableRefs) {
+  for (const ref of refs) {
     const root = getRootIdentifier(ref);
     if (root) alreadyCoveredNames.add(root.text);
   }
@@ -269,14 +299,9 @@ function unionWithEnclosingScopeFreeIdentifiers(
 
     if (ts.isIdentifier(node) && isReferenceSite(node)) {
       if (
-        node.text !== CF_HELPERS_IDENTIFIER &&
         !alreadyCoveredNames.has(node.text) && !addedNames.has(node.text)
       ) {
-        const original = ts.getOriginalNode(node);
-        const symbol = checker.getSymbolAtLocation(node) ??
-          (original !== node && ts.isIdentifier(original)
-            ? checker.getSymbolAtLocation(original)
-            : undefined);
+        const symbol = checker.getSymbolAtLocation(node);
         // Only capture value-space symbols. Type-only identifiers (type
         // aliases, interfaces — type parameters are also filtered by
         // `isEnclosingScopeDeclaration` below) can appear at reference
@@ -288,9 +313,7 @@ function unionWithEnclosingScopeFreeIdentifiers(
           isEnclosingScopeDeclaration(symbol)
         ) {
           addedNames.add(node.text);
-          added.push(
-            original !== node && ts.isExpression(original) ? original : node,
-          );
+          added.push(node);
         }
       }
     }
@@ -300,33 +323,37 @@ function unionWithEnclosingScopeFreeIdentifiers(
 
   visit(expression);
 
-  return [...portableRefs, ...added];
+  return [...refs, ...added];
 }
 
+/**
+ * The identifier a reference is rooted at, looking through member access, calls,
+ * and the transparent wrapper set.
+ *
+ * This decides which names an existing data flow already covers. A reference
+ * whose root goes unrecognized is not merely skipped: the free-identifier pass
+ * below then adds that root as its own capture, and a whole-object capture
+ * subsumes the narrower paths beside it — so the lift subscribes to the whole
+ * object where it could have subscribed to one field.
+ */
 function getRootIdentifier(expr: ts.Expression): ts.Identifier | undefined {
   let current: ts.Expression = expr;
-  while (
-    ts.isPropertyAccessExpression(current) ||
-    ts.isElementAccessExpression(current) ||
-    ts.isCallExpression(current) ||
-    ts.isParenthesizedExpression(current) ||
-    ts.isAsExpression(current) ||
-    ts.isNonNullExpression(current)
-  ) {
-    if (ts.isCallExpression(current)) {
-      current = current.expression;
-    } else if (ts.isPropertyAccessExpression(current)) {
-      current = current.expression;
-    } else if (ts.isElementAccessExpression(current)) {
-      current = current.expression;
-    } else {
-      current = (current as
-        | ts.ParenthesizedExpression
-        | ts.AsExpression
-        | ts.NonNullExpression).expression;
+  while (true) {
+    const unwrapped = unwrapTransparentWrapperOnce(current);
+    if (unwrapped) {
+      current = unwrapped;
+      continue;
     }
+    if (
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current) ||
+      ts.isCallExpression(current)
+    ) {
+      current = current.expression;
+      continue;
+    }
+    return ts.isIdentifier(current) ? current : undefined;
   }
-  return ts.isIdentifier(current) ? current : undefined;
 }
 
 function isReferenceSite(node: ts.Identifier): boolean {

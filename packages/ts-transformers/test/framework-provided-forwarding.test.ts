@@ -422,11 +422,15 @@ const authenticated = pattern<{
 export const sandboxWrapper: PatternFactory<
   { command: string },
   { ok: boolean }
-> = pattern(({ command }) => sandboxed({ command } as any));
+> = pattern<{ command: string }, { ok: boolean }>(
+  ({ command }) => sandboxed({ command } as any),
+);
 export const authWrapper: PatternFactory<
   { command: string },
   { ok: boolean }
-> = pattern(({ command }) => authenticated({ command } as any));
+> = pattern<{ command: string }, { ok: boolean }>(
+  ({ command }) => authenticated({ command } as any),
+);
 
 type SandboxOperation = typeof sandboxWrapper;
 type AuthOperation = typeof authWrapper;

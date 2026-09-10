@@ -1,22 +1,26 @@
-import { assertEquals, assertStrictEquals } from "@std/assert";
+/**
+ * `writeDetailValueForTarget` reconstructs "the value this transaction wrote
+ * at a path" from the recorded write-details. A value may be recorded either
+ * as a single coarse write (whole object) OR split across granular writes (an
+ * envelope `{}` at the path plus per-field writes at deeper paths) — e.g. when
+ * the value is deep-frozen and therefore written field-by-field. Both shapes
+ * MUST reconstruct to the same value; otherwise CFC's writeAuthorizedBy
+ * enforcement evaluates an item's policy against an incomplete value (e.g. the
+ * bare envelope `{}`) and mis-authorizes it.
+ */
+
+import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
+
+import { deepFreeze } from "@commonfabric/data-model";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
+
 import { writeDetailValueForTarget } from "../src/cfc/prepare.ts";
 import { normalizeCellScope } from "../src/scope.ts";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import type { FabricValue } from "@commonfabric/api";
-import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type {
   IExtendedStorageTransaction,
   TransactionWriteDetail,
 } from "../src/storage/interface.ts";
-
-// `writeDetailValueForTarget` reconstructs "the value this transaction wrote
-// at a path" from the recorded write-details. A value may be recorded either
-// as a single coarse write (whole object) OR split across granular writes (an
-// envelope `{}` at the path plus per-field writes at deeper paths) — e.g. when
-// the value is deep-frozen and therefore written field-by-field. Both shapes
-// MUST reconstruct to the same value; otherwise CFC's writeAuthorizedBy
-// enforcement evaluates an item's policy against an incomplete value (e.g. the
-// bare envelope `{}`) and mis-authorizes it.
 
 const SPACE = "did:key:test-space" as MemorySpace;
 const ID = "of:fid1:test-entity" as URI;
@@ -193,7 +197,7 @@ Deno.test("writeDetailValueForTarget: composition preserves large off-spine subt
     meta: { seen: false, tags: ["a", "b"] },
   }));
   const base = deepFreeze(
-    { items: bigList, status: "draft" } as unknown as FabricValue,
+    { items: bigList, status: "draft" },
   ) as unknown as Record<string, unknown>;
 
   const tx = txWith([
@@ -223,4 +227,41 @@ Deno.test("writeDetailValueForTarget: composition preserves large off-spine subt
         `copy-on-write spine-thawing, not a full deep clone).`,
     );
   }
+});
+
+//
+// A `FabricInstance` holds its state privately, so an overlay path addresses
+// nothing in one. Both arms are covered: the base itself, and an instance
+// nested deeper -- reached only through a descendant's parent path, which the
+// base check does not see.
+//
+
+Deno.test("writeDetailValueForTarget: refuses an overlay onto a `FabricInstance` base", () => {
+  const err = FabricError.fromNativeError(new Error("boom"));
+  const tx = txWith([
+    detail(["value"], deepFreeze(err)),
+    detail(["value", "extra"], 42),
+  ]);
+
+  assertThrows(
+    () => writeDetailValueForTarget(tx, target([]), "value"),
+    Error,
+    "FabricInstance",
+  );
+  assertEquals(Object.getOwnPropertyNames(err), []);
+});
+
+Deno.test("writeDetailValueForTarget: refuses an overlay through a nested `FabricInstance`", () => {
+  const err = FabricError.fromNativeError(new Error("boom"));
+  const tx = txWith([
+    detail(["value"], deepFreeze({ err })),
+    detail(["value", "err", "extra"], 42),
+  ]);
+
+  assertThrows(
+    () => writeDetailValueForTarget(tx, target([]), "value"),
+    Error,
+    "FabricInstance",
+  );
+  assertEquals(Object.getOwnPropertyNames(err), []);
 });

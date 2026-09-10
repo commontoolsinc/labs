@@ -1,54 +1,60 @@
-import { AnyCellWrapping } from "@commonfabric/api";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { getLogger } from "@commonfabric/utils/logger";
-import { isReadonlyRecord, isRecord } from "@commonfabric/utils/types";
-import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
-import { ContextualFlowControl } from "./cfc.ts";
-import { type JSONSchema } from "./builder/types.ts";
-import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
+import {
+  AnyCellWrapping,
+  type JSONSchemaObj,
+  type JSONValue,
+} from "@commonfabric/api";
 import {
   cloneIfNecessary,
-  type FabricValue,
-  shallowMutableClone,
-} from "@commonfabric/data-model/fabric-value";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import {
+  fabricAwareEqual,
   FabricInstance,
   FabricPrimitive,
-} from "@commonfabric/data-model/fabric-value";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+  type FabricValue,
+  isDeepFrozen,
+  isWalkableObjectOrArray,
+  shallowMutableClone,
+} from "@commonfabric/data-model";
 import {
+  internSchema,
   isNontrivialSchema,
   schemaWithProperties,
-} from "@commonfabric/data-model/schema-utils";
-import { createCell, isCell } from "./cell.ts";
-import { forEachSubschema } from "./schema-walk.ts";
-import { arrayMatchesPositionally } from "./schema-match.ts";
-import { readMaybeLink, resolveLink } from "./link-resolution.ts";
-import { type IExtendedStorageTransaction } from "./storage/interface.ts";
-import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
-import { type Runtime } from "./runtime.ts";
+} from "@commonfabric/data-model-schema";
 import {
-  type IMemorySpaceValueAddress,
-  type NormalizedFullLink,
+  readMaybeLink,
+  resolveLink,
+  undefinedDataLink,
+} from "./link-resolution.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import { waveRunContextOf } from "./executor/wave.ts";
+import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
+import type { Runtime } from "./runtime.ts";
+import type {
+  IMemorySpaceValueAddress,
+  NormalizedFullLink,
 } from "./link-utils.ts";
 import {
   createQueryResultProxy,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { toCell } from "./back-to-cell.ts";
+import { opaqueReference, toCell } from "./back-to-cell.ts";
 import {
-  canBranchMatch,
-  combineSchema,
-  createDefaultTraversalContext,
-  IObjectCreator,
-  mergeAnyOfMatches,
-  mergeSchemaFlags,
-  SchemaObjectTraverser,
-} from "@commonfabric/runner/traverse";
-import { ignoreReadForScheduling } from "./scheduler.ts";
-import { internalVerifierRead } from "./storage/reactivity-log.ts";
+  defaultForAbsentValue,
+  materializeSchemaView,
+  UnresolvedInputError,
+} from "./schema-view.ts";
+import {
+  externalResolutionMissCount,
+  onSchemaRegistryClear,
+} from "./schema-registry.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
+import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
+import { createCell, isCell } from "./cell.ts";
+import {
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForDereference,
@@ -57,13 +63,24 @@ import {
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
-import type { CfcAddress } from "./cfc/types.ts";
-import { isCellScope } from "./scope.ts";
-import {
-  cfcSchemaChildRoot,
-  resolveCfcSchemaRefRoot,
-} from "./cfc/schema-refs.ts";
+import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
+import { markIfcBearingLinkCrossing, schemaHasIfc } from "./schema-ifc.ts";
 import { materializeFactoryForSchema } from "./factory-materialization.ts";
+import type { CfcAddress } from "./cfc/types.ts";
+import { ignoreReadForScheduling } from "./scheduler.ts";
+import { arrayMatchesPositionally } from "./schema-match.ts";
+import { canFollowScopedLink, isCellScope } from "./scope.ts";
+import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import {
+  canBranchMatch,
+  combineOptionalSchema,
+  combineSchema,
+  combineSchemaForLink,
+  createDefaultTraversalContext,
+  IObjectCreator,
+  mergeAnyOfMatches,
+  SchemaObjectTraverser,
+} from "./traverse.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -100,10 +117,15 @@ const linkWithAsCellScope = (
 // Cache per deep-frozen schema identity; mutable schemas recompute per call.
 // The cached candidates are interned (combineSchema interns its results), so
 // downstream identity-keyed memos see stable references too.
-const compoundAsCellCandidatesCache = new WeakMap<
+let compoundAsCellCandidatesCache = new WeakMap<
   JSONSchemaObj,
   readonly JSONSchemaObj[]
 >();
+// Candidates embed resolved branch content, so a registry clear (last lease
+// out) swaps the cache — a resolution success must not outlive its epoch.
+onSchemaRegistryClear(() => {
+  compoundAsCellCandidatesCache = new WeakMap();
+});
 
 const asCellCompoundCandidates = (
   schema: JSONSchemaObj,
@@ -113,6 +135,7 @@ const asCellCompoundCandidates = (
     const cached = compoundAsCellCandidatesCache.get(schema);
     if (cached !== undefined) return cached;
   }
+  const missesBefore = externalResolutionMissCount();
   const branches = [
     ...(Array.isArray(schema.anyOf) ? schema.anyOf : []),
     ...(Array.isArray(schema.oneOf) ? schema.oneOf : []),
@@ -125,17 +148,40 @@ const asCellCompoundCandidates = (
       const resolved = resolveSchema(branchWithDefs) ?? branchWithDefs;
       const merged = combineSchema(baseSchema as JSONSchemaObj, resolved);
       if (
-        isRecord(merged) &&
+        isObjectOrArray(merged) &&
         ContextualFlowControl.getAsCellValues(merged).length > 0
       ) {
         candidates.push(merged as JSONSchemaObj);
       }
     }
   }
-  if (cacheable) {
+  // Populate only when no `cid:` resolution missed while building: a branch
+  // whose ref missed resolves to nothing and would be missing from a
+  // memoized candidate list forever, though the document can still arrive.
+  if (cacheable && externalResolutionMissCount() === missesBefore) {
     compoundAsCellCandidatesCache.set(schema, candidates);
   }
   return candidates;
+};
+
+/**
+ * The link a handle gets when its target is narrower than the cap its schema
+ * declares: undefined-data in place, the same shape resolveLink hands back for
+ * a blocked follow. It is still a Cell -- so a `required` container is not
+ * voided -- it reads as undefined, and it is not writable, because a data URI
+ * is a read-only address.
+ */
+const blockedHandleLink = (
+  link: NormalizedFullLink,
+  cap: SchemaScope | undefined,
+): NormalizedFullLink => {
+  logger.warn(
+    `blocked narrower-scope asCell handle: a "${cap}"-scoped read cannot ` +
+      `hold a "${link.scope}"-scoped link, so the handle reads as undefined. ` +
+      `Declare the handle's asCell scope at least as narrow as the value it ` +
+      `points at.`,
+  );
+  return undefinedDataLink(link);
 };
 
 const asCellCompoundSchemaForValue = (
@@ -160,7 +206,7 @@ export type CellViewRef = {
 
 const isCellViewRef = (
   ref: NormalizedFullLink | CellViewRef,
-): ref is CellViewRef => isRecord(ref) && "link" in ref;
+): ref is CellViewRef => isObjectOrArray(ref) && "link" in ref;
 
 const isPrefix = (
   prefix: readonly string[],
@@ -188,7 +234,7 @@ const containsLocalRef = (
   schema: JSONSchema,
   seen: Set<JSONSchema> = new Set(),
 ): boolean => {
-  if (!isRecord(schema) || seen.has(schema)) {
+  if (!isObjectOrArray(schema) || seen.has(schema)) {
     return false;
   }
   seen.add(schema);
@@ -211,9 +257,9 @@ const branchWithParentDefs = (
   branch: JSONSchema,
 ): JSONSchema => {
   if (
-    !isRecord(branch) ||
+    !isObjectOrArray(branch) ||
     branch.$defs !== undefined ||
-    !isRecord(parent.$defs) ||
+    !isObjectOrArray(parent.$defs) ||
     !containsLocalRef(branch)
   ) {
     return branch;
@@ -241,18 +287,14 @@ const matchesConcreteValue = (
   if (!canBranchMatch(resolved, value)) {
     return false;
   }
-  // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
-  // validation path today, but will in the not-too-distant future; at that
-  // point these `deepEqual(const/enum, value)` checks mishandle a
-  // `FabricValue` (same-class `FabricPrimitive`s compare equal regardless of
-  // value). Mark ahead of that; use a Fabric-aware equality when the path
-  // becomes live.
-  if (resolved.const !== undefined && !deepEqual(resolved.const, value)) {
+  if (
+    resolved.const !== undefined && !fabricAwareEqual(resolved.const, value)
+  ) {
     return false;
   }
   if (
     Array.isArray(resolved.enum) &&
-    !resolved.enum.some((candidate) => deepEqual(candidate, value))
+    !resolved.enum.some((candidate) => fabricAwareEqual(candidate, value))
   ) {
     return false;
   }
@@ -284,7 +326,7 @@ const matchesConcreteValue = (
     ).length === 1;
   }
 
-  if (isRecord(value) && isRecord(resolved.properties)) {
+  if (isObjectOrArray(value) && isObjectOrArray(resolved.properties)) {
     return Object.entries(resolved.properties).every(([key, childSchema]) =>
       value[key] === undefined ||
       matchesConcreteValue(
@@ -381,7 +423,20 @@ export function resolveSchema(
   let resolvedSchema = schema;
   if (typeof schema.$ref === "string") {
     const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
-    if (!isRecord(resolved)) {
+    if (resolved === undefined) {
+      // The ref names a definition this schema does not carry. That is not the
+      // same as no schema, which lets every value through untouched — it is a
+      // schema the runtime cannot read, and a value cannot be shown to match
+      // one of those. `false` selects nothing, which is the answer traversal
+      // already gives a top-level ref it fails to resolve; returning
+      // `undefined` here instead handed the reader the raw value.
+      logger.warn(
+        "unresolvable $ref in a schema; nothing matches it",
+        schema.$ref,
+      );
+      return false;
+    }
+    if (!isObjectOrArray(resolved)) {
       // For boolean schema or the default `{}` schema, we don't have any
       // meaningful information in the schema, so just return undefined.
       return undefined;
@@ -428,7 +483,7 @@ export function resolveSchemaForValue(
   const resolved = resolveSchema(schema);
   if (
     resolved === undefined || typeof resolved === "boolean" ||
-    !isRecord(resolved)
+    !isObjectOrArray(resolved)
   ) {
     return resolved;
   }
@@ -442,11 +497,11 @@ export function resolveSchemaForValue(
       resolved;
   }
 
-  if (!isRecord(narrowed)) {
+  if (!isObjectOrArray(narrowed)) {
     return narrowed;
   }
 
-  if (!isRecord(value) || !isRecord(narrowed.properties)) {
+  if (!isObjectOrArray(value) || !isObjectOrArray(narrowed.properties)) {
     return narrowed;
   }
 
@@ -474,99 +529,7 @@ export function resolveSchemaForValue(
     : narrowed;
 }
 
-// Memo for `schemaHasIfc` top-level calls. Safe **only** because entries
-// are populated under an `isDeepFrozen` guard below: the predicate's
-// answer depends on the entire subtree's shape, so caching against a
-// merely-TS-`readonly` or shallow-frozen input would be unsound — a
-// future sub-schema swap would silently invalidate the cached answer.
-// A future contributor must not relax the populate guard to accept
-// non-deep-frozen inputs. `Object.isFrozen` is **not** sufficient; it
-// is shallow-only.
-const _hasIfcCache = new WeakMap<JSONSchemaObj, boolean>();
-
-interface SchemaHasIfcContext {
-  seenByRoot: WeakMap<object, WeakSet<object>>;
-}
-
-export function schemaHasIfc(
-  schema: JSONSchema | undefined,
-  seen: Set<JSONSchema> = new Set(),
-  fullSchema: JSONSchema | undefined = schema,
-): boolean {
-  if (schema === undefined || typeof schema === "boolean") {
-    return false;
-  }
-  // Top-level calls (the default entry from cell.ts / schema.ts) can
-  // consult the memo. Recursive calls carry caller-provided `seen` and
-  // `fullSchema`, which aren't captured in the cache key, so they must
-  // bypass.
-  const isTopLevel = seen.size === 0 && fullSchema === schema;
-  if (isTopLevel) {
-    const cached = _hasIfcCache.get(schema);
-    if (cached !== undefined) return cached;
-  }
-  const context: SchemaHasIfcContext = { seenByRoot: new WeakMap() };
-  if (seen.size > 0) {
-    const initialRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
-    const rootKey = isRecord(initialRoot) ? initialRoot : schema;
-    const initialSeen = new WeakSet<object>();
-    for (const item of seen) {
-      if (isRecord(item)) initialSeen.add(item);
-    }
-    context.seenByRoot.set(rootKey, initialSeen);
-  }
-  const result = _schemaHasIfcUncached(schema, fullSchema, context);
-  // Populate only under a deep-frozen guard. See the invariant comment
-  // above `_hasIfcCache`.
-  if (isTopLevel && isDeepFrozen(schema)) {
-    _hasIfcCache.set(schema, result);
-  }
-  return result;
-}
-
-function _schemaHasIfcUncached(
-  schema: JSONSchemaObj,
-  fullSchema: JSONSchema | undefined,
-  context: SchemaHasIfcContext,
-): boolean {
-  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
-  const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
-  let seen = context.seenByRoot.get(rootKey);
-  if (seen?.has(schema)) return false;
-  if (!seen) {
-    seen = new WeakSet();
-    context.seenByRoot.set(rootKey, seen);
-  }
-  seen.add(schema);
-
-  const resolved = typeof schema.$ref === "string"
-    ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot)
-    : schema;
-  if (resolved === true || resolved === false || !isRecord(resolved)) {
-    return false;
-  }
-  const childFullSchema = cfcSchemaChildRoot(
-    resolved,
-    typeof schema.$ref === "string"
-      ? resolveCfcSchemaRefRoot(schema, schemaRoot)
-      : schemaRoot,
-  );
-  if (resolved.ifc !== undefined) {
-    return true;
-  }
-
-  // Descend every structural subschema via the shared vocabulary. Previously
-  // this hand-listed only anyOf/oneOf/allOf/properties/additionalProperties/
-  // items and silently skipped prefixItems, patternProperties, contains,
-  // if/then/else, not, propertyNames, dependentSchemas, and contentSchema — so
-  // an `ifc` in a tuple element or pattern property went undetected. `$defs`
-  // bodies are reached through `$ref` resolution above, not walked directly.
-  return forEachSubschema(
-    resolved,
-    (child) =>
-      isRecord(child) && _schemaHasIfcUncached(child, childFullSchema, context),
-  );
-}
+export { schemaHasIfc };
 
 const _filterAsCellCache = new WeakMap<
   JSONSchemaObj,
@@ -620,7 +583,7 @@ export function processDefaultValue(
   if (!schema) return defaultValue;
 
   let resolvedSchema = resolveSchema(schema);
-  if (!isRecord(resolvedSchema)) {
+  if (!isObjectOrArray(resolvedSchema)) {
     // For primitive types, return as is
     return annotateWithBackToCellSymbols(
       defaultValue,
@@ -707,8 +670,7 @@ export function processDefaultValue(
 
   // Handle object type defaults
   if (
-    resolvedSchema?.type === "object" && isRecord(defaultValue) &&
-    !Array.isArray(defaultValue)
+    resolvedSchema?.type === "object" && isObjectNotArray(defaultValue)
   ) {
     const result: Record<string, any> = {};
     const processedKeys = new Set<string>();
@@ -716,15 +678,22 @@ export function processDefaultValue(
     // Process properties defined in both the schema and default value
     if (resolvedSchema?.properties) {
       for (const key of Object.keys(resolvedSchema.properties)) {
-        const rawPropSchema = runtime.cfc.schemaAtPath(resolvedSchema, [key]);
-        const propSchema =
-          (isRecord(rawPropSchema) && typeof rawPropSchema.$ref === "string")
-            ? ContextualFlowControl.resolveSchemaRefs(
-              rawPropSchema,
-              resolvedSchema,
-            )
-            : rawPropSchema;
-        if (key in defaultValue) {
+        const rawPropSchema = ContextualFlowControl.schemaAtPath(
+          resolvedSchema,
+          [key],
+        );
+        const propSchema = (isObjectOrArray(rawPropSchema) &&
+            typeof rawPropSchema.$ref === "string")
+          ? ContextualFlowControl.resolveSchemaRefs(
+            rawPropSchema,
+            resolvedSchema,
+          )
+          : rawPropSchema;
+        // `Object.hasOwn`, not `in`: `key` is a schema-declared property NAME,
+        // and `defaultValue` is data. `in` walks the prototype chain, so a
+        // schema property called `toString` or `valueOf` matched every object
+        // and read back `Object.prototype`'s function instead of the default.
+        if (Object.hasOwn(defaultValue, key)) {
           result[key] = processDefaultValue(
             runtime,
             tx,
@@ -734,7 +703,7 @@ export function processDefaultValue(
             rebaseCfcLabelView(cfcLabelView, [key]),
           );
           processedKeys.add(key);
-        } else if (isRecord(propSchema)) {
+        } else if (isObjectOrArray(propSchema)) {
           const asCellValues = ContextualFlowControl.getAsCellValues(
             propSchema,
           );
@@ -890,8 +859,14 @@ export function mergeDefaults(
   const base = isNontrivialSchema(schema) ? schema : {};
 
   // TODO(seefeld): What's the right thing to do for arrays?
+  //
+  // A `FabricPrimitive` default on either side takes the `defaultValue` arm:
+  // it has no properties for the spread to copy, so merging one yields `{}`
+  // and loses whichever side held the value. A `FabricInstance` default is
+  // refused rather than merged.
   const mergedDefault = base.type === "object" &&
-      isReadonlyRecord(base.default) && isReadonlyRecord(defaultValue)
+      isWalkableObjectOrArray(base.default) &&
+      isWalkableObjectOrArray(defaultValue)
     ? { ...base.default, ...defaultValue } as JSONValue
     : defaultValue as JSONValue;
 
@@ -908,7 +883,7 @@ export function mergeDefaults(
  * is first shallow-cloned. It is up to callers to ensure that mutable and
  * unbound `value`s are indeed appropriate to be mutated.
  */
-function annotateWithBackToCellSymbols(
+export function annotateWithBackToCellSymbols(
   value: any,
   runtime: Runtime,
   link: NormalizedFullLink,
@@ -917,7 +892,7 @@ function annotateWithBackToCellSymbols(
   cfcLabelView?: CfcLabelView,
 ) {
   if (
-    !isRecord(value) || isCell(value) ||
+    !isObjectOrArray(value) || isCell(value) ||
     value instanceof FabricPrimitive
   ) {
     // We only possibly annotate plain objects or arrays that _aren't_ cells.
@@ -966,13 +941,99 @@ function annotateWithBackToCellSymbols(
   return value;
 }
 
+/**
+ * Derive the label view for the dereferences made since `traceStart`.
+ *
+ * The derivation reads each involved document's `cfc` path. Those are
+ * runtime-internal verifier reads — the runtime made them to check a label, not
+ * the reader on its own behalf — and an eager read makes them once, for the
+ * document it was handed, never for the documents its traversal reaches.
+ *
+ * A view re-enters here per property, so the same reads would land once per
+ * child. They are kept out of the scheduler's view of what the ACTION read:
+ * addresses the declared scope summary does not cover drop the action's
+ * execution-context floor to `session`, which stops its observations being
+ * adopted across users. The labels themselves are still derived and still
+ * applied — CFC's own prepare pass reads the raw activity list and skips
+ * internal verifier reads there regardless.
+ */
+function deriveDereferenceLabelView(
+  tx: IExtendedStorageTransaction,
+  traceStart: number,
+  viewChild: boolean,
+): CfcLabelView | undefined {
+  const derive = () =>
+    cfcLabelViewForDereferenceTraces(
+      tx,
+      tx.getCfcState().dereferenceTraces.slice(traceStart),
+    );
+  return viewChild
+    ? tx.runWithAmbientReadMeta(ignoreReadForScheduling, derive)
+    : derive();
+}
+
+/**
+ * The value a resolved link points at, including the one address that is
+ * computed rather than stored.
+ *
+ * A string's `length` is not a path the store holds. Traversal reads it off
+ * the string it sits on (`getAtPath` in `traverse.ts`), so a link ending there
+ * — `subject.key("label", "length")` where `label` is a string — resolves to
+ * an address the store cannot serve, and a bare read of it yields `undefined`.
+ * Reading it off the string applies traversal's rule where a link is
+ * followed rather than where a value is walked, so both routes agree on what
+ * `<string>/length` is worth. An array's `length` needs none of this; the store
+ * reads that segment itself.
+ *
+ * The read of the string is the dependency: a string's length changes only when
+ * the string is replaced, and it is replaced at the parent's own path.
+ */
+function readValueAtResolvedLink(
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  address: IMemorySpaceValueAddress,
+): FabricValue | undefined {
+  // Read without telling the scheduler. Whatever materializes this value —
+  // the traverser or a view — registers its own reads as it walks.
+  const meta = {
+    meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+  };
+  const value = tx.readOrThrow(address, meta);
+  if (value !== undefined || link.path.at(-1) !== "length") return value;
+  const parentLink = { ...link, path: link.path.slice(0, -1) };
+  const parent = tx.readOrThrow(toMemorySpaceAddress(parentLink), meta);
+  // Register the parent read whichever way it turns out. A string's length
+  // changes only when the string is replaced, which happens at the parent's own
+  // path; and a parent that is not there yet — a computed that has not produced
+  // — has to bring the reader back when it arrives. Non-recursive: nothing
+  // below the parent decides this.
+  tx.readValueOrThrow(parentLink, { nonRecursive: true });
+  return typeof parent === "string" ? parent.length : value;
+}
+
 export interface ValidateAndTransformOptions {
   /** When true, also read into each Cell created for asCell fields to capture dependencies */
   traverseCells?: boolean;
+
   /** When true, cells created during traversal are marked as already synced */
   synced?: boolean;
-  /** False for dependency-only/scheduled reads that must preserve shells. */
+
+  /** False for dependency-only reads that must preserve inert factory shells. */
   materializeFactories?: boolean;
+
+  /**
+   * Set by a schema view reading one of its children: a mismatch there is a
+   * refusal the reader must be told about, not the `undefined` a root read
+   * yields, which a reader cannot tell from an absent value.
+   */
+  mismatchThrows?: boolean;
+
+  /**
+   * Set by a schema view reading one of its children: this is a step inside a
+   * read the entry point already began, so the entry-point-only work — the
+   * stored CFC metadata probe — does not run again per property.
+   */
+  viewChild?: boolean;
 }
 
 export function validateAndTransform(
@@ -985,7 +1046,12 @@ export function validateAndTransform(
   // If the transaction is no longer open, read through the runtime's ambient
   // read path instead. Open transactions still take precedence so reads can see
   // their own uncommitted state.
-  tx = runtime.readTx(tx);
+  //
+  // A transaction marked for lazy materialization is kept whatever its state:
+  // a view reads the state ITS transaction saw, and swapping a finished one for
+  // a fresh read would read newer state where the view's contract is to
+  // refuse. The refusal comes from the marked transaction's own guard below.
+  if (tx?.isLazyMaterialize() !== true) tx = runtime.readTx(tx);
 
   // Reconstruct doc, path, schema from link and runtime
   let link = isCellViewRef(sourceRef) ? sourceRef.link : sourceRef;
@@ -1018,25 +1084,44 @@ export function validateAndTransform(
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
   const writeRedirectTraceStart = tx.getCfcState().dereferenceTraces.length;
-  const resolvedLink = resolveLink(runtime, tx, link, "writeRedirect");
+  // Read entry: opt into the crossing seam, so every labeled hop this
+  // resolution crosses marks the transaction cfc-relevant (write-path
+  // resolutions leave relevance to the write-policy gate).
+  const resolvedLink = resolveLink(runtime, tx, link, "writeRedirect", {
+    markIfcCrossings: true,
+  });
   cfcLabelView = mergeCfcLabelViews([
     cfcLabelView,
-    cfcLabelViewForDereferenceTraces(
+    deriveDereferenceLabelView(
       tx,
-      tx.getCfcState().dereferenceTraces.slice(writeRedirectTraceStart),
+      writeRedirectTraceStart,
+      options?.viewChild === true,
     ),
   ]);
 
   const resolvedLinkSchema = resolveSchema(resolvedLink.schema);
   const effectiveSchema = resolvedSchema !== undefined
     ? resolvedLinkSchema !== undefined
-      ? combineSchema(resolvedSchema, resolvedLinkSchema)
+      ? combineSchemaForLink(resolvedSchema, resolvedLinkSchema)
       : resolvedSchema
     : resolvedLinkSchema;
   const filteredSchema = filterAsCell(effectiveSchema);
+  // The stored-metadata probe reads `<doc>/cfc`, and it belongs to the entry
+  // point: an eager read runs it once for the document it was handed and never
+  // for the documents its traversal reaches through links. A view re-enters
+  // here for every property it resolves, so without this gate it probes every
+  // linked document too — reads outside any declared scope envelope, which
+  // drops the action's execution-context floor to `session` and stops its
+  // observations being adopted across users. The schema checks cost no read
+  // and stay. The link schema is consulted on its own because reader
+  // precedence (`combineSchemaForLink`) keeps a shaped reader's combined
+  // schema free of the link's `ifc` — the marking must not depend on which
+  // side won the combination.
   if (
     schemaHasIfc(effectiveSchema) ||
-    storedCfcMetadataAppliesToPath(tx, resolvedLink)
+    schemaHasIfc(resolvedLinkSchema) ||
+    (options?.viewChild !== true &&
+      storedCfcMetadataAppliesToPath(tx, resolvedLink))
   ) {
     tx.markCfcRelevant(`schema-ifc-read:${link.id}`);
   }
@@ -1068,7 +1153,6 @@ export function validateAndTransform(
       tx,
       link,
       0,
-      false,
       cfcLabelView,
       options?.materializeFactories ?? true,
     );
@@ -1078,14 +1162,24 @@ export function validateAndTransform(
   // We'll use this for the value, and potentially merge the schema
   // This gets me the result of following all the links, so I can get the value
   const valueTraceStart = tx.getCfcState().dereferenceTraces.length;
-  const resolvedValueLink = resolveLink(runtime, tx, link);
+  const resolvedValueLink = resolveLink(runtime, tx, link, "value", {
+    markIfcCrossings: true,
+  });
   cfcLabelView = mergeCfcLabelViews([
     cfcLabelView,
-    cfcLabelViewForDereferenceTraces(
+    deriveDereferenceLabelView(
       tx,
-      tx.getCfcState().dereferenceTraces.slice(valueTraceStart),
+      valueTraceStart,
+      options?.viewChild === true,
     ),
   ]);
+  // The write-redirect pass the gate above resolved cannot see a plain
+  // value link at the entry path; the full resolution can. Same cheap
+  // schema check, same marking — reader precedence keeps the crossing's
+  // `ifc` off the combined schema, so the marking must not depend on it.
+  if (schemaHasIfc(resolvedValueLink.schema)) {
+    tx.markCfcRelevant(`schema-ifc-read:${link.id}`);
+  }
   objectCreator.setBase(resolvedValueLink, cfcLabelView);
 
   // If our link is asCell/asStream, and we don't have any path portions, we
@@ -1095,6 +1189,14 @@ export function validateAndTransform(
     // We've already followed all the writeRedirect links above.
     const next = readMaybeLink(tx, link);
     if (next !== undefined) {
+      // This one-step hop bypasses resolveLink and the traversal, so it
+      // carries the crossing seam itself (the schema.ts twin of
+      // getNextCellLink).
+      markIfcBearingLinkCrossing(tx, link.space, next.schema, next.id);
+      // An asCell schema turns this link into a handle instead of following
+      // it, so resolveLink's cap check never sees this hop. Apply it here too,
+      // or reading THROUGH the handle escapes the cap the schema declared
+      // (#5230).
       cfcLabelView = mergeCfcLabelViews([
         cfcLabelView,
         cfcLabelViewForDereference(
@@ -1106,21 +1208,27 @@ export function validateAndTransform(
       // We leave the asCell/asStream in the schema, so that createObject
       // knows to create a cell
       const mergedSchema = (next.schema !== undefined)
-        ? combineSchema(effectiveSchema!, next.schema)
+        ? combineSchemaForLink(effectiveSchema!, next.schema)
         : effectiveSchema!;
       link = { ...next, schema: mergedSchema };
     }
-    // If our ref has a schema, merge our schema flags into that schema
-    // This will overwrite any schema that we got from the first non-redirect
-    // link, but this one should be more accurate
-    // Otherwise, we won't return a cell like we are supposed to.
+    // The fully value-resolved link is the last crossing of the chain, so
+    // its schema combines onto the result preserved above under the same
+    // reader precedence as every other hop: an agnostic reader adopts the
+    // final target's schema under its own asCell wrapper, a shaped reader
+    // stands (inheriting only the crossing's `default`), and the handle
+    // must never carry the link's wider schema past the reader's — a
+    // stored `required` the reader did not ask for would void the read
+    // through the handle. The result stays a cell (the reader's asCell
+    // survives every arm); the effectiveSchema fallback guards the
+    // combination ever losing it.
     if (resolvedValueLink.schema !== undefined) {
-      const mergedSchemaFlags = mergeSchemaFlags(
-        effectiveSchema!,
+      const combined = combineSchemaForLink(
+        link.schema ?? effectiveSchema!,
         resolvedValueLink.schema,
       );
-      link.schema = SchemaObjectTraverser.hasAsCell(mergedSchemaFlags)
-        ? mergedSchemaFlags
+      link.schema = SchemaObjectTraverser.hasAsCell(combined)
+        ? combined
         : effectiveSchema!;
     }
     objectCreator.setBase(link, cfcLabelView);
@@ -1133,11 +1241,9 @@ export function validateAndTransform(
   );
   // Get the full value without telling the scheduler. The traverse method will
   // notify the scheduler for shallow reads as they occur.
-  const value = tx.readOrThrow(address, {
-    meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
-  });
+  const value = readValueAtResolvedLink(tx, resolvedValueLink, address);
   const doc = { address, value: value };
-  const valueSelectedSchema = isRecord(effectiveSchema)
+  const valueSelectedSchema = isObjectOrArray(effectiveSchema)
     ? asCellCompoundSchemaForValue(effectiveSchema, value)
     : undefined;
   // If we have a ref with a schema, use that; otherwise, use the link's schema
@@ -1145,20 +1251,95 @@ export function validateAndTransform(
     path: doc.address.path,
     schema: valueSelectedSchema ?? resolvedValueLink.schema ?? link.schema!,
   };
+  // A marked transaction takes the lazy route from here. Everything above has
+  // run either way — link resolution, the `asCell` dispatch, schema
+  // combination — so a view and an eager read start from the same link and the
+  // same schema; only the materialization differs.
+  //
+  // A view describes the instant this read fixes, and goes on describing it
+  // however the reader writes afterwards — which is what a reader iterating a
+  // list while writing into it stands on, and what an eager read gives, since
+  // an eager read hands back a value built before the write. Seeing its own
+  // write means taking the read again.
+  if (tx.isLazyMaterialize()) {
+    // Crossing the last link is a hop the eager traverser combines schemas
+    // across (`linkHopSelector`), because a link's own schema describes the
+    // value at its target while the reader's schema describes what the reader
+    // asked for, and both apply. A view re-enters here for that hop instead of
+    // walking through it, so it has to do the same combining: the selector
+    // alone is the link's schema, and a reader asking for a property the link's
+    // schema does not name — `title` off a piece typed by its own
+    // registration — would read as a property the schema does not select.
+    const viewSchema = valueSelectedSchema ??
+      combineOptionalSchema(effectiveSchema, resolvedValueLink.schema) ??
+      selector.schema;
+    // The RULED unresolved-input refusal (OW51, 2026-08-21): the walk
+    // crossed a hop (or started from a data-derived handle) and
+    // dead-ended at a doc this replica cannot serve (link-resolution's
+    // `pendingHopDoc`), so nothing about the value — not even its
+    // absence — is knowable yet. When the reader's schema DECLARES a
+    // default, the view's absent-value arm stands that default in and
+    // registers the read (the existing "computed that has not produced
+    // yet" contract — schema-view.test.ts pins it); with NO default
+    // there is nothing honest to hand the body: register the dead-end
+    // doc's read FIRST (the dependency that re-triggers this reader
+    // when the doc arrives; the address-level read survives the
+    // NotFoundError `readValueOrThrow` swallows), then refuse. The
+    // action-run boundary disposes the refusal as a non-event: output
+    // `undefined`, no action failure, re-run on any registered read
+    // change — instead of handing `undefined` into a body whose schema
+    // promised a value (the OW51 splitDefinitions crash, browser and
+    // serving runtime alike). Lazy-branch only: eager reads (bindings,
+    // diffing, scheduler internals) keep today's behavior.
+    if (
+      resolvedValueLink.pendingHopDoc === true &&
+      value === undefined &&
+      defaultForAbsentValue(viewSchema) === undefined
+    ) {
+      tx.readValueOrThrow(resolvedValueLink);
+      const refusal = new UnresolvedInputError(resolvedValueLink);
+      tx.noteSchemaRefusal(refusal);
+      throw refusal;
+    }
+    return materializeSchemaView(
+      runtime,
+      tx,
+      { ...resolvedValueLink, schema: viewSchema },
+      value,
+      cfcLabelView,
+      options?.synced ?? false,
+      options?.mismatchThrows !== true,
+    );
+  }
+
   // TODO(@ubik2): these constructor parameters are complex enough that we should
   // use an options struct
+  // The traversal's acting identity (key-vocabulary.md §1 sites 5-6): a
+  // served run's DEMAND-SUPPLIED identity when the wave run context
+  // carries one (M1's per-run threading, server-execution v2 Phase 2) —
+  // or when the STORAGE transaction carries one (stage A: the event
+  // preflight's dependency probe runs under the event's actor without a
+  // wave stamp) — else the runtime's own session. `runIdentity` stays
+  // undefined for an own-identity traversal, so its absent-target loads
+  // take the ordinary path.
+  const runIdentity =
+    waveRunContextOf(tx as IExtendedStorageTransaction)?.scopeKeyIdentity ??
+      (tx as IExtendedStorageTransaction).tx?.scopeKeyIdentity;
   const traverser = new SchemaObjectTraverser<any>(
     tx!,
     selector,
     createDefaultTraversalContext(
+      runIdentity ?? runtime.scopeKeyIdentity,
       options?.traverseCells ?? false,
       undefined,
       undefined,
       // Absent link targets get an async load kicked (cross-space always;
       // same-space only when the replica has never seen the doc); the
-      // tracked read re-runs the reader on arrival.
+      // tracked read re-runs the reader on arrival. A served per-instance
+      // run's absent target loads AS that run's instance (stage A — the
+      // runner's explicit-instance read).
       (missing, sourceSpace) =>
-        runtime.ensureLinkedDocLoaded(missing, sourceSpace),
+        runtime.ensureLinkedDocLoaded(missing, sourceSpace, runIdentity),
     ),
     objectCreator,
   );
@@ -1184,28 +1365,73 @@ const combinedCellSchemaCache = new WeakMap<
   Map<string, JSONSchema>
 >();
 
+/**
+ * The value an opaque (`type: "unknown"`) position projects to when something
+ * is there: an empty object carrying the back-to-cell annotation and the
+ * marker that says it holds nothing of what it names. Both read paths mint it
+ * here, so a reader cannot tell which one answered.
+ */
+export function createOpaqueReference(
+  runtime: Runtime,
+  link: NormalizedFullLink,
+  tx: IExtendedStorageTransaction | undefined,
+  synced: boolean,
+  cfcLabelView: CfcLabelView | undefined,
+): FabricValue {
+  const value: Record<symbol, unknown> = {};
+  // Non-enumerable, like the back-to-cell annotation beside it, so the marker
+  // stays off `Object.keys` and out of a spread.
+  Object.defineProperty(value, opaqueReference, {
+    value: true,
+    enumerable: false,
+  });
+  return annotateWithBackToCellSymbols(
+    value,
+    runtime,
+    link,
+    tx,
+    synced,
+    cfcLabelView,
+  );
+}
+
 class TransformObjectCreator
   implements IObjectCreator<AnyCellWrapping<FabricValue>> {
+  #runtime: Runtime;
+
+  #tx: IExtendedStorageTransaction;
+
+  #synced: boolean;
+  #baseLink: NormalizedFullLink;
+  #cfcLabelView: CfcLabelView | undefined;
+  #materializeFactories: boolean;
+
   constructor(
-    private runtime: Runtime,
-    private tx: IExtendedStorageTransaction,
-    private synced: boolean,
-    private baseLink: NormalizedFullLink,
-    private cfcLabelView: CfcLabelView | undefined,
-    private materializeFactories: boolean,
+    runtime: Runtime,
+    tx: IExtendedStorageTransaction,
+    synced: boolean,
+    baseLink: NormalizedFullLink,
+    cfcLabelView: CfcLabelView | undefined,
+    materializeFactories: boolean,
   ) {
+    this.#runtime = runtime;
+    this.#tx = tx;
+    this.#synced = synced;
+    this.#baseLink = baseLink;
+    this.#cfcLabelView = cfcLabelView;
+    this.#materializeFactories = materializeFactories;
   }
 
   setBase(
     baseLink: NormalizedFullLink,
     cfcLabelView: CfcLabelView | undefined,
   ): void {
-    this.baseLink = baseLink;
-    this.cfcLabelView = cloneCfcLabelView(cfcLabelView);
+    this.#baseLink = baseLink;
+    this.#cfcLabelView = cloneCfcLabelView(cfcLabelView);
   }
 
-  private labelViewFor(link: NormalizedFullLink): CfcLabelView | undefined {
-    return labelViewForLink(this.baseLink, this.cfcLabelView, link);
+  #labelViewFor(link: NormalizedFullLink): CfcLabelView | undefined {
+    return labelViewForLink(this.#baseLink, this.#cfcLabelView, link);
   }
 
   /**
@@ -1280,8 +1506,10 @@ class TransformObjectCreator
     return mergeAnyOfMatches(matches);
   }
 
-  // This controls the behavior when properties is specified, but
-  // additonalProperties is not.
+  /**
+   * Does nothing: when `properties` is specified but `additionalProperties` is
+   * not, a property outside the map is excluded rather than stored.
+   */
   addOptionalProperty(
     _obj: Record<string, FabricValue>,
     _key: string,
@@ -1291,18 +1519,43 @@ class TransformObjectCreator
     // in the schema, but it doesn't include our property, and we don't have
     // additionalProperties set. So we don't do `obj[key] = value`;
   }
+
   applyDefault<T>(
     link: NormalizedFullLink,
     value: T | undefined,
   ): T | undefined {
     return processDefaultValue(
-      this.runtime,
-      this.tx,
+      this.#runtime,
+      this.#tx,
       link,
       value,
-      this.synced,
-      this.labelViewFor(link),
+      this.#synced,
+      this.#labelViewFor(link),
     );
+  }
+
+  /**
+   * An opaque (`type: "unknown"`) position that holds something projects to an
+   * empty object carrying the back-to-cell annotation. That is the whole
+   * contract: it is truthy, it compares by identity through `equals()`, and
+   * writing it back stores a link to the same document. It carries no
+   * properties, so a reader that probes it learns nothing about the target
+   * beyond its existence — which is what `unknown` declares.
+   *
+   * An empty object rather than a fresh symbol only because the back-to-cell
+   * annotation is carried as a property and a symbol cannot hold one; see the
+   * TODO on `toCell`.
+   */
+  createOpaquePresence(
+    link: NormalizedFullLink,
+  ): AnyCellWrapping<FabricValue> {
+    return createOpaqueReference(
+      this.#runtime,
+      link,
+      this.#tx,
+      this.#synced,
+      this.#labelViewFor(link),
+    ) as AnyCellWrapping<FabricValue>;
   }
 
   /**
@@ -1317,23 +1570,25 @@ class TransformObjectCreator
   ): AnyCellWrapping<FabricValue> {
     return annotateWithBackToCellSymbols(
       value,
-      this.runtime,
+      this.#runtime,
       link,
-      this.tx,
-      this.synced,
-      this.labelViewFor(link),
+      this.#tx,
+      this.#synced,
+      this.#labelViewFor(link),
     );
   }
 
-  // This is an early pass to see if we should just create a proxy or cell
-  // If not, we will actually resolve our links to get to our values.
+  /**
+   * Creates the object. This is an early pass to see if we should just create a
+   * proxy or cell; if not, we actually resolve our links to get to our values.
+   */
   createObject(
     link: NormalizedFullLink,
     value: AnyCellWrapping<FabricValue> | undefined,
   ): AnyCellWrapping<FabricValue> {
-    if (this.materializeFactories) {
+    if (this.#materializeFactories) {
       const materialized = materializeFactoryForSchema(value, link.schema, {
-        runtime: this.runtime,
+        runtime: this.#runtime,
         artifactSpace: link.space,
       });
       if (!Object.is(materialized, value)) {
@@ -1347,17 +1602,24 @@ class TransformObjectCreator
     // object so we can get back to the cell if needed.
     if (link.schema === undefined || link.schema === true) {
       return createQueryResultProxy(
-        this.runtime,
-        this.tx,
+        this.#runtime,
+        this.#tx,
         link,
         0,
-        false,
-        this.labelViewFor(link),
-        this.materializeFactories,
+        this.#labelViewFor(link),
+        this.#materializeFactories,
       );
-    } else if (isRecord(link.schema)) {
-      const schema = asCellCompoundSchemaForValue(link.schema, value) ??
-        link.schema;
+    } else if (isObjectOrArray(link.schema)) {
+      // A reference-form schema resolves here — materialization is a
+      // structural use (asCell handles, defaults), and the handle minted
+      // below works over the resolved document. The link itself keeps its
+      // reference; an unresolvable one behaves as the schemaless
+      // degradation (a plain proxy read, no handle, no defaults).
+      const structuralSchema = isObjectNotArray(link.schema)
+        ? resolveExternalRootRefForStructure(link.schema)
+        : link.schema;
+      const schema = asCellCompoundSchemaForValue(structuralSchema, value) ??
+        structuralSchema;
       const asCellValues = ContextualFlowControl.getAsCellValues(schema);
       if (asCellValues.length > 0) {
         // We'll use the first asCell for the outermost, and pass the rest
@@ -1367,34 +1629,43 @@ class TransformObjectCreator
         if (cellKind === undefined) {
           return undefined;
         }
-        // TODO(@ubik2): deal with anyOf/oneOf with asCell/asStream
         // This is a read/materialization path: keep the link's own
         // storage-resolved scope. The asCell entry scope is honored as a
         // follow cap during link resolution, never copied onto the link here
         // (doing so would re-address the value to a different scoped instance).
+        //
+        // Minting a handle is the one place a link is NOT followed, so
+        // resolveLink's cap check never sees this hop -- and the holder reads
+        // through the handle later, which is exactly the follow the cap bounds
+        // (#5230). Every route that produces a handle lands here, including
+        // the compound anyOf/oneOf shape `getSchemaScopeCap` cannot see, so
+        // this is the one place the check belongs.
+        const followCap = ContextualFlowControl.getAsCellFollowScopeCap(schema);
+        const handleLink = canFollowScopedLink(followCap, link.scope)
+          ? link
+          : blockedHandleLink(link, followCap);
         return createCell(
-          this.runtime,
+          this.#runtime,
           {
-            ...link,
+            ...handleLink,
             schema: unwrapAsCellSchema(schema as JSONSchemaObj),
           },
-          getTransactionForChildCells(this.tx),
-          this.synced,
+          getTransactionForChildCells(this.#tx),
+          this.#synced,
           cellKind,
-          this.labelViewFor(link),
+          this.#labelViewFor(link),
         ) as AnyCellWrapping<FabricValue>;
       }
       // If it's not a cell/stream, but the schema is true-ish, use a
       // QueryResultProxy
       if (ContextualFlowControl.isTrueSchema(schema)) {
         return createQueryResultProxy(
-          this.runtime,
-          this.tx,
+          this.#runtime,
+          this.#tx,
           link,
           0,
-          false,
-          this.labelViewFor(link),
-          this.materializeFactories,
+          this.#labelViewFor(link),
+          this.#materializeFactories,
         );
       }
       // link.schema is not true, and not asCell/asStream
@@ -1402,24 +1673,24 @@ class TransformObjectCreator
       if (schema.default !== undefined && value === undefined) {
         // processDefaultValue already annotates with back to cell
         return processDefaultValue(
-          this.runtime,
-          this.tx,
+          this.#runtime,
+          this.#tx,
           link,
           schema.default,
-          this.synced,
-          this.labelViewFor(link),
+          this.#synced,
+          this.#labelViewFor(link),
         );
       }
       // If we're an object, we may be missing some properties that have a
       // default.
       if (
-        isRecord(value) && !Array.isArray(value) &&
+        isObjectNotArray(value) &&
         schema.properties !== undefined
       ) {
         // Ensure value is mutable before injecting default properties.
         // cloneIfNecessary with { deep: false, frozen: false, force: false }
         // is a no-op for unfrozen objects and shallow-clones frozen ones.
-        value = cloneIfNecessary(value as FabricValue, {
+        value = cloneIfNecessary(value, {
           deep: false,
           frozen: false,
           force: false,
@@ -1429,20 +1700,20 @@ class TransformObjectCreator
           JSONSchema,
         ][];
         for (const [propName, propSchema] of propertyEntries) {
-          if (isRecord(propSchema) && propSchema.default !== undefined) {
+          if (isObjectOrArray(propSchema) && propSchema.default !== undefined) {
             const valueObj = value as Record<string, any>;
             if (valueObj[propName] === undefined) {
               valueObj[propName] = processDefaultValue(
-                this.runtime,
-                this.tx,
+                this.#runtime,
+                this.#tx,
                 {
                   ...link,
                   path: [...link.path, propName],
                   schema: propSchema,
                 },
                 undefined,
-                this.synced,
-                rebaseCfcLabelView(this.labelViewFor(link), [propName]),
+                this.#synced,
+                rebaseCfcLabelView(this.#labelViewFor(link), [propName]),
               );
             }
           }
@@ -1453,11 +1724,11 @@ class TransformObjectCreator
     }
     return annotateWithBackToCellSymbols(
       value,
-      this.runtime,
+      this.#runtime,
       link,
-      this.tx,
-      this.synced,
-      this.labelViewFor(link),
+      this.#tx,
+      this.#synced,
+      this.#labelViewFor(link),
     );
   }
 }
@@ -1466,24 +1737,24 @@ class TransformObjectCreator
  * This assumes that there will not be a conflict in definitions between the
  * eventSchema and the stateSchema.
  */
-// TODO(@ubik2): We also need to re-write any relative refs
 export function generateHandlerSchema(
   eventSchema?: JSONSchema,
   stateSchema?: JSONSchema,
 ): JSONSchema | undefined {
+  // TODO(@ubik2): We also need to re-write any relative refs
   if (eventSchema === undefined && stateSchema === undefined) {
     return undefined;
   }
   const mergedDefs: Record<string, JSONSchema> = {};
   const mergedDefinitions: Record<string, JSONSchema> = {};
-  if (isRecord(eventSchema)) {
+  if (isObjectOrArray(eventSchema)) {
     // extract $defs and definitions and remove them from eventSchema
     const { $defs, definitions, ...rest } = eventSchema;
     eventSchema = rest;
     Object.assign(mergedDefs, $defs);
     Object.assign(mergedDefinitions, definitions);
   }
-  if (isRecord(stateSchema)) {
+  if (isObjectOrArray(stateSchema)) {
     // extract $defs and definitions and remove them from stateSchema
     const { $defs, definitions, ...rest } = stateSchema;
     stateSchema = rest;
@@ -1532,7 +1803,7 @@ function unwrapAsCellSchema(schema: JSONSchemaObj): JSONSchemaObj {
 }
 
 function removeAsCellFromSchema(schema: JSONSchema): JSONSchema {
-  if (isRecord(schema)) {
+  if (isObjectOrArray(schema)) {
     const { asCell: _c, ...restSchema } = schema;
     return restSchema;
   }

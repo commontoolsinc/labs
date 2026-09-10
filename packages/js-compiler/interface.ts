@@ -1,75 +1,49 @@
 import { type RawSourceMap } from "source-map-js";
 
-// A reference to a runtime value from a `JsIsolate`.
-export interface JsValue {
-  invoke(...args: unknown[]): JsValue;
-  inner(): unknown;
-  asObject(): object;
-  isObject(): boolean;
-}
-
-// A JS runtime context.
-export interface JsIsolate {
-  // Execute `js` within this `JsIsolate`, returning the value.
-  execute(js: string | JsScript): JsValue;
-}
-
-// A `JsRuntime` can host several `JsIsolate`s, capable
-// of executing JavaScript.
-export interface JsRuntime extends EventTarget {
-  // Get `JsIsolate` by `key`.
-  getIsolate(key: string): JsIsolate;
-}
-
-export interface Source {
+export type Source = {
   name: string;
   contents: string;
-}
-
-export interface TsModuleSource extends Source {
-  name: `${string}.ts` | `${string}.tsx`;
-  contents: string;
-}
-
-export interface JsModuleSource extends Source {
-  name: `${string}.js` | `${string}.jsx`;
-  contents: string;
-}
-
-export interface TypeDefSource extends Source {
-  name: `${string}.d.ts`;
-  contents: string;
-}
-
-export interface Compiler<T> {
-  compile(input: Program | ProgramResolver, options: T): JsScript;
-}
+};
 
 // A program's entry point with a resolver to
 // resolve other sources used in the program.
-export interface ProgramResolver {
+export type ProgramResolver = {
   main(): Promise<Source>;
   resolveSource(identifier: string): Promise<Source | undefined>;
-}
+
+  /**
+   * Reads a data file the program's source declares, by the root-relative name
+   * a `dataFile()` call gives it. Undefined when this resolver holds no such
+   * file.
+   *
+   * A resolver that does not implement it has its data files read through
+   * `resolveSource`, which is right wherever source and data come from the
+   * same place. A resolver reads them itself when the transport calls for it:
+   * the file system reads a data file strictly as UTF-8 and keeps a byte order
+   * mark that module reading would consume.
+   */
+  resolveDataFile?(name: string): Promise<Source | undefined>;
+};
 
 // An entry point and its sources for a program.
-export interface Program {
+export type Program = {
   main: string;
   files: Source[];
-}
 
-export function isProgram(value: unknown): value is Program {
-  return !!value && typeof value === "object" && "main" in value &&
-    typeof value.main === "string" && "files" in value &&
-    Array.isArray(value.files);
-}
+  /**
+   * Names of entries in `files` that carry data rather than code. A data file
+   * travels with the source package and is never transformed, compiled, or
+   * executed; a pattern reads one by name with `dataFile()`.
+   */
+  dataFiles?: string[];
+};
 
 // A ready-to-execute string of JavaScript,
 // with optional metadata.
-export interface JsScript {
+export type JsScript = {
   js: string;
   sourceMap?: SourceMap;
   filename?: string;
-}
+};
 
-export interface SourceMap extends RawSourceMap {}
+export type SourceMap = RawSourceMap;

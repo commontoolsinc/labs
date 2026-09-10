@@ -3,8 +3,10 @@ import { type Action } from "../scheduler.ts";
 import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { resolveLink } from "../link-resolution.ts";
-import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
+import { ownedCell } from "./runtime-owned-store.ts";
+import { ownedResultCause, resolvedCellScope } from "./scope-policy.ts";
 import { parseLink } from "../link-utils.ts";
+import type { RawNodeCause } from "../module.ts";
 
 /**
  * unless(condition, fallback) - || semantics
@@ -14,20 +16,23 @@ export function unless(
   inputsCell: Cell<{ condition: any; fallback: any }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
-  cause: Cell<any>[],
+  cause: RawNodeCause,
   parentCell: Cell<any>,
   runtime: Runtime,
 ): Action {
   return (tx: IExtendedStorageTransaction) => {
     const conditionCell = inputsCell.key("condition");
     const resultScope = resolvedCellScope(runtime, tx, conditionCell);
-    const baseResult = runtime.getCell<any>(
-      parentCell.space,
-      { unless: cause },
-      undefined,
+    // Keyed on the output spot, never on the inputs document (see
+    // `ownedResultCause`).
+    const result = ownedCell<any>(
+      runtime,
       tx,
+      parentCell,
+      ownedResultCause("unless", cause, parentCell),
+      undefined,
+      resultScope,
     );
-    const result = scopedCell(runtime, tx, baseResult, resultScope);
     sendResult(tx, result);
     const resultWithLog = result.withTx(tx);
     const inputsWithLog = inputsCell.withTx(tx);

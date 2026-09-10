@@ -31,6 +31,7 @@ export interface FetchMockEntry {
   contentType?: string;
   body?: string;
   base64Body?: string;
+
   /** Fixed real-time delay (ms) before the mock returns. */
   delayMs?: number;
 }

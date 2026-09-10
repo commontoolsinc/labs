@@ -65,7 +65,10 @@ step, and we'll ratchet targets down as we improve.
   (`writersByEntity` is Set-backed), refer() caching (~2x)
 
 **What we don't have:**
-- No breakdown of "pattern load takes Xms: Y% compilation, Z% traversal, ..."
+- No breakdown of "pattern load takes Xms: Y% compilation, Z% traversal, ...".
+  The topic-board navigation benchmark splits a load into segments a person
+  would recognize — page load, sign-in, render, navigation — which says which
+  segment regressed, not which subsystem inside it did
 - No profiling data from real production usage (the profiles below are from
   the integration test flow on a dev stack)
 
@@ -132,14 +135,21 @@ rather than one-off flame charts.
 
 #### Documenting the Process
 
-We don't have profiling documentation yet (the debugging docs cover logging
-and pattern-level tips, but not runtime profiling). Whoever does the first
-client or server profile should document the concrete steps — which pattern
-to use, how to start the local dev server, how to record the trace, how to
-attach to the Deno process, what to look for — in
-`docs/development/debugging/profiling.md` so the next person can repeat it.
-This is something we'll need to do periodically; it shouldn't require tribal
-knowledge.
+`skills/perf-investigation/SKILL.md` carries the process for a slowness that
+surfaces in a pattern or in the browser: which instrument reaches what, why a
+logger row and a worker CPU profile answer different questions, and the causes
+this runtime has actually produced. It is live documentation — as those answers
+change, it changes with them.
+
+[`debugging/profiling.md`](debugging/profiling.md) is the walkthrough that goes
+with it: read the timings already being collected, find the phase, bracket it so
+a CPU profile can be read for exactly that window, split until a call explosion
+has an origin, and pin the result with a benchmark that correlates.
+
+The server side is the half still undocumented: attaching to a running
+toolshed's Deno process, and recording OTEL traces against a collector. Whoever
+profiles the server first should write those steps into that same document, so
+that path stops being tribal knowledge too.
 
 ### Making the Loop Fast
 
@@ -165,11 +175,11 @@ debating when the timing is right.
 | INFRA-1 | Performance marks at key boundaries | High | S | Add `performance.mark()` / `performance.measure()` at compilation start/end, first traversal, first render, storage read/write. ~20 lines across 4-5 files. Zero-cost when not observed. Shows up as labeled spans in Chrome DevTools traces. Makes every future profiling session start with structure instead of anonymous function calls. Consider adding as part of existing `logger.time` and `logger.timeEnd` calls. |
 | INFRA-2 | Local benchmark comparison | High | S | `deno task bench` wrapper that saves `bench-baseline.json` and diffs against it. See results in seconds instead of waiting for CI. Every optimization project gets faster. |
 | INFRA-3 | Selective benchmark filtering | Medium | S | Verify and document `deno bench --filter` for subsystem-specific runs. Faster inner loop when working on a specific area. |
-| INFRA-4 | Single "pattern load" benchmark | High | M | One representative pattern that compiles, loads, receives data, and renders. The top-level number that tells you whether an optimization actually moved the user-visible needle. Without this you're optimizing components without knowing if they're the bottleneck. (Partly done in [#3133](https://github.com/commontoolsinc/labs/pull/3133)) |
+| INFRA-4 | Single "pattern load" benchmark | High | M | One representative pattern that compiles, loads, receives data, and renders. The top-level number that tells you whether an optimization actually moved the user-visible needle. Without this you're optimizing components without knowing if they're the bottleneck. (done: `packages/patterns/integration/topic-board-navigation.bench.ts` loads a data-heavy topic board in a browser and charts the load, sign-in, render, open, and crossref segments alongside the whole journey — see [BENCHMARKS.md](BENCHMARKS.md)) |
 | INFRA-5 | PR benchmark bot | High | M | CI job on PRs touching critical packages, runs the benchmarks, compares against main, posts a before/after comment. Nothing gates benchmarks or CI timings on a PR today, so benchmark regressions surface only in the dashboard trends, after merge. The benchmark suite and the four-hourly bench-results artifacts are reusable; the deno-bench ingestion and the per-PR CI-timing gate have both been removed, so a bot would build its comparison from scratch. |
 | INFRA-6 | Benchmark trend visualization | Medium | M | Script that pulls 90 days of benchmark JSON artifacts and produces charts or CSVs. Spots gradual drift that per-PR checks miss. (done: the team ops dashboard charts benchmark trends on its /bench page) |
 | INFRA-7 | Automated budget enforcement | High | L | Hard budgets on critical metrics, CI fails if exceeded. Performance becomes a contract. Requires careful calibration for CI-vs-local variance and a warmup period as warnings-only. Risk of false positives creating CI noise. |
-| INFRA-8 | End-to-end performance test suite | High | L | Multiple representative user journeys (simple load, 100-cell pattern, LLM pattern, large list) measured wall-clock on every PR. Guarantees user-visible performance is protected, not just micro-benchmarks. Each scenario needs a pattern, test data, and harness. Maintenance scales with scenario count. (Note that the pattern unit tests integration test is the closest we have to that. It also run the backend in-memory, so it happens to measure both client and server in one go.) |
+| INFRA-8 | End-to-end performance test suite | High | L | Multiple representative user journeys (simple load, 100-cell pattern, LLM pattern, large list) measured wall-clock on every PR. Guarantees user-visible performance is protected, not just micro-benchmarks. Each scenario needs a pattern, test data, and harness. Maintenance scales with scenario count. (Partly done: the topic-board navigation benchmark is the first such journey, and `topic-board-scale.bench.ts` is the large-list scenario, both on the four-hourly schedule rather than per PR. Their fixture — `topic-board-fixture.ts` — is the reusable half; a second journey needs its own pattern and synthetic data. The large-list scenario currently reaches only 100 items. Seeding time grows faster than the item count, but peak memory is what binds: it is close to linear at roughly 26MB per topic, so a thousand needs more than a runner has. `docs/development/BENCHMARKS.md` carries the measurements.) |
 | INFRA-9 | Ratcheting | Medium | L | When a metric improves, automatically lower the budget to lock in the gain. Requires budget enforcement as prerequisite. Compound improvement without discipline overhead. Risk: lucky fast runs ratcheting to unreproducible levels. |
 | INFRA-10 | Runtime profiling infrastructure | High | L | Structured traces from running toolshed/shell, queryable programmatically. "Show me the 10 slowest reactive cycles." Transforms profiling from squinting at flame charts to querying data. Significant design work to make it zero-cost when inactive. (Note: `cf test --verbose ...` is useful here) |
 | INFRA-11 | Performance dashboard | Medium | L | Hosted page with benchmark results, trends, regression status. Replaces "download artifact, parse JSON, squint." Creates shared visibility and accountability. Frontend work, CI integration, ongoing maintenance. (Partly done: the team ops dashboard's /bench page covers benchmark results and trends.) |
@@ -190,7 +200,7 @@ path) · Medium (benchmarks improve, modest user impact) · Low (micro)
 
 | # | Project | Impact | Cost | Summary |
 |---|---------|--------|------|---------|
-| PERF-3 | Link resolution without JSON.stringify | High | S | `link-resolution.ts:83` allocates via `JSON.stringify` on every cycle-detection step. Replace with null-byte-separated concat (~2x faster on typical inputs). Naive separators like `\|` or `/` cause collisions when path segments contain the separator — use `\0` with a length prefix. [Tests needed.](#perf-3-link-resolution) |
+| PERF-3 | Link resolution without JSON.stringify | High | S | `linkAddressKey` in `link-resolution.ts` names a link for the walk's cycle check and for the transaction's snapshot memo. (done: a length-prefixed NUL-separated concat, 4x faster than `JSON.stringify` on board-shaped links; a prefix code, so a segment containing the separator cannot collide — `snapshot-memo.test.ts` pins the boundary case.) |
 
 ### Likely High-Impact (pending profiling confirmation)
 
@@ -221,10 +231,9 @@ types. Partial discriminated unions (only some branches have the discriminator)
 are untested. Nested anyOf has benchmarks but no correctness tests. **Write
 these tests first.**
 
-**<a id="perf-3-link-resolution"></a>PERF-3 (link resolution):** Good existing coverage (28 tests). Add 2-3 tests for
-cross-space cycles and separator edge cases. The replacement key function must
-not collide on path segments containing the separator. **Can ship alongside the
-fix.**
+**<a id="perf-3-link-resolution"></a>PERF-3 (link resolution):** Done. The
+key is a prefix code, and `snapshot-memo.test.ts` holds the case of two paths
+whose segments differ only in where a boundary falls.
 
 **<a id="perf-4-engine-files"></a>PERF-4 (engine files):** No test verifies the sandbox receives all needed files —
 current tests pass because the superset always includes everything. **Add

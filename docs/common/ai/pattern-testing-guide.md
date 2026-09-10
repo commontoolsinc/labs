@@ -44,6 +44,13 @@ Avoid tests for:
 deno task cf test <pattern>.test.tsx
 ```
 
+Imports resolve from the nearest ancestor directory whose `deno.json(c)`
+declares a package name (`packages/patterns` for this repository's patterns),
+so imports that span the package — shared helpers, `cfc/` modules — work
+without a flag. A failure naming an import that "escapes the program root"
+means the file imports from above that root; pass `--root` naming a common
+ancestor. CI runs these tests with `--root packages/patterns`.
+
 If `cf test` fails, treat that as repair work. Preserve the failing command and
 relevant output, isolate the smallest failing action/assertion when useful, fix
 either the implementation or an invalid test contract, and rerun the test. A
@@ -84,7 +91,7 @@ export default pattern(() => {
   const assertAfterAction = assert(() => instance.someField === newValue);
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assertInitialState },
       { action: actionDoSomething },
       { assertion: assertAfterAction },
@@ -95,10 +102,9 @@ export default pattern(() => {
 
 ## Key Points
 
-- write new assertions with `assert()` rather than `computed()`; a step accepts
-  either, and most test patterns in the repository use `assert()` for their
-  assertions, but a failed `assert()` reports its operands and a failed
-  `computed()` cannot
+- write assertions with `assert()`; a step's `assertion` accepts only the
+  record `assert()` produces, so a bare `computed()` boolean is a compile
+  error, and a failed `assert()` reports its operands while a bare value cannot
 - trigger actions with `.send()` when the output exposes streams
 - use direct property access for assertions rather than `.get()` unless the API
   truly requires writable access
@@ -120,8 +126,9 @@ An `assert()` failure names the operands and the values they held:
 
 Read it before reaching for other tools. It tells you which side was wrong and
 by how much, which is usually enough to locate the bug — no deploy, no
-inspection of the running piece. A `computed()` assertion cannot report this,
-because its comparison ran inside the closure and only the boolean survived:
+inspection of the running piece. Without the operands the record carries, only
+the verdict survives — the comparison ran inside the closure and the boolean is
+all that is left:
 
 ```
 ✗ assertion_2 (after action_1)
@@ -161,7 +168,7 @@ explicit render step after the action that creates that state:
 const subject = Pattern({});
 
 return {
-  tests: [
+  [TESTS]: [
     { action: actionReachLateState },
     { render: subject[UI] },
     { assertion: assertLateState },
@@ -189,7 +196,7 @@ the subject's UI from its own descriptor:
 // Shown for illustration only.
 return {
   [UI]: subject[UI],
-  tests: [
+  [TESTS]: [
     { action: actionReachLateState },
     { assertion: assertLateState },
   ],
@@ -229,7 +236,7 @@ returned descriptor — each flag covers only its own level:
 ```tsx
 // Shown inside a pattern body.
 return {
-  tests: [/* ... */],
+  [TESTS]: [/* ... */],
   allowConsoleErrors: true, // expected console/logger errors don't fail
   allowConsoleWarnings: true, // expected console/logger warnings don't fail
 };
@@ -252,7 +259,7 @@ against one shared space on an in-process storage server.
 
 ```tsx
 // Shown for illustration only.
-import { action, computed, multiUserTest, pattern } from "commonfabric";
+import { action, assert, multiUserTest, pattern } from "commonfabric";
 import Chat, { type ChatOutput } from "./pattern.tsx";
 
 interface Setup {
@@ -266,9 +273,9 @@ export const setup = pattern(() => ({ chat: Chat({}) }));
 
 export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   const save = action(() => setup.chat.saveProfile.send());
-  const sees_bob = computed(() => /* ... */);
+  const sees_bob = assert(() => /* ... */);
   return {
-    tests: [
+    [TESTS]: [
       { action: save },
       { label: "alice-saved" }, //  announce a marker
       { await: "bob-saved" }, //    park until bob announces
@@ -293,19 +300,24 @@ Key points:
 - Each participant gets its own identity. Use
   `{ pattern: aliceTab2, user: "alice" }` for a second session of an
   existing user (PerUser state shared, PerSession state isolated).
-- Assertions retry (with settling) until the step timeout, since asserted
-  state may still be propagating from another runtime — don't assert
-  "other user does NOT see X yet" right after the other user acted; assert
-  stable invariants instead.
+- A marker is a durable write in the shared space, so crossing
+  `{ await: "name" }` means everything the announcing participant committed
+  before `{ label: "name" }` has reached this runtime. An assertion is read
+  once, there: a false value is a failure rather than a cue to wait longer.
+  Put every assertion about another participant's state after the marker
+  that carries it. A marker says what HAS arrived and nothing about what has
+  not, so "other user does NOT see X yet" is still not something to assert —
+  assert stable invariants instead.
 - Pattern outputs a participant asserts on must be computed snapshots that
   always yield a REAL, STABLE value. In a runtime that didn't write the
   underlying scoped cell, the cell reads as `undefined` — and a computed that
   returns `undefined` (or a fresh `[]` per recompute) is indistinguishable
   from "not yet computed" for cross-runtime readers, so the assertion never
-  settles. Normalize inside the computed (`trimmedName(name.get())`,
-  `cell.get() ?? EMPTY_LIST` with a module-level constant).
+  sees the value the writing runtime holds. Normalize inside the computed
+  (`trimmedName(name.get())`, `cell.get() ?? EMPTY_LIST` with a module-level
+  constant).
 - Read another runtime's arrays with INLINE literal indexing in the assertion
-  computed (`users?.[0]?.name === "Alice"`). `.map()`, loop-variable
+  body (`users?.[0]?.name === "Alice"`). `.map()`, loop-variable
   indexing, and module-level helper calls over the array resolve in the
   runtime that wrote it but NOT cross-runtime before a local write.
 - A participant cannot read their own never-written `PerUser` array (e.g. an
@@ -326,8 +338,8 @@ with `Math.random()` (allowed inside a handler, coarsened to one-second
 resolution for the clock), keep the assertions deterministic:
 
 - prefer asserting that a value was set, changed, or has the expected shape
-- avoid calling `Date.now()` or `Math.random()` inside a test `computed()`
-  assertion — those built-ins throw a `TimeCapabilityError` in a computed
+- avoid calling `Date.now()` or `Math.random()` inside a test `assert()`
+  assertion — those built-ins throw a `TimeCapabilityError` in a computation
 - if you need an exact value, capture it in the action under test and assert
   against the captured result rather than recomputing it in the assertion
 

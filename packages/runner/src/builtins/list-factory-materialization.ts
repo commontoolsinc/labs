@@ -2,10 +2,7 @@ import {
   isAdmittedFabricFactory,
   sealFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
-import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { type FabricValue, valueEqual } from "@commonfabric/data-model";
 
 import type { Cell } from "../cell.ts";
 import { isPattern, type Pattern } from "../builder/types.ts";
@@ -15,7 +12,7 @@ import {
   materializeFactory,
   prepareFactory,
 } from "../factory-materialization.ts";
-import { resolveLink } from "../link-resolution.ts";
+import { resolveLinkTracingDereferences } from "../link-resolution.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import type { Runtime } from "../runtime.ts";
 import { RetryWhenReady } from "../scheduler/retry-when-ready.ts";
@@ -76,16 +73,16 @@ function readSelection(
   tx: IExtendedStorageTransaction,
   bindingLink: NormalizedFullLink,
 ): CurrentSelection {
-  const dereferenceSources: NormalizedFullLink[] = [];
-  const resolvedOp = resolveLink(
+  const resolution = resolveLinkTracingDereferences(
     runtime,
     tx,
     bindingLink,
     "value",
-    {
-      onDereferenceSource: (source) => dereferenceSources.push(source),
-    },
   );
+  const resolvedOp = resolution.link;
+  const dereferenceSources = resolution.traces.map((trace) => ({
+    ...trace.source,
+  } as NormalizedFullLink));
   const sourceCell = runtime.getCellFromLink(resolvedOp, undefined, tx);
   // The coordinator needs the value for generic materialization and reactive
   // generation tracking, but callback output is authored by the child run.
@@ -155,17 +152,36 @@ function materializeSelection(
  * and stop the active row generation while an authored promise occupies the
  * scheduler, but it never materializes code or starts a replacement.
  */
-export function createListPatternFactorySupervisor(
-  runtime: Runtime,
-  addCancel: AddCancel,
-  preemptRows: () => void,
-): {
+export type ListPatternFactorySupervisor = {
   materialize(
     tx: IExtendedStorageTransaction,
     opBindingCell: Cell<unknown>,
     builtinName: ListBuiltinName,
   ): MaterializedListPatternSelection;
-} {
+};
+
+/** Materialize one list callback without installing lifecycle supervision. */
+export function materializeListPatternSelection(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  opBindingCell: Cell<unknown>,
+  builtinName: ListBuiltinName,
+): MaterializedListPatternSelection {
+  const bindingLink = opBindingCell.getAsNormalizedFullLink();
+  const current = readSelection(runtime, tx, bindingLink);
+  return {
+    pattern: materializeSelection(runtime, current, builtinName),
+    generation: 1,
+    factorySelectionLink: bindingLink,
+    factorySourceLink: current.sourceLink,
+  };
+}
+
+export function createListPatternFactorySupervisor(
+  runtime: Runtime,
+  addCancel: AddCancel,
+  preemptRows: () => void,
+): ListPatternFactorySupervisor {
   let active = true;
   let bindingLink: NormalizedFullLink | undefined;
   let selectionSourceLinks: readonly NormalizedFullLink[] = [];

@@ -43,7 +43,7 @@ export class FrameRecorder {
   readonly #clock: RecorderClock;
   #removeListener?: () => void;
   #writeTail: Promise<void> = Promise.resolve();
-  #pendingAcknowledgements = new Set<Promise<void>>();
+  #pendingAcknowledgments = new Set<Promise<void>>();
   #pendingWrites = 0;
   #error?: Error;
   #startedAtMs?: number;
@@ -96,7 +96,7 @@ export class FrameRecorder {
       this.#removeListener = undefined;
       this.#endedAtMs = this.#clock.now();
       await this.#writeTail;
-      await Promise.all(this.#pendingAcknowledgements);
+      await Promise.all(this.#pendingAcknowledgments);
       this.#finalizeDurations();
     }
     if (this.#error) throw this.#error;
@@ -120,7 +120,7 @@ export class FrameRecorder {
 
   #acceptFrame(frame: ScreencastFrame): void {
     if (this.#state === "stopped") return;
-    const acknowledgement = this.#page
+    const acknowledgment = this.#page
       .acknowledgeScreencastFrame(frame.sessionId)
       .catch((cause) =>
         this.#recordError(
@@ -129,8 +129,8 @@ export class FrameRecorder {
           }),
         )
       )
-      .finally(() => this.#pendingAcknowledgements.delete(acknowledgement));
-    this.#pendingAcknowledgements.add(acknowledgement);
+      .finally(() => this.#pendingAcknowledgments.delete(acknowledgment));
+    this.#pendingAcknowledgments.add(acknowledgment);
 
     const limit = this.#options.maxPendingWrites ?? 120;
     if (this.#pendingWrites >= limit) {

@@ -15,8 +15,8 @@ interface Wrapper {
     const generator = new SchemaGenerator();
     const schema = asObjectSchema(generator.generateSchema(type, checker));
     const props = schema.properties as Record<string, unknown> | undefined;
-    expect(props?.value).toBe(true);
-    expect(props?.pointer).toBe(true);
+    expect(props?.value).toEqual({ type: "object" });
+    expect(props?.pointer).toEqual({ type: "object" });
     expect((schema as Record<string, unknown>).$defs).toBeUndefined();
   });
 

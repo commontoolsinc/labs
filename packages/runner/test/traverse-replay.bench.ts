@@ -9,6 +9,7 @@
  * counter totals per fixture on exit — wall-time wins should come with a
  * counter explanation (e.g. anyOfBranches down 80%).
  */
+
 import { listFixturePaths } from "./traverse-replay/goldens.ts";
 import {
   loadFixture,

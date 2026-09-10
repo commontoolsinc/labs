@@ -6,6 +6,7 @@
  * runs without a real terminal. A separate test exercises the real deps' thin
  * wrappers.
  */
+
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import { join } from "@std/path";
 import { parseDocument } from "./view-helpers.ts";
@@ -47,6 +48,7 @@ interface FakeOpts {
   closeThrows?: boolean;
   consoleSizeThrows?: boolean;
   consoleSize?: { columns: number; rows: number };
+  writeThrowsFrom?: number;
   addSignalThrowsFor?: Deno.Signal;
   removeSignalThrows?: boolean;
   env?: Record<string, string>;
@@ -58,7 +60,9 @@ function makeFake(opts: FakeOpts = {}) {
   const removed: string[] = [];
   const timers = new Map<number, () => void>();
   const exited: number[] = [];
+  const ttyState = { rawModes: [] as boolean[], closes: 0 };
   let nextTimer = 1;
+  let writeCount = 0;
   const steps = (opts.steps ?? []).slice();
 
   const tty: PagerTty = {
@@ -81,11 +85,13 @@ function makeFake(opts: FakeOpts = {}) {
       }
     },
     setRaw(mode) {
+      ttyState.rawModes.push(mode);
       // Throw only on the cleanup setRaw(false); the startup setRaw(true) is
       // not guarded, so a startup throw would escape.
       if (opts.setRawThrows && !mode) throw new Error("setRaw failed");
     },
     close() {
+      ttyState.closes++;
       if (opts.closeThrows) throw new Error("close failed");
     },
   };
@@ -95,7 +101,15 @@ function makeFake(opts: FakeOpts = {}) {
       if (opts.openThrows) throw new Error("no controlling terminal");
       return tty;
     },
-    write: (t) => writes.push(t),
+    write: (t) => {
+      writes.push(t);
+      writeCount++;
+      if (
+        opts.writeThrowsFrom !== undefined && writeCount >= opts.writeThrowsFrom
+      ) {
+        throw new Error("write failed");
+      }
+    },
     consoleSize: () => {
       if (opts.consoleSizeThrows) throw new Error("no console");
       return opts.consoleSize ?? { columns: 80, rows: 24 };
@@ -122,7 +136,7 @@ function makeFake(opts: FakeOpts = {}) {
     // here would only stall the run.
     delay: () => Promise.resolve(),
   };
-  return { deps, writes, signals, removed, timers, exited };
+  return { deps, writes, signals, removed, timers, exited, ttyState };
 }
 
 Deno.test("pager: a missing /dev/tty raises a ViewError", async () => {
@@ -141,6 +155,45 @@ Deno.test("pager: draws the document and quits on q", async () => {
   // The alt screen is entered on start and left on cleanup.
   assert(writes.some((w) => w.includes("\x1b[?1049h")), "entered alt screen");
   assert(writes.some((w) => w.includes("\x1b[?1049l")), "left alt screen");
+  assert(writes.some((w) => w.includes(term.enableMouse)), "enabled the mouse");
+  assert(
+    writes.some((w) => w.includes(term.disableMouse)),
+    "disabled the mouse",
+  );
+});
+
+Deno.test("pager: restores the terminal when the initial write fails", async () => {
+  const { deps, ttyState } = makeFake({ writeThrowsFrom: 1 });
+  await assertRejects(
+    () => runPager(DOC, OPTS, undefined, undefined, deps),
+    Error,
+    "write failed",
+  );
+  assertEquals(ttyState.rawModes, [true, false]);
+  assertEquals(ttyState.closes, 1);
+});
+
+Deno.test("pager: an SGR mouse-wheel report scrolls the document", async () => {
+  const doc = parseDocument(
+    Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n"),
+  );
+  const { deps, writes } = makeFake({
+    consoleSize: { columns: 30, rows: 6 },
+    steps: [
+      { bytes: enc("\x1b[<65;1;1M") },
+      { bytes: enc("q") },
+    ],
+  });
+  await runPager(doc, OPTS, undefined, undefined, deps);
+  const frames = writes.filter((write) => write.includes("\x1b[?7l"));
+  const wheelFrame = frames.at(-1)!;
+  assert(wheelFrame.includes("line 3"), "the wheel frame contains line 3");
+  for (const skippedLine of ["line 0", "line 1", "line 2"]) {
+    assert(
+      !wheelFrame.includes(skippedLine),
+      `the wheel frame starts after ${skippedLine}`,
+    );
+  }
 });
 
 Deno.test("pager: unknown named files schedule no semantic work", async () => {
@@ -152,7 +205,7 @@ Deno.test("pager: unknown named files schedule no semantic work", async () => {
   assertEquals(timers.size, 0);
 });
 
-Deno.test("pager: with colour, matches the terminal background to the status bar and restores it", async () => {
+Deno.test("pager: with color, matches the terminal background to the status bar and restores it", async () => {
   // A redraw (the 'j' scroll) in its own read precedes the quit, so the frame is
   // drawn again inside the loop.
   const { deps, writes } = makeFake({
@@ -167,9 +220,9 @@ Deno.test("pager: with colour, matches the terminal background to the status bar
   );
   const all = writes.join("");
   const set = term.setDefaultBg(ui.statusBar.bg!);
-  // OSC 11 sets the terminal default background to the status bar colour, and it
+  // OSC 11 sets the terminal default background to the status bar color, and it
   // is re-asserted on every frame so a terminal that drops it cannot leave a
-  // strip in its own colour; OSC 111 restores it on exit.
+  // strip in its own color; OSC 111 restores it on exit.
   assert(all.includes(set), "set the default background");
   assert(all.split(set).length - 1 >= 2, "re-asserted on redraw");
   assert(all.includes("\x1b]111\x07"), "restored the default background");
@@ -265,6 +318,7 @@ function editableDoc(): {
   doc: typeof DOC;
   source: ReturnType<typeof fileSource>;
   dir: string;
+
   /** How many times the source has been re-parsed — the deferred reparse calls
    * `source.parse`, so this stays 0 unless an edit actually scheduled and ran
    * one. */
@@ -369,7 +423,9 @@ Deno.test("realPagerDeps: the wrappers reach the real primitives", () => {
   } catch { /* no controlling terminal in this environment */ }
 });
 
-// --- Ctrl-L reveal frames ---------------------------------------------------
+//
+// Ctrl-L reveal frames
+//
 
 /** A one-file diff whose hunk has room to reveal ten lines above it. */
 function revealFixture() {
@@ -646,15 +702,16 @@ Deno.test("pager: paints a pressed button before its synchronous action starts",
       }),
       save: (
         text: string,
+        lineEndings: Parameters<typeof base.save>[1],
         baseline?: string,
-        options?: Parameters<typeof base.save>[2],
+        options?: Parameters<typeof base.save>[3],
       ) => {
         const promptFrames = writes.filter((write) =>
           write.includes("Amend commit 012345678")
         );
         promptFramesWhenSaveStarted = promptFrames.length;
         pressedFrameWasDistinct = promptFrames[0] !== promptFrames[1];
-        return base.save(text, baseline, options);
+        return base.save(text, lineEndings, baseline, options);
       },
     };
 

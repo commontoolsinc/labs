@@ -11,6 +11,7 @@
 import {
   type AnyCommand,
   type CompletionLine,
+  type CompletionSlot,
   resolveCompletionLine,
   stripInvocationPrefix,
 } from "./line.ts";
@@ -128,14 +129,32 @@ function isOwnInvocation(words: readonly string[]): boolean {
 }
 
 /**
+ * The `--name=` a slot's candidates must carry, or `undefined` when the value
+ * was written after a space.
+ */
+function inlinePrefixOf(slot: CompletionSlot | null): string | undefined {
+  if (!slot) return undefined;
+  if (slot.kind === "option-value" || slot.kind === "global-option-value") {
+    return slot.inlinePrefix;
+  }
+  return undefined;
+}
+
+/**
  * Re-attach a `--name=` prefix to values completed in inline form, so the shell
  * replaces the whole token rather than appending to it.
+ *
+ * Applied to every source of candidates rather than to one of them. The word
+ * under the cursor is `--name=…` in this spelling and candidates are filtered
+ * against it below, so a bare value cannot survive that filter — which is how
+ * a live provider's candidates came to be dropped for the one spelling
+ * `tokenizeLine` exists to serve.
  */
 function withInlinePrefix(
-  candidates: Candidate[],
+  candidates: readonly Candidate[],
   prefix: string | undefined,
 ): Candidate[] {
-  if (!prefix) return candidates;
+  if (!prefix) return [...candidates];
   return candidates.map((candidate) => ({
     ...candidate,
     value: `${prefix}${candidate.value}`,
@@ -146,6 +165,9 @@ function withInlinePrefix(
  * Static candidates for a resolved line — everything answerable without I/O.
  * Split out from `complete` so tests can assert the whole static surface
  * without a fabric, which is where most completion regressions would show.
+ *
+ * Values come back bare. `complete` attaches the inline `--name=` prefix, so
+ * that one rule covers this half and the live half alike.
  */
 export function staticCandidates(line: CompletionLine): Candidate[] {
   const slot = line.slot;
@@ -158,16 +180,12 @@ export function staticCandidates(line: CompletionLine): Candidate[] {
       return subcommandCandidates(line.command);
     case "option-name":
       return optionNameCandidates(line.command, line);
-    case "option-value": {
-      const enumerated = enumeratedOptionValues(slot.option);
-      if (!enumerated) return [];
-      return withInlinePrefix(enumerated, slot.inlinePrefix);
-    }
+    case "option-value":
+      // `null` means the option has no statically known set, which leaves the
+      // slot to a live provider.
+      return enumeratedOptionValues(slot.option) ?? [];
     case "global-option-value":
-      return withInlinePrefix(
-        preParseGlobalValues(slot.option),
-        slot.inlinePrefix,
-      );
+      return preParseGlobalValues(slot.option);
     default:
       return [];
   }
@@ -195,7 +213,10 @@ export async function complete(
   const line = resolveCompletionLine(root, words, cword);
 
   const live = await liveCandidates(line);
-  const candidates = [...staticCandidates(line), ...live.candidates];
+  const candidates = withInlinePrefix(
+    [...staticCandidates(line), ...live.candidates],
+    inlinePrefixOf(line.slot),
+  );
 
   const matching = candidates.filter((candidate) =>
     candidate.value.startsWith(line.word)

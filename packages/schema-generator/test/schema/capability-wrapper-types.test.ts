@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import ts from "typescript";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import {
   asObjectSchema,
   createTestProgram,
@@ -50,7 +50,7 @@ describe("Schema: Capability wrapper types", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker));
 
     const ro = result.properties?.ro as Record<string, any>;
@@ -84,7 +84,7 @@ describe("Schema: Capability wrapper types", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker));
 
     const ro = result.properties?.ro as Record<string, any>;
@@ -109,7 +109,7 @@ describe("Schema: Capability wrapper types", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker));
     const value = result.properties?.value as Record<string, any>;
     expect(value).toEqual({ type: "unknown", asCell: ["cell"] });
@@ -122,7 +122,7 @@ describe("Schema: Capability wrapper types", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker));
     const value = result.properties?.value as Record<string, any>;
 
@@ -138,7 +138,7 @@ describe("Schema: Capability wrapper types", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker));
     const items = result.properties?.items as Record<string, any>;
     expect(items.type).toBe("array");
@@ -167,7 +167,7 @@ describe("Schema: Capability wrapper types", () => {
     const schemaHints = new WeakMap<ts.Node, { items?: unknown }>();
     schemaHints.set(itemsTypeNode, { items: false });
 
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(
       gen.generateSchema(type, checker, undefined, undefined, schemaHints),
     );
@@ -202,7 +202,7 @@ describe("Schema: Capability wrapper types", () => {
     const schemaHints = new WeakMap<ts.Node, { items?: unknown }>();
     schemaHints.set(itemsTypeNode, { items: false });
 
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(
       gen.generateSchema(type, checker, undefined, undefined, schemaHints),
     );
@@ -242,7 +242,7 @@ describe("Schema: Capability wrapper types", () => {
       "authored",
     );
 
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = gen.generateSchema(
       narrowedType,
       checker,
@@ -282,7 +282,7 @@ describe("Schema: Capability wrapper types", () => {
     const typeRegistry = new WeakMap<ts.Node, ts.Type>();
     typeRegistry.set(syntheticNode, authoredType);
 
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = gen.generateSchemaFromSyntheticTypeNode(
       syntheticNode,
       checker,

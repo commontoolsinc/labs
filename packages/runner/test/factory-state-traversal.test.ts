@@ -16,11 +16,11 @@ import {
 } from "../src/builder/pattern-metadata.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { reactive as createReactive } from "../src/builder/reactive.ts";
-import { toJSONWithAliasBindings } from "../src/builder/json-utils.ts";
+import { withAliasBindings } from "../src/builder/to-encodable-form.ts";
 import { traverseValue } from "../src/builder/traverse-utils.ts";
 import { getCellOrThrow } from "../src/query-result-proxy.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { AliasBinding } from "../src/sigil-types.ts";
+import type { AliasBinding } from "../src/alias-binding.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -186,7 +186,7 @@ describe("hidden factory-state traversal", () => {
       $alias: { cell: "argument", path: ["capture"] },
     };
 
-    const serialized = toJSONWithAliasBindings(
+    const serialized = withAliasBindings(
       { factory },
       () => alias,
     ) as unknown as { factory: typeof factory };

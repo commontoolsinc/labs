@@ -1,25 +1,20 @@
 import ts from "typescript";
 import { TransformationContext } from "./mod.ts";
 import { CrossStageState } from "./cross-stage-state.ts";
-
-export type TransformMode = "transform" | "error";
+import type { BuilderSourceSite } from "./runtime-contract.ts";
 
 /**
  * Hints for schema generation that override default behavior.
  * Used to communicate access patterns (like array-property-only access)
  * from capture analysis to schema generation.
  */
-export interface SchemaHint {
+export type SchemaHint = {
   /** Override for array items schema (e.g., false for items: false) */
   readonly items?: unknown;
-  /**
-   * Compiler-owned exact contract for a generated first-class factory value.
-   * This never comes from serialized `argumentSchema` / `resultSchema` fields;
-   * it carries the canonical TypeNode/Type pairs inferred for the builder.
-   */
+
+  /** Compiler-owned exact contract for a generated first-class factory. */
   readonly factoryContracts?: readonly {
     readonly kind: "pattern" | "module" | "handler";
-    /** Exact trusted factory type that supplied this semantic contract. */
     readonly factoryType?: ts.Type;
     readonly inputTypeNode: ts.TypeNode;
     readonly inputType?: ts.Type;
@@ -27,9 +22,9 @@ export interface SchemaHint {
     readonly outputTypeNode: ts.TypeNode;
     readonly outputType?: ts.Type;
     readonly outputSchema?: unknown;
-    /** Trusted compiler metadata; never emitted inside authored `asFactory`. */
     readonly frameworkProvidedPaths?: readonly (readonly string[])[];
   }[];
+
   readonly cfcUiContract?: {
     readonly helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
     readonly action?: string;
@@ -39,7 +34,7 @@ export interface SchemaHint {
     readonly trustedPattern?: string;
     readonly requiredEventIntegrity?: readonly string[];
   };
-}
+};
 
 export type ReactiveCapability =
   | "opaque"
@@ -48,12 +43,12 @@ export type ReactiveCapability =
   | "writeonly"
   | "writable";
 
-export interface CapabilityParamDefault {
+export type CapabilityParamDefault = {
   readonly path: readonly string[];
   readonly defaultType: ts.TypeNode;
-}
+};
 
-export interface CapabilityParamSummary {
+export type CapabilityParamSummary = {
   readonly name: string;
   readonly capability: ReactiveCapability;
   readonly readPaths: readonly (readonly string[])[];
@@ -62,6 +57,7 @@ export interface CapabilityParamSummary {
   readonly opaquePaths?: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+
   /**
    * Write-exhaustiveness is unverifiable for this parameter — `writePaths`
    * may be incomplete. Set by unrecognized or dynamic method calls on
@@ -73,13 +69,14 @@ export interface CapabilityParamSummary {
    * (`const f = cell.send; f(x)`) are outside the contract.
    */
   readonly hasUnverifiedCellUse?: boolean;
+
   readonly identityOnly?: boolean;
   readonly identityPaths?: readonly (readonly string[])[];
   readonly identityCellPaths?: readonly (readonly string[])[];
   readonly comparablePaths?: readonly (readonly string[])[];
   readonly comparableCellPaths?: readonly (readonly string[])[];
   readonly defaults?: readonly CapabilityParamDefault[];
-}
+};
 
 /**
  * A cell argument that flows to an out-of-file parameter whose declared type the
@@ -87,18 +84,20 @@ export interface CapabilityParamSummary {
  * generic, or a non-branded cell-like interface). The capability silently
  * degrades, so the caller surfaces this as a diagnostic.
  */
-export interface UnreadableCellArgument {
+export type UnreadableCellArgument = {
   readonly node: ts.Node;
   readonly message: string;
-}
+};
 
-export interface FunctionCapabilitySummary {
+export type FunctionCapabilitySummary = {
   readonly params: readonly CapabilityParamSummary[];
+
   /** True when analysis was short-circuited due to recursion. */
   readonly recursive?: boolean;
+
   /** Cell arguments passed to parameters the contract could not classify. */
   readonly unreadableCellArguments?: readonly UnreadableCellArgument[];
-}
+};
 
 export type PatternCoverageKind = "runtime";
 
@@ -106,7 +105,7 @@ export type PatternCoverageKind = "runtime";
 // without the compiler stack; re-exported here for the compile-side callers.
 export { PATTERN_COVERAGE_GLOBAL } from "./runtime-contract.ts";
 
-export interface PatternCoverageSpan {
+export type PatternCoverageSpan = {
   readonly fileName: string;
   readonly id: number;
   readonly kind: PatternCoverageKind;
@@ -114,14 +113,27 @@ export interface PatternCoverageSpan {
   readonly endLine: number;
   readonly startColumn: number;
   readonly endColumn: number;
-}
+};
 
-export interface PatternCoverageOptions {
+export type PatternCoverageOptions = {
   readonly fileName?: (sourceFileName: string) => string;
   readonly mapSpan?: (
     span: PatternCoverageSpan,
   ) => PatternCoverageSpan | undefined;
   readonly registerSpan: (span: PatternCoverageSpan) => void;
+};
+
+/** Coordinate normalization for builder source-site compiler output. */
+export interface BuilderSourceSiteOptions {
+  /**
+   * Maps a compiler-input coordinate into authored source space. Callers whose
+   * compiler input is already authored must supply the identity mapping
+   * explicitly; without a mapper the transformer emits no sidecar.
+   */
+  readonly mapSite: (
+    sourceFileName: string,
+    site: BuilderSourceSite,
+  ) => BuilderSourceSite | undefined;
 }
 
 /**
@@ -130,24 +142,30 @@ export interface PatternCoverageOptions {
  * Type is used in multiple places with different access patterns.
  */
 export type SchemaHints = WeakMap<ts.Node, SchemaHint>;
+
 export type SyntheticReactiveCollectionRegistry = WeakSet<ts.Symbol>;
 
-export interface TransformationOptions {
-  readonly mode?: TransformMode;
-  readonly debug?: boolean;
-  readonly logger?: (message: string) => void;
+export type TransformationOptions = {
   /**
    * Single owner of the pipeline's cross-transformer communication registries
    * (typeRegistry, schemaHints, the marker sets, etc.). Replaces the formerly
    * separate registry fields. See `CrossStageState`.
+   *
+   * This is the injection point for a caller that wants several runs to share
+   * one set of registries. A `TransformationContext` built without one creates
+   * its own and stores it back here, so `context.state` is always present.
    */
   readonly state?: CrossStageState;
+
   /**
    * Shared diagnostics collector that accumulates diagnostics across all transformers.
    * If provided, diagnostics are pushed to this array in addition to the local context.
    */
   readonly diagnosticsCollector?: TransformationDiagnostic[];
+
   readonly patternCoverage?: PatternCoverageOptions;
+  readonly builderSourceSites?: BuilderSourceSiteOptions;
+
   /**
    * Whether an `assert(...)` body records its operands, so that a failing
    * pattern-test assertion can report them. Defaults to true.
@@ -158,8 +176,10 @@ export interface TransformationOptions {
    * debug rendering in its assertion bodies.
    */
   readonly assertDiagnostics?: boolean;
+
   /** Content identity assigned by the compiler for every authored source. */
   readonly moduleIdentities?: ReadonlyMap<string, string>;
+
   /**
    * Compile-name → authored-name mapping for CFC writer-identity file
    * spellings (claim minting, provenance stamping, `PolicyOf` source
@@ -170,11 +190,26 @@ export interface TransformationOptions {
    * verbatim (modulo path-separator normalization).
    */
   readonly canonicalWriterIdentityFile?: (fileName: string) => string;
-}
+
+  /**
+   * The program is DURABLE STORED pattern source being reloaded — bytes
+   * nobody can re-author, recompiled by a toolchain newer than the one that
+   * accepted them, under an identity pin that guarantees this compile admits
+   * nothing new. Authoring-shape gates report as warnings in this mode
+   * instead of errors, so a new rule cannot retroactively brick every
+   * stored pattern of an older shape (the 2026-08-25 estuary deploy: the
+   * opaque-reserved-key rule refused every piece pinned to a pre-`VNode`
+   * pattern, profiles fleet-wide among them). The transformer-level twin of
+   * the compiler option of the same name (CT-1916). Authoring paths — cf
+   * check, deploy, candidate admission — leave this off and stay strict:
+   * there the author is present and can fix the shape.
+   */
+  readonly storedSource?: boolean;
+};
 
 export type DiagnosticSeverity = "error" | "warning";
 
-export interface TransformationDiagnostic {
+export type TransformationDiagnostic = {
   readonly severity: DiagnosticSeverity;
   readonly type: string;
   readonly message: string;
@@ -183,14 +218,14 @@ export interface TransformationDiagnostic {
   readonly column: number;
   readonly start: number;
   readonly length: number;
-}
+};
 
-export interface DiagnosticInput {
+export type DiagnosticInput = {
   readonly severity?: DiagnosticSeverity;
   readonly type: string;
   readonly message: string;
   readonly node: ts.Node;
-}
+};
 
 /**
  * Registry for passing Type information between transformer stages.
@@ -219,9 +254,10 @@ export abstract class Transformer {
 
   abstract transform(context: TransformationContext): ts.SourceFile;
 
-  // Receives a TransformationContext, returning a boolean indicating
-  // whether a transformation should run for this source file.
-  // If not provided, always returns true.
+  /**
+   * Returns whether the transformation should run for `context`'s source
+   * file. This base implementation always returns `true`.
+   */
   filter(_context: TransformationContext): boolean {
     return true;
   }
@@ -252,16 +288,5 @@ export abstract class Transformer {
 export abstract class HelpersOnlyTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
     return context.cfHelpers.sourceHasHelpers();
-  }
-}
-
-export class Pipeline {
-  #transformers: Transformer[];
-  constructor(transformers: Transformer[]) {
-    this.#transformers = transformers;
-  }
-
-  toFactories(program: ts.Program): ts.TransformerFactory<ts.SourceFile>[] {
-    return this.#transformers.map((t) => t.toFactory(program));
   }
 }

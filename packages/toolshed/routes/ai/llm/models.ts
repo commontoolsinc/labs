@@ -1,16 +1,32 @@
+/**
+ * The provider abstraction for language models: the model catalog, the
+ * aliases, the capability records, the provider clients, and the chain that
+ * decides what `default` means. A request names a model; this is where that
+ * name becomes a provider to call.
+ *
+ * Which models a deployment has depends on the credentials it was configured
+ * with and, for the gateway's, on what the gateway answers when asked. Both
+ * are known only to this process, which is what keeps the catalog here rather
+ * than in the caller's package. `docs/features/llm-provider-boundary.md` sets
+ * out the boundary, and `packages/llm/README.md` redirects a reader who looked
+ * in the caller's package first.
+ */
 import { anthropic, createAnthropic } from "@ai-sdk/anthropic";
-import { createOpenAI } from "@ai-sdk/openai";
-import { createGroq, groq } from "@ai-sdk/groq";
-import { openai } from "@ai-sdk/openai";
 import { createVertex, vertex } from "@ai-sdk/google-vertex";
-import type { LanguageModel } from "ai";
+import { createGroq, groq } from "@ai-sdk/groq";
+import { createOpenAI, openai } from "@ai-sdk/openai";
 import {
   GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
   isLLMNativeModelToolId,
   type LLMNativeModelToolId,
 } from "@commonfabric/llm/types";
+import type { LanguageModel } from "ai";
 
 import env from "@/env.ts";
+import {
+  gatewayProvenanceHeaders,
+  withGatewayProvenance,
+} from "@/lib/gateway-provenance.ts";
 
 export type Capabilities = {
   contextWindow: number;
@@ -25,7 +41,10 @@ export type Capabilities = {
   nativeModelToolIds?: LLMNativeModelToolId[];
 };
 
+//
 // Gateway /v1/models response types
+//
+
 type GatewayModelCapabilities = {
   type?: string;
   contextWindow?: number;
@@ -61,7 +80,12 @@ export type ModelConfig = {
 
 export type ModelList = Record<string, ModelConfig>;
 
-export const MODELS: ModelList = {};
+// A registry with no prototype, so a name is registered here or it is not a
+// model. A plain object answers a lookup for `constructor` or `toString` with
+// something off `Object.prototype`, and a request naming one of those would be
+// taken for a model and then fail on reading its capabilities, rather than
+// being turned away as the unknown model it is.
+export const MODELS: ModelList = Object.create(null);
 export const ALIAS_NAMES: string[] = [];
 export const PROVIDER_NAMES: Set<string> = new Set();
 
@@ -90,7 +114,6 @@ const addModel = ({
   name,
   aliases,
   capabilities,
-  providerOptions: _,
   nativeModelToolFactories,
 }: {
   provider:
@@ -101,7 +124,6 @@ const addModel = ({
   name: string;
   aliases: string[];
   capabilities: Capabilities;
-  providerOptions?: Record<string, unknown>;
   nativeModelToolFactories?: Partial<Record<LLMNativeModelToolId, () => any>>;
 }) => {
   let modelName = name.includes(":")
@@ -111,10 +133,6 @@ const addModel = ({
   // AWS includes colons in their model names, so we need to special case it.
   if (name.includes("us.amazon")) {
     modelName = name;
-  }
-
-  if (name.includes("-thinking") && !name.startsWith("gateway:")) {
-    modelName = modelName.split("-thinking")[0];
   }
 
   const model = provider(modelName);
@@ -161,30 +179,6 @@ if (env.CFTS_AI_LLM_ANTHROPIC_API_KEY) {
 
   addModel({
     provider: anthropicProvider,
-    name: "anthropic:claude-opus-4-1-thinking",
-    aliases: [
-      "anthropic:claude-opus-4-1-thinking-latest",
-      "claude-opus-4-1-thinking",
-    ],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 32000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-    providerOptions: {
-      anthropic: {
-        thinking: { type: "enabled", budgetTokens: 32000 },
-      },
-    },
-  });
-
-  addModel({
-    provider: anthropicProvider,
     name: "anthropic:claude-sonnet-4-0",
     aliases: ["anthropic:claude-sonnet-4-0-latest", "claude-sonnet-4-0"],
     capabilities: {
@@ -196,30 +190,6 @@ if (env.CFTS_AI_LLM_ANTHROPIC_API_KEY) {
       stopSequences: true,
       streaming: true,
       reasoning: false,
-    },
-  });
-
-  addModel({
-    provider: anthropicProvider,
-    name: "anthropic:claude-sonnet-4-0-thinking",
-    aliases: [
-      "anthropic:claude-sonnet-4-0-thinking-latest",
-      "claude-sonnet-4-0-thinking",
-    ],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 64000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-    providerOptions: {
-      anthropic: {
-        thinking: { type: "enabled", budgetTokens: 64000 },
-      },
     },
   });
 
@@ -241,27 +211,6 @@ if (env.CFTS_AI_LLM_ANTHROPIC_API_KEY) {
 
   addModel({
     provider: anthropicProvider,
-    name: "anthropic:claude-sonnet-4-5-thinking",
-    aliases: ["sonnet-4-5-thinking", "sonnet-4.5-thinking"],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 64000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-    providerOptions: {
-      anthropic: {
-        thinking: { type: "enabled", budgetTokens: 64000 },
-      },
-    },
-  });
-
-  addModel({
-    provider: anthropicProvider,
     name: "anthropic:claude-sonnet-4-6",
     aliases: ["sonnet-4-6", "sonnet-4.6"],
     capabilities: {
@@ -273,27 +222,6 @@ if (env.CFTS_AI_LLM_ANTHROPIC_API_KEY) {
       stopSequences: true,
       streaming: true,
       reasoning: false,
-    },
-  });
-
-  addModel({
-    provider: anthropicProvider,
-    name: "anthropic:claude-sonnet-4-6-thinking",
-    aliases: ["sonnet-4-6-thinking", "sonnet-4.6-thinking"],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 64000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-    providerOptions: {
-      anthropic: {
-        thinking: { type: "enabled", budgetTokens: 64000 },
-      },
     },
   });
 
@@ -376,25 +304,6 @@ if (env.CFTS_AI_LLM_OPENAI_API_KEY) {
 
   addModel({
     provider: openAIProvider,
-    name: "openai:gpt-5-thinking",
-    aliases: ["openai:gpt-5-thinking-latest", "gpt-5-thinking"],
-    capabilities: {
-      contextWindow: 400_000,
-      maxOutputTokens: 128_000,
-      images: true,
-      prefill: false,
-      systemPrompt: true,
-      stopSequences: false,
-      streaming: true,
-      reasoning: true,
-    },
-    providerOptions: {
-      reasoningEffort: "high",
-    },
-  });
-
-  addModel({
-    provider: openAIProvider,
     name: "openai:gpt-5-mini",
     aliases: ["openai:gpt-5-mini-latest", "gpt-5-mini"],
     capabilities: {
@@ -406,25 +315,6 @@ if (env.CFTS_AI_LLM_OPENAI_API_KEY) {
       stopSequences: true,
       streaming: true,
       reasoning: false,
-    },
-  });
-
-  addModel({
-    provider: openAIProvider,
-    name: "openai:gpt-5-mini-thinking",
-    aliases: ["openai:gpt-5-mini-thinking-latest", "gpt-5-mini-thinking"],
-    capabilities: {
-      contextWindow: 400_000,
-      maxOutputTokens: 128_000,
-      images: true,
-      prefill: false,
-      systemPrompt: false,
-      stopSequences: false,
-      streaming: true,
-      reasoning: true,
-    },
-    providerOptions: {
-      reasoningEffort: "high",
     },
   });
 }
@@ -505,12 +395,9 @@ if (env.CFTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
 async function loadGatewayModels() {
   const url = env.CFTS_AI_GATEWAY_URL.replace(/\/+$/, "");
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3_000);
     const res = await fetch(`${url}/v1/models`, {
-      signal: controller.signal,
+      headers: gatewayProvenanceHeaders("list-models"),
     });
-    clearTimeout(timeout);
 
     if (!res.ok) {
       console.warn(
@@ -522,9 +409,12 @@ async function loadGatewayModels() {
     const body: GatewayModelsResponse = await res.json();
     // Force HTTP/1.1 to avoid Deno HTTP/2 SSE streaming bug
     const http1Client = Deno.createHttpClient({ http2: false });
-    const gatewayFetch: typeof fetch = (input, init) => {
+    // Every request through this provider reaches the gateway, so provenance
+    // is attached here rather than at each call site: the gateway needs it to
+    // attribute the request, and no vendor API is on the other end of it.
+    const gatewayFetch: typeof fetch = withGatewayProvenance((input, init) => {
       return fetch(input, { ...init, client: http1Client } as RequestInit);
-    };
+    });
     const gatewayProvider = createOpenAI({
       baseURL: `${url}/v1`,
       apiKey: "gateway-internal",
@@ -576,20 +466,33 @@ async function loadGatewayModels() {
     // The gateway is only reachable on Tailscale; an unreachable URL is
     // expected off-network. Log as a warning and continue without gateway
     // models — direct provider entries (Anthropic, etc.) remain available.
-    if (err instanceof DOMException && err.name === "AbortError") {
-      console.warn(`[gateway] Timeout fetching models from ${url}; skipping.`);
-    } else {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn(
-        `[gateway] Could not reach ${url} (${message}); skipping gateway models.`,
-      );
-    }
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[gateway] Could not reach ${url} (${message}); skipping gateway models.`,
+    );
   }
 }
 
 export const findModel = (name: string) => {
   return MODELS[name];
 };
+
+/**
+ * The model registered under `name`, waiting for gateway discovery only where
+ * waiting could change the answer. A model a provider registered as this
+ * module loaded is returned straight away, so a request for one of those is
+ * served whatever the gateway is doing. A name that is not registered yet is
+ * answered once discovery has finished, which is what a gateway model, the
+ * `default` alias, and a name that is no model at all have in common.
+ */
+export async function resolveModel(
+  name: string,
+): Promise<ModelConfig | undefined> {
+  const registered = MODELS[name];
+  if (registered !== undefined) return registered;
+  await modelsReady;
+  return MODELS[name];
+}
 
 const registerDefaultModel = () => {
   const chosenName = DEFAULT_MODEL_CANDIDATES.find((name) => MODELS[name]);
@@ -609,8 +512,23 @@ const registerDefaultModel = () => {
   console.log(` Default model: ${chosenName}`);
 };
 
-if (env.CFTS_AI_GATEWAY_URL) {
-  await loadGatewayModels();
-}
+// Gateway model discovery is a network call to a host that answers only on
+// Tailscale, and the list it returns is only needed by a request that names a
+// model. It runs alongside the server coming up rather than in front of it, so
+// a gateway that is slow to answer, or that never answers, delays no more than
+// the requests that need what it says.
+const modelsReady: Promise<void> = (async () => {
+  if (env.CFTS_AI_GATEWAY_URL) {
+    await loadGatewayModels();
+  }
+  registerDefaultModel();
+})();
 
-registerDefaultModel();
+/**
+ * Resolves once the model list holds everything it is going to hold. Await
+ * this before reading {@link MODELS} whole; to answer for one model, prefer
+ * {@link resolveModel}, which waits only where the answer is still open.
+ */
+export function whenModelsReady(): Promise<void> {
+  return modelsReady;
+}

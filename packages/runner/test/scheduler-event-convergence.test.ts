@@ -12,6 +12,13 @@ import { NodeRegistry } from "../src/scheduler/node-record.ts";
 import { runPullSchedulerSettleLoop } from "../src/scheduler/settle.ts";
 import type { Action } from "../src/scheduler/types.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
+// Identity entity keys resolve scoped addresses against (stage E); these
+// tests use space-scoped addresses, so any one identity partitions alike.
+const TEST_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+const identityThunk = () => TEST_IDENTITY;
 
 describe("event preflight convergence demand", () => {
   it("finds an invalid materializer through a transitive reader closure", () => {
@@ -60,7 +67,10 @@ describe("event preflight convergence demand", () => {
     const writes = new WeakMap<Action, IMemorySpaceAddress[]>([
       [closureWriter, [handlerInput]],
     ]);
-    const materializerIndex = new SchedulerMaterializers(nodes.effects);
+    const materializerIndex = new SchedulerMaterializers(
+      nodes.effects,
+      identityThunk,
+    );
     materializerIndex.registerAddresses(materializer, [materialized]);
     const candidates = new Set([
       materializer,
@@ -69,6 +79,7 @@ describe("event preflight convergence demand", () => {
       bridge,
     ]);
     const state = {
+      scopeKeyIdentity: identityThunk,
       getTrace: () => undefined,
       nodes,
       pending: new Set<Action>(),
@@ -76,13 +87,14 @@ describe("event preflight convergence demand", () => {
       dependents,
       dependencies,
       writersByEntity: new Map([
-        [entityKey(handlerInput), new Set([closureWriter])],
+        [entityKey(handlerInput, TEST_IDENTITY), new Set([closureWriter])],
       ]),
       effects: nodes.effects,
       materializerIndex,
       triggerIndex: {
         collectReadersForWrite: (write: IMemorySpaceAddress) =>
-          entityKey(write) === entityKey(materialized)
+          entityKey(write, TEST_IDENTITY) ===
+              entityKey(materialized, TEST_IDENTITY)
             ? candidates
             : new Set<Action>(),
       },
@@ -149,12 +161,14 @@ describe("event preflight convergence demand", () => {
     let eligibilityReads = 0;
     let runs = 0;
     const materializerIndex = {
+      scopeKeyIdentity: identityThunk,
       materializersByEntity: new Map(),
       effects: nodes.effects,
       getMaterializerWriteEnvelopes: () => undefined,
       isMaterializer: () => false,
     };
     const state = {
+      scopeKeyIdentity: identityThunk,
       getCollectSettleStats: () => false,
       effects: nodes.effects,
       computations: nodes.computations,
@@ -229,16 +243,18 @@ describe("event preflight convergence demand", () => {
       [actionB, [outputB]],
     ]);
     const writersByEntity = new Map([
-      [entityKey(outputA), new Set([actionA])],
-      [entityKey(outputB), new Set([actionB])],
+      [entityKey(outputA, TEST_IDENTITY), new Set([actionA])],
+      [entityKey(outputB, TEST_IDENTITY), new Set([actionB])],
     ]);
     const materializerIndex = {
+      scopeKeyIdentity: identityThunk,
       materializersByEntity: new Map(),
       effects: nodes.effects,
       getMaterializerWriteEnvelopes: () => undefined,
       isMaterializer: () => false,
     };
     const preflightState = {
+      scopeKeyIdentity: identityThunk,
       getTrace: () => undefined,
       nodes,
       pending,
@@ -260,6 +276,7 @@ describe("event preflight convergence demand", () => {
     };
 
     const state = {
+      scopeKeyIdentity: identityThunk,
       getCollectSettleStats: () => false,
       effects: nodes.effects,
       computations: nodes.computations,

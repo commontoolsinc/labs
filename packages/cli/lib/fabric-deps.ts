@@ -26,8 +26,16 @@ export async function pinProgramFabricImports(
 ): Promise<{ program: RuntimeProgram; rewrites: ProgramFabricPinRewrite[] }> {
   const rewrites: ProgramFabricPinRewrite[] = [];
   const files = [];
+  // A data file's bytes are stored exactly as authored and are never read as
+  // code. Parsing one for import specifiers would rewrite text that only
+  // resembles an import, so pinning skips them.
+  const dataFiles = new Set(program.dataFiles ?? []);
 
   for (const file of program.files) {
+    if (dataFiles.has(file.name)) {
+      files.push(file);
+      continue;
+    }
     const resolvedBySpecifier = new Map<string, string>();
     const rewritten = await rewriteFabricPins(
       file.contents,

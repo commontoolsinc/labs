@@ -1,20 +1,38 @@
+import { type BuiltInLLMMessage } from "@commonfabric/api";
+import {
+  type LLMGenerateObjectRequest,
+  llmGenerateObjectRequestProblem,
+  type LLMRequest,
+  llmRequestProblem,
+} from "@commonfabric/llm/types";
+import type { Context } from "@hono/hono";
 import * as HttpStatusCodes from "stoker/http-status-codes";
-import type { AppRouteHandler } from "@/lib/types.ts";
+
+import {
+  CacheItem,
+  hashKey,
+  loadFromCache,
+  requestsCaching,
+  saveToCache,
+} from "./cache.ts";
+import { httpStatusForError } from "./errors.ts";
+import { generateObject as generateObjectCore } from "./generateObject.ts";
+import { generateText as generateTextCore } from "./generateText.ts";
 import type {
-  FeedbackRoute,
   GenerateObjectRoute,
   GenerateTextRoute,
   GetModelsRoute,
 } from "./llm.routes.ts";
-import { ALIAS_NAMES, ModelList, MODELS, TASK_MODELS } from "./models.ts";
-import { CacheItem, hashKey, loadFromCache, saveToCache } from "./cache.ts";
-import type { Context } from "@hono/hono";
-import { generateText as generateTextCore } from "./generateText.ts";
-import { generateObject as generateObjectCore } from "./generateObject.ts";
-import { findModel } from "./models.ts";
-import env from "@/env.ts";
-import { isLLMRequest } from "@commonfabric/llm/types";
-import { type BuiltInLLMMessage } from "@commonfabric/api";
+import {
+  ALIAS_NAMES,
+  findModel,
+  ModelList,
+  MODELS,
+  resolveModel,
+  TASK_MODELS,
+  whenModelsReady,
+} from "./models.ts";
+import type { AppRouteHandler } from "@/lib/types.ts";
 
 const removeNonCacheableFields = (
   obj: object,
@@ -29,15 +47,34 @@ const removeNonCacheableFields = (
 };
 
 /**
+ * Reads the request body as JSON. A body that is not JSON at all reaches the
+ * framework as a failure with no status of its own, so it is caught here.
+ */
+async function readJsonBody(
+  c: Context,
+): Promise<{ ok: true; payload: any } | { ok: false; error: string }> {
+  try {
+    return { ok: true, payload: await c.req.json() };
+  } catch (error) {
+    return {
+      ok: false,
+      error: `Request body is not JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+}
+
+/**
  * Validates that the model and JSON mode settings are compatible
  * @returns An error response object if validation fails, or null if validation passes
  */
-function validateModelAndJsonMode(
+async function validateModelAndJsonMode(
   c: Context,
   modelString: string | undefined,
   mode: string | undefined,
 ) {
-  const model = modelString ? findModel(modelString) : null;
+  const model = modelString ? await resolveModel(modelString) : null;
 
   if (!model) {
     return c.json(
@@ -73,7 +110,13 @@ function validateModelAndJsonMode(
  * Handler for GET /models endpoint
  * Returns filtered list of available LLM models based on search criteria
  */
-export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
+export const getModels: AppRouteHandler<GetModelsRoute> = async (c) => {
+  // The list is what this route answers for, so it waits for the whole of it.
+  // A route naming one model asks `resolveModel`, which waits only when the
+  // name is not registered yet; there is no such shortcut for all of them, and
+  // a list quietly missing every gateway model is a wrong answer rather than
+  // an early one.
+  await whenModelsReady();
   const { search, capability, task } = c.req.query();
   const capabilities = capability?.split(",");
 
@@ -118,16 +161,21 @@ export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
  * Generates text using specified LLM model or task
  */
 export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
-  const payload = await c.req.json();
-  if (!isLLMRequest(payload)) {
+  const body = await readJsonBody(c);
+  if (!body.ok) {
+    return c.json({ error: body.error }, HttpStatusCodes.BAD_REQUEST);
+  }
+  const problem = llmRequestProblem(body.payload);
+  if (problem !== undefined) {
     return c.json(
-      {
-        error:
-          "Invalid request: requires 'model' (string), 'messages' (array), and 'cache' (boolean)",
-      },
+      { error: `Invalid request: ${problem}` },
       HttpStatusCodes.BAD_REQUEST,
     );
   }
+  // `llmRequestProblem()` answering `undefined` is what makes this hold, and
+  // it is the only thing that does: `body.payload` is whatever the JSON
+  // parser returned.
+  const payload: LLMRequest = body.payload;
 
   if (!payload.metadata) {
     payload.metadata = {};
@@ -150,7 +198,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   //
   // Provider-native tools such as Google Search are intentionally time-sensitive.
   // Treat them as live requests until we have a freshness-aware cache policy.
-  const shouldCache = payload.cache === true &&
+  const shouldCache = requestsCaching(payload) &&
     (payload.nativeModelToolIds?.length ?? 0) === 0;
 
   let cacheKey: string | undefined;
@@ -183,7 +231,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
     }
   };
 
-  const validationError = validateModelAndJsonMode(
+  const validationError = await validateModelAndJsonMode(
     c,
     payload.model,
     payload.mode,
@@ -227,55 +275,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   } catch (error) {
     console.error("Error in generateText:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
-    return c.json({ error: message }, HttpStatusCodes.BAD_REQUEST);
-  }
-};
-
-/**
- * Handler for POST /feedback endpoint
- * Submits user feedback on an LLM response to Phoenix
- */
-export const submitFeedback: AppRouteHandler<FeedbackRoute> = async (c) => {
-  const payload = await c.req.json();
-
-  try {
-    const phoenixPayload = {
-      data: [
-        {
-          span_id: payload.span_id,
-          name: payload.name || "user feedback",
-          annotator_kind: payload.annotator_kind || "HUMAN",
-          result: payload.result,
-          metadata: payload.metadata || {},
-        },
-      ],
-    };
-
-    const phoenixAnnotationPayload = {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Authorization": `Bearer ${env.CFTS_AI_LLM_PHOENIX_API_KEY}`,
-      },
-      body: JSON.stringify(phoenixPayload),
-    };
-
-    const response = await fetch(
-      `${env.CFTS_AI_LLM_PHOENIX_API_URL}/span_annotations?sync=false`,
-      phoenixAnnotationPayload,
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Phoenix API error: ${response.status} ${errorText}`);
-    }
-
-    return c.json({ success: true }, HttpStatusCodes.OK);
-  } catch (error) {
-    console.error("Error submitting feedback:", error);
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return c.json({ error: message }, HttpStatusCodes.BAD_REQUEST);
+    return c.json({ error: message }, httpStatusForError(error));
   }
 };
 
@@ -286,18 +286,21 @@ export const submitFeedback: AppRouteHandler<FeedbackRoute> = async (c) => {
 export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (
   c,
 ) => {
-  const payload = await c.req.json();
-
-  if (!payload.messages || !payload.schema) {
-    const missing = [
-      !payload.messages && "'messages'",
-      !payload.schema && "'schema'",
-    ].filter(Boolean).join(" and ");
+  const body = await readJsonBody(c);
+  if (!body.ok) {
+    return c.json({ error: body.error }, HttpStatusCodes.BAD_REQUEST);
+  }
+  const problem = llmGenerateObjectRequestProblem(body.payload);
+  if (problem !== undefined) {
     return c.json(
-      { error: `Missing required field(s): ${missing}` },
+      { error: `Invalid request: ${problem}` },
       HttpStatusCodes.BAD_REQUEST,
     );
   }
+  // `llmGenerateObjectRequestProblem()` answering `undefined` is what makes
+  // this hold, and it is the only thing that does: `body.payload` is whatever
+  // the JSON parser returned.
+  const payload: LLMGenerateObjectRequest = body.payload;
 
   if (!payload.metadata) {
     payload.metadata = {};
@@ -311,9 +314,10 @@ export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (
   const cacheKey = await hashKey(
     JSON.stringify(removeNonCacheableFields(payload)),
   );
+  const shouldCache = requestsCaching(payload);
 
   // Check cache if enabled
-  if (payload.cache !== false) {
+  if (shouldCache) {
     const cachedResult = await loadFromCache(cacheKey);
     if (cachedResult) {
       return c.json({
@@ -326,7 +330,7 @@ export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (
     const result = await generateObjectCore(payload);
 
     // Save to cache if enabled
-    if (payload.cache !== false) {
+    if (shouldCache) {
       try {
         await saveToCache(cacheKey, {
           ...removeNonCacheableFields(payload),
@@ -341,6 +345,6 @@ export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (
   } catch (error) {
     console.error("Error in generateObject:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
-    return c.json({ error: message }, HttpStatusCodes.BAD_REQUEST);
+    return c.json({ error: message }, httpStatusForError(error));
   }
 };

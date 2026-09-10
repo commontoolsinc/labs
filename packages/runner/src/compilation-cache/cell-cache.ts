@@ -1,36 +1,47 @@
-import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
-import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
-import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
 import { normalize } from "@std/path/posix";
-import { computeModuleHashes } from "../harness/module-identity.ts";
-import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
-import { deriveModuleRecordFields } from "../sandbox/module-record-compiler.ts";
-import type { CacheableModule } from "../harness/types.ts";
-import type { MemorySpace, Runtime } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { type Cell, isCell } from "../cell.ts";
-import { snapshotQueryResult } from "../query-result-proxy.ts";
+
+import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
+import type {
+  BuilderSourceSitesV1,
+  PatternCoverageSpan,
+} from "@commonfabric/ts-transformers";
+import { isBuilderSourceSitesV1 } from "@commonfabric/ts-transformers/runtime-contract";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import type { JSONSchema } from "../builder/types.ts";
+import { type Cell, isCell } from "../cell.ts";
 import { readStoredCfcMetadata } from "../cfc/metadata.ts";
+import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
+import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
+import { computeModuleHashes } from "../harness/module-identity.ts";
+import type { CacheableModule } from "../harness/types.ts";
+import { snapshotQueryResult } from "../query-result-proxy.ts";
+import type { MemorySpace, Runtime } from "../runtime.ts";
 import {
   isFabricImportSpecifier,
   parseFabricRef,
   pinnedIdentity,
 } from "../sandbox/fabric-import-specifier.ts";
 import {
+  DATA_FILE_SPECIFIER,
+  deriveModuleRecordFields,
+  SOURCE_ROOT_SPECIFIER,
+} from "../sandbox/module-record-compiler.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import {
   COMPILE_CACHE_RUNTIME_VERSION,
   SOURCE_COMPILE_CACHE_RUNTIME_VERSION,
 } from "./compile-cache-version.ts";
-import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
 
 const logger = getLogger("cell-cache");
 
 /**
  * Content-addressed compilation cache — document model and key scheme.
  *
- * Phase 4 of docs/specs/module-loading.md. The persistent cache is a pair of
- * per-module document sets stored as regular cells in the target space:
+ * See docs/specs/module-loading.md §"Storage model: two content-addressed
+ * document sets, per space". The persistent cache is a pair of per-module
+ * document sets stored as regular cells in the target space:
  *
  *  - **Source set** `pattern:<identity>` — authored TypeScript, keyed by the
  *    per-module Merkle identity (`computeModuleHashes`). Runtime-version
@@ -49,6 +60,7 @@ const logger = getLogger("cell-cache");
 export interface ModuleImportRef {
   /** Authored import specifier, e.g. `"./util.ts"`. */
   readonly specifier: string;
+
   /** Content-addressed identity of the imported module's document. */
   readonly identity: string;
 }
@@ -78,10 +90,13 @@ const SOURCE_DELEGATION_PATH = ["delegatedModuleIdentities"] as const;
 interface ModuleDocBase {
   /** Module code: authored TS (source set) or compiled JS (compiled set). */
   readonly code: string;
+
   /** Authored module path, e.g. `/main.tsx`. */
   readonly filename: string;
+
   /** Resolved internal imports; each points at another document by identity. */
   readonly imports: readonly ModuleImportRef[];
+
   /** Predecessor module identities whose writer authority this module inherits. */
   readonly delegatedModuleIdentities?: readonly string[];
 }
@@ -89,6 +104,7 @@ interface ModuleDocBase {
 /** A source-set document (`pattern:<identity>`). */
 export interface SourceDoc extends ModuleDocBase {
   readonly kind: "source";
+
   /**
    * Optional, NON-NORMATIVE product annotations (a name doc, a spec doc,
    * lineage — typically sigil links). The runtime NEVER reads these for
@@ -100,11 +116,22 @@ export interface SourceDoc extends ModuleDocBase {
   readonly annotations?: Record<string, unknown>;
 }
 
-/** A compiled-set document (`compileCache:<runtimeVersion>/<identity>`). */
+/**
+ * A compiled-set document (`compileCache:<runtimeVersion>/<identity>`).
+ *
+ * `kind` separates the two things this set holds. A `"compiled"` document's
+ * `code` is an emitted module body, built into a record and executed. A
+ * `"data"` document's `code` is the verbatim bytes of an attached data file:
+ * the compiled set carries them so a warm load has everything the pattern
+ * needs without reading the source set, and nothing ever parses, verifies, or
+ * executes them.
+ */
 export interface CompiledDoc extends ModuleDocBase {
-  readonly kind: "compiled";
-  /** Per-module source map, if any (registered for fn.src / CFC resolution). */
+  readonly kind: "compiled" | "data";
+
+  /** Per-module source map, if any (registered for authored error stacks). */
   readonly sourceMap?: unknown;
+
   /**
    * Precomputed record surface (Fix B): the direct export names, `export *`
    * target specifiers, and runtime import specifiers derived from `code` at
@@ -112,9 +139,14 @@ export interface CompiledDoc extends ModuleDocBase {
    * Absent on documents written before the field existed (→ parse fallback).
    */
   readonly exportNames?: readonly string[];
+
   readonly starTargetSpecs?: readonly string[];
   readonly importSpecs?: readonly string[];
   readonly policyManifests?: readonly unknown[];
+
+  /** Debug-only authored builder sites, keyed by runtime artifact symbol. */
+  readonly builderSourceSites?: BuilderSourceSitesV1;
+
   /**
    * Authored-line spans for the coverage probes the transformer baked into
    * `code`, keyed by `(fileName, id)`. Present only on documents written by a
@@ -353,6 +385,9 @@ export function compiledDocKey(
  * warm closure would always be incomplete. These links carry no authored
  * specifier, so they are ignored by the Merkle identity recompute (which
  * resolves a module's edges from its own source, not its stored links).
+ * Explicit source-package roots use {@link SOURCE_ROOT_SPECIFIER} and attached
+ * data files use {@link DATA_FILE_SPECIFIER} instead; both participate in the
+ * entry module's identity.
  */
 export const ROOT_LINK_SPECIFIER = "cf:cache-root/";
 
@@ -473,10 +508,13 @@ export function buildSourceDocs(
 /** Result of verifying a loaded source-document closure. */
 export interface SourceDocVerification {
   readonly ok: boolean;
+
   /** The entry document's authored filename, when present. */
   readonly entryFilename?: string;
+
   /** Identities whose recomputed Merkle hash does not match their key. */
   readonly mismatches: readonly string[];
+
   /** Import-link target identities absent from the loaded document set. */
   readonly missing: readonly string[];
 }
@@ -492,7 +530,8 @@ export interface SourceDocVerification {
  * an import link, makes the recomputed identity diverge from the key.
  *
  * Each document is verified against **its own view**: the documents reachable
- * from it over authored-import edges (root links excluded — a
+ * from it over authored-import and source-package edges (cache root links
+ * excluded — a
  * {@link ROOT_LINK_SPECIFIER} edge is never part of any module's Merkle
  * preimage). One closure may legally hold several generations of the same
  * ambient filename (e.g. two seals' injected `cfc.ts`, each root-linked by a
@@ -524,6 +563,23 @@ export function verifySourceDocs(
   for (const doc of docsByIdentity.values()) {
     for (const imp of doc.imports) {
       if (!docsByIdentity.has(imp.identity)) missing.push(imp.identity);
+    }
+  }
+
+  // Data documents, collected across the whole closure by IDENTITY. Reaching
+  // the verdict "this is data" must not depend on which document a view happens
+  // to be rooted at, since a data document rooted in its own view names nothing
+  // itself. Identity rather than filename is what makes that safe: one closure
+  // may legally hold several generations of a filename, so a filename set would
+  // condemn a code module that merely shares a name with data elsewhere.
+  // A forged data edge buys nothing: it changes the identity of the document
+  // carrying it, and hashing a real module as a leaf changes that module's
+  // identity too, so both diverge from their keys here.
+  const dataIdentities = new Set<string>();
+  for (const doc of docsByIdentity.values()) {
+    for (const imp of doc.imports) {
+      if (!imp.specifier.startsWith(DATA_FILE_SPECIFIER)) continue;
+      if (docsByIdentity.has(imp.identity)) dataIdentities.add(imp.identity);
     }
   }
 
@@ -563,9 +619,43 @@ export function verifySourceDocs(
       continue;
     }
 
+    const additionalInternalDeps = new Map<
+      string,
+      { specifier: string; target: string }[]
+    >();
+    for (const id of viewIds) {
+      const doc = docsByIdentity.get(id)!;
+      const packageEdges = doc.imports
+        .filter((imp) =>
+          imp.specifier.startsWith(SOURCE_ROOT_SPECIFIER) ||
+          imp.specifier.startsWith(DATA_FILE_SPECIFIER)
+        )
+        .flatMap((imp) => {
+          const target = docsByIdentity.get(imp.identity);
+          return target === undefined
+            ? []
+            : [{ specifier: imp.specifier, target: target.filename }];
+        });
+      if (packageEdges.length > 0) {
+        additionalInternalDeps.set(doc.filename, packageEdges);
+      }
+    }
+    // Within one view, filenames are unique by construction, so mapping the
+    // view's data identities to their filenames is unambiguous here.
+    const viewDataFiles = new Set(
+      viewIds
+        .filter((id) => dataIdentities.has(id))
+        .map((id) => docsByIdentity.get(id)!.filename),
+    );
     const recomputed = computeModuleHashes(
       { main: rootDoc.filename, files },
-      { runtimeFingerprint },
+      {
+        runtimeFingerprint,
+        ...(additionalInternalDeps.size === 0
+          ? {}
+          : { additionalInternalDeps }),
+        ...(viewDataFiles.size === 0 ? {} : { dataFiles: viewDataFiles }),
+      },
     );
     for (const id of viewIds) {
       if (!verdicts.has(id)) {
@@ -589,7 +679,9 @@ export function verifySourceDocs(
   };
 }
 
-// --- Source-set store (4.3.2): write/read `pattern:<identity>` cells ---------
+//
+// Source-set store (4.3.2): write/read `pattern:<identity>` cells
+//
 
 /**
  * Stored shape of a source-set cell. Mirrors {@link SourceDoc} but each import
@@ -605,58 +697,10 @@ interface StoredSourceDoc {
   filename: string;
   imports: { specifier: string; link: unknown }[];
   delegatedModuleIdentities?: string[];
-  // Synthetic closure-only edges are intentionally separate from authored
-  // imports: they make the stored graph load-complete but are not part of the
-  // module's Merkle identity.
-  roots?: unknown[];
   // Optional product annotations — see {@link SourceDoc.annotations}. Stored
   // verbatim; never part of the content identity.
   annotations?: Record<string, unknown>;
 }
-
-/** Flat write/read-back schema: resolve root links without recursively loading. */
-const SOURCE_DOC_WRITE_SCHEMA = {
-  type: "object",
-  properties: {
-    kind: { type: "string" },
-    identity: { type: "string" },
-    code: { type: "string" },
-    filename: { type: "string" },
-    imports: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          specifier: { type: "string" },
-          link: { asCell: ["cell"] },
-        },
-      },
-    },
-    roots: { type: "array", items: { asCell: ["cell"] } },
-    annotations: { type: "object" },
-  },
-} as const satisfies JSONSchema;
-
-const rootCellKey = (cell: Cell<unknown>): string => {
-  const { space, id, path, scope } = cell.getAsNormalizedFullLink();
-  return JSON.stringify([space, id, scope, path]);
-};
-
-/** Existing topology is monotonic; append new roots in deterministic order. */
-const unionRootLinks = (
-  existing: readonly unknown[] | undefined,
-  additions: readonly Cell<unknown>[],
-): unknown[] => {
-  const roots: Cell<unknown>[] = (existing ?? []).filter(isCell);
-  const seen = new Set(roots.map(rootCellKey));
-  for (const addition of additions) {
-    const key = rootCellKey(addition);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    roots.push(addition);
-  }
-  return roots.map((root) => root.getAsLink());
-};
 
 /**
  * Schema for a source-set document. **Recursive**: each `imports[].link` is an
@@ -687,10 +731,6 @@ export const SOURCE_DOC_SCHEMA = {
         delegatedModuleIdentities: {
           type: "array",
           items: { type: "string" },
-        },
-        roots: {
-          type: "array",
-          items: { $ref: "#/$defs/sourceDoc", asCell: ["cell"] },
         },
         // Optional, non-normative product annotations (see SourceDoc).
         annotations: { type: "object" },
@@ -729,7 +769,6 @@ function sourceDocWriteSchema(): JSONSchema {
         items: { type: "string" },
         ifc: { addIntegrity: [COMPILED_INTEGRITY_ATOM] },
       },
-      roots: { type: "array", items: { asCell: ["cell"] } },
       annotations: { type: "object" },
     },
   };
@@ -786,13 +825,6 @@ export const WRITE_TARGET_EDGE_SYNC_SCHEMA = {
         },
       },
     },
-    // Synthetic roots are direct links, not derived import-edge documents.
-    // Pull their stored values without following them so an idempotent
-    // write-back compares against the complete entry document.
-    roots: {
-      type: "array",
-      items: true,
-    },
   },
 } as const satisfies JSONSchema;
 
@@ -832,35 +864,16 @@ export function writeSourceDocs(
       const baseCell = runtime.getCell<StoredSourceDoc>(
         space,
         sourceDocKey(identity),
-        SOURCE_DOC_WRITE_SCHEMA,
+        undefined,
         tx,
       );
-      // Preserve product annotations on the entry doc only. Root topology is
-      // read through its narrow path on every doc so previously published roots
-      // remain monotonic; write-back pre-sync explicitly loads that path. Avoid
-      // a whole-document read here: it would turn unrelated stale cache fields
-      // into writeback conflict preconditions.
+      // Preserve product annotations on the entry doc only. Annotations are
+      // only written there; reading every dependency doc here turns unrelated
+      // stale cache cells into writeback conflict preconditions.
+      const existing = baseCell.get();
       const existingAnnotations = identity === entryIdentity
-        ? baseCell.key("annotations").get()
+        ? existing?.annotations
         : undefined;
-      const existingRoots = baseCell.key("roots").get();
-      const authoredImports = doc.imports.filter((imp) =>
-        !imp.specifier.startsWith(ROOT_LINK_SPECIFIER)
-      );
-      const roots = doc.imports.filter((imp) =>
-        imp.specifier.startsWith(ROOT_LINK_SPECIFIER)
-      );
-      const storedRoots = unionRootLinks(
-        existingRoots,
-        roots.map((imp) =>
-          runtime.getCell(
-            space,
-            sourceDocKey(imp.identity),
-            undefined,
-            tx,
-          )
-        ),
-      );
       const delegatedModuleIdentities = [
         ...(doc.delegatedModuleIdentities ?? []),
       ];
@@ -876,7 +889,7 @@ export function writeSourceDocs(
         identity,
         code: doc.code,
         filename: doc.filename,
-        imports: authoredImports.map((imp) => ({
+        imports: doc.imports.map((imp) => ({
           specifier: imp.specifier,
           link: runtime.getCell(
             space,
@@ -888,8 +901,7 @@ export function writeSourceDocs(
         ...(delegatedModuleIdentities.length > 0
           ? { delegatedModuleIdentities }
           : {}),
-        ...(storedRoots.length > 0 ? { roots: storedRoots } : {}),
-        ...(isRecord(existingAnnotations)
+        ...(isObjectOrArray(existingAnnotations)
           ? { annotations: existingAnnotations }
           : {}),
       } as StoredSourceDoc);
@@ -984,18 +996,6 @@ export function readLoadedSourceClosure(
         doc.delegatedModuleIdentities,
       )
       : [];
-    for (const rootLink of doc.roots ?? []) {
-      if (!isCell(rootLink)) continue;
-      const child = (rootLink as Cell<unknown>)
-        .asSchema(SOURCE_DOC_SCHEMA)
-        .get() as StoredSourceDoc | undefined;
-      if (!child || typeof child.identity !== "string") continue;
-      imports.push({
-        specifier: `${ROOT_LINK_SPECIFIER}${child.identity}`,
-        identity: child.identity,
-      });
-      childDocs.push({ doc: child, cell: rootLink as Cell<unknown> });
-    }
     out.set(doc.identity, {
       kind: "source",
       code: doc.code,
@@ -1004,7 +1004,9 @@ export function readLoadedSourceClosure(
       ...(delegatedModuleIdentities.length > 0
         ? { delegatedModuleIdentities }
         : {}),
-      ...(isRecord(doc.annotations) ? { annotations: doc.annotations } : {}),
+      ...(isObjectOrArray(doc.annotations)
+        ? { annotations: doc.annotations }
+        : {}),
     });
     for (const child of childDocs) {
       if (!out.has(child.doc.identity)) queue.push(child);
@@ -1114,7 +1116,9 @@ export async function loadVerifiedSourceClosure(
   );
 }
 
-// --- Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC ------
+//
+// Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC
+//
 
 const compiledDocProperties = {
   kind: { type: "string" },
@@ -1126,6 +1130,7 @@ const compiledDocProperties = {
   starTargetSpecs: { type: "array", items: { type: "string" } },
   importSpecs: { type: "array", items: { type: "string" } },
   patternCoverageSpansJson: { type: "string" },
+  builderSourceSitesJson: { type: "string" },
   policyManifests: {
     type: "array",
     items: { type: "object", additionalProperties: true },
@@ -1144,7 +1149,6 @@ const compiledDocProperties = {
       },
     },
   },
-  roots: { type: "array", items: { asCell: ["cell"] } },
 } as const;
 
 /**
@@ -1167,6 +1171,7 @@ export const COMPILED_DOC_SCHEMA = {
         starTargetSpecs: { type: "array", items: { type: "string" } },
         importSpecs: { type: "array", items: { type: "string" } },
         patternCoverageSpansJson: { type: "string" },
+        builderSourceSitesJson: { type: "string" },
         policyManifests: {
           type: "array",
           items: { type: "object", additionalProperties: true },
@@ -1184,10 +1189,6 @@ export const COMPILED_DOC_SCHEMA = {
               link: { $ref: "#/$defs/compiledDoc", asCell: ["cell"] },
             },
           },
-        },
-        roots: {
-          type: "array",
-          items: { $ref: "#/$defs/compiledDoc", asCell: ["cell"] },
         },
       },
     },
@@ -1208,7 +1209,7 @@ export function compiledDocWriteSchema(): JSONSchema {
 }
 
 interface StoredCompiledDoc {
-  kind: "compiled";
+  kind: "compiled" | "data";
   identity: string;
   code: string;
   filename: string;
@@ -1217,10 +1218,10 @@ interface StoredCompiledDoc {
   starTargetSpecs?: readonly string[];
   importSpecs?: readonly string[];
   patternCoverageSpansJson?: string;
+  builderSourceSitesJson?: string;
   policyManifests?: readonly unknown[];
   delegatedModuleIdentities?: string[];
   imports: { specifier: string; link: unknown }[];
-  roots?: unknown[];
 }
 
 /**
@@ -1245,7 +1246,7 @@ function storedCoverageSpans(
   if (!Array.isArray(spans)) return undefined;
   const out: PatternCoverageSpan[] = [];
   for (const span of spans) {
-    if (!isRecord(span)) return undefined;
+    if (!isObjectOrArray(span)) return undefined;
     const { fileName, id, kind, startLine, endLine, startColumn, endColumn } =
       span;
     if (
@@ -1269,6 +1270,20 @@ function storedCoverageSpans(
   return out;
 }
 
+/** Parses and validates a debug-only builder-source-site sidecar. */
+function storedBuilderSourceSites(
+  stored: unknown,
+): BuilderSourceSitesV1 | undefined {
+  if (typeof stored !== "string") return undefined;
+  let sidecar: unknown;
+  try {
+    sidecar = JSON.parse(stored);
+  } catch {
+    return undefined;
+  }
+  return isBuilderSourceSitesV1(sidecar) ? sidecar : undefined;
+}
+
 /** Whether a cell's persisted CFC label carries `atom` at `path`. */
 function cellCarriesIntegrity(
   cell: Cell<unknown>,
@@ -1277,6 +1292,8 @@ function cellCarriesIntegrity(
   path: readonly (string | number)[] = [],
 ): boolean {
   const link = cell.getAsNormalizedFullLink();
+  // An UnknownCfcMetadataVersionError propagates, deliberately: an
+  // uninterpretable envelope must not read as cacheable-unlabeled.
   const metadata = readStoredCfcMetadata(tx, {
     space: link.space,
     id: link.id,
@@ -1384,6 +1401,7 @@ export function writeCompiledDocs(
   opts: {
     runtimeVersion: string;
     moduleDelegations?: ModuleDelegationMap;
+
     /** See {@link buildSourceDocs}: full-set root links for chunked writes. */
     extraRoots?: readonly string[];
   },
@@ -1410,8 +1428,12 @@ export function writeCompiledDocs(
         tx,
       );
       // Fix B: derive the record surface from the compiled body once, here, so
-      // the boot-time record build reads it instead of re-parsing per load.
-      const derived = deriveModuleRecordFields(module.js);
+      // the boot-time record build reads it instead of re-parsing per load. A
+      // data entry has no record surface and its bytes are not JavaScript, so
+      // it is never handed to the extractor.
+      const derived = module.isData
+        ? undefined
+        : deriveModuleRecordFields(module.js);
       const delegatedModuleIdentities = validDelegatedModuleIdentities(
         module.identity,
         [...(effectiveModuleDelegations.get(module.identity) ?? [])],
@@ -1428,36 +1450,16 @@ export function writeCompiledDocs(
       if (policyManifests !== undefined) {
         runtime.registerCfcPolicyManifests(undefined, policyManifests);
       }
-      const refs = storedImportRefs(module, entryIdentity, extraRoots, {
-        includeFabricEdges: true,
-      });
-      const authoredImports = refs.filter((ref) =>
-        !ref.specifier.startsWith(ROOT_LINK_SPECIFIER)
-      );
-      const roots = refs.filter((ref) =>
-        ref.specifier.startsWith(ROOT_LINK_SPECIFIER)
-      );
-      // The write-back target sync loads this narrow path. Preserve its set
-      // without broad-reading the compiled body or import-edge documents.
-      const storedRoots = unionRootLinks(
-        cell.key("roots").get() as unknown[] | undefined,
-        roots.map((ref) =>
-          runtime.getCell(
-            space,
-            compiledDocKey(opts.runtimeVersion, ref.identity),
-            undefined,
-            tx,
-          )
-        ),
-      );
       cell.set({
-        kind: "compiled",
+        kind: module.isData ? "data" : "compiled",
         identity: module.identity,
         code: module.js,
         filename: module.filename,
-        exportNames: derived.exportNames,
-        starTargetSpecs: derived.starTargetSpecs,
-        importSpecs: derived.importSpecs,
+        ...(derived === undefined ? {} : {
+          exportNames: derived.exportNames,
+          starTargetSpecs: derived.starTargetSpecs,
+          importSpecs: derived.importSpecs,
+        }),
         ...(module.sourceMap !== undefined
           ? { sourceMap: module.sourceMap }
           : {}),
@@ -1466,11 +1468,16 @@ export function writeCompiledDocs(
             module.patternCoverageSpans,
           ),
         }),
+        ...(module.builderSourceSites === undefined ? {} : {
+          builderSourceSitesJson: JSON.stringify(module.builderSourceSites),
+        }),
         ...(policyManifests === undefined ? {} : { policyManifests }),
         ...(delegatedModuleIdentities.length > 0
           ? { delegatedModuleIdentities }
           : {}),
-        imports: authoredImports.map((ref) => ({
+        imports: storedImportRefs(module, entryIdentity, extraRoots, {
+          includeFabricEdges: true,
+        }).map((ref) => ({
           specifier: ref.specifier,
           link: runtime.getCell(
             space,
@@ -1479,7 +1486,6 @@ export function writeCompiledDocs(
             tx,
           ).getAsLink(),
         })),
-        ...(storedRoots.length > 0 ? { roots: storedRoots } : {}),
       } as StoredCompiledDoc);
     }
   });
@@ -1501,6 +1507,7 @@ export function writeSourceAndCompiledDocs(
   opts: {
     runtimeVersion: string;
     moduleDelegations?: ModuleDelegationMap;
+
     /** See {@link buildSourceDocs}: full-set root links for chunked writes. */
     extraRoots?: readonly string[];
   },
@@ -1696,10 +1703,44 @@ export async function loadCompiledClosure(
     } catch {
       return undefined;
     }
-    return doc.policyManifests === undefined ? doc : (() => {
+    // `cell.get()` hands back a live query-result view, and `sourceMap` is the
+    // one stored field consumers carry VERBATIM into module artifacts (the
+    // process byte cache, storage-served compile bodies, repair and
+    // replication write-backs). Written back into another space, a live view
+    // serializes as a link to the place it was read from — a cross-space
+    // `/sourceMap` link instead of the map, which either lands silently
+    // corrupt (fresh target doc) or aborts the write-back when the target doc
+    // already carries its stored CFC envelope ("missing link source metadata
+    // … at /sourceMap" — the ensure-ON sx2-scale red). Materialize it to a
+    // plain value here, at the one read boundary every consumer funnels
+    // through, exactly as `policyManifests` are snapshotted above. The other
+    // verbatim-reused fields are immune: strings and string arrays either
+    // re-derive on write (`deriveModuleRecordFields`) or serialize through
+    // `JSON.stringify`.
+    let sourceMap: unknown;
+    try {
+      sourceMap = doc.sourceMap === undefined
+        ? undefined
+        : snapshotQueryResult(doc.sourceMap);
+    } catch {
+      // Mirror the policyManifests degradation above: a synchronously
+      // throwing resolution — e.g. an authorization error against an
+      // unreachable space behind a legacy cross-space `/sourceMap` link —
+      // drops THIS doc (a cache miss, so the caller recompiles) instead of
+      // failing the whole closure load.
+      return undefined;
+    }
+    if (doc.policyManifests === undefined && sourceMap === undefined) {
+      return doc;
+    }
+    if (doc.policyManifests !== undefined) {
       runtime.registerCfcPolicyManifests(undefined, policyManifests);
-      return { ...doc, policyManifests };
-    })();
+    }
+    return {
+      ...doc,
+      ...(sourceMap === undefined ? {} : { sourceMap }),
+      ...(doc.policyManifests === undefined ? {} : { policyManifests }),
+    };
   };
 
   const entryCell = runtime.getCell(
@@ -1725,6 +1766,9 @@ export async function loadCompiledClosure(
     const coverageSpans = storedCoverageSpans(
       doc.patternCoverageSpansJson,
     );
+    const builderSourceSites = storedBuilderSourceSites(
+      doc.builderSourceSitesJson,
+    );
 
     const imports: ModuleImportRef[] = [];
     for (const imp of doc.imports ?? []) {
@@ -1742,20 +1786,11 @@ export async function loadCompiledClosure(
       imports.push({ specifier: imp.specifier, identity: child.identity });
       if (!visited.has(child.identity)) queue.push({ doc: child });
     }
-    for (const rootLink of doc.roots ?? []) {
-      if (!isCell(rootLink)) continue;
-      const child = verifiedDoc(
-        (rootLink as Cell<unknown>).asSchema(COMPILED_DOC_SCHEMA),
-      );
-      if (child === undefined) continue;
-      imports.push({
-        specifier: `${ROOT_LINK_SPECIFIER}${child.identity}`,
-        identity: child.identity,
-      });
-      if (!visited.has(child.identity)) queue.push({ doc: child });
-    }
     out.set(doc.identity, {
-      kind: "compiled",
+      // A stored `kind` the writer did not produce is read as compiled, the
+      // conservative reading: a data entry is only ever treated as data when
+      // the document says so.
+      kind: doc.kind === "data" ? "data" : "compiled",
       code: doc.code,
       filename: doc.filename,
       ...(doc.sourceMap !== undefined ? { sourceMap: doc.sourceMap } : {}),
@@ -1771,6 +1806,7 @@ export async function loadCompiledClosure(
       ...(coverageSpans === undefined
         ? {}
         : { patternCoverageSpans: coverageSpans }),
+      ...(builderSourceSites === undefined ? {} : { builderSourceSites }),
       ...(doc.policyManifests !== undefined
         ? { policyManifests: doc.policyManifests }
         : {}),

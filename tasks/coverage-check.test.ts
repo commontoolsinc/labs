@@ -1,61 +1,68 @@
 import {
   assert,
   assertEquals,
+  assertFalse,
   assertRejects,
   assertStringIncludes,
 } from "@std/assert";
 import * as path from "@std/path";
 import {
   type Artifact,
+  type BaselineSample,
   COVERAGE_SUGGESTION_MARKER,
   type CoverageCommentPayload,
   PERF_METRICS_ARTIFACT_NAME,
   type PRInfo,
-  type TimingSample,
   type WorkflowRun,
 } from "./ci-check-lib.ts";
 import {
-  addCoverageBaselineFromArtifacts,
+  baselineLcovForRun,
   type BaselineRunContext,
-  buildBaselineRunContexts,
+  type BaselineRunReading,
+  buildBaselineRunContext,
+  buildCoverageRows,
+  buildUnattributedRegressionBody,
   collectCurrentCacheStates,
+  combinedLcovFromArtifacts,
   copyCoverageArtifactFiles,
   currentWorkflowRunFromEvent,
+  fetchAncestorRanks,
   fetchArtifactsForRunBestEffort,
   fetchBaselineRunsForCheck,
-  fetchCommitsBehindMain,
+  fetchGroupsChangedOnBase,
   fetchLatestBaselineRunSha,
   fetchMainHeadSha,
   fetchPRForCommitWithError,
-  formatBaselineSourceRunAge,
-  formatCommitDistance,
   formatCompileCacheStates,
   formatErrorForLog,
   formatMetricDelta,
   formatMetricValueForTable,
-  formatRelativeAge,
-  formatRelativeDuration,
   githubApiOrSkip,
-  logBaselineSourceRuns,
+  isComparableBaseline,
   main,
-  metricDisplayParts,
   metricTableRows,
   newestArtifactNamed,
   parseCoverageBaselineFromArtifacts,
   parseMergedBaselineOverrides,
   printMetricTable,
+  readBaseBranchSha,
+  readHeadCommitObject,
   reportBaselineContextResults,
+  reportBaselineDistance,
   reportBaselineRunAvailability,
-  reportPRLookupResults,
+  reportUngatedGroups,
   type Row,
+  selectBaselines,
   selectMergedPRForCommit,
-  summarizeBaselinePRLookups,
+  unscoredGroupsReport,
   validateBaselineRunsForMainHead,
+  walkBaselineRuns,
   workflowRunsPathForBaseline,
   writeCoverageComment,
   writeCoverageDebtSuggestion,
   writeCoverageResolved,
 } from "./coverage-check.ts";
+import { writeUnlaunchedMembers } from "./unlaunched-members.ts";
 
 const SHA_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const SHA_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -89,13 +96,12 @@ function makeArtifact(
   };
 }
 
-function makeSample(run = makeRun(1)): TimingSample {
+function makeSample(run = makeRun(1)): BaselineSample {
   return {
     runId: run.id,
-    runUrl: run.html_url,
     sha: run.head_sha,
     createdAt: run.created_at,
-    durationSeconds: 1.5,
+    uncoveredLines: 2,
   };
 }
 
@@ -131,7 +137,7 @@ Deno.test("copyCoverageArtifactFiles reads a pre-downloaded artifact in place", 
         lcovDir,
         artifactsDir,
       ),
-      { profileFiles: 1, lcovFiles: 2 },
+      { profileFiles: 1, lcovFiles: 2, unlaunchedMembers: [] },
     );
 
     const copiedLcov: string[] = [];
@@ -144,6 +150,47 @@ Deno.test("copyCoverageArtifactFiles reads a pre-downloaded artifact in place", 
       "profile",
     );
     assert((await Deno.stat(sourceDir)).isDirectory);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("copyCoverageArtifactFiles reads the artifact's unlaunched-member record", async () => {
+  const root = await Deno.makeTempDir({ prefix: "perf-coverage-unlaunched-" });
+  const artifact = makeArtifact(21, "coverage-profile-workspace-3");
+  const artifactsDir = path.join(root, "artifacts");
+  const sourceDir = path.join(artifactsDir, artifact.name);
+  const profileDir = path.join(root, "profiles");
+  const lcovDir = path.join(root, "lcov");
+
+  try {
+    await Promise.all([
+      Deno.mkdir(sourceDir, { recursive: true }),
+      Deno.mkdir(profileDir),
+      Deno.mkdir(lcovDir),
+    ]);
+    await Promise.all([
+      Deno.writeTextFile(path.join(sourceDir, "workspace-3.lcov"), "workspace"),
+      writeUnlaunchedMembers(sourceDir, ["./packages/shell", "./tasks"]),
+    ]);
+
+    assertEquals(
+      await copyCoverageArtifactFiles(
+        artifact,
+        profileDir,
+        lcovDir,
+        artifactsDir,
+      ),
+      {
+        profileFiles: 0,
+        lcovFiles: 1,
+        unlaunchedMembers: ["./packages/shell", "./tasks"],
+      },
+    );
+
+    // The record is read rather than copied: a file `deno coverage` cannot
+    // parse among the profiles would fail the whole conversion.
+    assertEquals([...Deno.readDirSync(profileDir)], []);
   } finally {
     await Deno.remove(root, { recursive: true });
   }
@@ -220,7 +267,7 @@ Deno.test("coverage check pre-downloads coverage with strict integrity checks", 
   );
 
   const downloadStep = job.slice(downloadStart, checkStart);
-  assertStringIncludes(downloadStep, "uses: actions/download-artifact@v8");
+  assertStringIncludes(downloadStep, "uses: actions/download-artifact@");
   assertStringIncludes(downloadStep, "pattern: coverage-profile-*");
   assertStringIncludes(downloadStep, "path: coverage-artifacts");
   assertStringIncludes(downloadStep, "merge-multiple: false");
@@ -366,8 +413,9 @@ Deno.test("invalid merged PR baseline override metadata is ignored", () => {
   const overrides = parseMergedBaselineOverrides(
     {
       number: 123,
-      // "job: Check" is not a coverage-debt metric, so accepting it throws.
-      body: "ACCEPT_COVERAGE_DEBT: job: Check = 7 lines",
+      // A directory below the group level names no source group, so accepting
+      // it throws.
+      body: "ACCEPT_COVERAGE_DEBT: packages/runner/src +7 lines",
     },
     (message) => warnings.push(message),
   );
@@ -375,17 +423,13 @@ Deno.test("invalid merged PR baseline override metadata is ignored", () => {
   assertEquals(overrides, null);
   assertEquals(warnings.length, 1);
   assertStringIncludes(warnings[0], "merged PR #123");
-  assertStringIncludes(
-    warnings[0],
-    "only coverage-debt metrics can be accepted",
-  );
+  assertStringIncludes(warnings[0], "name a coverage source group");
 });
 
 Deno.test("valid merged PR baseline override metadata is parsed", () => {
   const overrides = parseMergedBaselineOverrides({
     number: 124,
-    body:
-      "ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 7 lines",
+    body: "ACCEPT_COVERAGE_DEBT: packages/runner +7 lines",
   });
 
   assertEquals(
@@ -394,10 +438,32 @@ Deno.test("valid merged PR baseline override metadata is parsed", () => {
   );
 });
 
+Deno.test("a merged PR's unreadable acceptance leaves the rest of it standing", () => {
+  // A description that merged before the acceptance form changed cannot be
+  // rewritten to suit this parser, so the marker it carries is passed over and
+  // the reset marker beside it is still read.
+
+  const warnings: string[] = [];
+  const overrides = parseMergedBaselineOverrides(
+    {
+      number: 126,
+      body:
+        "ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 7 lines\n" +
+        "NEW_COVERAGE_BASELINE",
+    },
+    (message) => warnings.push(message),
+  );
+
+  assertEquals(overrides?.metrics.size, 0);
+  assertEquals(overrides?.coverageBaselineReset, true);
+  assertEquals(warnings, []);
+});
+
 Deno.test("merged PR legacy coverage-debt acceptance is honored", () => {
   // A baseline PR merged before the marker rename accepted debt with
   // NEW_PERF_BASELINE; its acceptance must still register so it truncates the
   // baseline timeline.
+
   const overrides = parseMergedBaselineOverrides({
     number: 125,
     body:
@@ -413,16 +479,10 @@ Deno.test("merged PR legacy coverage-debt acceptance is honored", () => {
 function coverageRow(
   metric: string,
   current: number,
-  median?: number,
-  status: Row["status"] = median === undefined ? "n/a" : "OK",
+  baseline?: number,
+  status: Row["status"] = baseline === undefined ? "n/a" : "OK",
 ): Row {
-  return {
-    metric,
-    status,
-    current,
-    median,
-    n: 1,
-  };
+  return { metric, status, current, baseline };
 }
 
 /**
@@ -493,7 +553,7 @@ Deno.test("writeCoverageResolved omits groups the PR did not change", async () =
   ];
   // No changed files map to a coverage group, so there is no per-group summary.
   const payload = await payloadFrom(() =>
-    writeCoverageResolved(4211, rows, [{ filename: "README.md" }])
+    writeCoverageResolved(4211, rows, [{ filename: "README.md" }], "")
   );
 
   assertEquals(payload?.state, "resolved");
@@ -509,7 +569,7 @@ Deno.test("writeCoverageResolved flags a changed group whose debt was overridden
     coverageRow("coverage-debt: tasks uncovered lines", 15, 12, "ovrd"),
   ];
   const payload = await payloadFrom(() =>
-    writeCoverageResolved(4211, rows, [{ filename: "tasks/foo.ts" }])
+    writeCoverageResolved(4211, rows, [{ filename: "tasks/foo.ts" }], "")
   );
 
   assertEquals(payload?.state, "resolved");
@@ -519,6 +579,89 @@ Deno.test("writeCoverageResolved flags a changed group whose debt was overridden
   assertEquals(payload?.groups, [
     { group: "tasks", baseline: 12, current: 15 },
   ]);
+  // The changed file carries no patch, so no line can be attributed to it.
+  assertEquals(payload?.files, []);
+});
+
+Deno.test("writeCoverageResolved names the files an accepted debt stands in for", async () => {
+  const rows = [
+    coverageRow("coverage-debt: workspace uncovered lines", 2948, 2953, "excl"),
+    coverageRow("coverage-debt: tasks uncovered lines", 15, 12, "ovrd"),
+  ];
+  // Lines 10 and 11 are uncovered and added; 12 is added but covered, and 20 is
+  // uncovered but not added. Only the overlap is the PR's new uncovered debt.
+  const lcov = [
+    `SF:${path.join(Deno.cwd(), "tasks/foo.ts")}`,
+    "DA:10,0",
+    "DA:11,0",
+    "DA:12,4",
+    "DA:20,0",
+    "end_of_record",
+  ].join("\n");
+  const payload = await payloadFrom(() =>
+    writeCoverageResolved(4211, rows, [{
+      filename: "tasks/foo.ts",
+      patch: ["@@ -9,0 +10,3 @@", "+one", "+two", "+three"].join("\n"),
+    }], lcov)
+  );
+
+  assertEquals(payload?.overridden, true);
+  assertEquals(payload?.files, [
+    { relativePath: "tasks/foo.ts", group: "tasks", uncoveredCount: 2 },
+  ]);
+});
+
+Deno.test("writeCoverageResolved preserves an accepted unchanged-file attribution", async () => {
+  await withFlakyLineCheckout(async ({ rootDir, lcov, baselineLcov }) => {
+    const rows: Row[] = [{ ...unattributedFailure(), status: "ovrd" }];
+    const payload = await payloadFrom(() =>
+      writeCoverageResolved(
+        4211,
+        rows,
+        // The PR changed this coverage group, but not the file whose coverage
+        // moved between otherwise comparable runs.
+        [{ filename: "packages/example/src/changed.ts" }],
+        lcov,
+        {
+          rootDir,
+          readBaselineLcov: (runId) => {
+            assertEquals(runId, 900);
+            return Promise.resolve(baselineLcov);
+          },
+        },
+      )
+    );
+
+    assertEquals(payload?.overridden, true);
+    // The resolved payload replaces the detailed failing comment, so it must
+    // carry the unchanged-file diagnosis forward rather than erase it.
+    assertEquals(payload?.files, [{
+      relativePath: "packages/example/src/racy.ts",
+      group: "packages/example",
+      uncoveredCount: 1,
+    }]);
+  });
+});
+
+Deno.test("writeCoverageResolved leaves the file list empty when nothing was overridden", async () => {
+  const rows = [
+    coverageRow("coverage-debt: tasks uncovered lines", 4, 9),
+  ];
+  const lcov = [
+    `SF:${path.join(Deno.cwd(), "tasks/foo.ts")}`,
+    "DA:10,0",
+    "end_of_record",
+  ].join("\n");
+  const payload = await payloadFrom(() =>
+    writeCoverageResolved(4211, rows, [{
+      filename: "tasks/foo.ts",
+      patch: ["@@ -9,0 +10,1 @@", "+one"].join("\n"),
+    }], lcov)
+  );
+
+  // The group passed on its own, so there is no acceptance to account for.
+  assertEquals(payload?.overridden, false);
+  assertEquals(payload?.files, []);
 });
 
 Deno.test("writeCoverageResolved sums gated groups and ignores workspace and overrides", async () => {
@@ -530,7 +673,7 @@ Deno.test("writeCoverageResolved sums gated groups and ignores workspace and ove
     coverageRow("coverage-debt: identity uncovered lines", 50, 60, "ovrd"),
   ];
   const payload = await payloadFrom(() =>
-    writeCoverageResolved(4211, rows, [])
+    writeCoverageResolved(4211, rows, [], "")
   );
 
   assertEquals(payload?.state, "resolved");
@@ -546,7 +689,7 @@ Deno.test("writeCoverageResolved reports zero improvement when gated groups sit 
     coverageRow("coverage-debt: tasks uncovered lines", 4, 4),
   ];
   const payload = await payloadFrom(() =>
-    writeCoverageResolved(4211, rows, [])
+    writeCoverageResolved(4211, rows, [], "")
   );
 
   assertEquals(payload?.state, "resolved");
@@ -557,7 +700,7 @@ Deno.test("writeCoverageResolved reports zero improvement when gated groups sit 
 Deno.test("writeCoverageResolved reports zero improvement without a workspace baseline", async () => {
   const rows = [coverageRow("coverage-debt: workspace uncovered lines", 100)];
   const payload = await payloadFrom(() =>
-    writeCoverageResolved(4211, rows, [])
+    writeCoverageResolved(4211, rows, [], "")
   );
 
   assertEquals(payload?.state, "resolved");
@@ -567,7 +710,7 @@ Deno.test("writeCoverageResolved reports zero improvement without a workspace ba
 
 Deno.test("writeCoverageDebtSuggestion writes nothing when no coverage group resolves", async () => {
   const failures: Row[] = [
-    { metric: "job: Check", status: "OVER", current: 5, median: 3, n: 1 },
+    { metric: "job: Check", status: "OVER", current: 5, baseline: 3 },
   ];
   const payload = await payloadFrom(() =>
     writeCoverageDebtSuggestion(4211, failures, [], "")
@@ -645,7 +788,11 @@ Deno.test("fetchBaselineRunsForCheck fetches main head and baseline runs", async
       return new Response("unexpected request", { status: 404 });
     },
     () =>
-      fetchBaselineRunsForCheck(new Map(), 1, (message) => logs.push(message)),
+      fetchBaselineRunsForCheck(
+        { metrics: new Map() },
+        1,
+        (message) => logs.push(message),
+      ),
   );
 
   assertEquals(result, { mainHeadSha: SHA_A, baselineRuns: [run] });
@@ -655,97 +802,6 @@ Deno.test("fetchBaselineRunsForCheck fetches main head and baseline runs", async
   assertStringIncludes(requests[1], "event=push");
   assertStringIncludes(requests[1], "per_page=1");
   assertStringIncludes(logs.join("\n"), "Current main head");
-});
-
-Deno.test("relative duration formatting uses two readable parts", () => {
-  assertEquals(formatRelativeDuration(45), "45 seconds");
-  assertEquals(formatRelativeDuration(65), "1 minute 5 seconds");
-  assertEquals(
-    formatRelativeDuration(2 * 60 * 60 + 3 * 60 + 4),
-    "2 hours 3 minutes",
-  );
-  assertEquals(
-    formatRelativeDuration(3 * 24 * 60 * 60 + 2 * 60 * 60),
-    "3 days 2 hours",
-  );
-  assertEquals(formatRelativeDuration(Number.NaN), "unknown");
-});
-
-Deno.test("relative age formatting compares two timestamps", () => {
-  assertEquals(
-    formatRelativeAge(
-      "2026-06-18T10:00:00Z",
-      "2026-06-18T12:03:04Z",
-    ),
-    "2 hours 3 minutes",
-  );
-  assertEquals(
-    formatRelativeAge("not a date", "2026-06-18T12:03:04Z"),
-    "unknown",
-  );
-});
-
-Deno.test("commit distance formatting handles known and unknown values", () => {
-  assertEquals(formatCommitDistance(0), "0 commits");
-  assertEquals(formatCommitDistance(1), "1 commit");
-  assertEquals(formatCommitDistance(12), "12 commits");
-  assertEquals(formatCommitDistance(null), "an unknown number of commits");
-});
-
-Deno.test("baseline source run age combines time and commit distance", () => {
-  assertEquals(
-    formatBaselineSourceRunAge(
-      "2026-06-18T10:00:00Z",
-      "2026-06-18T12:03:04Z",
-      7,
-    ),
-    "created 2 hours 3 minutes ago; 7 commits behind current main",
-  );
-  assertEquals(
-    formatBaselineSourceRunAge("not a date", "2026-06-18T12:03:04Z", null),
-    "age unknown; an unknown number of commits behind current main",
-  );
-});
-
-Deno.test("fetchCommitsBehindMain reports zero for the current main commit", async () => {
-  assertEquals(await fetchCommitsBehindMain(SHA_A, SHA_A), 0);
-});
-
-Deno.test("fetchCommitsBehindMain reads GitHub compare distance", async () => {
-  const result = await withMockFetch(
-    (input) => {
-      assertStringIncludes(String(input), `/compare/${SHA_A}...${SHA_B}`);
-      return new Response(JSON.stringify({ ahead_by: 3 }));
-    },
-    () => fetchCommitsBehindMain(SHA_A, SHA_B),
-  );
-
-  assertEquals(result, 3);
-});
-
-Deno.test("fetchCommitsBehindMain treats malformed compare data as unknown", async () => {
-  const result = await withMockFetch(
-    () => new Response(JSON.stringify({ ahead_by: "3" })),
-    () => fetchCommitsBehindMain(SHA_A, SHA_B),
-  );
-
-  assertEquals(result, null);
-});
-
-Deno.test("fetchCommitsBehindMain warns and continues after compare failure", async () => {
-  const captured = await captureConsoleAsync(() =>
-    withMockFetch(
-      () => new Response("missing", { status: 404 }),
-      () => fetchCommitsBehindMain(SHA_A, SHA_B),
-    )
-  );
-
-  assertEquals(captured.result, null);
-  assertStringIncludes(
-    captured.warnings.join("\n"),
-    "could not compare baseline",
-  );
-  assertStringIncludes(captured.warnings.join("\n"), SHA_A.slice(0, 8));
 });
 
 Deno.test("fetchPRForCommitWithError returns selected PR metadata", async () => {
@@ -792,8 +848,10 @@ Deno.test("formatErrorForLog keeps the first line only", () => {
   assertEquals(formatErrorForLog("plain\nsecond"), "plain");
 });
 
-Deno.test("githubApiOrSkip writes metrics and exits on rate limits", async () => {
-  const metrics = new Map<string, TimingSample>([["job: Check", makeSample()]]);
+Deno.test("githubApiOrSkip writes the stamped artifact and exits on rate limits", async () => {
+  const metrics = new Map<string, BaselineSample>([
+    ["job: Check", makeSample()],
+  ]);
 
   try {
     const captured = await captureConsoleAsync(() =>
@@ -801,7 +859,7 @@ Deno.test("githubApiOrSkip writes metrics and exits on rate limits", async () =>
         githubApiOrSkip(
           "collecting test data",
           () => Promise.reject(new Error("rate limit exceeded")),
-          metrics,
+          { metrics, compileCacheStates: { "pattern-unit": "cold" } },
         ).then(() => {})
       )
     );
@@ -814,6 +872,9 @@ Deno.test("githubApiOrSkip writes metrics and exits on rate limits", async () =>
     );
     const file = JSON.parse(await Deno.readTextFile("perf-metrics.json"));
     assertEquals(file.metrics[0].name, "job: Check");
+    // The skip path carries the compile cache stamp, so a later run reading
+    // this artifact still sees that this run was cold.
+    assertEquals(file.compileCacheStates, { "pattern-unit": "cold" });
   } finally {
     await Deno.remove("perf-metrics.json").catch(() => {});
   }
@@ -825,60 +886,47 @@ Deno.test("githubApiOrSkip rethrows non-rate-limit errors", async () => {
       githubApiOrSkip(
         "collecting test data",
         () => Promise.reject(new Error("plain failure")),
-        new Map(),
+        { metrics: new Map() },
       ),
     Error,
     "plain failure",
   );
 });
 
-Deno.test("metric table helpers format task and metric details", () => {
-  const coverageRow = {
+Deno.test("metric table helpers name the group and its change", () => {
+  const row: Row = {
     metric: "coverage-debt: tasks uncovered lines",
-    status: "OK" as const,
+    status: "OK",
     current: 12.4,
-    median: 10,
-    n: 5,
+    baseline: 10,
     pctIncrease: 24,
   };
-  const pendingRow = {
-    metric: "job: Check",
-    status: "n/a" as const,
+  const pendingRow: Row = {
+    metric: "coverage-debt: tasks uncovered lines",
+    status: "n/a",
     current: 9,
-    n: 0,
   };
 
-  assertEquals(formatMetricValueForTable(coverageRow.current), "12");
+  assertEquals(formatMetricValueForTable(row.current), "12");
   assertEquals(formatMetricValueForTable(undefined), "-");
   assertEquals(formatMetricDelta(pendingRow), "-");
-  assertEquals(formatMetricDelta(coverageRow), "+2 (+24%)");
-  assertEquals(metricDisplayParts("coverage-debt: tasks uncovered lines"), {
-    task: "coverage-debt",
-    metric: "tasks",
-  });
-  assertEquals(metricDisplayParts("coverage-debt: custom metric"), {
-    task: "coverage-debt",
-    metric: "custom metric",
-  });
-  assertEquals(metricDisplayParts("uncategorized"), {
-    task: "other",
-    metric: "uncategorized",
-  });
-  assertEquals(metricDisplayParts("job: Check"), {
-    task: "job",
-    metric: "Check",
-  });
-  assertEquals(metricTableRows([coverageRow], true)[0][0], "OK");
-  assertEquals(metricTableRows([coverageRow], false)[0][0], "10");
+  assertEquals(formatMetricDelta(row), "+2 (+24%)");
+  assertEquals(metricTableRows([row], true)[0], [
+    "OK",
+    "10",
+    "12",
+    "+2 (+24%)",
+    "tasks",
+  ]);
+  assertEquals(metricTableRows([row], false)[0][0], "10");
 });
 
 Deno.test("printMetricTable renders status and non-status tables", () => {
-  const row = {
-    metric: "job: Check",
-    status: "OK" as const,
+  const row: Row = {
+    metric: "coverage-debt: tasks uncovered lines",
+    status: "OK",
     current: 9,
-    median: 8,
-    n: 5,
+    baseline: 8,
     pctIncrease: 12.5,
   };
 
@@ -917,7 +965,7 @@ Deno.test("currentWorkflowRunFromEvent reads event and environment metadata", ()
   }
 });
 
-Deno.test("logBaselineSourceRuns prints age, PR, lookup, and artifact details", () => {
+Deno.test("reportBaselineContextResults lists each run's PR and artifact", () => {
   const contexts: BaselineRunContext[] = [
     {
       run: makeRun(1, SHA_A, "2026-06-18T10:00:00Z"),
@@ -928,94 +976,56 @@ Deno.test("logBaselineSourceRuns prints age, PR, lookup, and artifact details", 
       ],
       pr: makePR(10, "2026-06-18T00:00:00Z"),
       prLookupError: null,
-      commitsBehindMain: 0,
     },
     {
       run: makeRun(2, SHA_B, "2026-06-18T11:00:00Z"),
       artifacts: [],
       pr: null,
-      prLookupError: new Error("lookup failed\nsecond line"),
-      commitsBehindMain: null,
-    },
-    {
-      run: makeRun(3, SHA_C, "2026-06-18T11:30:00Z"),
-      artifacts: [],
-      pr: null,
       prLookupError: null,
-      commitsBehindMain: 5,
     },
   ];
 
-  const captured = captureConsole(() =>
-    logBaselineSourceRuns(contexts, "2026-06-18T12:00:00Z")
-  );
+  const captured = captureConsole(() => reportBaselineContextResults(contexts));
   const output = captured.logs.join("\n");
 
   assertStringIncludes(output, "Baseline source runs:");
   assertStringIncludes(
     output,
-    "created 2 hours ago; 0 commits behind current main",
+    `2026-06-18T10:00:00Z run 1 ${
+      SHA_A.slice(0, 8)
+    } PR #10; perf-metrics artifact 2`,
   );
-  assertStringIncludes(output, "PR #10");
-  assertStringIncludes(output, "perf-metrics artifact 2");
-  assertStringIncludes(output, "PR lookup failed");
   assertStringIncludes(
     output,
-    "an unknown number of commits behind current main",
+    `2026-06-18T11:00:00Z run 2 ${
+      SHA_B.slice(0, 8)
+    } no PR found; no perf-metrics artifact`,
   );
-  assertStringIncludes(output, "no PR found");
-  assertStringIncludes(output, "no perf-metrics artifact");
+  assertEquals(captured.warnings, []);
 });
 
-Deno.test("reportPRLookupResults logs clean and failed lookup summaries", () => {
-  const clean = captureConsole(() =>
-    reportPRLookupResults([
-      {
-        run: makeRun(1),
-        artifacts: [],
-        pr: makePR(1),
-        prLookupError: null,
-        commitsBehindMain: 0,
-      },
-    ])
-  );
-  assertEquals(clean.result, 0);
-  assertStringIncludes(clean.logs.join("\n"), "0 failed");
+Deno.test("reportBaselineContextResults names each failed PR lookup", () => {
+  const contexts: BaselineRunContext[] = [
+    {
+      run: makeRun(1, SHA_A),
+      artifacts: [],
+      pr: makePR(10, "2026-06-18T00:00:00Z"),
+      prLookupError: null,
+    },
+    {
+      run: makeRun(2, SHA_B),
+      artifacts: [],
+      pr: null,
+      prLookupError: new Error("lookup failed\nsecond line"),
+    },
+  ];
 
-  const failed = captureConsole(() =>
-    reportPRLookupResults([
-      {
-        run: makeRun(2, SHA_B),
-        artifacts: [],
-        pr: null,
-        prLookupError: new Error("boom\nsecond line"),
-        commitsBehindMain: null,
-      },
-    ])
-  );
-  assertEquals(failed.result, 1);
-  assertStringIncludes(
-    failed.warnings.join("\n"),
-    "failed to fetch PR metadata",
-  );
-  assertStringIncludes(failed.warnings.join("\n"), "boom");
-});
+  const captured = captureConsole(() => reportBaselineContextResults(contexts));
 
-Deno.test("reportBaselineContextResults logs incomplete PR metadata warning", () => {
-  const context: BaselineRunContext = {
-    run: makeRun(1),
-    artifacts: [],
-    pr: null,
-    prLookupError: new Error("lookup failed"),
-    commitsBehindMain: null,
-  };
-
-  const captured = captureConsole(() =>
-    reportBaselineContextResults([context], "2026-06-18T12:00:00Z")
-  );
-
-  assertEquals(captured.result, 1);
-  assertStringIncludes(captured.warnings.join("\n"), "incomplete PR metadata");
+  assertStringIncludes(captured.logs.join("\n"), "PR lookup failed;");
+  assertEquals(captured.warnings, [
+    `  Warning: run 2 (${SHA_B.slice(0, 8)}) PR lookup failed: lookup failed`,
+  ]);
 });
 
 Deno.test("baseline main validation reports stale newest run", () => {
@@ -1143,15 +1153,13 @@ Deno.test("fetchArtifactsForRunBestEffort returns artifacts or an empty fallback
   assertStringIncludes(warnings.join("\n"), "artifact API failed");
 });
 
-Deno.test("buildBaselineRunContexts collects artifacts, PRs, and commit distance", async () => {
+Deno.test("buildBaselineRunContext collects artifacts and PRs", async () => {
   const run = makeRun(11, SHA_A);
   const artifact = makeArtifact(5, PERF_METRICS_ARTIFACT_NAME);
   const pr = makePR(11, "2026-06-18T00:00:00Z");
 
-  const contexts = await buildBaselineRunContexts({
-    baselineRuns: [run],
-    mainHeadSha: SHA_B,
-    concurrency: 1,
+  const context = await buildBaselineRunContext({
+    run,
     fetchArtifactsForRun: (requestedRun) => {
       assertEquals(requestedRun, run);
       return Promise.resolve([artifact]);
@@ -1160,27 +1168,19 @@ Deno.test("buildBaselineRunContexts collects artifacts, PRs, and commit distance
       assertEquals(sha, SHA_A);
       return Promise.resolve({ pr, error: null });
     },
-    fetchCommitsBehindMain: (baselineSha, mainHeadSha) => {
-      assertEquals(baselineSha, SHA_A);
-      assertEquals(mainHeadSha, SHA_B);
-      return Promise.resolve(4);
-    },
   });
 
-  assertEquals(contexts, [
-    {
-      run,
-      artifacts: [artifact],
-      pr,
-      prLookupError: null,
-      commitsBehindMain: 4,
-    },
-  ]);
+  assertEquals(context, {
+    run,
+    artifacts: [artifact],
+    pr,
+    prLookupError: null,
+  });
 });
 
 Deno.test("parseCoverageBaselineFromArtifacts uses newest coverage baseline artifact", async () => {
   const parsed = {
-    metrics: new Map<string, TimingSample>([["job: Check", makeSample()]]),
+    metrics: new Map<string, BaselineSample>([["job: Check", makeSample()]]),
     compileCacheStates: { "pattern-unit": "warm" as const },
   };
   let parsedArtifactId = 0;
@@ -1204,51 +1204,6 @@ Deno.test("parseCoverageBaselineFromArtifacts uses newest coverage baseline arti
       throw new Error("should not parse without an artifact");
     }),
     null,
-  );
-});
-
-Deno.test("addCoverageBaselineFromArtifacts adds parsed samples to timelines", async () => {
-  const artifacts = [makeArtifact(1, PERF_METRICS_ARTIFACT_NAME)];
-  const sample = makeSample();
-  const timelines = new Map();
-
-  assertEquals(
-    await addCoverageBaselineFromArtifacts(
-      timelines,
-      artifacts,
-      (requested) => {
-        assertEquals(requested, artifacts);
-        return Promise.resolve({
-          metrics: new Map([["job: Check", sample]]),
-          compileCacheStates: { "generated-patterns": "cold" as const },
-        });
-      },
-    ),
-    { added: true, compileCacheStates: { "generated-patterns": "cold" } },
-  );
-  assertEquals(timelines.get("job: Check")?.samples, [sample]);
-
-  // An untagged (pre-rollout) artifact still adds samples, with null states.
-  assertEquals(
-    await addCoverageBaselineFromArtifacts(
-      timelines,
-      artifacts,
-      () =>
-        Promise.resolve({
-          metrics: new Map([["job: Check", sample]]),
-          compileCacheStates: null,
-        }),
-    ),
-    { added: true, compileCacheStates: null },
-  );
-
-  assertEquals(
-    await addCoverageBaselineFromArtifacts(
-      timelines,
-      [],
-      () => Promise.resolve(null),
-    ),
-    { added: false, compileCacheStates: null },
   );
 });
 
@@ -1483,15 +1438,1287 @@ Deno.test("selectMergedPRForCommit falls back to the first PR", () => {
   assertEquals(selectMergedPRForCommit([]), null);
 });
 
-Deno.test("baseline PR lookup summary counts found, missing, and failed lookups", () => {
-  const pr = { number: 1, merged_at: "2026-06-18T00:00:00Z" } as PRInfo;
+Deno.test("readBaseBranchSha reads the first parent of a merge checkout", async () => {
+  const commit = [
+    "tree 1111111111111111111111111111111111111111",
+    `parent ${SHA_A}`,
+    `parent ${SHA_B}`,
+    "author CI <ci@example.com> 1780000000 +0000",
+    "",
+    `parent ${SHA_C} looks like a header but is message text`,
+  ].join("\n");
+
+  assertEquals(await readBaseBranchSha(() => Promise.resolve(commit)), SHA_A);
+});
+
+Deno.test("readBaseBranchSha reports no base for a non-merge checkout", async () => {
+  const commit = [
+    "tree 1111111111111111111111111111111111111111",
+    `parent ${SHA_A}`,
+    "",
+    "a push run checks out the commit itself",
+  ].join("\n");
+
+  assertEquals(await readBaseBranchSha(() => Promise.resolve(commit)), null);
+  assertEquals(await readBaseBranchSha(() => Promise.resolve(null)), null);
+});
+
+function makeBaselineSample(
+  runId: number,
+  sha: string,
+  createdAt: string,
+  uncoveredLines: number,
+): BaselineSample {
+  return { runId, sha, createdAt, uncoveredLines };
+}
+
+/** Ancestry of base-branch commit `SHA_C`, newest first. */
+const RANKS = new Map([[SHA_C, 0], [SHA_B, 1], [SHA_A, 2]]);
+
+const RUNNER_METRIC = "coverage-debt: packages/runner uncovered lines";
+const MEMORY_METRIC = "coverage-debt: packages/memory uncovered lines";
+
+/** One baseline run's contribution to the walk. */
+function reading(
+  run: WorkflowRun,
+  samples: Record<string, number>,
+  options: { cold?: boolean; accepts?: string[]; reset?: boolean } = {},
+): BaselineRunReading {
+  const accepts = options.accepts ?? [];
+  return {
+    samples: new Map(
+      Object.entries(samples).map(([metric, uncoveredLines]) => [
+        metric,
+        makeBaselineSample(
+          run.id,
+          run.head_sha,
+          run.created_at,
+          uncoveredLines,
+        ),
+      ]),
+    ),
+    overrides: accepts.length > 0 || options.reset
+      ? {
+        metrics: new Map(accepts.map((metric) => [metric, 0])),
+        coverageBaselineReset: options.reset ?? false,
+      }
+      : null,
+    cold: options.cold ?? false,
+  };
+}
+
+/**
+ * Walk `readings` newest first, reporting which runs the walk actually read.
+ * Each entry is a run and what reading it would give.
+ */
+async function walk(
+  readings: [WorkflowRun, BaselineRunReading][],
+  ancestorRank: Map<string, number> | null,
+  metrics: string[] = [RUNNER_METRIC],
+): Promise<{ lines: Record<string, number | undefined>; read: number[] }> {
+  const read: number[] = [];
+  const baselines = await walkBaselineRuns({
+    metrics,
+    runs: readings.map(([run]) => run),
+    ancestorRank,
+    readRun: (run) => {
+      read.push(run.id);
+      const found = readings.find(([candidate]) => candidate.id === run.id);
+      return Promise.resolve(found![1]);
+    },
+  });
+
+  const lines: Record<string, number | undefined> = {};
+  for (const metric of metrics) {
+    lines[metric] = baselines.get(metric)?.uncoveredLines;
+  }
+  return { lines, read };
+}
+
+/** The newest of three `main` runs along the ancestry `RANKS` describes. */
+const RUN_AT_BASE = makeRun(3, SHA_C, "2026-08-04T10:40:00Z");
+
+/** The one before it. */
+const RUN_ONE_BACK = makeRun(2, SHA_B, "2026-08-04T10:20:00Z");
+
+/** The one before that. */
+const RUN_TWO_BACK = makeRun(1, SHA_A, "2026-08-04T10:00:00Z");
+
+Deno.test("walkBaselineRuns prefers the base-branch commit's own run", async () => {
+  const walked = await walk([
+    [RUN_AT_BASE, reading(RUN_AT_BASE, { [RUNNER_METRIC]: 5760 })],
+    [RUN_ONE_BACK, reading(RUN_ONE_BACK, { [RUNNER_METRIC]: 5746 })],
+    [RUN_TWO_BACK, reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740 })],
+  ], RANKS);
+
+  assertEquals(walked.lines[RUNNER_METRIC], 5760);
+  // The newest run answered every metric, so the older ones are never read.
+  assertEquals(walked.read, [3]);
+});
+
+Deno.test("walkBaselineRuns falls back to the nearest ancestor with a run", async () => {
+  // The base-branch commit's run uploaded no baseline artifact, so its parent
+  // stands in rather than the gate giving up.
+
+  const walked = await walk([
+    [RUN_AT_BASE, reading(RUN_AT_BASE, {})],
+    [RUN_ONE_BACK, reading(RUN_ONE_BACK, { [RUNNER_METRIC]: 5746 })],
+    [RUN_TWO_BACK, reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740 })],
+  ], RANKS);
+
+  assertEquals(walked.lines[RUNNER_METRIC], 5746);
+  assertEquals(walked.read, [3, 2]);
+});
+
+Deno.test("walkBaselineRuns ranks the ancestry rather than trusting run order", async () => {
+  // The nearer ancestor's run arrives second, as a history rewrite or two
+  // pushes in one second can leave it. The nearer commit still wins.
+
+  const walked = await walk([
+    [RUN_TWO_BACK, reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740 })],
+    [RUN_AT_BASE, reading(RUN_AT_BASE, { [RUNNER_METRIC]: 5760 })],
+  ], RANKS);
+
+  assertEquals(walked.lines[RUNNER_METRIC], 5760);
+  assertEquals(walked.read, [3]);
+});
+
+Deno.test("walkBaselineRuns reads the first of two runs for one commit", async () => {
+  const rerun = makeRun(9, SHA_C, "2026-08-04T12:00:00Z");
+  const walked = await walk([
+    [rerun, reading(rerun, { [RUNNER_METRIC]: 5770 })],
+    [RUN_AT_BASE, reading(RUN_AT_BASE, { [RUNNER_METRIC]: 5760 })],
+  ], RANKS);
+
+  assertEquals(walked.lines[RUNNER_METRIC], 5760);
+  assertEquals(walked.read, [3]);
+});
+
+Deno.test("walkBaselineRuns ignores a run that is not an ancestor", async () => {
+  // Landed after this run started, so it measured code the run lacks.
+
+  const sibling = makeRun(4, "dddddddddddddddddddddddddddddddddddddddd");
+  const walked = await walk([
+    [sibling, reading(sibling, { [RUNNER_METRIC]: 5700 })],
+    [RUN_ONE_BACK, reading(RUN_ONE_BACK, { [RUNNER_METRIC]: 5746 })],
+  ], RANKS);
+
+  assertEquals(walked.lines[RUNNER_METRIC], 5746);
+});
+
+Deno.test("walkBaselineRuns skips a cold ancestor for a warm one", async () => {
+  const walked = await walk([
+    [
+      RUN_ONE_BACK,
+      reading(RUN_ONE_BACK, { [RUNNER_METRIC]: 5600 }, { cold: true }),
+    ],
+    [RUN_TWO_BACK, reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740 })],
+  ], RANKS);
+
+  assertEquals(walked.lines[RUNNER_METRIC], 5740);
+});
+
+Deno.test("walkBaselineRuns takes a cold ancestor when every ancestor is cold", async () => {
+  const walked = await walk([
+    [
+      RUN_ONE_BACK,
+      reading(RUN_ONE_BACK, { [RUNNER_METRIC]: 5600 }, { cold: true }),
+    ],
+    [
+      RUN_TWO_BACK,
+      reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740 }, { cold: true }),
+    ],
+  ], RANKS);
+
+  // The nearest of them, not the oldest.
+  assertEquals(walked.lines[RUNNER_METRIC], 5600);
+});
+
+Deno.test("walkBaselineRuns ignores an acceptance that is not an ancestor", async () => {
+  // A reset that merged after this run's base-branch commit is not in this
+  // run's code, so it sets no floor here and the ancestry still gates.
+
+  const later = makeRun(4, "dddddddddddddddddddddddddddddddddddddddd");
+  const walked = await walk([
+    [later, reading(later, { [RUNNER_METRIC]: 7000 }, { reset: true })],
+    [RUN_AT_BASE, reading(RUN_AT_BASE, { [RUNNER_METRIC]: 5760 })],
+  ], RANKS);
+
+  assertEquals(walked.lines[RUNNER_METRIC], 5760);
+  // The run that is no baseline is never read either.
+  assertEquals(walked.read, [3]);
+});
+
+Deno.test("walkBaselineRuns falls back to the latest run without ancestry", async () => {
+  const walked = await walk([
+    [RUN_ONE_BACK, reading(RUN_ONE_BACK, { [RUNNER_METRIC]: 5746 })],
+    [RUN_TWO_BACK, reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740 })],
+  ], null);
+
+  assertEquals(walked.lines[RUNNER_METRIC], 5746);
+
+  const nothing = await walk([], RANKS);
+  assertEquals(nothing.lines[RUNNER_METRIC], undefined);
+});
+
+Deno.test("walkBaselineRuns takes the latest cold run without ancestry", async () => {
+  const walked = await walk([
+    [
+      RUN_ONE_BACK,
+      reading(RUN_ONE_BACK, { [RUNNER_METRIC]: 5746 }, { cold: true }),
+    ],
+    [
+      RUN_TWO_BACK,
+      reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740 }, { cold: true }),
+    ],
+  ], null);
+
+  assertEquals(walked.lines[RUNNER_METRIC], 5746);
+});
+
+Deno.test("walkBaselineRuns stops at the run whose PR accepted the debt", async () => {
+  // The middle run's merged pull request accepted the runner group's debt, so
+  // nothing older may serve as that group's baseline: the accepted level is
+  // what later runs are held to. Every run that measured it is cold, so the
+  // accepting run stands as the baseline rather than the metric losing one.
+  // The memory group was not accepted, so its walk carries on to the warm run.
+
+  const walked = await walk(
+    [
+      [RUN_AT_BASE, reading(RUN_AT_BASE, {}, { cold: true })],
+      [
+        RUN_ONE_BACK,
+        reading(
+          RUN_ONE_BACK,
+          { [RUNNER_METRIC]: 5746, [MEMORY_METRIC]: 410 },
+          { cold: true, accepts: [RUNNER_METRIC] },
+        ),
+      ],
+      [
+        RUN_TWO_BACK,
+        reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740, [MEMORY_METRIC]: 400 }),
+      ],
+    ],
+    RANKS,
+    [RUNNER_METRIC, MEMORY_METRIC],
+  );
+
+  assertEquals(walked.lines[RUNNER_METRIC], 5746);
+  assertEquals(walked.lines[MEMORY_METRIC], 400);
+});
+
+Deno.test("walkBaselineRuns stops every coverage metric at a merged reset", async () => {
+  const walked = await walk(
+    [
+      [
+        RUN_ONE_BACK,
+        reading(
+          RUN_ONE_BACK,
+          { [RUNNER_METRIC]: 5746, [MEMORY_METRIC]: 410 },
+          { cold: true, reset: true },
+        ),
+      ],
+      [
+        RUN_TWO_BACK,
+        reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740, [MEMORY_METRIC]: 400 }),
+      ],
+    ],
+    RANKS,
+    [RUNNER_METRIC, MEMORY_METRIC],
+  );
+
+  assertEquals(walked.lines[RUNNER_METRIC], 5746);
+  assertEquals(walked.lines[MEMORY_METRIC], 410);
+});
+
+Deno.test("walkBaselineRuns walks past an acceptance that measured nothing", async () => {
+  // The accepting run uploaded no baseline artifact, so it has no level to
+  // hold later runs to and the search continues past it.
+
+  const walked = await walk([
+    [RUN_ONE_BACK, reading(RUN_ONE_BACK, {}, { accepts: [RUNNER_METRIC] })],
+    [RUN_TWO_BACK, reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740 })],
+  ], RANKS);
+
+  assertEquals(walked.lines[RUNNER_METRIC], 5740);
+});
+
+Deno.test("fetchAncestorRanks ranks commits by distance from the base", async () => {
+  const ranks = await withMockFetch(
+    (input) => {
+      assertStringIncludes(String(input), `/commits?sha=${SHA_C}`);
+      return new Response(
+        JSON.stringify([{ sha: SHA_C }, { sha: SHA_B }, { sha: SHA_A }]),
+      );
+    },
+    () => fetchAncestorRanks(SHA_C),
+  );
+
+  assertEquals([...ranks], [[SHA_C, 0], [SHA_B, 1], [SHA_A, 2]]);
+});
+
+Deno.test("fetchGroupsChangedOnBase reports the groups the base branch moved", async () => {
+  const groups = await withMockFetch(
+    (input) => {
+      assertStringIncludes(String(input), `/compare/${SHA_A}...${SHA_C}`);
+      return new Response(JSON.stringify({
+        files: [
+          { filename: "packages/runner/src/runner.ts" },
+          { filename: "packages/runner/test/runner.test.ts" },
+          { filename: "docs/development/COVERAGE.md" },
+        ],
+      }));
+    },
+    () => fetchGroupsChangedOnBase(SHA_A, SHA_C),
+  );
+
+  assertEquals([...groups], ["packages/runner"]);
+});
+
+Deno.test("fetchGroupsChangedOnBase compares nothing against the base itself", async () => {
+  const groups = await withMockFetch(
+    () => {
+      throw new Error("must not compare a commit against itself");
+    },
+    () => fetchGroupsChangedOnBase(SHA_C, SHA_C),
+  );
+
+  assertEquals(groups.size, 0);
+});
+
+Deno.test("isComparableBaseline withholds only the groups the base branch moved", () => {
+  const sample = makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 5740);
+  const moved = new Map([[SHA_A, new Set(["packages/runner"])]]);
+  const at = (metric: string, sha: string | null = SHA_C) =>
+    isComparableBaseline({
+      sample,
+      metric,
+      baseSha: sha,
+      groupsChangedByBaseline: moved,
+      isPullRequest: true,
+    });
+
+  assertEquals(at(RUNNER_METRIC), false);
+  assertEquals(at(MEMORY_METRIC), true);
+
+  // No base-branch commit means no ancestry, so the baseline is whatever ran
+  // last and nothing may be gated against it.
+  assertEquals(at(MEMORY_METRIC, null), false);
 
   assertEquals(
-    summarizeBaselinePRLookups([
-      { pr, prLookupError: null },
-      { pr: null, prLookupError: null },
-      { pr: null, prLookupError: new Error("boom") },
-    ]),
-    { found: 1, noPR: 1, failed: 1 },
+    isComparableBaseline({
+      sample: undefined,
+      metric: MEMORY_METRIC,
+      baseSha: SHA_C,
+      groupsChangedByBaseline: moved,
+      isPullRequest: true,
+    }),
+    false,
   );
+
+  // A main push run has no base-branch commit and only reports.
+  assertEquals(
+    isComparableBaseline({
+      sample,
+      metric: RUNNER_METRIC,
+      baseSha: null,
+      groupsChangedByBaseline: moved,
+      isPullRequest: false,
+    }),
+    true,
+  );
+});
+
+Deno.test("isComparableBaseline reads the moved groups of its own baseline", () => {
+  const atBase = makeBaselineSample(2, SHA_C, "2026-08-04T10:40:00Z", 5746);
+  const older = makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 5740);
+  // The base branch moved packages/runner since SHA_A but not since SHA_C, so
+  // a metric baselined at SHA_C stays gated.
+  const moved = new Map([
+    [SHA_A, new Set(["packages/runner"])],
+    [SHA_C, new Set<string>()],
+  ]);
+  const at = (sample: BaselineSample) =>
+    isComparableBaseline({
+      sample,
+      metric: RUNNER_METRIC,
+      baseSha: SHA_C,
+      groupsChangedByBaseline: moved,
+      isPullRequest: true,
+    });
+
+  assertEquals(at(atBase), true);
+  assertEquals(at(older), false);
+});
+
+Deno.test("selectBaselines picks a baseline and its gating for each metric", async () => {
+  const runs: [WorkflowRun, BaselineRunReading][] = [
+    [RUN_AT_BASE, reading(RUN_AT_BASE, { [RUNNER_METRIC]: 5746 })],
+    // Only an older run measured the memory group, and the base branch moved
+    // that group since, so it is reported and not gated.
+    [
+      RUN_TWO_BACK,
+      reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740, [MEMORY_METRIC]: 400 }),
+    ],
+  ];
+
+  const resolved = await selectBaselines({
+    metrics: [
+      RUNNER_METRIC,
+      MEMORY_METRIC,
+      "coverage-debt: gone uncovered lines",
+    ],
+    runs: runs.map(([run]) => run),
+    readRun: (run) =>
+      Promise.resolve(runs.find(([candidate]) => candidate.id === run.id)![1]),
+    isPullRequest: true,
+    readBaseSha: () => Promise.resolve(SHA_C),
+    fetchRanks: () => Promise.resolve(RANKS),
+    fetchChangedGroups: (baselineSha) =>
+      Promise.resolve(
+        baselineSha === SHA_A
+          ? new Set(["packages/memory"])
+          : new Set<string>(),
+      ),
+    log: () => {},
+  });
+
+  assertEquals(resolved.size, 3);
+  assertEquals(resolved.get(RUNNER_METRIC)?.sample?.uncoveredLines, 5746);
+  assertEquals(resolved.get(RUNNER_METRIC)?.comparable, true);
+  assertEquals(resolved.get(MEMORY_METRIC)?.sample?.uncoveredLines, 400);
+  assertEquals(resolved.get(MEMORY_METRIC)?.comparable, false);
+
+  // A metric no baseline run measured has nothing to be gated against.
+  const missing = resolved.get("coverage-debt: gone uncovered lines");
+  assertEquals(missing?.sample, undefined);
+  assertEquals(missing?.comparable, false);
+});
+
+Deno.test("reportBaselineDistance names each baseline and its distance", () => {
+  const captured = captureConsole(() =>
+    reportBaselineDistance(
+      new Set([SHA_C, SHA_A]),
+      SHA_C,
+      RANKS,
+      (message) => console.log(message),
+    )
+  );
+
+  const logs = captured.logs.join("\n");
+  assertStringIncludes(
+    logs,
+    `measured at the base-branch commit: ${SHA_C.slice(0, 8)}`,
+  );
+  assertStringIncludes(
+    logs,
+    `measured 2 commits before the base-branch commit: ${SHA_A.slice(0, 8)}`,
+  );
+});
+
+Deno.test("reportBaselineDistance reports an ancestry it could not read", () => {
+  const unknown = captureConsole(() =>
+    reportBaselineDistance(new Set([SHA_A]), SHA_C, null, (m) => console.log(m))
+  );
+  assertStringIncludes(
+    unknown.logs.join("\n"),
+    "at an unknown distance from the base-branch commit",
+  );
+
+  const none = captureConsole(() =>
+    reportBaselineDistance(new Set(), SHA_C, RANKS, (m) => console.log(m))
+  );
+  assertStringIncludes(
+    none.logs.join("\n"),
+    `No \`main\` run has measured base-branch commit ${SHA_C.slice(0, 8)}`,
+  );
+});
+
+/**
+ * Two of the three runs in the ancestry above, each carrying one metric.
+ * `RUN_ONE_BACK` is deliberately absent: callers derive their run list from
+ * these readings, so leaving it out is what makes a commit unmeasured.
+ */
+function runnerReadings(): [WorkflowRun, BaselineRunReading][] {
+  return [
+    [RUN_AT_BASE, reading(RUN_AT_BASE, { [RUNNER_METRIC]: 5746 })],
+    [RUN_TWO_BACK, reading(RUN_TWO_BACK, { [RUNNER_METRIC]: 5740 })],
+  ];
+}
+
+function readerFor(
+  readings: [WorkflowRun, BaselineRunReading][],
+): (run: WorkflowRun) => Promise<BaselineRunReading> {
+  return (run) =>
+    Promise.resolve(
+      readings.find(([candidate]) => candidate.id === run.id)![1],
+    );
+}
+
+Deno.test("selectBaselines chooses each metric's baseline against the base commit", async () => {
+  const readings = runnerReadings();
+  const compared: string[] = [];
+
+  const captured = await captureConsoleAsync(() =>
+    selectBaselines({
+      metrics: [RUNNER_METRIC],
+      runs: readings.map(([run]) => run),
+      readRun: readerFor(readings),
+      isPullRequest: true,
+      readBaseSha: () => Promise.resolve(SHA_C),
+      fetchRanks: (baseSha) => {
+        assertEquals(baseSha, SHA_C);
+        return Promise.resolve(RANKS);
+      },
+      fetchChangedGroups: (baselineSha, baseSha) => {
+        compared.push(`${baselineSha}...${baseSha}`);
+        return Promise.resolve(new Set<string>());
+      },
+    })
+  );
+
+  assertEquals(
+    captured.result.get(RUNNER_METRIC)?.sample?.uncoveredLines,
+    5746,
+  );
+  assertEquals(captured.result.get(RUNNER_METRIC)?.comparable, true);
+  // The commit the comparison was judged against travels with it, so a later
+  // comment can say which `main` code this run's numbers describe.
+  assertEquals(captured.result.get(RUNNER_METRIC)?.baseSha, SHA_C);
+  // Only the baseline actually chosen is compared against the base commit.
+  assertEquals(compared, [`${SHA_C}...${SHA_C}`]);
+  assertStringIncludes(
+    captured.logs.join("\n"),
+    `merges the pull request into base-branch commit ${SHA_C.slice(0, 8)}`,
+  );
+});
+
+Deno.test("selectBaselines gates nothing when the base commit cannot be read", async () => {
+  const readings = runnerReadings();
+
+  const captured = await captureConsoleAsync(() =>
+    selectBaselines({
+      metrics: [RUNNER_METRIC],
+      runs: readings.map(([run]) => run),
+      readRun: readerFor(readings),
+      isPullRequest: true,
+      readBaseSha: () => Promise.resolve(null),
+      fetchRanks: () => {
+        throw new Error("must not rank an ancestry it has no base for");
+      },
+      fetchChangedGroups: () => {
+        throw new Error("must not compare without a base commit");
+      },
+    })
+  );
+
+  // The fallback still names a sample, but nothing may be failed against it.
+  assertEquals(
+    captured.result.get(RUNNER_METRIC)?.sample?.uncoveredLines,
+    5746,
+  );
+  assertEquals(captured.result.get(RUNNER_METRIC)?.comparable, false);
+  assertEquals(captured.result.get(RUNNER_METRIC)?.baseSha, undefined);
+  assertStringIncludes(
+    captured.warnings.join("\n"),
+    "could not read the base-branch commit",
+  );
+});
+
+Deno.test("selectBaselines reports against whatever it has for a push run", async () => {
+  const readings = runnerReadings();
+
+  const resolved = await selectBaselines({
+    metrics: [RUNNER_METRIC],
+    runs: readings.map(([run]) => run),
+    readRun: readerFor(readings),
+    isPullRequest: false,
+    readBaseSha: () => {
+      throw new Error("a push run has no base-branch commit to read");
+    },
+    log: () => {},
+    warn: () => {},
+  });
+
+  assertEquals(resolved.get(RUNNER_METRIC)?.comparable, true);
+});
+
+Deno.test("reportUngatedGroups names the groups it withheld", () => {
+  const captured = captureConsole(() =>
+    reportUngatedGroups(
+      new Set(["packages/runner", "packages/memory"]),
+      (message) => console.log(message),
+    )
+  );
+  assertStringIncludes(
+    captured.logs.join("\n"),
+    "packages/memory, packages/runner",
+  );
+
+  const quiet = captureConsole(() =>
+    reportUngatedGroups(new Set(), (message) => console.log(message))
+  );
+  assertEquals(quiet.logs, []);
+});
+
+Deno.test("readHeadCommitObject returns the commit object of a checkout", async () => {
+  const commit = await readHeadCommitObject();
+  assert(commit !== null);
+  assertStringIncludes(commit, "tree ");
+});
+
+Deno.test("readHeadCommitObject returns null outside a checkout", async () => {
+  const outside = await Deno.makeTempDir({ prefix: "coverage-no-repo-" });
+  try {
+    const captured = await captureConsoleAsync(() =>
+      readHeadCommitObject(outside)
+    );
+    assertEquals(captured.result, null);
+    assertStringIncludes(
+      captured.warnings.join("\n"),
+      "could not read the `HEAD` commit object",
+    );
+  } finally {
+    await Deno.remove(outside, { recursive: true });
+  }
+});
+
+Deno.test("fetchGroupsChangedOnBase warns when the compare response is capped", async () => {
+  const files = Array.from({ length: 300 }, (_, index) => ({
+    filename: `packages/runner/src/file-${index}.ts`,
+  }));
+  const warnings: string[] = [];
+
+  const groups = await withMockFetch(
+    () => new Response(JSON.stringify({ files })),
+    () =>
+      fetchGroupsChangedOnBase(SHA_A, SHA_C, (message) => {
+        warnings.push(message);
+      }),
+  );
+
+  assertEquals([...groups], ["packages/runner"]);
+  assertStringIncludes(warnings.join("\n"), "300-file response cap");
+});
+
+Deno.test("isComparableBaseline gates a metric that names no coverage group", () => {
+  assertEquals(
+    isComparableBaseline({
+      sample: makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 1),
+      metric: "some-other-metric",
+      baseSha: SHA_C,
+      groupsChangedByBaseline: new Map(),
+      isPullRequest: true,
+    }),
+    true,
+  );
+});
+
+Deno.test("readHeadCommitObject returns null when git cannot be run", async () => {
+  const captured = await captureConsoleAsync(() =>
+    readHeadCommitObject("/coverage-check-no-such-directory")
+  );
+
+  assertEquals(captured.result, null);
+  assertStringIncludes(
+    captured.warnings.join("\n"),
+    "could not run `git` to read the `HEAD` commit object",
+  );
+});
+
+Deno.test("selectBaselines routes its GitHub calls through the guard", async () => {
+  const guarded: string[] = [];
+
+  const readings = runnerReadings();
+
+  await selectBaselines({
+    metrics: [RUNNER_METRIC],
+    runs: readings.map(([run]) => run),
+    readRun: readerFor(readings),
+    isPullRequest: true,
+    readBaseSha: () => Promise.resolve(SHA_C),
+    fetchRanks: () => Promise.resolve(RANKS),
+    fetchChangedGroups: () => Promise.resolve(new Set<string>()),
+    guard: (description, operation) => {
+      guarded.push(description);
+      return operation();
+    },
+    log: () => {},
+  });
+
+  assertEquals(guarded, [
+    "listing the base-branch commit's ancestry",
+    "comparing the baseline commit against the base-branch commit",
+  ]);
+});
+
+const NO_OVERRIDES = { metrics: new Map(), coverageBaselineReset: false };
+
+function rowsFor(
+  metrics: Record<string, number>,
+  baselines: Record<string, { value?: number; comparable: boolean }>,
+  extra: Partial<Parameters<typeof buildCoverageRows>[0]> = {},
+) {
+  const currentMetrics = new Map(
+    Object.entries(metrics).map(([metric, value]) => [
+      metric,
+      makeBaselineSample(9, SHA_C, "2026-08-04T11:00:00Z", value),
+    ]),
+  );
+  const baselineByMetric = new Map(
+    Object.entries(baselines).map(([metric, spec]) => [metric, {
+      sample: spec.value === undefined
+        ? undefined
+        : makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", spec.value),
+      comparable: spec.comparable,
+      baseSha: SHA_B,
+    }]),
+  );
+  return buildCoverageRows({
+    currentMetrics,
+    baselineByMetric,
+    overrides: NO_OVERRIDES,
+    changedCoverageGroups: new Set(["packages/runner", "packages/memory"]),
+    ...extra,
+  });
+}
+
+Deno.test("buildCoverageRows stamps every row with where it was measured", () => {
+  // The comment for a regression the pull request did not cause reads these
+  // back to say which run produced the numbers and which `main` commit that
+  // run merged, so every row carries them whatever the gate decides.
+
+  const { rows } = rowsFor(
+    { [RUNNER_METRIC]: 5747, [MEMORY_METRIC]: 3 },
+    {
+      [RUNNER_METRIC]: { value: 5746, comparable: true },
+      [MEMORY_METRIC]: { comparable: true },
+    },
+  );
+
+  assertEquals(rows.map((row) => row.status), ["OVER", "OVER"]);
+  for (const row of rows) {
+    assertEquals(row.measuredRunId, 9);
+    assertEquals(row.baseSha, SHA_B);
+  }
+
+  // A metric with no baseline at all knows no base-branch commit to name.
+  const ungated = rowsFor(
+    { [RUNNER_METRIC]: 1 },
+    {},
+  );
+  assertEquals(ungated.rows[0].measuredRunId, 9);
+  assertEquals(ungated.rows[0].baseSha, undefined);
+});
+
+Deno.test("buildCoverageRows fails a gated group above its baseline", () => {
+  const { rows, failures } = rowsFor(
+    { [RUNNER_METRIC]: 5747 },
+    { [RUNNER_METRIC]: { value: 5746, comparable: true } },
+  );
+
+  assertEquals(rows[0].status, "OVER");
+  assertEquals(rows[0].baseline, 5746);
+  assertEquals(rows[0].baselineSha, SHA_A);
+  assertEquals(failures.length, 1);
+});
+
+Deno.test("buildCoverageRows passes a gated group at its baseline", () => {
+  const { rows, failures } = rowsFor(
+    { [RUNNER_METRIC]: 5746 },
+    { [RUNNER_METRIC]: { value: 5746, comparable: true } },
+  );
+
+  assertEquals(rows[0].status, "OK");
+  assertEquals(failures, []);
+});
+
+Deno.test("buildCoverageRows reports an incomparable baseline without failing it", () => {
+  const { rows, failures, ungatedGroups } = rowsFor(
+    { [RUNNER_METRIC]: 9999 },
+    { [RUNNER_METRIC]: { value: 5746, comparable: false } },
+  );
+
+  assertEquals(rows[0].status, "excl");
+  assertEquals(rows[0].baseline, 5746);
+  assertEquals(failures, []);
+  assertEquals([...ungatedGroups], ["packages/runner"]);
+});
+
+Deno.test("buildCoverageRows leaves a group the PR did not change alone", () => {
+  const other = "coverage-debt: packages/toolshed uncovered lines";
+  const { rows, failures, ungatedGroups } = rowsFor(
+    { [other]: 9999 },
+    { [other]: { value: 10, comparable: true } },
+  );
+
+  assertEquals(rows[0].status, "excl");
+  assertEquals(failures, []);
+  // Comparable, so nothing is withheld for want of a baseline.
+  assertEquals([...ungatedGroups], []);
+});
+
+Deno.test("buildCoverageRows honors a per-group acceptance and a reset", () => {
+  const accepted = rowsFor(
+    { [RUNNER_METRIC]: 5800 },
+    { [RUNNER_METRIC]: { value: 5746, comparable: true } },
+    {
+      overrides: {
+        metrics: new Map([[RUNNER_METRIC, 54]]),
+        coverageBaselineReset: false,
+      },
+    },
+  );
+  assertEquals(accepted.rows[0].status, "ovrd");
+  assertEquals(accepted.failures, []);
+
+  const reset = rowsFor(
+    { [RUNNER_METRIC]: 5800 },
+    { [RUNNER_METRIC]: { value: 5746, comparable: true } },
+    {
+      overrides: { metrics: new Map(), coverageBaselineReset: true },
+    },
+  );
+  assertEquals(reset.rows[0].status, "ovrd");
+  assertEquals(reset.failures, []);
+});
+
+Deno.test("buildCoverageRows measures an acceptance from the baseline", () => {
+  const overrides = {
+    metrics: new Map([[RUNNER_METRIC, 54]]),
+    coverageBaselineReset: false,
+  };
+
+  // 5746 + 54 is the most the group may reach, and one line more fails.
+  const atLimit = rowsFor(
+    { [RUNNER_METRIC]: 5800 },
+    { [RUNNER_METRIC]: { value: 5746, comparable: true } },
+    { overrides },
+  );
+  assertEquals(atLimit.rows[0].status, "ovrd");
+
+  const overLimit = rowsFor(
+    { [RUNNER_METRIC]: 5801 },
+    { [RUNNER_METRIC]: { value: 5746, comparable: true } },
+    { overrides },
+  );
+  assertEquals(overLimit.rows[0].status, "OVER");
+  assertEquals(overLimit.failures.length, 1);
+});
+
+Deno.test("buildCoverageRows accepts the same rise after the baseline moves", () => {
+  // What a rebase does: the base branch uncovers 30 lines of its own, so both
+  // the baseline and this run's count rise by 30. The pull request still adds
+  // the 54 lines it accepted, and the same acceptance line still passes it.
+
+  const overrides = {
+    metrics: new Map([[RUNNER_METRIC, 54]]),
+    coverageBaselineReset: false,
+  };
+
+  const rebased = rowsFor(
+    { [RUNNER_METRIC]: 5830 },
+    { [RUNNER_METRIC]: { value: 5776, comparable: true } },
+    { overrides },
+  );
+  assertEquals(rebased.rows[0].status, "ovrd");
+  assertEquals(rebased.failures, []);
+
+  // And a rebase onto a base branch that covered 30 lines of its own does not
+  // hand the pull request room to add 84.
+  const tightened = rowsFor(
+    { [RUNNER_METRIC]: 5800 },
+    { [RUNNER_METRIC]: { value: 5716, comparable: true } },
+    { overrides },
+  );
+  assertEquals(tightened.rows[0].status, "OVER");
+  assertEquals(tightened.failures.length, 1);
+});
+
+Deno.test("buildCoverageRows bootstraps a metric with no baseline", () => {
+  const fresh = rowsFor(
+    { [RUNNER_METRIC]: 12 },
+    { [RUNNER_METRIC]: { comparable: true } },
+  );
+  assertEquals(fresh.rows[0].status, "OVER");
+  assertEquals(fresh.rows[0].baseline, 0);
+  assertEquals(fresh.failures.length, 1);
+
+  const empty = rowsFor(
+    { [RUNNER_METRIC]: 0 },
+    { [RUNNER_METRIC]: { comparable: true } },
+  );
+  assertEquals(empty.rows[0].status, "n/a");
+  assertEquals(empty.failures, []);
+
+  // With no baseline and nothing gating it, the metric is only reported.
+  const ungated = rowsFor(
+    { [RUNNER_METRIC]: 12 },
+    { [RUNNER_METRIC]: { comparable: false } },
+  );
+  assertEquals(ungated.rows[0].status, "excl");
+  assertEquals(ungated.failures, []);
+
+  // A reset accepts a metric that has no baseline yet.
+  const reset = rowsFor(
+    { [RUNNER_METRIC]: 12 },
+    { [RUNNER_METRIC]: { comparable: true } },
+    { overrides: { metrics: new Map(), coverageBaselineReset: true } },
+  );
+  assertEquals(reset.rows[0].status, "ovrd");
+
+  // A metric with no baseline is held to zero, so an acceptance is measured
+  // from there and the whole of it is available.
+  const accepted = rowsFor(
+    { [RUNNER_METRIC]: 12 },
+    { [RUNNER_METRIC]: { comparable: true } },
+    {
+      overrides: {
+        metrics: new Map([[RUNNER_METRIC, 12]]),
+        coverageBaselineReset: false,
+      },
+    },
+  );
+  assertEquals(accepted.rows[0].status, "ovrd");
+
+  const short = rowsFor(
+    { [RUNNER_METRIC]: 13 },
+    { [RUNNER_METRIC]: { comparable: true } },
+    {
+      overrides: {
+        metrics: new Map([[RUNNER_METRIC, 12]]),
+        coverageBaselineReset: false,
+      },
+    },
+  );
+  assertEquals(short.rows[0].status, "OVER");
+});
+
+Deno.test("buildCoverageRows reports a rise from a zero baseline as complete", () => {
+  const { rows } = rowsFor(
+    { [RUNNER_METRIC]: 4 },
+    { [RUNNER_METRIC]: { value: 0, comparable: true } },
+  );
+  assertEquals(rows[0].status, "OVER");
+  assertEquals(rows[0].pctIncrease, 100);
+
+  const held = rowsFor(
+    { [RUNNER_METRIC]: 0 },
+    { [RUNNER_METRIC]: { value: 0, comparable: true } },
+  );
+  assertEquals(held.rows[0].status, "OK");
+  assertEquals(held.rows[0].pctIncrease, 0);
+});
+
+/**
+ * A regressed group measured by run 1001, whose baseline came from `main` run
+ * 900.
+ */
+function unattributedFailure(): Row {
+  return {
+    metric: "coverage-debt: packages/example uncovered lines",
+    status: "OVER",
+    current: 3,
+    baseline: 1,
+    baselineRunId: 900,
+    baselineSha: SHA_B,
+    measuredRunId: 1001,
+    baseSha: SHA_C,
+  };
+}
+
+/** A checkout holding one source file, with reports for two runs of it. */
+async function withFlakyLineCheckout(
+  run: (context: {
+    rootDir: string;
+    lcov: string;
+    baselineLcov: string;
+  }) => Promise<void>,
+): Promise<void> {
+  const rootDir = await Deno.makeTempDir({ prefix: "coverage-unattributed-" });
+  try {
+    const sourcePath = path.join(rootDir, "packages/example/src/racy.ts");
+    await Deno.mkdir(path.dirname(sourcePath), { recursive: true });
+    await Deno.writeTextFile(
+      sourcePath,
+      ["export const a = 1;", "export const b = 2;"].join("\n"),
+    );
+    const report = (secondLineHits: number) =>
+      [
+        `SF:${sourcePath}`,
+        "DA:1,1",
+        `DA:2,${secondLineHits}`,
+        "end_of_record",
+      ].join("\n");
+    await run({
+      rootDir,
+      lcov: report(0),
+      baselineLcov: report(2),
+    });
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
+}
+
+Deno.test("buildUnattributedRegressionBody names lines the baseline run covered", async () => {
+  await withFlakyLineCheckout(async ({ rootDir, lcov, baselineLcov }) => {
+    const body = await buildUnattributedRegressionBody({
+      rootDir,
+      groups: [{ group: "packages/example", target: 1, current: 3 }],
+      coverageFailures: [unattributedFailure()],
+      // The PR changed a file in another group entirely.
+      prFiles: [{ filename: "packages/other/src/mod.ts" }],
+      lcov,
+      readBaselineLcov: (runId) => {
+        assertEquals(runId, 900);
+        return Promise.resolve(baselineLcov);
+      },
+    });
+
+    assertStringIncludes(body ?? "", "`packages/example/src/racy.ts`: 2");
+    assertStringIncludes(body ?? "", "not introduced by this PR");
+    // The prompt names the run that measured the lines and the run each group
+    // was held against, so a session picking it up can find both.
+    assertStringIncludes(
+      body ?? "",
+      "  Measuring run: https://github.com/commontoolsinc/labs/actions/runs/1001",
+    );
+    assertStringIncludes(body ?? "", `  Base commit measured: ${SHA_C}`);
+    assertStringIncludes(body ?? "", `  git log ${SHA_C}.. -- `);
+    assertStringIncludes(
+      body ?? "",
+      `  Baseline for packages/example: run https://github.com/commontoolsinc/labs/actions/runs/900, commit ${SHA_B}`,
+    );
+  });
+});
+
+Deno.test("buildUnattributedRegressionBody skips a line in a file the PR changed", async () => {
+  await withFlakyLineCheckout(async ({ rootDir, lcov, baselineLcov }) => {
+    const body = await buildUnattributedRegressionBody({
+      rootDir,
+      groups: [{ group: "packages/example", target: 1, current: 3 }],
+      coverageFailures: [unattributedFailure()],
+      prFiles: [{ filename: "packages/example/src/racy.ts" }],
+      lcov,
+      readBaselineLcov: () => Promise.resolve(baselineLcov),
+    });
+
+    assertEquals(body, null);
+  });
+});
+
+Deno.test("buildUnattributedRegressionBody gives up without a readable baseline run", async () => {
+  await withFlakyLineCheckout(async ({ rootDir, lcov }) => {
+    const noRunId = await buildUnattributedRegressionBody({
+      rootDir,
+      groups: [{ group: "packages/example", target: 1, current: 3 }],
+      coverageFailures: [{
+        ...unattributedFailure(),
+        baselineRunId: undefined,
+      }],
+      prFiles: [],
+      lcov,
+      readBaselineLcov: () => {
+        throw new Error("must not be read without a baseline run");
+      },
+    });
+    assertEquals(noRunId, null);
+
+    // The run exists but its coverage artifacts have expired or failed to
+    // download; the caller falls back to the ordinary comment.
+    const unreadable = await buildUnattributedRegressionBody({
+      rootDir,
+      groups: [{ group: "packages/example", target: 1, current: 3 }],
+      coverageFailures: [unattributedFailure()],
+      prFiles: [],
+      lcov,
+      readBaselineLcov: () => Promise.resolve(null),
+    });
+    assertEquals(unreadable, null);
+  });
+});
+
+Deno.test("writeCoverageDebtSuggestion falls back to the ordinary comment when the baseline is unreadable", async () => {
+  const failures = [unattributedFailure()];
+  const payload = await payloadFrom(() =>
+    writeCoverageDebtSuggestion(
+      4211,
+      failures,
+      [],
+      "",
+      () => Promise.resolve(null),
+    )
+  );
+
+  assertEquals(payload?.state, "regressed");
+  assertStringIncludes(payload?.body ?? "", "Could not tie the regression");
+});
+
+Deno.test("baselineLcovForRun gives up on a run with no coverage artifacts", async () => {
+  const lcov = await baselineLcovForRun(900, () =>
+    Promise.resolve([
+      { id: 1, name: "perf-metrics", size_in_bytes: 10, expired: false },
+    ]));
+
+  assertEquals(lcov, null);
+});
+
+Deno.test("baselineLcovForRun gives up when the artifact listing fails", async () => {
+  const lcov = await baselineLcovForRun(900, () => {
+    throw new Error("artifact listing unavailable");
+  });
+
+  assertEquals(lcov, null);
+});
+
+Deno.test("combinedLcovFromArtifacts joins every artifact's uploaded report", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "coverage-artifacts-" });
+  try {
+    const artifacts = [
+      { id: 11, name: "coverage-profile-runner-1" },
+      { id: 12, name: "coverage-profile-workspace-7" },
+    ].map((artifact) => ({ ...artifact, size_in_bytes: 64, expired: false }));
+
+    for (const [index, artifact] of artifacts.entries()) {
+      const artifactDir = path.join(dir, artifact.name);
+      await Deno.mkdir(artifactDir, { recursive: true });
+      await Deno.writeTextFile(
+        path.join(artifactDir, `${artifact.name}.lcov`),
+        [
+          `SF:/home/runner/work/labs/labs/packages/example/src/mod-${index}.ts`,
+          "DA:1,1",
+          "end_of_record",
+        ].join("\n"),
+      );
+    }
+
+    const { lcov, sourceDescription } = await combinedLcovFromArtifacts(
+      artifacts,
+      dir,
+    );
+
+    assertStringIncludes(lcov, "packages/example/src/mod-0.ts");
+    assertStringIncludes(lcov, "packages/example/src/mod-1.ts");
+    assertEquals(sourceDescription, "2 LCOV report files");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("unscoredGroupsReport names the members and the groups they cost", () => {
+  assertEquals(
+    unscoredGroupsReport(["./tasks", "./packages/shell"]),
+    "This run never launched ./packages/shell, ./tasks, so it carries no " +
+      "measurement of packages/shell, tasks and does not score them.",
+  );
+});
+
+Deno.test("unscoredGroupsReport says nothing for a run that launched everything", () => {
+  assertEquals(unscoredGroupsReport([]), undefined);
+});
+
+Deno.test("combinedLcovFromArtifacts unions the records its artifacts carry", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "coverage-unlaunched-union-" });
+  try {
+    const artifacts = [
+      { id: 31, name: "coverage-profile-workspace-2" },
+      { id: 32, name: "coverage-profile-workspace-5" },
+      { id: 33, name: "coverage-profile-workspace-6" },
+    ].map((artifact) => ({ ...artifact, size_in_bytes: 64, expired: false }));
+    const records = [["./packages/shell", "./tasks"], ["./packages/shell"], []];
+
+    for (const [index, artifact] of artifacts.entries()) {
+      const artifactDir = path.join(dir, artifact.name);
+      await Deno.mkdir(artifactDir, { recursive: true });
+      await Deno.writeTextFile(
+        path.join(artifactDir, `${artifact.name}.lcov`),
+        "",
+      );
+      await writeUnlaunchedMembers(artifactDir, records[index]);
+    }
+
+    const { unlaunchedMembers } = await combinedLcovFromArtifacts(
+      artifacts,
+      dir,
+    );
+
+    // Every member any artifact names, each of them once, and nothing from the
+    // artifact that carries no record.
+    assertEquals([...unlaunchedMembers].sort(), [
+      "./packages/shell",
+      "./tasks",
+    ]);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("combinedLcovFromArtifacts refuses to report on no artifacts at all", async () => {
+  // An empty set is not an empty report: it means the run uploaded nothing,
+  // which must be an error rather than a workspace scored as uncovered.
+
+  await assertRejects(
+    () => combinedLcovFromArtifacts([]),
+    Error,
+    "contained no profile or LCOV files",
+  );
+});
+
+Deno.test("buildUnattributedRegressionBody holds each group against its own baseline run", async () => {
+  const rootDir = await Deno.makeTempDir({ prefix: "coverage-unattributed-" });
+  try {
+    const alphaPath = path.join(rootDir, "packages/alpha/src/mod.ts");
+    const betaPath = path.join(rootDir, "packages/beta/src/mod.ts");
+    await Deno.mkdir(path.dirname(alphaPath), { recursive: true });
+    await Deno.mkdir(path.dirname(betaPath), { recursive: true });
+    await Deno.writeTextFile(alphaPath, "export const alpha = 1;\n");
+    await Deno.writeTextFile(betaPath, "export const beta = 1;\n");
+
+    const report = (alphaHits: number, betaHits: number) =>
+      [
+        `SF:${alphaPath}`,
+        `DA:1,${alphaHits}`,
+        "end_of_record",
+        `SF:${betaPath}`,
+        `DA:1,${betaHits}`,
+        "end_of_record",
+      ].join("\n");
+
+    // Two groups regress, and their baselines resolve to different main runs.
+    // Run 901 covered both lines; run 902 covered neither. Only alpha is held
+    // against 901, so only alpha regressed — beta's own baseline never covered
+    // its line, which makes it existing debt.
+    const read = new Map([[901, report(1, 1)], [902, report(0, 0)]]);
+    const body = await buildUnattributedRegressionBody({
+      rootDir,
+      groups: [
+        { group: "packages/alpha", target: 1, current: 2 },
+        { group: "packages/beta", target: 1, current: 2 },
+      ],
+      coverageFailures: [
+        {
+          metric: "coverage-debt: packages/alpha uncovered lines",
+          status: "OVER",
+          current: 2,
+          baseline: 1,
+          baselineRunId: 901,
+        },
+        {
+          metric: "coverage-debt: packages/beta uncovered lines",
+          status: "OVER",
+          current: 2,
+          baseline: 1,
+          baselineRunId: 902,
+        },
+      ],
+      prFiles: [],
+      lcov: report(0, 0),
+      readBaselineLcov: (runId) => Promise.resolve(read.get(runId) ?? null),
+    });
+
+    assertStringIncludes(body ?? "", "`packages/alpha/src/mod.ts`: 1");
+    assertFalse((body ?? "").includes("packages/beta/src/mod.ts"));
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
 });

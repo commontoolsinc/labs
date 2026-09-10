@@ -1,134 +1,91 @@
-import { assertEquals } from "@std/assert";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import * as Chronicle from "../src/storage/transaction/chronicle.ts";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Runtime } from "../src/runtime.ts";
+import { getDirectTransactionNativeCommit } from "../src/storage/transaction-inspection.ts";
+
+// A memory v2 entity document is an envelope: the transaction's root value
+// lives under its `value` key. Emptying that envelope and storing an empty
+// envelope are the same end state, so a write that removes the last field
+// has to reach storage as a document delete rather than as a stored empty
+// object -- otherwise a deleted document would come back as a present,
+// empty one.
 
 const signer = await Identity.fromPassphrase("memory v2 envelope delete");
 const space = signer.did();
 
-Deno.test("memory v2 chronicle retracts when the envelope value is deleted", async () => {
-  const storage = StorageManager.emulate({
-    as: signer,
+describe("memory v2 envelope deletion", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      storageManager,
+      apiUrl: new URL("http://localhost:8000"),
+    });
   });
 
-  try {
-    const replica = storage.open(space).replica;
-    if (!replica.commitNative) {
-      throw new Error("Expected memory v2 replica to support commitNative()");
-    }
-    await replica.commitNative({
-      operations: [{
-        op: "set",
-        id: "test:delete-envelope",
-        type: "application/json",
-        value: { value: { name: "ToDelete", active: true } },
-      }],
-    });
-
-    const chronicle = Chronicle.open(replica);
-    // Explicit delete of the envelope's `value` key empties the envelope,
-    // which commits as a retraction.
-    chronicle.write(
-      {
-        id: "test:delete-envelope",
-        type: "application/json",
-        path: ["value"],
-      },
-      undefined,
-      { delete: true },
-    );
-
-    const commitResult = chronicle.commit();
-    const transaction = commitResult.ok!;
-
-    assertEquals(commitResult.error, undefined);
-    assertEquals(transaction.facts.length, 1);
-    assertEquals(transaction.facts[0].of, "test:delete-envelope");
-    assertEquals(transaction.facts[0].is, undefined);
-  } finally {
-    await storage.close();
-  }
-});
-
-Deno.test("memory v2 chronicle preserves an envelope whose value is written as undefined", async () => {
-  const storage = StorageManager.emulate({
-    as: signer,
+  afterEach(async () => {
+    await runtime.dispose();
+    await storageManager.close();
   });
 
-  try {
-    const replica = storage.open(space).replica;
-    if (!replica.commitNative) {
-      throw new Error("Expected memory v2 replica to support commitNative()");
-    }
-    await replica.commitNative({
-      operations: [{
-        op: "set",
-        id: "test:set-undefined-envelope",
-        type: "application/json",
-        value: { value: { name: "ToClear", active: true } },
-      }],
-    });
+  it("commits an explicit root delete as a document delete", async () => {
+    const address = {
+      space,
+      scope: "space" as const,
+      id: "of:envelope-delete" as const,
+      path: [] as string[],
+    };
 
-    const chronicle = Chronicle.open(replica);
-    // A plain write of `undefined` stores `undefined` as the envelope value;
-    // the fact stays asserted (present-but-undefined, not retracted).
-    chronicle.write({
-      id: "test:set-undefined-envelope",
-      type: "application/json",
-      path: ["value"],
-    }, undefined);
+    const seed = runtime.edit();
+    seed.writeValueOrThrow(address, { name: "ToDelete", active: true });
+    expect((await seed.commit()).error).toBeUndefined();
 
-    const commitResult = chronicle.commit();
-    const transaction = commitResult.ok!;
+    const tx = runtime.edit();
+    tx.writeValueOrThrow(address, undefined, { delete: true });
 
-    assertEquals(commitResult.error, undefined);
-    assertEquals(transaction.facts.length, 1);
-    assertEquals(transaction.facts[0].of, "test:set-undefined-envelope");
-    const is = transaction.facts[0].is as
-      | Record<string, unknown>
-      | undefined;
-    assertEquals(is !== undefined, true);
-    assertEquals(Object.hasOwn(is!, "value"), true);
-    assertEquals(is!.value, undefined);
-  } finally {
-    await storage.close();
-  }
-});
+    const commit = getDirectTransactionNativeCommit(tx, space);
+    expect(commit?.operations.length).toBe(1);
+    expect(commit?.operations[0].op).toBe("delete");
+    expect(commit?.operations[0].id).toBe(address.id);
 
-Deno.test("memory v2 chronicle treats an explicit empty root envelope as deletion", async () => {
-  const storage = StorageManager.emulate({
-    as: signer,
+    expect((await tx.commit()).error).toBeUndefined();
+
+    const after = runtime.edit();
+    expect(after.read(address).ok?.value).toBeUndefined();
+    after.abort();
   });
 
-  try {
-    const replica = storage.open(space).replica;
-    if (!replica.commitNative) {
-      throw new Error("Expected memory v2 replica to support commitNative()");
-    }
-    await replica.commitNative({
-      operations: [{
-        op: "set",
-        id: "test:keep-empty-object",
-        type: "application/json",
-        value: { value: { value: "hello", other: true } },
-      }],
-    });
+  it("keeps the document when the root is written as undefined", async () => {
+    const address = {
+      space,
+      scope: "space" as const,
+      id: "of:envelope-set-undefined" as const,
+      path: [] as string[],
+    };
 
-    const chronicle = Chronicle.open(replica);
-    chronicle.write({
-      id: "test:keep-empty-object",
-      type: "application/json",
-      path: [],
-    }, {});
+    const seed = runtime.edit();
+    seed.writeValueOrThrow(address, { name: "ToClear", active: true });
+    expect((await seed.commit()).error).toBeUndefined();
 
-    const commitResult = chronicle.commit();
-    const transaction = commitResult.ok!;
+    const tx = runtime.edit();
+    // A plain write of `undefined` stores `undefined` under the envelope's
+    // `value` key. The key stays present, so the document stays present.
+    tx.writeValueOrThrow(address, undefined);
 
-    assertEquals(commitResult.error, undefined);
-    assertEquals(transaction.facts.length, 1);
-    assertEquals(transaction.facts[0].of, "test:keep-empty-object");
-    assertEquals(transaction.facts[0].is, undefined);
-  } finally {
-    await storage.close();
-  }
+    const commit = getDirectTransactionNativeCommit(tx, space);
+    expect(commit?.operations.length).toBe(1);
+    expect(commit?.operations[0].op).not.toBe("delete");
+
+    expect((await tx.commit()).error).toBeUndefined();
+
+    const replica = storageManager.open(space).replica;
+    const document = replica.getDocument(address.id, address.scope);
+    expect(document).toBeDefined();
+    expect(Object.hasOwn(document!, "value")).toBe(true);
+    expect(document!.value).toBeUndefined();
+  });
 });

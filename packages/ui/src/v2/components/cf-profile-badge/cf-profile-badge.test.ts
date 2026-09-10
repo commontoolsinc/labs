@@ -64,6 +64,40 @@ function fakeClick(): any {
   return { stopPropagation() {}, metaKey: false, ctrlKey: false };
 }
 
+/**
+ * The values bound by the nested template whose markup contains `marker`.
+ *
+ * Asserting on the serialized whole cannot tell an avatar's `name` from the
+ * text beside it: every variant puts the name in an outer span or an
+ * aria-label, so a fallback that reached ONLY that path looks identical to
+ * one that reached the avatar and the tooltip as well.
+ */
+function bindingsOfTemplateWith(
+  node: unknown,
+  marker: string,
+): unknown[] | undefined {
+  if (node === null || typeof node !== "object") return undefined;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = bindingsOfTemplateWith(child, marker);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  const template = node as { strings?: unknown; values?: unknown[] };
+  if (
+    Array.isArray(template.strings) &&
+    template.strings.join("").includes(marker)
+  ) {
+    return template.values ?? [];
+  }
+  for (const value of template.values ?? []) {
+    const found = bindingsOfTemplateWith(value, marker);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 describe("CFProfileBadge", () => {
   it("registers the custom element", () => {
     expect(customElements.get("cf-profile-badge")).toBe(CFProfileBadge);
@@ -72,6 +106,119 @@ describe("CFProfileBadge", () => {
   it("defaults to a medium avatar in the presented state", () => {
     const el = new CFProfileBadge();
     expect(el.size).toBe("md");
+  });
+
+  describe("fallback name", () => {
+    it("is undefined by default, so an unresolved badge still says so", () => {
+      const el = new CFProfileBadge();
+      expect(el.fallbackName).toBeUndefined();
+    });
+
+    it("presents a stored name where no profile resolves", () => {
+      // A roster row written before the space had profiles knows the name it
+      // stored; showing it beats telling the reader the person is unknown.
+      const el = new CFProfileBadge() as any;
+      el.fallbackName = "Alex";
+      expect(JSON.stringify(el.render())).toContain("Alex");
+    });
+
+    it("never lets the fallback stand in for a resolved profile", () => {
+      // A fallback that could shadow a real identity would be a way to label
+      // someone as somebody else.
+      const el = new CFProfileBadge() as any;
+      el._name = "Ada";
+      el._resolved = true;
+      el.fallbackName = "Alex";
+      const html = JSON.stringify(el.render());
+      expect(html).toContain("Ada");
+      expect(html).not.toContain("Alex");
+    });
+
+    it("keeps the fallback when resolution produced no value at all", () => {
+      // The no-cell and failed-resolve paths both apply `undefined`. Treating
+      // those as "resolved" would suppress the fallback in exactly the case it
+      // exists for — a roster row that never had a profile to resolve.
+      const el = new CFProfileBadge() as any;
+      el.fallbackName = "Alex";
+      el._applyValue(undefined);
+      expect(el._resolved).toBe(false);
+      expect(JSON.stringify(el.render())).toContain("Alex");
+    });
+
+    it("refuses the fallback for a resolved profile that carries no name", () => {
+      // The sharp case: verification comes from the resolved cell's label, not
+      // from the name, so a nameless VERIFIED profile would otherwise render a
+      // caller's string beside a seal it did not earn.
+      const el = new CFProfileBadge() as any;
+      el._resolved = true;
+      el._state = "verified";
+      el._seal = identitySeal(OWNER_DID);
+      el.fallbackName = "Alice";
+      const html = JSON.stringify(el.render());
+      expect(html).not.toContain("Alice");
+      expect(html).toContain("Unknown profile");
+    });
+
+    it("does not carry the seal while presenting a fallback", () => {
+      // Verification can be derived from a resolved cell's LABEL while no
+      // value arrived, so this is the state the component can really be in —
+      // not a contrived one.
+      const el = new CFProfileBadge() as any;
+      el._state = "verified";
+      el._seal = identitySeal(OWNER_DID);
+      el.fallbackName = "Alex";
+      const html = JSON.stringify(el.render());
+      expect(html).toContain("Alex");
+      expect(html).not.toContain(identitySeal(OWNER_DID).accent);
+    });
+
+    it("reports no verified state or liveness while presenting a fallback", () => {
+      // The seal is one claim wearing three faces — the seal nodes,
+      // `data-state` (which the verified CSS keys on), and the cursor-sheen
+      // liveness. Guarding only the nodes leaves the other two asserting it.
+      const el = new CFProfileBadge() as any;
+      el._state = "verified";
+      el._seal = identitySeal(OWNER_DID);
+      el.fallbackName = "Alex";
+      expect(el._verified).toBe(false);
+      expect(JSON.stringify(el.render())).not.toContain('"verified"');
+    });
+
+    it("reports verified once a value and a label have both arrived", () => {
+      // The boundary must not swallow the real case it is protecting.
+      const el = new CFProfileBadge() as any;
+      el._applyValue({ name: "Ada" });
+      el._state = "verified";
+      el._seal = identitySeal(OWNER_DID);
+      expect(el._verified).toBe(true);
+      expect(JSON.stringify(el.render())).toContain("verified");
+    });
+
+    it("presents the fallback through every variant's name and avatar", () => {
+      // Asserted on the AVATAR and TOOLTIP bindings, not on the string
+      // appearing anywhere: the outer name span and the aria-label carry it in
+      // every variant, so a check for "Alex" somewhere passes while the avatar
+      // still renders "?" and the tooltip still says "Profile" — which is
+      // exactly the state this is here to catch.
+      for (const variant of ["full", "circle", "hero"] as const) {
+        const el = new CFProfileBadge() as any;
+        el.variant = variant;
+        el.fallbackName = "Alex";
+        const avatar = bindingsOfTemplateWith(el.render(), "<cf-avatar");
+        expect(avatar, `${variant} renders no avatar`).toBeDefined();
+        expect(avatar, `${variant} avatar took no name`).toContain("Alex");
+      }
+
+      // `circle` hides the name, so its tooltip is where the fallback has to
+      // land; unfixed it read "Profile".
+      const circle = new CFProfileBadge() as any;
+      circle.variant = "circle";
+      circle.fallbackName = "Alex";
+      const tooltip = bindingsOfTemplateWith(circle.render(), "tooltip-name");
+      expect(tooltip).toBeDefined();
+      expect(tooltip).toContain("Alex");
+      expect(tooltip).not.toContain("Profile");
+    });
   });
 
   describe("variants (CT-1761)", () => {
@@ -87,12 +234,13 @@ describe("CFProfileBadge", () => {
       for (const variant of ["full", "chip", "circle", "hero"] as const) {
         const el = new CFProfileBadge() as any;
         el.variant = variant;
-        el._name = "Ada";
+        el._applyValue({ name: "Ada" });
         expect(el.render()).toBeTruthy(); // presented
 
         el._state = "verified";
         el._seal = identitySeal(OWNER_DID);
-        expect(el.render()).toBeTruthy(); // verified
+        expect(el._verified).toBe(true);
+        expect(JSON.stringify(el.render())).toContain('"verified"');
       }
     });
   });

@@ -17,14 +17,13 @@ import {
   searchPattern as summarySearchPattern,
   type SummaryIndexEntry,
 } from "./summary-index.tsx";
-import { listMentionable, listRecent } from "./common-fabric.tsx";
+import { listMentionable } from "./common-fabric.tsx";
 
 // ===== Types =====
 
 type SpaceOverviewResult = {
   headline: string;
   themes: Array<{ name: string; description: string; relatedPieces: string[] }>;
-  recentActivity: string;
   connections: Array<{ description: string; pieceNames: string[] }>;
   suggestions: string[];
 };
@@ -47,8 +46,7 @@ const triggerAnalysis = handler<
     role: "user",
     content: [{
       type: "text" as const,
-      text:
-        "Analyze this space and give me an overview of what's here and what's been happening recently.",
+      text: "Analyze this space and give me an overview of what's here.",
     }],
   });
 });
@@ -60,7 +58,6 @@ export default pattern<SpaceOverviewInput, SpaceOverviewOutput>(() => {
   const mentionable = wish<MentionablePiece[]>({
     query: "#mentionable",
   }).result;
-  const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
   const { entries: summaryEntries } = wish<{ entries: SummaryIndexEntry[] }>({
     query: "#summaryIndex",
   }).result!;
@@ -77,14 +74,12 @@ export default pattern<SpaceOverviewInput, SpaceOverviewOutput>(() => {
 
 Process:
 1. Use searchSpace to browse the space contents — search for broad terms and specific topics
-2. Use listRecent to see what's been active lately
-3. Use listMentionable to get a full inventory
-4. Synthesize what you find into a structured overview
+2. Use listMentionable to get a full inventory
+3. Synthesize what you find into a structured overview
 
 After exploring, call the finalResult tool with your structured findings:
 - headline: A punchy one-sentence summary of the space
 - themes: 2-4 active themes or topic clusters you identified (each with name, description, and relatedPieces)
-- recentActivity: A narrative of what's been captured/changed lately
 - connections: Notable connections between pieces (each with description and pieceNames)
 - suggestions: 2-3 suggested next actions or things to explore
 
@@ -106,9 +101,6 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
     ),
     listMentionable: pattern((_input: Record<string, never>) =>
       listMentionable({ mentionable })
-    ),
-    listRecent: pattern((_input: Record<string, never>) =>
-      listRecent({ recentPieces })
     ),
   };
 
@@ -194,25 +186,6 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
                         </p>
                       </cf-vstack>
                     ))}
-                  </cf-vstack>
-
-                  <cf-vstack gap="1">
-                    <h3
-                      style={{
-                        margin: 0,
-                        fontSize: "14px",
-                        color: "var(--cf-colors-gray-500)",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.05em",
-                      }}
-                    >
-                      Recent Activity
-                    </h3>
-                    <p
-                      style={{ margin: 0, fontSize: "14px", lineHeight: "1.5" }}
-                    >
-                      {overview?.recentActivity}
-                    </p>
                   </cf-vstack>
 
                   {computed(() => (overview?.connections?.length ?? 0) > 0)

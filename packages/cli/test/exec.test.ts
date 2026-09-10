@@ -2,12 +2,8 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { dirname, join } from "@std/path";
 import type { JSONSchema } from "@commonfabric/api";
-import {
-  createFactoryShell,
-  factoryStateOf,
-  registerFabricFactory,
-} from "@commonfabric/data-model/fabric-factory";
-import { PiecesController } from "@commonfabric/piece/ops";
+import { undeclaredVerbFieldError } from "../lib/callable.ts";
+import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   type ExecCommandSpec,
   normalizeCallableInputForExecution,
@@ -24,45 +20,8 @@ import {
 } from "../lib/exec.ts";
 import { writeMountState } from "../lib/fuse.ts";
 import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
-import {
-  brandTrustedBuilderArtifact,
-  setFrameworkProvidedPaths,
-} from "../../runner/src/builder/pattern-metadata.ts";
 import type { SpaceConfig } from "../lib/piece.ts";
-import { cf, isIgnorableDenoWarningLine } from "./utils.ts";
-
-const canonicalSearchFactory = createFactoryShell({
-  kind: "pattern",
-  ref: {
-    identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    symbol: "search",
-  },
-  argumentSchema: {
-    type: "object",
-    properties: { query: { type: "string" } },
-    required: ["query"],
-  },
-  resultSchema: {
-    type: "object",
-    properties: { echoed: { type: "string" } },
-  },
-});
-
-function livePatternFactory(
-  argumentSchema: JSONSchema,
-  resultSchema: JSONSchema,
-  frameworkProvidedPaths: readonly (readonly string[])[] = [],
-): unknown {
-  const factory = brandTrustedBuilderArtifact(() => undefined);
-  const registered = registerFabricFactory(factory, "pattern", {
-    kind: "pattern",
-    rootToken: {},
-    argumentSchema,
-    resultSchema,
-  });
-  setFrameworkProvidedPaths(registered, frameworkProvidedPaths);
-  return registered;
-}
+import { cf, relevantStderr } from "./utils.ts";
 
 function makeSpec(
   callableKind: "handler" | "tool",
@@ -75,6 +34,20 @@ function makeSpec(
     inputSchema,
     outputSchemaSummary,
   };
+}
+
+/** The message `parseExecArgs` refused `args` with, or "" where it did not. */
+function refusalFrom(
+  spec: ExecCommandSpec,
+  args: string[],
+  sectionPrefix?: string,
+): string {
+  try {
+    parseExecArgs(spec, args, sectionPrefix);
+  } catch (error) {
+    return (error as Error).message;
+  }
+  return "";
 }
 
 describe("parseExecArgs", () => {
@@ -458,8 +431,265 @@ describe("parseExecArgs", () => {
     );
     expect(() => parseExecArgs(spec, ["--query", "tea", "--mode", "invalid"]))
       .toThrow(/Invalid value for --mode/i);
+    // The five elements the payload door gives for the same mistake: the
+    // name, the position, the refusal, and the accepted vocabulary. A caller
+    // who mistypes a flag and one who mistypes a payload key made one
+    // mistake, and the flag spelling is the one the walkthrough teaches.
     expect(() => parseExecArgs(spec, ["--query", "tea", "--unknown", "value"]))
-      .toThrow(/Unknown flag --unknown/i);
+      .toThrow(
+        /"--unknown" at <event> is not a field this verb declares\./,
+      );
+    expect(() => parseExecArgs(spec, ["--query", "tea", "--unknown", "value"]))
+      .toThrow(/<event> takes "--mode", "--query"/);
+
+    // The fifth element, on a name close enough to have been meant.
+    expect(() => parseExecArgs(spec, ["--quer", "tea"]))
+      .toThrow(/Did you mean "--query"\?/);
+    // And withheld where nothing is close: a wrong guess is worse than none.
+    expect(() => parseExecArgs(spec, ["--zzzzzzzz", "tea"]))
+      .not.toThrow(/Did you mean/);
+
+    // A verb declaring nothing says so rather than trailing an empty list,
+    // which is the same sentence the payload door gives for that case.
+    const bare = makeSpec("handler", { type: "object", properties: {} });
+    expect(() => parseExecArgs(bare, ["invoke", "--titel", "x"]))
+      .toThrow(/<event> declares no fields at all/);
+  });
+
+  it("refuses a read option inside the callable's section, and says where it goes", () => {
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { title: { type: "string" } },
+      required: ["title"],
+    });
+
+    // The projection is not a near miss for `--title`; it is a `cf` flag in
+    // the wrong section, and the answer is the section it belongs to.
+    const message = (() => {
+      try {
+        parseExecArgs(
+          spec,
+          ["--select", "topic.title", "--title", "Ship it"],
+          "cf piece call ... addTopic",
+        );
+      } catch (error) {
+        return (error as Error).message;
+      }
+      return "";
+    })();
+    expect(message).toContain('"--select" is a `cf` read option');
+    expect(message).toContain(
+      "written:  cf piece call ... addTopic --select topic.title --title 'Ship it'",
+    );
+    expect(message).toContain(
+      "write:    cf piece call ... addTopic --title 'Ship it' -- --select topic.title",
+    );
+  });
+
+  it("refuses all three read options in the section, and none the verb declares", () => {
+    const spec = makeSpec("tool", {
+      type: "object",
+      properties: { query: { type: "string" } },
+    });
+    for (const flag of ["--select", "--schema", "--filter"]) {
+      expect(() => parseExecArgs(spec, [flag, "x"]), flag)
+        .toThrow(/is a `cf` read option/);
+    }
+
+    // Nothing reserves a field name. A verb that declares `select` owns the
+    // word inside its own section, and the refusal never sees it.
+    const declaring = makeSpec("tool", {
+      type: "object",
+      properties: { select: { type: "string" } },
+    });
+    expect(parseExecArgs(declaring, ["--select", "manual"]).input)
+      .toEqual({ select: "manual" });
+  });
+
+  it("leaves a declared read-option name where its owner reads it", () => {
+    // `filter` is this verb's field and `select` is nobody's. The corrected
+    // line moves the one that names no field and leaves the other in the
+    // section — moving both would hand the verb's own input to the read step.
+    const spec = makeSpec("tool", {
+      type: "object",
+      properties: { filter: { type: "string" } },
+    });
+    const message = (() => {
+      try {
+        parseExecArgs(
+          spec,
+          ["--filter", "mine", "--select", "title"],
+          "cf piece call ... findItems",
+        );
+      } catch (error) {
+        return (error as Error).message;
+      }
+      return "";
+    })();
+    expect(message).toContain(
+      "write:    cf piece call ... findItems --filter mine -- --select title",
+    );
+  });
+
+  it("refuses a read option in the section of a verb whose schema judges nothing", () => {
+    // An open schema accepts any field, so this flag would otherwise be
+    // absorbed as one and the handler would run with input the caller never
+    // meant — a projection asked for, an unprojected value returned, exit
+    // zero. That is the silent case the boundary exists for, so the answer
+    // comes before the schema is consulted at all.
+    const open = makeSpec("handler", { type: "object" });
+    expect(() => parseExecArgs(open, ["--select", "title"]))
+      .toThrow(/is a `cf` read option/);
+    expect(parseExecArgs(open, ["--anything", "else"]).input)
+      .toEqual({ anything: "else" });
+  });
+
+  it("refuses a read option in the section of a verb taking a single value", () => {
+    // A verb with no fields reaches a different parser, and the boundary is
+    // the same one: the alternative is the four value flags, which is a true
+    // sentence about a vocabulary the caller was never reaching for.
+    for (
+      const spec of [
+        makeSpec("handler", { type: "string" }),
+        makeSpec("handler", true),
+      ]
+    ) {
+      const message = (() => {
+        try {
+          parseExecArgs(
+            spec,
+            ["--value", "Ship", "--select", "topic.title"],
+            "cf piece call ... setTitle",
+          );
+        } catch (error) {
+          return (error as Error).message;
+        }
+        return "";
+      })();
+      expect(message).toContain('"--select" is a `cf` read option');
+      expect(message).toContain(
+        "write:    cf piece call ... setTitle --value Ship -- --select topic.title",
+      );
+    }
+
+    // The keyword rejoins the prefix here too, so the corrected line is the
+    // caller's own rather than one with a word silently dropped.
+    expect(
+      refusalFrom(
+        makeSpec("handler", { type: "string" }),
+        ["invoke", "--filter", "open"],
+        "cf piece call ... setTitle",
+      ),
+    ).toContain("write:    cf piece call ... setTitle invoke -- --filter open");
+  });
+
+  it("takes a flag-shaped word after `--value` as the value it is", () => {
+    // Such a verb's whole payload is one word the caller chose, and a word
+    // beginning with dashes is a payload like any other. Reading it as a
+    // projection refuses a call that names no projection at all.
+    expect(
+      parseExecArgs(makeSpec("handler", { type: "string" }), [
+        "--value",
+        "--select",
+      ]).input,
+    ).toBe("--select");
+  });
+
+  it("takes a flag-shaped word after `--value-file` and `--json-file` as the path", () => {
+    // The same rule, and the reason the four flags are checked one at a time:
+    // a path beginning with dashes is a path this verb accepts, so neither of
+    // these leaves the word standing for the projection scan to find.
+    const spec = makeSpec("handler", { type: "string" });
+    expect(parseExecArgs(spec, ["--value-file", "--select"]).inputFile)
+      .toStrictEqual({ format: "text", path: "--select" });
+    expect(parseExecArgs(spec, ["--json-file", "--select"]).inputFile)
+      .toStrictEqual({ format: "json", path: "--select" });
+  });
+
+  it("reads a read option after a bare `--json` as a read option", () => {
+    // `--json` is the one of the four that declines a flag-shaped word: bare
+    // it reads stdin, so the word after it is nobody's value and a read option
+    // written there is a projection inside the callable's section.
+    const spec = makeSpec("handler", { type: "string" });
+    expect(
+      refusalFrom(
+        spec,
+        ["--json", "--select", "topic.title"],
+        "cf piece call ... scalar",
+      ),
+    )
+      .toContain(
+        "write:    cf piece call ... scalar --json -- --select topic.title",
+      );
+    // And still spends a payload that is not flag-shaped.
+    expect(parseExecArgs(spec, ["--json", '"hi"']).input).toBe("hi");
+  });
+
+  it("leaves a field's own value in the section, flag-shaped or not", () => {
+    // `--title` declares a string, so the word after it is that string. A
+    // correction re-reading it as a flag moves the title's value out of the
+    // section, breaks the pairing of the flag that really is misplaced, and
+    // prints a line asking for something the caller never wrote.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { title: { type: "string" } },
+      required: ["title"],
+    });
+    expect(
+      refusalFrom(
+        spec,
+        ["--title", "--select", "--schema", "topic"],
+        "cf piece call ... addItem",
+      ),
+    ).toContain(
+      "write:    cf piece call ... addItem --title --select -- --schema topic",
+    );
+  });
+
+  it("moves a read option with its value where the field before it takes none", () => {
+    // A boolean field spends no word, so the read option after it opens its
+    // own pair and both words move together.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { draft: { type: "boolean" }, title: { type: "string" } },
+    });
+    expect(
+      refusalFrom(
+        spec,
+        ["--draft", "--select", "topic.title"],
+        "cf piece call ... addItem",
+      ),
+    ).toContain(
+      "write:    cf piece call ... addItem --draft -- --select topic.title",
+    );
+    // A negation says which value it means, so it spends no word either.
+    expect(
+      refusalFrom(
+        spec,
+        ["--no-draft", "--select", "topic.title"],
+        "cf piece call ... addItem",
+      ),
+    ).toContain(
+      "write:    cf piece call ... addItem --no-draft -- --select topic.title",
+    );
+  });
+
+  it("leaves a flag after `--json` standing as a flag, which `--json` refuses to take", () => {
+    // `--json` takes a payload and refuses a flag-shaped word outright, so a
+    // read option written after it is a read option rather than its value.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { title: { type: "string" } },
+    });
+    expect(
+      refusalFrom(
+        spec,
+        ["--select", "a", "--json", "--filter", "b"],
+        "cf piece call ... addItem",
+      ),
+    ).toContain(
+      "write:    cf piece call ... addItem --json -- --select a --filter b",
+    );
   });
 });
 
@@ -538,10 +768,453 @@ describe("parseExecArgs edge cases", () => {
     expect(parseExecArgs(spec, ["--no-enabled"]).input).toEqual({
       enabled: false,
     });
+    // The field exists; the negation is what does not apply. Listing the
+    // vocabulary here would send the caller looking for a name they already
+    // found, so this refusal names only the field it is about.
     expect(() => parseExecArgs(spec, ["--no-query"])).toThrow(
-      /Unknown flag/,
+      /"--no-query" negates "--query", which is not a boolean field/,
+    );
+    expect(() => parseExecArgs(spec, ["--no-query"])).not.toThrow(
+      /declared fields are/,
     );
     expect(() => parseExecArgs(spec, ["--query"])).toThrow(/Missing value/);
+  });
+
+  it("reads a field a conjunction declares, on every flag surface", () => {
+    // `properties` alone missed what an `allOf` member contributes, while the
+    // payload door read it — so one door judged a field the other could not
+    // see. A caller was refused at dispatch for omitting something no surface
+    // had shown them.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { note: { type: "string" } },
+      required: ["note"],
+      allOf: [{
+        type: "object",
+        properties: { count: { type: "number" } },
+        required: ["count"],
+      }],
+    });
+
+    // The flag parses, and to its DECLARED type rather than a string.
+    expect(
+      parseExecArgs(spec, ["invoke", "--note", "hi", "--count", "5"]).input,
+    )
+      .toEqual({ note: "hi", count: 5 });
+
+    // Required is enforced from the member that declares it.
+    expect(() => parseExecArgs(spec, ["invoke", "--note", "hi"]))
+      .toThrow(/Missing required flag --count/);
+
+    // And the help page lists it, which is the half a caller reads first.
+    const help = renderExecHelp("/mnt/x.handler", spec, {});
+    expect(help).toMatch(/--count/);
+
+    // The type block above the flags shows it too. The two are rendered by
+    // DIFFERENT readers — the flag list by the CLI's own, the type block by
+    // the runner's formatter — so one page could state two answers about one
+    // schema, and did. Sliced out rather than matched against the whole page,
+    // because `--count` in the flag list would satisfy a looser match on its
+    // own and the disagreement is exactly what needs catching.
+    const typeBlock = help.split("Input type:")[1]?.split("Flags:")[0] ?? "";
+    expect(typeBlock).toMatch(/note/);
+    expect(typeBlock).toMatch(/count/);
+  });
+
+  it("follows a reference into the definition a conjunction names", () => {
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { note: { type: "string" } },
+      allOf: [{ $ref: "#/$defs/Extra" }],
+      $defs: {
+        Extra: {
+          type: "object",
+          properties: { count: { type: "number" } },
+          required: ["count"],
+        },
+      },
+    });
+    expect(parseExecArgs(spec, ["invoke", "--note", "a", "--count", "2"]).input)
+      .toEqual({ note: "a", count: 2 });
+  });
+
+  it("does not pull a field out of a disjunction", () => {
+    // A payload satisfies ONE branch of an `anyOf`, so no single flag list
+    // describes the position and no branch's `required` binds it. Offering
+    // `--only-here` would advertise a flag that fits one branch and breaks the
+    // other.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { note: { type: "string" } },
+      allOf: [{
+        anyOf: [{
+          type: "object",
+          properties: { onlyHere: { type: "string" } },
+          required: ["onlyHere"],
+        }],
+      }],
+    });
+
+    // It is not in the DECLARED vocabulary: the help page does not advertise
+    // it, and its `required` does not bind a payload that omits it.
+    const help = renderExecHelp("/mnt/x.handler", spec, {});
+    expect(help).not.toMatch(/--only-here/);
+    expect(parseExecArgs(spec, ["invoke", "--note", "a"]).input)
+      .toEqual({ note: "a" });
+
+    // A disjunction leaves the position unjudgeable, so BOTH doors fail open
+    // and take an unnamed flag rather than refusing what they cannot assess.
+    // Agreeing is the property worth pinning; which way they agree follows
+    // from the design's "a call wrongly refused cannot be made at all".
+    expect(parseExecArgs(spec, ["invoke", "--only-here", "x"]).input)
+      .toEqual({ "only-here": "x" });
+    expect(undeclaredVerbFieldError({ onlyHere: "x" }, spec.inputSchema))
+      .toBeUndefined();
+  });
+
+  it("leaves a conjunction over a scalar on the single-value path", () => {
+    // `allOf` earns the object path by CONTRIBUTING fields. A conjunction
+    // constraining a scalar contributes none, and routing it through flag
+    // parsing would offer a single-value verb a vocabulary of nothing.
+    const spec = makeSpec("tool", { allOf: [{ type: "string" }] });
+    expect(parseExecArgs(spec, ["run", "--value", "hi"]).input).toBe("hi");
+    expect(() => parseExecArgs(spec, ["run", "--anything", "x"]))
+      .toThrow(/is not a flag this verb takes/);
+  });
+
+  it("keeps the flags beside a disjunction it cannot express", () => {
+    // A root `anyOf` adds constraints no flag list can express, but the
+    // properties beside it are still declared and still typed. Reporting none
+    // because a disjunction is present would take away flags that already
+    // worked — the disjunction is stepped over, not treated as a veto.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { note: { type: "string" }, count: { type: "number" } },
+      anyOf: [
+        { required: ["note"] },
+        { required: ["count"] },
+      ],
+    });
+
+    expect(parseExecArgs(spec, ["invoke", "--note", "a", "--count", "2"]).input)
+      .toEqual({ note: "a", count: 2 });
+    expect(renderExecHelp("/mnt/x.handler", spec, {})).toMatch(/--note/);
+  });
+
+  it("accepts an undeclared flag exactly where the payload door accepts the field", () => {
+    // The two doors are one gate asked in two spellings, so what they let
+    // through must not depend on which the caller reached for. Both
+    // permissive cases are schemas the RUNTIME will not judge either: one
+    // naming no fields at all, and one saying extra fields are welcome.
+    const shapes: Record<string, JSONSchema> = {
+      "no properties key": { type: "object" },
+      "empty properties": { type: "object", properties: {} },
+      "additionalProperties": {
+        type: "object",
+        properties: { title: { type: "string" } },
+        additionalProperties: true,
+      },
+      "closed": { type: "object", properties: { title: { type: "string" } } },
+    };
+
+    const verdicts: Record<string, { flag: string; payload: string }> = {};
+    for (const [label, inputSchema] of Object.entries(shapes)) {
+      const spec = makeSpec("handler", inputSchema);
+      let flag: string;
+      try {
+        parseExecArgs(spec, ["invoke", "--titel", "x"]);
+        flag = "accept";
+      } catch {
+        flag = "refuse";
+      }
+      verdicts[label] = {
+        flag,
+        payload: undeclaredVerbFieldError({ titel: "x" }, inputSchema) ===
+            undefined
+          ? "accept"
+          : "refuse",
+      };
+    }
+
+    // Asserted as one object so a disagreement names WHICH shape drifted,
+    // and so a change making both doors uniformly wrong still fails.
+    expect(verdicts).toEqual({
+      "no properties key": { flag: "accept", payload: "accept" },
+      "empty properties": { flag: "refuse", payload: "refuse" },
+      "additionalProperties": { flag: "accept", payload: "accept" },
+      "closed": { flag: "refuse", payload: "refuse" },
+    });
+
+    // An accepted flag lands as the string the caller typed: the schema
+    // declared no type to read it as, and this door does not invent one.
+    expect(
+      parseExecArgs(makeSpec("handler", shapes["no properties key"]), [
+        "invoke",
+        "--titel",
+        "x",
+      ]).input,
+    ).toEqual({ titel: "x" });
+  });
+
+  it("offers a negated near miss, and only over fields that can be negated", () => {
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: {
+        title: { type: "boolean" },
+        done: { type: "boolean" },
+        body: { type: "string" },
+      },
+    });
+
+    // The case the caller actually hits: a typo inside the negated name. The
+    // `no-` prefix is stripped before matching, because otherwise it is three
+    // edits of noise and the threshold scales with the misspelling's length —
+    // so it would get HARDER to match precisely because they typed more.
+    expect(() => parseExecArgs(spec, ["invoke", "--no-titel"]))
+      .toThrow(/Did you mean "--no-title"\?/);
+
+    // Only booleans are offered, because only a boolean can be negated.
+    expect(() => parseExecArgs(spec, ["invoke", "--no-titel"]))
+      .toThrow(
+        /Only a boolean field can be negated, and this verb declares "--title", "--done"/,
+      );
+
+    // A near miss toward a NON-boolean is withheld: `--no-body` would fail
+    // too, so naming it sends the caller to a spelling that does not work.
+    expect(() => parseExecArgs(spec, ["invoke", "--no-bodi"]))
+      .not.toThrow(/Did you mean/);
+
+    // The unnegated door is untouched, and still lists every field.
+    expect(() => parseExecArgs(spec, ["invoke", "--titel", "x"]))
+      .toThrow(
+        /Did you mean "--title"\? <event> takes "--title", "--done", "--body"/,
+      );
+
+    // A valid negation still works.
+    expect(parseExecArgs(spec, ["invoke", "--no-title"]).input)
+      .toEqual({ title: false });
+  });
+
+  it("says so when a verb declares nothing that can be negated", () => {
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { body: { type: "string" } },
+    });
+    expect(() => parseExecArgs(spec, ["invoke", "--no-body-x"]))
+      .toThrow(
+        /Only a boolean field can be negated, and this verb declares none/,
+      );
+  });
+
+  it("refuses a declared field typed in its schema spelling, not aliases it", () => {
+    // The permissive path turns on whether the SCHEMA judges its fields, not
+    // on whether a NAME is declared. Asking the second would read `--fooBar`
+    // as an undeclared field against an open schema and accept it — a silent
+    // alias for `--foo-bar` that no help page teaches and that arrives
+    // untyped, because the synthesized descriptor carries no schema.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { fooBar: { type: "number" } },
+    });
+
+    expect(() => parseExecArgs(spec, ["invoke", "--fooBar", "5"]))
+      .toThrow(/"--fooBar" at <event> is not a field this verb declares\./);
+    expect(() => parseExecArgs(spec, ["invoke", "--fooBar", "5"]))
+      .toThrow(/Did you mean "--foo-bar"\?/);
+
+    // And the spelling it names parses to the DECLARED type, not a string.
+    expect(parseExecArgs(spec, ["invoke", "--foo-bar", "5"]).input)
+      .toEqual({ fooBar: 5 });
+  });
+
+  it("reads a $ref's siblings the way the payload door resolves them", () => {
+    // 2020-12 lets a `$ref` carry siblings, and the runtime's own
+    // `resolveCfcSchemaRefs` merges the ref site over its target. Jumping
+    // straight to the target instead would name `query` here — a flag the
+    // validator refuses as an additional property — while hiding `limit`,
+    // the one it accepts. Which fields exist is the validator's answer to
+    // give; this door's job is to report the same one.
+    const spec = makeSpec("handler", {
+      $ref: "#/$defs/AddEvent",
+      asCell: ["stream"],
+      properties: { limit: { type: "number" } },
+      additionalProperties: false,
+      $defs: {
+        AddEvent: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          additionalProperties: false,
+        },
+      },
+    } as unknown as JSONSchema);
+
+    expect(parseExecArgs(spec, ["--limit", "5"]).input).toEqual({ limit: 5 });
+    expect(() => parseExecArgs(spec, ["--query", "Milk"]))
+      .toThrow(/<event> takes "--limit"/);
+  });
+
+  it("falls back to the single-value vocabulary for an unresolvable $ref", () => {
+    // A dangling ref describes nothing, so there is no fields position to
+    // read and the scalar flags are all that remain — where such a schema
+    // sat before any of this resolved.
+    const spec = makeSpec("handler", {
+      $ref: "#/$defs/Missing",
+      asCell: ["stream"],
+      $defs: {},
+    } as unknown as JSONSchema);
+
+    expect(parseExecArgs(spec, ["--value", "Milk"]).input).toBe("Milk");
+    expect(() => parseExecArgs(spec, ["--query", "Milk"]))
+      .toThrow(/This verb takes a single value/);
+  });
+
+  it("derives flags from fields behind a top-level $ref", () => {
+    // The shape a stream's event is routinely written in. Its fields sit in
+    // the definition, and a caller should not have to know that to name them.
+    const refSchema = (
+      properties: Record<string, JSONSchema>,
+      required: string[],
+    ): JSONSchema => ({
+      $ref: "#/$defs/AddEvent",
+      asCell: ["stream"],
+      $defs: { AddEvent: { type: "object", properties, required } },
+    } as JSONSchema);
+
+    const one = makeSpec(
+      "handler",
+      refSchema({ query: { type: "string" } }, ["query"]),
+    );
+    expect(parseExecArgs(one, ["--query", "Milk"]).input)
+      .toEqual({ query: "Milk" });
+    // The field has a name, so that name is the flag. `--value` belongs to a
+    // verb whose event IS a single value, and this one's is an object.
+    expect(() => parseExecArgs(one, ["--value", "Milk"]))
+      .toThrow(/"--value" at <event> is not a field this verb declares/);
+
+    const two = makeSpec(
+      "handler",
+      refSchema(
+        { query: { type: "string" }, limit: { type: "number" } },
+        ["query"],
+      ),
+    );
+    expect(parseExecArgs(two, ["--query", "Milk", "--limit", "5"]).input)
+      .toEqual({ query: "Milk", limit: 5 });
+    expect(() => parseExecArgs(two, ["--value", "Milk"]))
+      .toThrow(/<event> takes "--query", "--limit"/);
+    expect(() => parseExecArgs(two, ["--quer", "Milk"]))
+      .toThrow(/Did you mean "--query"\?/);
+
+    // The page reports the resolved event rather than calling it void, and
+    // names the flags the parser accepts.
+    const help = renderExecHelp("/tmp/x.handler", one);
+    expect(help).toContain("query: string");
+    expect(help).toContain("--query <string>");
+    expect(help).not.toContain("Input type:\n  void");
+  });
+
+  it("spells a boolean without a placeholder, and a boolean value with one", () => {
+    // A boolean FIELD is named bare in Usage, because writing the flag is
+    // already the whole of saying true — a placeholder there would invite a
+    // value the parser does not take in that position.
+    const field = makeSpec("handler", {
+      type: "object",
+      properties: { done: { type: "boolean" } },
+      required: ["done"],
+    });
+    const fieldHelp = renderExecHelp("/tmp/x.handler", field);
+    expect(fieldHelp).toContain("[invoke] --done\n");
+    expect(fieldHelp).not.toContain("--done <boolean>");
+
+    // A verb whose whole event IS a boolean has no field to name, so the
+    // value rides `--value` and the placeholder says which value it takes.
+    const whole = makeSpec("tool", { type: "boolean" });
+    const wholeHelp = renderExecHelp("/tmp/x.tool", whole);
+    expect(wholeHelp).toContain("--value <boolean>");
+  });
+
+  it("keeps a defaulted field optional on the help page too", () => {
+    // The page and the parser must answer required-ness the same way. Labelling
+    // `--mode` required while the last line says a bare invoke works, and while
+    // the parser accepts one, is the page contradicting itself and the caller.
+    const spec = makeSpec("handler", {
+      $ref: "#/$defs/RefreshEvent",
+      asCell: ["stream"],
+      $defs: {
+        RefreshEvent: {
+          type: "object",
+          properties: { mode: { type: "string", default: "fast" } },
+          required: ["mode"],
+        },
+      },
+    } as unknown as JSONSchema);
+
+    const help = renderExecHelp("/tmp/x.handler", spec);
+    expect(help).toContain('--mode <string>  Optional. Default: "fast".');
+    // Usage names what a call must carry, and this one need carry nothing.
+    expect(help).not.toContain("[invoke] --mode");
+    expect(help).toContain("Invoke alone will call the handler");
+    expect(parseExecArgs(spec, []).input).toEqual({});
+  });
+
+  it("leaves a verb schema-less when its $ref lands on no fields", () => {
+    // Only where the ref reaches a fields position is there anything to derive.
+    // A ref to a scalar, to a position naming nothing, or one that does not
+    // resolve leaves the verb invoking bare, as it did before it was followed.
+    const streamOf = (defs: Record<string, unknown>) => ({
+      $ref: "#/$defs/Target",
+      asCell: ["stream"],
+      $defs: defs,
+    } as unknown as JSONSchema);
+
+    for (
+      const inputSchema of [
+        streamOf({ Target: {} }),
+        streamOf({ Target: { type: "string" } }),
+        streamOf({}),
+      ]
+    ) {
+      expect(parseExecArgs(makeSpec("handler", inputSchema), []).input)
+        .toBeUndefined();
+    }
+
+    // The stream marker is still what makes a bare position schema-less, and
+    // following the ref must not take it out of the question. A $ref to a
+    // scalar with no marker is a single-value verb, and owes its caller the
+    // flags and the input type that go with one.
+    const scalarTool = makeSpec("tool", {
+      $ref: "#/$defs/Target",
+      $defs: { Target: { type: "string" } },
+    } as unknown as JSONSchema);
+    expect(parseExecArgs(scalarTool, ["--value", "Milk"]).input).toBe("Milk");
+    const help = renderExecHelp("/tmp/x.tool", scalarTool);
+    expect(help).toContain("--value");
+    expect(help).toContain("Input type:\n  string");
+    expect(help).not.toContain("Input type:\n  void");
+  });
+
+  it("counts a defaulted field as supplied rather than owed", () => {
+    // The payload gate relaxes `required` for a field carrying a default, so
+    // demanding it at the flag door would refuse a call the runtime fills in.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: {
+        mode: { type: "string", default: "fast" },
+        note: { type: "string" },
+      },
+      required: ["mode"],
+    });
+    expect(parseExecArgs(spec, []).input).toEqual({});
+    expect(parseExecArgs(spec, ["--note", "hi"]).input).toEqual({ note: "hi" });
+
+    // A required field with no default is still owed.
+    const owed = makeSpec("handler", {
+      type: "object",
+      properties: { mode: { type: "string" } },
+      required: ["mode"],
+    });
+    expect(() => parseExecArgs(owed, ["invoke"]))
+      .toThrow(/Missing required flag --mode/);
   });
 
   it("handles each non-object input mode and its errors", () => {
@@ -551,9 +1224,19 @@ describe("parseExecArgs edge cases", () => {
     expect(parseExecArgs(booleanSpec, ["--value", "true"]).input).toBe(true);
     expect(() => parseExecArgs(stringSpec, ["--value", "one", "extra"]))
       .toThrow(/Unexpected argument extra/);
+    // A verb taking a single value has no fields to name, so the vocabulary
+    // is the fixed four rather than schema-derived — but a fixed vocabulary
+    // is still a vocabulary, so the near miss is owed here too.
     expect(() => parseExecArgs(stringSpec, ["--other", "value"])).toThrow(
-      /Unknown flag/,
+      /"--other" is not a flag this verb takes\./,
     );
+    expect(() => parseExecArgs(stringSpec, ["--other", "value"])).toThrow(
+      /"--value", "--value-file", "--json", "--json-file"/,
+    );
+    expect(() => parseExecArgs(stringSpec, ["--valu", "x"]))
+      .toThrow(/Did you mean "--value"\?/);
+    expect(() => parseExecArgs(stringSpec, ["--zzzzzzzz", "x"]))
+      .not.toThrow(/Did you mean/);
     expect(() => parseExecArgs(stringSpec, ["--json", "--other"])).toThrow(
       /cannot be combined/,
     );
@@ -572,8 +1255,11 @@ describe("parseExecArgs edge cases", () => {
     const spec = makeSpec("tool", { type: "object", properties: {} });
 
     expect(() => parseExecArgs(spec, ["invoke"])).toThrow(/Invalid verb/);
+    // `--help` is not unknown — alone it prints the help page. What it does
+    // not do is take an argument, and only a verb declaring a `help` field
+    // gives it one to fill.
     expect(() => parseExecArgs(spec, ["--help", "extra"])).toThrow(
-      /Unknown flag --help/,
+      /--help takes no arguments/,
     );
     expect(parseExecArgs(spec, ["run", "--help"])).toMatchObject({
       verb: "run",
@@ -583,7 +1269,7 @@ describe("parseExecArgs edge cases", () => {
     expect(parseExecArgs(spec, ["run", "--help", "--json"]))
       .toMatchObject({ showHelp: true, showHelpJson: true });
     expect(() => parseExecArgs(spec, ["run", "--help", "extra"])).toThrow(
-      /Unknown flag --help/,
+      /--help takes no arguments/,
     );
   });
 });
@@ -625,6 +1311,31 @@ describe("resolveParsedExecInput edge cases", () => {
         readTextInput: () => Promise.resolve(""),
       })).input,
     ).toEqual({});
+  });
+
+  it("resolves a bare schema-less handler call without reading piped stdin", async () => {
+    // A rejecting reader proves stdin stays untouched: a schema-less input
+    // declares no payload, so the bare call must not wait on EOF even when
+    // stdin is a pipe.
+    const deps = {
+      isStdinTerminal: () => false,
+      readTextInput: () => Promise.reject(new Error("stdin was read")),
+    };
+
+    const stream = await resolveExecInvocation(
+      makeSpec("handler", { asCell: ["stream"] } as JSONSchema),
+      [],
+      deps,
+    );
+    expect(stream.parsed.verb).toBe("invoke");
+    expect(stream.input).toBeUndefined();
+
+    const unschematized = await resolveExecInvocation(
+      makeSpec("handler", true),
+      [],
+      deps,
+    );
+    expect(unschematized.input).toBeUndefined();
   });
 
   it("normalizes only object inputs for tools with a string help field", () => {
@@ -877,7 +1588,10 @@ describe("renderExecHelp", () => {
     expect(help).toContain("./legacyWrite.handler [invoke] --message <string>");
     expect(help).toContain("./legacyWrite.handler [invoke] --help");
     expect(help).not.toContain("cf exec ./legacyWrite.handler");
-    expect(help).toContain("No output on success.");
+    // A handler's help carries no `Output:` section at all: it cannot see a
+    // declared result from here, and a verb that declares one does return it,
+    // so any fixed claim about output would be false for half the verbs.
+    expect(help).not.toContain("Output:");
     expect(help).toContain(
       "Alternatively, write JSON to this file to invoke the handler.",
     );
@@ -1087,18 +1801,22 @@ describe("renderPieceCallHelp", () => {
     expect(help).toContain("cf piece call ... search --help --json");
     expect(help).toContain("cf piece call ... search <json>");
     expect(help).toContain("cf piece call ... search --json [<json>]");
+    // The verb opens the section, so its own flags follow the name with
+    // nothing between; the marker appears once, on the read-option line.
     expect(help).toContain(
-      "cf piece call ... search -- [run] --query <string>",
+      "cf piece call ... search [run] --query <string>",
     );
+    expect(help).toContain("cf piece call ... search ... -- --select <fields>");
+    expect(help).not.toContain("cf piece call ... search -- ");
     expect(help).toContain("JSON input:");
     expect(help).toContain(
       "Pass inline JSON as one positional argument or after `--json`",
     );
     expect(help).toContain("query: string");
     expect(help).toContain("help?: string");
-    expect(help).toContain("Flags after `--`:");
+    expect(help).toContain("Flags:");
     expect(help).not.toContain("Read the full input object from stdin.");
-    expect(help).not.toContain("cf piece call ... search -- [run] --help");
+    expect(help).not.toContain("cf piece call ... search [run] --help");
   });
 
   it("renders bare usage for schema-less handler piece-call help", () => {
@@ -1108,10 +1826,134 @@ describe("renderPieceCallHelp", () => {
     );
 
     expect(help).toContain("cf piece call ... onAddContact");
-    expect(help).toContain("cf piece call ... onAddContact -- invoke");
+    expect(help).toContain("cf piece call ... onAddContact invoke");
     expect(help).toContain(
       "Invoke alone will call the handler without any inputs.",
     );
+  });
+
+  it("enumerates a handler's declared result under Output", () => {
+    const help = renderPieceCallHelp(
+      "cf piece call ... addItem",
+      makeSpec(
+        "handler",
+        {
+          type: "object",
+          properties: { title: { type: "string" } },
+          required: ["title"],
+        },
+        {
+          type: "object",
+          properties: {
+            item: { type: "object" },
+            openBelow: { type: "number" },
+          },
+        },
+      ),
+    );
+
+    // The section closes the page, so comparing the tail compares the whole
+    // section: `title <string>` also occurs in the flags above it as
+    // `--title <string>`, which a containment check could not tell apart.
+    expect(help.slice(help.indexOf("\n\nOutput:\n"))).toBe(
+      [
+        "",
+        "",
+        "Output:",
+        "  The invocation's `result`:",
+        "    item <json-object>",
+        "    openBelow <number>",
+      ].join("\n"),
+    );
+  });
+
+  it("names the type of a handler result that is not an object", () => {
+    const help = renderPieceCallHelp(
+      "cf piece call ... rename",
+      makeSpec(
+        "handler",
+        { type: "object", properties: { title: { type: "string" } } },
+        { type: "array", items: { type: "string" } },
+      ),
+    );
+
+    expect(help.slice(help.indexOf("\n\nOutput:\n"))).toBe(
+      [
+        "",
+        "",
+        "Output:",
+        "  The invocation's `result`:",
+        "    string[]",
+      ].join("\n"),
+    );
+  });
+
+  it("prints a result field's own description beside its placeholder", () => {
+    // The description is a ref-site sibling on the property — the shape a
+    // declared result actually arrives in — so no resolution stands between
+    // the wire and the page. Aligned as the flags are, and a multi-line
+    // comment continues under its own first line.
+    const help = renderPieceCallHelp(
+      "cf piece call ... addItem",
+      makeSpec(
+        "handler",
+        { type: "object", properties: { title: { type: "string" } } },
+        {
+          type: "object",
+          properties: {
+            item: {
+              "$ref": "#/$defs/ItemOutput",
+              description: "The root item this call created.",
+            } as never,
+            openBelow: {
+              type: "number",
+              description: "Descendants still open.\nZero means done.",
+            },
+          },
+        },
+      ),
+    );
+
+    expect(help.slice(help.indexOf("\n\nOutput:\n"))).toBe(
+      [
+        "",
+        "",
+        "Output:",
+        "  The invocation's `result`:",
+        "    item <json>         The root item this call created.",
+        "    openBelow <number>  Descendants still open.",
+        "                        Zero means done.",
+      ].join("\n"),
+    );
+  });
+
+  it("mentions no file to write JSON to, there being none in this context", () => {
+    const help = renderPieceCallHelp(
+      "cf piece call ... onAddContact",
+      makeSpec("handler", { asCell: ["stream"] } as JSONSchema),
+    );
+
+    // The write-through note belongs to the mounted-file page, which this
+    // renderer shares its body with. `cf piece call` takes its payload as an
+    // argument and mounts nothing, so the sentence would name a file the
+    // caller has no way to reach — and it is the last line of the page.
+    expect(help).not.toContain("write JSON to this file");
+    expect(help).not.toContain("Alternatively");
+    // The neighboring note is about this command's own spelling, and stays.
+    expect(help).toContain(
+      "Invoke alone will call the handler without any inputs.",
+    );
+  });
+
+  it("carries no Output section for a handler that declares no result", () => {
+    const help = renderPieceCallHelp(
+      "cf piece call ... archive",
+      makeSpec("handler", { type: "object", properties: {} }),
+    );
+
+    // The value-less shape, which is the common one: the page says nothing
+    // about output rather than asserting there is none.
+    expect(help).not.toContain("Output:");
   });
 });
 
@@ -1133,15 +1975,15 @@ describe("exec command user-facing errors", () => {
     expect(code).toBe(1);
     expect(stdout).toEqual([]);
 
-    const relevantStderr = stderr.filter((line) =>
-      !line.includes("deno run ") && !isIgnorableDenoWarningLine(line)
+    const relevant = relevantStderr(stderr).filter((line) =>
+      !line.includes("deno run ")
     );
 
-    expect(relevantStderr).toEqual([
+    expect(relevant).toEqual([
       `Path is not within a mounted cf fuse filesystem: ${missingPath}`,
     ]);
-    expect(relevantStderr.join("\n")).not.toMatch(/\n\s*at\s+/);
-    expect(relevantStderr.join("\n")).not.toMatch(
+    expect(relevant.join("\n")).not.toMatch(/\n\s*at\s+/);
+    expect(relevant.join("\n")).not.toMatch(
       /executeMountedCallableFile|resolveMountedCallableFile/,
     );
   });
@@ -1211,7 +2053,7 @@ describe("mounted callable resolution and execution", () => {
     await expect(
       resolveMountedCallableFile(filePath, {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
       }),
     ).rejects.toThrow(/does not resolve to a handler/i);
@@ -1247,7 +2089,7 @@ describe("mounted callable resolution and execution", () => {
     await expect(
       resolveMountedCallableFile(filePath, {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         delay: (ms) => {
           delays.push(ms);
@@ -1306,7 +2148,7 @@ describe("mounted callable resolution and execution", () => {
     const statCalls: string[] = [];
     const resolved = await resolveMountedCallableFile(filePath, {
       stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
+      loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
       stat: (path) => {
         statCalls.push(path);
@@ -1365,7 +2207,7 @@ describe("mounted callable resolution and execution", () => {
     const delays: number[] = [];
     const resolved = await resolveMountedCallableFile(filePath, {
       stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
+      loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
       stat: (path) =>
         Promise.reject(new Deno.errors.NotFound(`stat '${path}': invalidated`)),
@@ -1421,7 +2263,7 @@ describe("mounted callable resolution and execution", () => {
 
     const resolved = await resolveMountedCallableFile(filePath, {
       stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
+      loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
     });
 
@@ -1471,7 +2313,7 @@ describe("mounted callable resolution and execution", () => {
 
     const resolved = await resolveMountedCallableFile(filePath, {
       stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
+      loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
     });
 
@@ -1513,12 +2355,12 @@ describe("mounted callable resolution and execution", () => {
 
     const piecesResolved = await resolveMountedCallableFile(piecesPath, {
       stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
+      loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
     });
     const entitiesResolved = await resolveMountedCallableFile(entitiesPath, {
       stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
+      loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
     });
 
@@ -1557,7 +2399,7 @@ describe("mounted callable resolution and execution", () => {
 
     const resolved = await resolveMountedCallableFile(filePath, {
       stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
+      loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
     });
 
@@ -1595,7 +2437,7 @@ describe("mounted callable resolution and execution", () => {
 
     const resolved = await resolveMountedCallableFile(filePath, {
       stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
+      loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
     });
 
@@ -1632,7 +2474,7 @@ describe("mounted callable resolution and execution", () => {
 
     const resolved = await resolveMountedCallableFile(filePath, {
       stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
+      loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
     });
 
@@ -1673,7 +2515,7 @@ describe("mounted callable resolution and execution", () => {
 
     const resolved = await resolveMountedCallableFile(aliasPath, {
       stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
+      loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: (_manager, pieceId) => {
         expect(pieceId).toBe("of:real-piece");
         return Promise.resolve(harness.piece);
@@ -1704,7 +2546,7 @@ describe("mounted callable resolution and execution", () => {
 
     await resolveMountedCallableFile(filePath, {
       stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
+      loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
     });
 
@@ -1731,30 +2573,23 @@ describe("mounted callable resolution and execution", () => {
 
     await writeLiveMountState(stateDir, mountpoint);
 
-    const originalGet = PiecesController.prototype.get;
     const runItArgs: boolean[] = [];
-    PiecesController.prototype.get = function (
-      pieceId: string,
-      runIt?: boolean,
-      _schema?: JSONSchema,
-    ) {
+    (harness.pieces as unknown as {
+      get: (pieceId: string, runIt?: boolean) => Promise<unknown>;
+    }).get = (pieceId, runIt) => {
       runItArgs.push(runIt ?? false);
       expect(pieceId).toBe("of:piece-123");
-      return Promise.resolve(harness.piece as never);
+      return Promise.resolve(harness.piece);
     };
 
-    try {
-      await executeMountedCallableFile(
-        filePath,
-        ["--query", "milk"],
-        {
-          stateDir,
-          loadManager: () => Promise.resolve(harness.manager),
-        },
-      );
-    } finally {
-      PiecesController.prototype.get = originalGet;
-    }
+    await executeMountedCallableFile(
+      filePath,
+      ["--query", "milk"],
+      {
+        stateDir,
+        loadPieces: () => Promise.resolve(harness.pieces),
+      },
+    );
 
     expect(runItArgs).toEqual([true]);
   });
@@ -1784,7 +2619,7 @@ describe("mounted callable resolution and execution", () => {
       ["--query", "milk"],
       {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
       },
     );
@@ -1821,7 +2656,7 @@ describe("mounted callable resolution and execution", () => {
 
     await executeMountedCallableFile(filePath, ["--query", "milk"], {
       stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
+      loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
     });
 
@@ -1861,14 +2696,14 @@ describe("mounted callable resolution and execution", () => {
         ["--message", "milk"],
         {
           stateDir,
-          loadManager: () => Promise.resolve(harness.manager),
+          loadPieces: () => Promise.resolve(harness.pieces),
           loadPiece: () => Promise.resolve(harness.piece),
         },
       ),
     ).rejects.toThrow(/Handler "add" failed: Mounted handler failed/);
   });
 
-  it("dispatches direct factory tools with public input and returns JSON output", async () => {
+  it("dispatches tools with extraParams merged into the runtime input and returns JSON output", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
       relativePath: "home/pieces/notes-2/result/search.tool",
@@ -1906,6 +2741,10 @@ describe("mounted callable resolution and execution", () => {
           },
         },
       },
+      extraParams: {
+        source: "bound-source",
+        result: "bound-result",
+      },
       toolResult: {
         echoed: "tea",
         source: "bound-source",
@@ -1916,7 +2755,7 @@ describe("mounted callable resolution and execution", () => {
 
     const resolved = await resolveMountedCallableFile(filePath, {
       stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
+      loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
     });
     const loadConfigs: SpaceConfig[] = [];
@@ -1925,9 +2764,9 @@ describe("mounted callable resolution and execution", () => {
       ["--query", "tea"],
       {
         stateDir,
-        loadManager: (config) => {
+        loadPieces: (config) => {
           loadConfigs.push(config);
-          return Promise.resolve(harness.manager);
+          return Promise.resolve(harness.pieces);
         },
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
@@ -1947,243 +2786,13 @@ describe("mounted callable resolution and execution", () => {
     expect(harness.tracker.toolRunInput).toEqual({
       query: "tea",
       help: "",
+      source: "bound-source",
+      result: "bound-result",
     });
     expect(JSON.parse(result.outputText!)).toEqual({
       echoed: "tea",
       source: "bound-source",
     });
-  });
-
-  it("discovers and source-space materializes a direct PatternFactory tool", async () => {
-    const mountpoint = join(tmpDir, "mount");
-    const filePath = await createMountedFile(mountpoint, {
-      relativePath: "home/pieces/notes-2/result/search.tool",
-      pieceId: "of:piece-123",
-    });
-    const harness = createExecHarness({
-      callableKind: "tool",
-      cellProp: "result",
-      cellKey: "search",
-      pieceId: "of:piece-123",
-      inputSchema: true,
-      canonicalFactory: canonicalSearchFactory,
-      factorySourceSpace: "did:key:factory-source",
-      toolResult: { echoed: "tea" },
-    });
-
-    await writeLiveMountState(stateDir, mountpoint);
-
-    const resolved = await resolveMountedCallableFile(filePath, {
-      stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
-      loadPiece: () => Promise.resolve(harness.piece),
-    });
-    const result = await executeMountedCallableFile(
-      filePath,
-      ["--query", "tea"],
-      {
-        stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
-        loadPiece: () => Promise.resolve(harness.piece),
-        prepareFactory: (factory, context) => {
-          expect(factory).toBe(canonicalSearchFactory);
-          harness.tracker.factoryMaterializationSpace = context.artifactSpace;
-          return Promise.resolve(factory);
-        },
-      },
-    );
-
-    expect(resolved.commandSpec.inputSchema).toEqual(
-      (factoryStateOf(canonicalSearchFactory) as {
-        argumentSchema: JSONSchema;
-      }).argumentSchema,
-    );
-    expect(harness.tracker.factoryMaterializationSpace).toBe(
-      "did:key:factory-source",
-    );
-    expect(harness.tracker.toolRunInput).toEqual({ query: "tea" });
-    expect(JSON.parse(result.outputText!)).toEqual({ echoed: "tea" });
-  });
-
-  it("injects FrameworkProvided inputs from the stable mounted callable identity", async () => {
-    const mountpoint = join(tmpDir, "mount");
-    const filePath = await createMountedFile(mountpoint, {
-      relativePath: "home/pieces/notes-2/result/search.tool",
-      pieceId: "of:piece-123",
-    });
-    const { harness, materializedFactory } = createFrameworkProvidedExecHarness(
-      {
-        stableIdentity: true,
-      },
-    );
-
-    await writeLiveMountState(stateDir, mountpoint);
-    const deps = {
-      stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
-      loadPiece: () => Promise.resolve(harness.piece),
-      prepareFactory: () => Promise.resolve(materializedFactory),
-    };
-
-    const help = await executeMountedCallableFile(
-      filePath,
-      ["--help", "--json"],
-      deps,
-    );
-    expect(JSON.parse(help.helpText!).inputSchema).toEqual({
-      type: "object",
-      properties: { query: { type: "string" } },
-      required: ["query"],
-    });
-
-    await executeMountedCallableFile(filePath, ["--query", "tea"], deps);
-
-    expect(harness.tracker.toolRunInput).toMatchObject({ query: "tea" });
-    const sandboxId = (harness.tracker.toolRunInput as Record<string, unknown>)
-      .sandboxId;
-    expect(typeof sandboxId).toBe("string");
-    expect(sandboxId).not.toBe("");
-    expect(sandboxId).not.toBe("authored-sandbox");
-  });
-
-  it("overwrites authored FrameworkProvided JSON input", async () => {
-    const mountpoint = join(tmpDir, "mount");
-    const filePath = await createMountedFile(mountpoint, {
-      relativePath: "home/pieces/notes-2/result/search.tool",
-      pieceId: "of:piece-123",
-    });
-    const { harness, materializedFactory } = createFrameworkProvidedExecHarness(
-      {
-        stableIdentity: true,
-      },
-    );
-
-    await writeLiveMountState(stateDir, mountpoint);
-
-    await executeMountedCallableFile(filePath, ["--json"], {
-      stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
-      loadPiece: () => Promise.resolve(harness.piece),
-      prepareFactory: () => Promise.resolve(materializedFactory),
-      readJsonInput: () =>
-        Promise.resolve({
-          query: "tea",
-          sandboxId: "authored-sandbox",
-        }),
-      isStdinTerminal: () => false,
-    });
-
-    expect(harness.tracker.toolRunInput).toMatchObject({ query: "tea" });
-    expect(
-      (harness.tracker.toolRunInput as Record<string, unknown>).sandboxId,
-    ).not.toBe("authored-sandbox");
-  });
-
-  it("fails closed when a FrameworkProvided tool has no stable callable identity", async () => {
-    const mountpoint = join(tmpDir, "mount");
-    const filePath = await createMountedFile(mountpoint, {
-      relativePath: "home/pieces/notes-2/result/search.tool",
-      pieceId: "of:piece-123",
-    });
-    const { harness, materializedFactory } = createFrameworkProvidedExecHarness(
-      {
-        stableIdentity: false,
-      },
-    );
-
-    await writeLiveMountState(stateDir, mountpoint);
-
-    await expect(
-      executeMountedCallableFile(filePath, ["--json"], {
-        stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
-        loadPiece: () => Promise.resolve(harness.piece),
-        prepareFactory: () => Promise.resolve(materializedFactory),
-        readJsonInput: () =>
-          Promise.resolve({ query: "tea", sandboxId: "authored-sandbox" }),
-        isStdinTerminal: () => false,
-      }),
-    ).rejects.toThrow(/no stable entity id/i);
-  });
-
-  it("leaves an ordinary authored sandboxId unchanged", async () => {
-    const mountpoint = join(tmpDir, "mount");
-    const filePath = await createMountedFile(mountpoint, {
-      relativePath: "home/pieces/notes-2/result/search.tool",
-      pieceId: "of:piece-123",
-    });
-    const { harness, materializedFactory } = createFrameworkProvidedExecHarness(
-      {
-        stableIdentity: false,
-        frameworkProvided: false,
-      },
-    );
-    await writeLiveMountState(stateDir, mountpoint);
-
-    await executeMountedCallableFile(filePath, ["--json"], {
-      stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
-      loadPiece: () => Promise.resolve(harness.piece),
-      prepareFactory: () => Promise.resolve(materializedFactory),
-      readJsonInput: () =>
-        Promise.resolve({ query: "tea", sandboxId: "authored-sandbox" }),
-      isStdinTerminal: () => false,
-    });
-
-    expect(harness.tracker.toolRunInput).toMatchObject({
-      query: "tea",
-      sandboxId: "authored-sandbox",
-    });
-  });
-
-  it("resolves linked PatternFactory tools in their source space", async () => {
-    const mountpoint = join(tmpDir, "mount");
-    const filePath = await createMountedFile(mountpoint, {
-      relativePath: "home/pieces/notes-2/result/search.tool",
-      pieceId: "of:piece-123",
-    });
-    const harness = createExecHarness({
-      callableKind: "tool",
-      cellProp: "result",
-      cellKey: "search",
-      pieceId: "of:piece-123",
-      inputSchema: true,
-      canonicalFactory: canonicalSearchFactory,
-      factoryLinkSourceSpace: "did:key:linked-factory-source",
-      toolResult: { echoed: "tea" },
-    });
-
-    await writeLiveMountState(stateDir, mountpoint);
-
-    const resolved = await resolveMountedCallableFile(filePath, {
-      stateDir,
-      loadManager: () => Promise.resolve(harness.manager),
-      loadPiece: () => Promise.resolve(harness.piece),
-    });
-    const result = await executeMountedCallableFile(
-      filePath,
-      ["--query", "tea"],
-      {
-        stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
-        loadPiece: () => Promise.resolve(harness.piece),
-        prepareFactory: (factory, context) => {
-          expect(factory).toBe(canonicalSearchFactory);
-          harness.tracker.factoryMaterializationSpace = context.artifactSpace;
-          return Promise.resolve(factory);
-        },
-      },
-    );
-
-    expect(resolved.commandSpec.inputSchema).toEqual(
-      (factoryStateOf(canonicalSearchFactory) as {
-        argumentSchema: JSONSchema;
-      }).argumentSchema,
-    );
-    expect(harness.tracker.factoryMaterializationSpace).toBe(
-      "did:key:linked-factory-source",
-    );
-    expect(JSON.parse(result.outputText!)).toEqual({ echoed: "tea" });
   });
 
   it("settles mounted tool results before reading, without polling", async () => {
@@ -2229,7 +2838,7 @@ describe("mounted callable resolution and execution", () => {
       ["--query", "tea"],
       {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
       },
@@ -2237,12 +2846,14 @@ describe("mounted callable resolution and execution", () => {
 
     // Commit, then drain to a fully settled state, then read the result cell
     // once. No poll loop and no deadline: `settled()` awaits the tool's async
-    // work to completion.
+    // work to completion. The trailing sync is the auto-step that follows
+    // every mounted invocation.
     expect(harness.tracker.events).toEqual([
       "run",
       "idle",
       "commit",
       "settled",
+      "pieces.synced",
     ]);
     expect(JSON.parse(result.outputText!)).toEqual({ echoed: "tea" });
   });
@@ -2290,7 +2901,7 @@ describe("mounted callable resolution and execution", () => {
       ["--query", "tea"],
       {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
       },
@@ -2304,6 +2915,7 @@ describe("mounted callable resolution and execution", () => {
       "idle",
       "commit",
       "settled",
+      "pieces.synced",
     ]);
     expect(JSON.parse(result.outputText!)).toEqual({ echoed: "from-sink" });
   });
@@ -2341,7 +2953,7 @@ describe("mounted callable resolution and execution", () => {
     await expect(
       executeMountedCallableFile(filePath, ["--query", "tea"], {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
       }),
@@ -2381,7 +2993,7 @@ describe("mounted callable resolution and execution", () => {
     await expect(
       executeMountedCallableFile(filePath, ["--query", "tea"], {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
       }),
@@ -2427,6 +3039,9 @@ describe("mounted callable resolution and execution", () => {
           },
         },
       },
+      extraParams: {
+        source: "bound-source",
+      },
       toolResultGetValue: {
         query: "explicit",
         help: "schema-field",
@@ -2448,7 +3063,7 @@ describe("mounted callable resolution and execution", () => {
       ["--query", "explicit", "--help", "schema-field"],
       {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
       },
     );
@@ -2456,6 +3071,7 @@ describe("mounted callable resolution and execution", () => {
     expect(harness.tracker.toolRunInput).toEqual({
       query: "explicit",
       help: "schema-field",
+      source: "bound-source",
     });
     expect(JSON.parse(result.outputText!)).toEqual({
       query: "explicit",
@@ -2511,7 +3127,7 @@ describe("mounted callable resolution and execution", () => {
       ["--query", "tea"],
       {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
       },
@@ -2545,7 +3161,7 @@ describe("mounted callable resolution and execution", () => {
       ["--json"],
       {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         readJsonInput: () => Promise.resolve({ query: "milk" }),
       },
@@ -2581,7 +3197,7 @@ describe("mounted callable resolution and execution", () => {
       [],
       {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => false,
         readTextInput: () => Promise.resolve("# Title\n\nLine 2"),
@@ -2597,7 +3213,7 @@ describe("mounted callable resolution and execution", () => {
     ]);
   });
 
-  it("passes implicit piped JSON through for mounted object handlers without CLI shape enforcement", async () => {
+  it("refuses implicit piped JSON that cannot satisfy a mounted object handler", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
       relativePath: "home/pieces/notes-2/result/add.handler",
@@ -2617,25 +3233,21 @@ describe("mounted callable resolution and execution", () => {
 
     await writeLiveMountState(stateDir, mountpoint);
 
-    await executeMountedCallableFile(
-      filePath,
-      [],
-      {
-        stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
-        loadPiece: () => Promise.resolve(harness.piece),
-        isStdinTerminal: () => false,
-        readTextInput: () => Promise.resolve('["not-an-object"]'),
-      },
-    );
+    await expect(
+      executeMountedCallableFile(
+        filePath,
+        [],
+        {
+          stateDir,
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+          isStdinTerminal: () => false,
+          readTextInput: () => Promise.resolve('["not-an-object"]'),
+        },
+      ),
+    ).rejects.toThrow(/Invalid input for "add"/);
 
-    expect(harness.tracker.handlerWrites).toEqual([
-      {
-        cellProp: "result",
-        path: ["add"],
-        value: ["not-an-object"],
-      },
-    ]);
+    expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
   it("passes stdin --json through unchanged for mounted tools", async () => {
@@ -2674,6 +3286,9 @@ describe("mounted callable resolution and execution", () => {
           },
         },
       },
+      extraParams: {
+        source: "bound-source",
+      },
       toolResult: {
         summary: "bound-source:tea",
       },
@@ -2686,7 +3301,7 @@ describe("mounted callable resolution and execution", () => {
       ["--json"],
       {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         readJsonInput: () => Promise.resolve({ query: "tea" }),
       },
@@ -2694,6 +3309,7 @@ describe("mounted callable resolution and execution", () => {
 
     expect(harness.tracker.toolRunInput).toEqual({
       query: "tea",
+      source: "bound-source",
     });
   });
 
@@ -2733,6 +3349,9 @@ describe("mounted callable resolution and execution", () => {
           },
         },
       },
+      extraParams: {
+        source: "bound-source",
+      },
       toolResult: {
         summary: "bound-source:tea",
       },
@@ -2745,17 +3364,18 @@ describe("mounted callable resolution and execution", () => {
       ["--json", '{"query":"tea"}'],
       {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
       },
     );
 
     expect(harness.tracker.toolRunInput).toEqual({
       query: "tea",
+      source: "bound-source",
     });
   });
 
-  it("parses stdin JSON for --json without enforcing the linked schema in the CLI", async () => {
+  it("refuses stdin --json that cannot satisfy the linked handler schema", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
       relativePath: "home/pieces/notes-2/result/add.handler",
@@ -2775,24 +3395,72 @@ describe("mounted callable resolution and execution", () => {
 
     await writeLiveMountState(stateDir, mountpoint);
 
-    await executeMountedCallableFile(
-      filePath,
-      ["--json"],
-      {
-        stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
-        loadPiece: () => Promise.resolve(harness.piece),
-        readJsonInput: () => Promise.resolve(["not-an-object"]),
-      },
+    // stdin is still parsed as JSON verbatim — the CLI does not reshape it.
+    // What changed is that a payload the verb cannot accept stops here rather
+    // than dispatching and settling as if it had worked.
+    await expect(
+      executeMountedCallableFile(
+        filePath,
+        ["--json"],
+        {
+          stateDir,
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+          readJsonInput: () => Promise.resolve(["not-an-object"]),
+        },
+      ),
+    ).rejects.toThrow(/Invalid input for "add"/);
+
+    expect(harness.tracker.handlerWrites).toEqual([]);
+  });
+
+  it("refuses an absent payload for a mounted handler that cannot run without one", async () => {
+    // A mounted handler whose event schema sits behind a top-level local $ref
+    // is refused at the flag door, which reads the definition's fields and can
+    // name the type the caller must supply. Nothing dispatches, so an
+    // invocation id is never spent.
+
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/add.handler",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "handler",
+      cellProp: "result",
+      cellKey: "add",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        $ref: "#/$defs/AddEvent",
+        asCell: ["stream"],
+        $defs: {
+          AddEvent: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+      } as JSONSchema,
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await expect(
+      executeMountedCallableFile(
+        filePath,
+        [],
+        {
+          stateDir,
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+          isStdinTerminal: () => true,
+        },
+      ),
+    ).rejects.toThrow(
+      /Handler requires input\. Expected type: \{\s*query: string\s*\}/,
     );
 
-    expect(harness.tracker.handlerWrites).toEqual([
-      {
-        cellProp: "result",
-        path: ["add"],
-        value: ["not-an-object"],
-      },
-    ]);
+    expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
   it("returns machine-readable schema details for --help --json", async () => {
@@ -2829,6 +3497,9 @@ describe("mounted callable resolution and execution", () => {
           },
         },
       },
+      extraParams: {
+        source: "bound-source",
+      },
     });
 
     await writeLiveMountState(stateDir, mountpoint);
@@ -2838,7 +3509,7 @@ describe("mounted callable resolution and execution", () => {
       ["--help", "--json"],
       {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
       },
     );
@@ -2915,54 +3586,6 @@ async function createMountedFile(
   return absPath;
 }
 
-function createFrameworkProvidedExecHarness(options: {
-  stableIdentity: boolean;
-  frameworkProvided?: boolean;
-}) {
-  const argumentSchema: JSONSchema = {
-    type: "object",
-    properties: {
-      query: { type: "string" },
-      sandboxId: { type: "string" },
-    },
-    required: ["query", "sandboxId"],
-  };
-  const storedFactory = createFactoryShell({
-    kind: "pattern",
-    ref: {
-      identity: `${"E".repeat(42)}A`,
-      symbol: "search",
-    },
-    argumentSchema,
-    resultSchema: true,
-  });
-  const materializedFactory = livePatternFactory(
-    argumentSchema,
-    true,
-    options.frameworkProvided === false ? [] : [["sandboxId"]],
-  );
-  const harness = createExecHarness({
-    callableKind: "tool",
-    cellProp: "result",
-    cellKey: "search",
-    pieceId: "of:piece-123",
-    inputSchema: true,
-    canonicalFactory: storedFactory,
-    ...(options.stableIdentity
-      ? {
-        callableNormalizedLink: {
-          id: "of:NdU1e0QpFblGEAqU517Kq4iMKRcKwnVHyQI0tOPwmE4",
-          path: ["search"],
-          scope: "space" as const,
-          space: "home",
-        },
-      }
-      : {}),
-    toolResult: { echoed: "tea" },
-  });
-  return { harness, materializedFactory };
-}
-
 function createExecHarness(options: {
   callableKind: "handler" | "tool";
   cellProp: "input" | "result";
@@ -2974,15 +3597,7 @@ function createExecHarness(options: {
     argumentSchema: JSONSchema;
     resultSchema?: JSONSchema;
   };
-  canonicalFactory?: unknown;
-  factorySourceSpace?: string;
-  factoryLinkSourceSpace?: string;
-  callableNormalizedLink?: {
-    id: string;
-    path: string[];
-    scope: "space" | "user" | "session";
-    space: string;
-  };
+  extraParams?: Record<string, unknown>;
   toolResult?: unknown;
   toolResultGetValue?: unknown;
   toolResultPullValue?: unknown;
@@ -3002,32 +3617,25 @@ function createExecHarness(options: {
     }>,
     toolRunInput: undefined as unknown,
     toolResultSpace: undefined as string | undefined,
-    factoryMaterializationSpace: undefined as string | undefined,
   };
 
   const callableSchema: JSONSchema = options.callableKind === "tool"
-    ? true
-    : options.inputSchema;
-  const defaultToolFactory = options.callableKind === "tool"
-    ? livePatternFactory(
-      options.inputSchema,
-      options.pattern?.resultSchema ?? true,
-    )
-    : undefined;
-  const canonicalValue = options.canonicalFactory ??
-    (options.callableKind === "tool"
-      ? defaultToolFactory
-      : options.sparseHandlerCell
-      ? undefined
-      : { $stream: true });
-  const callableValue = options.factoryLinkSourceSpace
     ? {
-      $link: {
-        id: "of:linked-factory",
-        space: options.factoryLinkSourceSpace,
+      type: "object",
+      properties: {
+        pattern: { type: "object" },
+        extraParams: { type: "object" },
       },
     }
-    : canonicalValue;
+    : options.inputSchema;
+  const callableValue = options.callableKind === "tool"
+    ? {
+      pattern: options.pattern,
+      extraParams: options.extraParams ?? {},
+    }
+    : options.sparseHandlerCell
+    ? undefined
+    : { $stream: true };
   const runtimeErrors: Array<{ message: string }> = [];
   const handlerSend = function (
     this: unknown,
@@ -3072,16 +3680,6 @@ function createExecHarness(options: {
         onSchemaFromLinks: () => {
           tracker.asSchemaFromLinksCalls++;
         },
-        normalizedLink: options.callableNormalizedLink ??
-          (options.factorySourceSpace
-            ? { space: options.factorySourceSpace }
-            : undefined),
-        resolvedValue: options.factoryLinkSourceSpace
-          ? canonicalValue
-          : undefined,
-        resolvedNormalizedLink: options.factoryLinkSourceSpace
-          ? { space: options.factoryLinkSourceSpace }
-          : undefined,
       },
   );
   const rootCell = createMockCell(
@@ -3109,10 +3707,17 @@ function createExecHarness(options: {
     pull: () => Promise.resolve(state.pullValue ?? state.value),
     key: (_key: string) => resultCell,
     asSchemaFromLinks: () => resultCell,
+    getAsNormalizedFullLink: () => ({
+      id: "of:tool-result-cell",
+      space: "did:key:test-home",
+      scope: "space",
+      path: [],
+    }),
   };
 
   const piece = {
     id: options.pieceId,
+    getCell: () => ({ pull: () => Promise.resolve() }),
     input: {
       getCell: () => Promise.resolve(rootCell),
       set: (value: unknown, path?: (string | number)[]) => {
@@ -3129,10 +3734,10 @@ function createExecHarness(options: {
     },
   };
 
-  const manager = {
+  const pieces = {
     getSpace: () => options.managerSpace ?? "home",
     synced: () => {
-      tracker.events.push("manager.synced");
+      tracker.events.push("pieces.synced");
       return Promise.resolve();
     },
     runtime: {
@@ -3148,7 +3753,12 @@ function createExecHarness(options: {
           tracker.events.push("commit");
           return Promise.resolve();
         },
+        // The real transaction reports both, and the write receipt reads
+        // them rather than treating a resolved `commit()` as proof of a
+        // write. This stub stages none, so it reports none.
+        status: () => ({ status: "done", journal: { novelty: () => [] } }),
       }),
+      prepareTxForCommit: () => {},
       getCell: (
         space: string,
         _id: string,
@@ -3193,7 +3803,13 @@ function createExecHarness(options: {
     },
   };
 
-  return { manager, piece, tracker };
+  // The doubles implement the slice of the controller and piece surfaces the
+  // invocation engine exercises; the cast is at this seam alone.
+  return {
+    pieces: pieces as unknown as PiecesController,
+    piece: piece as unknown as PieceController,
+    tracker,
+  };
 }
 
 function createMockCell(
@@ -3209,19 +3825,6 @@ function createMockCell(
       ) => void,
     ) => void;
     isStream?: () => boolean;
-    normalizedLink?: {
-      id?: string;
-      path?: string[];
-      scope?: "space" | "user" | "session";
-      space?: string;
-    };
-    resolvedValue?: unknown;
-    resolvedNormalizedLink?: {
-      id?: string;
-      path?: string[];
-      scope?: "space" | "user" | "session";
-      space?: string;
-    };
   },
 ) {
   const cell = {
@@ -3232,15 +3835,14 @@ function createMockCell(
       options?.onSchemaFromLinks?.();
       return cell;
     },
+    getAsNormalizedFullLink: () => ({
+      id: "of:mock-cell",
+      space: "did:key:test-home",
+      scope: "space",
+      path: [],
+    }),
     send: options?.send,
     isStream: options?.isStream,
-    resolveAsCell: () =>
-      options?.resolvedValue === undefined
-        ? cell
-        : createMockCell(options.resolvedValue, schema, {
-          normalizedLink: options.resolvedNormalizedLink,
-        }),
-    getAsNormalizedFullLink: () => options?.normalizedLink ?? {},
     key: (key: string) => {
       if (options?.childOverrides?.[key]) {
         return options.childOverrides[key];

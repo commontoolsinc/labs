@@ -51,10 +51,29 @@
 //                  (`hasTable`, the scope_key shim). A schema-migration concern.
 // └────────────────────────────────────────────────────────────────────────────┘
 
+import { isObjectNotArray } from "@commonfabric/utils/types";
+import { utf8Compare } from "@commonfabric/utils/utf8";
+
 import type { SpaceDb } from "./db.ts";
-import { countLinks, parseSigilLink, summarize } from "./decode.ts";
-import { reconstructDocument } from "./reconstruct.ts";
-import type { EntityDocument, ReconstructOptions } from "./reconstruct.ts";
+import {
+  linksWithPaths,
+  type LinkWalkBounds,
+  parseSigilLink,
+  summarize,
+} from "./decode.ts";
+import {
+  branchReadChain,
+  type BranchReadLink,
+  reconstructDocument,
+  reconstructOutcome,
+  visibleRevisionRows,
+} from "./reconstruct.ts";
+import type {
+  AbsenceStatus,
+  EntityDocument,
+  ReconstructOptions,
+  ReconstructOutcome,
+} from "./reconstruct.ts";
 
 export type EntityKind =
   | "piece" // a running pattern instance (result cell + lineage meta)
@@ -63,7 +82,39 @@ export type EntityKind =
   | "schema" // a JSONSchema stored as a cell value
   | "owned-cell" // a cell owned by a piece (carries a `result` back-link)
   | "free-cell" // a standalone cell, owned by no piece
-  | "unknown";
+  | "deleted" // a tombstone: the visible head row is a `delete`
+  | "unknown"; // present but unreadable, or a shape nothing above recognizes
+
+/** How an entity that carries no document reads: its kind, and its label. */
+export interface AbsentEntity {
+  kind: EntityKind;
+  label: string;
+}
+
+/**
+ * Name an entity by WHY it has no document. `deleted` is its own kind because a
+ * tombstone is an ordinary thing to find and says what happened; the rest are
+ * `unknown`, which therefore means the entity is there and cannot be read. A
+ * tombstone's original shape is genuinely gone at HEAD — recovering "this was a
+ * piece" takes a reconstruction at the seq before the delete.
+ */
+export function absentEntity(status: AbsenceStatus): AbsentEntity {
+  return { kind: ABSENT_KIND[status], label: ABSENT_LABEL[status] };
+}
+
+const ABSENT_KIND: Record<AbsenceStatus, EntityKind> = {
+  deleted: "deleted",
+  empty: "unknown",
+  absent: "unknown",
+  undecodable: "unknown",
+};
+
+const ABSENT_LABEL: Record<AbsenceStatus, string> = {
+  deleted: "(deleted)",
+  empty: "(no data)",
+  absent: "(absent)",
+  undecodable: "(undecodable)",
+};
 
 // LEGACY-PROCESS-CELL: `"legacy"` collapses out when the process-cell era is
 // retired, leaving `"modern" | "n/a"` (see top-of-file retirement note).
@@ -83,12 +134,16 @@ export type ValueShape =
 export interface Lineage {
   /** Input cell — a piece's `argument` link target. */
   argument?: string;
+
   /** Pattern pointer + resolved module entity (modern pieces). */
   pattern?: { identity: string; symbol?: string; moduleId?: string };
+
   /** Owning piece — an owned cell's `result` back-link target. */
   owner?: string;
+
   /** Owned child cell ids — a piece's `internal` manifest. */
   internal?: string[];
+
   /**
    * Legacy process/source cell link target.
    * LEGACY-PROCESS-CELL: removed with the process-cell era (top-of-file note).
@@ -101,20 +156,20 @@ export interface EntityModel {
   scope: string;
   kind: EntityKind;
   regime: Regime;
+
   /** True when the entity carries a `result` ownership back-link. */
   owned: boolean;
+
   /** Human label: piece $NAME, module:<file>, stream, schema, or value summary. */
   label: string;
+
   /** Top-level paths present in the document (the control plane, sorted). */
   paths: string[];
+
   valueShape: ValueShape;
   lineage: Lineage;
   revisions?: number;
   links?: number;
-}
-
-function isObj(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
 /** The target id of a SigilLink value, if it is one. */
@@ -127,7 +182,7 @@ function internalIds(internal: unknown): string[] {
   if (!Array.isArray(internal)) return [];
   const out: string[] = [];
   for (const el of internal) {
-    if (isObj(el) && "link" in el) {
+    if (isObjectNotArray(el) && "link" in el) {
       const id = linkId(el.link);
       if (id) out.push(id);
     }
@@ -143,26 +198,28 @@ function basename(p: string): string {
 export function isModuleValue(
   v: unknown,
 ): v is { code: string; identity: string; filename?: string; kind?: string } {
-  return isObj(v) && typeof v.code === "string" &&
+  return isObjectNotArray(v) && typeof v.code === "string" &&
     typeof v.identity === "string";
 }
 
 /** A value shaped like a JSONSchema stored as data: `{ type, properties|$defs }`. */
 function isSchemaValue(v: unknown): boolean {
-  if (!isObj(v)) return false;
+  if (!isObjectNotArray(v)) return false;
   if (typeof v.type !== "string") return false;
-  if (!(isObj(v.properties) || isObj(v.$defs))) return false;
+  if (!(isObjectNotArray(v.properties) || isObjectNotArray(v.$defs))) {
+    return false;
+  }
   // Schemas-as-data don't carry render markers.
   return !("$UI" in v) && !("$NAME" in v);
 }
 
 function isStreamValue(v: unknown): boolean {
-  return isObj(v) && v.$stream === true;
+  return isObjectNotArray(v) && v.$stream === true;
 }
 
 /** A piece result value: carries render/name markers. */
 function isPieceResultValue(v: unknown): boolean {
-  return isObj(v) && ("$UI" in v || "$NAME" in v || "$TILE_UI" in v);
+  return isObjectNotArray(v) && ("$UI" in v || "$NAME" in v || "$TILE_UI" in v);
 }
 
 /**
@@ -179,7 +236,7 @@ function isLegacyProcessValue(
   spell?: unknown;
   source?: unknown;
 } {
-  return isObj(v) && typeof v.$TYPE === "string" &&
+  return isObjectNotArray(v) && typeof v.$TYPE === "string" &&
     ("resultRef" in v || "spell" in v || "source" in v);
 }
 
@@ -190,7 +247,7 @@ function valueShapeOf(v: unknown): ValueShape {
   if (isSchemaValue(v)) return "schema";
   if (isPieceResultValue(v)) return "piece-result";
   if (Array.isArray(v)) return "array";
-  if (isObj(v)) return "object";
+  if (isObjectNotArray(v)) return "object";
   return "scalar";
 }
 
@@ -225,9 +282,9 @@ export function classifyDocument(doc: EntityDocument): Classification {
   const lineage: Lineage = {};
   if (owned) lineage.owner = linkId(doc.result);
 
-  // --- Pieces -------------------------------------------------------------
+  // Pieces
   // Modern: the durable piece → pattern pointer is `patternIdentity`.
-  if (isObj(doc.patternIdentity)) {
+  if (isObjectNotArray(doc.patternIdentity)) {
     const pi = doc.patternIdentity as { identity?: unknown; symbol?: unknown };
     lineage.argument = linkId(doc.argument);
     lineage.internal = internalIds(doc.internal);
@@ -237,7 +294,7 @@ export function classifyDocument(doc: EntityDocument): Classification {
         symbol: typeof pi.symbol === "string" ? pi.symbol : undefined,
       };
     }
-    const name = isObj(value) && typeof value.$NAME === "string"
+    const name = isObjectNotArray(value) && typeof value.$NAME === "string"
       ? value.$NAME
       : undefined;
     return {
@@ -269,7 +326,7 @@ export function classifyDocument(doc: EntityDocument): Classification {
   // Legacy: a result cell links to its process cell via top-level `source`.
   if ("source" in doc && isPieceResultValue(value)) {
     lineage.source = linkId(doc.source);
-    const name = isObj(value) && typeof value.$NAME === "string"
+    const name = isObjectNotArray(value) && typeof value.$NAME === "string"
       ? value.$NAME
       : undefined;
     return {
@@ -283,7 +340,7 @@ export function classifyDocument(doc: EntityDocument): Classification {
     };
   }
 
-  // --- Cell sub-kinds by value shape -------------------------------------
+  // Cell sub-kinds by value shape
   if (isModuleValue(value)) {
     return {
       kind: "module",
@@ -307,7 +364,7 @@ export function classifyDocument(doc: EntityDocument): Classification {
     };
   }
   if (isSchemaValue(value)) {
-    const ifc = isObj(value) && "ifc" in value ? "+ifc" : "";
+    const ifc = isObjectNotArray(value) && "ifc" in value ? "+ifc" : "";
     return {
       kind: "schema",
       regime: "n/a",
@@ -319,7 +376,7 @@ export function classifyDocument(doc: EntityDocument): Classification {
     };
   }
 
-  // --- Plain cells -------------------------------------------------------
+  // Plain cells
   if (owned) {
     const label = value === undefined ? "(lineage)" : summarize(value);
     return {
@@ -371,12 +428,9 @@ export function buildModuleIndex(
 ): Map<string, ModuleEntry> {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const ids = space.db
-    .prepare(
-      `SELECT DISTINCT id FROM revision WHERE branch = ? AND scope_key = ?`,
-    )
-    .all<{ id: string }>(branch, scope)
-    .map((r) => r.id);
+  // Same enumeration every space-wide scan walks: branch-visible, and without
+  // the tombstones that could never reconstruct into a module anyway.
+  const ids = visibleEntityRows(space, { branch, scope }).map((r) => r.id);
 
   const index = new Map<string, ModuleEntry>();
   for (const id of ids) {
@@ -442,64 +496,402 @@ const KIND_ORDER: Record<EntityKind, number> = {
   schema: 3,
   "owned-cell": 4,
   "free-cell": 5,
+  // Unreadable entities sort above tombstones: corruption is worth looking at,
+  // and a deletion is the ordinary end of an entity's life.
   unknown: 6,
+  deleted: 7,
 };
 
-/**
- * Model every entity in a space — the fluent "what is in here?" view. One
- * reconstruction pass: collect documents, build the module index from them,
- * then classify each. Sorted pieces → modules → streams → schemas → cells.
- * Replaces the old value-shape-only `listEntities` (which undercounted pieces).
- */
-export function listEntityModels(
-  space: SpaceDb,
-  opts: { branch?: string; scope?: string; limit?: number } = {},
-): EntityModel[] {
-  const branch = opts.branch ?? "";
-  const scope = opts.scope ?? "space";
-  const limit = opts.limit ?? 5000;
-  const rows = space.db
-    .prepare(
-      `SELECT id, count(*) revisions FROM revision
-       WHERE branch = ? AND scope_key = ?
-       GROUP BY id ORDER BY revisions DESC LIMIT ?`,
-    )
-    .all<{ id: string; revisions: number }>(branch, scope, limit);
+/** Every kind an entity classifies as, in the order a listing presents them. */
+export const entityKinds: readonly EntityKind[] = Object.keys(
+  KIND_ORDER,
+) as EntityKind[];
 
-  // Single reconstruction pass: cache docs + build the module index inline.
-  const docs = new Map<string, EntityDocument | undefined>();
-  const moduleIndex = new Map<string, ModuleEntry>();
-  for (const r of rows) {
-    let doc: EntityDocument | undefined;
-    try {
-      doc = reconstructDocument(space, { id: r.id, branch, scope });
-    } catch {
-      doc = undefined;
-    }
-    docs.set(r.id, doc);
-    const v = doc?.value;
-    if (isModuleValue(v)) {
-      const existing = moduleIndex.get(v.identity);
-      if (!existing || v.kind === "source") {
-        moduleIndex.set(v.identity, {
-          id: r.id,
-          filename: v.filename,
-          kind: v.kind,
-        });
+/** Whether a string names one of the kinds an entity classifies as. */
+export function isEntityKind(value: string): value is EntityKind {
+  return (entityKinds as readonly string[]).includes(value);
+}
+
+/**
+ * How many entities a space-wide scan reconstructs before it stops. Every scan
+ * is capped, because reconstruction is per-entity work and a space can hold
+ * more entities than anyone wants to wait for.
+ */
+export const DEFAULT_SCAN_LIMIT = 5000;
+
+/**
+ * The end index a row listing slices to, for a limit that may be anything a
+ * caller passed.
+ *
+ * These listings were SQL `LIMIT ?` clauses, where SQLite reads a NEGATIVE as
+ * UNLIMITED, and the CLI still accepts one. A JS `slice` reads the same number
+ * as "drop the last N", so moving the bound out of SQL turns an operator asking
+ * for everything into a silent under-report. Distinct from `scanLimit`, which
+ * governs a reconstruction CAP and floors a negative to zero: nothing to
+ * reconstruct is a coherent answer, while nothing to list is not what a
+ * negative meant here. A limit that is not a whole number is refused, which is
+ * also what the SQL did.
+ */
+export function rowLimit(limit: number): number | undefined {
+  // A non-integer is REFUSED rather than rounded, because that is what these
+  // listings did before the bound moved into JS: SQLite answers `LIMIT 1.5`,
+  // `LIMIT NaN` and `LIMIT Infinity` with a datatype mismatch, while `slice`
+  // reads them as one row, no rows, and every row. Silently coercing a limit
+  // the caller could not have meant is how a listing under-reports without
+  // saying so. `Number.isInteger` rejects all four in one test.
+  if (!Number.isInteger(limit)) {
+    throw new Error(
+      `a row limit must be a whole number of rows, not ${limit}.`,
+    );
+  }
+  return limit < 0 ? undefined : limit;
+}
+
+/**
+ * The cap a scan will actually apply, for a limit that may be anything a caller
+ * passed. Entities are counted one at a time, so a cap has to be a whole
+ * number: a fractional one no integer count can ever equal is a cap that never
+ * takes effect, and the three scans disagreed about which way to round it.
+ */
+export function scanLimit(limit: number | undefined): number {
+  if (limit === undefined || Number.isNaN(limit)) return DEFAULT_SCAN_LIMIT;
+  return Math.max(0, Math.floor(limit));
+}
+
+/**
+ * How far a capped space-wide scan reached. A scan that stops at its cap
+ * returns a SUBSET, and a caller that cannot tell a capped result from a
+ * complete one will read the subset as the whole space — so every capped scan
+ * reports this alongside its result.
+ */
+export interface ScanExtent {
+  /** The cap the scan applied. */
+  limit: number;
+
+  /**
+   * Entities this branch and scope can see, before any `kind` filter — the
+   * size of the set the scan walked (`visibleEntityRows`), so a complete pass
+   * describes exactly this many.
+   */
+  total: number;
+
+  /** True when the scan reached more of what was asked for than `limit`. */
+  truncated: boolean;
+
+  /**
+   * Entities the scan enumerated and could NOT describe — a payload that would
+   * not decode, or a reconstruction that threw. A separate count from
+   * `truncated` because it is a separate kind of incompleteness: raising
+   * `limit` does not recover one. Zero where a pass returns a row for every
+   * entity it reached, as `listEntityModels` does by modeling an unreadable
+   * entity `unknown`.
+   */
+  unreadable: number;
+}
+
+/** Whether a scan returned less than the whole set, for any reason. */
+export function isCompleteScan(extent: ScanExtent): boolean {
+  return !extent.truncated && extent.unreadable === 0;
+}
+
+/** One entity a scan can reach, and how many of its revisions it can see. */
+export interface EntityScanRow {
+  id: string;
+  revisions: number;
+
+  /**
+   * The chain link that owns the visible row. A pass describing an entity's
+   * history has to read THIS branch and no other: nearest-branch ownership
+   * hides a parent's log exactly as it hides the parent's value.
+   */
+  link: BranchReadLink;
+}
+
+/**
+ * Every entity a read on this branch and scope can see, busiest-first.
+ *
+ * This is the DOMAIN of every space-wide scan, and the set `ScanExtent.total`
+ * counts — one enumeration so that a scan's rows and its own report of how far
+ * it reached can never describe different sets. Two properties earn it:
+ *
+ *  - It reads through branch ancestry, not just the rows written ON `branch`.
+ *    A child branch inherits every entity its parent held at the fork
+ *    (`branchReadChain`), and a scan that enumerated only local rows would
+ *    report a listing complete while omitting entities the same branch reads
+ *    fine. `revisions` counts the history on the branch that OWNS the visible
+ *    row, which is the history a read from here can reach.
+ *  - It drops entities whose visible head is a `delete`, unless
+ *    `includeDeleted`. A tombstone reconstructs to nothing, so a pass that
+ *    describes reconstructed entities would otherwise count rows it never
+ *    describes — inflating the total and raising a truncation notice for a
+ *    result that was never truncated.
+ *
+ * Ties on `revisions` break by id through `utf8Compare`, so which entities a
+ * cap admits is a property of the space rather than of the day's query plan.
+ */
+export function visibleEntityRows(
+  space: SpaceDb,
+  opts: {
+    branch?: string;
+    scope?: string;
+
+    /** Include entities whose visible head is a `delete`. Default false. */
+    includeDeleted?: boolean;
+  } = {},
+): EntityScanRow[] {
+  const scope = opts.scope ?? "space";
+  const branch = opts.branch ?? "";
+  const rows = visibleRevisionRows(space, { branch, scope });
+
+  // Entities on ONE branch whose LAST row up to the cut is a delete. Asked for
+  // the other way round — find the deletes, then ask which are final — because
+  // deletes are a sliver of a space's rows, where deriving every entity's head
+  // op reads all of them. Keyed by the branch that OWNS the entity: a delete on
+  // a farther link is hidden by the nearer branch that claimed it.
+  const gone = new Set<string>();
+  if (!opts.includeDeleted) {
+    const tombstoned = space.db.prepare(
+      `SELECT r.id FROM revision r
+       WHERE r.branch = ? AND r.scope_key = ? AND r.op = 'delete' AND r.seq <= ?
+         AND NOT EXISTS (
+           SELECT 1 FROM revision h
+           WHERE h.branch = r.branch AND h.id = r.id
+             AND h.scope_key = r.scope_key AND h.seq <= ?
+             AND (h.seq > r.seq OR (h.seq = r.seq AND h.op_index > r.op_index))
+         )`,
+    );
+    for (const link of branchReadChain(space, branch)) {
+      for (
+        const r of tombstoned.all<{ id: string }>(
+          link.branch,
+          scope,
+          link.atSeq,
+          link.atSeq,
+        )
+      ) {
+        gone.add(`${link.branch}\u0000${r.id}`);
       }
     }
   }
 
-  const out: EntityModel[] = rows.map((r): EntityModel => {
-    const doc = docs.get(r.id);
-    if (doc === undefined) {
+  return rows
+    .filter((r) => !gone.has(`${r.link.branch}\u0000${r.id}`))
+    .map((r) => ({ id: r.id, revisions: r.revisions, link: r.link }))
+    // `utf8Compare` rather than `<`, matching `fingerprint.ts` and every other
+    // id ordering in the tree. The tie-break exists to make the order a
+    // property of the space; a hand-rolled comparison is a second definition of
+    // string order in the one domain that already has a shared one.
+    .sort((a, b) => b.revisions - a.revisions || utf8Compare(a.id, b.id));
+}
+
+/**
+ * How many entities a read on this branch and scope can see — the size of
+ * `visibleEntityRows`, and by construction the same set a scan walks.
+ */
+export function countEntities(
+  space: SpaceDb,
+  opts: { branch?: string; scope?: string; includeDeleted?: boolean } = {},
+): number {
+  return visibleEntityRows(space, opts).length;
+}
+
+/**
+ * An entity's kind without modeling it. An entity carrying no document is named
+ * by WHY it carries none, so a tombstone answers `deleted` and only a genuinely
+ * unreadable one answers `unknown`.
+ */
+function kindOf(outcome: ReconstructOutcome): EntityKind {
+  return outcome.status === "present"
+    ? classifyDocument(outcome.document).kind
+    : absentEntity(outcome.status).kind;
+}
+
+/**
+ * The pattern identity a document's `moduleId` would resolve through — the
+ * same `patternIdentity.identity` `classifyDocument` reads into
+ * `lineage.pattern`, without paying for a full classification.
+ */
+function patternIdentityOf(
+  doc: EntityDocument | undefined,
+): string | undefined {
+  if (doc === undefined || !isObjectNotArray(doc.patternIdentity)) return;
+  const identity = (doc.patternIdentity as { identity?: unknown }).identity;
+  return typeof identity === "string" ? identity : undefined;
+}
+
+/** A capped listing of a space's entities, with how far its scan reached. */
+export interface EntityListing {
+  /** The entities modeled, at most `extent.limit` of them. */
+  entities: EntityModel[];
+
+  extent: ScanExtent;
+}
+
+/**
+ * How far a listing's link count reaches. The count is a fan-out proxy in one
+ * column of a table over every entity in a space, read beside the others to
+ * tell a hub from a leaf, so it is bounded shallow: eight levels is deeper
+ * than the nesting that distinguishes them, and the walk runs once per entity.
+ *
+ * `maxNodes` is unbounded because `EntityModel` carries a link count and no
+ * field saying the count is a floor, and a number silently short is worse than
+ * a walk that does not stop early. Giving it a finite value belongs with
+ * giving the model that field.
+ */
+const LISTING_LINK_WALK: LinkWalkBounds = {
+  maxDepth: 8,
+  maxNodes: Number.POSITIVE_INFINITY,
+};
+
+/**
+ * Model the entities in a space — the fluent "what is in here?" view. One
+ * reconstruction pass: collect documents, build the module index from them,
+ * then classify each. Sorted pieces → modules → streams → schemas → cells.
+ *
+ * `limit` bounds what the caller asked for, so `kind` selects DURING the scan
+ * rather than over its result: filtering afterwards would yield "the pieces
+ * among the first `limit` entities" rather than "up to `limit` pieces", which
+ * reads the same and is a different set. A `kind` scan therefore walks the
+ * space until it has enough matches, and costs more than an unfiltered one.
+ */
+export function listEntityModels(
+  space: SpaceDb,
+  opts: {
+    branch?: string;
+    scope?: string;
+    limit?: number;
+    kind?: EntityKind;
+  } = {},
+): EntityListing {
+  const branch = opts.branch ?? "";
+  const scope = opts.scope ?? "space";
+  const limit = scanLimit(opts.limit);
+  const kind = opts.kind;
+
+  // A listing describes the space's RECORDS, so it keeps tombstones (they model
+  // as `deleted`, which is why `--kind deleted` can ask for them) — and that
+  // keeps `extent.total` counting exactly the set this pass returns.
+  const rows = visibleEntityRows(space, {
+    branch,
+    scope,
+    includeDeleted: true,
+  });
+
+  // Single reconstruction pass: cache docs + build the module index inline.
+  // Only matching documents are cached; a `kind` scan may pass over far more
+  // entities than it keeps, and holding every value would cost the space.
+  const outcomes = new Map<string, ReconstructOutcome>();
+  const moduleIndex = new Map<string, ModuleEntry>();
+  const indexModule = (id: string, doc: EntityDocument | undefined): void => {
+    const v = doc?.value;
+    if (!isModuleValue(v)) return;
+    const existing = moduleIndex.get(v.identity);
+    // First wins, but a `source` entity always supersedes a `compiled` one.
+    if (!existing || v.kind === "source") {
+      moduleIndex.set(v.identity, { id, filename: v.filename, kind: v.kind });
+    }
+  };
+  // A tombstone and a corrupt payload both yield no document, and only one of
+  // them is an error: a deleted entity is definitively not a `piece`, while an
+  // entity that would not decode might have been one. The outcome keeps the two
+  // apart, so a `kind` filter that drops an error can still report it.
+  const read = (id: string): ReconstructOutcome =>
+    reconstructOutcome(space, { id, branch, scope });
+  const documentOf = (o: ReconstructOutcome): EntityDocument | undefined =>
+    o.status === "present" ? o.document : undefined;
+  // An entity that is HERE and cannot be read. A tombstone is not one: it says
+  // what happened to it.
+  const isUnreadable = (o: ReconstructOutcome): boolean =>
+    o.status === "undecodable" || o.status === "empty";
+  // Whether corruption could be hiding the kind that was asked for. It cannot
+  // hide a tombstone: what makes an entity `deleted` is the OP of its visible
+  // row, which is read before any payload is, and an unreadable row's op is a
+  // `set` or a `patch`. So a `deleted` scan is exhaustive even over rows it
+  // could not decode, and counting them would make a complete listing report
+  // itself partial — turning `--require-complete` into a nonzero exit over an
+  // answer that was whole.
+  const concealable = kind !== "deleted";
+
+  const kept: EntityScanRow[] = [];
+  let truncated = false;
+  let scanned = 0;
+  // Rows a `kind` filter dropped BECAUSE they would not reconstruct. An
+  // unfiltered listing keeps every row it reaches — an unreadable one included,
+  // modeled `unknown` — so it never has any; a filtered one silently omits what
+  // it cannot classify, and `--require-complete` has to hear about it.
+  let unreadable = 0;
+  // Collect: one entity past the limit is kept and dropped, because HOLDING it
+  // is what proves more remain — truncation is never inferred from a count that
+  // happened to land on the cap.
+  for (; scanned < rows.length; scanned++) {
+    const r = rows[scanned];
+    const outcome = read(r.id);
+    const doc = documentOf(outcome);
+    indexModule(r.id, doc);
+    if (kind !== undefined && kindOf(outcome) !== kind) {
+      if (concealable && isUnreadable(outcome)) unreadable++;
+      continue;
+    }
+    if (kept.length === limit) {
+      truncated = true;
+      scanned++;
+      break;
+    }
+    outcomes.set(r.id, outcome);
+    kept.push(r);
+  }
+
+  // Resolve: a piece's `moduleId` comes from a module that can sit ANYWHERE in
+  // the order — modules are written once, so they rank last among busiest-first
+  // rows, and a `kind` scan that stopped at the cap can hold pieces whose module
+  // it never reached. Their `moduleId` would come back `undefined`, which reads
+  // as "this piece has no pattern" rather than "the scan stopped early".
+  //
+  // A `kind` scan is where that matters: the module is a DIFFERENT kind, so it
+  // could never be in the result and the caller has no way to resolve the
+  // identity themselves. An unfiltered capped listing is a prefix that says so,
+  // and its unresolved ids point outside the prefix the same way `lineage.owner`
+  // and `lineage.argument` already do — so it keeps its cheap scan.
+  const wanted = new Set<string>();
+  if (kind !== undefined) {
+    for (const o of outcomes.values()) {
+      const identity = patternIdentityOf(documentOf(o));
+      if (
+        identity !== undefined && moduleIndex.get(identity)?.kind !== "source"
+      ) {
+        wanted.add(identity);
+      }
+    }
+  }
+  // Reachable only when collection stopped at the cap — the loop above runs to
+  // `rows.length` otherwise — so a failure this walk meets is already covered by
+  // `truncated`, and counting it under `unreadable` would contradict the notice
+  // that goes with it: raising `--limit` DOES bring these rows into the pass
+  // above, which reports them. Pinned by a test, since the invariant lives in
+  // the loop bounds rather than anywhere it can be read off.
+  //
+  // The walk ends the moment nothing is still wanted.
+  for (; wanted.size > 0 && scanned < rows.length; scanned++) {
+    const r = rows[scanned];
+    const doc = documentOf(read(r.id));
+    indexModule(r.id, doc);
+    const v = doc?.value;
+    // A `source` entity supersedes a `compiled` one, so a want is only settled
+    // once source is seen — or the rows run out.
+    if (isModuleValue(v) && v.kind === "source") wanted.delete(v.identity);
+  }
+
+  const out: EntityModel[] = kept.map((r): EntityModel => {
+    const outcome = outcomes.get(r.id)!;
+    if (outcome.status !== "present") {
+      const { kind, label } = absentEntity(outcome.status);
       return {
         id: r.id,
         scope,
-        kind: "unknown",
+        kind,
         regime: "n/a",
         owned: false,
-        label: "(undecodable)",
+        label,
         paths: [],
         valueShape: "absent",
         lineage: {},
@@ -507,23 +899,43 @@ export function listEntityModels(
         links: 0,
       };
     }
-    const m = modelFromDocument(doc, { id: r.id, scope, moduleIndex });
+    const m = modelFromDocument(outcome.document, {
+      id: r.id,
+      scope,
+      moduleIndex,
+    });
     m.revisions = r.revisions;
-    m.links = countLinks(doc.value);
+    m.links = linksWithPaths(outcome.document.value, LISTING_LINK_WALK)
+      .links.length;
     return m;
   });
 
-  return out.sort(
-    (a, b) =>
-      KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
-      (b.revisions ?? 0) - (a.revisions ?? 0),
-  );
+  return {
+    entities: out.sort(
+      (a, b) =>
+        KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
+        (b.revisions ?? 0) - (a.revisions ?? 0),
+    ),
+    extent: {
+      // `rows`, not a second count: the listing and its own report of how far
+      // it reached are the same enumeration, so they cannot drift. It counts
+      // tombstones because this listing returns them, which is also why a
+      // `graph` or `html` total over the same space is smaller — those describe
+      // reconstructed entities, and a tombstone reconstructs to nothing.
+      limit,
+      total: rows.length,
+      truncated,
+      unreadable,
+    },
+  };
 }
 
 export interface PieceCellRef {
   id: string;
+
   /** Classified kind of the owned cell (stream / schema / owned-cell / …). */
   kind: EntityKind;
+
   label: string;
   summary: string;
 }
@@ -532,6 +944,7 @@ export interface PieceModel {
   id: string;
   regime: Regime;
   name: string;
+
   /** The pattern (module) this piece instantiates, resolved via patternIdentity. */
   pattern?: {
     id?: string;
@@ -539,15 +952,20 @@ export interface PieceModel {
     symbol?: string;
     filename?: string;
     codeLines?: number;
+
     /** Full TS source — only populated when `includeCode` is set. */
     code?: string;
   };
+
   /** The piece's input cell (the `argument` link). */
   input?: { id: string; summary: string };
+
   /** Top-level keys of the piece's result value ($UI, $NAME, …pattern outputs). */
   resultKeys: string[];
+
   /** Top-level keys of the result JSONSchema. */
   schemaKeys: string[];
+
   /** The piece's owned child cells (its `internal` manifest, resolved). */
   ownedCells: PieceCellRef[];
 }
@@ -569,13 +987,16 @@ export function describePiece(
 ): PieceModel | { error: string } {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const doc = reconstructDocument(space, { id, branch, scope });
-  if (doc === undefined) return { error: "entity absent" };
+  const outcome = reconstructOutcome(space, { id, branch, scope });
+  if (outcome.status !== "present") {
+    return { error: `entity ${absentEntity(outcome.status).label}` };
+  }
+  const doc = outcome.document;
   const c = classifyDocument(doc);
   if (c.kind !== "piece") return { error: `not a piece (kind=${c.kind})` };
 
   const value = doc.value;
-  const name = isObj(value) && typeof value.$NAME === "string"
+  const name = isObjectNotArray(value) && typeof value.$NAME === "string"
     ? value.$NAME
     : "(unnamed)";
 
@@ -606,28 +1027,27 @@ export function describePiece(
 
   let input: PieceModel["input"];
   if (c.lineage.argument) {
-    const adoc = reconstructDocument(space, {
+    const a = reconstructOutcome(space, {
       id: c.lineage.argument,
       branch,
       scope,
     });
     input = {
       id: c.lineage.argument,
-      summary: adoc ? summarize(adoc.value) : "(absent)",
+      summary: a.status === "present"
+        ? summarize(a.document.value)
+        : absentEntity(a.status).label,
     };
   }
 
   const ownedCells: PieceCellRef[] = (c.lineage.internal ?? []).map(
     (cid): PieceCellRef => {
-      const cdoc = reconstructDocument(space, { id: cid, branch, scope });
-      if (cdoc === undefined) {
-        return {
-          id: cid,
-          kind: "unknown",
-          label: "(absent)",
-          summary: "(absent)",
-        };
+      const child = reconstructOutcome(space, { id: cid, branch, scope });
+      if (child.status !== "present") {
+        const { kind, label } = absentEntity(child.status);
+        return { id: cid, kind, label, summary: label };
       }
+      const cdoc = child.document;
       const cc = classifyDocument(cdoc);
       return {
         id: cid,
@@ -646,8 +1066,8 @@ export function describePiece(
     name,
     pattern,
     input,
-    resultKeys: isObj(value) ? Object.keys(value) : [],
-    schemaKeys: isObj(doc.schema) ? Object.keys(doc.schema) : [],
+    resultKeys: isObjectNotArray(value) ? Object.keys(value) : [],
+    schemaKeys: isObjectNotArray(doc.schema) ? Object.keys(doc.schema) : [],
     ownedCells,
   };
 }

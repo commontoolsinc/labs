@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import {
   createFactoryShell,
   factoryStateOf,

@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run=git
+
 /**
  * The pattern-update gate's safety argument is that `--update` can only ADD a
  * baseline — a command that could remove one could remove the very baseline
@@ -20,7 +21,7 @@
  * Usage: check-baselines-append-only.ts [base-ref]   (default: origin/main)
  */
 
-import { PATTERNS_DIR } from "./pattern-files.ts";
+import { patternPath, PATTERNS_DIR } from "./pattern-files.ts";
 
 const BASELINES_PREFIX = `${PATTERNS_DIR}/baselines/`;
 
@@ -60,7 +61,7 @@ export function unjustifiedDeletions(
   for (const path of deleted) {
     const key = baselineKeyOf(path);
     if (key === undefined) continue;
-    if (deletedPatterns.has(`${PATTERNS_DIR}/${key}`)) continue;
+    if (deletedPatterns.has(patternPath(key))) continue;
     offenders.push({ path, key });
   }
   return offenders;
@@ -87,10 +88,7 @@ async function main() {
   )).split("\n").filter((line) => line.length > 0);
 
   const deletedPatterns = new Set(
-    deleted.filter((path) =>
-      path.startsWith(`${PATTERNS_DIR}/`) &&
-      (path.endsWith(".ts") || path.endsWith(".tsx"))
-    ),
+    deleted.filter((path) => path.endsWith(".ts") || path.endsWith(".tsx")),
   );
 
   const offenders = unjustifiedDeletions(deleted, deletedPatterns);
@@ -104,7 +102,7 @@ async function main() {
       `pattern:\n`,
   );
   for (const { path, key } of offenders) {
-    console.error(`  ${path}\n    ${PATTERNS_DIR}/${key} still exists.`);
+    console.error(`  ${path}\n    ${patternPath(key)} still exists.`);
   }
   console.error(
     `\nA baseline records a contract that WAS deployed. Deleting one drops the ` +

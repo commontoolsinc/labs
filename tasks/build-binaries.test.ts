@@ -117,7 +117,7 @@ async function renderComputedVersionModule(root: string): Promise<string> {
  * Build a minimal tree holding the files `build-binaries` reads and writes: a
  * manifest with a frontend-only `compilerOptions.types`, a lockfile, the
  * fingerprint input paths, the committed version module, and the toolshed
- * directory for the COMPILED build marker.
+ * and cli directories for the COMPILED build markers.
  */
 async function makeFakeRepo(): Promise<string> {
   const root = await Deno.makeTempDir({ prefix: "build-binaries-" });
@@ -152,6 +152,7 @@ async function makeFakeRepo(): Promise<string> {
     SOURCE_VERSION_MODULE,
   );
   await Deno.mkdir(`${root}/packages/toolshed`, { recursive: true });
+  await Deno.mkdir(`${root}/packages/cli`, { recursive: true });
   return root;
 }
 
@@ -199,10 +200,18 @@ Deno.test("BuildConfig resolves workspace paths against the root", async () => {
       join(root, "packages", "toolshed", "COMPILED"),
     );
     assertEquals(
+      config.cliEnvPath(),
+      join(root, "packages", "cli", "COMPILED"),
+    );
+    assertEquals(
       config.staticAssetsPath(),
       join(root, "packages", "static", "assets"),
     );
-    assertEquals(config.patternsPath(), join(root, "packages", "patterns"));
+    assertEquals(config.patternPaths(), [
+      join(root, "packages", "patterns"),
+      join(root, "packages", "connectors", "agents", "debug-view"),
+      join(root, "packages", "connectors", "github", "activity-view"),
+    ]);
     assertEquals(
       config.staticTypesPath(),
       join(root, "packages", "static", "assets", "types"),
@@ -450,6 +459,7 @@ Deno.test("prepareWorkspace writes the fingerprint; revertWorkspace restores the
   const config = new BuildConfig({ root, toolshedFlags: [], cliOnly: true });
   const versionPath = config.compileCacheVersionPath();
   const compiledPath = join(root, "packages", "toolshed", "COMPILED");
+  const cliCompiledPath = join(root, "packages", "cli", "COMPILED");
   const sourceModule = await Deno.readTextFile(versionPath);
   const computedModule = await renderComputedVersionModule(root);
   try {
@@ -465,13 +475,33 @@ Deno.test("prepareWorkspace writes the fingerprint; revertWorkspace restores the
     const prepared = JSON.parse(await Deno.readTextFile(`${root}/deno.jsonc`));
     assertEquals(prepared.compilerOptions.types, undefined);
     assert(await exists(compiledPath), "COMPILED marker should be written");
+    assert(
+      await exists(cliCompiledPath),
+      "cli COMPILED marker should be written",
+    );
+    assertEquals(
+      await Deno.readTextFile(cliCompiledPath),
+      await Deno.readTextFile(compiledPath),
+    );
+    // The marker records the server-execution posture the shell bakes
+    // from this environment (unset here → null: the shell follows the
+    // first-party default); toolshed surfaces it on /api/meta.
+    const marker = JSON.parse(await Deno.readTextFile(compiledPath));
+    assertEquals(
+      marker.shellServerExecutionDefine,
+      Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") ?? null,
+    );
 
     await revertWorkspace(config);
 
-    // The version module, manifest bytes, and build marker are restored.
+    // The version module, manifest bytes, and build markers are restored.
     assertEquals(await Deno.readTextFile(versionPath), sourceModule);
     assertEquals(await Deno.readTextFile(`${root}/deno.jsonc`), FAKE_MANIFEST);
     assert(!(await exists(compiledPath)), "COMPILED marker should be removed");
+    assert(
+      !(await exists(cliCompiledPath)),
+      "cli COMPILED marker should be removed",
+    );
   } finally {
     await Deno.remove(root, { recursive: true });
   }

@@ -1,9 +1,11 @@
+import { exists } from "@std/fs/exists";
+import { join } from "@std/path/join";
+
 import { Command } from "@cliffy/command";
 import { HelpCommand } from "@cliffy/command/help";
-import { exists } from "@std/fs/exists";
+
 import { Felt } from "./felt.ts";
 import { Config, FeltCommand, ResolvedConfig } from "./interface.ts";
-import { join } from "@std/path/join";
 
 const command = new Command()
   .name("felt")

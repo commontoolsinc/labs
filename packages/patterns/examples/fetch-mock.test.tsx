@@ -7,7 +7,7 @@
 //
 // LLM calls (generateText/generateObject) mock separately via @commonfabric/llm;
 // this seam is for generic `fetchJson` HTTP.
-import { assert, computed, fetchJson, pattern } from "commonfabric";
+import { assert, computed, fetchJson, pattern, TESTS } from "commonfabric";
 
 export const fetchMocks = [
   {
@@ -34,7 +34,7 @@ export default pattern(() => {
   const no_error = assert(() => fetched.error === undefined);
 
   return {
-    tests: [
+    [TESTS]: [
       // Drive the in-flight fetchJson (mutex -> mock fetch -> result write) to
       // completion before the assertions read the result.
       { settle: true },

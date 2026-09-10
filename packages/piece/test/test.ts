@@ -1,12 +1,14 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { PieceManager } from "../src/manager.ts";
-import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import { describe, it } from "@std/testing/bdd";
+
+import { taggedHashStringOf } from "@commonfabric/data-model";
+
+import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 describe("noop", () => {
 });
 
-describe("PieceManager.get", () => {
+describe("PiecesController.getPieceCell", () => {
   it("syncs a loaded piece before starting it", async () => {
     let pieceSynced = false;
     let startSawSyncedPiece = false;
@@ -28,17 +30,22 @@ describe("PieceManager.get", () => {
         sync: () => Promise.resolve(),
       }),
       getCellFromEntityId: () => piece,
+      // Opening a piece follows its origin before starting it; this one
+      // records none.
+      sourceReconciler: { reconcile: () => Promise.resolve("detached") },
       start: () => {
         startSawSyncedPiece = pieceSynced;
         return Promise.resolve(true);
       },
     };
-    const manager = new PieceManager({
+    const pieces = new PiecesController({
       as: {} as never,
       space: "did:key:test-space" as never,
     }, runtime as never);
 
-    await manager.get(taggedHashStringOf("piece-id"), true, { type: "object" });
+    await pieces.getPieceCell(taggedHashStringOf("piece-id"), true, {
+      type: "object",
+    });
 
     expect(startSawSyncedPiece).toBe(true);
   });

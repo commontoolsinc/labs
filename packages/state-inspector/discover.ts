@@ -30,6 +30,7 @@ export async function deriveSpaceDid(name: string): Promise<string> {
 export interface DiscoveredSpace {
   /** Space DID (DB file basename without `.sqlite`). */
   did: string;
+
   path: string;
   sizeBytes: number;
   mtimeMs: number;

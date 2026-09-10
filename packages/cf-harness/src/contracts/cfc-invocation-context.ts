@@ -3,8 +3,10 @@ import {
   type CfcPromptSlotInfluenceAtom,
 } from "@commonfabric/api/cfc";
 import type {
+  CfcConfClause,
   CfcEnforcementMode,
   CfcLabelView,
+  CfcReadOnExceed,
 } from "@commonfabric/runner/cfc";
 import { mergeCfcLabelViews } from "@commonfabric/runner/cfc";
 import {
@@ -70,6 +72,13 @@ export interface HarnessCfcInvocationRunManifestSummary {
   wishId?: string;
   dispatchClass?: string;
   cfcEnforcementMode?: CfcEnforcementMode;
+
+  /** The read ceiling the manifest declared for the run's fabric session. */
+  cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+
+  /** Its `onExceed`, when the manifest declared one. */
+  cfcReadOnExceed?: CfcReadOnExceed;
+
   promptSlotPresent?: boolean;
 }
 
@@ -185,6 +194,12 @@ export const summarizeCfcInvocationRunManifest = (
         : {}),
       ...(manifest.cfc?.enforcementMode !== undefined
         ? { cfcEnforcementMode: manifest.cfc.enforcementMode }
+        : {}),
+      ...(manifest.cfc?.maxConfidentiality !== undefined
+        ? { cfcReadMaxConfidentiality: manifest.cfc.maxConfidentiality }
+        : {}),
+      ...(manifest.cfc?.onExceed !== undefined
+        ? { cfcReadOnExceed: manifest.cfc.onExceed }
         : {}),
       promptSlotPresent: manifest.promptSlot !== undefined,
     }

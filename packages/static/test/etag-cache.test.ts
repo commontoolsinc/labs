@@ -4,8 +4,11 @@ import {
   createCacheHeaders,
   generateETag,
 } from "@commonfabric/static/etag";
-import { decode } from "@commonfabric/utils/encoding";
-import { TestStaticCache } from "../utils.ts";
+import {
+  createTestStaticCache,
+  TEST_ASSET,
+  TEST_ASSET_CONTENT,
+} from "../utils.ts";
 
 Deno.test("ETag Generation - generates same ETag for same content", async () => {
   const content = new TextEncoder().encode("Hello, World!");
@@ -97,7 +100,7 @@ Deno.test("ETag Comparison - handles both weak ETags", () => {
   assertEquals(compareETags(etag, ifNoneMatch), true);
 });
 
-Deno.test("Cache Headers - generates 'public, no-cache' by default", () => {
+Deno.test("Cache Headers - generates 'public, no-cache'", () => {
   const etag = '"abc123"';
   const headers = createCacheHeaders(etag);
   assertEquals(headers["Cache-Control"], "public, no-cache");
@@ -109,69 +112,60 @@ Deno.test("Cache Headers - includes ETag header", () => {
   assertEquals(headers["ETag"], etag);
 });
 
-Deno.test("Cache Headers - respects noCache: false option", () => {
-  const etag = '"abc123"';
-  const headers = createCacheHeaders(etag, { noCache: false });
-  assertEquals("Cache-Control" in headers, false);
-  assertEquals(headers["ETag"], etag);
-});
+Deno.test("StaticCache ETag - getWithETag returns both blob and ETag", async () => {
+  const cache = createTestStaticCache();
+  const result = await cache.getWithETag(TEST_ASSET);
 
-Deno.test("Cache Headers - respects public: false option", () => {
-  const etag = '"abc123"';
-  const headers = createCacheHeaders(etag, { public: false });
-  assertEquals(headers["Cache-Control"], "no-cache");
-});
-
-Deno.test("Cache Headers - respects both options together", () => {
-  const etag = '"abc123"';
-  const headers = createCacheHeaders(etag, {
-    noCache: false,
-    public: false,
-  });
-  assertEquals("Cache-Control" in headers, false);
-  assertEquals(headers["ETag"], etag);
-});
-
-Deno.test("StaticCache ETag - getWithETag returns both buffer and ETag", async () => {
-  const cache = new TestStaticCache();
-  const result = await cache.getWithETag("prompts/system.md");
-
-  assert(result.buffer instanceof Uint8Array);
+  assert(result.blob instanceof Blob);
   assertEquals(typeof result.etag, "string");
   assert(result.etag.startsWith('"') && result.etag.endsWith('"'));
 });
 
 Deno.test("StaticCache ETag - returns same ETag for same asset (caching works)", async () => {
-  const cache = new TestStaticCache();
-  const result1 = await cache.getWithETag("prompts/system.md");
-  const result2 = await cache.getWithETag("prompts/system.md");
+  const cache = createTestStaticCache();
+  const result1 = await cache.getWithETag(TEST_ASSET);
+  const result2 = await cache.getWithETag(TEST_ASSET);
 
   assertEquals(result1.etag, result2.etag);
   // Should be the exact same promise/object from cache
   assert(result1 === result2 || result1.etag === result2.etag);
 });
 
-Deno.test("StaticCache ETag - get() method still works (backward compatibility)", async () => {
-  const cache = new TestStaticCache();
-  const buffer = await cache.get("prompts/system.md");
+Deno.test("StaticCache ETag - get() returns the content without its ETag", async () => {
+  const cache = createTestStaticCache();
+  const blob = await cache.get(TEST_ASSET);
 
-  assert(buffer instanceof Uint8Array);
-  const text = decode(buffer);
-  assert(/# React Component Builder/.test(text));
+  assert(blob instanceof Blob);
+  const text = await blob.text();
+  assert(text.includes(TEST_ASSET_CONTENT));
+});
+
+Deno.test("StaticCache ETag - bytes read from the content are a copy, so writing to them leaves the cached content as it was", async () => {
+  const cache = createTestStaticCache();
+  const { blob } = await cache.getWithETag(TEST_ASSET);
+
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const original = bytes[0];
+  bytes[0] = original ^ 0xff;
+
+  const again = new Uint8Array(await blob.arrayBuffer());
+  assertEquals(again[0], original);
 });
 
 Deno.test("StaticCache ETag - ETag is consistent for same content", async () => {
-  const cache = new TestStaticCache();
-  const result = await cache.getWithETag("prompts/system.md");
+  const cache = createTestStaticCache();
+  const result = await cache.getWithETag(TEST_ASSET);
 
-  // Generate ETag directly from the buffer
-  const expectedETag = await generateETag(result.buffer);
+  // Generate ETag directly from the content
+  const expectedETag = await generateETag(
+    new Uint8Array(await result.blob.arrayBuffer()),
+  );
   assertEquals(result.etag, expectedETag);
 });
 
 Deno.test("StaticCache ETag - different assets have different ETags", async () => {
-  const cache = new TestStaticCache();
-  const result1 = await cache.getWithETag("prompts/system.md");
+  const cache = createTestStaticCache();
+  const result1 = await cache.getWithETag(TEST_ASSET);
   const result2 = await cache.getWithETag("types/es2023.d.ts");
 
   assert(result1.etag !== result2.etag);

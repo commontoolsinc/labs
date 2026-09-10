@@ -1,8 +1,9 @@
+import { booleanSchema } from "@commonfabric/runner/schemas";
+import { type CellHandle } from "@commonfabric/runtime-client";
 import { css, html, LitElement } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
+
 import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle } from "@commonfabric/runtime-client";
-import { booleanSchema } from "@commonfabric/runner/schemas";
 import { createBooleanCellController } from "../../core/cell-controller.ts";
 
 /**

@@ -1,6 +1,7 @@
 /**
  * Tests for CFEmptyState component
  */
+
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { CFEmptyState } from "./index.ts";

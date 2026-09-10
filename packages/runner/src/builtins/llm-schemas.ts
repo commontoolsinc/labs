@@ -1,6 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { cfcAtom } from "@commonfabric/api/cfc";
+import { internSchema } from "@commonfabric/data-model-schema";
 
 // Epic D1b (docs/history/plans/cfc-future-work-implementation.md): model output written
 // by the `llm`, `generateText`, and `generateObject` builtins carries an
@@ -54,7 +54,7 @@ export const LLMMessageSchema = internSchema(
   {
     type: "object",
     properties: {
-      role: { type: "string", enum: ["user", "assistant", "system", "tool"] },
+      role: { type: "string", enum: ["user", "assistant", "tool"] },
       content: LLMContentSchema,
     },
     required: ["role", "content"],

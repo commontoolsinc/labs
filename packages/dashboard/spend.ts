@@ -1,8 +1,21 @@
-// Shared daily-spend projection and charting for the dashboard's spend tiles.
-// A monthly estimate uses every settled day in the current month. Until that
-// supplies two weeks, it fills the rate window from the end of the prior month.
-import type { Status } from "./types.ts";
-import { multiSparkline, SPARK_FADE } from "./lib.ts";
+/**
+ * Projects and charts daily spend for every one of the dashboard's spend
+ * tiles. A monthly estimate uses every settled day in the current month, and
+ * until that supplies two weeks it fills the rate window from the end of the
+ * prior month. A chart line ends on the day its source is known through — its
+ * last reported day, or the newest day its reporting lag has settled — even
+ * when another source's line runs further. A line skips the days its source
+ * has no report to draw on, breaking across the hole rather than charting
+ * zeros.
+ *
+ * A settled day with no report counts as a real $0, which holds only while the
+ * source is still reporting. A tile establishes that from the newest day its
+ * source has a report for, and stops reading a source whose reports have run
+ * dry further back than its lag allows.
+ */
+
+import { multiSparkline } from "./lib.ts";
+import { themedChartSeries } from "./theme.ts";
 
 export const DAY_MS = 86_400_000;
 export const MIN_SPEND_WINDOW_DAYS = 14;
@@ -34,6 +47,14 @@ export interface SpendChartSource {
   spend: ChartSpend | null;
   color: string;
   label?: string;
+  lagDays: number;
+
+  /**
+   * The calendar months, as "YYYY-MM", the source has a report for. A day
+   * outside them is left out of the source's line. Leave it undefined when the
+   * source reports on every month it spans.
+   */
+  knownMonths?: ReadonlySet<string>;
 }
 
 export function settled(
@@ -45,6 +66,34 @@ export function settled(
   while (withData > 0 && daily[withData - 1] === 0) withData--;
   const known = Math.max(withData, elapsedDays - lagDays);
   return daily.slice(0, Math.max(0, Math.min(daily.length, known)));
+}
+
+/**
+ * The newest day a source has a figure for, or undefined when it has none.
+ */
+export function newestReportedDay(
+  byDay: Map<string, number>,
+): string | undefined {
+  let newest: string | undefined;
+  for (const day of byDay.keys()) {
+    if (newest === undefined || day > newest) newest = day;
+  }
+  return newest;
+}
+
+/**
+ * How many days back the newest day a source has a report for sits. Compare it
+ * against the lag the source declares: a report that ends further back than
+ * that allows has stopped, and the days after it are unreported rather than
+ * days that cost nothing.
+ */
+export function reportLagDays(reportedThrough: string, now: Date): number {
+  const today = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  return (today - Date.parse(`${reportedThrough}T00:00:00Z`)) / DAY_MS;
 }
 
 export function calendarMonth(
@@ -170,36 +219,58 @@ export function summarizeDailySpend(
 export function spendChart(
   sources: SpendChartSource[],
   now: Date,
-  status: Status,
   estimateDays?: number,
 ): { chart: string; duration: number } {
   const allDays = new Set<string>();
   for (const source of sources) {
     if (source.spend) {
       for (const day of source.spend.byDay.keys()) allDays.add(day);
+      if (source.spend.byDay.size > 0 && source.knownMonths) {
+        for (const month of source.knownMonths) allDays.add(`${month}-01`);
+      }
     }
   }
   if (allDays.size < 2) return { chart: "", duration: 0 };
   const sorted = [...allDays].sort();
   const timeOf = (day: string) => Date.parse(`${day}T00:00:00Z`);
-  const end = timeOf(sorted[sorted.length - 1]);
+  const dayAt = (time: number) => new Date(time).toISOString().slice(0, 10);
+  // A month the source has no report for tells us nothing about its days, so
+  // those days are left out of the line entirely.
+  const reports = (source: SpendChartSource, day: string) =>
+    !source.knownMonths || source.knownMonths.has(day.slice(0, 7));
+  // A source is known through its last reported day or through the newest day
+  // its reporting lag has settled, whichever is later. A settled day with no
+  // report is a real $0; a day past that horizon has no figure yet, and the
+  // source's line stops there rather than drawing the missing days as zero.
+  const today = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  const earliest = timeOf(sorted[0]);
+  const knownThrough = new Map<SpendChartSource, number>();
+  for (const source of sources) {
+    if (!source.spend) continue;
+    // A settled day in an unreported month has no figure to settle, so the
+    // horizon falls back to the newest day the source does report on.
+    let known = today - source.lagDays * DAY_MS;
+    while (known >= earliest && !reports(source, dayAt(known))) {
+      known -= DAY_MS;
+    }
+    for (const day of source.spend.byDay.keys()) {
+      known = Math.max(known, timeOf(day));
+    }
+    knownThrough.set(source, known);
+  }
+  const end = Math.max(...knownThrough.values());
   const start = Math.max(
-    timeOf(sorted[0]),
+    earliest,
     end - (SPEND_HISTORY_DAYS - 1) * DAY_MS,
   );
   const grid: string[] = [];
   for (let time = start; time <= end; time += DAY_MS) {
     grid.push(new Date(time).toISOString().slice(0, 10));
   }
-  const lines = sources.flatMap((source) =>
-    source.spend
-      ? [{
-        vals: grid.map((day) => source.spend!.byDay.get(day) ?? 0),
-        color: source.color,
-        label: source.label,
-      }]
-      : []
-  );
   const monthStart = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
   const currentDays = grid.filter((day) => day >= monthStart).length;
   const highlightDays = Math.min(
@@ -207,9 +278,39 @@ export function spendChart(
     estimateDays ??
       Math.max(currentDays, MIN_SPEND_WINDOW_DAYS),
   );
+  const highlightFrom = grid.length - highlightDays;
+  const lines = sources.flatMap((source) => {
+    const known = knownThrough.get(source);
+    if (known === undefined) return [];
+    const covered = Math.min(
+      grid.length,
+      Math.max(0, Math.round((known - start) / DAY_MS) + 1),
+    );
+    if (covered === 0) return [];
+    const columns = grid.slice(0, covered)
+      .map((day, index) => ({ day, index }))
+      .filter(({ day }) => reports(source, day));
+    return [{
+      vals: columns.map(({ day }) => source.spend!.byDay.get(day) ?? 0),
+      // A line that skips days, or that the grid outlives, keeps its points on
+      // the shared day axis and its highlight aligned to the shared trailing
+      // window.
+      xs: columns.length === grid.length
+        ? undefined
+        : columns.map(({ index }) => index / (grid.length - 1)),
+      ...themedChartSeries(source.color),
+      label: source.label,
+      highlightCount: columns.filter(({ index }) => index >= highlightFrom)
+        .length,
+      // Two day columns apart is a day with no figure, so the path breaks
+      // there instead of drawing a straight run across the missing days.
+      maxXGap: 1.5 / (grid.length - 1),
+      showSinglePoint: true,
+    }];
+  });
   return {
     chart: multiSparkline(lines, {
-      fadeFrom: SPARK_FADE[status],
+      fade: true,
       highlight: { count: highlightDays },
     }),
     duration: end - start + DAY_MS,

@@ -1,6 +1,4 @@
-/**
- * Hashtag lexing for free text.
- */
+/** Hashtag lexing for free text. */
 
 // A hashtag is `#` followed by a run of Unicode letters, combining marks,
 // numbers, and underscores. Letters from any script are accepted (Latin with
@@ -10,10 +8,10 @@
 const HASHTAG_PATTERN = /#([\p{L}\p{M}\p{N}_]+)/gu;
 
 /**
- * Extract hashtag tokens from free text. A token starts at `#` and runs through
- * Unicode letters, combining marks, numbers, and underscores; a hyphen, space,
- * or other punctuation ends it. Returns the tokens lowercased, without the
- * leading `#`, deduplicated, in order of first appearance.
+ * Extracts hashtag tokens from free text. A token starts at `#` and runs
+ * through Unicode letters, combining marks, numbers, and underscores; a
+ * hyphen, space, or other punctuation ends it. Returns the tokens lowercased,
+ * without the leading `#`, deduplicated, in order of first appearance.
  *
  * **Note:** The lexing here is looser than the convention the same syntax
  * implies elsewhere, in ways a caller minting durable tags out of prose is

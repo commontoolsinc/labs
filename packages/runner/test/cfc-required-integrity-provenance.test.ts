@@ -1,13 +1,19 @@
-import { describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/interface";
+import { describe, it } from "@std/testing/bdd";
+
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import { parseLink } from "../src/link-utils.ts";
 import type { URI } from "@commonfabric/memory/interface";
+
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
+import { parseLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-ri-provenance");
 
@@ -44,6 +50,7 @@ const seedLabeledDoc = async (
   const seed = runtime.edit();
   const cell = runtime.getCell(signer.did(), id, undefined, seed);
   const docId = cell.getAsNormalizedFullLink().id as URI;
+  writeSeedEnvelopeDoc(seed, signer.did());
   seed.writeOrThrow({
     space: signer.did(),
     id: docId,
@@ -53,17 +60,24 @@ const seedLabeledDoc = async (
     value,
     cfc: {
       version: 1,
-      schemaHash: `seed-${id}`,
+      schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
       labelMap: { version: 1, entries: [{ path: [], label }] },
     },
   });
   expect((await seed.commit()).ok).toBeDefined();
 };
 
+// The sink names the admin endorsement twice on `out`: it is required there,
+// and it is minted there. The mint is what the write-side floor credits the
+// written value with. The read-side gate these steps exercise quantifies over
+// the reads the transaction consumed, so the mint leaves it alone.
 const SINK_SCHEMA = {
   type: "object",
   properties: {
-    out: { type: "string", ifc: { requiredIntegrity: [ADMIN_ATOM] } },
+    out: {
+      type: "string",
+      ifc: { requiredIntegrity: [ADMIN_ATOM], addIntegrity: [ADMIN_ATOM] },
+    },
   },
   required: ["out"],
 } as const satisfies JSONSchema;
@@ -74,7 +88,6 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       // A lookup doc whose stored label is entirely provenance: a link
@@ -117,7 +130,6 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       await seedLabeledDoc(runtime, "ri-empty-lookup", "lookup", {});
@@ -150,11 +162,10 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       await seedLabeledDoc(runtime, "ri-conf-src", "briefing", {
-        confidentiality: ["prompt-injection-risk"],
+        confidentiality: ["prompt-injection-risk-unscreened"],
       });
 
       const tx = runtime.edit();
@@ -186,7 +197,6 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       await seedLabeledDoc(runtime, "ri-mixed-src", "data", {
@@ -230,7 +240,6 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const seed = runtime.edit();

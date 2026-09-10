@@ -1,7 +1,8 @@
-import ts from "typescript";
+import { assert, assertEquals, assertMatch, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { assert, assertEquals, assertRejects } from "@std/assert";
-import { transformFiles } from "./utils.ts";
+
+import ts from "typescript";
+
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import {
   callsMatching,
@@ -12,6 +13,7 @@ import {
   literalToValue,
   parseModule,
 } from "./transformed-ast.ts";
+import { transformFiles } from "./utils.ts";
 
 /**
  * True when some emitted `.for(...)` call is attached directly to a
@@ -93,14 +95,16 @@ export function make() {
     assertEquals(literalToValue(receiver.arguments[1]!), { type: "number" });
   });
 
-  it("registers cast-wrapped non-exported builder consts in __cfReg (CT-1743)", async () => {
+  it("registers wrapped non-exported builder consts in __cfReg (CT-1743)", async () => {
     // A non-exported top-level handler written as `const x = handler(...) as T`
-    // must still be __cfReg-registered. Without unwrapping the `as` cast its
-    // AsExpression initializer fails the CallExpression check, so it is excluded
-    // from __cfReg, gets no content-addressed provenance, and at resolve time
-    // falls to the SES source fallback that strips its builder imports — the
-    // CT-1743 `navigateTo`-of-undefined crash. The no-cast sibling is the
-    // positive control (it has always registered).
+    // must still be __cfReg-registered. Without unwrapping the wrapper its
+    // initializer fails the CallExpression check, so it is excluded from
+    // __cfReg, gets no content-addressed provenance, and at resolve time falls
+    // to the SES source fallback that strips its builder imports — the CT-1743
+    // `navigateTo`-of-undefined crash. Every transparent wrapper spelling has
+    // to register, not just the cast: the registration reads the shared set, so
+    // a spelling left out of it fails silently at runtime rather than loudly
+    // here. The no-wrapper sibling is the positive control.
     const source = `
 import { handler } from "commonfabric";
 
@@ -112,6 +116,20 @@ const openWithCast = handler<
 >((_event, { count }) => {
   void count;
 }) as OpenFactory;
+
+const openWithNonNull = handler<
+  { id: string },
+  { count: number }
+>((_event, { count }) => {
+  void count;
+})!;
+
+const openWithSatisfies = handler<
+  { id: string },
+  { count: number }
+>((_event, { count }) => {
+  void count;
+}) satisfies unknown;
 
 const openNoCast = handler<
   { id: string },
@@ -140,6 +158,8 @@ const openNoCast = handler<
     );
     assert(keys.includes("openNoCast")); // positive control
     assert(keys.includes("openWithCast")); // CT-1743 regression guard
+    assert(keys.includes("openWithNonNull"));
+    assert(keys.includes("openWithSatisfies"));
   });
 
   it("adds stable property causes to pattern-owned lowered derives", async () => {
@@ -700,49 +720,37 @@ export const build = lift((values: number[]) =>
     assert(!forCauses(parseModule(main)).includes("token"));
   });
 
-  it("transforms by default and supports cf-disable-transform opt-out", async () => {
-    const source = `
+  it("lowers computed() to lift() in every file it compiles", async () => {
+    const transformed = await transformFiles({
+      "/main.ts": `
 import { computed } from "commonfabric";
 
 const value = computed(() => 1);
 export { value };
-`;
-
-    const enabledByDefault = await transformFiles({
-      "/main.ts": source,
-    }, {
-      types: COMMONFABRIC_TYPES,
+`,
     });
-    const enabledRoot = parseModule(enabledByDefault["/main.ts"]!);
-    assert(callsNamed(enabledRoot, "lift").length >= 1);
-    assertEquals(callsNamed(enabledRoot, "computed").length, 0);
-
-    const disabled = await transformFiles({
-      "/main.ts": `/// <cf-disable-transform />\n${source}`,
-    }, {
-      types: COMMONFABRIC_TYPES,
-    });
-
-    const disabledRoot = parseModule(disabled["/main.ts"]!);
-    assertEquals(callsNamed(disabledRoot, "computed").length, 1);
-    assertEquals(callsNamed(disabledRoot, "lift").length, 0);
+    const root = parseModule(transformed["/main.ts"]!);
+    assert(callsNamed(root, "lift").length >= 1);
+    assertEquals(callsNamed(root, "computed").length, 0);
   });
 
-  it("rejects an authored source that collides with a trusted type source", async () => {
-    await assertRejects(
-      () =>
-        transformFiles({
-          "/main.ts": `
-            import { pattern } from "commonfabric";
-            export default pattern(() => ({ ok: true }));
-          `,
-          "commonfabric.d.ts": `
-            export declare function pattern<T>(callback: () => T): T;
-          `,
-        }, { types: COMMONFABRIC_TYPES }),
-      Error,
-      "collides with trusted Common Fabric test source",
-    );
+  it("transforms a file carrying the retired opt-out marker like any other", async () => {
+    // `/// <cf-disable-transform />` once suppressed the transform for the file
+    // that carried it. It is an ordinary comment now, and a source still
+    // carrying it is compiled the same as one that never did.
+    const transformed = await transformFiles({
+      "/main.ts": `/// <cf-disable-transform />
+import { computed } from "commonfabric";
+
+const value = computed(() => 1);
+export { value };
+`,
+    });
+    const output = transformed["/main.ts"]!;
+    const root = parseModule(output);
+    assert(callsNamed(root, "lift").length >= 1);
+    assertEquals(callsNamed(root, "computed").length, 0);
+    assertMatch(output, /import \{ __cfHelpers \} from "commonfabric";/);
   });
 
   it("wraps top-level data candidates with __cfHelpers.__cf_data", async () => {
@@ -842,30 +850,6 @@ export default function next(value: number) {
         c.arguments[0].text === "next"
       ),
     );
-  });
-
-  it("skips snapshot wrapping when cf-disable-transform is present", async () => {
-    const output = await transformFiles({
-      "/main.ts": `/// <cf-disable-transform />
-function pow(x: number): number {
-  return x * x;
-}
-
-export default pow(5);
-`,
-    });
-
-    const main = output["/main.ts"]!;
-
-    const root = parseModule(main);
-    // The default export stays the bare `pow(5)` call, untouched by wrapping.
-    const defaultExport = collect(root, ts.isExportAssignment)[0];
-    assert(defaultExport && ts.isCallExpression(defaultExport.expression));
-    const call = defaultExport.expression;
-    assert(ts.isIdentifier(call.expression) && call.expression.text === "pow");
-    assertEquals(literalToValue(call.arguments[0]!), 5);
-    // No snapshot wrapping was inserted.
-    assertEquals(callsNamed(root, "__cf_data").length, 0);
   });
 });
 

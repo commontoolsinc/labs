@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model";
 import type { MutableJSONSchema } from "@commonfabric/api";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { getPropertyNameText } from "./typescript/property-name.ts";
@@ -35,6 +35,7 @@ const CELL_LIKE_WRAPPER_NAMES = spellingsWhere({
   CellTypeConstructor: false,
   ScopedCellTypeConstructor: false,
 });
+
 const OPAQUE_WRAPPER_NAMES = spellingsWhere({
   OpaqueCell: true,
   Cell: false,
@@ -415,6 +416,7 @@ export function getNativeTypeSchema(
 
   return resolve(type);
 }
+
 /**
  * Return a public/stable named key for a type if and only if it has a useful
  * symbol name. Filters out anonymous ("__type") and wrapper/container names
@@ -512,9 +514,17 @@ export function getNamedTypeKey(
   }
 
   // If we are overriding the type, don't return a named type key.
-  // This makes it so we include these inline instead of as $defs
+  // This makes it so we include these inline instead of as $defs. The
+  // `FabricPrimitive` names are only claimed by NativeTypeFormatter when the
+  // type carries the FabricSpecialObject brand; hoisting classifies the same
+  // way, so an unbranded user type sharing a name hoists normally.
   if (NativeTypeFormatter.isNativeType(name)) {
-    return undefined;
+    if (
+      !NativeTypeFormatter.isFabricPrimitiveTypeName(name) ||
+      NativeTypeFormatter.declaresFabricSpecialObjectBrand(type)
+    ) {
+      return undefined;
+    }
   }
   // Don't hoist generic type instantiations (Record<K,V>, Partial<T>, Box<T>, etc.)
   // These have aliasTypeArguments, meaning they're a generic type applied to specific type arguments

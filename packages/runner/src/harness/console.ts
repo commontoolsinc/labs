@@ -36,67 +36,67 @@ export class Console {
   constructor(emitter?: EventTarget) {
     this.#emitter = emitter;
   }
-  private impl(method: ConsoleMethod, ...args: any[]) {
+  #impl(method: ConsoleMethod, ...args: any[]) {
     this.#emitter?.dispatchEvent(new ConsoleEvent(method, args));
   }
   assert(...args: any[]) {
-    return this.impl(ConsoleMethod.Assert, ...args);
+    return this.#impl(ConsoleMethod.Assert, ...args);
   }
   clear(...args: any[]) {
-    return this.impl(ConsoleMethod.Clear, ...args);
+    return this.#impl(ConsoleMethod.Clear, ...args);
   }
   count(...args: any[]) {
-    return this.impl(ConsoleMethod.Count, ...args);
+    return this.#impl(ConsoleMethod.Count, ...args);
   }
   countReset(...args: any[]) {
-    return this.impl(ConsoleMethod.CountReset, ...args);
+    return this.#impl(ConsoleMethod.CountReset, ...args);
   }
   debug(...args: any[]) {
-    return this.impl(ConsoleMethod.Debug, ...args);
+    return this.#impl(ConsoleMethod.Debug, ...args);
   }
   dir(...args: any[]) {
-    return this.impl(ConsoleMethod.Dir, ...args);
+    return this.#impl(ConsoleMethod.Dir, ...args);
   }
   dirxml(...args: any[]) {
-    return this.impl(ConsoleMethod.DirXml, ...args);
+    return this.#impl(ConsoleMethod.DirXml, ...args);
   }
   error(...args: any[]) {
-    return this.impl(ConsoleMethod.Error, ...args);
+    return this.#impl(ConsoleMethod.Error, ...args);
   }
   group(...args: any[]) {
-    return this.impl(ConsoleMethod.Group, ...args);
+    return this.#impl(ConsoleMethod.Group, ...args);
   }
   groupCollapsed(...args: any[]) {
-    return this.impl(ConsoleMethod.GroupCollapsed, ...args);
+    return this.#impl(ConsoleMethod.GroupCollapsed, ...args);
   }
   groupEnd(...args: any[]) {
-    return this.impl(ConsoleMethod.GroupEnd, ...args);
+    return this.#impl(ConsoleMethod.GroupEnd, ...args);
   }
   info(...args: any[]) {
-    return this.impl(ConsoleMethod.Info, ...args);
+    return this.#impl(ConsoleMethod.Info, ...args);
   }
   log(...args: any[]) {
-    return this.impl(ConsoleMethod.Log, ...args);
+    return this.#impl(ConsoleMethod.Log, ...args);
   }
   table(...args: any[]) {
-    return this.impl(ConsoleMethod.Table, ...args);
+    return this.#impl(ConsoleMethod.Table, ...args);
   }
   time(...args: any[]) {
-    return this.impl(ConsoleMethod.Time, ...args);
+    return this.#impl(ConsoleMethod.Time, ...args);
   }
   timeEnd(...args: any[]) {
-    return this.impl(ConsoleMethod.TimeEnd, ...args);
+    return this.#impl(ConsoleMethod.TimeEnd, ...args);
   }
   timeLog(...args: any[]) {
-    return this.impl(ConsoleMethod.TimeLog, ...args);
+    return this.#impl(ConsoleMethod.TimeLog, ...args);
   }
   timeStamp(...args: any[]) {
-    return this.impl(ConsoleMethod.TimeStamp, ...args);
+    return this.#impl(ConsoleMethod.TimeStamp, ...args);
   }
   trace(...args: any[]) {
-    return this.impl(ConsoleMethod.Trace, ...args);
+    return this.#impl(ConsoleMethod.Trace, ...args);
   }
   warn(...args: any[]) {
-    return this.impl(ConsoleMethod.Warn, ...args);
+    return this.#impl(ConsoleMethod.Warn, ...args);
   }
 }

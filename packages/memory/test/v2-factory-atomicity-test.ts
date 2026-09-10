@@ -1,5 +1,5 @@
 import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
 
 import { applyPatch } from "../v2/patch.ts";

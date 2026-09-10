@@ -1,10 +1,18 @@
-import { action, computed, NAME, pattern, UI, Writable } from "commonfabric";
+import {
+  action,
+  computed,
+  NAME,
+  pattern,
+  UI,
+  type VNode,
+  Writable,
+} from "commonfabric";
 
 // deno-lint-ignore no-empty-interface
 interface MobileAppDemoInput {}
 export interface MobileAppDemoOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
 }
 
 const IOS_HOME_THEME = {

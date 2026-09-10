@@ -1,9 +1,15 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/interface";
-import { createSession, Identity } from "@commonfabric/identity";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import type { FabricValue } from "@commonfabric/data-model";
 import {
-  FactoryArtifactUnavailableError,
+  entityRefToString,
+  linkRefPayload,
+} from "@commonfabric/data-model/cell-rep";
+import { createSession, Identity } from "@commonfabric/identity";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import {
+  type Cell,
   getPatternIdentityRef,
   getPatternRepository,
   getPieceSourceRevisions,
@@ -11,26 +17,24 @@ import {
   isLink,
   type JSONSchema,
   KeepAsCell,
+  type Module,
   NAME,
   Pattern,
+  PatternSetupPostCommitError,
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
 import {
-  entityRefToString,
-  linkRefPayload,
-} from "@commonfabric/data-model/cell-rep";
-import { defer } from "@commonfabric/utils/defer";
-import {
-  EmulatedStorageManager,
-  StorageManager,
-} from "@commonfabric/runner/storage/cache.deno";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import {
   validateAgainstSchema,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
-import { PieceManager } from "../src/manager.ts";
+import {
+  EmulatedStorageManager,
+  newLoopbackServer,
+  StorageManager,
+} from "@commonfabric/runner/storage/cache.deno";
+import { defer } from "@commonfabric/utils/defer";
+
 import {
   assertSuppliedLinkSchemasCompatible,
   assertWritablePiecePath,
@@ -52,6 +56,7 @@ import {
 } from "../src/ops/piece-controller.ts";
 import { readPieceSourceState } from "../src/ops/piece-origin.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 const signer = await Identity.fromPassphrase("piece pull materialization");
 
@@ -449,42 +454,35 @@ function trustPattern(runtime: Runtime, pattern: Pattern): Pattern {
   });
 }
 
+async function withInputRootPullSpy<T>(
+  pieces: PiecesController,
+  piece: Cell<unknown>,
+  action: (rootPulls: () => number) => Promise<T>,
+): Promise<T> {
+  const inputRoot = pieces.getArgument(piece);
+  const originalGetArgument = pieces.getArgument.bind(pieces);
+  const originalPull = inputRoot.pull.bind(inputRoot);
+  let pullCount = 0;
+  pieces.getArgument = (() => inputRoot) as typeof pieces.getArgument;
+  inputRoot.pull = () => {
+    pullCount++;
+    return originalPull();
+  };
+
+  try {
+    return await action(() => pullCount);
+  } finally {
+    pieces.getArgument = originalGetArgument;
+    inputRoot.pull = originalPull;
+  }
+}
+
 // Two-replica harness: a server that several emulated replicas can share, so a
 // fresh reader must fetch cross-replica rather than read its own warm cache.
-// Mirrors newSharedServer/SharedServerStorageManager in
+// Mirrors newSharedServer/EmulatedStorageManager.connectTo in
 // fresh-replica-read-asymmetry.test.ts; the auth matches the server
 // EmulatedStorageManager.emulate builds for itself (v2-emulate.ts).
-const EMULATED_AUDIENCE = "did:key:z6Mk-runner-emulated-memory";
-
-function newSharedServer(): MemoryV2Server.Server {
-  return new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: { audience: EMULATED_AUDIENCE },
-  });
-}
-
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: { as: typeof signer },
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      // deno-lint-ignore no-explicit-any
-      { ...options, memoryHost: new URL("memory://") } as any,
-      () => server,
-    );
-    manager.#sharedServer = server;
-    return manager;
-  }
-  #sharedServer!: MemoryV2Server.Server;
-  protected override server(): MemoryV2Server.Server {
-    return this.#sharedServer;
-  }
-}
+const newSharedServer = (): MemoryV2Server.Server => newLoopbackServer();
 
 describe("piece link contract localization", () => {
   const contract = (schema: JSONSchema, root: JSONSchema = schema) => ({
@@ -919,7 +917,7 @@ describe("piece link contract localization", () => {
 describe("piece pull materialization", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
+  let pieces: PiecesController;
 
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -932,8 +930,8 @@ describe("piece pull materialization", () => {
       identity: signer,
       spaceName: "pull-materialization-" + crypto.randomUUID(),
     });
-    manager = new PieceManager(session, runtime);
-    await manager.synced();
+    pieces = new PiecesController(session, runtime);
+    await pieces.synced();
   });
 
   afterEach(async () => {
@@ -953,7 +951,7 @@ describe("piece pull materialization", () => {
 
   it("distinguishes absent projection documents from failed reads", () => {
     const resolved = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "projection-read-" + crypto.randomUUID(),
     ).getAsNormalizedFullLink();
     const transaction = (
@@ -992,13 +990,13 @@ describe("piece pull materialization", () => {
   });
 
   it("follows materialized Cells and fails closed on recursive write authority", async () => {
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
       { start: true },
     );
-    const argument = manager.getArgument(piece);
+    const argument = pieces.getArgument(piece);
 
     expect(
       materializedValueAtPath({ argument }, ["argument", "input"]),
@@ -1022,7 +1020,7 @@ describe("piece pull materialization", () => {
 
   it("rejects conflicting and descendant Stream destinations", async () => {
     const rootCell = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "destination-contract-" + crypto.randomUUID(),
     );
     await runtime.editWithRetry((tx) => {
@@ -1081,11 +1079,11 @@ describe("piece pull materialization", () => {
 
   it("requires a transaction before reconciling a raw projection alias", () => {
     const base = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "projection-base-" + crypto.randomUUID(),
     );
     const source = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "projection-source-" + crypto.randomUUID(),
     );
     const raw = source.getAsLink({ base, includeSchema: false });
@@ -1096,7 +1094,7 @@ describe("piece pull materialization", () => {
         raw,
         undefined,
         base,
-        manager,
+        pieces,
       )
     ).toThrow(/projection alias reconciliation requires a transaction/);
   });
@@ -1135,7 +1133,7 @@ describe("piece pull materialization", () => {
     // is created (`linkSqliteDiskSource`). `durableSourceContract` finds
     // nothing, so validation falls back to the prior argument contract.
     const handle = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "sqlite-handle-" + crypto.randomUUID(),
     );
     await runtime.editWithRetry((tx) => {
@@ -1143,7 +1141,7 @@ describe("piece pull materialization", () => {
     });
 
     const base = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "sqlite-panel-argument-" + crypto.randomUUID(),
     );
     await runtime.editWithRetry((tx) => {
@@ -1162,7 +1160,7 @@ describe("piece pull materialization", () => {
         [{ path: ["db"], value: raw.db }],
         destination,
         base,
-        manager,
+        pieces,
         {
           priorArgumentSchema: argumentSchema,
           linksPreservedVerbatim: true,
@@ -1199,7 +1197,7 @@ describe("piece pull materialization", () => {
         [{ path: ["db"], value: raw.db }],
         argumentSchema,
         base,
-        manager,
+        pieces,
         { priorArgumentSchema: argumentSchema },
       )
     ).toThrow(/sqlite capability cannot be exposed as an ordinary alias/);
@@ -1221,13 +1219,101 @@ describe("piece pull materialization", () => {
         [{ path: ["db2"], value: raw.db }],
         twoSlotSchema,
         base,
-        manager,
+        pieces,
         {
           priorArgumentSchema: twoSlotSchema,
           linksPreservedVerbatim: true,
         },
       )
     ).toThrow(/sqlite capability cannot be exposed as an ordinary alias/);
+  });
+
+  it("restores retained links whose payload nests a Cell-typed property", async () => {
+    // The roster shape: a plain array element whose `profile` field is a
+    // Cell (`asCell: ["cell"]`). The element link's contract carries the
+    // nested wrapper; the non-preserving path sanitizes it away from the
+    // SOURCE side only, and the exact-match `asCell` comparison then refused
+    // the destination's own wrapper — so a piece whose roster held one such
+    // element could never have its source updated in place, even with the
+    // byte-identical source (`asCell changed` at participants.0.profile).
+    // Nested non-stream wrappers are read-side projections, so the proof
+    // sees both sides through the same sanitizing lens.
+    const profileSchema: JSONSchema = {
+      type: "object",
+      properties: { name: { type: "string" }, avatar: { type: "string" } },
+    };
+    const elementSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        profile: { ...profileSchema, asCell: ["cell"] },
+      },
+      required: ["name", "profile"],
+    };
+    const argumentSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        participants: { type: "array", items: elementSchema },
+      },
+      required: ["participants"],
+    };
+
+    const profileDoc = runtime.getCell(
+      pieces.getSpace(),
+      "roster-profile-" + crypto.randomUUID(),
+    );
+    await runtime.editWithRetry((tx) => {
+      profileDoc.withTx(tx).set({ name: "Robin", avatar: "" });
+    });
+    const element = runtime.getCell(
+      pieces.getSpace(),
+      "roster-element-" + crypto.randomUUID(),
+    );
+    await runtime.editWithRetry((tx) => {
+      element.withTx(tx).set({ name: "Robin", profile: profileDoc });
+    });
+    const base = runtime.getCell(
+      pieces.getSpace(),
+      "roster-argument-" + crypto.randomUUID(),
+    );
+    await runtime.editWithRetry((tx) => {
+      base.withTx(tx).set({ participants: [element] });
+    });
+
+    const raw = base.getRaw() as { participants: unknown[] };
+    // Guard the premise: the restore path sees a SERIALIZED link.
+    expect(isLink(raw.participants[0])).toBe(true);
+    expect(isCell(raw.participants[0])).toBe(false);
+
+    // The source-update call-site shape: `setPattern` declares
+    // `linksPreservedVerbatim`, but the element's slot declares no outer Cell
+    // wrapper, so the preserve branch never engages and the link faces the
+    // sanitizing proof regardless — which is exactly how a source update
+    // reaches the asymmetry this test pins.
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        [{ path: ["participants", 0], value: raw.participants[0] }],
+        argumentSchema,
+        base,
+        pieces,
+        {
+          priorArgumentSchema: argumentSchema,
+          linksPreservedVerbatim: true,
+        },
+      )
+    ).not.toThrow();
+
+    // Without the flag the same proof runs: a nested wrapper the destination
+    // declares does not demand one from the source's payload contract.
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        [{ path: ["participants", 0], value: raw.participants[0] }],
+        argumentSchema,
+        base,
+        pieces,
+        { priorArgumentSchema: argumentSchema },
+      )
+    ).not.toThrow();
   });
 
   it("refuses a preserved link whose carried wrapper widens its contract", async () => {
@@ -1237,7 +1323,7 @@ describe("piece pull materialization", () => {
     // refuse it: a forged envelope that was never committed loses preserve
     // status outright (it is not the committed bytes at its path) and faces
     // the rebuild rules; and even a COMMITTED forged envelope — raw write
-    // paths like `PieceManager.link` commit links without ever running this
+    // paths like `PiecesController.link` commit links without ever running this
     // validator — is caught by the preserve branch's own wrapper check.
     const readonlyNum: JSONSchema = { type: "number", asCell: ["readonly"] };
     const argumentSchema: JSONSchema = {
@@ -1246,7 +1332,7 @@ describe("piece pull materialization", () => {
       required: ["v"],
     };
 
-    const producer = await manager.runPersistent(
+    const producer = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -1262,11 +1348,15 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     await runtime.editWithRetry((tx) => {
-      producer.withTx(tx).setMetaRaw("schema", argumentSchema);
+      producer.withTx(tx).setMetaRaw(
+        "schema",
+        argumentSchema,
+        rawMetaWriteAuthorization,
+      );
     });
 
     const base = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "forged-wrapper-argument-" + crypto.randomUUID(),
     );
     await runtime.editWithRetry((tx) => {
@@ -1285,7 +1375,7 @@ describe("piece pull materialization", () => {
         [{ path: ["v"], value: forged }],
         argumentSchema,
         base,
-        manager,
+        pieces,
         {
           priorArgumentSchema: argumentSchema,
           linksPreservedVerbatim: true,
@@ -1317,7 +1407,7 @@ describe("piece pull materialization", () => {
       required: ["count"],
     };
 
-    const producer = await manager.runPersistent(
+    const producer = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -1334,7 +1424,7 @@ describe("piece pull materialization", () => {
     );
 
     const base = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "ordinary-cell-argument-" + crypto.randomUUID(),
     );
     await runtime.editWithRetry((tx) => {
@@ -1349,7 +1439,7 @@ describe("piece pull materialization", () => {
         [{ path: ["count"], value: raw.count }],
         argumentSchema,
         base,
-        manager,
+        pieces,
         {
           priorArgumentSchema: argumentSchema,
           linksPreservedVerbatim: true,
@@ -1365,7 +1455,7 @@ describe("piece pull materialization", () => {
       required: ["value"],
     };
     const makeSource = async (schema: JSONSchema) => {
-      const source = await manager.runPersistent(
+      const source = await pieces.runPersistent(
         trustPattern(runtime, {
           argumentSchema: { type: "object", properties: {} },
           resultSchema: ordinarySourceSchema,
@@ -1377,12 +1467,16 @@ describe("piece pull materialization", () => {
         { start: true },
       );
       await runtime.editWithRetry((tx) => {
-        source.withTx(tx).setMetaRaw("schema", schema);
+        source.withTx(tx).setMetaRaw(
+          "schema",
+          schema,
+          rawMetaWriteAuthorization,
+        );
       });
       return source;
     };
     const base = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "link-contract-base-" + crypto.randomUUID(),
     );
     const supplied = (source: typeof base) => [{
@@ -1398,7 +1492,7 @@ describe("piece pull materialization", () => {
         supplied(ordinary),
         recursiveTarget as JSONSchema,
         base,
-        manager,
+        pieces,
       )
     ).toThrow(/recursive Cell schema/);
 
@@ -1420,7 +1514,7 @@ describe("piece pull materialization", () => {
         supplied(incompatible),
         { type: "number" },
         base,
-        manager,
+        pieces,
       )
     ).toThrow(/incompatible outer capabilities/);
     expect(() =>
@@ -1428,7 +1522,7 @@ describe("piece pull materialization", () => {
         supplied(incompatible),
         { type: "number", asCell: ["cell"] },
         base,
-        manager,
+        pieces,
       )
     ).toThrow(/incompatible outer capabilities/);
 
@@ -1448,7 +1542,7 @@ describe("piece pull materialization", () => {
         supplied(conflicting),
         { type: "number" },
         base,
-        manager,
+        pieces,
       )
     ).toThrow(/source Cell constraints disagree/);
     expect(() =>
@@ -1456,13 +1550,57 @@ describe("piece pull materialization", () => {
         supplied(conflicting),
         { type: "number", asCell: ["cell"] },
         base,
-        manager,
+        pieces,
       )
     ).toThrow(/source Cell constraints disagree/);
   });
 
+  it("fails closed when the producer contract stops at a scalar ancestor", async () => {
+    // A supplied link that reaches THROUGH a scalar slot of its producer's
+    // durable schema has no derivable source contract: the contract walk in
+    // `buildSourceContracts` fails, and that failure must surface as the
+    // uniform supplied-link rejection rather than escaping unwrapped.
+    const scalarAncestorSchema: JSONSchema = {
+      type: "object",
+      properties: { value: { type: "number" } },
+      required: ["value"],
+    };
+    const source = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: scalarAncestorSchema,
+        result: { value: 7 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await runtime.editWithRetry((tx) => {
+      source.withTx(tx).setMetaRaw(
+        "schema",
+        scalarAncestorSchema,
+        rawMetaWriteAuthorization,
+      );
+    });
+    const base = runtime.getCell(
+      pieces.getSpace(),
+      "scalar-ancestor-base-" + crypto.randomUUID(),
+    );
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        [{ path: [], value: source.key("value").key("deep") }],
+        true,
+        base,
+        pieces,
+      )
+    ).toThrow(
+      /input link at <root> schema is not compatible: schema does not describe a container at deep/,
+    );
+  });
+
   it("recovers only producer-owned argument and internal contracts", async () => {
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
@@ -1472,12 +1610,12 @@ describe("piece pull materialization", () => {
     const originalInternal = piece.getMetaRaw("internal");
     expect(Array.isArray(originalInternal)).toBe(true);
     const unrelated = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "unrelated-internal-" + crypto.randomUUID(),
       { type: "number" },
     );
     const orphan = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "orphan-internal-" + crypto.randomUUID(),
       { type: "number" },
     );
@@ -1494,28 +1632,29 @@ describe("piece pull materialization", () => {
           }),
         },
         ...(originalInternal as FabricValue[]),
-      ]);
+      ], rawMetaWriteAuthorization);
       orphan.withTx(tx).setMetaRaw(
         "result",
         piece.withTx(tx).getAsWriteRedirectLink({
           base: orphan.withTx(tx),
           includeSchema: true,
         }),
+        rawMetaWriteAuthorization,
       );
     });
 
-    expect(durableSourceContract(internalCell, manager)?.schemas.length)
+    expect(durableSourceContract(internalCell, pieces)?.schemas.length)
       .toBeGreaterThan(0);
-    expect(durableSourceContract(orphan, manager)).toBeUndefined();
+    expect(durableSourceContract(orphan, pieces)).toBeUndefined();
   });
 
   it("terminates projection reconciliation cycles", async () => {
     const source = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "projection-cycle-source-" + crypto.randomUUID(),
     );
     const base = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "projection-cycle-base-" + crypto.randomUUID(),
     );
 
@@ -1539,9 +1678,10 @@ describe("piece pull materialization", () => {
           }),
           undefined,
           baseWithTx,
-          manager,
+          pieces,
           true,
           [],
+          undefined,
           resolving,
         ),
       ).toBe("already-materialized");
@@ -1549,7 +1689,7 @@ describe("piece pull materialization", () => {
   });
 
   it("rejects writes redirected to cells without producer contracts", async () => {
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -1565,11 +1705,11 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     const orphan = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "redirect-without-contract-" + crypto.randomUUID(),
       { type: "number" },
     );
-    const argument = manager.getArgument(target);
+    const argument = pieces.getArgument(target);
     await runtime.editWithRetry((tx) => {
       const argumentWithTx = argument.withTx(tx);
       orphan.withTx(tx).set(1);
@@ -1582,75 +1722,102 @@ describe("piece pull materialization", () => {
     });
 
     await expect(
-      new PieceController(manager, target).input.set(2, ["slot"]),
+      new PieceController(pieces, target).input.set(2, ["slot"]),
     ).rejects.toThrow(/write destination has no durable schema contract/);
     expect(orphan.get()).toBe(1);
   });
 
   it("exposes source provenance and Piece dependency relationships", async () => {
     const sourceProgram = compiledMultiplierProgram("source", 2);
-    const source = await manager.runPersistent(
+    const source = await pieces.runPersistent(
       await runtime.patternManager.compilePattern(sourceProgram, {
-        space: manager.getSpace(),
+        space: pieces.getSpace(),
       }),
       { input: 5 },
       undefined,
       { start: true },
     );
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 1 },
       undefined,
       { start: true },
     );
-    const sourceController = new PieceController(manager, source);
-    const targetController = new PieceController(manager, target);
+    const sourceController = new PieceController(pieces, source);
+    const targetController = new PieceController(pieces, target);
 
-    expect(await sourceController.getPatternSourceFiles()).toEqual(
+    expect((await sourceController.getPatternSourceProgram())?.files).toEqual(
       sourceProgram.files,
     );
-    expect(await targetController.getPatternSourceFiles()).toBeUndefined();
+    expect(await targetController.getPatternSourceProgram()).toBeUndefined();
 
-    await manager.link(
+    await pieces.link(
       sourceController.id,
       ["output"],
       targetController.id,
       ["input"],
     );
-    const originalGetPieceRegistry = manager.getPieceRegistry.bind(manager);
-    manager.getPieceRegistry = () =>
+    const originalGetPieceRegistry = pieces.getPieceRegistry.bind(pieces);
+    pieces.getPieceRegistry = () =>
       Promise.resolve({
         get: () => [source, target],
-      } as unknown as Awaited<ReturnType<typeof manager.getPieceRegistry>>);
+      } as unknown as Awaited<ReturnType<typeof pieces.getPieceRegistry>>);
     try {
       expect((await targetController.readingFrom()).map((piece) => piece.id))
         .toEqual([sourceController.id]);
       expect((await sourceController.readBy()).map((piece) => piece.id))
         .toEqual([targetController.id]);
     } finally {
-      manager.getPieceRegistry = originalGetPieceRegistry;
+      pieces.getPieceRegistry = originalGetPieceRegistry;
     }
+  });
+
+  it("loads a pattern through a document-bounded result cell", async () => {
+    const pattern = await runtime.patternManager.compilePattern(
+      compiledMultiplierProgram("bounded-pattern-load", 2),
+      { space: pieces.getSpace() },
+    );
+    const piece = await pieces.runPersistent(
+      pattern,
+      { input: 5 },
+      undefined,
+      { start: false },
+    );
+    const schemas: unknown[] = [];
+    const originalAsSchema = piece.asSchema.bind(piece);
+    piece.asSchema = ((schema: unknown) => {
+      schemas.push(schema);
+      return originalAsSchema(schema as never);
+    }) as typeof piece.asSchema;
+
+    const controller = new PieceController(pieces, piece);
+    expect(await controller.getPattern({ projectResult: false })).toBe(pattern);
+    expect(schemas).toEqual([undefined]);
+    // The default keeps the projection: no schema-less sibling is synced.
+    schemas.length = 0;
+    expect(await controller.getPattern()).toBe(pattern);
+    expect(schemas).toEqual([]);
   });
 
   it("keeps pattern content refs useful when source programs are unavailable", async () => {
     const identityless = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "identityless-piece-" + crypto.randomUUID(),
       { type: "object", properties: {} },
     );
-    expect(await new PieceController(manager, identityless).getPatternRef())
+    expect(await new PieceController(pieces, identityless).getPatternRef())
       .toBeUndefined();
 
     const program = compiledMultiplierProgram("unavailable-source", 2);
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       await runtime.patternManager.compilePattern(program, {
-        space: manager.getSpace(),
+        space: pieces.getSpace(),
       }),
       { input: 5 },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const identityRef = getPatternIdentityRef(piece)!;
     const contentOnlyRef = {
       ...identityRef,
@@ -1674,7 +1841,7 @@ describe("piece pull materialization", () => {
 
   it("distinguishes absent setup patterns from unknown stored identities", async () => {
     const emptyPiece = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "missing-setup-pattern-" + crypto.randomUUID(),
       { type: "object", properties: {} },
     );
@@ -1691,7 +1858,7 @@ describe("piece pull materialization", () => {
     ]);
 
     const unknownPiece = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "unknown-setup-pattern-" + crypto.randomUUID(),
       { type: "object", properties: {} },
     );
@@ -1699,114 +1866,21 @@ describe("piece pull materialization", () => {
       unknownPiece.withTx(tx).setMetaRaw("patternIdentity", {
         identity: "Z".repeat(43),
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
 
     await expect(runtime.setup(undefined, undefined, {}, unknownPiece))
       .rejects.toThrow(`Unknown pattern: ${"Z".repeat(43)}#default`);
   });
 
-  it("pulls only the selected result path", async () => {
-    const piece = runtime.getCell(
-      manager.getSpace(),
-      "piece-controller-selected-result-path",
-    );
-    let rootPulls = 0;
-    let childPulls = 0;
-    const child = {
-      pull() {
-        childPulls++;
-      },
-      get() {
-        return "selected";
-      },
-      key() {
-        return this;
-      },
-    };
-    const root = {
-      pull() {
-        rootPulls++;
-      },
-      get() {
-        throw new Error("root contains a cold factory sibling");
-      },
-      key(segment: string | number) {
-        if (segment !== "lastMessage") throw new Error("unexpected path");
-        return child;
-      },
-    };
-    (manager as unknown as { getResult(): unknown }).getResult = () => root;
-    const controller = new PieceController(manager, piece);
-
-    expect(await controller.result.get(["lastMessage"])).toBe("selected");
-    expect(rootPulls).toBe(0);
-    expect(childPulls).toBe(1);
-  });
-
-  it("warms a cold factory artifact before returning a result", async () => {
-    const piece = runtime.getCell(
-      manager.getSpace(),
-      "piece-controller-cold-factory-result",
-    );
-    const ref = {
-      identity: "PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      symbol: "coldFactory",
-    };
-    let warmed = false;
-    let pulls = 0;
-    const root = {
-      pull() {
-        pulls++;
-      },
-      get() {
-        if (!warmed) {
-          throw new FactoryArtifactUnavailableError(ref, manager.getSpace());
-        }
-        return { factory: "materialized" };
-      },
-      key() {
-        return this;
-      },
-    };
-    const originalGetResult = manager.getResult.bind(manager);
-    const originalLoad = runtime.patternManager.loadArtifactByIdentity.bind(
-      runtime.patternManager,
-    );
-    const loads: unknown[][] = [];
-    manager.getResult = () => root as never;
-    runtime.patternManager.loadArtifactByIdentity = (
-      identity,
-      symbol,
-      space,
-    ) => {
-      loads.push([identity, symbol, space]);
-      warmed = true;
-      return Promise.resolve({});
-    };
-    try {
-      const controller = new PieceController(manager, piece);
-      expect(await controller.result.get()).toEqual({
-        factory: "materialized",
-      });
-      expect(pulls).toBe(1);
-      expect(loads).toEqual([
-        [ref.identity, ref.symbol, manager.getSpace()],
-      ]);
-    } finally {
-      manager.getResult = originalGetResult;
-      runtime.patternManager.loadArtifactByIdentity = originalLoad;
-    }
-  });
-
   it("pulls before reading result values", async () => {
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const inputCell = await controller.input.getCell();
 
     await runtime.editWithRetry((tx) => {
@@ -1816,28 +1890,314 @@ describe("piece pull materialization", () => {
     expect(await controller.result.get(["output"])).toBe(14);
   });
 
-  it("materializes piece results before setInput returns", async () => {
-    const piece = await manager.runPersistent(
+  it("does not pull the input root for a selected path", async () => {
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
+    await withInputRootPullSpy(pieces, piece, async (rootPulls) => {
+      expect(await controller.input.get(["input"])).toBe(5);
+      expect(rootPulls()).toBe(0);
+
+      expect(await controller.input.get()).toEqual({ input: 5 });
+      expect(rootPulls()).toBe(1);
+    });
+  });
+
+  it("pulls a selected asCell value without pulling the input root", async () => {
+    const sourcePiece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: "number" } },
+          required: ["value"],
+        },
+        result: { value: 7 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const targetPiece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: { type: "number", asCell: ["cell"] },
+          },
+          required: ["handle"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: sourcePiece.key("value") },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, targetPiece);
+    await withInputRootPullSpy(pieces, targetPiece, async (rootPulls) => {
+      expect(await controller.input.get(["handle"])).toBe(7);
+      expect(rootPulls()).toBe(0);
+    });
+  });
+
+  it("narrows a multi-segment input path without pulling the root", async () => {
+    const piece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            section: {
+              type: "object",
+              properties: { value: { type: "number" } },
+              required: ["value"],
+            },
+          },
+          required: ["section"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { section: { value: 7 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, piece);
+
+    await withInputRootPullSpy(pieces, piece, async (rootPulls) => {
+      expect(await controller.input.get(["section", "value"])).toBe(7);
+      expect(rootPulls()).toBe(0);
+    });
+  });
+
+  it("re-roots a narrow path through an intermediate asCell", async () => {
+    const sourcePiece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: {
+            details: {
+              type: "object",
+              properties: { value: { type: "number" } },
+              required: ["value"],
+            },
+          },
+          required: ["details"],
+        },
+        result: { details: { value: 7 } },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const targetPiece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: {
+              type: "object",
+              properties: { value: { type: "number" } },
+              required: ["value"],
+              asCell: ["cell"],
+            },
+          },
+          required: ["handle"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: sourcePiece.key("details") },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, targetPiece);
+
+    await withInputRootPullSpy(pieces, targetPiece, async (rootPulls) => {
+      expect(await controller.input.get(["handle", "value"])).toBe(7);
+      expect(rootPulls()).toBe(0);
+    });
+  });
+
+  it("re-roots through compound intermediate asCell schemas", async () => {
+    const detailsSchema = {
+      type: "object",
+      properties: {
+        kind: { const: "number" },
+        value: { type: "number" },
+      },
+      required: ["kind", "value"],
+    } as const satisfies JSONSchema;
+    const compoundCellSchema = {
+      anyOf: [
+        { ...detailsSchema, asCell: ["cell"] },
+        {
+          type: "object",
+          properties: {
+            kind: { const: "text" },
+            value: { type: "string" },
+          },
+          required: ["kind", "value"],
+          asCell: ["cell"],
+        },
+      ],
+    } as const satisfies JSONSchema;
+    const targetPiece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { handle: compoundCellSchema },
+          required: ["handle"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: { kind: "number", value: 7 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, targetPiece);
+
+    await withInputRootPullSpy(pieces, targetPiece, async (rootPulls) => {
+      expect(await controller.input.get(["handle", "value"])).toBe(7);
+      expect(rootPulls()).toBe(0);
+    });
+  });
+
+  it("refuses an undeclared path without pulling the input root", async () => {
+    const piece = await pieces.runPersistent(
+      trustPattern(runtime, doublePattern()),
+      { input: 5 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, piece);
+
+    await withInputRootPullSpy(pieces, piece, async (rootPulls) => {
+      await expect(controller.input.get(["missing"])).rejects.toThrow(
+        'Cannot access path "missing" - property "missing" not found',
+      );
+      expect(rootPulls()).toBe(0);
+    });
+  });
+
+  it("preserves schema-valid undefined through the narrow fallback", async () => {
+    const piece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            value: {
+              anyOf: [{ type: "number" }, { type: "undefined" }],
+            },
+          },
+          required: ["value"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { value: undefined },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, piece);
+
+    await withInputRootPullSpy(pieces, piece, async (rootPulls) => {
+      expect(await controller.input.get(["value"])).toBeUndefined();
+      expect(rootPulls()).toBe(1);
+    });
+  });
+
+  it("preserves missing-path diagnostics for an absent asCell slot", async () => {
+    const piece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: { type: "number", asCell: ["cell"] },
+          },
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, piece);
+
+    await withInputRootPullSpy(pieces, piece, async (rootPulls) => {
+      await expect(controller.input.get(["handle"])).rejects.toThrow(
+        'Cannot access path "handle" - property "handle" not found',
+      );
+      expect(rootPulls()).toBe(1);
+    });
+  });
+
+  it("preserves explicit undefined for an asCell slot", async () => {
+    const piece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: {
+              anyOf: [{ type: "number" }, { type: "undefined" }],
+              asCell: ["cell"],
+            },
+          },
+          required: ["handle"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: undefined },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, piece);
+
+    await withInputRootPullSpy(pieces, piece, async (rootPulls) => {
+      expect(await controller.input.get(["handle"])).toBeUndefined();
+      expect(rootPulls()).toBe(1);
+    });
+  });
+
+  it("materializes piece results before setInput returns", async () => {
+    const piece = await pieces.runPersistent(
+      trustPattern(runtime, doublePattern()),
+      { input: 5 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, piece);
 
     await controller.setInput({ input: 7 });
 
-    expect(manager.getResult(piece).get()).toEqual({ output: 14 });
+    expect(pieces.getResult(piece).get()).toEqual({ output: 14 });
   });
 
   it("rejects setInput values outside the current argument schema", async () => {
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await expect(
       controller.setInput({ input: "wrong" } as unknown as { input: number }),
@@ -1845,7 +2205,7 @@ describe("piece pull materialization", () => {
     expect((await controller.input.getCell()).getRaw()).toEqual({ input: 5 });
     expect(await controller.result.get()).toEqual({ output: 10 });
 
-    await manager.stopPiece(piece);
+    await pieces.stopPiece(piece);
     await expect(
       controller.setInput({ input: "still wrong" } as unknown as {
         input: number;
@@ -1855,13 +2215,13 @@ describe("piece pull materialization", () => {
   });
 
   it("validates path-based input writes against the current schema", async () => {
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await controller.input.set(7, ["input"]);
     expect(await controller.input.get()).toEqual({ input: 7 });
@@ -1899,25 +2259,125 @@ describe("piece pull materialization", () => {
       },
       nodes: [],
     };
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, pattern),
       { value: 1 },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     expect(await controller.result.get()).toEqual({ value: 1 });
     await controller.result.set(2, ["value"]);
     expect(await controller.result.get()).toEqual({ value: 2 });
 
     await expect(controller.result.set("bad", ["value"])).rejects.toThrow(
-      /updated result does not match its schema/,
+      /updated (result|value) does not match its schema/,
     );
     expect(await controller.result.get()).toEqual({ value: 2 });
   });
 
-  it("does not hide invalid raw result siblings during path validation", async () => {
+  it("an ABSENT unrelated required property does not invalidate a path write — the ON-arm server-derived-late shape (RULED 2026-08-07)", async () => {
+    // The ruled scenario verbatim: under EXPERIMENTAL_SERVER_EXECUTION
+    // a fresh client's local view legitimately LACKS server-derived
+    // required properties ($NAME et al) when it writes an unrelated
+    // property. The whole-result validation failed this with `missing
+    // required property`; the narrowed guard validates only the
+    // written subtree, so the write succeeds. (Stale-view fixture: the
+    // required sibling simply never materializes locally.)
+    const resultSchema = {
+      type: "object",
+      properties: {
+        value: { type: "number" },
+        name: { type: "string" },
+      },
+      required: ["value", "name"],
+    } as const;
+    const piece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema,
+        // `name` is REQUIRED by the schema but absent from the local
+        // view — the server-derived-late shape.
+        result: { value: 1 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, piece);
+    await controller.result.set(2, ["value"]);
+    // Raw readback: the schema-typed get validates the WHOLE object
+    // and reads undefined while the required sibling is still absent —
+    // exactly the local view the ruled write succeeds against.
+    expect((piece.getRaw() as { value?: number }).value).toBe(2);
+    // The written value's own protection still binds.
+    await expect(controller.result.set("bad", ["value"])).rejects.toThrow(
+      /updated (result|value) does not match its schema/,
+    );
+  });
+
+  it("a nested result write cannot extend an array past its parent maxItems — ancestor container cardinality survives the narrowed guard (r3739139515)", async () => {
+    // The narrowed path-only contract validates the LEAF; pre-fix a
+    // write to items[3] of a maxItems:3 array passed leaf validation
+    // and persisted a 4-element array the schema forbids. The
+    // cardinality re-check binds ONLY minItems/maxItems on ancestors
+    // of the written path — never the unrelated-sibling validation the
+    // ruling removed.
+    const resultSchema = {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: { type: "number" },
+          maxItems: 3,
+        },
+        name: { type: "string" },
+      },
+      // `name` REQUIRED but server-derived-late (absent locally): its
+      // absence must NOT block the container check's error, nor a
+      // legal in-bounds write — the ruling's narrowing stands.
+      required: ["items", "name"],
+    } as const;
+    const piece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema,
+        result: { items: [1, 2] },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, piece);
+    // In-bounds nested writes stay legal (index 2 fills to maxItems),
+    // even with the required sibling still absent.
+    await controller.result.set(9, ["items", "2"]);
+    expect((piece.getRaw() as { items?: number[] }).items).toEqual(
+      [1, 2, 9],
+    );
+    // Out-of-bounds extension: refused by the CONTAINER stage.
+    await expect(controller.result.set(4, ["items", "3"])).rejects.toThrow(
+      /updated value does not match its container at \["items"\]/,
+    );
+    expect((piece.getRaw() as { items?: number[] }).items).toEqual(
+      [1, 2, 9],
+    );
+  });
+
+  it("an invalid UNRELATED sibling does not invalidate a valid path write (the narrowed #4717 guard — RULED 2026-08-07)", async () => {
+    // RECONCILED with the set-validation ruling: the pre-ruling test
+    // pinned the WHOLE-RESULT validation deliberately (an invalid raw
+    // sibling made an unrelated path write throw). That over-reach is
+    // the mechanism that made a fresh ON-arm client's property write
+    // fail on server-derived-late unrelated required properties, so
+    // the guard now validates ONLY the written subtree — the same
+    // rationale the stream branch always carried ("unrelated result
+    // projections … cannot invalidate an otherwise valid event"). The
+    // written value's own protection stays (the sibling tests above
+    // and below still throw on invalid WRITTEN values).
     const resultSchema = {
       type: "object",
       properties: {
@@ -1926,7 +2386,7 @@ describe("piece pull materialization", () => {
       },
       required: ["a"],
     } as const;
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema,
@@ -1940,14 +2400,19 @@ describe("piece pull materialization", () => {
     await runtime.editWithRetry((tx) => {
       piece.withTx(tx).key("b").setRawUntyped("bad");
     });
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     expect(piece.get()).toEqual({ a: 1 });
     expect(piece.getRaw()).toEqual({ a: 1, b: "bad" });
-    await expect(controller.result.set(3, ["a"])).rejects.toThrow(
-      /updated result does not match its schema/,
+    // The VALID write at ["a"] succeeds regardless of the invalid
+    // sibling…
+    await controller.result.set(3, ["a"]);
+    expect(piece.get()).toEqual({ a: 3 });
+    // …and an INVALID write at ["a"] still throws (#4717's protection,
+    // narrowed to the written path).
+    await expect(controller.result.set("bad", ["a"])).rejects.toThrow(
+      /updated (result|value) does not match its schema/,
     );
-    expect(piece.getRaw()).toEqual({ a: 1, b: "bad" });
   });
 
   it("does not hide present explicit undefined behind an optional alias", async () => {
@@ -1959,7 +2424,7 @@ describe("piece pull materialization", () => {
       },
       required: ["a"],
     } as const;
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: model,
         resultSchema: model,
@@ -1974,15 +2439,25 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     await runtime.editWithRetry((tx) => {
-      manager.getArgument(piece).withTx(tx).key("b").setRawUntyped(undefined);
+      pieces.getArgument(piece).withTx(tx).key("b").setRawUntyped(undefined);
     });
-    const argument = manager.getArgument(piece);
-    const controller = new PieceController(manager, piece);
+    const argument = pieces.getArgument(piece);
+    const controller = new PieceController(pieces, piece);
 
     expect(Object.hasOwn(argument.getRaw() as object, "b")).toBe(true);
     expect(Object.hasOwn(piece.get(), "b")).toBe(false);
+    // Post-ruling (the narrowed #4717 guard): the whole-result schema
+    // validation no longer fires for the unrelated path — the explicit
+    // undefined behind the alias is still NOT hidden, surfaced by the
+    // WRITE-DESTINATION validation instead ("updated result does not
+    // match its write destination"), which materializes through the
+    // alias and catches b on the same write. The regex pins EXACTLY
+    // that stage (review thread r3739139525): the previous
+    // (schema|write destination) cross-product also accepted the
+    // whole-result schema message, so a regression back to the
+    // over-reaching validation this ruling removed would have passed.
     await expect(controller.result.set(3, ["a"])).rejects.toThrow(
-      /updated result does not match its schema/,
+      /updated (result|value) does not match its write destination/,
     );
     expect(argument.getRaw()).toEqual({ a: 1, b: undefined });
   });
@@ -1996,7 +2471,7 @@ describe("piece pull materialization", () => {
       },
       required: ["value"],
     } as const;
-    const source = await manager.runPersistent(
+    const source = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: model,
         resultSchema: model,
@@ -2012,7 +2487,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const rootTarget = await manager.runPersistent(
+    const rootTarget = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: model,
@@ -2028,7 +2503,7 @@ describe("piece pull materialization", () => {
       properties: { nested: model },
       required: ["nested"],
     } as const;
-    const nestedTarget = await manager.runPersistent(
+    const nestedTarget = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: nestedSchema,
@@ -2047,10 +2522,10 @@ describe("piece pull materialization", () => {
     expect(rootTarget.get()).toEqual({ value: 1 });
     expect(nestedTarget.get()).toEqual({ nested: { value: 1 } });
     await expect(
-      new PieceController(manager, rootTarget).result.set(3, ["value"]),
+      new PieceController(pieces, rootTarget).result.set(3, ["value"]),
     ).resolves.toBeUndefined();
     await expect(
-      new PieceController(manager, nestedTarget).result.set(4, [
+      new PieceController(pieces, nestedTarget).result.set(4, [
         "nested",
         "value",
       ]),
@@ -2067,7 +2542,7 @@ describe("piece pull materialization", () => {
       },
       required: ["value"],
     } as const;
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema,
@@ -2087,7 +2562,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     expect(piece.get()).toEqual({ value: 1 });
     await expect(controller.result.set(2, ["value"]))
@@ -2104,7 +2579,7 @@ describe("piece pull materialization", () => {
       },
       required: ["value"],
     } as const;
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema,
@@ -2128,13 +2603,29 @@ describe("piece pull materialization", () => {
       piece.key("optional").withTx(tx).resolveAsCell()
         .setRawUntyped(undefined);
     });
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     expect(piece.get()).toEqual({ value: 1 });
-    await expect(controller.result.set(2, ["value"])).rejects.toThrow(
-      /updated result does not match its schema/,
+    // RECONCILED with the set-validation ruling (2026-08-07): the
+    // pre-ruling whole-result validation made this unrelated write
+    // throw on the sibling's explicit undefined. Under the narrowed
+    // guard the valid write at ["value"] succeeds — and the explicit
+    // undefined at the derived Cell root is RETAINED, neither hidden
+    // nor clobbered by the write.
+    await controller.result.set(2, ["value"]);
+    expect(piece.get()).toEqual({ value: 2 });
+    expect(
+      Object.hasOwn(
+        (piece.key("optional").resolveAsCell().getRawUntyped() === undefined
+          ? { optional: undefined }
+          : {}) as object,
+        "optional",
+      ),
+    ).toBe(true);
+    // The written value's own protection still binds.
+    await expect(controller.result.set("bad", ["value"])).rejects.toThrow(
+      /updated (result|value) does not match its schema/,
     );
-    expect(piece.getRaw()).toMatchObject({ value: 1 });
   });
 
   it("validates result stream payloads independently of sibling projections", async () => {
@@ -2176,14 +2667,14 @@ describe("piece pull materialization", () => {
       },
       nodes: [],
     };
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, pattern),
       { event: { $stream: true } },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
-    const stream = manager.getArgument(piece).key("event");
+    const controller = new PieceController(pieces, piece);
+    const stream = pieces.getArgument(piece).key("event");
     const events: unknown[] = [];
     const removeHandler = runtime.scheduler.addEventHandler((_tx, event) => {
       events.push(event);
@@ -2195,7 +2686,7 @@ describe("piece pull materialization", () => {
       expect(events).toEqual([7]);
 
       await expect(controller.result.set("bad", ["event"])).rejects.toThrow(
-        /updated result does not match its schema/,
+        /updated (result|value) does not match its schema/,
       );
       expect(events).toEqual([7]);
     } finally {
@@ -2230,14 +2721,14 @@ describe("piece pull materialization", () => {
         },
         nodes: [],
       };
-      const piece = await manager.runPersistent(
+      const piece = await pieces.runPersistent(
         trustPattern(runtime, pattern),
         { event: { $stream: true } },
         undefined,
         { start: true },
       );
-      const controller = new PieceController(manager, piece);
-      const stream = manager.getArgument(piece).key("event");
+      const controller = new PieceController(pieces, piece);
+      const stream = pieces.getArgument(piece).key("event");
       const events: unknown[] = [];
       const removeHandler = runtime.scheduler.addEventHandler((_tx, event) => {
         events.push(event);
@@ -2283,14 +2774,14 @@ describe("piece pull materialization", () => {
       },
       nodes: [],
     };
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, pattern),
       { event: { $stream: true } },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
-    const stream = manager.getArgument(piece).key("event");
+    const controller = new PieceController(pieces, piece);
+    const stream = pieces.getArgument(piece).key("event");
     const events: unknown[] = [];
     const removeHandler = runtime.scheduler.addEventHandler((_tx, event) => {
       events.push(event);
@@ -2301,7 +2792,7 @@ describe("piece pull materialization", () => {
       await runtime.idle();
       expect(events).toEqual([5]);
       await expect(controller.result.set(-1, ["event"])).rejects.toThrow(
-        /updated result does not match its schema/,
+        /updated (result|value) does not match its schema/,
       );
       expect(events).toEqual([5]);
     } finally {
@@ -2334,20 +2825,20 @@ describe("piece pull materialization", () => {
       },
       nodes: [],
     };
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, pattern),
       { event: { $stream: true } },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
-    const stream = manager.getArgument(piece).key("event");
+    const controller = new PieceController(pieces, piece);
+    const stream = pieces.getArgument(piece).key("event");
     const events: unknown[] = [];
     const removeHandler = runtime.scheduler.addEventHandler((_tx, event) => {
       events.push(event);
     }, stream.getAsNormalizedFullLink());
 
-    const numberSource = await manager.runPersistent(
+    const numberSource = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -2362,7 +2853,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const stringSource = await manager.runPersistent(
+    const stringSource = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -2377,7 +2868,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const streamSource = await manager.runPersistent(
+    const streamSource = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -2434,21 +2925,21 @@ describe("piece pull materialization", () => {
   it("validates stale result views against the durable result schema", async () => {
     const initialPattern = await runtime.patternManager.compilePattern(
       compiledResultNarrowingProgram("string | number"),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       initialPattern,
       { input: 4 },
       "stale-result-write-" + crypto.randomUUID(),
       { start: true },
     );
-    const staleController = new PieceController(manager, piece);
-    const updater = new PieceController(manager, piece);
+    const staleController = new PieceController(pieces, piece);
+    const updater = new PieceController(pieces, piece);
 
     await updater.setPattern(compiledResultNarrowingProgram("number"));
     await expect(
       staleController.result.set("bad", ["value"]),
-    ).rejects.toThrow(/updated result does not match its schema/);
+    ).rejects.toThrow(/updated (result|value) does not match its schema/);
     expect(await updater.result.get(["value"])).toBe(4);
   });
 
@@ -2475,13 +2966,13 @@ describe("piece pull materialization", () => {
       result: {},
       nodes: [],
     };
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, pattern),
       { slot: { $stream: true } },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const inputCell = await controller.input.getCell();
     const stream = inputCell.key("slot");
     const events: unknown[] = [];
@@ -2499,7 +2990,7 @@ describe("piece pull materialization", () => {
       );
       expect(events).toEqual([5]);
 
-      const sourcePiece = await manager.runPersistent(
+      const sourcePiece = await pieces.runPersistent(
         trustPattern(runtime, {
           argumentSchema: { type: "object", properties: {} },
           resultSchema: {
@@ -2523,7 +3014,7 @@ describe("piece pull materialization", () => {
       await runtime.idle();
       expect(events).toHaveLength(2);
 
-      const broadSource = await manager.runPersistent(
+      const broadSource = await pieces.runPersistent(
         trustPattern(runtime, {
           argumentSchema: { type: "object", properties: {} },
           resultSchema: {
@@ -2566,7 +3057,7 @@ describe("piece pull materialization", () => {
   });
 
   it("accepts an opaque Cell supplied as a path value", async () => {
-    const sourcePiece = await manager.runPersistent(
+    const sourcePiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -2593,19 +3084,19 @@ describe("piece pull materialization", () => {
       result: {},
       nodes: [],
     };
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, pattern),
       {},
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await controller.input.set(source, ["handle"]);
 
     expect(await controller.input.get(["handle"])).toBe(7);
 
-    const incompatiblePiece = await manager.runPersistent(
+    const incompatiblePiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -2625,7 +3116,7 @@ describe("piece pull materialization", () => {
       controller.input.set(incompatiblePiece.key("value"), ["handle"]),
     ).rejects.toThrow(/input link.*schema is not compatible/);
 
-    const nestedPiece = await manager.runPersistent(
+    const nestedPiece = await pieces.runPersistent(
       trustPattern(runtime, {
         ...pattern,
         argumentSchema: {
@@ -2640,10 +3131,10 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     await expect(
-      new PieceController(manager, nestedPiece).input.set(source, ["handle"]),
+      new PieceController(pieces, nestedPiece).input.set(source, ["handle"]),
     ).rejects.toThrow(/input link.*schema is not compatible/);
 
-    const readonlyPiece = await manager.runPersistent(
+    const readonlyPiece = await pieces.runPersistent(
       trustPattern(runtime, {
         ...pattern,
         argumentSchema: {
@@ -2658,12 +3149,12 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     await expect(
-      new PieceController(manager, readonlyPiece).input.set(source, ["handle"]),
+      new PieceController(pieces, readonlyPiece).input.set(source, ["handle"]),
     ).resolves.toBeUndefined();
   });
 
   it("accepts a cold opaque Cell supplied as a path value", async () => {
-    const sourcePiece = await manager.runPersistent(
+    const sourcePiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -2678,7 +3169,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const targetPiece = await manager.runPersistent(
+    const targetPiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -2694,7 +3185,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, targetPiece);
+    const controller = new PieceController(pieces, targetPiece);
 
     await expect(
       controller.input.set(sourcePiece.key("value"), ["handle"]),
@@ -2702,7 +3193,7 @@ describe("piece pull materialization", () => {
     expect(await controller.input.get(["handle"])).toBeUndefined();
     expect(
       Object.hasOwn(
-        manager.getArgument(targetPiece).getRaw() as object,
+        pieces.getArgument(targetPiece).getRaw() as object,
         "handle",
       ),
     ).toBe(true);
@@ -2714,7 +3205,7 @@ describe("piece pull materialization", () => {
       properties: { name: { type: "string" } },
       required: ["name"],
     } as const;
-    const sourcePiece = await manager.runPersistent(
+    const sourcePiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -2730,7 +3221,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const targetPiece = await manager.runPersistent(
+    const targetPiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -2747,7 +3238,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, targetPiece);
+    const controller = new PieceController(pieces, targetPiece);
 
     await expect(
       controller.setInput({ handle: sourcePiece.key("value") }),
@@ -2756,7 +3247,7 @@ describe("piece pull materialization", () => {
   });
 
   it("accepts opaque Cell handles through uniform union wrappers", async () => {
-    const sourcePiece = await manager.runPersistent(
+    const sourcePiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -2771,7 +3262,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const targetPiece = await manager.runPersistent(
+    const targetPiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -2794,7 +3285,7 @@ describe("piece pull materialization", () => {
     );
 
     await expect(
-      new PieceController(manager, targetPiece).input.set(
+      new PieceController(pieces, targetPiece).input.set(
         sourcePiece.key("value"),
         ["handle"],
       ),
@@ -2802,7 +3293,7 @@ describe("piece pull materialization", () => {
   });
 
   it("selects ordinary and optional Cell alternatives by the supplied value", async () => {
-    const source = await manager.runPersistent(
+    const source = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -2817,7 +3308,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -2845,7 +3336,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, target);
+    const controller = new PieceController(pieces, target);
 
     await expect(
       controller.input.set(1, ["ordinaryOrHandle"]),
@@ -2861,7 +3352,7 @@ describe("piece pull materialization", () => {
       properties: { n: { type: "number" } },
       required: ["n"],
     } as const;
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -2880,11 +3371,11 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await expect(controller.input.set(2, ["slot", "n"]))
       .resolves.toBeUndefined();
-    expect(manager.getArgument(piece).getRaw()).toEqual({ slot: { n: 2 } });
+    expect(pieces.getArgument(piece).getRaw()).toEqual({ slot: { n: 2 } });
   });
 
   it("selects an ordinary union branch through a result redirect", async () => {
@@ -2902,7 +3393,7 @@ describe("piece pull materialization", () => {
       },
       required: ["slot"],
     } as const;
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: schema,
         resultSchema: schema,
@@ -2915,11 +3406,11 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await expect(controller.result.set(2, ["slot", "n"]))
       .resolves.toBeUndefined();
-    expect(manager.getArgument(piece).getRaw()).toEqual({ slot: { n: 2 } });
+    expect(pieces.getArgument(piece).getRaw()).toEqual({ slot: { n: 2 } });
   });
 
   it("narrows Cell capabilities without granting new authority", async () => {
@@ -2927,7 +3418,7 @@ describe("piece pull materialization", () => {
       type: "number" as const,
       asCell: [kind],
     });
-    const source = await manager.runPersistent(
+    const source = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -2946,7 +3437,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -2964,7 +3455,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, target);
+    const controller = new PieceController(pieces, target);
 
     await expect(
       controller.input.set(source.key("readonly"), ["comparable"]),
@@ -2985,7 +3476,7 @@ describe("piece pull materialization", () => {
       properties: { n: { type: "number" } },
       required: ["n"],
     } as const;
-    const source = await manager.runPersistent(
+    const source = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -3002,7 +3493,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3019,7 +3510,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, target);
+    const controller = new PieceController(pieces, target);
 
     await expect(
       controller.input.set(
@@ -3034,7 +3525,7 @@ describe("piece pull materialization", () => {
       ),
     ).rejects.toThrow(/input link.*schema is not compatible/);
 
-    const preexisting = await manager.runPersistent(
+    const preexisting = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3050,7 +3541,7 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     await expect(
-      new PieceController(manager, preexisting).input.set(2, ["slot", "n"]),
+      new PieceController(pieces, preexisting).input.set(2, ["slot", "n"]),
     ).rejects.toThrow(/write destination.*not writable/);
     expect(source.getRaw()).toEqual({
       readonly: { n: 1 },
@@ -3065,7 +3556,7 @@ describe("piece pull materialization", () => {
       required: ["n"],
       additionalProperties: false,
     } as const;
-    const source = await manager.runPersistent(
+    const source = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -3086,7 +3577,7 @@ describe("piece pull materialization", () => {
       required: ["n"],
       additionalProperties: false,
     } as const;
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3103,7 +3594,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, target);
+    const controller = new PieceController(pieces, target);
 
     await expect(
       controller.input.set(source.key("value"), ["handle"]),
@@ -3117,7 +3608,7 @@ describe("piece pull materialization", () => {
 
   it("rejects stream links that widen producer event contracts", async () => {
     const numberStream = { type: "number", asCell: ["stream"] } as const;
-    const source = await manager.runPersistent(
+    const source = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3140,7 +3631,7 @@ describe("piece pull materialization", () => {
       type: ["number", "string"],
       asCell: ["stream"],
     } as const;
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3163,10 +3654,227 @@ describe("piece pull materialization", () => {
     );
 
     await expect(
-      new PieceController(manager, target).setInput({
+      new PieceController(pieces, target).setInput({
         event: source.key("event"),
       }),
     ).rejects.toThrow(/input link.*schema is not compatible/);
+  });
+
+  it("ignores a producer document the write does not reach", async () => {
+    const far = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { n: { type: "number" } },
+          required: ["n"],
+        },
+        result: { n: 1 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const payload = {
+      type: "object",
+      properties: { n: { type: "number" } },
+      required: ["n"],
+    } as const;
+    const producer = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { obj: payload, linked: { type: "number" } },
+          required: ["obj", "linked"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: { obj: payload, linked: { type: "number" } },
+          required: ["obj", "linked"],
+        },
+        result: {
+          obj: { $alias: { cell: "argument", path: ["obj"] } },
+          linked: { $alias: { cell: "argument", path: ["linked"] } },
+        },
+        nodes: [],
+      }),
+      { obj: { n: 1 }, linked: 2 },
+      undefined,
+      { start: true },
+    );
+    await new PieceController(pieces, producer).input.set(
+      far.key("n"),
+      ["linked"],
+    );
+    // The producer now links a document its own schema refuses. Nothing the
+    // consumer writes below reaches it.
+    await runtime.editWithRetry((tx) => {
+      far.withTx(tx).key("n").setRawUntyped("bad");
+    });
+
+    const consumer = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            slot: {
+              type: "object",
+              properties: { n: { type: ["number", "string"] } },
+              required: ["n"],
+            },
+          },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: { n: 0 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, consumer);
+    await controller.input.set(producer.key("obj"), ["slot"]);
+
+    await controller.input.set(5, ["slot", "n"]);
+    expect(pieces.getArgument(producer).getRaw()).toMatchObject({
+      obj: { n: 5 },
+    });
+
+    // The producer's contract still decides the path the write does reach,
+    // even though the consumer declares it wider.
+    await expect(controller.input.set("bad", ["slot", "n"])).rejects.toThrow(
+      /^updated input does not match its write destination: value does not match type number$/,
+    );
+    expect(pieces.getArgument(producer).getRaw()).toMatchObject({
+      obj: { n: 5 },
+    });
+
+    // A target that exists but reads as undefined is still a target: the link
+    // settles it, and the write goes through.
+    await runtime.editWithRetry((tx) => {
+      far.withTx(tx).key("n").setRawUntyped(undefined);
+    });
+    await controller.input.set(7, ["slot", "n"]);
+    expect(pieces.getArgument(producer).getRaw()).toMatchObject({
+      obj: { n: 7 },
+    });
+
+    // Having no target at all is the case the link cannot settle: empty the far
+    // document and the producer's `linked` member has nothing behind it, so
+    // `required` refuses.
+    await runtime.editWithRetry((tx) => {
+      far.withTx(tx).setRawUntyped({});
+    });
+    await expect(controller.input.set(8, ["slot", "n"])).rejects.toThrow(
+      /updated input does not match its write destination: missing required property linked/,
+    );
+    expect(pieces.getArgument(producer).getRaw()).toMatchObject({
+      obj: { n: 7 },
+    });
+  });
+
+  it("sends a stream event past an invalid producer sibling", async () => {
+    const members = {
+      other: { type: "number" },
+      spare: { type: "number" },
+    } as const;
+    const piece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            event: { type: "number", asCell: ["stream"] },
+            ...members,
+          },
+          required: ["event", "other", "spare"],
+        },
+        // The result declares the same stream with its payload unconstrained,
+        // so a payload only the producer refuses reaches the producer contract
+        // instead of stopping at this Piece's own result schema.
+        resultSchema: {
+          type: "object",
+          properties: { event: { asCell: ["stream"] }, ...members },
+          required: ["event", "other", "spare"],
+        },
+        result: {
+          event: { $alias: { cell: "argument", path: ["event"] } },
+          other: { $alias: { cell: "argument", path: ["other"] } },
+          spare: { $alias: { cell: "argument", path: ["spare"] } },
+        },
+        nodes: [],
+      }),
+      { event: { $stream: true }, other: 1, spare: 2 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, piece);
+    const argument = pieces.getArgument(piece);
+    // A producer member that no write below touches, holding a value the
+    // producer's own schema refuses.
+    await runtime.editWithRetry((tx) => {
+      argument.withTx(tx).key("spare").setRawUntyped("bad");
+    });
+
+    const stream = argument.key("event");
+    const events: unknown[] = [];
+    const removeHandler = runtime.scheduler.addEventHandler((_tx, event) => {
+      events.push(event);
+    }, stream.getAsNormalizedFullLink());
+    try {
+      await controller.result.set(7, ["event"]);
+      await runtime.idle();
+      expect(events).toEqual([7]);
+      // The premise the skip rests on: sending stores nothing, so the producer
+      // document the root pass would have judged is the one it already was.
+      expect(argument.getRawUntyped()).toEqual({
+        event: { $stream: true },
+        other: 1,
+        spare: "bad",
+      });
+
+      // Bypassing the root pass does not excuse a payload the producer's own
+      // event contract refuses: nothing further reaches the stream.
+      await expect(controller.result.set("bad", ["event"])).rejects.toThrow(
+        /does not match its write destination: value does not match type number/,
+      );
+      await runtime.idle();
+      expect(events).toEqual([7]);
+    } finally {
+      removeHandler();
+    }
+  });
+
+  it("drops a raw key the materialized view does not carry", async () => {
+    // `omitMissingProjectionAliases` reconciles two views of one document. A
+    // raw key with no counterpart in the materialized view is not a missing
+    // alias to resolve — there is nothing on the materialized side to keep — so
+    // it is skipped rather than recursed into.
+    const piece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const result = omitMissingProjectionAliases(
+      { kept: 1 },
+      { kept: 1, absentFromMaterialized: 2 },
+      undefined,
+      pieces.getResult(piece),
+      pieces,
+    );
+    // `toEqual` treats a present undefined as absent, so ask about the key
+    // itself: recursing would have set it, to undefined.
+    expect(Object.hasOwn(result as object, "absentFromMaterialized")).toBe(
+      false,
+    );
+    expect(result).toEqual({ kept: 1 });
   });
 
   it("rejects descendant writes through Stream wrappers", async () => {
@@ -3176,7 +3884,7 @@ describe("piece pull materialization", () => {
       required: ["n"],
       asCell: ["stream"],
     } as const;
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3193,7 +3901,7 @@ describe("piece pull materialization", () => {
     );
 
     await expect(
-      new PieceController(manager, piece).input.set(2, ["event", "n"]),
+      new PieceController(pieces, piece).input.set(2, ["event", "n"]),
     ).rejects.toThrow(/stream Cell path is not writable/);
   });
 
@@ -3205,7 +3913,7 @@ describe("piece pull materialization", () => {
       additionalProperties: false,
     } as const;
     const readonlyPayload = { ...payload, asCell: ["readonly"] } as const;
-    const source = await manager.runPersistent(
+    const source = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -3220,7 +3928,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3237,7 +3945,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, target);
+    const controller = new PieceController(pieces, target);
 
     await controller.input.set(source.key("value"), ["readonlyHandle"]);
     await expect(
@@ -3278,13 +3986,13 @@ describe("piece pull materialization", () => {
       },
       nodes: [],
     };
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, pattern),
       { settings: { n: 1 } },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await expect(
       controller.result.set("bad", ["settings", "n"]),
@@ -3295,7 +4003,7 @@ describe("piece pull materialization", () => {
   });
 
   it("re-proves supplied links against a narrowed redirect destination", async () => {
-    const source = await manager.runPersistent(
+    const source = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -3310,7 +4018,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3343,7 +4051,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, target);
+    const controller = new PieceController(pieces, target);
 
     await expect(
       controller.result.set(source.key("value"), ["settings", "n"]),
@@ -3364,7 +4072,7 @@ describe("piece pull materialization", () => {
       properties: { n: { type: ["number", "string"] } },
       required: ["n"],
     } as const;
-    const source = await manager.runPersistent(
+    const source = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -3379,7 +4087,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3394,7 +4102,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, target);
+    const controller = new PieceController(pieces, target);
 
     await controller.input.set(source.key("value").asSchema(wide), ["slot"]);
     await expect(
@@ -3414,7 +4122,7 @@ describe("piece pull materialization", () => {
       properties: { n: { type: ["number", "string"] } },
       required: ["n"],
     } as const;
-    const producer = await manager.runPersistent(
+    const producer = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3435,7 +4143,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3447,16 +4155,16 @@ describe("piece pull materialization", () => {
         nodes: [],
       }),
       {
-        slot: manager.getArgument(producer).key("value").asSchema(wide),
+        slot: pieces.getArgument(producer).key("value").asSchema(wide),
       },
       undefined,
       { start: true },
     );
 
     await expect(
-      new PieceController(manager, target).input.set("bad", ["slot", "n"]),
+      new PieceController(pieces, target).input.set("bad", ["slot", "n"]),
     ).rejects.toThrow(/write destination/);
-    expect(manager.getArgument(producer).getRaw()).toEqual({
+    expect(pieces.getArgument(producer).getRaw()).toEqual({
       value: { n: 1 },
     });
   });
@@ -3467,7 +4175,7 @@ describe("piece pull materialization", () => {
       items: { type: "number" },
       maxItems: 1,
     } as const;
-    const producer = await manager.runPersistent(
+    const producer = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3488,7 +4196,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3505,17 +4213,17 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, target);
+    const controller = new PieceController(pieces, target);
 
     await controller.input.set(producer.key("arr"), ["slot"]);
     await expect(controller.input.set(2, ["slot", 1])).rejects.toThrow(
       /write destination/,
     );
-    expect(manager.getArgument(producer).getRaw()).toEqual({ arr: [1] });
+    expect(pieces.getArgument(producer).getRaw()).toEqual({ arr: [1] });
   });
 
   it("validates concrete writes through correlated producer projections", async () => {
-    const producer = await manager.runPersistent(
+    const producer = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           description: "correlated numeric choice",
@@ -3554,22 +4262,22 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, producer);
+    const controller = new PieceController(pieces, producer);
 
     await controller.result.set(2, ["value"]);
-    expect(manager.getArgument(producer).getRaw()).toEqual({
+    expect(pieces.getArgument(producer).getRaw()).toEqual({
       kind: "n",
       value: 2,
     });
 
     await expect(controller.result.set("bad", ["value"]))
       .rejects.toThrow(/write destination/);
-    expect(manager.getArgument(producer).getRaw()).toEqual({
+    expect(pieces.getArgument(producer).getRaw()).toEqual({
       kind: "n",
       value: 2,
     });
 
-    const futureValue = await manager.runPersistent(
+    const futureValue = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -3587,7 +4295,7 @@ describe("piece pull materialization", () => {
     await expect(
       controller.result.set(futureValue.key("value"), ["value"]),
     ).rejects.toThrow(/write destination/);
-    expect(manager.getArgument(producer).getRaw()).toEqual({
+    expect(pieces.getArgument(producer).getRaw()).toEqual({
       kind: "n",
       value: 2,
     });
@@ -3612,7 +4320,7 @@ describe("piece pull materialization", () => {
       }],
     } as const;
     const createProducer = (kind: "readonly" | "plain") =>
-      manager.runPersistent(
+      pieces.runPersistent(
         trustPattern(runtime, {
           argumentSchema: {
             type: "object",
@@ -3640,22 +4348,22 @@ describe("piece pull materialization", () => {
       );
 
     const readonlyProducer = await createProducer("readonly");
-    const readonlyController = new PieceController(manager, readonlyProducer);
+    const readonlyController = new PieceController(pieces, readonlyProducer);
     await expect(readonlyController.result.set(2, ["value"]))
       .rejects.toThrow(/readonly Cell write destination is not writable/);
-    expect(manager.getArgument(readonlyProducer).getRaw()).toEqual({
+    expect(pieces.getArgument(readonlyProducer).getRaw()).toEqual({
       choice: { kind: "readonly", value: 1 },
     });
 
     const plainProducer = await createProducer("plain");
-    const plainController = new PieceController(manager, plainProducer);
+    const plainController = new PieceController(pieces, plainProducer);
     await plainController.result.set(2, ["value"]);
-    expect(manager.getArgument(plainProducer).getRaw()).toEqual({
+    expect(pieces.getArgument(plainProducer).getRaw()).toEqual({
       choice: { kind: "plain", value: 2 },
     });
 
     const createProjectedProducer = (kind: "readonly" | "plain") =>
-      manager.runPersistent(
+      pieces.runPersistent(
         trustPattern(runtime, {
           argumentSchema: { type: "object", properties: {} },
           resultSchema: {
@@ -3692,14 +4400,14 @@ describe("piece pull materialization", () => {
 
     const projectedReadonly = await createProjectedProducer("readonly");
     await expect(
-      new PieceController(manager, projectedReadonly).result.set(2, ["value"]),
+      new PieceController(pieces, projectedReadonly).result.set(2, ["value"]),
     ).rejects.toThrow(/readonly Cell write destination is not writable/);
     expect(projectedReadonly.key("value").resolveAsCell().getRaw()).toBe(
       undefined,
     );
 
     const projectedPlain = await createProjectedProducer("plain");
-    await new PieceController(manager, projectedPlain).result.set(2, ["value"]);
+    await new PieceController(pieces, projectedPlain).result.set(2, ["value"]);
     expect(projectedPlain.key("value").resolveAsCell().getRaw()).toBe(2);
   });
 
@@ -3712,7 +4420,7 @@ describe("piece pull materialization", () => {
       uniqueItems: true,
       maximum: 10,
     } as const;
-    const producer = await manager.runPersistent(
+    const producer = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3733,18 +4441,18 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, producer);
+    const controller = new PieceController(pieces, producer);
 
     await controller.result.set(2, ["value", "x"]);
-    expect(manager.getArgument(producer).getRaw()).toEqual({
+    expect(pieces.getArgument(producer).getRaw()).toEqual({
       value: { x: 2 },
     });
 
     await controller.result.set([3], ["value"]);
     await controller.result.set(4, ["value", 0]);
-    expect(manager.getArgument(producer).getRaw()).toEqual({ value: [4] });
+    expect(pieces.getArgument(producer).getRaw()).toEqual({ value: [4] });
 
-    const futureValue = await manager.runPersistent(
+    const futureValue = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -3762,10 +4470,10 @@ describe("piece pull materialization", () => {
     await expect(
       controller.result.set(futureValue.key("value"), ["value", 0]),
     ).rejects.toThrow(/correlated write destination/);
-    expect(manager.getArgument(producer).getRaw()).toEqual({ value: [4] });
+    expect(pieces.getArgument(producer).getRaw()).toEqual({ value: [4] });
 
     const bareSchema = { type: ["object", "array"] } as const;
-    const bareProducer = await manager.runPersistent(
+    const bareProducer = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3786,16 +4494,16 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const bareController = new PieceController(manager, bareProducer);
+    const bareController = new PieceController(pieces, bareProducer);
     await bareController.result.set(2, ["value", "x"]);
-    expect(manager.getArgument(bareProducer).getRaw()).toEqual({
+    expect(pieces.getArgument(bareProducer).getRaw()).toEqual({
       value: { x: 2 },
     });
     await bareController.result.set([3], ["value"]);
     await bareController.result.set(4, ["value", 0]);
-    expect(manager.getArgument(bareProducer).getRaw()).toEqual({ value: [4] });
+    expect(pieces.getArgument(bareProducer).getRaw()).toEqual({ value: [4] });
 
-    const arrayProducer = await manager.runPersistent(
+    const arrayProducer = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3823,11 +4531,11 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    await new PieceController(manager, arrayProducer).result.set(
+    await new PieceController(pieces, arrayProducer).result.set(
       2,
       ["value", 0],
     );
-    expect(manager.getArgument(arrayProducer).getRaw()).toEqual({ value: [2] });
+    expect(pieces.getArgument(arrayProducer).getRaw()).toEqual({ value: [2] });
   });
 
   it("intersects argument and public result destination contracts", async () => {
@@ -3841,7 +4549,7 @@ describe("piece pull materialization", () => {
       properties: { n: { type: ["number", "string"] } },
       required: ["n"],
     } as const;
-    const producer = await manager.runPersistent(
+    const producer = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3862,7 +4570,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3877,12 +4585,12 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, target);
+    const controller = new PieceController(pieces, target);
 
     await controller.input.set(producer.key("settings"), ["slot"]);
     await expect(controller.input.set("bad", ["slot", "n"]))
       .rejects.toThrow(/write destination/);
-    expect(manager.getArgument(producer).getRaw()).toEqual({
+    expect(pieces.getArgument(producer).getRaw()).toEqual({
       settings: { n: 1 },
     });
   });
@@ -3899,7 +4607,7 @@ describe("piece pull materialization", () => {
       properties: { n: { type: ["number", "string"] } },
       required: ["n"],
     } as const;
-    const producer = await manager.runPersistent(
+    const producer = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -3920,7 +4628,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -3935,7 +4643,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, target);
+    const controller = new PieceController(pieces, target);
 
     await controller.input.set(producer.key("value"), ["slot"]);
     await expect(controller.input.set("bad", ["slot", "n"]))
@@ -3957,7 +4665,7 @@ describe("piece pull materialization", () => {
       required: ["x", "sibling"],
       asCell: ["cell"],
     } as const;
-    const producer = await manager.runPersistent(
+    const producer = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -3982,7 +4690,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, producer);
+    const controller = new PieceController(pieces, producer);
     const payload = producer.key("payload").resolveAsCell();
 
     await controller.result.set(
@@ -4019,7 +4727,7 @@ describe("piece pull materialization", () => {
       ...eventSchema,
       $defs: { Mentionable: mentionableSchema },
     } as const;
-    const mentionable = await manager.runPersistent(
+    const mentionable = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: mentionableSchema,
@@ -4030,7 +4738,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const producer = await manager.runPersistent(
+    const producer = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -4073,7 +4781,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, producer);
+    const controller = new PieceController(pieces, producer);
     const stream = producer.key("event").resolveAsCell();
     const events: unknown[] = [];
     const removeHandler = runtime.scheduler.addEventHandler((_tx, event) => {
@@ -4090,7 +4798,7 @@ describe("piece pull materialization", () => {
   });
 
   it("accepts a Piece Stream supplied to a Stream Cell input", async () => {
-    const sourcePiece = await manager.runPersistent(
+    const sourcePiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -4110,7 +4818,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const targetPiece = await manager.runPersistent(
+    const targetPiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -4130,7 +4838,7 @@ describe("piece pull materialization", () => {
       { start: true },
     );
 
-    const controller = new PieceController(manager, targetPiece);
+    const controller = new PieceController(pieces, targetPiece);
     await expect(
       controller.setInput({ events: sourcePiece.key("events") }),
     ).resolves.toBeUndefined();
@@ -4156,7 +4864,7 @@ describe("piece pull materialization", () => {
   });
 
   it("rejects conflicting and forged Cell wrapper contracts", async () => {
-    const sourcePiece = await manager.runPersistent(
+    const sourcePiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -4173,7 +4881,7 @@ describe("piece pull materialization", () => {
       { start: true },
     );
 
-    const conflictingTarget = await manager.runPersistent(
+    const conflictingTarget = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -4194,13 +4902,13 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     await expect(
-      new PieceController(manager, conflictingTarget).input.set(
+      new PieceController(pieces, conflictingTarget).input.set(
         sourcePiece.key("value"),
         ["handle"],
       ),
     ).rejects.toThrow(/destination Cell constraints disagree/);
 
-    const scalarTarget = await manager.runPersistent(
+    const scalarTarget = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -4216,7 +4924,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const scalarController = new PieceController(manager, scalarTarget);
+    const scalarController = new PieceController(pieces, scalarTarget);
     const scalarInput = await scalarController.input.getCell();
     const forged = sourcePiece.key("value").getAsLink({
       base: scalarInput.key("slot"),
@@ -4232,7 +4940,7 @@ describe("piece pull materialization", () => {
   });
 
   it("projects nested Cell wrappers with the canonical link schema", async () => {
-    const sourcePiece = await manager.runPersistent(
+    const sourcePiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -4260,7 +4968,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const targetPiece = await manager.runPersistent(
+    const targetPiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -4283,14 +4991,14 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, targetPiece);
+    const controller = new PieceController(pieces, targetPiece);
 
     await controller.input.set(sourcePiece.key("value"), ["slot"]);
     expect(await controller.input.get(["slot"])).toEqual({ handle: 7 });
   });
 
   it("checks patternProperties on both sides of a durable path link", async () => {
-    const broadSource = await manager.runPersistent(
+    const broadSource = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -4305,7 +5013,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const patternedTarget = await manager.runPersistent(
+    const patternedTarget = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -4321,13 +5029,13 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     await expect(
-      new PieceController(manager, patternedTarget).input.set(
+      new PieceController(pieces, patternedTarget).input.set(
         broadSource.key("value"),
         ["xSlot"],
       ),
     ).rejects.toThrow(/input link.*schema is not compatible/);
 
-    const patternedSource = await manager.runPersistent(
+    const patternedSource = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -4344,7 +5052,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const numericTarget = await manager.runPersistent(
+    const numericTarget = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -4360,7 +5068,7 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     await expect(
-      new PieceController(manager, numericTarget).input.set(
+      new PieceController(pieces, numericTarget).input.set(
         patternedSource.key("xSlot"),
         ["slot"],
       ),
@@ -4368,7 +5076,7 @@ describe("piece pull materialization", () => {
   });
 
   it("includes possible source-path omission in durable link contracts", async () => {
-    const targetPiece = await manager.runPersistent(
+    const targetPiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -4383,8 +5091,8 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const target = new PieceController(manager, targetPiece);
-    const optionalSource = await manager.runPersistent(
+    const target = new PieceController(pieces, targetPiece);
+    const optionalSource = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -4406,7 +5114,7 @@ describe("piece pull materialization", () => {
       target.input.set(optionalSource.key("value"), ["slot"]),
     ).rejects.toThrow(/input link.*schema is not compatible/);
 
-    const defaultedOptionalSource = await manager.runPersistent(
+    const defaultedOptionalSource = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -4427,7 +5135,7 @@ describe("piece pull materialization", () => {
       target.input.set(defaultedOptionalSource.key("value"), ["slot"]),
     ).rejects.toThrow(/input link.*schema is not compatible/);
 
-    const optionalTargetPiece = await manager.runPersistent(
+    const optionalTargetPiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -4444,12 +5152,12 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const optionalTarget = new PieceController(manager, optionalTargetPiece);
+    const optionalTarget = new PieceController(pieces, optionalTargetPiece);
     await optionalTarget.input.set(optionalSource.key("value"), ["slot"]);
-    await new PieceController(manager, optionalSource).result.set({});
+    await new PieceController(pieces, optionalSource).result.set({});
     expect(await optionalTarget.input.get(["slot"])).toBeUndefined();
 
-    const requiredSource = await manager.runPersistent(
+    const requiredSource = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -4468,10 +5176,10 @@ describe("piece pull materialization", () => {
     await target.input.set(requiredSource.key("value"), ["slot"]);
     expect(await target.input.get(["slot"])).toBe(2);
     await expect(
-      new PieceController(manager, requiredSource).result.set({}),
+      new PieceController(pieces, requiredSource).result.set({}),
     ).rejects.toThrow(/does not match/);
 
-    const conditionallyObjectSource = await manager.runPersistent(
+    const conditionallyObjectSource = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -4489,7 +5197,7 @@ describe("piece pull materialization", () => {
       target.input.set(conditionallyObjectSource.key("value"), ["slot"]),
     ).rejects.toThrow(/input link.*schema is not compatible/);
 
-    const maybeShortArray = await manager.runPersistent(
+    const maybeShortArray = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: { type: "array", items: { type: "number" } },
@@ -4504,7 +5212,7 @@ describe("piece pull materialization", () => {
       target.input.set(maybeShortArray.key(0), ["slot"]),
     ).rejects.toThrow(/input link.*schema is not compatible/);
 
-    const nonemptyArray = await manager.runPersistent(
+    const nonemptyArray = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -4533,12 +5241,12 @@ describe("piece pull materialization", () => {
       },
       sparse,
     )).toBeUndefined();
-    await new PieceController(manager, nonemptyArray).result.set(sparse);
+    await new PieceController(pieces, nonemptyArray).result.set(sparse);
     expect(await optionalTarget.input.get(["slot"])).toBeUndefined();
   });
 
   it("rejects path links through correlated parent schemas", async () => {
-    const sourcePiece = await manager.runPersistent(
+    const sourcePiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -4553,7 +5261,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const targetPiece = await manager.runPersistent(
+    const targetPiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           anyOf: [
@@ -4585,7 +5293,7 @@ describe("piece pull materialization", () => {
     );
 
     await expect(
-      new PieceController(manager, targetPiece).input.set(
+      new PieceController(pieces, targetPiece).input.set(
         sourcePiece.key("value"),
         ["value"],
       ),
@@ -4605,7 +5313,7 @@ describe("piece pull materialization", () => {
       result: { value: 1 },
       nodes: [],
     };
-    const spaceSource = await manager.runPersistent(
+    const spaceSource = await pieces.runPersistent(
       trustPattern(runtime, sourcePattern),
       {},
       undefined,
@@ -4618,7 +5326,7 @@ describe("piece pull materialization", () => {
       nodes: [],
     });
     const sessionSource = runtime.getCell<number>(
-      manager.getSpace(),
+      pieces.getSpace(),
       "session-source-" + crypto.randomUUID(),
       sessionPattern.resultSchema,
       undefined,
@@ -4627,7 +5335,7 @@ describe("piece pull materialization", () => {
     await runtime.setup(undefined, sessionPattern, {}, sessionSource);
     await sessionSource.sync();
     expect(sessionSource.getAsNormalizedFullLink().scope).toBe("session");
-    const targetPiece = await manager.runPersistent(
+    const targetPiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -4642,14 +5350,14 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, targetPiece);
+    const controller = new PieceController(pieces, targetPiece);
 
     await controller.input.set(spaceSource.key("value"), ["slot"]);
     await expect(
       controller.input.set(sessionSource, ["slot"]),
     ).rejects.toThrow(/scope session exceeds the destination scope/);
 
-    const handleTarget = await manager.runPersistent(
+    const handleTarget = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -4669,7 +5377,7 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     await expect(
-      new PieceController(manager, handleTarget).input.set(
+      new PieceController(pieces, handleTarget).input.set(
         sessionSource,
         ["handle"],
       ),
@@ -4689,15 +5397,15 @@ describe("piece pull materialization", () => {
       result: {},
       nodes: [],
     };
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, pattern),
       { slot: undefined },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const inputCell = await controller.input.getCell();
-    const compatibleSource = await manager.runPersistent(
+    const compatibleSource = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -4714,7 +5422,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const incompatibleSource = await manager.runPersistent(
+    const incompatibleSource = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -4751,17 +5459,17 @@ describe("piece pull materialization", () => {
       ),
     ).rejects.toThrow(/input link.*schema is not compatible/);
 
-    const compatibleController = new PieceController(manager, compatibleSource);
+    const compatibleController = new PieceController(pieces, compatibleSource);
     await compatibleController.result.set(7, ["value"]);
     expect(await controller.input.get(["slot"])).toBe(7);
     await expect(
       compatibleController.result.set("bad", ["value"]),
-    ).rejects.toThrow(/updated result does not match its schema/);
+    ).rejects.toThrow(/updated (result|value) does not match its schema/);
     expect(await controller.input.get(["slot"])).toBe(7);
   });
 
   it("ignores a narrowed carried schema in favor of the producer contract", async () => {
-    const sourcePiece = await manager.runPersistent(
+    const sourcePiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -4776,7 +5484,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const targetPiece = await manager.runPersistent(
+    const targetPiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -4791,7 +5499,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, targetPiece);
+    const controller = new PieceController(pieces, targetPiece);
     const inputCell = await controller.input.getCell();
     const narrowed = sourcePiece.key("value").asSchema({ type: "number" });
 
@@ -4809,7 +5517,7 @@ describe("piece pull materialization", () => {
     ).rejects.toThrow(/input link.*schema is not compatible/);
 
     const standalone = runtime.getCell<number>(
-      manager.getSpace(),
+      pieces.getSpace(),
       "standalone-link-without-contract-" + crypto.randomUUID(),
       { type: "number" },
     );
@@ -4818,7 +5526,7 @@ describe("piece pull materialization", () => {
       controller.input.set(standalone, ["slot"]),
     ).rejects.toThrow(/source has no durable schema contract/);
 
-    const argumentSourcePiece = await manager.runPersistent(
+    const argumentSourcePiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -4835,7 +5543,7 @@ describe("piece pull materialization", () => {
     );
     await expect(
       controller.input.set(
-        manager.getArgument(argumentSourcePiece).key("value"),
+        pieces.getArgument(argumentSourcePiece).key("value"),
         ["slot"],
       ),
     ).resolves.toBeUndefined();
@@ -4866,13 +5574,13 @@ describe("piece pull materialization", () => {
       result: {},
       nodes: [],
     };
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, pattern),
       { settings: { mode: "old", attempts: 1, label: "old" } },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await controller.input.set(
       { mode: "new", label: undefined },
@@ -4928,13 +5636,13 @@ describe("piece pull materialization", () => {
       nodes: [],
     };
     const items = new Array(1);
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, pattern),
       { items },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await controller.input.set(undefined, ["slot"]);
     await controller.input.set(undefined, ["label"]);
@@ -4974,13 +5682,13 @@ describe("piece pull materialization", () => {
       result: { items: resultItems },
       nodes: [],
     };
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, pattern),
       {},
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await controller.result.set(undefined, ["slot"]);
     await controller.result.set(undefined, ["label"]);
@@ -5036,13 +5744,13 @@ describe("piece pull materialization", () => {
       result: {},
       nodes: [],
     };
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, pattern),
       { kind: "a", settings: { attempts: 7 } },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await controller.input.set({}, ["settings"]);
 
@@ -5090,13 +5798,13 @@ describe("piece pull materialization", () => {
       result: {},
       nodes: [],
     };
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, pattern),
       { items: [{ mode: "old", attempts: 2 }] },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await controller.input.set({ mode: "new" }, ["items", 0]);
 
@@ -5129,13 +5837,13 @@ describe("piece pull materialization", () => {
       result: {},
       nodes: [],
     };
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, pattern),
       { items: [{ attempts: 9 }] },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await controller.input.set({ items: [{}] });
     expect(await controller.input.get()).toEqual({
@@ -5193,13 +5901,13 @@ describe("piece pull materialization", () => {
       result: {},
       nodes: [],
     };
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, pattern),
       { kind: "a", items: [{ attempts: 7 }] },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await controller.input.set({}, ["items", 0]);
 
@@ -5209,35 +5917,35 @@ describe("piece pull materialization", () => {
   });
 
   it("materializes piece results before runWithPattern returns", async () => {
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
       { start: true },
     );
 
-    expect(manager.getResult(piece).get()).toEqual({ output: 10 });
+    expect(pieces.getResult(piece).get()).toEqual({ output: 10 });
 
-    await manager.runWithPattern(
+    await pieces.runWithPattern(
       trustPattern(runtime, tenfoldPattern()),
       entityRefToString(piece.entityId),
       { input: 5 },
       { start: true },
     );
 
-    expect(manager.getResult(piece).get()).toEqual({ output: 50 });
+    expect(pieces.getResult(piece).get()).toEqual({ output: 50 });
   });
 
   it("stores repository metadata when preparing without starting", async () => {
     const repository = "https://github.com/commontoolsinc/labs";
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
       { start: false },
     );
 
-    await manager.runWithPattern(
+    await pieces.runWithPattern(
       trustPattern(runtime, tenfoldPattern()),
       entityRefToString(piece.entityId),
       { input: 5 },
@@ -5248,7 +5956,7 @@ describe("piece pull materialization", () => {
   });
 
   it("moves a source-less programmatic piece into source history on edit", async () => {
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(
         runtime,
         sourceLessMultiplierPattern("source-less", 2),
@@ -5257,10 +5965,14 @@ describe("piece pull materialization", () => {
       "source-less-set-pattern-" + crypto.randomUUID(),
       { start: true },
     );
-    const previous = getPatternIdentityRef(piece)!;
+    // A hand-built (keyless) piece writes no durable pattern pointer (the
+    // never-durable contract; L3(a), RULED 2026-08-27); its session
+    // identity lives on the runner.
+    expect(getPatternIdentityRef(piece)).toBeUndefined();
+    expect(runtime.runner.sessionPatternPointerFor(piece)).toBeDefined();
     expect(getPieceSourceRevisions(piece)).toEqual([]);
 
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     await controller.setPattern(
       compiledMultiplierProgram("source-backed", 3),
     );
@@ -5268,36 +5980,67 @@ describe("piece pull materialization", () => {
     expect(
       getPieceSourceRevisions(piece).map((revision) => revision.operation),
     ).toEqual(["edit"]);
+    // The displaced executable was a session-built value no session can
+    // reload: a keyless identity never lands durably, so no
+    // `displacedPattern` record is stamped — the history's absent baseline
+    // is the record that the pre-edit past was programmatic.
     expect((await readPieceSourceState(runtime, piece)).displacedPattern)
-      .toEqual({
-        identity: previous.identity,
-        symbol: previous.symbol,
-        displacedAt: expect.any(Number),
-      });
+      .toBeUndefined();
     expect(await controller.result.get()).toEqual({
       version: "source-backed",
       output: 15,
     });
   });
 
+  it("syncPattern prefers the live session pointer over a legacy keyless durable pointer", async () => {
+    const piece = await pieces.runPersistent(
+      trustPattern(
+        runtime,
+        sourceLessMultiplierPattern("sync-legacy-keyless", 2),
+      ),
+      { input: 5 },
+      "sync-legacy-keyless-" + crypto.randomUUID(),
+      { start: true },
+    );
+    expect(getPatternIdentityRef(piece)).toBeUndefined();
+    expect(runtime.runner.sessionPatternPointerFor(piece)).toBeDefined();
+
+    // A legacy pre-guard durable `keyless:` orphan landing AFTER this
+    // session's keyless setup — the remote-sync-lag interleaving (the
+    // in-session setup cleared the metas transactionally; a lagging sync
+    // can still deliver the old record afterwards). Such a pointer is
+    // unloadable everywhere except the session that MINTED it — never this
+    // one — so it must not shadow the live session pointer.
+    const { error } = await runtime.editWithRetry((tx) => {
+      piece.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: "keyless:fid1:legacy-orphan-from-a-pre-guard-session",
+        symbol: "default",
+      }, rawMetaWriteAuthorization);
+    });
+    expect(error).toBeUndefined();
+
+    const pattern = await pieces.syncPattern(piece);
+    expect(pattern).toBeDefined();
+  });
+
   it("persists setPattern replacement by identity for fresh runtime reloads", async () => {
     const repository = "https://github.com/commontoolsinc/labs";
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledMultiplierProgram("v1", 2),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       firstPattern,
       { input: 5 },
       "compiled-set-pattern-" + crypto.randomUUID(),
       { start: true, repository },
     );
     const id = entityRefToString(piece.entityId);
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const firstRef = getPatternIdentityRef(piece);
 
     expect(firstRef).toBeDefined();
-    expect(manager.getResult(piece).get()).toEqual({
+    expect(pieces.getResult(piece).get()).toEqual({
       version: "v1",
       output: 10,
     });
@@ -5310,30 +6053,29 @@ describe("piece pull materialization", () => {
       ),
       { repository },
     );
-    await manager.runtime.idle();
-    await manager.synced();
+    await pieces.runtime.idle();
+    await pieces.synced();
 
     const secondRef = getPatternIdentityRef(piece);
     expect(secondRef).toBeDefined();
     expect(secondRef!.identity).not.toEqual(firstRef!.identity);
-    expect(manager.getResult(piece).get()).toEqual({
+    expect(pieces.getResult(piece).get()).toEqual({
       version: "v2",
       output: 50,
     });
 
     const session = await createSession({
       identity: signer,
-      spaceName: manager.getSpaceName()!,
+      spaceName: pieces.getSpaceName()!,
     });
     const freshRuntime = new Runtime({
       apiUrl: new URL("http://localhost:9999"),
       storageManager,
     });
-    const freshManager = new PieceManager(session, freshRuntime);
-    const freshPieces = new PiecesController(freshManager);
+    const freshPieces = new PiecesController(session, freshRuntime);
 
     try {
-      await freshManager.synced();
+      await freshPieces.synced();
       const freshPiece = await freshPieces.get(id, true);
       const freshCell = freshPiece.getCell();
       const freshRef = getPatternIdentityRef(freshCell);
@@ -5366,15 +6108,15 @@ describe("piece pull materialization", () => {
     const replacementRepository = "https://github.com/commontoolsinc/patterns";
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledMultiplierProgram("v1", 2),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       firstPattern,
       { input: 5 },
       "repository-update-" + crypto.randomUUID(),
       { start: true, repository: originalRepository },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await controller.setPattern(compiledMultiplierProgram("v2", 3));
     expect(getPatternRepository(piece)).toBe(originalRepository);
@@ -5389,16 +6131,16 @@ describe("piece pull materialization", () => {
   });
 
   it("recovers a durable contract through a scoped redirect link", async () => {
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
       { start: true },
     );
-    const argument = manager.getArgument(piece);
+    const argument = pieces.getArgument(piece);
     // Baseline: the producer-owned argument doc has a durable contract at its
     // own (base) scope.
-    expect(durableSourceContract(argument, manager)?.schemas.length)
+    expect(durableSourceContract(argument, pieces)?.schemas.length)
       .toBeGreaterThan(0);
 
     // A PerUser/PerSession input is a redirect to that same producer-owned
@@ -5413,7 +6155,7 @@ describe("piece pull materialization", () => {
         ...argument.getAsNormalizedFullLink(),
         scope,
       });
-      const contract = durableSourceContract(scopedSource, manager);
+      const contract = durableSourceContract(scopedSource, pieces);
       expect(contract?.schemas.length, `scope=${scope}`).toBeGreaterThan(0);
     }
   });
@@ -5429,17 +6171,17 @@ describe("piece pull materialization", () => {
     // destination slot ("a schema alternative accepted previously...").
     const compiled = await runtime.patternManager.compilePattern(
       compiledScopedInputProgram("v1"),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       compiled,
       {},
       "scoped-mergeable-update-" + crypto.randomUUID(),
       { start: true },
     );
     await runtime.idle();
-    const controller = new PieceController(manager, piece);
-    const argument = manager.getArgument(piece);
+    const controller = new PieceController(pieces, piece);
+    const argument = pieces.getArgument(piece);
     const rawWho =
       (argument.getRawUntyped({ lastNode: "top" }) as Record<string, unknown>)
         .who;
@@ -5473,7 +6215,7 @@ describe("piece pull materialization", () => {
     // value: a producer whose contract admits `undefined` as a value must
     // still be rejected when the destination value schema does not accept it,
     // even at an optional slot.
-    const sourcePiece = await manager.runPersistent(
+    const sourcePiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -5490,7 +6232,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const targetPiece = await manager.runPersistent(
+    const targetPiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -5505,15 +6247,15 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     await expect(
-      new PieceController(manager, targetPiece).input.set(
-        manager.getArgument(sourcePiece).key("value"),
+      new PieceController(pieces, targetPiece).input.set(
+        pieces.getArgument(sourcePiece).key("value"),
         ["slot"],
       ),
     ).rejects.toThrow(/not accepted by the candidate/);
   });
 
   it("rejects a possibly-missing source at a required destination", async () => {
-    const sourcePiece = await manager.runPersistent(
+    const sourcePiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -5527,7 +6269,7 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const targetPiece = await manager.runPersistent(
+    const targetPiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
           type: "object",
@@ -5543,8 +6285,8 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     await expect(
-      new PieceController(manager, targetPiece).input.set(
-        manager.getArgument(sourcePiece).key("maybe"),
+      new PieceController(pieces, targetPiece).input.set(
+        pieces.getArgument(sourcePiece).key("maybe"),
         ["slot"],
       ),
     ).rejects.toThrow(/not accepted by the candidate/);
@@ -5553,15 +6295,15 @@ describe("piece pull materialization", () => {
   it("updates a piece across backward-compatible schema additions", async () => {
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledSchemaEvolutionProgram(1),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       firstPattern,
       { value: 4 },
       "compatible-schema-update-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     expect(await controller.input.get()).toEqual({ value: 4 });
     expect(await controller.result.get()).toEqual({ doubled: 4 });
@@ -5597,31 +6339,31 @@ describe("piece pull materialization", () => {
   });
 
   it("migrates defaults through array items and dynamic fields", async () => {
-    const arrayPiece = await manager.runPersistent(
+    const arrayPiece = await pieces.runPersistent(
       await runtime.patternManager.compilePattern(
         compiledArrayItemDefaultsProgram(1),
-        { space: manager.getSpace() },
+        { space: pieces.getSpace() },
       ),
       { items: [{}] },
       "array-default-migration-" + crypto.randomUUID(),
       { start: true },
     );
-    const arrayController = new PieceController(manager, arrayPiece);
+    const arrayController = new PieceController(pieces, arrayPiece);
     await arrayController.setPattern(compiledArrayItemDefaultsProgram(2));
     expect((await arrayController.input.getCell()).getRaw()).toEqual({
       items: [{ attempts: 1 }],
     });
 
-    const dynamicPiece = await manager.runPersistent(
+    const dynamicPiece = await pieces.runPersistent(
       await runtime.patternManager.compilePattern(
         compiledDynamicDefaultsProgram(1),
-        { space: manager.getSpace() },
+        { space: pieces.getSpace() },
       ),
       { extra: {} },
       "dynamic-default-migration-" + crypto.randomUUID(),
       { start: true },
     );
-    const dynamicController = new PieceController(manager, dynamicPiece);
+    const dynamicController = new PieceController(pieces, dynamicPiece);
     await dynamicController.setPattern(compiledDynamicDefaultsProgram(2));
     expect((await dynamicController.input.getCell()).getRaw()).toEqual({
       extra: { attempts: 1 },
@@ -5635,7 +6377,7 @@ describe("piece pull materialization", () => {
       properties: { output: { type: "number" } },
       required: ["output"],
     };
-    const source = await manager.runPersistent(
+    const source = await pieces.runPersistent(
       trustPattern(runtime, sourcePattern),
       { input: 5 },
       "linked-update-source-" + crypto.randomUUID(),
@@ -5643,17 +6385,17 @@ describe("piece pull materialization", () => {
     );
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledMultiplierProgram("v1", 2),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       firstPattern,
       { input: 1 },
       "linked-update-target-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, target);
+    const controller = new PieceController(pieces, target);
 
-    await manager.link(
+    await pieces.link(
       entityRefToString(source.entityId),
       ["output"],
       entityRefToString(target.entityId),
@@ -5679,7 +6421,7 @@ describe("piece pull materialization", () => {
   });
 
   it("preserves linked objects while adding nested defaults", async () => {
-    const source = await manager.runPersistent(
+    const source = await pieces.runPersistent(
       trustPattern(runtime, linkedSettingsSourcePattern()),
       {},
       "linked-object-default-source-" + crypto.randomUUID(),
@@ -5687,17 +6429,17 @@ describe("piece pull materialization", () => {
     );
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledLinkedSettingsProgram(1),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       firstPattern,
       { settings: { mode: "local" } },
       "linked-object-default-target-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, target);
+    const controller = new PieceController(pieces, target);
 
-    await manager.link(
+    await pieces.link(
       entityRefToString(source.entityId),
       ["settings"],
       entityRefToString(target.entityId),
@@ -5737,7 +6479,7 @@ describe("piece pull materialization", () => {
       result: { settings: { mode: "linked", attempts: 3 } },
       nodes: [],
     };
-    const source = await manager.runPersistent(
+    const source = await pieces.runPersistent(
       trustPattern(runtime, sourcePattern),
       {},
       "raw-link-path-source-" + crypto.randomUUID(),
@@ -5745,16 +6487,16 @@ describe("piece pull materialization", () => {
     );
     const targetPattern = await runtime.patternManager.compilePattern(
       compiledLinkedSettingsProgram(2),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const target = await manager.runPersistent(
+    const target = await pieces.runPersistent(
       targetPattern,
       { settings: { mode: "local", attempts: 1 } },
       "raw-link-path-target-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, target);
-    await manager.link(
+    const controller = new PieceController(pieces, target);
+    await pieces.link(
       entityRefToString(source.entityId),
       ["settings"],
       entityRefToString(target.entityId),
@@ -5777,15 +6519,15 @@ describe("piece pull materialization", () => {
   it("rejects an incompatible schema update before changing the piece", async () => {
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledSchemaEvolutionProgram(1),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       firstPattern,
       { value: 4 },
       "incompatible-schema-update-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const previousRef = getPatternIdentityRef(controller.getCell());
 
     await expect(
@@ -5800,15 +6542,15 @@ describe("piece pull materialization", () => {
   it("allows an explicitly authorized incompatible schema update", async () => {
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledResultNarrowingProgram("number"),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       firstPattern,
       { input: 5 },
       "allowed-incompatible-schema-update-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await controller.setPattern(
       compiledResultNarrowingProgram("string | number"),
@@ -5821,15 +6563,15 @@ describe("piece pull materialization", () => {
   it("does not hydrate an invalid partial default into an optional object", async () => {
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledOptionalPartialDefaultProgram(1),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       firstPattern,
       { value: 4 },
       "optional-partial-default-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     await controller.setPattern(compiledOptionalPartialDefaultProgram(2));
 
@@ -5843,15 +6585,15 @@ describe("piece pull materialization", () => {
   it("does not hydrate an invalid partial ref default on first start", async () => {
     const pattern = await runtime.patternManager.compilePattern(
       compiledOptionalPartialDefaultProgram(2),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       pattern,
       { value: 4 },
       "optional-partial-default-first-start-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const rawInput = (await controller.input.getCell()).getRaw();
 
     expect(rawInput).toEqual({ value: 4 });
@@ -5863,15 +6605,15 @@ describe("piece pull materialization", () => {
     const originalRepository = "https://github.com/commontoolsinc/labs";
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledDefaultedOptionsProgram(1),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       firstPattern,
       { value: 4 },
       "defined-object-default-conflict-" + crypto.randomUUID(),
       { start: true, repository: originalRepository },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const inputCell = await controller.input.getCell();
     await runtime.editWithRetry((tx) => {
       inputCell.withTx(tx).setRawUntyped({
@@ -5895,15 +6637,15 @@ describe("piece pull materialization", () => {
   it("rejects an optional field update that conflicts with durable raw args", async () => {
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledOptionalNumberFieldProgram(1),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       firstPattern,
       { value: 4 },
       "optional-field-conflict-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const inputCell = await controller.input.getCell();
     await runtime.editWithRetry((tx) => {
       inputCell.withTx(tx).setRawUntyped({
@@ -5919,10 +6661,10 @@ describe("piece pull materialization", () => {
 
     const candidate = await runtime.patternManager.compilePattern(
       compiledOptionalNumberFieldProgram(2),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     await expect(
-      manager.runWithPattern(candidate, controller.id),
+      pieces.runWithPattern(candidate, controller.id),
     ).rejects.toThrow(/updated arguments do not match the candidate schema/);
 
     expect(getPatternIdentityRef(piece)).toEqual(previousRef);
@@ -5930,16 +6672,16 @@ describe("piece pull materialization", () => {
   });
 
   it("validates legacy-open setInput calls against the updated schema", async () => {
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       await runtime.patternManager.compilePattern(
         compiledOptionalNumberFieldProgram(1),
-        { space: manager.getSpace() },
+        { space: pieces.getSpace() },
       ),
       { value: 4 },
       "optional-field-set-input-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     await controller.setPattern(compiledOptionalNumberFieldProgram(2));
 
     await expect(
@@ -5949,7 +6691,7 @@ describe("piece pull materialization", () => {
   });
 
   it("re-proves retained durable links against the candidate schema", async () => {
-    const sourcePiece = await manager.runPersistent(
+    const sourcePiece = await pieces.runPersistent(
       trustPattern(runtime, {
         argumentSchema: { type: "object", properties: {} },
         resultSchema: {
@@ -5964,19 +6706,30 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       await runtime.patternManager.compilePattern(
         compiledOptionalNumberFieldProgram(1),
-        { space: manager.getSpace() },
+        { space: pieces.getSpace() },
       ),
       { value: 4 },
       "optional-field-linked-contract-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const previousRef = getPatternIdentityRef(piece);
 
-    await controller.input.set(sourcePiece.key("value"), ["mode"]);
+    // Seed a retained link written before the pattern declared this input.
+    // Piece IO refuses new writes through such a hidden path.
+    const inputCell = await controller.input.getCell();
+    const write = await runtime.editWithRetry((tx) => {
+      inputCell.withTx(tx).key("mode").setRawUntyped(
+        sourcePiece.key("value").getAsLink({
+          base: inputCell,
+          includeSchema: true,
+        }),
+      );
+    });
+    expect(write.error).toBeUndefined();
     await expect(
       controller.setPattern(compiledOptionalNumberFieldProgram(2)),
     ).rejects.toThrow(/input link.*schema is not compatible/);
@@ -5993,18 +6746,18 @@ describe("piece pull materialization", () => {
   it("does not accept a linked stream as an optional scalar during migration", async () => {
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledOptionalNumberFieldProgram(1),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       firstPattern,
       { value: 4 },
       "optional-field-stream-conflict-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const inputCell = await controller.input.getCell();
     const stream = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "optional-field-stream-" + crypto.randomUUID(),
       { type: "number", asCell: ["stream"] },
     );
@@ -6034,23 +6787,23 @@ describe("piece pull materialization", () => {
     const winnerProgram = compiledMultiplierProgram("winner", 10);
     const initialPattern = await runtime.patternManager.compilePattern(
       initialProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const winnerPattern = await runtime.patternManager.compilePattern(
       winnerProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       initialPattern,
       { input: 5 },
       "set-input-pattern-race-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const oldInputEntered = defer<void>();
     const releaseOldInput = defer<void>();
-    const originalRunWithPattern = manager.runWithPattern;
-    manager.runWithPattern = async (pattern, pieceId, inputs, options) => {
+    const originalRunWithPattern = pieces.runWithPattern;
+    pieces.runWithPattern = async (pattern, pieceId, inputs, options) => {
       if (
         pattern === initialPattern &&
         (inputs as { input?: number } | undefined)?.input === 7
@@ -6059,7 +6812,7 @@ describe("piece pull materialization", () => {
         await releaseOldInput.promise;
       }
       return await originalRunWithPattern.call(
-        manager,
+        pieces,
         pattern,
         pieceId,
         inputs,
@@ -6091,7 +6844,7 @@ describe("piece pull materialization", () => {
       });
     } finally {
       releaseOldInput.resolve();
-      manager.runWithPattern = originalRunWithPattern;
+      pieces.runWithPattern = originalRunWithPattern;
       runtime.patternManager.compilePattern = originalCompile;
     }
   });
@@ -6099,15 +6852,15 @@ describe("piece pull materialization", () => {
   it("re-resolves input schema and defaults after a commit retry", async () => {
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledSchemaEvolutionProgram(1),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       firstPattern,
       { value: 4 },
       "piece-prop-schema-race-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const commitEntered = defer<void>();
     const releaseCommit = defer<void>();
     const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
@@ -6157,15 +6910,15 @@ describe("piece pull materialization", () => {
   it("re-resolves root schema defaults for a path write after retry", async () => {
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledLinkedSettingsProgram(1),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       firstPattern,
       { settings: { mode: "old" } },
       "piece-prop-path-schema-race-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const commitEntered = defer<void>();
     const releaseCommit = defer<void>();
     const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
@@ -6215,23 +6968,23 @@ describe("piece pull materialization", () => {
     const numberProgram = compiledResultNarrowingProgram("number");
     const initialPattern = await runtime.patternManager.compilePattern(
       initialProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const stringPattern = await runtime.patternManager.compilePattern(
       stringProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const numberPattern = await runtime.patternManager.compilePattern(
       numberProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       initialPattern,
       { input: 4 },
       "concurrent-schema-update-" + crypto.randomUUID(),
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const compileEntered = defer<void>();
     const releaseCompile = defer<void>();
     const originalCompile = runtime.patternManager.compilePattern.bind(
@@ -6261,7 +7014,7 @@ describe("piece pull materialization", () => {
       expect(await controller.result.get()).toEqual({ value: 4 });
 
       await expect(
-        manager.runWithPattern(numberPattern, controller.id, undefined, {
+        pieces.runWithPattern(numberPattern, controller.id, undefined, {
           start: false,
           expectedPatternIdentity: getPatternIdentityRef(piece),
         }),
@@ -6278,23 +7031,23 @@ describe("piece pull materialization", () => {
     const winnerProgram = compiledMultiplierProgram("winner", 10);
     const initialPattern = await runtime.patternManager.compilePattern(
       initialProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const stalePattern = await runtime.patternManager.compilePattern(
       staleProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const winnerPattern = await runtime.patternManager.compilePattern(
       winnerProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       initialPattern,
       { input: 5 },
       "commit-conflict-update-" + crypto.randomUUID(),
       { start: false },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const commitEntered = defer<void>();
     const releaseCommit = defer<void>();
     const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
@@ -6353,44 +7106,35 @@ describe("piece pull materialization", () => {
     const winnerProgram = compiledResultNarrowingProgram("number");
     const initialPattern = await runtime.patternManager.compilePattern(
       initialProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const firstPattern = await runtime.patternManager.compilePattern(
       firstProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const winnerPattern = await runtime.patternManager.compilePattern(
       winnerProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       initialPattern,
       { input: 5 },
       "post-commit-update-race-" + crypto.randomUUID(),
       { start: false },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const firstPostCommitSync = defer<void>();
     const winnerPostCommitSync = defer<void>();
     const releaseFirst = defer<void>();
     const releaseWinner = defer<void>();
-    const runnerInternals = runtime.runner as unknown as {
-      syncCellsForRunningPattern(
-        resultCell: unknown,
-        pattern: Pattern,
-        inputs?: unknown,
-      ): Promise<boolean>;
-    };
-    const originalSync = runnerInternals.syncCellsForRunningPattern.bind(
-      runtime.runner,
-    );
-    const syncCounts = new Map<Pattern, number>();
-    runnerInternals.syncCellsForRunningPattern = async (
+    const syncCounts = new Map<Module | Pattern, number>();
+    runtime.runner.accessForTestingOnly.dependencySyncer = async (
       resultCell,
       pattern,
       inputs,
+      sync,
     ) => {
-      const synced = await originalSync(resultCell, pattern, inputs);
+      const synced = await sync(resultCell, pattern, inputs);
       const count = (syncCounts.get(pattern) ?? 0) + 1;
       syncCounts.set(pattern, count);
       if (count === 2 && pattern === firstPattern) {
@@ -6418,11 +7162,31 @@ describe("piece pull materialization", () => {
       await winnerPostCommitSync.promise;
 
       releaseWinner.resolve();
-      await winnerUpdate;
+      const winnerReceipt = await winnerUpdate;
       releaseFirst.resolve();
-      await firstUpdate;
+      const firstReceipt = await firstUpdate;
       await runtime.idle();
 
+      // Each receipt answers whether that caller's transaction committed; it
+      // is not a later snapshot of the row. The winner assertion below is the
+      // independent current-state check, just as it would be after two
+      // successful database updates to the same row.
+      expect(firstReceipt.ref).toEqual(
+        runtime.patternManager.getArtifactEntryRef(firstPattern),
+      );
+      expect(winnerReceipt.ref).toEqual(
+        runtime.patternManager.getArtifactEntryRef(winnerPattern),
+      );
+      // Each revision names its own caller's transaction too. This is the
+      // field that would drift first if a receipt ever started reporting the
+      // history's last entry rather than what the caller committed: both
+      // revisions are in the history, and only their order distinguishes
+      // them.
+      const revisions = getPieceSourceRevisions(piece);
+      const revisionIds = revisions.map((revision) => revision.revisionId);
+      expect(firstReceipt.revisionId).not.toBe(winnerReceipt.revisionId);
+      expect(revisionIds).toContain(firstReceipt.revisionId);
+      expect(revisions.at(-1)?.revisionId).toBe(winnerReceipt.revisionId);
       expect(getPatternIdentityRef(piece)).toEqual(
         runtime.patternManager.getArtifactEntryRef(winnerPattern),
       );
@@ -6440,12 +7204,12 @@ describe("piece pull materialization", () => {
     } finally {
       releaseFirst.resolve();
       releaseWinner.resolve();
-      runnerInternals.syncCellsForRunningPattern = originalSync;
+      runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
       runtime.patternManager.compilePattern = originalCompile;
     }
   });
 
-  it("does not install an older controller mutation after a newer one", async () => {
+  it("keeps the newer mutation's schema when an older one fails after it", async () => {
     const initialProgram = compiledResultNarrowingProgram(
       "string | number | boolean",
     );
@@ -6453,27 +7217,37 @@ describe("piece pull materialization", () => {
     const winnerProgram = compiledResultNarrowingProgram("number");
     const initialPattern = await runtime.patternManager.compilePattern(
       initialProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const firstPattern = await runtime.patternManager.compilePattern(
       firstProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const winnerPattern = await runtime.patternManager.compilePattern(
       winnerProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       initialPattern,
       { input: 5 },
       "controller-update-race-" + crypto.randomUUID(),
       { start: false },
     );
-    const controller = new PieceController(manager, piece);
+    const winnerRef = runtime.patternManager.getArtifactEntryRef(winnerPattern);
+    if (!winnerRef) {
+      throw new Error("missing compiled pattern ref");
+    }
+    const controller = new PieceController(pieces, piece);
     const firstRunEntered = defer<void>();
     const releaseFirstRun = defer<void>();
-    const originalRunWithPattern = manager.runWithPattern;
-    manager.runWithPattern = async (
+    // Only the losing update is intercepted: it is held until the winner has
+    // finished, then fails, which is what an update superseded before it
+    // commits does — the identity precondition inside the setup transaction
+    // refuses it. The winner runs the real update path, so the pointer it
+    // commits and the receipt it returns are the ones production would
+    // produce rather than values this fixture invented.
+    const originalRunPatternUpdate = pieces.runPatternUpdate.bind(pieces);
+    pieces.runPatternUpdate = async (
       pattern,
       pieceId,
       inputs,
@@ -6482,13 +7256,11 @@ describe("piece pull materialization", () => {
       if (pattern === firstPattern) {
         firstRunEntered.resolve();
         await releaseFirstRun.promise;
-        return piece.asSchema(firstPattern.resultSchema);
+        throw new Error(
+          "piece pattern changed while the source update was compiling",
+        );
       }
-      if (pattern === winnerPattern) {
-        return piece.asSchema(winnerPattern.resultSchema);
-      }
-      return await originalRunWithPattern.call(
-        manager,
+      return await originalRunPatternUpdate(
         pattern,
         pieceId,
         inputs,
@@ -6505,18 +7277,24 @@ describe("piece pull materialization", () => {
     }) as typeof runtime.patternManager.compilePattern;
 
     try {
-      const firstUpdate = controller.setPattern(firstProgram);
+      const firstUpdate = expect(controller.setPattern(firstProgram)).rejects
+        .toThrow(/pattern changed while the source update was compiling/);
       await firstRunEntered.promise;
-      await controller.setPattern(winnerProgram);
+      const winnerReceipt = await controller.setPattern(winnerProgram);
       releaseFirstRun.resolve();
       await firstUpdate;
 
+      // The loser's failure is handled after the winner installed its schema,
+      // and must leave that schema in place rather than reconciling back to
+      // the version it was carrying.
       expect(controller.getCell().getAsNormalizedFullLink().schema).toEqual(
         winnerPattern.resultSchema,
       );
+      expect(winnerReceipt.ref).toEqual(winnerRef);
+      expect(getPatternIdentityRef(piece)).toEqual(winnerRef);
     } finally {
       releaseFirstRun.resolve();
-      manager.runWithPattern = originalRunWithPattern;
+      pieces.runPatternUpdate = originalRunPatternUpdate;
       runtime.patternManager.compilePattern = originalCompile;
     }
   });
@@ -6529,34 +7307,33 @@ describe("piece pull materialization", () => {
     const winnerProgram = compiledResultNarrowingProgram("number");
     const initialPattern = await runtime.patternManager.compilePattern(
       initialProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const firstPattern = await runtime.patternManager.compilePattern(
       firstProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const winnerPattern = await runtime.patternManager.compilePattern(
       winnerProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       initialPattern,
       { input: 5 },
       "controller-post-commit-failure-" + crypto.randomUUID(),
       { start: false },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
     const firstRunReturned = defer<void>();
     const releaseFirstRun = defer<void>();
-    const originalRunWithPattern = manager.runWithPattern;
-    manager.runWithPattern = async (
+    const originalRunPatternUpdate = pieces.runPatternUpdate.bind(pieces);
+    pieces.runPatternUpdate = async (
       pattern,
       pieceId,
       inputs,
       options,
     ) => {
-      const cell = await originalRunWithPattern.call(
-        manager,
+      const result = await originalRunPatternUpdate(
         pattern,
         pieceId,
         inputs,
@@ -6566,9 +7343,12 @@ describe("piece pull materialization", () => {
         firstRunReturned.resolve();
         await releaseFirstRun.promise;
       } else if (pattern === winnerPattern) {
-        throw new Error("injected post-commit failure");
+        throw new PatternSetupPostCommitError(
+          result.commit,
+          new Error("injected post-commit failure"),
+        );
       }
-      return cell;
+      return result;
     };
     const originalCompile = runtime.patternManager.compilePattern.bind(
       runtime.patternManager,
@@ -6582,21 +7362,36 @@ describe("piece pull materialization", () => {
     try {
       const firstUpdate = controller.setPattern(firstProgram);
       await firstRunReturned.promise;
-      await expect(controller.setPattern(winnerProgram)).resolves
-        .toBeUndefined();
+      // Resolves rather than rejects: the transition committed, so the
+      // injected post-commit failure is not this call's failure. The receipt
+      // names what that committed transition wrote, reports the refresh as
+      // failed, and says what it detached — for a piece following no origin,
+      // nothing.
+      const winnerReceipt = await controller.setPattern(winnerProgram);
+      expect(winnerReceipt.ref).toEqual(
+        runtime.patternManager.getArtifactEntryRef(winnerPattern),
+      );
+      expect(winnerReceipt.refresh).toEqual({
+        status: "failed",
+        warning: "injected post-commit failure",
+      });
+      expect(winnerReceipt.detachedOrigin).toBeNull();
       expect(getPatternIdentityRef(piece)).toEqual(
         runtime.patternManager.getArtifactEntryRef(winnerPattern),
       );
 
       releaseFirstRun.resolve();
-      await firstUpdate;
+      const firstReceipt = await firstUpdate;
+      expect(firstReceipt.ref).toEqual(
+        runtime.patternManager.getArtifactEntryRef(firstPattern),
+      );
 
       expect(controller.getCell().getAsNormalizedFullLink().schema).toEqual(
         winnerPattern.resultSchema,
       );
     } finally {
       releaseFirstRun.resolve();
-      manager.runWithPattern = originalRunWithPattern;
+      pieces.runPatternUpdate = originalRunPatternUpdate;
       runtime.patternManager.compilePattern = originalCompile;
     }
   });
@@ -6604,15 +7399,15 @@ describe("piece pull materialization", () => {
   it("rechecks the durable identity after loading the winner's schema", async () => {
     const initialPattern = await runtime.patternManager.compilePattern(
       compiledResultNarrowingProgram("string | number | boolean"),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledResultNarrowingProgram("string"),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const winnerPattern = await runtime.patternManager.compilePattern(
       compiledResultNarrowingProgram("number"),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const firstRef = runtime.patternManager.getArtifactEntryRef(firstPattern);
     const winnerRef = runtime.patternManager.getArtifactEntryRef(winnerPattern);
@@ -6620,7 +7415,7 @@ describe("piece pull materialization", () => {
       throw new Error("missing compiled pattern ref");
     }
 
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       initialPattern,
       { input: 5 },
       "schema-load-race-" + crypto.randomUUID(),
@@ -6679,13 +7474,13 @@ describe("piece pull materialization", () => {
   it("syncs dependencies after a remote pattern supersedes local setup", async () => {
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledMultiplierProgram("local", 2),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const remotePattern = await runtime.patternManager.compilePattern(
       compiledMultiplierProgram("remote", 10),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       firstPattern,
       { input: 5 },
       "remote-preparation-supersession-" + crypto.randomUUID(),
@@ -6694,52 +7489,43 @@ describe("piece pull materialization", () => {
     const id = entityRefToString(piece.entityId);
     const session = await createSession({
       identity: signer,
-      spaceName: manager.getSpaceName()!,
+      spaceName: pieces.getSpaceName()!,
     });
     const remoteRuntime = new Runtime({
       apiUrl: new URL("http://localhost:9999"),
       storageManager,
     });
-    const remoteManager = new PieceManager(session, remoteRuntime);
+    const remotePieces = new PiecesController(session, remoteRuntime);
 
     try {
-      await remoteManager.synced();
-      await remoteManager.runWithPattern(
+      await remotePieces.synced();
+      await remotePieces.runWithPattern(
         remotePattern,
         id,
         { input: 5 },
         { start: false },
       );
-      await remoteManager.synced();
-      await manager.synced();
+      await remotePieces.synced();
+      await pieces.synced();
       await piece.pull();
       expect(getPatternIdentityRef(piece)).toEqual(
         runtime.patternManager.getArtifactEntryRef(remotePattern),
       );
 
-      const runnerInternals = runtime.runner as unknown as {
-        syncCellsForRunningPattern(
-          resultCell: unknown,
-          pattern: Pattern,
-          inputs?: unknown,
-        ): Promise<boolean>;
-      };
-      const originalSync = runnerInternals.syncCellsForRunningPattern.bind(
-        runtime.runner,
-      );
       let dependencySyncs = 0;
-      runnerInternals.syncCellsForRunningPattern = async (
+      runtime.runner.accessForTestingOnly.dependencySyncer = async (
         resultCell,
         pattern,
         inputs,
+        sync,
       ) => {
         if (pattern === remotePattern) dependencySyncs++;
-        return await originalSync(resultCell, pattern, inputs);
+        return await sync(resultCell, pattern, inputs);
       };
       try {
         await runtime.start(piece);
       } finally {
-        runnerInternals.syncCellsForRunningPattern = originalSync;
+        runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
       }
 
       expect(dependencySyncs).toBeGreaterThan(0);
@@ -6755,17 +7541,17 @@ describe("piece pull materialization", () => {
   it("waits for setup to settle before setupPersistent syncs pattern metadata", async () => {
     const pattern = doublePattern();
     const patternRef = { identity: "test-pattern-identity", symbol: "default" };
-    const originalSetup = manager.runtime.setup.bind(manager.runtime);
-    const originalGetArtifactEntryRef = manager.runtime.patternManager
-      .getArtifactEntryRef.bind(manager.runtime.patternManager);
-    const originalSyncPatternByIdentity = manager.syncPatternByIdentity.bind(
-      manager,
+    const originalSetup = pieces.runtime.setup.bind(pieces.runtime);
+    const originalGetArtifactEntryRef = pieces.runtime.patternManager
+      .getArtifactEntryRef.bind(pieces.runtime.patternManager);
+    const originalSyncPatternByIdentity = pieces.syncPatternByIdentity.bind(
+      pieces,
     );
     let setupResolved = false;
     let releaseSetup: (() => void) | undefined;
     const setupCalled = defer<void>();
 
-    manager.runtime.setup = ((...args) => {
+    pieces.runtime.setup = ((...args) => {
       const piece = args[3];
       return new Promise<typeof piece>((resolve) => {
         releaseSetup = () => {
@@ -6774,22 +7560,22 @@ describe("piece pull materialization", () => {
         };
         setupCalled.resolve();
       });
-    }) as typeof manager.runtime.setup;
+    }) as typeof pieces.runtime.setup;
 
     const getRefStub: unknown = () => patternRef;
-    manager.runtime.patternManager.getArtifactEntryRef =
-      getRefStub as typeof manager.runtime.patternManager.getArtifactEntryRef;
+    pieces.runtime.patternManager.getArtifactEntryRef =
+      getRefStub as typeof pieces.runtime.patternManager.getArtifactEntryRef;
 
-    manager.syncPatternByIdentity = ((
+    pieces.syncPatternByIdentity = ((
       ref: { identity: string; symbol: string },
     ) => {
       expect(ref).toEqual(patternRef);
       expect(setupResolved).toBe(true);
       return Promise.resolve(pattern);
-    }) as typeof manager.syncPatternByIdentity;
+    }) as typeof pieces.syncPatternByIdentity;
 
     try {
-      const pending = manager.setupPersistent(pattern, { input: 5 });
+      const pending = pieces.setupPersistent(pattern, { input: 5 });
       await setupCalled.promise;
       expect(setupResolved).toBe(false);
       if (!releaseSetup) {
@@ -6798,15 +7584,15 @@ describe("piece pull materialization", () => {
       releaseSetup();
       await pending;
     } finally {
-      manager.runtime.setup = originalSetup;
-      manager.runtime.patternManager.getArtifactEntryRef =
+      pieces.runtime.setup = originalSetup;
+      pieces.runtime.patternManager.getArtifactEntryRef =
         originalGetArtifactEntryRef;
-      manager.syncPatternByIdentity = originalSyncPatternByIdentity;
+      pieces.syncPatternByIdentity = originalSyncPatternByIdentity;
     }
   });
 
   it("restarts stopped pieces when runWithPattern is called with start", async () => {
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
@@ -6815,11 +7601,11 @@ describe("piece pull materialization", () => {
 
     expect(runtime.runner.cancels.size).toBe(1);
 
-    await manager.stopPiece(piece);
+    await pieces.stopPiece(piece);
 
     expect(runtime.runner.cancels.size).toBe(0);
 
-    await manager.runWithPattern(
+    await pieces.runWithPattern(
       trustPattern(runtime, tenfoldPattern()),
       entityRefToString(piece.entityId),
       { input: 5 },
@@ -6827,25 +7613,25 @@ describe("piece pull materialization", () => {
     );
 
     expect(runtime.runner.cancels.size).toBe(1);
-    expect(manager.getResult(piece).get()).toEqual({ output: 50 });
+    expect(pieces.getResult(piece).get()).toEqual({ output: 50 });
   });
 
   it("updates piece names when runWithPattern changes patterns", async () => {
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       trustPattern(runtime, namedPattern("double", 2)),
       { input: 5 },
       undefined,
       { start: true },
     );
-    const controller = new PieceController(manager, piece);
+    const controller = new PieceController(pieces, piece);
 
     expect(controller.name()).toBe("double");
-    expect(manager.getResult(piece).get()).toEqual({
+    expect(pieces.getResult(piece).get()).toEqual({
       [NAME]: "double",
       output: 10,
     });
 
-    await manager.runWithPattern(
+    await pieces.runWithPattern(
       trustPattern(runtime, namedPattern("tenfold", 10)),
       entityRefToString(piece.entityId),
       { input: 5 },
@@ -6853,7 +7639,7 @@ describe("piece pull materialization", () => {
     );
 
     expect(controller.name()).toBe("tenfold");
-    expect(manager.getResult(piece).get()).toEqual({
+    expect(pieces.getResult(piece).get()).toEqual({
       [NAME]: "tenfold",
       output: 50,
     });
@@ -6861,13 +7647,13 @@ describe("piece pull materialization", () => {
 
   it("reads a piece addressed through a value-link wrapper (headless sub-piece slot)", async () => {
     // The canonical piece K — setup writes patternIdentity + the argument link.
-    const k = await manager.runPersistent(
+    const k = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
       { start: true },
     );
-    expect(manager.getResult(k).get()).toEqual({ output: 10 });
+    expect(pieces.getResult(k).get()).toEqual({ output: 10 });
 
     // A value-link "slot" cell R that redirects to K — the exact shape a piece
     // pushed into a list/object gets addressed by (the array/object element,
@@ -6875,22 +7661,21 @@ describe("piece pull materialization", () => {
     // board's `addTopic`, whose array element is a plain value-link to the topic
     // piece; the slot itself carries no piece metadata.
     const r = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "wrapper-slot-" + crypto.randomUUID(),
     );
     await runtime.editWithRetry((tx) => {
       r.withTx(tx).set(k.getAsLink());
     });
-    await manager.synced();
+    await pieces.synced();
 
     // Reading the argument directly off the slot fails exactly as
     // `cf piece inspect <slot-fid>` did before this fix:
-    expect(() => manager.getArgument(r)).toThrow("piece missing argument cell");
+    expect(() => pieces.getArgument(r)).toThrow("piece missing argument cell");
 
     // Addressing the slot by its fid (the path `cf piece inspect`/`get` take)
-    // canonicalizes R -> its result cell K (a VALUE link) in manager.get, so
+    // canonicalizes R -> its result cell K (a VALUE link) in pieces.get, so
     // input/result reads land on the real piece, not the un-materialized wrapper.
-    const pieces = new PiecesController(manager);
     const piece = await pieces.get(entityRefToString(r.entityId), false);
     expect(await piece.result.get(["output"])).toBe(10);
     expect(await piece.input.get(["input"])).toBe(5);
@@ -6899,14 +7684,14 @@ describe("piece pull materialization", () => {
 
 describe("piece cold-replica slot read (two replicas, one server)", () => {
   let server: MemoryV2Server.Server;
-  let writerStorage: SharedServerStorageManager;
+  let writerStorage: EmulatedStorageManager;
   let writerRuntime: Runtime;
-  let writerManager: PieceManager;
+  let writerPieces: PiecesController;
   let spaceName: string;
 
   beforeEach(async () => {
     server = newSharedServer();
-    writerStorage = SharedServerStorageManager.connectTo(server, {
+    writerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     writerRuntime = new Runtime({
@@ -6915,8 +7700,8 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
     });
     spaceName = "cold-slot-" + crypto.randomUUID();
     const session = await createSession({ identity: signer, spaceName });
-    writerManager = new PieceManager(session, writerRuntime);
-    await writerManager.synced();
+    writerPieces = new PiecesController(session, writerRuntime);
+    await writerPieces.synced();
   });
 
   afterEach(async () => {
@@ -6929,27 +7714,27 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
     // Writer replica: create the canonical piece K (setup writes patternIdentity
     // + the argument link), then a value-link slot R -> K — the exact shape the
     // topics board's addTopic produces — and sync both to the shared server.
-    const k = await writerManager.runPersistent(
+    const k = await writerPieces.runPersistent(
       trustPattern(writerRuntime, doublePattern()),
       { input: 5 },
       undefined,
       { start: true },
     );
     const r = writerRuntime.getCell(
-      writerManager.getSpace(),
+      writerPieces.getSpace(),
       "wrapper-slot-" + crypto.randomUUID(),
     );
     await writerRuntime.editWithRetry((tx) => {
       r.withTx(tx).set(k.getAsLink());
     });
-    await writerManager.synced();
+    await writerPieces.synced();
     const slotId = entityRefToString(r.entityId);
 
-    // Fresh reader replica: a NEW storage manager on the SAME server, so it has
+    // Fresh reader replica: a NEW storage manager on the SAME server, so it
     // never pulled K. Reading the slot by its fid must canonicalize R -> K (a
     // VALUE link) AND cold-fetch K's docs from the server — the end-to-end
     // behavior the local-toolshed run confirmed, now repeatable in-process.
-    const readerStorage = SharedServerStorageManager.connectTo(server, {
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     const readerRuntime = new Runtime({
@@ -6957,10 +7742,9 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
       storageManager: readerStorage,
     });
     const readerSession = await createSession({ identity: signer, spaceName });
-    const readerManager = new PieceManager(readerSession, readerRuntime);
+    const readerPieces = new PiecesController(readerSession, readerRuntime);
     try {
-      await readerManager.synced();
-      const readerPieces = new PiecesController(readerManager);
+      await readerPieces.synced();
       const piece = await readerPieces.get(slotId, false);
 
       // Both reads canonicalize the slot R -> its result cell K (a value link)
@@ -6968,6 +7752,227 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
       // that threw "piece missing argument cell" pre-fix, so exercise it first.
       expect(await piece.input.get(["input"])).toBe(5);
       expect(await piece.result.get(["output"])).toBe(10);
+    } finally {
+      await readerRuntime.dispose();
+      await readerStorage.close();
+    }
+  });
+
+  it("a fresh replica preserves visible nested input beside a scoped link", async () => {
+    const sectionSchema = {
+      type: "object",
+      properties: {
+        label: { type: "string" },
+        inner: {
+          type: "object",
+          properties: {
+            plain: { type: "string" },
+            scoped: { type: "string" },
+          },
+          required: ["plain", "scoped"],
+        },
+      },
+      required: ["label"],
+    } as const satisfies JSONSchema;
+    const tx = writerRuntime.edit();
+    const scoped = writerRuntime.getCell<string>(
+      writerPieces.getSpace(),
+      "nested-scoped-" + crypto.randomUUID(),
+      { type: "string" },
+      tx,
+      "session",
+    );
+    scoped.set("writer-only");
+    const commit = await tx.commit();
+    expect(commit.error).toBeUndefined();
+
+    const piece = await writerPieces.runPersistent(
+      trustPattern(writerRuntime, {
+        argumentSchema: {
+          type: "object",
+          properties: { section: sectionSchema },
+          required: ["section"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {
+        section: {
+          label: "hello",
+          inner: { plain: "visible", scoped },
+        },
+      },
+      undefined,
+      { start: true },
+    );
+    await writerPieces.synced();
+
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const readerRuntime = new Runtime({
+      apiUrl: new URL("http://localhost:9999"),
+      storageManager: readerStorage,
+    });
+    const readerSession = await createSession({ identity: signer, spaceName });
+    const readerPieces = new PiecesController(readerSession, readerRuntime);
+    try {
+      await readerPieces.synced();
+      const readerPiece = await readerPieces.get(
+        entityRefToString(piece.entityId),
+        false,
+      );
+
+      expect(await readerPiece.input.get(["section"])).toEqual({
+        label: "hello",
+        inner: { plain: "visible" },
+      });
+    } finally {
+      await readerRuntime.dispose();
+      await readerStorage.close();
+    }
+  });
+
+  it("keeps a capped asCell handle capped through the narrow read", async () => {
+    // The narrow read reaches a path below an asCell slot with a plain `key()`
+    // chain, letting link resolution follow the handle mid-path rather than
+    // dereferencing it by hand. This pins the two properties that choice has to
+    // keep: the terminal handle still applies the scoped-link relaxation (so a
+    // scoped child voids only itself, not its whole object), and a path THROUGH
+    // the handle still lands on the right document. #5231 moved the asCell
+    // scope cap into the runner's own projection, which let the narrow read
+    // drop its resolveAsCell() routing. That routing was the only thing keeping
+    // a capped handle capped here, so pin the behavior at this layer rather
+    // than trusting the runner test to stand in for it.
+
+    const tx = writerRuntime.edit();
+    const target = writerRuntime.getCell(
+      writerPieces.getSpace(),
+      "capped-target-" + crypto.randomUUID(),
+      { type: "object", properties: { field: { type: "string" } } },
+      tx,
+      "session",
+    );
+    target.set({ field: "secret" });
+    const commit = await tx.commit();
+    expect(commit.error).toBeUndefined();
+
+    const piece = await writerPieces.runPersistent(
+      trustPattern(writerRuntime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            // The handle may only follow links at space scope; the stored
+            // link is session-scoped, so it must not resolve.
+            handle: {
+              type: "object",
+              properties: { field: { type: "string" } },
+              required: ["field"],
+              asCell: [{ kind: "cell", scope: "space" }],
+            },
+            plain: { type: "string" },
+          },
+          required: ["handle", "plain"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: target, plain: "visible" },
+      undefined,
+      { start: true },
+    );
+    await writerPieces.synced();
+    const controller = new PieceController(writerPieces, piece);
+
+    expect(await controller.input.get(["handle"])).toBeUndefined();
+    // An uncapped sibling on the same input still reads, so the block above
+    // is the cap and not a broken fixture.
+    expect(await controller.input.get(["plain"])).toBe("visible");
+  });
+
+  it("relaxes a scoped link below an asCell handle, at and through it", async () => {
+    const sectionSchema = {
+      type: "object",
+      properties: {
+        label: { type: "string" },
+        inner: {
+          type: "object",
+          properties: {
+            plain: { type: "string" },
+            scoped: { type: "string" },
+          },
+          required: ["plain", "scoped"],
+        },
+      },
+      required: ["label"],
+    } as const satisfies JSONSchema;
+    const tx = writerRuntime.edit();
+    const scoped = writerRuntime.getCell<string>(
+      writerPieces.getSpace(),
+      "handle-scoped-" + crypto.randomUUID(),
+      { type: "string" },
+      tx,
+      "session",
+    );
+    scoped.set("writer-only");
+    const section = writerRuntime.getCell(
+      writerPieces.getSpace(),
+      "handle-section-" + crypto.randomUUID(),
+      sectionSchema,
+      tx,
+    );
+    section.set({
+      label: "hello",
+      inner: { plain: "visible", scoped },
+    } as never);
+    const commit = await tx.commit();
+    expect(commit.error).toBeUndefined();
+
+    const piece = await writerPieces.runPersistent(
+      trustPattern(writerRuntime, {
+        argumentSchema: {
+          type: "object",
+          properties: { handle: { ...sectionSchema, asCell: ["cell"] } },
+          required: ["handle"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: section },
+      undefined,
+      { start: true },
+    );
+    await writerPieces.synced();
+
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const readerRuntime = new Runtime({
+      apiUrl: new URL("http://localhost:9999"),
+      storageManager: readerStorage,
+    });
+    const readerSession = await createSession({ identity: signer, spaceName });
+    const readerPieces = new PiecesController(readerSession, readerRuntime);
+    try {
+      await readerPieces.synced();
+      const readerPiece = await readerPieces.get(
+        entityRefToString(piece.entityId),
+        false,
+      );
+
+      // Terminal asCell: the handle is unwrapped and read through the same
+      // relaxation the root read uses, so `inner` survives without `scoped`.
+      expect(await readerPiece.input.get(["handle"])).toEqual({
+        label: "hello",
+        inner: { plain: "visible" },
+      });
+      // Through the asCell: link resolution follows the handle mid-path.
+      expect(await readerPiece.input.get(["handle", "label"])).toBe("hello");
+      expect(await readerPiece.input.get(["handle", "inner", "plain"]))
+        .toBe("visible");
     } finally {
       await readerRuntime.dispose();
       await readerStorage.close();

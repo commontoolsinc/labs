@@ -6,6 +6,7 @@ import {
   NAME,
   pattern,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -29,6 +30,8 @@ type Input = {
 };
 
 export type Output = {
+  [NAME]: string;
+  [UI]: VNode;
   transcription: TranscriptionData | null | Default<null>;
   notes: TranscriptionData[] | Default<[]>;
 };

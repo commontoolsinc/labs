@@ -1,0 +1,46 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "text": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "Fabric",
+        "type": "string"
+      }
+    },
+    "required": [
+      "text"
+    ],
+    "type": "object"
+  },
+  "pattern": "examples/phonetic-speller.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "codeWords": {
+        "description": "Every code word the file holds, in the order the file stores them.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "spelled": {
+        "description": "`text` spelled out, one code word per letter it recognizes.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "spelled",
+      "codeWords",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

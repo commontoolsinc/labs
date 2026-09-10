@@ -99,26 +99,37 @@ export type BillStatus = "unpaid" | "paid" | "overdue" | "likely_paid";
 export interface TrackedBill {
   /** Unique key for deduplication (identifier|dueDate) */
   key: string;
+
   /** Generic identifier (card last 4, account number, etc.) */
   identifier: string;
+
   /** Bill amount in dollars */
   amount: number;
+
   /** Due date in ISO format */
   dueDate: string;
+
   /** Current status */
   status: BillStatus;
+
   /** Whether the bill is considered paid */
   isPaid: boolean;
+
   /** Date the bill was paid (if known) */
   paidDate?: string;
+
   /** Date the email was received */
   emailDate: string;
+
   /** Gmail message ID */
   emailId: string;
+
   /** Whether user manually marked as paid */
   isManuallyPaid: boolean;
+
   /** Whether assumed paid due to age (>45 days overdue) */
   isLikelyPaid: boolean;
+
   /** Days until due (negative = overdue) */
   daysUntilDue: number;
 }

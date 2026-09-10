@@ -17,7 +17,6 @@ import {
   calculator,
   fetchAndRunPattern,
   listMentionable,
-  listRecent,
   navigateToPattern,
   readWebpage,
   searchWeb,
@@ -114,7 +113,6 @@ export default pattern<OmniboxFABInput>(
   ({ extraTools, extraSystemPrompt }) => {
     const mentionable =
       wish<MentionablePiece[]>({ query: "#mentionable" }).result;
-    const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
     const { entries: summaryEntries } = wish<{
       entries: SummaryIndexEntry[];
     }>({ query: "#summaryIndex" }).result!;
@@ -156,7 +154,7 @@ ${profileSection}${indexText}
 Tool usage priority:
 - For finding content in the space: use searchSpace with a query to search the indexed mentionable pieces that have nonempty summaries
 - For patterns: review the available patterns listed above, then use fetchAndRunPattern to instantiate one
-- For existing pages/notes/content: searchSpace first, then listRecent or listMentionable to identify what they're referencing
+- For existing pages/notes/content: searchSpace first, then listMentionable to identify what they're referencing
 - Attach relevant items to conversation after instantiation/retrieval if they support ongoing tasks
 - Remove attachments when no longer relevant
 - Search web only as last resort when nothing exists in the space
@@ -180,9 +178,6 @@ Be matter-of-fact. Prefer action to explanation.`;
       wishAndNavigate: wishTool,
       listMentionable: pattern((_input: Record<string, never>) =>
         listMentionable({ mentionable })
-      ),
-      listRecent: pattern((_input: Record<string, never>) =>
-        listRecent({ recentPieces })
       ),
       updateProfile,
       bash,

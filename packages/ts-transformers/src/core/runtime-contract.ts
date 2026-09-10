@@ -33,47 +33,55 @@ export interface CfcPolicyCompilerManifestV1 {
   };
 }
 
-// A `/// <cf-disable-transform />` directive is honored only at column zero.
-// This is intentional and mirrors TypeScript's own triple-slash directives
-// (`/// <reference ... />`), which are likewise recognized only at the very
-// start of a line, ahead of any statement. Leading blank lines before the
-// directive are fine — `findFirstContentLineIndex` skips them — but leading
-// whitespace *on* the directive line is not: an indented directive is ignored
-// and the file transforms normally (see `sourceHasIgnoredDisableDirective`).
-const CF_DISABLE_TRANSFORM_DIRECTIVE_RE =
-  /^\/\/\/\s*<cf-disable-transform\s*\/>/m;
+/** Authored location of one function-bearing builder artifact. */
+export interface BuilderSourceSite {
+  /** Authored line, 1-based. */
+  readonly line: number;
 
-/**
- * True when the source's first content line is the disable directive at column
- * zero — see {@link CF_DISABLE_TRANSFORM_DIRECTIVE_RE} for why column zero is
- * required. Read on the runtime boot path, so it stays a cheap string scan.
- */
-export function sourceDisablesCfTransform(source: string): boolean {
-  const lines = source.split("\n");
-  const firstContentLineIndex = findFirstContentLineIndex(lines);
-  return firstContentLineIndex !== null &&
-    isCFTransformDisabled(lines[firstContentLineIndex]!);
+  /** Authored column, 0-based. */
+  readonly col: number;
+
+  /** Declaration name visible in authored source, when one exists. */
+  readonly bindingName?: string;
 }
 
 /**
- * True when the source's first content line is an *indented* disable directive:
- * a `/// <cf-disable-transform />` that would disable the transform but for its
- * leading whitespace, so it is silently ignored under the column-zero rule.
- * A compile-time caller can use this to warn the author instead of transforming
- * a file they meant to opt out. The runtime boot path never needs it —
- * {@link sourceDisablesCfTransform} alone decides behavior.
+ * Debug-only compiler output mapping runtime artifact symbols to authored
+ * locations. It travels beside emitted JavaScript and is never executable.
  */
-export function sourceHasIgnoredDisableDirective(source: string): boolean {
-  const lines = source.split("\n");
-  const firstContentLineIndex = findFirstContentLineIndex(lines);
-  if (firstContentLineIndex === null) return false;
-  const line = lines[firstContentLineIndex]!;
-  return !isCFTransformDisabled(line) &&
-    isCFTransformDisabled(line.trimStart());
+export interface BuilderSourceSitesV1 {
+  readonly formatVersion: 1;
+  readonly sites: Readonly<Record<string, BuilderSourceSite>>;
 }
 
-function isCFTransformDisabled(line: string) {
-  return CF_DISABLE_TRANSFORM_DIRECTIVE_RE.test(line);
+/** Returns whether `value` is a well-formed builder-source-site sidecar. */
+export function isBuilderSourceSitesV1(
+  value: unknown,
+): value is BuilderSourceSitesV1 {
+  if (!isRecord(value) || value.formatVersion !== 1) return false;
+  if (!isRecord(value.sites)) return false;
+  for (const [symbol, site] of Object.entries(value.sites)) {
+    if (symbol.length === 0 || !isRecord(site)) return false;
+    if (!isIntegerAtLeast(site.line, 1) || !isIntegerAtLeast(site.col, 0)) {
+      return false;
+    }
+    if (
+      site.bindingName !== undefined &&
+      (typeof site.bindingName !== "string" || site.bindingName.length === 0)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isIntegerAtLeast(value: unknown, minimum: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) &&
+    value >= minimum;
 }
 
 /** Index of the first non-blank line, or null for an all-blank source. */

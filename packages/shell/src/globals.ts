@@ -1,10 +1,15 @@
-import { App } from "../shared/mod.ts";
 import { type RuntimeClient } from "@commonfabric/runtime-client";
+
+import type { ShellApp } from "./lib/app-state.ts";
 declare global {
-  var app: App;
+  var app: ShellApp;
   var commonfabric: {
     rt?: RuntimeClient;
     detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
+
+    /** Changes memory-message compression for live and later connections. */
+    setMemoryMessageCompression?: (enabled: boolean) => Promise<void>;
+
     watchWrites?: (
       options?:
         | {

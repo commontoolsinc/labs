@@ -9,7 +9,7 @@ import {
 import {
   DATA_URI_MEDIA_TYPE,
   valueFromDataUri,
-} from "@commonfabric/data-model/data-uri-codec";
+} from "@commonfabric/data-model/codec-data-uri";
 
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
@@ -59,7 +59,7 @@ describe("canonical factory data URI writer", () => {
     await storageManager?.close();
   });
 
-  it("writes Factory@1 only when its closure is available in the exact containing space", async () => {
+  it("writes inert Factory@1 transport without granting destination availability", async () => {
     const factory = await runtime.patternManager.compilePattern(PROGRAM, {
       space: destinationSpace,
     });
@@ -83,9 +83,14 @@ describe("canonical factory data URI writer", () => {
       "factory requires runner materialization",
     );
 
-    expect(() => runtime.getImmutableCell(otherSpace, factory)).toThrow(
-      `is not available in space ${otherSpace}`,
-    );
+    const transported = runtime.getImmutableCell(otherSpace, factory);
+    expect(isAdmittedFabricFactory(transported.getRaw())).toBe(true);
+    expect(
+      runtime.patternManager.isArtifactAvailableInSpace(
+        factoryStateOf(factory).ref!.identity,
+        otherSpace,
+      ),
+    ).toBe(false);
 
     const onlyInOtherSpace = await runtime.patternManager.compilePattern(
       OTHER_PROGRAM,
@@ -96,7 +101,13 @@ describe("canonical factory data URI writer", () => {
         available: factory,
         unavailable: onlyInOtherSpace,
       })
-    ).toThrow(`is not available in space ${destinationSpace}`);
+    ).not.toThrow();
+    expect(
+      runtime.patternManager.isArtifactAvailableInSpace(
+        factoryStateOf(onlyInOtherSpace).ref!.identity,
+        destinationSpace,
+      ),
+    ).toBe(false);
   });
 
   it("rejects session-only factories and arbitrary JavaScript functions", async () => {
@@ -104,7 +115,7 @@ describe("canonical factory data URI writer", () => {
     expect(() => runtime.getImmutableCell(destinationSpace, sessionOnly))
       .toThrow("artifact ref is not available");
     expect(() => runtime.getImmutableCell(destinationSpace, () => undefined))
-      .toThrow("Cannot store function");
+      .toThrow("Not representable as a `FabricValue`: function");
   });
 
   it("preserves undefined fields and sparse arrays in canonical inline documents", () => {

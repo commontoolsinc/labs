@@ -1,0 +1,162 @@
+== c1a-chat-off
+start_utc=2026-08-20T08:14:39Z
+load_before={ 4.04 3.29 3.12 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-off sha256=e5971fc9dff189f8 repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=0 test_wall_s=55 (rc 124 = hard cap 520s hit)
+load_after={ 4.76 3.61 3.25 }
+  posture: gitSha=44bb76b055a3 define=None
+== c1-chat-on
+start_utc=2026-08-20T08:15:56Z
+load_before={ 4.81 3.68 3.28 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-on sha256=6d0bef40e437ea8f repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=0 test_wall_s=68 (rc 124 = hard cap 520s hit)
+load_after={ 4.29 3.80 3.36 }
+  posture: gitSha=44bb76b055a3 define=true
+== c1b-chat-off
+start_utc=2026-08-20T08:18:15Z
+load_before={ 3.68 3.87 3.42 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-off sha256=e5971fc9dff189f8 repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=0 test_wall_s=56 (rc 124 = hard cap 520s hit)
+load_after={ 4.29 4.04 3.52 }
+  posture: gitSha=44bb76b055a3 define=None
+== c2-chat-on
+start_utc=2026-08-20T08:29:41Z
+load_before={ 4.61 3.72 3.48 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-on sha256=6d0bef40e437ea8f repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=0 test_wall_s=59 (rc 124 = hard cap 520s hit)
+load_after={ 2.81 3.36 3.36 }
+  posture: gitSha=44bb76b055a3 define=true
+== c2b-chat-off
+start_utc=2026-08-20T08:31:00Z
+load_before={ 2.65 3.29 3.33 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-off sha256=e5971fc9dff189f8 repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=0 test_wall_s=54 (rc 124 = hard cap 520s hit)
+load_after={ 3.14 3.35 3.35 }
+  posture: gitSha=44bb76b055a3 define=None
+== l1a-lunch-off
+start_utc=2026-08-20T08:19:33Z
+load_before={ 3.71 3.92 3.49 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-off sha256=e5971fc9dff189f8 repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=0 test_wall_s=12 (rc 124 = hard cap 520s hit)
+load_after={ 3.27 3.81 3.45 }
+  posture: gitSha=44bb76b055a3 define=None
+== l1-lunch-on
+start_utc=2026-08-20T08:20:02Z
+load_before={ 2.93 3.72 3.42 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-on sha256=6d0bef40e437ea8f repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=0 test_wall_s=12 (rc 124 = hard cap 520s hit)
+load_after={ 4.40 3.99 3.53 }
+  posture: gitSha=44bb76b055a3 define=true
+== l1b-lunch-off
+start_utc=2026-08-20T08:20:57Z
+load_before={ 3.93 3.93 3.52 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-off sha256=e5971fc9dff189f8 repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=0 test_wall_s=12 (rc 124 = hard cap 520s hit)
+load_after={ 3.52 3.83 3.50 }
+  posture: gitSha=44bb76b055a3 define=None
+== l2-lunch-on
+start_utc=2026-08-20T08:21:30Z
+load_before={ 3.03 3.71 3.46 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-on sha256=6d0bef40e437ea8f repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=0 test_wall_s=14 (rc 124 = hard cap 520s hit)
+load_after={ 2.59 3.57 3.41 }
+  posture: gitSha=44bb76b055a3 define=true
+== l3-lunch-on
+start_utc=2026-08-20T08:22:03Z
+load_before={ 2.27 3.47 3.38 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-on sha256=6d0bef40e437ea8f repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=0 test_wall_s=12 (rc 124 = hard cap 520s hit)
+load_after={ 2.70 3.48 3.39 }
+  posture: gitSha=44bb76b055a3 define=true
+== l2b-lunch-off
+start_utc=2026-08-20T08:35:54Z
+load_before={ 2.59 3.48 3.46 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-off sha256=e5971fc9dff189f8 repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=0 test_wall_s=12 (rc 124 = hard cap 520s hit)
+load_after={ 2.95 3.51 3.47 }
+  posture: gitSha=44bb76b055a3 define=None
+== n1a-note-off
+start_utc=2026-08-20T08:22:37Z
+load_before={ 2.63 3.43 3.37 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-off sha256=e5971fc9dff189f8 repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=0 test_wall_s=81 (rc 124 = hard cap 520s hit)
+load_after={ 2.58 3.27 3.31 }
+  posture: gitSha=44bb76b055a3 define=None
+== n1-note-on
+start_utc=2026-08-20T08:24:19Z
+load_before={ 2.68 3.24 3.30 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-on sha256=6d0bef40e437ea8f repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=1 test_wall_s=89 (rc 124 = hard cap 520s hit)
+load_after={ 3.77 3.45 3.37 }
+  posture: gitSha=44bb76b055a3 define=true
+== n1b-note-off
+start_utc=2026-08-20T08:27:25Z
+load_before={ 2.70 3.18 3.27 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-off sha256=e5971fc9dff189f8 repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=0 test_wall_s=93 (rc 124 = hard cap 520s hit)
+load_after={ 3.64 3.47 3.38 }
+  posture: gitSha=44bb76b055a3 define=None
+== n2-note-on
+start_utc=2026-08-20T08:32:14Z
+load_before={ 2.73 3.25 3.31 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-on sha256=6d0bef40e437ea8f repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=1 test_wall_s=93 (rc 124 = hard cap 520s hit)
+load_after={ 4.78 4.07 3.64 }
+  posture: gitSha=44bb76b055a3 define=true
+== n2b-note-off
+start_utc=2026-08-20T08:34:06Z
+load_before={ 3.88 3.91 3.59 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-off sha256=e5971fc9dff189f8 repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=0 test_wall_s=79 (rc 124 = hard cap 520s hit)
+load_after={ 3.32 3.68 3.53 }
+  posture: gitSha=44bb76b055a3 define=None
+== n3p-note-on
+start_utc=2026-08-20T08:41:26Z
+load_before={ 1.38 2.44 2.99 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-on sha256=6d0bef40e437ea8f repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=1 test_wall_s=95 (rc 124 = hard cap 520s hit)
+load_after={ 3.30 2.88 3.10 }
+  posture: gitSha=44bb76b055a3 define=true
+== n3pb-note-off
+start_utc=2026-08-20T08:43:18Z
+load_before={ 2.87 2.80 3.07 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary/0e87bf81-8ea5-450a-9ea5-1dfbee746e7a/scratchpad/w4bench/toolshed-off sha256=e5971fc9dff189f8 repo=/Users/berni/labs-worktrees/w4-bench
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+default_model=No default model available
+test_rc=0 test_wall_s=80 (rc 124 = hard cap 520s hit)
+load_after={ 3.71 3.07 3.14 }
+  posture: gitSha=44bb76b055a3 define=None

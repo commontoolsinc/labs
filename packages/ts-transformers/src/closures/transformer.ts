@@ -1,12 +1,33 @@
 import ts from "typescript";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { setParentPointers, visitEachChildWithJsx } from "../ast/mod.ts";
-import { ActionStrategy } from "./strategies/action-strategy.ts";
-import { ArrayMethodStrategy } from "./strategies/array-method-strategy.ts";
-import { LiftAppliedStrategy } from "./strategies/lift-applied-strategy.ts";
-import { HandlerStrategy } from "./strategies/handler-strategy.ts";
+import { transformActionCall } from "./strategies/action-strategy.ts";
+import { transformArrayMethodCall } from "./strategies/array-method-strategy.ts";
+import { transformLiftAppliedCall } from "./strategies/lift-applied-strategy.ts";
+import { transformHandlerJsxAttribute } from "./strategies/handler-strategy.ts";
 import { PatternStrategy } from "./strategies/pattern-strategy.ts";
-import type { ClosureTransformationStrategy } from "./strategies/strategy.ts";
+
+/** Rewrites one node, or returns undefined when it does not apply to it. */
+type ClosureTransformation = (
+  node: ts.Node,
+  context: TransformationContext,
+  visitor: ts.Visitor,
+) => ts.Node | undefined;
+
+/** Tried in order; the first one to return a node wins. */
+const transformations: ClosureTransformation[] = [
+  transformHandlerJsxAttribute,
+  transformActionCall,
+  transformArrayMethodCall,
+  transformLiftAppliedCall,
+  (() => {
+    const strategy = new PatternStrategy();
+    return (node, context, visitor) =>
+      strategy.canTransform(node, context)
+        ? strategy.transform(node, context, visitor)
+        : undefined;
+  })(),
+];
 
 export class ClosureTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -17,25 +38,14 @@ export class ClosureTransformer extends HelpersOnlyTransformer {
 function createClosureTransformVisitor(
   context: TransformationContext,
 ): ts.Visitor {
-  const strategies: ClosureTransformationStrategy[] = [
-    new HandlerStrategy(),
-    new ActionStrategy(),
-    new ArrayMethodStrategy(),
-    new LiftAppliedStrategy(),
-    new PatternStrategy(),
-  ];
-
   const visit: ts.Visitor = (node: ts.Node) => {
-    // Try to find a strategy that can transform this node
-    for (const strategy of strategies) {
-      if (strategy.canTransform(node, context)) {
-        const transformed = strategy.transform(node, context, visit);
-        if (transformed) {
-          if (transformed !== node) {
-            setParentPointers(transformed, node.parent);
-          }
-          return transformed;
+    for (const transformation of transformations) {
+      const transformed = transformation(node, context, visit);
+      if (transformed) {
+        if (transformed !== node) {
+          setParentPointers(transformed, node.parent);
         }
+        return transformed;
       }
     }
 

@@ -107,6 +107,10 @@ check_server() {
 
 check_server "Toolshed" "http://localhost:$TOOLSHED_PORT/_health" "$TOOLSHED_PORT"
 check_server "Shell" "http://localhost:$SHELL_PORT" "$SHELL_PORT"
+# The page a browser loads, which the toolshed answers by fetching the shell
+# dev server. It fails while both checks above report success whenever that hop
+# is broken.
+check_server "Shell through toolshed" "http://localhost:$TOOLSHED_PORT/" "$TOOLSHED_PORT"
 
 if [[ "$ALL_OK" == "true" ]]; then
     echo "All servers healthy."

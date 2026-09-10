@@ -9,6 +9,10 @@ export type JSXElement = unknown;
 export type JSONSchema = boolean | Record<string, unknown>;
 export type RenderNode = unknown;
 export type Stream<T = unknown> = unknown;
+// `packages/html/src/jsx.d.ts` imports this beside `Stream`; this mirror must
+// export every name that file pulls from `commonfabric` or pattern tests fail
+// to type-check.
+export type AnyStream = unknown;
 
 export interface PatternEnvironment {
   readonly apiUrl: URL;

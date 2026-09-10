@@ -4,14 +4,14 @@ import { serveDir } from "@std/http/file-server";
 const DEV_SOCKET = "DEV_SOCKET.js";
 
 export class DevServer {
-  private _server: Deno.HttpServer;
-  private outDir: string;
-  private sockets: WebSocket[] = [];
-  private html: string;
-  private socketScript: string;
-  private useReloadSocket: boolean;
-  private redirectToIndex?: RegExp;
-  private staticDirs: Array<{ from: string; to: string }>;
+  #server: Deno.HttpServer;
+  #outDir: string;
+  #sockets: WebSocket[] = [];
+  #html: string;
+  #socketScript: string;
+  #useReloadSocket: boolean;
+  #redirectToIndex?: RegExp;
+  #staticDirs: Array<{ from: string; to: string }>;
 
   constructor(
     {
@@ -30,13 +30,13 @@ export class DevServer {
       staticDirs?: Array<{ from: string; to: string }>;
     },
   ) {
-    this.useReloadSocket = useReloadSocket;
-    this.outDir = outDir;
-    this.redirectToIndex = redirectToIndex;
-    this.staticDirs = staticDirs;
-    this.html = this.getHtml({ useReloadSocket, outDir });
-    this.socketScript = this.getSocketScript({ hostname, port });
-    this._server = Deno.serve(
+    this.#useReloadSocket = useReloadSocket;
+    this.#outDir = outDir;
+    this.#redirectToIndex = redirectToIndex;
+    this.#staticDirs = staticDirs;
+    this.#html = this.#getHtml({ useReloadSocket, outDir });
+    this.#socketScript = this.#getSocketScript({ hostname, port });
+    this.#server = Deno.serve(
       {
         port,
         hostname,
@@ -44,25 +44,25 @@ export class DevServer {
           console.log(`Dev server listening on http://${hostname}:${port}`);
         },
       },
-      this.onRequest.bind(this),
+      this.#onRequest.bind(this),
     );
   }
 
   reload() {
-    for (const socket of this.sockets) {
+    for (const socket of this.#sockets) {
       socket.send("reload");
     }
   }
 
-  private async onRequest(req: Request) {
+  async #onRequest(req: Request) {
     const url = new URL(req.url);
 
     if (req.headers.get("upgrade") === "websocket") {
-      return this.upgradeWebSocket(req);
+      return this.#upgradeWebSocket(req);
     }
 
-    if (this.useReloadSocket && url.pathname === `/${DEV_SOCKET}`) {
-      return new Response(this.socketScript, {
+    if (this.#useReloadSocket && url.pathname === `/${DEV_SOCKET}`) {
+      return new Response(this.#socketScript, {
         status: 200,
         headers: { "Content-Type": "text/javascript" },
       });
@@ -70,16 +70,16 @@ export class DevServer {
 
     if (
       url.pathname === "/" || url.pathname === "/index.html" ||
-      (this.redirectToIndex && this.redirectToIndex?.test(url.pathname))
+      (this.#redirectToIndex && this.#redirectToIndex?.test(url.pathname))
     ) {
-      return new Response(this.html, {
+      return new Response(this.#html, {
         status: 200,
         headers: { "Content-Type": "text/html" },
       });
     }
 
     // Check static directories
-    for (const { from, to } of this.staticDirs) {
+    for (const { from, to } of this.#staticDirs) {
       if (url.pathname.startsWith(to)) {
         // Handle OPTIONS requests for CORS
         if (req.method === "OPTIONS") {
@@ -117,26 +117,26 @@ export class DevServer {
     }
 
     return serveDir(req, {
-      fsRoot: this.outDir,
+      fsRoot: this.#outDir,
       quiet: true,
     });
   }
 
-  private upgradeWebSocket(req: Request): Response {
+  #upgradeWebSocket(req: Request): Response {
     const { socket, response } = Deno.upgradeWebSocket(req);
     socket.addEventListener("open", () => {
-      this.sockets.push(socket);
+      this.#sockets.push(socket);
     });
     socket.addEventListener("close", () => {
-      const index = this.sockets.findIndex((s) => s === socket);
+      const index = this.#sockets.findIndex((s) => s === socket);
       if (index > 0) {
-        this.sockets.splice(index, 1);
+        this.#sockets.splice(index, 1);
       }
     });
     return response;
   }
 
-  private getHtml(
+  #getHtml(
     { useReloadSocket, outDir }: { useReloadSocket?: boolean; outDir: string },
   ): string {
     const html = Deno.readTextFileSync(join(outDir, "index.html"));
@@ -148,7 +148,7 @@ export class DevServer {
       : html;
   }
 
-  private getSocketScript(
+  #getSocketScript(
     { hostname, port }: { hostname: string; port: number },
   ): string {
     let script = "";

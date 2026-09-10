@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import ts from "typescript";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { detectTrustedFactoryType } from "../../src/formatters/factory-formatter.ts";
 import { registerCommonFabricDeclarationSources } from "../../src/typescript/common-fabric-symbols.ts";
 import { asObjectSchema, getTypeFromCode, getTypeFromFiles } from "../utils.ts";
@@ -140,7 +140,7 @@ describe("Schema: factory types", () => {
     expect(detectTrustedFactoryType(type, checker)).toBeUndefined();
 
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
     expect(schema.properties).not.toHaveProperty("operation");
   });
@@ -160,7 +160,7 @@ describe("Schema: factory types", () => {
       "SchemaRoot",
     );
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
     expect(schema.properties).not.toHaveProperty("operation");
   });
@@ -182,7 +182,7 @@ describe("Schema: factory types", () => {
       "SchemaRoot",
     );
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
     expect(schema.properties).not.toHaveProperty("operation");
   });
@@ -197,7 +197,7 @@ describe("Schema: factory types", () => {
     `;
     const { type, checker } = await getTrustedFactoryType(code, "SchemaRoot");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     expect(schema.properties?.pattern).toEqual({
@@ -262,7 +262,7 @@ describe("Schema: factory types", () => {
     `;
     const { type, checker } = await getTrustedFactoryType(code, "SchemaRoot");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     expect((schema.properties?.alias as any).asFactory.kind).toBe("pattern");
@@ -317,7 +317,7 @@ describe("Schema: factory types", () => {
     `;
     const { type, checker } = await getTrustedFactoryType(code, "SchemaRoot");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     const documents = collectFactorySchemaDocuments(schema);
@@ -339,10 +339,80 @@ describe("Schema: factory types", () => {
     `;
     const { type, checker } = await getTrustedFactoryType(code, "SchemaRoot");
 
-    expect(() => createSchemaTransformerV2().generateSchema(type, checker))
+    expect(() => new SchemaGenerator().generateSchema(type, checker))
       .toThrow(
         /test\.ts:\d+:\d+: Recursive nested factory contract.*cannot be emitted as a finite self-contained schema document/,
       );
+  });
+
+  it("uses a compiler-owned factory contract for a deliberately bare callable property", async () => {
+    const { type, checker, typeNode } = await getTypeFromCode(
+      `
+        type SchemaRoot = {
+          operation: (inputs: { stale: string }) => { stale: boolean };
+        };
+      `,
+      "SchemaRoot",
+    );
+    if (!typeNode || !ts.isTypeLiteralNode(typeNode)) {
+      throw new Error("Expected a type-literal root");
+    }
+    const operation = typeNode.members.find((member) =>
+      ts.isPropertySignature(member) &&
+      ts.isIdentifier(member.name) &&
+      member.name.text === "operation"
+    );
+    if (!operation || !ts.isPropertySignature(operation) || !operation.type) {
+      throw new Error("Expected an operation property");
+    }
+    const objectType = (name: string, value: ts.KeywordTypeSyntaxKind) =>
+      ts.factory.createTypeLiteralNode([
+        ts.factory.createPropertySignature(
+          undefined,
+          name,
+          undefined,
+          ts.factory.createKeywordTypeNode(value),
+        ),
+      ]);
+    const schemaHints = new WeakMap<ts.Node, {
+      factoryContracts?: readonly {
+        kind: "module";
+        inputTypeNode: ts.TypeNode;
+        outputTypeNode: ts.TypeNode;
+      }[];
+    }>();
+    schemaHints.set(operation.type, {
+      factoryContracts: [{
+        kind: "module",
+        inputTypeNode: objectType("value", ts.SyntaxKind.StringKeyword),
+        outputTypeNode: objectType("size", ts.SyntaxKind.NumberKeyword),
+      }],
+    });
+
+    const schema = asObjectSchema(
+      new SchemaGenerator().generateSchema(
+        type,
+        checker,
+        typeNode,
+        undefined,
+        schemaHints,
+      ),
+    );
+    expect(schema.properties?.operation).toEqual({
+      asFactory: {
+        kind: "module",
+        argumentSchema: {
+          type: "object",
+          properties: { value: { type: "string" } },
+          required: ["value"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: { size: { type: "number" } },
+          required: ["size"],
+        },
+      },
+    });
   });
 
   it("uses compiler-owned exact contracts for factories inside readonly tuples", async () => {
@@ -389,7 +459,7 @@ describe("Schema: factory types", () => {
     });
 
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(
+      new SchemaGenerator().generateSchema(
         type,
         checker,
         typeNode,
@@ -448,7 +518,7 @@ describe("Schema: factory types", () => {
     });
 
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(
+      new SchemaGenerator().generateSchema(
         type,
         checker,
         typeNode,
@@ -518,7 +588,7 @@ describe("Schema: factory types", () => {
     });
 
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(
+      new SchemaGenerator().generateSchema(
         type,
         checker,
         typeNode,

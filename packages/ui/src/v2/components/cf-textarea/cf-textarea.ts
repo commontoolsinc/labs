@@ -1,8 +1,13 @@
+import { stringSchema } from "@commonfabric/runner/schemas";
+import { type CellHandle } from "@commonfabric/runtime-client";
+import { consume } from "@lit/context";
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { ifDefined } from "lit/directives/if-defined.js";
+
 import { BaseElement } from "../../core/base-element.ts";
-import { consume } from "@lit/context";
+import { createStringCellController } from "../../core/cell-controller.ts";
+import { createFormFieldController } from "../../core/form-field-controller.ts";
 import {
   applyThemeToElement,
   type CFTheme,
@@ -10,10 +15,6 @@ import {
   type ComponentSize,
   defaultTheme,
 } from "../theme-context.ts";
-import { type CellHandle } from "@commonfabric/runtime-client";
-import { stringSchema } from "@commonfabric/runner/schemas";
-import { createStringCellController } from "../../core/cell-controller.ts";
-import { createFormFieldController } from "../../core/form-field-controller.ts";
 
 export type TimingStrategy = "immediate" | "debounce" | "throttle" | "blur";
 
@@ -53,7 +54,6 @@ export type TimingStrategy = "immediate" | "debounce" | "throttle" | "blur";
  * <!-- Debounced input - waits 500ms after user stops typing -->
  * <cf-textarea timingStrategy="debounce" timingDelay="500" placeholder="Search..."></cf-textarea>
  */
-
 export class CFTextarea extends BaseElement {
   static formAssociated = true;
 
@@ -325,7 +325,7 @@ export class CFTextarea extends BaseElement {
     }
   `;
 
-  // Theme consumption
+  /** The theme, consumed from the provider. */
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   accessor theme: CFTheme = defaultTheme;
@@ -333,7 +333,10 @@ export class CFTextarea extends BaseElement {
   #internals: ElementInternals;
   private _generatedAriaLabel: string | null = null;
 
+  //
   // Cache + initial setup
+  //
+
   private _textarea: HTMLTextAreaElement | null = null;
   private _cellController = createStringCellController(this, {
     timing: {
@@ -342,7 +345,10 @@ export class CFTextarea extends BaseElement {
     },
   });
 
-  // Form field controller handles buffering when in cf-form context
+  /**
+   * Form field controller, which handles buffering when in a `cf-form`
+   * context.
+   */
   private _formField = createFormFieldController<string>(this, {
     cellController: this._cellController,
     validate: () => ({

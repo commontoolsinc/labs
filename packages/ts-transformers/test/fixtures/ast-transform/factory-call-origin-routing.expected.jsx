@@ -30,7 +30,7 @@ interface EquivalentOutput {
 }
 type PatternOperation = PatternFactory<Input, Output>;
 type ModuleOperation = ModuleFactory<Input, Output>;
-type HandlerOperation = HandlerFactory<Input, Output>;
+type HandlerOperation = HandlerFactory<Output, Input>;
 type CompatiblePatternChoice = PatternOperation | PatternFactory<EquivalentInput, EquivalentOutput>;
 const __cfLift_1 = __cfHelpers.lift<{
     value: number;

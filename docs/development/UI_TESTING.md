@@ -81,6 +81,30 @@ composite web component; use a flattened-tree tool or the pierce fallback below.
      probe.collect("cf-input[role='textbox']").length > 0);
    ```
 
+   Every navigation a `ShellIntegration` page performs — `shell.goto()`, and a
+   bare `page.goto()` or `page.reload()` on the page it hands out — returns
+   only once the shell behind it can be driven. The shell publishes
+   `globalThis.app`, the handle a driver reaches it through, as the last step
+   of a bootstrap module whose body runs on past the document's `load` event,
+   so a navigation that settled on `load` would otherwise hand back a page
+   whose shell is still booting.
+
+   Every such page is also opened at a fixed viewport, `SHELL_VIEWPORT` in
+   `packages/integration/shell-utils.ts`, wide enough for the shell's desktop
+   header layout. The header switches layouts on the viewport width, and a
+   browser left to its own default picks a width that varies by platform, so
+   without the pin which layout a suite drives would be a property of the
+   machine running it. A test that means to drive the narrow layout sets a
+   viewport of its own with `page.setViewportSize()`.
+
+   Pinning the width settles which layout is rendered; it does not settle
+   whether a control in it is there to be clicked. A wait that asks only whether
+   an element exists is satisfied by one laid out at no size, and the failure
+   then surfaces one step later as a click that cannot land. Ask
+   `probe.isRendered` in the wait, as
+   [`waiting-in-tests.md`](waiting-in-tests.md) requires of a wait that
+   precedes a click.
+
 ## Why This Works
 
 - **Host roles** give single-control `cf-*` components one stable semantic
@@ -174,7 +198,7 @@ describe("shadow DOM component test", () => {
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
     cc = await PiecesController.initialize({
-      spaceName: SPACE_NAME,
+      space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
     });
@@ -230,12 +254,31 @@ is not bound yet.
 Settling first also keeps a trusted click from missing its target. A trusted
 click resolves the element's layout box and then dispatches the mouse events at
 that point. On a cold load the page keeps reflowing for a few frames as content
-above the control fills in — a topic's markdown body renders, a form or card
-below it appears — so a control that has just become rendered is still moving.
-If the box moves between when the click resolves it and when the mouse events
-fire, the click lands on whatever shifted into that spot instead of the control,
-and nothing happens. Settling the view drains the pending reflow so the target
-is stationary when it is clicked.
+above the control fills in. A topic's markdown body may render, or a form or
+card below it may appear. A control that has just become rendered can therefore
+still be moving. If the box moves between measurement and dispatch, the click
+lands on whatever shifted into the old spot instead of the control. Nothing
+happens.
+
+`clickCfButton` waits for the marked control's box to remain unchanged across
+two consecutive rendering frames. It measures the marked control again just
+before dispatch. If that final measurement finds that the control moved or was
+replaced, the helper settles and marks the current control before dispatching
+one trusted click. It aims at the middle of the part of the control's box that
+lies inside the page, so a control the edge of the page cuts off is clicked
+inside the page rather than at a point past the edge, and a control with no part
+of it inside the page is reported rather than clicked. A page that moves the
+control after even that last measurement is caught as well: the helper stops an
+interaction that misses before the page sees it, and aims again.
+`docs/development/waiting-in-tests.md` describes how.
+
+It also holds until the control is enabled. A disabled control has a layout box
+and passes every rendered-ness check, and it still takes no click: the browser
+raises none on it, and a `cf-button` additionally gives it
+`pointer-events: none`, which sends the press to the host that wraps it.
+Where the state that enables a control is also the state that drops a surface
+above it, waiting covers the move as well as the enable, because the aim is
+taken once the page has settled into the layout it keeps.
 
 **Use `awaitViewSettled(page)`** from `@commonfabric/integration` as the
 lower-level wait after navigation or a state change. When the next step
@@ -258,19 +301,12 @@ await waitForCondition(page, (probe) =>
 Pattern integration tests can use the higher-level wrappers in
 `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
 `fillCfInput`, `clickCfButton`, `clickCfButtonAndWaitForText` — which bundle
-"settle the view, act once, wait for the effect" on top of these primitives.
-`clickCfButton` proceeds only when the same target remains rendered before and
-after a settle, and marks that target inside the successful predicate. Among
-stable matches, the click helpers select a **visible, enabled** control rather
-than blindly using the first DOM match. Disabled-state waits likewise search
-rendered matches for the requested state instead of letting the first stale
-duplicate decide the result. A rendered control may legitimately be outside the
-viewport before the test scrolls to it, so state-only waits must not require it
-to be on-screen. Worker replacement can briefly leave a hidden, disabled, or
-otherwise stale node from a retired render alongside the current control; the
-state wait and the single click must both observe a live matching control. See
+the common waiting and interaction sequences. Every one of them that clicks
+proceeds only when the same target remains rendered before and after a settle,
+and marks that target inside the successful predicate — the helpers that reach a
+control by index, by `data-ui-action`, or by its button text included. See
 `docs/development/waiting-in-tests.md` for why that ordering is the load-bearing
-part, and for which helpers do not yet have it.
+part.
 
 ### Do not reach for these instead
 

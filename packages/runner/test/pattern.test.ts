@@ -1,5 +1,12 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { Identity } from "@commonfabric/identity";
+
+import { lift } from "../src/builder/module.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
+import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { reactive } from "../src/builder/reactive.ts";
 import {
   type FactoryInput,
   type Frame,
@@ -9,13 +16,8 @@ import {
   type Module,
   type Pattern,
 } from "../src/builder/types.ts";
-import { lift } from "../src/builder/module.ts";
-import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
-import { installTestPatternArtifact } from "./support/trusted-builder.ts";
-import { reactive } from "../src/builder/reactive.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Identity } from "@commonfabric/identity";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -85,12 +87,10 @@ describe("pattern", () => {
       {
         partialCause: "double",
         kind: "computed",
-        scope: "space",
       },
       {
         partialCause: "x",
         schema: { default: 1 },
-        scope: "space",
       },
     ]);
   });
@@ -107,12 +107,10 @@ describe("pattern", () => {
       {
         partialCause: { $generated: 0 },
         kind: "computed",
-        scope: "space",
       },
       {
         partialCause: "doubled",
         kind: "computed",
-        scope: "space",
       },
     ]);
     expect(testPattern.nodes[0].outputs).toMatchObject({
@@ -149,7 +147,6 @@ describe("pattern", () => {
         partialCause: "isSelected",
         schema: { type: "boolean" },
         kind: "computed",
-        scope: "space",
       },
       {
         partialCause: {
@@ -158,7 +155,6 @@ describe("pattern", () => {
         },
         schema: { type: "boolean" },
         kind: "computed",
-        scope: "space",
       },
     ]);
   });
@@ -365,15 +361,13 @@ describe("pattern", () => {
     const doubleArray = pattern<{ values: { x: number }[] }>(
       ({ values }) => {
         const doubled = (values as any).mapWithPattern(
-          installTestPatternArtifact(
-            runtime,
-            pattern(({ element, index, array }: FactoryInput<any>) =>
-              ((({ x }: any) => {
-                const double = lift<number>((x) => x * 2);
-                return { doubled: double(x) };
-              }) as any)(element, index, array)
-            ),
+          pattern(({ element, index, array }: FactoryInput<any>) =>
+            ((({ x }: any) => {
+              const double = lift<number>((x) => x * 2);
+              return { doubled: double(x) };
+            }) as any)(element, index, array)
           ),
+          {},
         );
         return { doubled };
       },
@@ -451,11 +445,11 @@ describe("pattern", () => {
         $alias: {
           partialCause: { $generated: 1 },
           path: ["double"],
-          schema: {
-            ifc: ArgumentSchema.properties.x.ifc,
-          },
         },
       },
+    });
+    expect(resolvedSchema((result as any).double.$alias.schema)).toMatchObject({
+      ifc: ArgumentSchema.properties.x.ifc,
     });
 
     expect(nodes.length).toBe(2);
@@ -467,38 +461,42 @@ describe("pattern", () => {
         $alias: {
           cell: "argument",
           path: ["x"],
-          schema: ArgumentSchema.properties?.x,
         },
       },
     });
+    expect(
+      resolvedSchema((nodes[0].inputs as any).x.$alias.schema),
+    ).toMatchObject(ArgumentSchema.properties?.x);
     // I don't like that we don't know the other properties of our output here
     expect(nodes[0].outputs).toMatchObject({
       $alias: {
         partialCause: { $generated: 0 },
         path: [],
-        schema: { ifc: ArgumentSchema.properties.x.ifc },
       },
     });
+    expect(
+      resolvedSchema((nodes[0].outputs as any).$alias.schema),
+    ).toMatchObject({ ifc: ArgumentSchema.properties.x.ifc });
     expect(nodes[1].inputs).toMatchObject({
       x: {
         $alias: {
           partialCause: { $generated: 0 },
           path: ["double"],
-          schema: {
-            ifc: ArgumentSchema.properties.x.ifc,
-          },
         },
       },
     });
+    expect(
+      resolvedSchema((nodes[1].inputs as any).x.$alias.schema),
+    ).toMatchObject({ ifc: ArgumentSchema.properties.x.ifc });
     expect(nodes[1].outputs).toMatchObject({
       $alias: {
         partialCause: { $generated: 1 },
         path: [],
-        schema: {
-          ifc: ArgumentSchema.properties.x.ifc,
-        },
       },
     });
+    expect(
+      resolvedSchema((nodes[1].outputs as any).$alias.schema),
+    ).toMatchObject({ ifc: ArgumentSchema.properties.x.ifc });
   });
 
   it("pattern with mixed ifc properties has correct confidentiality in the schema of the ssn result", () => {
@@ -574,17 +572,21 @@ describe("pattern", () => {
     expect(nodeOutputAlias).toMatchObject({
       partialCause: { $generated: 0 },
       path: [],
-      schema: { ifc: { confidentiality: ["confidential"] } },
+    });
+    expect(resolvedSchema(nodeOutputAlias.schema)).toMatchObject({
+      ifc: { confidentiality: ["confidential"] },
     });
     expect(result).toMatchObject({
       capitalized: {
         $alias: {
           partialCause: { $generated: 0 },
           path: ["capitalized"],
-          schema: { ifc: { confidentiality: ["confidential"] } },
         },
       },
     });
+    expect(
+      resolvedSchema((result as any).capitalized.$alias.schema),
+    ).toMatchObject({ ifc: { confidentiality: ["confidential"] } });
     expect(resultSchema).toMatchObject({
       ...ResultSchema,
       ...{ ifc: { confidentiality: ["confidential"] } },

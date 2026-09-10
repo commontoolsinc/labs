@@ -56,4 +56,4 @@ fallback branch is active.
 ## See Also
 
 - [Conditional Rendering](../../../common/patterns/conditional.md) - ternaries are the idiom
-- [ifElse with Composed Pattern Cells](ifelse-composed-pattern-cells.md) - related ifElse hang
+- [ifElse with composed pattern cells](quick.md#ifelse-with-composed-pattern-cells) - related ifElse hang

@@ -1,7 +1,7 @@
 import {
   FabricInstance,
   type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commonfabric/data-model";
 import { codecOf } from "@commonfabric/data-model/codec-common";
 import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
 import {

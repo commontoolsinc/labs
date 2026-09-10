@@ -1,8 +1,9 @@
+import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import { consume } from "@lit/context";
 import { css, html, nothing, render } from "lit";
 import { property, state } from "lit/decorators.js";
+
 import { BaseElement } from "../../core/base-element.ts";
-import { consume } from "@lit/context";
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import {
   applyThemeToElement,
@@ -103,7 +104,7 @@ const ToolsArraySchema = {
 } as const satisfies JSONSchema;
 
 export class CFToolsChip extends BaseElement {
-  /* ---------- Cell controller for tools binding ---------- */
+  /** Cell controller for tools binding */
   private _cellController = createCellController<ToolsInput>(this, {
     timing: { strategy: "immediate" },
     onChange: () => {
@@ -288,14 +289,19 @@ export class CFToolsChip extends BaseElement {
 
   /** Chip label shown in the pill. */
   declare label: string;
+
   /** Show the number of tools next to the label. */
   declare showCount: boolean;
+
   /** If true, hovering/focus opens the panel. */
   declare openOnHover: boolean;
+
   /** If true, clicking toggles the panel. */
   declare toggleOnClick: boolean;
+
   /** Current open state. Reflected to attribute. */
   declare open: boolean;
+
   /** Tools array shown in the panel. Accepts array, record, or CellHandle. */
   @property({ attribute: false })
   accessor tools:
@@ -303,22 +309,29 @@ export class CFToolsChip extends BaseElement {
     | ToolsChipTool[]
     | ToolsRecord
     | undefined = undefined;
+
   /** Delay in ms before closing on hover-out. */
   declare closeDelay: number;
 
-  // Track pointer-in to support hover open/close reliably.
+  /** Whether the pointer is in, tracked so hover open/close works reliably. */
   @state()
   private accessor _hovering = false;
-  // Track user toggle state to keep panel open until clicked again.
+
+  /**
+   * Whether the user toggled the panel open, which keeps it open until clicked
+   * again.
+   */
   @state()
   private accessor _toggledOpen = false;
+
   #closeTimer?: ReturnType<typeof setTimeout>;
 
-  // Consume theme and keep overlay/popover state
+  /** The theme, consumed from the provider. */
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   accessor theme: CFTheme = defaultTheme;
 
+  // Overlay/popover state
   #overlay: HTMLDivElement | null = null;
   #resizeObs?: ResizeObserver;
   #raf?: number;
@@ -468,13 +481,15 @@ export class CFToolsChip extends BaseElement {
     }
   }
 
-  // Normalize incoming tools (array or native record) to display-friendly
-  // objects with name/description/schema.
-  // Get the resolved tools value (handles both CellHandle and plain values)
+  /** The resolved tools value, from either a `CellHandle` or a plain value. */
   private get _toolsValue(): Readonly<ToolsInput> | undefined {
     return this._cellController.getValue() ?? undefined;
   }
 
+  /**
+   * Normalizes the incoming tools (an array or a native record) to
+   * display-friendly objects with name, description, and schema.
+   */
   private _normalizedTools(): ToolsChipTool[] {
     const t = this._toolsValue;
     if (!t) return [];

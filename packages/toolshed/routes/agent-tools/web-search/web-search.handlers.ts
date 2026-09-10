@@ -1,8 +1,10 @@
-import type { AppRouteHandler } from "@/lib/types.ts";
+import { ensureDir } from "@std/fs";
+
 import type { WebSearchRoute } from "./web-search.routes.ts";
 import env from "@/env.ts";
+import { gatewayProvenanceHeaders } from "@/lib/gateway-provenance.ts";
 import { sha256 } from "@/lib/sha2.ts";
-import { ensureDir } from "@std/fs";
+import type { AppRouteHandler } from "@/lib/types.ts";
 
 const CACHE_DIR = `${env.CACHE_DIR}/agent-tools-web-search`;
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes in milliseconds
@@ -95,11 +97,14 @@ function extractGroundingChunks(completion: unknown): GroundingChunk[] {
   return Array.isArray(chunks) ? (chunks as GroundingChunk[]) : [];
 }
 
-// --- SSRF guard ---------------------------------------------------------
+//
+// SSRF guard
+//
 // This route fetches URLs that come from search results (and follows their
 // redirects), so it must never be coaxed into reaching internal hosts. We
 // validate every hop's host (name + resolved IP) against private/reserved
 // ranges before connecting.
+//
 
 function isPrivateIpv4(ip: string): boolean {
   const m = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
@@ -235,7 +240,7 @@ async function resolveGroundingUrl(
 
 /**
  * Best-effort plain-text extraction of a page, for `include_content` requests.
- * Not a full reader (that's the webreader route's job) — crude tag-strip with a
+ * Not a full reader (that's the web-read route's job) — crude tag-strip with a
  * length cap; returns "" on any error or non-text response.
  */
 async function fetchPageText(url: string): Promise<string> {
@@ -329,54 +334,32 @@ export const webSearch: AppRouteHandler<WebSearchRoute> = async (c) => {
     // validates reachability.
     const gatewayUrl = env.CFTS_AI_GATEWAY_URL.replace(/\/+$/, "");
 
-    const runGroundedSearch = async (): Promise<{
-      chunks: GroundingChunk[];
-      finishReason: string | undefined;
-    }> => {
-      const res = await fetch(`${gatewayUrl}/v1/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer gateway-internal",
-        },
-        body: JSON.stringify({
-          model: GROUNDED_SEARCH_MODEL,
-          messages: [{ role: "user", content: query }],
-          tools: [{ type: "google_search", google_search: {} }],
-          stream: false,
-        }),
-      });
-      if (!res.ok) {
-        throw new Error(`gateway ${res.status}: ${await res.text()}`);
-      }
-      const json = await res.json();
-      return {
-        chunks: extractGroundingChunks(json),
-        finishReason: json?.choices?.[0]?.finish_reason as string | undefined,
-      };
-    };
+    const res = await fetch(`${gatewayUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer gateway-internal",
+        ...gatewayProvenanceHeaders("web-search"),
+      },
+      body: JSON.stringify({
+        model: GROUNDED_SEARCH_MODEL,
+        messages: [{ role: "user", content: query }],
+        tools: [{ type: "google_search", google_search: {} }],
+        stream: false,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`gateway ${res.status}: ${await res.text()}`);
+    }
+    const json = await res.json();
+    const chunks = extractGroundingChunks(json);
 
-    // A search occasionally trips Vertex's content filter (no grounding).
-    // Retry once before giving up.
-    let chunks: GroundingChunk[] = [];
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      let finishReason: string | undefined;
-      try {
-        const r = await runGroundedSearch();
-        chunks = r.chunks;
-        finishReason = r.finishReason;
-      } catch (e) {
-        logger.error(
-          { attempt, err: String(e) },
-          "Grounded search call failed",
-        );
-        if (attempt === 2) return c.json({ error: "Search failed" }, 500);
-        continue;
-      }
-      if (chunks.length > 0) break;
+    // A search that trips Vertex's content filter is grounded in nothing, and
+    // answers with no results.
+    if (chunks.length === 0) {
       logger.warn(
-        { attempt, finishReason },
-        "No grounding chunks returned; retrying",
+        { finishReason: json?.choices?.[0]?.finish_reason },
+        "No grounding chunks returned",
       );
     }
 

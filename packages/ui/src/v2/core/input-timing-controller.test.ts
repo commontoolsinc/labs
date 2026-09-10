@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { FakeTime } from "@std/testing/time";
+
 import type { ReactiveControllerHost } from "lit";
+
 import { InputTimingController } from "./input-timing-controller.ts";
 
 function createMockHost(): ReactiveControllerHost {
@@ -13,9 +15,9 @@ function createMockHost(): ReactiveControllerHost {
   } as unknown as ReactiveControllerHost;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Immediate strategy
-// ---------------------------------------------------------------------------
+//
 
 describe("InputTimingController — immediate", () => {
   it("fires callback synchronously", () => {
@@ -30,9 +32,9 @@ describe("InputTimingController — immediate", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Debounce strategy
-// ---------------------------------------------------------------------------
+//
 
 describe("InputTimingController — debounce", () => {
   let time: FakeTime;
@@ -109,9 +111,9 @@ describe("InputTimingController — debounce", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Throttle strategy
-// ---------------------------------------------------------------------------
+//
 
 describe("InputTimingController — throttle", () => {
   let time: FakeTime;
@@ -189,9 +191,9 @@ describe("InputTimingController — throttle", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Blur strategy
-// ---------------------------------------------------------------------------
+//
 
 describe("InputTimingController — blur", () => {
   it("does not fire until onBlur()", () => {
@@ -242,9 +244,9 @@ describe("InputTimingController — blur", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // flush()
-// ---------------------------------------------------------------------------
+//
 
 describe("InputTimingController — flush", () => {
   let time: FakeTime;
@@ -333,9 +335,9 @@ describe("InputTimingController — flush", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Lifecycle and configuration
-// ---------------------------------------------------------------------------
+//
 
 describe("InputTimingController — lifecycle", () => {
   let time: FakeTime;

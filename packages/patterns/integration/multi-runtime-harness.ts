@@ -16,38 +16,49 @@
  * runtimes (verified-load registries, frame stacks and similar module-level
  * state cross-talk), and production never does — every browser tab or CLI
  * process is its own realm. The storage server is self-hosted in-process
- * (@commonfabric/memory/v2/standalone), so no toolshed is needed; pass
- * `apiUrl` to target a running toolshed instead.
+ * (@commonfabric/memory/v2/standalone), and serves the authored patterns tree
+ * beside it, so no toolshed is needed; pass `apiUrl` to target a running
+ * toolshed instead. Serving that tree is what lets a session resolve a
+ * `system:` origin, and so what lets a `#profile` wish open its real create
+ * surface rather than an account of why it could not.
+ *
+ * POSTURE (server-execution v2): the self-hosted standalone server has no
+ * serving host — no ExecutorHost, no serving loop — and its engine reads
+ * this realm's ambient flag, which nothing here enables. Under the ON
+ * posture that combination is a MIXED topology no deployment produces:
+ * the worker clients resolve `EXPERIMENTAL_SERVER_EXECUTION=true` from
+ * env and send event appends, and the in-process engine's OFF-arm
+ * admission refuses them deterministically ("the OFF arm has no
+ * event-append admission"), so every cross-session consequence silently
+ * never happens (first observed on the first CI run of the ON pattern
+ * lanes, 2026-08-21). So when the environment resolves the ON posture
+ * (the canonical env mapping, else the first-party default) and no
+ * explicit `apiUrl` was passed, the harness targets the integration
+ * environment's toolshed (`env.API_URL`) — the real ON topology, serving
+ * loop included — instead of self-hosting. The OFF arm is byte-identical
+ * to before: flag unset or false keeps the in-process standalone server.
  */
 
+import { fromFileUrl } from "@std/path/from-file-url";
+
+import type { FabricValue } from "@commonfabric/data-model";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import { env } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
-import { setPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { experimentalOptionsFromEnv } from "@commonfabric/runner";
-import type {
-  RuntimeDiagnosticsSnapshot,
-  TrustedUiDescriptor,
-  WorkerRequest,
-  WorkerResponse,
-} from "./multi-runtime-worker.ts";
-
-// The self-hosted storage server lives in THIS realm, while every runtime
-// lives in a worker realm whose Runtime constructor propagates the
-// EXPERIMENTAL_* env flags into the memory module's ambient config. No
-// Runtime is ever constructed in the harness realm, so a flag-ON test run
-// would otherwise leave the SERVER side of the flag off — a client/server
-// capability skew the harness does not intend to model (skewed peers now
-// degrade gracefully, so the suite would silently test flag-off semantics).
-// Mirror toolshed (whose in-process Runtime sets the ambient flag for its
-// memory route) by propagating the canonical env mapping. Re-asserted per
-// harness creation: any Runtime constructed later in this realm re-derives
-// the ambient flag from ITS options and would stomp a load-time value.
-function propagateExperimentalEnvToServerRealm(): void {
-  const experimental = experimentalOptionsFromEnv(Deno.env.get);
-  if (experimental.persistentSchedulerState !== undefined) {
-    setPersistentSchedulerStateConfig(experimental.persistentSchedulerState);
-  }
-}
+import type { CfcWriteFloorMode } from "@commonfabric/runner/cfc";
+import { PatternsRoute } from "@commonfabric/runner/patterns-route.deno";
+import {
+  type RuntimeDiagnosticsSnapshot,
+  type TrustedUiDescriptor,
+  type WorkerRequest,
+  type WorkerResponse,
+} from "./multi-runtime-ipc.ts";
 
 export type { TrustedUiDescriptor };
 export type { RuntimeDiagnosticsSnapshot };
@@ -55,11 +66,13 @@ export type { RuntimeDiagnosticsSnapshot };
 export interface MultiRuntimeSessionSpec {
   /** Label used in error messages and as the identity passphrase seed. */
   label: string;
+
   /**
    * Identity for this session. Pass the same Identity in two specs to model
    * one user with two concurrent sessions (e.g. two browser tabs).
    */
   identity?: Identity;
+
   /**
    * Test-only network shaping: delay every storage WebSocket frame (both
    * directions) in this session's realm by this many milliseconds. Reproduces
@@ -67,35 +80,88 @@ export interface MultiRuntimeSessionSpec {
    * near-zero in-process latency hides.
    */
   wsDelayMs?: number;
+  /**
+   * Write-side `requiredIntegrity` floor for this session's runtime,
+   * overriding the harness-wide setting. Set it per session to model a fleet
+   * partway through the staged rollout, where one client already enforces the
+   * floor and another does not.
+   */
+  cfcWriteFloor?: CfcWriteFloorMode;
 }
 
 export interface MultiRuntimeHarnessOptions {
   /** Path to the pattern entry file (e.g. `<dir>/main.tsx`). */
   programPath: string;
+
   /** Module-resolution root, usually the `packages/patterns` directory. */
   rootPath: string;
+
+  /**
+   * Data files to store with the pattern, as paths on disk. A file the pattern
+   * reads with `dataFile()` is attached from that call alone and needs no
+   * entry here; this is for a file the source cannot name. The bootstrap
+   * worker compiles the pattern in its own process, so these travel with the
+   * request rather than being attached here.
+   */
+  dataFilePaths?: readonly string[];
+
   /** Optional initial pattern input for the bootstrap-created piece. */
-  input?: Record<string, unknown>;
+  input?: Record<string, FabricValue>;
+
   /** Enable scheduler graph/stats/action diagnostics for this harness run. */
   diagnostics?: boolean;
   sessions: (string | MultiRuntimeSessionSpec)[];
   spaceName?: string;
+
   /**
    * When set, sessions talk to a running toolshed at this URL instead of the
    * self-hosted in-process storage server.
    */
   apiUrl?: URL;
+  /**
+   * Write-side `requiredIntegrity` floor for every runtime this harness
+   * creates, the bootstrap worker that authors the piece included. Defaults to
+   * the runtime's own default, which is `off`.
+   */
+  cfcWriteFloor?: CfcWriteFloorMode;
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const RPC_TIMEOUT_MS = 120_000;
+
+/** Total event-consequence quiescence budget per `settle()` call on a
+ * toolshed-backed harness (see `settle`): generous against the measured
+ * ~2–3 s serving drain of a 40-event pipelined storm, small against the
+ * suite timeouts a wedged consequence would otherwise eat. */
+const SERVED_SETTLE_QUIESCENCE_BUDGET_MS = 10_000;
+
+/**
+ * The authored patterns tree this repository deploys, served at the same
+ * address as the in-process storage server.
+ *
+ * A runtime resolves a `system:` provenance ref — the origin the wish
+ * builtin's sidecar surfaces record, and the one a space root carries —
+ * against the host serving its space. Self-hosting storage and leaving that
+ * route unanswered is a topology no deployment has, and under it a piece
+ * whose identity is a profile cell never gets its create surface. Answering it
+ * here is what lets a headless multi-runtime test drive the real resolution.
+ *
+ * One route for the process: it computes each pattern's closure identity once
+ * and holds it, and every harness in a run wants the same answers.
+ */
+let patternsRoute: PatternsRoute | undefined;
+function systemPatternsRoute(): PatternsRoute {
+  return patternsRoute ??= new PatternsRoute(
+    fromFileUrl(new URL("..", import.meta.url)),
+  );
+}
 
 class WorkerClient {
   #worker: Worker;
   #nextId = 1;
   #pending = new Map<
     number,
-    { resolve: (value: unknown) => void; reject: (error: Error) => void }
+    { resolve: (value: FabricValue) => void; reject: (error: Error) => void }
   >();
   readonly label: string;
 
@@ -114,7 +180,13 @@ class WorkerClient {
           new Error(`[${this.label}] ${event.data.error}`),
         );
       } else {
-        pending.resolve(event.data.ok);
+        try {
+          pending.resolve(fabricFromRealmValue(event.data.ok));
+        } catch (error) {
+          pending.reject(
+            new Error(`[${this.label}] undecodable answer`, { cause: error }),
+          );
+        }
       }
     };
     this.#worker.onerror = (event) => {
@@ -126,10 +198,23 @@ class WorkerClient {
     };
   }
 
-  call(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  /**
+   * Calls `cmd` in the worker realm, answering with what it returns.
+   *
+   * `args` and the answer each cross as one `codec-realm` encoding, so both
+   * carry the whole `FabricValue` domain.
+   */
+  call(
+    cmd: string,
+    args: Record<string, FabricValue> = {},
+  ): Promise<FabricValue> {
     const id = this.#nextId++;
-    const request: WorkerRequest = { id, cmd, args };
-    return new Promise((resolve, reject) => {
+    const request: WorkerRequest = {
+      id,
+      cmd,
+      args: realmFromFabricValue(args),
+    };
+    return new Promise<FabricValue>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
         reject(
@@ -179,7 +264,7 @@ export class MultiRuntimeSession {
    */
   async send(
     handler: string,
-    event: unknown = {},
+    event: FabricValue = {},
     trustedUi?: TrustedUiDescriptor,
     opts: { idle?: boolean } = {},
   ): Promise<void> {
@@ -200,7 +285,7 @@ export class MultiRuntimeSession {
    */
   async set(
     path: (string | number)[],
-    value: unknown,
+    value: FabricValue,
     opts: { idle?: boolean } = {},
   ): Promise<{ ok: boolean; error?: { name?: string; message?: string } }> {
     return await this.#client.call("set", {
@@ -218,7 +303,7 @@ export class MultiRuntimeSession {
    */
   async push(
     path: (string | number)[],
-    value: unknown,
+    value: FabricValue,
     opts: { idle?: boolean } = {},
   ): Promise<{ ok: boolean; error?: { name?: string; message?: string } }> {
     return await this.#client.call("push", {
@@ -228,16 +313,39 @@ export class MultiRuntimeSession {
     }) as { ok: boolean; error?: { name?: string; message?: string } };
   }
 
-  /** Read a value from the piece result, pulling fresh state first. */
-  async read(path: (string | number)[] = []): Promise<unknown> {
+  /**
+   * Read a value from the piece result, pulling fresh state first. Where the
+   * result schema says `asCell` — over a pattern's `[UI]` tree, among other
+   * places — the value carries the link that reaches the cell rather than the
+   * cell, which belongs to the runtime's own realm. Read a path below such a
+   * cell, or use `readRaw`, to reach its contents.
+   */
+  async read(path: (string | number)[] = []): Promise<FabricValue> {
     return await this.#client.call("read", { path });
   }
 
   /** Read the RAW stored value at `path` (links resolved to the target cell,
    *  no result-schema shaping) — for state the declared schema does not
    *  carry, e.g. a query result's `requestHash`. */
-  async readRaw(path: (string | number)[] = []): Promise<unknown> {
+  async readRaw(path: (string | number)[] = []): Promise<FabricValue> {
     return await this.#client.call("readRaw", { path });
+  }
+
+  /**
+   * Mint a cell in this runtime's space holding `value`, and answer with the
+   * link that reaches it. `cause` names the cell: the same cause is the same
+   * cell, a different cause a different one.
+   *
+   * The link is ordinary data, so it can be passed straight back in a `send`
+   * event to reach a handler input declared `asCell`. That is how a headless
+   * caller hands a pattern a cell it did not create — a viewer identity, say,
+   * where a browser would supply a resolved `#profile`.
+   */
+  async createCell(
+    cause: FabricValue,
+    value: FabricValue,
+  ): Promise<FabricValue> {
+    return await this.#client.call("createCell", { cause, value });
   }
 
   /** Inspect the normalized link (id, space, scope) at `path` in the result. */
@@ -262,18 +370,63 @@ export class MultiRuntimeSession {
       id: string;
       space: string;
       path?: (string | number)[];
-      scope?: unknown;
+      scope?: FabricValue;
     },
-  ): Promise<{ ok: boolean; value?: unknown; error?: string }> {
+  ): Promise<{ ok: boolean; value?: FabricValue; error?: string }> {
     return await this.#client.call("rawRead", address) as {
       ok: boolean;
-      value?: unknown;
+      value?: FabricValue;
       error?: string;
     };
   }
 
   async idle(): Promise<void> {
     await this.#client.call("idle");
+  }
+
+  /**
+   * Wait, bounded by `timeoutMs`, until every event this session fired has
+   * its terminal consequence ARRIVED back here (speculation.md §4 step 2 —
+   * the overlay's outstanding-intent set is empty). Resolves with the
+   * still-outstanding count when the budget elapses first. Instant on the
+   * OFF arm (no overlay). See `MultiRuntimeHarness.settle`.
+   */
+  async eventQuiescence(timeoutMs?: number): Promise<{ pending: number }> {
+    return await this.#client.call("eventQuiescence", { timeoutMs }) as {
+      pending: number;
+    };
+  }
+
+  /**
+   * Wait — with no budget of its own, backstopped by the RPC timeout —
+   * until every event THIS session fired has its terminal consequence
+   * (consequenced, errored, dropped, or refused) arrived back here:
+   * the overlay's outstanding-intent set is empty (speculation.md §4
+   * step 2). Instant on the OFF arm and when nothing is outstanding.
+   *
+   * This is the gate between two CHAINED events whose second served
+   * handler reads state the first one writes (a draft-then-trusted-
+   * action pair): events on different streams have no cross-stream
+   * serve-order guarantee (events.md §2), so firing the second while
+   * the first is in flight can serve it against a pre-first view — a
+   * precondition-reading handler then no-ops silently, an interleaving
+   * the real UI forbids (the trusted control stays disabled until the
+   * served precondition round-trips). Await this before the second
+   * fire; once the first consequence has arrived back, its commit is
+   * in the space's history and every later-fired event is served
+   * against a view that includes it.
+   */
+  async awaitEventConsequences(): Promise<void> {
+    await this.#client.call("awaitEventConsequences");
+  }
+
+  /**
+   * Force an ordered-after round trip on this runtime's open space connections,
+   * so any subscription fan-out the server has already sent has landed here.
+   * See `MultiRuntimeHarness.settle`.
+   */
+  async barrier(): Promise<void> {
+    await this.#client.call("barrier");
   }
 
   /** Capture scheduler graph, settle stats history, and action run trace. */
@@ -328,10 +481,20 @@ export class MultiRuntimeHarness {
     if (options.sessions.length === 0) {
       throw new Error("MultiRuntimeHarness needs at least one session");
     }
-    propagateExperimentalEnvToServerRealm();
     const spaceName = options.spaceName ?? crypto.randomUUID();
-    const server = options.apiUrl ? undefined : StandaloneMemoryServer.start();
-    const apiUrl = (options.apiUrl ?? server!.url).href;
+    // The ON posture needs a serving host, which the standalone in-process
+    // server does not have — see the header's POSTURE block. Resolve the
+    // posture exactly like a deployed entry point (canonical env mapping,
+    // else the first-party default) and pick the backend accordingly.
+    const serverExecutionOn =
+      experimentalOptionsFromEnv(Deno.env.get).serverExecution ??
+        SERVER_EXECUTION_DEFAULT_ENABLED;
+    const targetUrl = options.apiUrl ??
+      (serverExecutionOn ? new URL(env.API_URL) : undefined);
+    const server = targetUrl ? undefined : StandaloneMemoryServer.start({
+      serve: (request) => systemPatternsRoute().serve(request),
+    });
+    const apiUrl = (targetUrl ?? server!.url).href;
 
     const sessions: MultiRuntimeSession[] = [];
     let bootstrap: WorkerClient | undefined;
@@ -345,15 +508,17 @@ export class MultiRuntimeHarness {
             `multi-runtime-harness ${normalized.label}`,
             { implementation: "noble" },
           );
+        const cfcWriteFloor = normalized.cfcWriteFloor ?? options.cfcWriteFloor;
         const client = new WorkerClient(normalized.label);
         await client.call("init", {
-          rawIdentity: identity.serialize(),
+          identity: identity.keyPair,
           spaceName,
           apiUrl,
           diagnostics: options.diagnostics === true,
           ...(normalized.wsDelayMs !== undefined
             ? { wsDelayMs: normalized.wsDelayMs }
             : {}),
+          ...(cfcWriteFloor !== undefined ? { cfcWriteFloor } : {}),
         });
         sessions.push(
           new MultiRuntimeSession(normalized.label, identity, client),
@@ -367,14 +532,18 @@ export class MultiRuntimeHarness {
       // compile state.
       bootstrap = new WorkerClient("bootstrap");
       await bootstrap.call("init", {
-        rawIdentity: sessions[0].identity.serialize(),
+        identity: sessions[0].identity.keyPair,
         spaceName,
         apiUrl,
         diagnostics: options.diagnostics === true,
+        ...(options.cfcWriteFloor !== undefined
+          ? { cfcWriteFloor: options.cfcWriteFloor }
+          : {}),
       });
       const { pieceId } = await bootstrap.call("createPiece", {
         programPath: options.programPath,
         rootPath: options.rootPath,
+        dataFilePaths: options.dataFilePaths,
         input: options.input,
       }) as { pieceId: string };
       await bootstrap.call("dispose");
@@ -404,12 +573,87 @@ export class MultiRuntimeHarness {
     return session;
   }
 
-  /** Let all runtimes finish local work and exchange pending sync traffic. */
+  /**
+   * Let all runtimes finish local work and exchange pending sync traffic. Each
+   * round is one full cross-runtime hop, driven by real completion signals
+   * rather than a timer:
+   *
+   * 1. Every runtime settles its own reactivity and flushes its pending commits
+   *    to the server (`session.idle`).
+   * 2. The in-process server drains: it applies every commit it has received
+   *    and sends all pending subscription fan-out (`server.idle`).
+   * 3. Every runtime forces an ordered-after round trip on its open space
+   *    connections (`session.barrier`). Because a WebSocket delivers a
+   *    connection's frames in order, the fan-out the server just sent has been
+   *    received and applied by the time each round trip's response returns.
+   * 4. Every runtime settles again, so a foreign write that just arrived and
+   *    re-derives local cells has its recompute run before this round ends.
+   *
+   * With a running toolshed (when `apiUrl` was passed, or the ON posture
+   * resolved one) there is no in-process server handle for step 2, and under
+   * the ON posture the toolshed's serving loop processes this harness's event
+   * appends ASYNCHRONOUSLY — a fixed round count of idle/barrier hops races
+   * the drain (the OW52 shape: a 40-event pipelined storm needs ~2–3 s of
+   * server time while 20 rounds complete in well under a second, so the
+   * assert read a mid-drain head). Step 2's replacement is the
+   * client-observable stand-in for `server.idle()`: wait until every event
+   * each session fired has its terminal consequence ARRIVED back at that
+   * session (speculation.md §4 step 2 — the overlay's outstanding-intent set
+   * empties exactly then). CAVEAT (#6158 review F2): this covers
+   * FIRST-ORDER consequences only — a server-side cascade child (an event a
+   * served handler itself emits) is no session's intent and commits in a
+   * LATER wave, outside the wait; cascades ride the ordinary barrier rounds,
+   * so a test asserting on cascade results still needs enough rounds (or a
+   * `waitFor`). The wait shares ONE budget across the whole `settle()`
+   * call, so a genuinely wedged consequence degrades to the old behavior
+   * (the caller's assert speaks) instead of hanging the harness — LOUDLY:
+   * exhausting the budget with intents still outstanding warns once, so a
+   * red assert after it self-identifies as budget exhaustion (a slow
+   * serving drain) rather than re-opening the OW52 loss triage. The
+   * barrier then pulls each replica to a head ≥ every first-order
+   * consequence commit. Instant on an OFF-posture toolshed run (no
+   * overlay, no outstanding intents).
+   */
   async settle(rounds = 2): Promise<void> {
+    const quiescenceDeadline = this.#server === undefined
+      ? Date.now() + SERVED_SETTLE_QUIESCENCE_BUDGET_MS
+      : undefined;
+    let quiescenceWarned = false;
     for (let i = 0; i < rounds; i++) {
       await Promise.all(this.sessions.map((session) => session.idle()));
-      // Give subscription pushes a macrotask to land before the next round.
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await this.#server?.idle();
+      if (quiescenceDeadline !== undefined) {
+        const budget = Math.max(0, quiescenceDeadline - Date.now());
+        const outcomes = await Promise.all(
+          this.sessions.map((session) => session.eventQuiescence(budget)),
+        );
+        // #6158 review F1: the worker returns pending > 0 ONLY at its
+        // deadline, so any nonzero here means the shared budget ran out
+        // with consequences still outstanding — the reads that follow may
+        // see a MID-DRAIN head. Say so once, so the resulting red names
+        // itself instead of presenting as the OW52 "loss" shape.
+        if (!quiescenceWarned && outcomes.some((o) => o.pending > 0)) {
+          quiescenceWarned = true;
+          const detail = outcomes
+            .map((outcome, index) =>
+              outcome.pending > 0
+                ? `${this.sessions[index].label}: ${outcome.pending}`
+                : undefined
+            )
+            .filter((entry) => entry !== undefined)
+            .join(", ");
+          console.warn(
+            `[multi-runtime-harness] settle: event-consequence quiescence ` +
+              `budget (${SERVED_SETTLE_QUIESCENCE_BUDGET_MS} ms) exhausted ` +
+              `with intents still outstanding (${detail}) — subsequent ` +
+              `reads may see a mid-drain head. A red assert after this ` +
+              `line is BUDGET EXHAUSTION (a slow serving drain or a wedged ` +
+              `consequence), not the OW52 loss shape.`,
+          );
+        }
+      }
+      await Promise.all(this.sessions.map((session) => session.barrier()));
+      await Promise.all(this.sessions.map((session) => session.idle()));
     }
   }
 
@@ -445,5 +689,18 @@ export class MultiRuntimeHarness {
       });
     }
     await this.#server?.close();
+  }
+
+  /**
+   * Drop every worker without asking it to shut down first, for a caller that
+   * has no `await` to spend — a process-exit listener, which Deno runs
+   * synchronously. `dispose()` is the ordinary path and says goodbye properly;
+   * this one exists so a harness held for the life of a process is still
+   * released deterministically rather than left to process teardown. The
+   * in-process server is not closed, because closing it is asynchronous and it
+   * has nothing outside this process to release.
+   */
+  terminate(): void {
+    for (const session of this.sessions) session.client().terminate();
   }
 }

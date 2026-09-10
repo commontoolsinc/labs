@@ -6,6 +6,7 @@
 // Spec: docs/specs/sqlite-builtin/06-cfc.md ("Read — re-derive per row,
 // attach, ceiling"; "Fail-closed rules").
 
+import type { CfcAtom, CfcAtomObject } from "@commonfabric/api/cfc";
 import {
   atomKey,
   evaluateRowLabel,
@@ -15,12 +16,12 @@ import {
   ruleInputFields,
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
-import type { CfcAtomObject } from "@commonfabric/api/cfc";
-import type { CfcAtom } from "@commonfabric/api/cfc";
 import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
 import type { CfcConfClause } from "../../cfc/clause.ts";
+import { clauseAlternatives, isOrClause } from "../../cfc/clause.ts";
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
-import { clauseAlternatives } from "../../cfc/clause.ts";
 
 interface ResultColumn {
   output: string;
@@ -37,19 +38,33 @@ export interface PerRowIfc {
 export interface RowLabelReadArgs {
   /** Declared table schemas (`db.tables`, wire-supplied — re-validated). */
   tables: Record<string, unknown> | undefined;
+
   /** Per-result-column TRUE origins (`res.columns`); undefined when the
    *  server captured none. */
   columns: readonly ResultColumn[] | undefined;
+
   rows: readonly unknown[];
+
   /** The db's owner (db ref), resolving the rule's `dbOwner()` term. */
   owner?: string;
+
   /** Per-column (Phase 2) confidentiality atoms of the labeled projection —
    *  they ride every row, so they count against the ceiling too. */
   staticConfidentiality?: readonly CfcConfClause[];
+
   /** Declared output ceiling (placeholders already resolved). */
   ceiling?: readonly CfcConfClause[];
+
   /** What to do when a row's label exceeds the ceiling (default "fail"). */
   onExceed?: unknown;
+  /** True when `onExceed` is the runtime's default rather than the query's
+   *  own declaration. A runtime-wide `skip` is a mode the query author never
+   *  chose, so on an aggregate/expression projection — where skip is refused
+   *  because a withheld row already contributed server-side — the runtime's
+   *  default falls back to `fail` instead of refusing a query that declared
+   *  nothing. A query's OWN `skip` on such a projection is still refused. */
+  onExceedIsRuntimeDefault?: boolean;
+
   /** CFC Phase 3.b read-time clearance: when set, keep only rows the acting
    *  reader may read (a declared existence release, §8.17/inv-14). Requires the
    *  rule-bearing table to opt in (`rowLabelReadClearance`); never for
@@ -63,17 +78,16 @@ export type RowLabelReadResult =
     /** Per kept-order row: the per-row label for its row entity doc, or
      *  undefined when the row carries no per-row label. */
     labels: (PerRowIfc | undefined)[];
+
     /** Row keep-mask under a declared ceiling and/or read-time clearance
      *  (undefined: neither declared). */
     keep: boolean[] | undefined;
+
     /** CFC Phase 3.b: rows withheld because the acting reader could not read
      *  them (a declared, audited existence release). 0/undefined when no
      *  clearance was requested. */
     withheld?: number;
   };
-
-const isRecord = (x: unknown): x is Record<string, unknown> =>
-  typeof x === "object" && x !== null && !Array.isArray(x);
 
 // The common-alternative outcome for a null-origin (aggregate) projection over
 // the rule-bearing tables. `unconstrained`: no rule imposes any confidentiality
@@ -163,7 +177,7 @@ export function computeRowLabelRead(
       } — expected "fail" or "skip"`,
     };
   }
-  const onExceed = (args.onExceed ?? "fail") as "fail" | "skip";
+  let onExceed = (args.onExceed ?? "fail") as "fail" | "skip";
 
   // Discover + re-validate rule-bearing tables (db.tables is wire-supplied;
   // "couldn't validate" is never "no label"). `allowReadClearance` is the
@@ -176,10 +190,10 @@ export function computeRowLabelRead(
   for (const [name, t] of Object.entries(tables ?? {})) {
     if (!tableDeclaresRowLabel(t)) continue;
     const spec = (t as { rowLabel: RowLabelSpec }).rowLabel;
-    const columnNames = Object.keys(
-      (t as { properties?: Record<string, unknown> }).properties ?? {},
-    );
-    const reason = validateRowLabelSpec(spec, columnNames);
+    const properties =
+      (t as { properties?: Record<string, unknown> }).properties ?? {};
+    const columnNames = Object.keys(properties);
+    const reason = validateRowLabelSpec(spec, columnNames, properties);
     if (reason) {
       return {
         error: `sqlite: table "${name}" declares an invalid rowLabel rule — ` +
@@ -280,7 +294,7 @@ export function computeRowLabelRead(
         labels = [];
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
-          if (!isRecord(row)) {
+          if (!isObjectNotArray(row)) {
             return { error: `sqlite: result row ${i} is not an object` };
           }
           const rowValues: Record<string, unknown> = {};
@@ -313,6 +327,14 @@ export function computeRowLabelRead(
   // reader-clearance (none exists), a declared contract (06-cfc.md ceiling).
   let keep: boolean[] | undefined;
   if (ceiling !== undefined) {
+    if (
+      onExceed === "skip" && nullOrigin && args.onExceedIsRuntimeDefault
+    ) {
+      // The runtime's default, not the query's word: fall back to the
+      // builtin's own `fail` rather than refuse a projection the query
+      // author never opted into skipping.
+      onExceed = "fail";
+    }
     if (onExceed === "skip" && nullOrigin) {
       return {
         error: 'sqlite: onExceed:"skip" never applies to an aggregate/' +
@@ -405,17 +427,20 @@ export function computeRowLabelRead(
 /**
  * Resolve placeholder principals in a declared ceiling: the acting user
  * (`{__ctCurrentPrincipal:true}`, prepare-time identity) and the db owner
- * (`{__ctDbOwner:true}`, from the db ref). Unresolvable placeholders fail
- * closed — a ceiling that can't be pinned must not silently widen.
+ * (`{__ctDbOwner:true}`, from the db ref), whether an entry is the
+ * placeholder or an `anyOf` whose alternative is. Unresolvable placeholders
+ * fail closed — a ceiling that can't be pinned must not silently widen.
  */
 export function resolveCeilingPlaceholders(
   ceiling: readonly CfcConfClause[],
   ctx: { actingPrincipal?: string; owner?: string },
 ): { atoms: CfcConfClause[] } | { error: string } {
-  const atoms: CfcConfClause[] = [];
-  for (const atom of ceiling) {
+  const resolveAtom = (
+    atom: CfcAtom,
+  ): { atom: CfcAtom } | { error: string } => {
     if (
-      isRecord(atom) && (atom as CfcAtomObject).__ctCurrentPrincipal === true
+      isObjectNotArray(atom) &&
+      (atom as CfcAtomObject).__ctCurrentPrincipal === true
     ) {
       if (ctx.actingPrincipal === undefined) {
         return {
@@ -423,20 +448,39 @@ export function resolveCeilingPlaceholders(
             "principal is available — refusing (fail closed)",
         };
       }
-      atoms.push(ctx.actingPrincipal);
-      continue;
+      return { atom: ctx.actingPrincipal };
     }
-    if (isRecord(atom) && (atom as CfcAtomObject).__ctDbOwner === true) {
+    if (
+      isObjectNotArray(atom) && (atom as CfcAtomObject).__ctDbOwner === true
+    ) {
       if (ctx.owner === undefined) {
         return {
           error: "sqlite: ceiling references the db owner but the db ref " +
             "carries no owner — refusing (fail closed)",
         };
       }
-      atoms.push(ctx.owner);
+      return { atom: ctx.owner };
+    }
+    return { atom };
+  };
+  const atoms: CfcConfClause[] = [];
+  for (const clause of ceiling) {
+    if (isOrClause(clause)) {
+      // An alternative is an atom, never a nested clause, so one level is
+      // the whole depth; a nested `anyOf` stays as it is, opaque and
+      // unsatisfiable, which is how the clause machinery reads it.
+      const alternatives: CfcAtom[] = [];
+      for (const alternative of clause.anyOf) {
+        const resolved = resolveAtom(alternative);
+        if ("error" in resolved) return resolved;
+        alternatives.push(resolved.atom);
+      }
+      atoms.push({ anyOf: alternatives });
       continue;
     }
-    atoms.push(atom);
+    const resolved = resolveAtom(clause);
+    if ("error" in resolved) return resolved;
+    atoms.push(resolved.atom);
   }
   return { atoms };
 }

@@ -9,11 +9,10 @@ import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
 // async flow boundaries that normally load the deferred compiler stack).
 await ensureCompilerStack();
 
-// D2: the ESM verifier front-end classifies each module's compiled-CommonJS
-// body. Unlike the AMD factory (deps are params), the CJS body has a
-// `const x = require("...")` import preamble that the front-end must recognize
-// (seeding env with import bindings) before handing the rest to the shared
-// classifyModuleItems core.
+// The verifier front-end classifies each module's compiled-CommonJS body. That
+// body carries a `const x = require("...")` import preamble which the front-end
+// must recognize (seeding env with import bindings) before handing the rest to
+// the shared classifyModuleItems core.
 
 function compiledBody(files: Record<string, string>, path: string): string {
   const sources = Object.entries(files).map(([name, contents]) => ({
@@ -62,8 +61,7 @@ describe("verifyCompiledModuleBody", () => {
     // CT-1661: TypeScript's CommonJS emit declares the module reference for a
     // named re-export with `var` (hoisted ahead of the live getter), unlike the
     // `const` of a plain import. The import-preamble fast-path must accept the
-    // `var` form so the re-export verifies — matching the AMD verdict, which
-    // already accepts re-exports (imports arrive as factory params).
+    // `var` form so the re-export verifies instead of failing SES at runtime.
     const body = compiledBody({
       "/sibling.ts": `export const thatConst = (): number => 42;`,
       "/main.ts":

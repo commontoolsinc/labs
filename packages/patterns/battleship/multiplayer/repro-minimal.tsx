@@ -83,6 +83,7 @@ interface Container {
 interface ChildInput {
   /** Cell set by THIS session - works correctly */
   myData: Writable<Container | null>;
+
   /** Cell set by OTHER session - BUG: nested array elements are undefined */
   otherData: Writable<Container | null>;
   whichPlayer: 1 | 2;

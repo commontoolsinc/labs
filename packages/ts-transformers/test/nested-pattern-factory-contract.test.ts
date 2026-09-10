@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { JSONSchema } from "@commonfabric/api";
-import { factorySchemasEqual } from "@commonfabric/data-model/schema-utils";
+import { factorySchemasEqual } from "@commonfabric/data-model-schema";
 import ts from "typescript";
 
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";

@@ -2,6 +2,7 @@
  * The YAML language used by `cf view`. Tests cover direct files, diffs, live
  * edits, common scalar forms, flow collections, and state that crosses lines.
  */
+
 import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import { join } from "@std/path";
 import {
@@ -1145,7 +1146,11 @@ function assertLiveDiffLineOffsets(
     );
     assert(!target.spans.some((span) => span.cls === "propertyName"));
 
-    source.save(edited, diff);
+    source.save(
+      edited,
+      source.lineEndingProvenance!(edited),
+      diff,
+    );
     const afterSave = highlighter.update(
       edited.replace("+  target: new", "+  target: newer"),
     );

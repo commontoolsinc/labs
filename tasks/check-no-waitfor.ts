@@ -80,7 +80,7 @@ const PACKAGE_IMPORT =
 // literal may span lines, and its `${...}` is swallowed as part of the literal,
 // which holds here because an import statement cannot sit inside one.
 //
-// Regular-expression literals are not modelled. A `/\//` reads as a line
+// Regular-expression literals are not modeled. A `/\//` reads as a line
 // comment and a quote inside a regex reads as a string opening, so both blind
 // the scan to the rest of that line. Imports sit at the top of a file, above any
 // regex literal.
@@ -158,6 +158,7 @@ export function isIntegrationTestFile(relPath: string): boolean {
 export interface ScanResult {
   /** In-scope files importing the polling `waitFor` that are not allowlisted. */
   violations: string[];
+
   /** In-scope files importing the polling `waitFor` that are allowlisted. */
   allowlisted: string[];
 }

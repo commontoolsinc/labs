@@ -1,20 +1,16 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  CompiledJsParseError,
   findTopLevelArrow,
   findTopLevelEquals,
   isStringLiteralRange,
   locationFromOffset,
-  parseCompiledBundleSource,
   parseFunctionText,
-  parseStringLiteralValue,
   splitTopLevelCommaList,
   stripJsTrivia,
   stripWholeParentheses,
   trimRange,
   tryParseCallExpression,
-  tryParseDefineCall,
 } from "../src/sandbox/compiled-js-parser.ts";
 
 describe("findTopLevelEquals()", () => {
@@ -58,66 +54,6 @@ describe("trimRange()", () => {
       start: 0,
       end: source.length,
     });
-  });
-});
-
-describe("tryParseDefineCall()", () => {
-  it("parses a canonical AMD define statement", () => {
-    const source =
-      `define("index", ["require", "exports"], function (require, exports) {
-        "use strict";
-        exports.default = 1;
-      });`;
-
-    const defineCall = tryParseDefineCall(source, {
-      start: 0,
-      end: source.length,
-    });
-
-    expect(defineCall).toBeDefined();
-    expect(defineCall?.moduleId).toBe("index");
-    expect(defineCall?.dependencies).toEqual(["require", "exports"]);
-    expect(defineCall?.factory.params).toEqual(["require", "exports"]);
-    expect(defineCall?.factory.body.statements).toHaveLength(2);
-  });
-});
-
-describe("parseCompiledBundleSource()", () => {
-  it("parses wrapped AMD define calls and preserves factory statements", () => {
-    const source = `(function () {
-      define("index", ["require", "exports", "./dep"], function named(require, exports, dep) {
-        "use strict";
-        if (dep.ready) {
-          exports.value = dep.value;
-        } else {
-          exports.value = /a,b/.test("a,b");
-        }
-      });
-      const ignored = call(1, { nested: [2, 3] });
-    });`;
-
-    const parsed = parseCompiledBundleSource(source);
-
-    expect(parsed.defineCalls).toHaveLength(1);
-    expect(parsed.body.statements).toHaveLength(2);
-    expect(parsed.defineCalls[0].moduleId).toBe("index");
-    expect(parsed.defineCalls[0].dependencies).toEqual([
-      "require",
-      "exports",
-      "./dep",
-    ]);
-    expect(parsed.defineCalls[0].factory.params).toEqual([
-      "require",
-      "exports",
-      "dep",
-    ]);
-    expect(parsed.defineCalls[0].factory.body.statements).toHaveLength(2);
-  });
-
-  it("throws a parse error for empty bundles", () => {
-    expect(() => parseCompiledBundleSource("  ")).toThrow(
-      CompiledJsParseError,
-    );
   });
 });
 
@@ -218,12 +154,6 @@ describe("scanner helpers", () => {
     expect(tryParseCallExpression(source, 0, source.length)).toBeUndefined();
   });
 
-  it("parses escaped string literal values", () => {
-    const source = `"a\\\"b"`;
-
-    expect(parseStringLiteralValue(source, 0, source.length)).toBe('a"b');
-  });
-
   it("recognizes exact string literal ranges", () => {
     const literalWithTrivia = ` /* before */ "a\\\"b" /* after */ `;
     expect(isStringLiteralRange(
@@ -280,22 +210,6 @@ describe("scanner helpers", () => {
     expect(() => new Function(`return ${escapedBackslash};`)).not.toThrow();
     expect(() => new Function(`return ${unicodeEscape};`)).not.toThrow();
     expect(() => new Function(`return ${adjacentStrings};`)).toThrow();
-  });
-
-  it("rejects non-string literal values", () => {
-    const source = `value`;
-
-    expect(() => parseStringLiteralValue(source, 0, source.length)).toThrow(
-      "Expected a string literal",
-    );
-  });
-
-  it("rejects malformed string literal ranges", () => {
-    const source = `"a\n"`;
-
-    expect(() => parseStringLiteralValue(source, 0, source.length)).toThrow(
-      "Expected a string literal",
-    );
   });
 
   it("strips only whole parentheses", () => {

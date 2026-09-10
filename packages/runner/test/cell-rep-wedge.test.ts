@@ -1,3 +1,11 @@
+/**
+ * Exercises the modern-cell-rep flag end to end at the `Cell.entityId` →
+ * `createRef`/`hashOf` boundary that the `map`/`filter`/`flatMap` builtins use
+ * to derive result-cell addresses. The serialized entity-id reference's shape
+ * is itself a hash input, so flipping the flag re-points those derived
+ * addresses — the storage-affecting change the flag gates.
+ */
+
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -14,13 +22,6 @@ import { createRef } from "../src/create-ref.ts";
 const signer = await Identity.fromPassphrase("cell-rep wedge");
 const space = signer.did();
 
-/**
- * Exercises the modern-cell-rep flag end to end at the `Cell.entityId` →
- * `createRef`/`hashOf` boundary that the `map`/`filter`/`flatMap` builtins use
- * to derive result-cell addresses. The serialized entity-id reference's shape
- * is itself a hash input, so flipping the flag re-points those derived
- * addresses — the storage-affecting change the flag gates.
- */
 describe("modern-cell-rep wedge", () => {
   afterEach(() => {
     resetModernCellRepConfig();

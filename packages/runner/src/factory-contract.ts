@@ -1,5 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 type FrameworkProvidedContract = Readonly<{
   /** Compiler-owned graph metadata; never derived from authored schemas. */
@@ -37,9 +37,9 @@ export type FactoryContract =
 export function factoryContractFromSchema(
   schema: JSONSchema | undefined,
 ): FactoryContract | undefined {
-  if (!isRecord(schema) || !("asFactory" in schema)) return undefined;
+  if (!isObjectNotArray(schema) || !("asFactory" in schema)) return undefined;
   const contract = schema.asFactory;
-  if (!isRecord(contract)) {
+  if (!isObjectNotArray(contract)) {
     throw new TypeError("Invalid asFactory schema contract");
   }
   switch (contract.kind) {

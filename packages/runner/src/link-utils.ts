@@ -1,7 +1,33 @@
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { isRecord } from "@commonfabric/utils/types";
-import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
-import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import {
+  deepFreeze,
+  type FabricValue,
+  isDeepFrozen,
+  isWalkableObjectOrArray,
+  toCompactDebugString,
+} from "@commonfabric/data-model";
+import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import {
+  internSchema,
+  isNontrivialSchema,
+} from "@commonfabric/data-model-schema";
+import type { JSONSchemaObj } from "@commonfabric/api";
+import {
+  decomposeSchema,
+  isExternalSchemaRef,
+  recomposeSchema,
+  SchemaNotDecomposableError,
+} from "./schema-decompose.ts";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
+import {
+  lookupSchemaDocument,
+  onSchemaRegistryClear,
+  registerSchemaDocument,
+} from "./schema-registry.ts";
+import type { MetaLinkField } from "./meta-seam.ts";
+import type { IReadOptions } from "./storage/interface.ts";
+import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
 import {
   type AnyCell,
   type DerivedInternalCellDescriptor,
@@ -15,23 +41,14 @@ import {
   type MemorySpace,
   type Stream,
 } from "./cell.ts";
-import { type CellLinkRefPayload, type SigilLink } from "./sigil-types.ts";
-import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { toURI } from "./uri-utils.ts";
-import { arrayEqual } from "./path-utils.ts";
 import {
-  CellResultInternals,
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "./query-result-proxy.ts";
-import { ContextualFlowControl } from "./cfc.ts";
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
+import { createRef } from "./create-ref.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
-  IExtendedStorageTransaction,
-  IMemorySpaceAddress,
-} from "./storage/interface.ts";
-import type { Runtime } from "./runtime.ts";
-import {
+  areNormalizedLinksSame,
   isNormalizedFullLink,
   isNormalizedLink,
   isPrimitiveCellLink,
@@ -40,9 +57,19 @@ import {
   parseLinkPrimitive,
   PrimitiveCellLink,
 } from "./link-types.ts";
-import { MetaLinkField } from "@commonfabric/api";
+import {
+  CellResultInternals,
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "./query-result-proxy.ts";
+import type { Runtime } from "./runtime.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
-import { createRef } from "./create-ref.ts";
+import { type CellLinkRefPayload, type SigilLink } from "./sigil-types.ts";
+import {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "./storage/interface.ts";
+import { toURI } from "./uri-utils.ts";
 
 export * from "./link-types.ts";
 
@@ -104,12 +131,19 @@ export function parseLink(
   if (isCell(value)) return value.getAsNormalizedFullLink();
 
   if (isPrimitiveCellLink(value)) {
+    // A sigil-parsed link is DATA-DERIVED (link-types.ts `viaLinkHop`):
+    // it names somebody else's doc, so a later read that dead-ends at
+    // that doc missing is an unresolved input, not a known absence.
+    const markDerived = <L extends NormalizedLink | undefined>(link: L): L =>
+      link === undefined ? link : { ...link, viaLinkHop: true as const };
     if (!base) {
-      return parseLinkPrimitive(value);
+      return markDerived(parseLinkPrimitive(value));
     } else if (isAnyCell(base)) {
-      return parseLinkPrimitive(value, base.getAsNormalizedFullLink());
+      return markDerived(
+        parseLinkPrimitive(value, base.getAsNormalizedFullLink()),
+      );
     } else if (isNormalizedLink(base)) {
-      return parseLinkPrimitive(value, base);
+      return markDerived(parseLinkPrimitive(value, base));
     }
     throw new Error(`Unexpected link base: ${base}`);
   }
@@ -142,6 +176,7 @@ export function areLinksSame(
   resolveBeforeComparing?: boolean,
   txForResolving?: IExtendedStorageTransaction,
   runtime?: Runtime,
+  markIfcCrossings?: boolean,
 ): boolean {
   if (value1 === undefined && value2 === undefined) return false;
 
@@ -164,11 +199,15 @@ export function areLinksSame(
     if (!runtime) {
       throw new Error("Provide runtime to resolve before comparing");
     }
+    // Content-reading callers (a candidate comparison reads through the
+    // links it resolves) opt into the ifc crossing seam; identity-only
+    // callers leave it off.
+    const options = markIfcCrossings ? { markIfcCrossings: true } : {};
     link1 = isNormalizedFullLink(link1)
-      ? resolveLink(runtime, tx, link1)
+      ? resolveLink(runtime, tx, link1, "value", options)
       : link1;
     link2 = isNormalizedFullLink(link2)
-      ? resolveLink(runtime, tx, link2)
+      ? resolveLink(runtime, tx, link2, "value", options)
       : link2;
   }
 
@@ -186,20 +225,77 @@ export function areMaybeLinkAndNormalizedLinkSame(
   return areNormalizedLinksSame(normalizedLink, normalizedLink2);
 }
 
+// Link identity (`areNormalizedLinksSame` and neighbors) lives in
+// ./link-types.ts — one canonical implementation — and reaches importers of
+// this module through the `export *` above.
+
+// Successful externalization depends on schema documents registered during
+// the current lease epoch. Frozen source schemas keep stable identity, so the
+// external reference can be reused until that registry clears.
+let externalizedLinkSchemaCache = new WeakMap<
+  object,
+  Map<KeepAsCell, JSONSchema>
+>();
+onSchemaRegistryClear(() => {
+  externalizedLinkSchemaCache = new WeakMap();
+});
+
 /**
- * Compare two normalized links for equality
+ * Replaces an inline schema with a reference to content-addressed schema
+ * documents (`docs/specs/content-addressed-schemas.md`, Phases 1 and 2;
+ * `contentAddressedSchemas` flag) — the shared emission for link schemas
+ * and `$alias` binding schemas. Decomposition registers the closure in
+ * the realm registry — in-session resolution works immediately — and the
+ * commit pipeline materializes the documents into the destination space in
+ * the same transaction as the write that carries the reference (the
+ * write-side delivery guarantee). Input decomposition refuses stays inline,
+ * exactly as with the flag off.
  */
-export function areNormalizedLinksSame(
-  link1: NormalizedLink,
-  link2: NormalizedLink,
-): boolean {
-  return link1.id === link2.id && link1.space === link2.space &&
-    (link1.scope ?? "space") === (link2.scope ?? "space") &&
-    arrayEqual(link1.path, link2.path);
+export function externalizeSchema(schema: JSONSchemaObj): JSONSchema {
+  try {
+    const { rootRef, documents } = decomposeSchema(schema, {
+      resolveDocument: lookupSchemaDocument,
+    });
+    for (const [hash, document] of documents) {
+      registerSchemaDocument(hash, document);
+    }
+    return internSchema({ $ref: rootRef });
+  } catch (error) {
+    if (error instanceof SchemaNotDecomposableError) return schema;
+    throw error;
+  }
 }
 
 /**
- * Creates a sigil reference (link or alias) with shared logic
+ * Rewrites reference-form link schemas inside `value` back to their inline
+ * (recomposed) form. A `data:` document is self-contained by construction —
+ * the value lives in the id and no write ever installs anything alongside
+ * it — so a link serialized into one carries its schema inline, exactly as
+ * with the flag off. A reference whose closure the registry cannot supply
+ * stays a reference; the traversal's loader gates that read either way.
+ */
+export function inlineExternalSchemaRefsInValue<T extends FabricValue>(
+  value: T,
+): T {
+  return mapLinkSchemas(value, (schema) => {
+    if (!isObjectNotArray(schema)) return schema;
+    const ref = schema.$ref;
+    if (typeof ref !== "string" || !isExternalSchemaRef(ref)) return schema;
+    try {
+      // Recomposition never mints an empty `$defs` (a closure of one
+      // document returns the body alone), so the result rides as it is. A
+      // schema document is plain JSON, hence a FabricValue.
+      return internSchema(
+        recomposeSchema(ref, lookupSchemaDocument),
+      ) as FabricValue;
+    } catch {
+      return schema;
+    }
+  }) as T;
+}
+
+/**
+ * Creates a sigil link, optionally a write redirect, with shared logic
  */
 export function createSigilLinkFromParsedLink(
   link: NormalizedLink,
@@ -248,11 +344,13 @@ export function createSigilLinkFromParsedLink(
   // permissive and should not turn links into schema-bearing links.
   if (options.includeSchema && link.schema !== undefined) {
     // Default to keeping streams unless a broader mode was requested.
-    const schema = sanitizeSchemaForLinks(
-      link.schema,
-      options.keepAsCell ?? KeepAsCell.OnlyStream,
-    );
-    if (isNontrivialSchema(schema)) reference.schema = schema;
+    const keepAsCell = options.keepAsCell ?? KeepAsCell.OnlyStream;
+    const schema = getContentAddressedSchemasConfig()
+      ? externalizeLinkSchema(link.schema, keepAsCell)
+      : sanitizeSchemaForLinks(link.schema, keepAsCell);
+    if (isNontrivialSchema(schema)) {
+      reference.schema = schema;
+    }
   }
 
   // Option overrides link value
@@ -265,6 +363,7 @@ export function createSigilLinkFromParsedLink(
 
   return sigil;
 }
+
 /**
  * Controls which `asCell` schema entries survive {@link sanitizeSchemaForLinks}.
  */
@@ -281,10 +380,20 @@ export enum KeepAsCell {
 // Values are always deep-frozen OBJECT schemas: boolean/undefined inputs take
 // the early return and never reach the memo, and outputs are frozen before
 // caching (their sub-trees are shared across callers).
-const _sanitizeCache = new WeakMap<
+//
+// Dropped on the registry-clear transition, per the registry's rule for
+// resolution-success memos: a sanitized result can EMBED references the
+// strip minted (re-externalized sanitized documents), and those documents
+// live in the epoch's registry. A result cached in one epoch would keep
+// stamping references the next epoch's writer cannot stage — the link
+// would ship without its closure, and the stored schema would go cold.
+let _sanitizeCache = new WeakMap<
   object,
   Map<KeepAsCell, JSONSchema & object>
 >();
+onSchemaRegistryClear(() => {
+  _sanitizeCache = new WeakMap();
+});
 
 /**
  * Traverse schema and remove all asCell flags.
@@ -310,6 +419,14 @@ export function sanitizeSchemaForLinks(
   if (schema === undefined || typeof schema === "boolean") {
     return schema;
   }
+  // A reference-form schema sanitizes as its resolved document: the strip is
+  // a structural operation, and letting a reference pass through unstripped
+  // would carry `asCell` entries into stored link schemas the flag-off
+  // sanitize removed — a reader would mint handles where values are
+  // expected. The sanitized (inline) result re-externalizes at the emission
+  // site as usual; an unresolvable reference passes through unchanged (the
+  // helper returns it as it is, and a reference has nothing to strip).
+  schema = resolveExternalRootRefForStructure(schema);
 
   // Memoize by input identity: sanitize is a pure function of
   // `(schema, keepAsCell)`, and at pattern-build time the same interned/frozen
@@ -380,6 +497,36 @@ export function sanitizeSchemaForLinks(
   return output;
 }
 
+/** Sanitizes and externalizes a link schema, memoizing frozen inputs. */
+function externalizeLinkSchema(
+  schema: JSONSchema,
+  keepAsCell: KeepAsCell,
+): JSONSchema {
+  const cacheable = isObjectOrArray(schema) && isDeepFrozen(schema);
+  const cached = cacheable
+    ? externalizedLinkSchemaCache.get(schema)?.get(keepAsCell)
+    : undefined;
+  if (cached !== undefined) return cached;
+  const sanitized = sanitizeSchemaForLinks(schema, keepAsCell);
+  if (!isObjectNotArray(sanitized) || !isNontrivialSchema(sanitized)) {
+    return sanitized;
+  }
+  const externalized = externalizeSchema(sanitized);
+  if (
+    cacheable && isObjectNotArray(externalized) &&
+    typeof externalized.$ref === "string" &&
+    isExternalSchemaRef(externalized.$ref)
+  ) {
+    let byMode = externalizedLinkSchemaCache.get(schema);
+    if (byMode === undefined) {
+      byMode = new Map();
+      externalizedLinkSchemaCache.set(schema, byMode);
+    }
+    byMode.set(keepAsCell, externalized);
+  }
+  return externalized;
+}
+
 interface SanitizeContext {
   // Maps original schema objects to their processed results
   seen: Map<any, any>;
@@ -393,26 +540,6 @@ interface SanitizeContext {
   reservedNames: Set<string>;
   // Which asCell entries to preserve while stripping.
   keepAsCell: KeepAsCell;
-}
-
-function cloneSchemaMetadata(
-  value: unknown,
-  seen: Map<object, unknown> = new Map(),
-): unknown {
-  if (value === null || typeof value !== "object") return value;
-  const cached = seen.get(value);
-  if (cached !== undefined) return cached;
-  const clone: unknown[] | Record<PropertyKey, unknown> = Array.isArray(value)
-    ? []
-    : {};
-  seen.set(value, clone);
-  for (const key of Reflect.ownKeys(value)) {
-    (clone as Record<PropertyKey, unknown>)[key] = cloneSchemaMetadata(
-      (value as Record<PropertyKey, unknown>)[key],
-      seen,
-    );
-  }
-  return clone;
 }
 
 /**
@@ -442,6 +569,37 @@ function recursiveStripAsCellFromSchema(
   // Prevent infinite recursion from proxy objects or very deep schemas
   // JSON Schema shouldn't need more than ~50 levels of nesting in practice
   if (depth > 100) return schema;
+
+  // A NESTED reference-form schema stays a reference, but the strip must
+  // reach THROUGH it: the referenced closure may carry `asCell`, and a
+  // reference left unexamined would reintroduce it the moment a reader
+  // resolves it — visibly clean, actually not. The referenced document
+  // sanitizes through the whole pipeline (its own cycles, its own memo); a
+  // document the strip leaves untouched keeps the reference verbatim, and
+  // one it changes re-externalizes to the sanitized closure, so only the
+  // target moves. Siblings stay on the node and strip in the walk below.
+  // External references are hash-based, so document-to-document recursion
+  // cannot cycle; an unresolvable reference passes through unchanged, as
+  // at the root.
+  const nestedRef = (schema as { $ref?: unknown }).$ref;
+  if (typeof nestedRef === "string" && isExternalSchemaRef(nestedRef)) {
+    const bare = internSchema({ $ref: nestedRef }) as JSONSchemaObj;
+    const resolved = resolveExternalRootRefForStructure(bare);
+    if (resolved !== bare && isObjectNotArray(resolved)) {
+      const sanitizedDoc = sanitizeSchemaForLinks(
+        resolved,
+        context.keepAsCell,
+      );
+      const target =
+        internSchema(sanitizedDoc as JSONSchemaObj) === internSchema(resolved)
+          ? bare
+          : externalizeSchema(internSchema(sanitizedDoc as JSONSchemaObj));
+      const { $ref: _nested, ...siblings } = schema as Record<string, unknown>;
+      schema = Object.keys(siblings).length > 0 && isObjectNotArray(target)
+        ? { ...siblings, ...target }
+        : target;
+    }
+  }
 
   // If we've already fully processed this schema, return the result
   if (context.seen.has(schema) && !context.inProgress.has(schema)) {
@@ -496,20 +654,20 @@ function recursiveStripAsCellFromSchema(
   }
 
   // Recursively process all object properties
+  //
+  // TODO(danfuzz): this loop filters by key name only, so it also descends
+  // into `default` and `examples` VALUES, and rewrites whatever schema
+  // keywords it finds spelled inside one. Value-bearing keys want to be
+  // carried by reference, the way `simplifySchemaForContext` preserves them.
   for (const [key, value] of Object.entries(result)) {
     // Skip $ref - it's just a string pointer, not a schema to process
     if (key === "$ref") continue;
 
-    // `asFactory` carries an exact public call contract. Its nested schemas are
-    // metadata about a different invocation boundary, so stripping their cell
-    // wrappers would silently change the factory type. Copy the extension as a
-    // unit while allowing the enclosing link schema to be sanitized normally.
-    if (key === "asFactory") {
-      result[key] = cloneSchemaMetadata(value);
-      continue;
-    }
-
-    if (value && typeof value === "object") {
+    // A fabric value is carried by reference: the rebuild below reads it by
+    // property name and would return `{}`, so a fabric-valued default (which
+    // `Cell.of()` embeds into schemas) would be lost from the sanitized
+    // schema that rides on links.
+    if (isWalkableObjectOrArray(value)) {
       if (key === "$defs") {
         // Process each definition in $defs (they contain schemas that may have asCell/asStream)
         const processedDefs: Record<string, any> = {};
@@ -518,7 +676,7 @@ function recursiveStripAsCellFromSchema(
             value as Record<string, any>,
           )
         ) {
-          if (defSchema && typeof defSchema === "object") {
+          if (isWalkableObjectOrArray(defSchema)) {
             processedDefs[defName] = recursiveStripAsCellFromSchema(
               defSchema,
               context,
@@ -532,7 +690,7 @@ function recursiveStripAsCellFromSchema(
       } else if (Array.isArray(value)) {
         // Handle arrays
         result[key] = value.map((item) =>
-          typeof item === "object" && item !== null
+          isWalkableObjectOrArray(item)
             ? recursiveStripAsCellFromSchema(
               item,
               context,
@@ -576,7 +734,7 @@ function schemaLosesStreamCellMarker(
   schema: unknown,
   context: SanitizeContext,
 ): boolean {
-  if (context.keepAsCell === KeepAsCell.All || !isRecord(schema)) {
+  if (context.keepAsCell === KeepAsCell.All || !isObjectOrArray(schema)) {
     return false;
   }
 
@@ -597,9 +755,9 @@ function removeStrippedStreamPropertiesFromRequired(
   result: unknown,
   context: SanitizeContext,
 ): void {
-  if (!isRecord(originalSchema) || !isRecord(result)) return;
+  if (!isObjectOrArray(originalSchema) || !isObjectOrArray(result)) return;
   const properties = originalSchema.properties;
-  if (!isRecord(properties)) return;
+  if (!isObjectOrArray(properties)) return;
   if (!Array.isArray(result.required)) return;
 
   const required = result.required.filter((property) =>
@@ -676,7 +834,7 @@ export function getStableInternalPathSegment(
   }
 
   if (cause !== undefined) {
-    if (isRecord(cause) && "stream" in cause) {
+    if (isObjectOrArray(cause) && "stream" in cause) {
       return `stream:${formatStableCauseSegment(cause.stream as JSONValue)}`;
     }
     return formatStableCauseSegment(cause as JSONValue);
@@ -728,7 +886,7 @@ const META_READ_OPTIONS = {
 export function getMetaLink(
   resultCell: Cell<unknown>,
   field: MetaLinkField,
-  options: unknown = META_READ_OPTIONS,
+  options: IReadOptions = META_READ_OPTIONS,
 ): NormalizedFullLink | undefined {
   const linkObj = resultCell.getMetaRaw(field, options);
   if (linkObj === undefined) return undefined;

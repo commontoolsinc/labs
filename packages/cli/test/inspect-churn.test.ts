@@ -8,10 +8,16 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Database } from "@db/sqlite";
-import { cf } from "./utils.ts";
+import { cf, stripAnsi } from "./utils.ts";
 
-/** `CliResult` streams are line arrays; join before substring assertions. */
-const text = (lines: string[]): string => lines.join("\n");
+/**
+ * `CliResult` streams are line arrays; join before substring assertions.
+ *
+ * The escapes go too: the CLI colors help and error output whenever the
+ * environment asks for color, so an assertion on raw text passes or fails by
+ * where the developer ran it.
+ */
+const text = (lines: string[]): string => stripAnsi(lines.join("\n"));
 
 const SESSION = "session:did%3Akey%3AzAlice:s1";
 
@@ -110,6 +116,48 @@ describe("cf inspect churn", () => {
       expect(coarse.code).toBe(0);
       // Same totals, one bucket.
       expect(text(coarse.stdout)).toContain("42 commits / 52 revisions over 1");
+    });
+  });
+
+  it("shows a settle by reporting the quiet through --until", async () => {
+    // Without an observation boundary the curve ends at the last write, which
+    // for a storm that has just stopped is its busiest bucket — so it can show
+    // a storm but never show one settling. The footer's two timestamps are what
+    // make the gap between "stopped writing" and "stopped watching" readable.
+    await withStore(STORM, async (path) => {
+      const bare = text((await cf(`inspect churn ${path}`)).stdout);
+      expect(bare).toContain("over 3 × 60s");
+      expect(bare).toContain(
+        "last commit 2026-07-22 10:02:00, observed through 2026-07-22 10:02:00",
+      );
+
+      const observed = await cf(
+        `inspect churn ${path} --until "2026-07-22 10:06:00"`,
+      );
+      expect(observed.code).toBe(0);
+      const output = text(observed.stdout);
+      expect(output).toContain("over 6 × 60s");
+      // Writing stopped four minutes before watching did, and the totals did
+      // not move — the trailing buckets are quiet, not new activity.
+      expect(output).toContain(
+        "last commit 2026-07-22 10:02:00, observed through 2026-07-22 10:05:00",
+      );
+      expect(output).toContain("42 commits / 52 revisions");
+    });
+  });
+
+  it("refuses a window that would report as quiet rather than as wrong", async () => {
+    await withStore(STORM, async (path) => {
+      const unreadable = await cf(`inspect churn ${path} --since yesterday`);
+      expect(unreadable.code).not.toBe(0);
+      expect(text(unreadable.stderr)).toContain("not a time SQLite can read");
+
+      const backwards = await cf(
+        `inspect churn ${path} --since "2026-07-22 11:00:00" ` +
+          `--until "2026-07-22 10:00:00"`,
+      );
+      expect(backwards.code).not.toBe(0);
+      expect(text(backwards.stderr)).toContain("is not before");
     });
   });
 

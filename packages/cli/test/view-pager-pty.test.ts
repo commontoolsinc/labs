@@ -14,6 +14,7 @@
  * still making progress never trips it, and a silent child fails the test
  * with the captured output. Skipped where `script` is unavailable.
  */
+
 import { assert } from "@std/assert";
 import { join } from "@std/path";
 

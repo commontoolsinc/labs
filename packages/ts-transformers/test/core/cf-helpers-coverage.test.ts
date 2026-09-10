@@ -11,13 +11,15 @@
  * feeding a source whose import differs in exactly one respect and asserting
  * whether the helper is detected.
  */
-import ts from "typescript";
+
 import { assert, assertEquals, assertFalse, assertThrows } from "@std/assert";
+
+import ts from "typescript";
+
 import {
   CF_HELPERS_IDENTIFIER,
   CFHelpers,
   injectCfHelpers,
-  sourceDisablesCfTransform,
   transformCfDirective,
 } from "../../src/core/cf-helpers.ts";
 
@@ -46,9 +48,9 @@ function printExpr(node: ts.Node, sourceFile: ts.SourceFile): string {
   );
 }
 
-// ---------------------------------------------------------------------------
+//
 // Constructor scanning: getCFHelpersIdentifier
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("CFHelpers detects the __cfHelpers named import from commonfabric", () => {
   const helpers = helpersFor(
@@ -120,9 +122,9 @@ Deno.test("CFHelpers ignores a bare import declaration with no import clause", (
   assertFalse(helpers.sourceHasHelpers());
 });
 
-// ---------------------------------------------------------------------------
+//
 // getHelperExpr / getHelperQualified
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("getHelperExpr throws when the source has no helpers import", () => {
   const helpers = helpersFor(`const x = 1;`);
@@ -159,9 +161,19 @@ Deno.test("getHelperExpr with an original node preserves source map ranges and i
 
   const expr = helpers.getHelperExpr("lift", original);
   assert(ts.isPropertyAccessExpression(expr));
+  const helperImport = sf.statements[0];
+  assert(ts.isImportDeclaration(helperImport));
+  const namedBindings = helperImport.importClause?.namedBindings;
+  assert(namedBindings && ts.isNamedImports(namedBindings));
+  const helperIdentity = namedBindings.elements[0]?.name;
+  assert(helperIdentity);
   // The whole property-access is anchored to the original node's source map
   // range (its position), distinguishing this branch from the no-original one.
   assertEquals(ts.getSourceMapRange(expr).pos, original.pos);
+  assert(ts.isIdentifier(expr.expression));
+  assert(ts.getOriginalNode(expr.expression) === helperIdentity);
+  assert(ts.getOriginalNode(expr.name) === expr.name);
+  assert(ts.getOriginalNode(expr) === expr);
   assertEquals(printExpr(expr, sf), "__cfHelpers.lift");
 });
 
@@ -184,9 +196,9 @@ Deno.test("getHelperQualified builds a qualified name against the helper identif
   assertEquals((qualified.left as ts.Identifier).text, CF_HELPERS_IDENTIFIER);
 });
 
-// ---------------------------------------------------------------------------
+//
 // transformCfDirective / injectCfHelpers (string passes)
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("transformCfDirective returns an all-blank source unchanged", () => {
   // With no content line, `findFirstContentLineIndex` returns null and the
@@ -203,17 +215,6 @@ Deno.test("transformCfDirective injects the helpers import for an ordinary sourc
   assert(out.startsWith(`import { ${CF_HELPERS_IDENTIFIER} } from`));
   assert(out.includes(source));
   assert(out.includes(`${CF_HELPERS_IDENTIFIER}.h.apply`));
-});
-
-Deno.test("transformCfDirective blanks a leading cf-disable-transform directive", () => {
-  const source = `/// <cf-disable-transform />\nconst answer = 42;`;
-  assert(sourceDisablesCfTransform(source));
-  const out = transformCfDirective(source);
-  const lines = out.split("\n");
-  // The directive line is replaced by an empty line; no helper import is added.
-  assertEquals(lines[0], "");
-  assertEquals(lines[1], "const answer = 42;");
-  assertFalse(out.includes(CF_HELPERS_IDENTIFIER));
 });
 
 Deno.test("injectCfHelpers uses TypeScript helper-shim syntax by default", () => {

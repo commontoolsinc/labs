@@ -4,7 +4,6 @@ import {
   type CallableResultRef,
   executeResolvedCallable,
   type InvocationOutcome,
-  prepareResolvedCallableTool,
 } from "./callable.ts";
 import {
   type ExecCommandSpec,
@@ -17,10 +16,13 @@ import {
 export interface CallableCommandExecutionResult<TResolved> {
   helpText?: string;
   outputText?: string;
+
   /** Handler invocation outcome, passed through from ExecutedCallable. */
   invocation?: InvocationOutcome;
+
   /** Tool result cell address, passed through from ExecutedCallable. */
   resultRef?: CallableResultRef;
+
   parsed: ParsedExecArgs;
   resolved: TResolved;
 }
@@ -34,12 +36,34 @@ export interface CallableCommandExecutionOptions<
   commandSpec: ExecCommandSpec;
   rawArgs: string[];
   deps?: TDeps;
-  renderHelp: (commandSpec: ExecCommandSpec, parsed: ParsedExecArgs) => string;
+
+  /** Render the help page, once the parse has established one was asked for.
+   *
+   * Allowed to be async so a renderer can resolve something it needs ONLY
+   * here: `cf piece call` reads a handler's declared result off the compiled
+   * pattern, and every other invocation of the command has no use for it. A
+   * synchronous renderer satisfies this signature unchanged. */
+  renderHelp: (
+    commandSpec: ExecCommandSpec,
+    parsed: ParsedExecArgs,
+  ) => string | Promise<string>;
+
   validateRawArgs?: (
     rawArgs: string[],
     commandSpec: ExecCommandSpec,
     resolved: TResolved,
   ) => void;
+
+  /**
+   * The command through the word that opened the callable's section — `cf
+   * call ... addItem`, `cf exec /tmp/search.tool` — as a refusal about that
+   * section reprints it.
+   *
+   * The parser sees the section and nothing before it, so this is the half of
+   * the line it cannot reconstruct. It elides the target the way the verb's
+   * own help page elides it, for the same reason.
+   */
+  sectionPrefix?: string;
 }
 
 export async function readJsonInputFromStdin(): Promise<unknown> {
@@ -88,30 +112,22 @@ export async function executeCallableCommand<
     deps,
     renderHelp,
     validateRawArgs,
+    sectionPrefix,
   } = options;
 
-  const preparedTool = execution.callableKind === "tool"
-    ? await prepareResolvedCallableTool(execution, deps)
-    : undefined;
-  const effectiveExecution = preparedTool === undefined
-    ? execution
-    : { ...execution, preparedTool };
-  const effectiveCommandSpec = preparedTool === undefined
-    ? commandSpec
-    : preparedTool.commandSpec;
-
-  validateRawArgs?.(rawArgs, effectiveCommandSpec, resolved);
+  validateRawArgs?.(rawArgs, commandSpec, resolved);
 
   const invocation = await resolveExecInvocation(
-    effectiveCommandSpec,
+    commandSpec,
     rawArgs,
     deps,
+    sectionPrefix,
   );
   const parsed = invocation.parsed;
 
   if (parsed.showHelp) {
     return {
-      helpText: renderHelp(effectiveCommandSpec, parsed),
+      helpText: await renderHelp(commandSpec, parsed),
       parsed,
       resolved,
     };
@@ -120,10 +136,10 @@ export async function executeCallableCommand<
   const input = invocation.input;
 
   const executed = await executeResolvedCallable(
-    effectiveExecution,
+    execution,
     parsed.usedJsonInput
       ? input
-      : normalizeCallableInputForExecution(effectiveCommandSpec, input),
+      : normalizeCallableInputForExecution(commandSpec, input),
     deps,
   );
 

@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Type aliases and shared types", () => {
@@ -26,7 +26,7 @@ describe("Schema: Type aliases and shared types", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "TypeAliasTest");
     const s = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
     const genericCell = s.properties?.genericCell as any;
     expect(genericCell?.type).toBe("string");
@@ -62,7 +62,7 @@ describe("Schema: Type aliases and shared types", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "A");
     const s = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
     const b1 = s.properties?.b1 as any;
     const b2 = s.properties?.b2 as any;

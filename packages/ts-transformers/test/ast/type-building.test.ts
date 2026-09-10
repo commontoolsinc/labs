@@ -1,13 +1,11 @@
 import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import ts from "typescript";
-import { SchemaGenerator } from "@commonfabric/schema-generator";
 
 import { parseModule } from "../transformed-ast.ts";
 
 import {
   buildCaptureTypeElements,
   cloneTypeNodeDeepForEmission,
-  typeToTypeNodeWithRegistry,
 } from "../../src/ast/type-building.ts";
 import { TransformationContext } from "../../src/core/mod.ts";
 import {
@@ -15,13 +13,17 @@ import {
   createCaptureTreeNode,
 } from "../../src/utils/capture-tree.ts";
 
+//
+// Emitting a type node into another file
+//
 // The printer extracts literal text by source position from the file it is
 // printing. A declaration member's type node reused in ANOTHER file therefore
 // emits garbage tokens for literal types (e.g. the `"n/a"` in
 // `Default<string, "n/a">` printed as whatever sits at those offsets in the
 // emit file). cloneTypeNodeDeepForEmission strips positions throughout so
-// literals print from their own `.text`. (Same guarantee as the helper of
-// this name on the #4078 branch.)
+// literals print from their own `.text`.
+//
+
 Deno.test("cloneTypeNodeDeepForEmission prints cross-file literal types from their own text", () => {
   const declarationFile = ts.createSourceFile(
     "declaration.ts",
@@ -69,94 +71,9 @@ Deno.test("cloneTypeNodeDeepForEmission carries typeRegistry entries onto clones
   assertStrictEquals(typeRegistry.get(cloned), fakeType);
 });
 
-Deno.test("detached generic unknown references remain unknown schemas", () => {
-  const sourceText = `
-type Identity<T> = T;
-type Result = Identity<unknown>;
-`;
-  const { program, sourceFile } = createProgram("unknown.ts", sourceText);
-  const checker = program.getTypeChecker();
-  const result = sourceFile.statements.find((statement) =>
-    ts.isTypeAliasDeclaration(statement) && statement.name.text === "Result"
-  );
-  if (!result || !ts.isTypeAliasDeclaration(result)) {
-    throw new Error("Expected Result alias");
-  }
-  const type = checker.getTypeFromTypeNode(result.type);
-  const cloned = cloneTypeNodeDeepForEmission(result.type);
-  const schema = new SchemaGenerator().generateSchema(
-    type,
-    checker,
-    cloned,
-    undefined,
-    undefined,
-    sourceFile,
-  );
-
-  assertEquals(schema, { type: "unknown" });
-});
-
-Deno.test("detached type-parameter references remain unknown schemas", () => {
-  const sourceText = "function f<T>(arg: T): void {}";
-  const { program, sourceFile } = createProgram("type-param.ts", sourceText);
-  const checker = program.getTypeChecker();
-  const declaration = sourceFile.statements[0];
-  if (!declaration || !ts.isFunctionDeclaration(declaration)) {
-    throw new Error("Expected function declaration");
-  }
-  const typeNode = declaration.parameters[0]?.type;
-  if (!typeNode) throw new Error("Expected parameter type");
-  const cloned = cloneTypeNodeDeepForEmission(typeNode);
-  const schema = new SchemaGenerator().generateSchema(
-    checker.getUnknownType(),
-    checker,
-    cloned,
-    undefined,
-    undefined,
-    sourceFile,
-  );
-
-  assertEquals(schema, { type: "unknown" });
-});
-
-Deno.test("typeToTypeNodeWithRegistry registers exact nested generic arguments", () => {
-  const sourceText = `
-interface Box<T> { value: T }
-interface Root { captured: Box<string> }
-`;
-  const { program, sourceFile } = createProgram("nested-types.ts", sourceText);
-  const checker = program.getTypeChecker();
-  const rootDeclaration = sourceFile.statements.find((statement) =>
-    ts.isInterfaceDeclaration(statement) && statement.name.text === "Root"
-  );
-  if (!rootDeclaration || !ts.isInterfaceDeclaration(rootDeclaration)) {
-    throw new Error("Expected Root declaration");
-  }
-  const rootType = checker.getTypeAtLocation(rootDeclaration.name);
-  const captured = rootType.getProperty("captured");
-  if (!captured?.valueDeclaration) {
-    throw new Error("Expected Root.captured declaration");
-  }
-  const capturedType = checker.getTypeOfSymbolAtLocation(
-    captured,
-    captured.valueDeclaration,
-  );
-  const typeRegistry = new WeakMap<ts.Node, ts.Type>();
-  const emitted = typeToTypeNodeWithRegistry(
-    capturedType,
-    { checker, factory: ts.factory, sourceFile },
-    typeRegistry,
-  );
-  if (!ts.isTypeReferenceNode(emitted) || !emitted.typeArguments?.[0]) {
-    throw new Error("Expected emitted Box<string> reference");
-  }
-
-  assertStrictEquals(typeRegistry.get(emitted), capturedType);
-  assertEquals(
-    checker.typeToString(typeRegistry.get(emitted.typeArguments[0])!),
-    "string",
-  );
-});
+//
+// Building capture type elements
+//
 
 Deno.test("buildCaptureTypeElements handles destructured keys and renames identifier captures", () => {
   const sourceText = `

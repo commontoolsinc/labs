@@ -4,21 +4,22 @@ import {
   assertNotMatch,
   assertThrows,
 } from "@std/assert";
+
+import { injectCfHelpers } from "@commonfabric/ts-transformers";
+
+import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+import { helperInjectionLineOffset } from "../src/harness/engine.ts";
 import {
   preserveLineCount,
   transformInjectHelperModule,
 } from "../src/harness/pretransform.ts";
-import { helperInjectionLineOffset } from "../src/harness/engine.ts";
-import { injectCfHelpers } from "@commonfabric/ts-transformers";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-
-import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
 
 // These tests drive the sync parse internals directly (below the async flow
 // boundaries that normally load the deferred compiler stack), so load it here.
 await ensureCompilerStack();
 
-Deno.test("transformInjectHelperModule transforms by default and respects cf-disable-transform", () => {
+Deno.test("transformInjectHelperModule injects the helper import into every file", () => {
   const program: RuntimeProgram = {
     main: "/main.tsx",
     files: [
@@ -31,73 +32,18 @@ Deno.test("transformInjectHelperModule transforms by default and respects cf-dis
       },
       {
         name: "/plain.tsx",
-        contents: [
-          "/// <cf-disable-transform />",
-          "export const value = 1;",
-        ].join("\n"),
+        contents: "export const value = 1;\n",
       },
     ],
   };
 
   const transformed = transformInjectHelperModule(program);
-  const main = transformed.files.find((file) => file.name === "/main.tsx")!;
-  const plain = transformed.files.find((file) => file.name === "/plain.tsx")!;
-
-  assertMatch(
-    main.contents,
-    /import \{ __cfHelpers \} from "commonfabric";/,
-  );
+  for (const name of ["/main.tsx", "/plain.tsx"]) {
+    const file = transformed.files.find((f) => f.name === name)!;
+    assertMatch(file.contents, /import \{ __cfHelpers \} from "commonfabric";/);
+  }
+  const main = transformed.files.find((f) => f.name === "/main.tsx")!;
   assertNotMatch(main.contents, /cts-enable/);
-
-  assertNotMatch(
-    plain.contents,
-    /import \{ __cfHelpers \} from "commonfabric";/,
-  );
-  assertNotMatch(plain.contents, /cf-disable-transform/);
-});
-
-Deno.test("transformInjectHelperModule warns only on an indented (ignored) cf-disable-transform", () => {
-  const run = (name: string, contents: string) => {
-    const warnings: string[] = [];
-    const originalWarn = console.warn;
-    console.warn = (...args: unknown[]) => {
-      warnings.push(args.map(String).join(" "));
-    };
-    try {
-      const out = transformInjectHelperModule({
-        main: name,
-        files: [{ name, contents }],
-      });
-      return { warnings, contents: out.files[0]!.contents };
-    } finally {
-      console.warn = originalWarn;
-    }
-  };
-
-  // Indented directive: not honored, so the file is transformed as usual —
-  // and the author is warned, by file name, that it was ignored.
-  const indented = run(
-    "/indented.tsx",
-    ["  /// <cf-disable-transform />", "export const value = 1;"].join("\n"),
-  );
-  assertMatch(
-    indented.contents,
-    /import \{ __cfHelpers \} from "commonfabric";/,
-  );
-  assertEquals(indented.warnings.length, 1);
-  assertMatch(indented.warnings[0]!, /\/indented\.tsx/);
-  assertMatch(indented.warnings[0]!, /column zero/);
-
-  // Column-zero directive: honored (transform disabled) and no warning.
-  const columnZero = run(
-    "/plain.tsx",
-    ["/// <cf-disable-transform />", "export const value = 1;"].join("\n"),
-  );
-  assertNotMatch(
-    columnZero.contents,
-    /import \{ __cfHelpers \} from "commonfabric";/,
-  );
-  assertEquals(columnZero.warnings.length, 0);
 });
 
 Deno.test("transformInjectHelperModule passes .d.ts files through untouched", () => {
@@ -153,8 +99,11 @@ Deno.test("transformInjectHelperModule injects JS-syntax helpers into .js source
   assertNotMatch(helper.contents, /any\[\]/);
 });
 
+//
 // Coverage remapping assumes this pretransform only adds the one-line helper
 // prelude. Mixed import splitting must preserve the original line count.
+//
+
 Deno.test("mixed import rewrite must not drift coverage line numbers", () => {
   const transformedContents = (contents: string): string =>
     transformInjectHelperModule({
@@ -218,6 +167,7 @@ Deno.test("preserveLineCount rejects expanding rewrites", () => {
   );
 });
 
+//
 // The coverage span mapper subtracts `helperInjectionLineOffset` from every span
 // line to recover the authored line, so it has to predict exactly how far
 // `transformInjectHelperModule` moved that file's content. The two live in
@@ -225,6 +175,8 @@ Deno.test("preserveLineCount rejects expanding rewrites", () => {
 // branches, so pin them against each other rather than against a hand-written
 // number: only the leading helper import shifts lines, and the trailing `h` shim
 // the injector also appends must not count.
+//
+
 Deno.test("helperInjectionLineOffset matches what the injector actually shifts", async () => {
   await ensureCompilerStack();
   const MARKER = "const marker = 1;";
@@ -232,10 +184,6 @@ Deno.test("helperInjectionLineOffset matches what the injector actually shifts",
   // Every shape that reaches the mapper, and what the injector does with it.
   const cases: { label: string; source: string }[] = [
     { label: "plain authored source", source: `const top = 0;\n${MARKER}\n` },
-    {
-      label: "disable-transform directive (blanked in place)",
-      source: `/// <cf-disable-transform />\nconst top = 0;\n${MARKER}\n`,
-    },
     {
       label: "stored legacy envelope (passes through untouched)",
       source: injectCfHelpers(`const top = 0;\n${MARKER}\n`),

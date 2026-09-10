@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { favoriteKey } from "@commonfabric/home-schemas";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { Runtime } from "../src/runtime.ts";
@@ -20,11 +20,12 @@ type FavoriteEntry = {
   id?: string;
 };
 
-// Compiles and runs the real home pattern, then drives its addFavorite /
-// removeFavorite handlers the way the runtime client does: it derives the
-// piece's stable key and the discovery tags as data, and the handlers key the
-// favorite entity by that id.
 describe("home favorites handlers", () => {
+  // Compiles and runs the real home pattern, then drives its addFavorite /
+  // removeFavorite handlers the way the runtime client does: it derives the
+  // piece's stable key and the discovery tags as data, and the handlers key the
+  // favorite entity by that id.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -40,11 +41,9 @@ describe("home favorites handlers", () => {
     tx = runtime.edit();
 
     const patternsRoot = join(import.meta.dirname!, "..", "..", "patterns");
-    const program = await runtime.harness.resolve(
-      new FileSystemProgramResolver(
-        join(patternsRoot, "system", "home.tsx"),
-        patternsRoot,
-      ),
+    const program = await resolveLocalProgram(
+      (resolver) => runtime.harness.resolve(resolver),
+      { main: join(patternsRoot, "system", "home.tsx"), root: patternsRoot },
     );
     const homePattern = await runtime.patternManager.compilePattern(program, {
       space,
@@ -144,7 +143,11 @@ describe("home favorites handlers", () => {
       tags: [],
       userTags: [],
     });
-    await tx.commit();
+    // A manual test tx prepares the way the runtime's own commit paths do:
+    // an enforcing rung refuses a relevant transaction that arrives
+    // unprepared.
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
     tx = runtime.edit();
     await runtime.idle();
     const seeded =

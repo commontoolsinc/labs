@@ -46,8 +46,10 @@ export type ChatProfileCell = Cell<{ name?: string; avatar?: string }>;
 export interface ChatMessage {
   /** Sender's live profile cell — rendered first-class via cf-profile-badge. */
   authorProfile: ChatProfileCell;
+
   /** Sender's profile name, snapshotted at send time (durable fallback label). */
   author: string;
+
   /** Sender's profile avatar (URL or glyph), snapshotted at send time. */
   avatar: string;
   body: string;
@@ -91,6 +93,7 @@ const sendMessage = handler<SendEvent, {
 export interface ProfileGroupChatInput {
   /** Shared message log — every user in the space reads & appends to this. */
   messages?: PerSpace<ChatMessage[] | Default<typeof DEFAULT_MESSAGES>>;
+
   /** Current viewer's message draft — follows the user, not broadcast. */
   draft?: PerUser<string | Default<"">>;
 }

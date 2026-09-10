@@ -1,11 +1,12 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
 import { fromFileUrl } from "@std/path";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commonfabric/identity";
+
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 
 // CT-1755: a profile card can pin an EXISTING deployed piece. `mutateElements`'s
 // `addPiece` mode stores a real cross-space link to the target piece as the
@@ -94,6 +95,10 @@ describe("profile-home addPiece (followable piece card)", () => {
         pieceId: TARGET_PIECE,
         title: "Demo Counter",
       });
+      // A manual test tx prepares the way the runtime's own commit paths do:
+      // an enforcing rung refuses a relevant transaction that arrives
+      // unprepared.
+      rt.prepareTxForCommit(tx2);
       const commit2 = await tx2.commit();
       expect(commit2.error).toBeUndefined();
       await result.pull();

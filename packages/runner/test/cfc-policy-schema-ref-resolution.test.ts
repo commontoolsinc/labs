@@ -1,20 +1,23 @@
+/**
+ * Regression guard for $ref resolution inside policy value matching.
+ *
+ * The schema generator emits named types as `#/$defs/<name>` refs with the
+ * `$defs` on the root schema (e.g. profile-home's owner-protected `elements`
+ * list: `{type: "array", items: {$ref: "#/$defs/ProfileElement"}, ifc,
+ * $defs}`). The pre-fix matcher recursed into `properties`/`items`/compound
+ * branches without threading the root document, so a nested `$ref` was
+ * resolved against the bare ref node itself, warned "Unresolved $ref", and
+ * failed closed — the policy entry was treated as not applying even though the
+ * schema was valid. Only a ref that is genuinely unresolvable against its
+ * document may fail closed.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { wildcardPolicyMatchesValue } from "../src/cfc/prepare.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
-// Regression guard for $ref resolution inside policy value matching.
-//
-// The schema generator emits named types as `#/$defs/<name>` refs with the
-// `$defs` on the root schema (e.g. profile-home's owner-protected `elements`
-// list: `{type: "array", items: {$ref: "#/$defs/ProfileElement"}, ifc, $defs}`).
-// The pre-fix matcher recursed into `properties`/`items`/compound branches
-// without threading the root document, so a nested `$ref` was resolved against
-// the bare ref node itself, warned "Unresolved $ref", and failed closed — the
-// policy entry was treated as not applying even though the schema was valid.
-// Only a ref that is genuinely unresolvable against its document may fail
-// closed.
 describe("CFC policy value matching resolves $refs against the schema root", () => {
   const space = "did:key:policy-schema-refs" as const;
   const target = { space, id: "of:guarded" as const, scope: "space" as const };
@@ -79,13 +82,14 @@ describe("CFC policy value matching resolves $refs against the schema root", () 
   });
 });
 
-// A write-authority policy whose value condition is carried by a `$ref` (the
-// generated array-items shape) must still apply when that ref is unresolvable.
-// Otherwise `ifcEntryAppliesToAttemptedWrite` treats the `writeAuthorizedBy`
-// entry as not applying and the protected write is accepted unverified — a
-// fail-open direction the nearby comment ("must fail closed on unresolved
-// refs") and the S17 link branch both forbid.
 describe("CFC writeAuthorizedBy policy applies when its value-condition $ref is unresolvable", () => {
+  // A write-authority policy whose value condition is carried by a `$ref` (the
+  // generated array-items shape) must still apply when that ref is
+  // unresolvable. Otherwise `ifcEntryAppliesToAttemptedWrite` treats the
+  // `writeAuthorizedBy` entry as not applying and the protected write is
+  // accepted unverified — a fail-open direction the nearby comment ("must fail
+  // closed on unresolved refs") and the S17 link branch both forbid.
+
   const space = "did:key:policy-schema-refs" as const;
   const target = { space, id: "of:guarded" as const, scope: "space" as const };
   const tx = {

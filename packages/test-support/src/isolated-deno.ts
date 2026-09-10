@@ -10,11 +10,13 @@ export interface DenoCommandWithTemporaryLockOptions {
 
 export interface DenoCheckWithTemporaryConfigOptions {
   root: string;
+
   /**
    * A copy of the root config with the same workspace dependency graph.
    * Compiler options may differ for the check.
    */
   config: unknown;
+
   files: string[];
   tempConfigPrefix: string;
 }
@@ -22,12 +24,14 @@ export interface DenoCheckWithTemporaryConfigOptions {
 export interface FrozenDriftCheckOptions {
   /** Import map the baseline lockfile is generated from. */
   baselineImports: Record<string, string>;
+
   /**
    * Import map the frozen check runs against. It must differ from
    * `baselineImports`, and the entry module must only import specifiers that it
    * still maps.
    */
   driftedImports: Record<string, string>;
+
   /** Source of the entry module the checks type-check. */
   entrySource: string;
 }
@@ -35,6 +39,7 @@ export interface FrozenDriftCheckOptions {
 export interface FrozenDriftCheckResult {
   /** Output of generating the baseline lockfile from `baselineImports`. */
   generate: Deno.CommandOutput;
+
   /** Output of the frozen check run against `driftedImports`. */
   check: Deno.CommandOutput;
 }
@@ -57,6 +62,14 @@ async function removeIfPresent(path: string, options?: Deno.RemoveOptions) {
   }
 }
 
+// Both helpers below spawn `Deno.execPath()`, the Deno running the test, rather
+// than the program name `deno`, which resolves through `PATH`. A test that
+// spawned the `PATH` copy would exercise a different toolchain than the one
+// under test whenever the two differ, and the two share one cache directory: a
+// coverage profile written by one version cannot be reported by the other,
+// because each version reads transpiled sources only from its own part of the
+// cache.
+
 export async function runDenoCommandWithTemporaryLock(
   options: DenoCommandWithTemporaryLockOptions,
 ): Promise<Deno.CommandOutput> {
@@ -76,10 +89,7 @@ export async function runDenoCommandWithTemporaryLock(
     if (options.env) {
       commandOptions.env = options.env;
     }
-    // Invoke through the command name so package tasks can grant only
-    // `--allow-run=deno`. `Deno.execPath()` resolves Homebrew-style symlinks to
-    // a versioned absolute path, which cannot be named portably in the task.
-    return await new Deno.Command("deno", commandOptions).output();
+    return await new Deno.Command(Deno.execPath(), commandOptions).output();
   } finally {
     await removeIfPresent(tempDir, { recursive: true });
   }
@@ -145,7 +155,7 @@ export async function runFrozenDriftCheck(
 
   const runCheck = async (imports: Record<string, string>, frozen: boolean) => {
     await Deno.writeTextFile(configPath, JSON.stringify({ imports }, null, 2));
-    return await new Deno.Command("deno", {
+    return await new Deno.Command(Deno.execPath(), {
       cwd: tempDir,
       args: [
         "check",

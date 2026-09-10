@@ -1,12 +1,16 @@
+/**
+ * Importing through the package barrel keeps `defaultHarnessFetch` reachable
+ * from the public entry point that consumers use, alongside the gateway client
+ * that falls back to it. What that default forwards to the global fetch is
+ * pinned here too.
+ */
+
 import { assertEquals, assertStrictEquals } from "@std/assert";
 import {
   defaultHarnessFetch,
   OpenAICompatibleGatewayClient,
 } from "../src/index.ts";
 
-// Importing through the package barrel keeps `defaultHarnessFetch` reachable
-// from the public entry point that consumers use, alongside the gateway client
-// that falls back to it.
 Deno.test("barrel re-exports the harness fetch default", () => {
   assertEquals(typeof defaultHarnessFetch, "function");
   assertEquals(typeof OpenAICompatibleGatewayClient, "function");

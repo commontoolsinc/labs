@@ -1,7 +1,6 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { type FabricValue, hashOf } from "@commonfabric/data-model";
 import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 
 import * as Differential from "../src/storage/differential.ts";
 import type { IMemoryAddress, State } from "../src/storage/interface.ts";

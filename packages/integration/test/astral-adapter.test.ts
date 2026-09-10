@@ -1,14 +1,16 @@
-import { assert, assertEquals, assertRejects } from "@std/assert";
-import { launch } from "@astral/astral";
-import { closeAstralBrowser } from "../astral-adapter.ts";
+import {
+  assert,
+  assertAlmostEquals,
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import { Browser } from "../browser.ts";
 import { Page } from "../page.ts";
 
-type LaunchedBrowser = Awaited<ReturnType<typeof launch>>;
-
 async function closeTestBrowser(
   page: Page,
-  browser: LaunchedBrowser,
+  browser: Browser,
 ): Promise<void> {
   let closeError: unknown;
   try {
@@ -17,7 +19,7 @@ async function closeTestBrowser(
     closeError = error;
   }
   try {
-    await closeAstralBrowser(browser);
+    await browser.close();
   } catch (error) {
     closeError ??= error;
   }
@@ -56,37 +58,14 @@ async function waitForSelectorStateInstallation(page: Page): Promise<void> {
   });
 }
 
-Deno.test("closeAstralBrowser ignores only the exited-process race", async () => {
-  let closeCalls = 0;
-  await closeAstralBrowser({
-    close: () => {
-      closeCalls++;
-      return Promise.reject(
-        new TypeError("Child process has already terminated"),
-      );
-    },
-  });
-  assertEquals(closeCalls, 1);
-
-  await assertRejects(
-    () =>
-      closeAstralBrowser({
-        close: () => Promise.reject(new TypeError("different close failure")),
-      }),
-    TypeError,
-    "different close failure",
-  );
-});
-
 Deno.test("Browser closes a published Astral browser", async () => {
   const browser = await Browser.launch();
   await browser.close();
 });
 
 Deno.test("pierce waits reject when their page closes", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     const target = page.waitForSelector("#never-created", {
@@ -100,14 +79,13 @@ Deno.test("pierce waits reject when their page closes", async () => {
     await page.close();
     await rejected;
   } finally {
-    await closeAstralBrowser(browser);
+    await browser.close();
   }
 });
 
 Deno.test("ElementHandle pierce waits observe their own shadow root", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -117,7 +95,7 @@ Deno.test("ElementHandle pierce waits observe their own shadow root", async () =
 
       const lightTarget = document.createElement("button");
       lightTarget.id = "scoped-light-target";
-      lightTarget.className = "scoped-target";
+      lightTarget.className = "scoped-light";
       host.append(lightTarget);
       document.body.append(host);
     });
@@ -148,10 +126,79 @@ Deno.test("ElementHandle pierce waits observe their own shadow root", async () =
   }
 });
 
+Deno.test("pierce selectors resolve light-DOM elements", async () => {
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
+
+  try {
+    await page.evaluate(() => {
+      const lightTarget = document.createElement("button");
+      lightTarget.className = "pierce-target";
+      lightTarget.textContent = "light";
+      document.body.append(lightTarget);
+
+      const host = document.createElement("section");
+      host.id = "pierce-shadow-host";
+      const root = host.attachShadow({ mode: "open" });
+      const shadowTarget = document.createElement("button");
+      shadowTarget.className = "pierce-target";
+      shadowTarget.textContent = "shadow";
+      root.append(shadowTarget);
+      document.body.append(host);
+
+      const scope = document.createElement("main");
+      scope.id = "pierce-scope";
+      document.body.append(scope);
+    });
+
+    const firstTarget = await page.$(".pierce-target", { strategy: "pierce" });
+    assertEquals(await firstTarget?.innerText(), "light");
+
+    const targets = await page.$$(".pierce-target", { strategy: "pierce" });
+    assertEquals(
+      await Promise.all(targets.map((target) => target.innerText())),
+      ["light", "shadow"],
+    );
+
+    const awaitedTarget = await page.waitForSelector(".pierce-target", {
+      strategy: "pierce",
+    });
+    assertEquals(await awaitedTarget.innerText(), "light");
+
+    const host = await page.waitForSelector("#pierce-shadow-host");
+    const hostTarget = await host.$(".pierce-target", { strategy: "pierce" });
+    assertEquals(await hostTarget?.innerText(), "shadow");
+
+    const lateTarget = page.waitForSelector("#late-light-target", {
+      strategy: "pierce",
+    });
+    await page.evaluate(() => {
+      const target = document.createElement("button");
+      target.id = "late-light-target";
+      target.textContent = "late light";
+      document.body.append(target);
+    });
+    assertEquals(await (await lateTarget).innerText(), "late light");
+
+    const scope = await page.waitForSelector("#pierce-scope");
+    const scopedTarget = scope.waitForSelector("#scoped-late-light-target", {
+      strategy: "pierce",
+    });
+    await page.evaluate(() => {
+      const target = document.createElement("button");
+      target.id = "scoped-late-light-target";
+      target.textContent = "scoped late light";
+      document.getElementById("pierce-scope")!.append(target);
+    });
+    assertEquals(await (await scopedTarget).innerText(), "scoped late light");
+  } finally {
+    await closeTestBrowser(page, browser);
+  }
+});
+
 Deno.test("method observers use writable locked descriptors", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -233,9 +280,8 @@ Deno.test("method observers use writable locked descriptors", async () => {
 });
 
 Deno.test("method observers cover submit-button validity", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -308,9 +354,8 @@ Deno.test("method observers cover submit-button validity", async () => {
 });
 
 Deno.test("method observers cover custom-element validity", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -401,9 +446,8 @@ Deno.test("method observers cover custom-element validity", async () => {
 });
 
 Deno.test("method observers cover custom-element definition", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -477,9 +521,8 @@ Deno.test("method observers cover custom-element definition", async () => {
 });
 
 Deno.test("method observers cover custom-element states", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -561,9 +604,8 @@ Deno.test("method observers cover custom-element states", async () => {
 });
 
 Deno.test("property observers cover programmatic file selection", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -620,9 +662,8 @@ Deno.test("property observers cover programmatic file selection", async () => {
 });
 
 Deno.test("root events cover shadow selector state", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -753,9 +794,8 @@ Deno.test("root events cover shadow selector state", async () => {
 });
 
 Deno.test("method observers cover explicit custom-element upgrades", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -831,9 +871,8 @@ Deno.test("method observers cover explicit custom-element upgrades", async () =>
 });
 
 Deno.test("retained selector state reconciles displaced observers", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -971,9 +1010,9 @@ Deno.test("retained selector state reconciles displaced observers", async () => 
 });
 
 Deno.test("Page preserves Common Tools behavior on published Astral", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
+  const astralPage = page.astralPage;
 
   try {
     await page.evaluate(() => {
@@ -1005,15 +1044,15 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
     const nativeTarget = await page.$(".target");
     assertEquals(await nativeTarget?.innerText(), "light");
 
-    const firstShadowTarget = await page.$(".target", {
+    const firstPierceTarget = await page.$(".target", {
       strategy: "pierce",
     });
-    assertEquals(await firstShadowTarget?.innerText(), "outer");
+    assertEquals(await firstPierceTarget?.innerText(), "light");
 
-    const shadowTargets = await page.$$(".target", { strategy: "pierce" });
+    const pierceTargets = await page.$$(".target", { strategy: "pierce" });
     assertEquals(
-      await Promise.all(shadowTargets.map((target) => target.innerText())),
-      ["outer", "inner"],
+      await Promise.all(pierceTargets.map((target) => target.innerText())),
+      ["light", "outer", "inner"],
     );
 
     const queryRoot = await page.waitForSelector("#query-root");
@@ -1293,12 +1332,121 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
       const button = document.createElement("button");
       button.id = "click-target";
       button.textContent = "click";
-      button.style.width = "100px";
-      button.style.height = "30px";
+      // Pinned so the click point is arithmetic on a known rect rather than
+      // on wherever the default layout put the control.
+      Object.assign(button.style, {
+        position: "fixed",
+        left: "60px",
+        top: "60px",
+        width: "100px",
+        height: "30px",
+        margin: "0",
+        padding: "0",
+        border: "0",
+      });
       button.addEventListener("click", () => {
         document.body.dataset.clicked = "yes";
       });
       document.body.append(button);
+
+      const offsetButton = document.createElement("button");
+      offsetButton.id = "offset-click-target";
+      offsetButton.textContent = "offset click";
+      Object.assign(offsetButton.style, {
+        position: "fixed",
+        left: "260px",
+        top: "90px",
+        width: "100px",
+        height: "30px",
+        margin: "0",
+        padding: "7px 11px 13px 17px",
+        borderStyle: "solid",
+        borderWidth: "3px 5px 9px 11px",
+        boxSizing: "content-box",
+        transform: "rotate(8deg) scale(1.2)",
+        transformOrigin: "13px 9px",
+      });
+      document.body.append(offsetButton);
+
+      const transformedAncestor = document.createElement("section");
+      Object.assign(transformedAncestor.style, {
+        position: "fixed",
+        left: "430px",
+        top: "80px",
+        width: "180px",
+        height: "120px",
+        transform: "rotate(17deg) scale(0.85)",
+        transformOrigin: "20px 30px",
+      });
+      const transformedDescendant = document.createElement("button");
+      transformedDescendant.id = "ancestor-transform-click-target";
+      Object.assign(transformedDescendant.style, {
+        position: "absolute",
+        left: "25px",
+        top: "35px",
+        width: "80px",
+        height: "26px",
+        margin: "0",
+        padding: "5px 7px",
+        border: "3px solid",
+        boxSizing: "content-box",
+      });
+      transformedAncestor.append(transformedDescendant);
+      document.body.append(transformedAncestor);
+
+      const perspectiveAncestor = document.createElement("section");
+      Object.assign(perspectiveAncestor.style, {
+        position: "fixed",
+        left: "100px",
+        top: "250px",
+        width: "180px",
+        height: "120px",
+        perspective: "400px",
+        transformStyle: "preserve-3d",
+      });
+      const threeDimensionalTarget = document.createElement("button");
+      threeDimensionalTarget.id = "three-dimensional-click-target";
+      Object.assign(threeDimensionalTarget.style, {
+        position: "absolute",
+        left: "30px",
+        top: "30px",
+        width: "90px",
+        height: "30px",
+        margin: "0",
+        padding: "4px 9px",
+        border: "2px solid",
+        boxSizing: "content-box",
+        transform: "rotateY(32deg) rotateX(14deg) translateZ(20px)",
+        transformOrigin: "15px 10px",
+      });
+      perspectiveAncestor.append(threeDimensionalTarget);
+      document.body.append(perspectiveAncestor);
+
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      Object.assign(svg.style, {
+        position: "fixed",
+        left: "360px",
+        top: "270px",
+        width: "200px",
+        height: "120px",
+        overflow: "visible",
+        transform: "rotate(-11deg)",
+        transformOrigin: "20px 15px",
+      });
+      const svgTarget = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "rect",
+      );
+      svgTarget.id = "svg-click-target";
+      svgTarget.setAttribute("x", "30");
+      svgTarget.setAttribute("y", "20");
+      svgTarget.setAttribute("width", "80");
+      svgTarget.setAttribute("height", "40");
+      svgTarget.setAttribute("fill", "blue");
+      svgTarget.setAttribute("stroke", "black");
+      svgTarget.setAttribute("stroke-width", "6");
+      svg.append(svgTarget);
+      document.body.append(svg);
 
       const input = document.createElement("input");
       input.id = "type-target";
@@ -1312,30 +1460,9 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
       "yes",
     );
 
-    const content = [
-      { x: 160, y: 60 },
-      { x: 200, y: 100 },
-      { x: 130, y: 160 },
-      { x: 70, y: 100 },
-    ];
-    const boxModel = {
-      border: content,
-      content,
-      height: 40,
-      margin: content,
-      padding: content,
-      width: 80,
-    };
-    Object.defineProperties(clickTarget, {
-      boxModel: {
-        configurable: true,
-        value: () => Promise.resolve(boxModel),
-      },
-      scrollIntoView: {
-        configurable: true,
-        value: () => Promise.resolve(),
-      },
-    });
+    // The click aims at the center of the control's own rect, and an offset
+    // aims from its content-box origin. This control has no border or padding,
+    // so both points are direct arithmetic on the pinned rect above.
     let mousePoint: { x: number; y: number } | undefined;
     Object.defineProperty(astralPage.mouse, "click", {
       configurable: true,
@@ -1345,12 +1472,55 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
       },
     });
     await clickTarget.click();
-    assertEquals(mousePoint, { x: 140, y: 105 });
-    assertEquals(clickPoints[1], { x: 140, y: 105 });
+    assertEquals(mousePoint, { x: 110, y: 75 });
+    assertEquals(clickPoints[1], { x: 110, y: 75 });
 
-    await clickTarget.click({ offset: { x: 0, y: 0 } });
-    assertEquals(mousePoint, { x: 160, y: 60 });
-    assertEquals(clickPoints[2], { x: 160, y: 60 });
+    await clickTarget.click({ offset: { x: 4, y: 6 } });
+    assertEquals(mousePoint, { x: 64, y: 66 });
+    assertEquals(clickPoints[2], { x: 64, y: 66 });
+
+    // Match published Astral's offset contract: the offset is added to the
+    // content quad's top-left point. A stable DOM-agent box model is the
+    // compatibility oracle for geometry that includes the element's own 2D
+    // transform, a transformed ancestor, a 3D transform, and SVG layout.
+    const offsetCases = [
+      { selector: "#offset-click-target", offset: { x: 4, y: 6 } },
+      {
+        selector: "#ancestor-transform-click-target",
+        offset: { x: 7, y: 3 },
+      },
+      {
+        selector: "#three-dimensional-click-target",
+        offset: { x: 5, y: 8 },
+      },
+      { selector: "#svg-click-target", offset: { x: 9, y: 4 } },
+    ];
+    for (const [index, offsetCase] of offsetCases.entries()) {
+      const offsetOracle = await page.waitForSelector(offsetCase.selector);
+      const offsetModel = await offsetOracle.boxModel();
+      assert(offsetModel);
+      let contentOrigin = offsetModel.content[0];
+      for (const point of offsetModel.content) {
+        if (point.x < contentOrigin.x && point.y < contentOrigin.y) {
+          contentOrigin = point;
+        }
+      }
+
+      const offsetTarget = await page.waitForSelector(offsetCase.selector);
+      await offsetTarget.click({ offset: offsetCase.offset });
+      assert(mousePoint);
+      assertAlmostEquals(
+        mousePoint.x,
+        contentOrigin.x + offsetCase.offset.x,
+        0.01,
+      );
+      assertAlmostEquals(
+        mousePoint.y,
+        contentOrigin.y + offsetCase.offset.y,
+        0.01,
+      );
+      assertEquals(clickPoints[3 + index], mousePoint);
+    }
 
     const typeTarget = await page.waitForSelector("#type-target");
     await typeTarget.type("text");
@@ -1362,9 +1532,132 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
       "afterClick",
       "beforeClick",
       "afterClick",
+      "beforeClick",
+      "afterClick",
+      "beforeClick",
+      "afterClick",
+      "beforeClick",
+      "afterClick",
+      "beforeClick",
+      "afterClick",
       "beforeType",
       "afterType",
     ]);
+  } finally {
+    await closeTestBrowser(page, browser);
+  }
+});
+
+Deno.test("Page clicks the part of an element that lies inside the page", async () => {
+  // An element can reach past the edge of the page it is drawn on: a surface
+  // positioned towards the right of a narrow viewport, a control wider than the
+  // column it sits in. The middle of such an element's box is a point the page
+  // does not have, and a trusted click dispatched there is delivered to the
+  // browser, lands outside the page, and reaches nothing at all.
+  const observed: { x: number; y: number }[] = [];
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
+  page.setInteractionObserver({
+    afterClick: (_element, point) =>
+      void observed.push({ x: point.x, y: point.y }),
+  });
+
+  try {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.evaluate(() => {
+      // Fixed, so the element cannot be brought into the page by scrolling to
+      // it: the part of it inside the page is the whole of what a click has to
+      // work with. It spans 700 to 1100 in a page 800 wide, so the middle of
+      // the whole box is at 900, a hundred columns past the last column the
+      // page has.
+      const button = document.createElement("button");
+      button.id = "clipped-target";
+      button.textContent = "Continue as guest";
+      Object.assign(button.style, {
+        position: "fixed",
+        left: "700px",
+        top: "300px",
+        width: "400px",
+        height: "40px",
+      });
+      let clicked = 0;
+      button.addEventListener("click", () => {
+        clicked++;
+      });
+      document.body.append(button);
+      (globalThis as typeof globalThis & {
+        __clippedClicks: () => number;
+      }).__clippedClicks = () => clicked;
+    });
+
+    const target = await page.waitForSelector("#clipped-target");
+    await target.click();
+
+    assertEquals(
+      await page.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __clippedClicks: () => number;
+        }).__clippedClicks()
+      ),
+      1,
+      "the click never landed on the part of the element inside the page",
+    );
+    // The part of the box inside the page spans 700 to 800 across and 300 to
+    // 340 down, so the point to click is 750,320.
+    assertEquals(observed, [{ x: 750, y: 320 }]);
+  } finally {
+    await closeTestBrowser(page, browser);
+  }
+});
+
+Deno.test("Page reports an element with no part of it inside the page", async () => {
+  // Every point on the element is outside the page, so there is nowhere to aim
+  // that a click can reach. Saying so is the only honest answer: a click
+  // dispatched past the edge of the page reaches nothing, and returning from
+  // that tells the caller the element was pressed.
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
+
+  try {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.evaluate(() => {
+      const button = document.createElement("button");
+      button.id = "off-page-target";
+      button.textContent = "Continue as guest";
+      Object.assign(button.style, {
+        position: "fixed",
+        left: "900px",
+        top: "300px",
+        width: "200px",
+        height: "40px",
+      });
+      let clicked = 0;
+      button.addEventListener("click", () => {
+        clicked++;
+      });
+      document.body.append(button);
+      (globalThis as typeof globalThis & {
+        __offPageClicks: () => number;
+      }).__offPageClicks = () => clicked;
+    });
+
+    const target = await page.waitForSelector("#off-page-target");
+    const error = await assertRejects(() => target.click(), Error);
+    assertStringIncludes(error.message, "outside the page");
+    assertStringIncludes(error.message, "button#off-page-target");
+    // The size of the page, so a message that names some other 800 cannot
+    // satisfy this.
+    assertStringIncludes(error.message, 'page {"width":800,"height":600}');
+
+    assertEquals(
+      await page.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __offPageClicks: () => number;
+        }).__offPageClicks()
+      ),
+      0,
+      "a click reached an element with no part of it inside the page",
+    );
   } finally {
     await closeTestBrowser(page, browser);
   }

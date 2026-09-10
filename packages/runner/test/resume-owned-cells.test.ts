@@ -43,10 +43,14 @@ function plainLoopback(
 }
 
 class LoopbackSessionFactory implements SessionFactory {
-  constructor(private readonly getServer: () => MemoryV2Server.Server) {}
+  readonly #getServer: () => MemoryV2Server.Server;
+
+  constructor(getServer: () => MemoryV2Server.Server) {
+    this.#getServer = getServer;
+  }
   async create(spaceId: string, sgnr?: Signer) {
     const client = await MemoryV2Client.connect({
-      transport: plainLoopback(this.getServer()),
+      transport: plainLoopback(this.#getServer()),
     });
     const session = await client.mount(
       spaceId,
@@ -169,7 +173,7 @@ describe("resume owned-cell pre-sync", () => {
     await rt1.patternManager.flushCompileCacheWrites();
     await sm1.synced();
     expect(rc1.key("value").get()).toBe(70);
-    rt1.scheduler.dispose();
+    await rt1.dispose({ closeStorage: false });
 
     // RESUME (runtime B): cold cache. start() walks the pattern tree and
     // pre-syncs the nested node's owned cells before instantiating.
@@ -197,8 +201,7 @@ describe("resume owned-cell pre-sync", () => {
       }
       expect(rc2.key("value").get()).toBe(70);
     } finally {
-      await rt2.dispose();
-      await rt1.dispose();
+      await rt2.dispose({ closeStorage: false });
     }
   });
 
@@ -237,7 +240,7 @@ describe("resume owned-cell pre-sync", () => {
       rc1.key("y").get(),
       rc1.key("z").get(),
     ]).toEqual([10, 20, 30]);
-    rt1.scheduler.dispose();
+    await rt1.dispose({ closeStorage: false });
 
     const rt2 = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -269,25 +272,26 @@ describe("resume owned-cell pre-sync", () => {
         rc2.key("z").get(),
       ]).toEqual([10, 20, 30]);
     } finally {
-      await rt2.dispose();
-      await rt1.dispose();
+      await rt2.dispose({ closeStorage: false });
     }
   });
 });
 
-// Direct refutation of the review note:
-//   "Cycle-detection key is not identity-safe; collisions can skip sub-pattern
-//    traversal and miss required pre-sync cells on resume."
-//
-// collectResumeOwnedCells dedups sub-pattern nodes on `${space}\0${id}\0${scope}`
-// (runner.ts). The id is the content-addressed entity id createRef() mints from
-// the child node's resultFor cause {space, id, path}, so the output-spot path
-// that distinguishes sibling nodes is already folded into the id. These tests
-// mint child result cells exactly the way the walk does and show the key is
-// injective over distinct nodes: distinct nodes get distinct keys, the \0
-// delimiter is unambiguous because every component is null-free, and only a
-// genuinely identical node collapses.
 describe("resume owned-cell walk cycle-detection key", () => {
+  // Direct refutation of the review note:
+  // "Cycle-detection key is not identity-safe; collisions can skip sub-pattern
+  //  traversal and miss required pre-sync cells on resume."
+  //
+  // collectResumeOwnedCells dedups sub-pattern nodes on
+  // `${space}\0${id}\0${scope}` (runner.ts). The id is the content-addressed
+  // entity id createRef() mints from the child node's resultFor cause {space,
+  // id, path}, so the output-spot path that distinguishes sibling nodes is
+  // already folded into the id. These tests mint child result cells exactly the
+  // way the walk does and show the key is injective over distinct nodes:
+  // distinct nodes get distinct keys, the \0 delimiter is unambiguous because
+  // every component is null-free, and only a genuinely identical node
+  // collapses.
+
   let keyServer: MemoryV2Server.Server;
   let keySm: LoopbackStorageManager;
   let rt: Runtime;

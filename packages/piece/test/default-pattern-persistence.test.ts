@@ -6,7 +6,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { RuntimeProgram } from "../../runner/src/harness/types.ts";
 import { createBuilder } from "../../runner/src/builder/factory.ts";
 import type { Cell } from "../../runner/src/builder/types.ts";
-import { pieceId, PieceManager } from "../src/manager.ts";
+import { pieceId } from "../src/piece-id.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -19,15 +19,18 @@ const defaultPatternProgram: RuntimeProgram = {
     {
       name: "/main.tsx",
       contents: [
-        "/// <cf-disable-transform />",
-        "import { handler, pattern } from 'commonfabric';",
-        "const addPiece = handler<{ piece: unknown }, { pieceRegistry: unknown[] }>(",
+        "import { handler, pattern, type Cell, type Stream } from 'commonfabric';",
+        "const addPiece = handler<{ piece: unknown }, { pieceRegistry: Cell<unknown[]> }>(",
+        "  true,",
+        "  { type: 'object', properties: { pieceRegistry: { type: 'array', asCell: ['cell'] } } },",
         "  ({ piece }, { pieceRegistry }) => {",
         "    pieceRegistry.push(piece);",
         "  },",
-        "  { proxy: true },",
         ");",
-        "export default pattern<{ pieceRegistry: unknown[] }>(({ pieceRegistry }) => ({",
+        "export default pattern<",
+        "  { pieceRegistry: unknown[] },",
+        "  { pieceRegistry: unknown[]; addPiece: Stream<{ piece: unknown }> }",
+        ">(({ pieceRegistry }) => ({",
         "  pieceRegistry,",
         "  addPiece: addPiece({ pieceRegistry }),",
         "}));",
@@ -49,18 +52,22 @@ const persistedPieceProgram: RuntimeProgram = {
   ],
 };
 
-async function createDefaultPatternPieceWithResult(manager: PieceManager) {
+async function createDefaultPatternPieceWithResult(pieces: PiecesController) {
   const { commonfabric } = createBuilder();
   const { handler, pattern } = commonfabric;
 
   const addPiece = handler<
     { piece: Cell<unknown> },
-    { pieceRegistry: Cell<unknown>[] }
+    { pieceRegistry: Cell<Cell<unknown>[]> }
   >(
+    true,
+    {
+      type: "object",
+      properties: { pieceRegistry: { type: "array", asCell: ["cell"] } },
+    },
     ({ piece }, { pieceRegistry }) => {
       pieceRegistry.push(piece);
     },
-    { proxy: true },
   );
   const defaultPattern = pattern<{ pieceRegistry: Cell<unknown>[] }>(
     ({ pieceRegistry }) => ({
@@ -69,35 +76,35 @@ async function createDefaultPatternPieceWithResult(manager: PieceManager) {
     }),
   );
 
-  const defaultPatternPiece = await manager.runPersistent(
+  const defaultPatternPiece = await pieces.runPersistent(
     defaultPattern,
     { pieceRegistry: [] },
     "default-pattern-persistence",
   );
-  await manager.linkDefaultPattern(defaultPatternPiece);
-  await manager.runtime.idle();
-  await manager.synced();
+  await pieces.linkDefaultPattern(defaultPatternPiece);
+  await pieces.runtime.idle();
+  await pieces.synced();
 
   const persistedPattern = pattern<{ value: number }>(({ value }) => ({
     value,
     nested: { value },
   }));
-  const persistedPiece = await manager.runPersistent(
+  const persistedPiece = await pieces.runPersistent(
     persistedPattern,
     { value: 42 },
     "persisted-piece",
   );
-  await manager.add([persistedPiece]);
-  await manager.runtime.idle();
-  await manager.synced();
+  await pieces.add([persistedPiece]);
+  await pieces.runtime.idle();
+  await pieces.synced();
 
   return persistedPiece;
 }
 
-describe("PieceManager default pattern persistence", () => {
+describe("PiecesController default pattern persistence", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
+  let pieces: PiecesController;
 
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -110,8 +117,8 @@ describe("PieceManager default pattern persistence", () => {
       identity: signer,
       spaceName: "default-pattern-persistence-" + crypto.randomUUID(),
     });
-    manager = new PieceManager(session, runtime);
-    await manager.synced();
+    pieces = new PiecesController(session, runtime);
+    await pieces.synced();
   });
 
   afterEach(async () => {
@@ -125,12 +132,16 @@ describe("PieceManager default pattern persistence", () => {
 
     const addPiece = handler<
       { piece: Cell<unknown> },
-      { pieceRegistry: Cell<unknown>[] }
+      { pieceRegistry: Cell<Cell<unknown>[]> }
     >(
+      true,
+      {
+        type: "object",
+        properties: { pieceRegistry: { type: "array", asCell: ["cell"] } },
+      },
       ({ piece }, { pieceRegistry }) => {
         pieceRegistry.push(piece);
       },
-      { proxy: true },
     );
     const defaultPattern = pattern<{ pieceRegistry: Cell<unknown>[] }>(
       ({ pieceRegistry }) => ({
@@ -139,90 +150,111 @@ describe("PieceManager default pattern persistence", () => {
       }),
     );
 
-    const defaultPatternPiece = await manager.runPersistent(
+    const defaultPatternPiece = await pieces.runPersistent(
       defaultPattern,
       { pieceRegistry: [] },
       "default-pattern-persistence",
     );
-    await manager.linkDefaultPattern(defaultPatternPiece);
-    await manager.runtime.idle();
-    await manager.synced();
+    await pieces.linkDefaultPattern(defaultPatternPiece);
+    await pieces.runtime.idle();
+    await pieces.synced();
 
     const persistedPattern = pattern<{ value: number }>(({ value }) => ({
       value,
     }));
-    const persistedPiece = await manager.runPersistent(
+    const persistedPiece = await pieces.runPersistent(
       persistedPattern,
       { value: 1 },
       "persisted-piece",
     );
-    await manager.add([persistedPiece]);
-    await manager.stopPiece(defaultPatternPiece);
+    await pieces.add([persistedPiece]);
+    await pieces.stopPiece(defaultPatternPiece);
 
-    const piecesCell = await manager.getPieceRegistry();
-    const ids = piecesCell.get().map((piece) => pieceId(piece)).filter(Boolean);
+    // What this test is named for, pinned rather than assumed. `start()` is
+    // idempotent and a restarted root serves the same listing, so a restart
+    // is invisible in the rows and has to be observed at the call.
+    type Startable = { start: (piece: Cell<unknown>) => unknown };
+    const startable = runtime as unknown as Startable;
+    const realStart = startable.start.bind(runtime);
+    const started: Cell<unknown>[] = [];
+    startable.start = (piece: Cell<unknown>) => {
+      started.push(piece);
+      return realStart(piece);
+    };
 
-    expect(ids).toContain(pieceId(persistedPiece));
+    try {
+      const piecesCell = await pieces.getPieceRegistry();
+      const ids = piecesCell.get().map((piece) => pieceId(piece)).filter(
+        Boolean,
+      );
+
+      expect(ids).toContain(pieceId(persistedPiece));
+      expect(started).toEqual([]);
+    } finally {
+      startable.start = realStart;
+    }
   });
 
   it("adds a persisted piece from a fresh runtime", async () => {
     const compiledDefaultPattern = await runtime.patternManager.compilePattern(
       defaultPatternProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const defaultPatternPiece = await manager.runPersistent(
+    const defaultPatternPiece = await pieces.runPersistent(
       compiledDefaultPattern,
       { pieceRegistry: [] },
       "default-pattern-persistence-fresh",
     );
-    await manager.linkDefaultPattern(defaultPatternPiece);
-    await manager.runtime.idle();
-    await manager.synced();
+    await pieces.linkDefaultPattern(defaultPatternPiece);
+    await pieces.runtime.idle();
+    await pieces.synced();
 
     // Compile INTO the space so the content-addressed source + compiled docs
     // persist — a fresh runtime recovers the pattern by its `{ identity, symbol }`
     // pointer (there is no longer a meta cell holding the program).
     const compiledPiecePattern = await runtime.patternManager.compilePattern(
       persistedPieceProgram,
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
-    const persistedPiece = await manager.runPersistent(
+    const persistedPiece = await pieces.runPersistent(
       compiledPiecePattern,
       { value: 2 },
       "persisted-piece-fresh",
     );
-    await manager.runtime.idle();
-    await manager.synced();
+    await pieces.runtime.idle();
+    await pieces.synced();
 
     const session = await createSession({
       identity: signer,
-      spaceName: manager.getSpaceName()!,
+      spaceName: pieces.getSpaceName()!,
     });
     const freshRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    const freshManager = new PieceManager(session, freshRuntime);
+    const freshPieces = new PiecesController(session, freshRuntime);
 
     try {
-      await freshManager.synced();
+      await freshPieces.synced();
       const freshPiece = freshRuntime.getCellFromEntityId(
-        freshManager.getSpace(),
+        freshPieces.getSpace(),
         entityIdFrom(pieceId(persistedPiece)!),
       );
 
-      await freshManager.add([freshPiece]);
-      await freshManager.stopPiece(defaultPatternPiece);
+      await freshPieces.add([freshPiece]);
+      await freshPieces.stopPiece(defaultPatternPiece);
 
-      const piecesCell = await freshManager.getPieceRegistry();
+      const piecesCell = await freshPieces.getPieceRegistry();
       const ids = piecesCell.get().map((piece) => pieceId(piece)).filter(
         Boolean,
       );
-      const pieces = new PiecesController(freshManager);
-      const listedPiece = (await pieces.getRegisteredPieces()).find((piece) =>
-        piece.id === pieceId(persistedPiece)
+      const listedPiece = (await freshPieces.getRegisteredPieces()).find((
+        piece,
+      ) => piece.id === pieceId(persistedPiece));
+      const directPiece = await freshPieces.get(
+        pieceId(persistedPiece)!,
+        false,
       );
-      const directPiece = await pieces.get(pieceId(persistedPiece)!, false);
 
       expect(ids.filter((id) => id === pieceId(persistedPiece))).toHaveLength(
         1,
@@ -237,9 +269,8 @@ describe("PieceManager default pattern persistence", () => {
   });
 
   it("registered piece controllers expose the same result root as direct cold lookup", async () => {
-    const persistedPiece = await createDefaultPatternPieceWithResult(manager);
+    const persistedPiece = await createDefaultPatternPieceWithResult(pieces);
     const id = pieceId(persistedPiece)!;
-    const pieces = new PiecesController(manager);
 
     const listedPiece = (await pieces.getRegisteredPieces()).find((piece) =>
       piece.id === id
@@ -254,9 +285,8 @@ describe("PieceManager default pattern persistence", () => {
   });
 
   it("registered piece controllers resolve result paths like direct cold lookup", async () => {
-    const persistedPiece = await createDefaultPatternPieceWithResult(manager);
+    const persistedPiece = await createDefaultPatternPieceWithResult(pieces);
     const id = pieceId(persistedPiece)!;
-    const pieces = new PiecesController(manager);
 
     const listedPiece = (await pieces.getRegisteredPieces()).find((piece) =>
       piece.id === id

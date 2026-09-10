@@ -1,3 +1,10 @@
+/**
+ * Serves the favicon and decides which face it wears: the worst status across
+ * the tiles, since the tab has one icon to say how the wall is doing. The
+ * href carries the version the artwork was generated at, so a browser holding
+ * an older icon fetches the new one instead of keeping what it cached.
+ */
+
 import { FAVICON_PNG, FAVICON_VERSION } from "./favicon-png.generated.ts";
 import type { FaviconFace, FaviconStatus } from "./favicon-types.ts";
 import type { Status } from "./types.ts";

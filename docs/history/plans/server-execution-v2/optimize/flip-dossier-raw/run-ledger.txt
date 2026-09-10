@@ -1,0 +1,263 @@
+# POST-RUN ANNOTATION (2026-08-22, review round; entries below are verbatim as written during the runs):
+# - The two smoke0-* entries are instrument-validation smokes, never series data.
+#   smoke0-chat ran on the FIRST toolshed-off build (sha db152c149819e559) - a
+#   source-identical build from the same clean worktree at 0c0261df3, made
+#   BEFORE the COMMIT_SHA-baked rebuild, which is why its probe line reads
+#   gitSha=? (the first build served /api/meta gitSha=null). smoke0-lunch and
+#   every ledger series run below used the rebaked pair:
+#   toolshed-off f9ebb1b71038acde / toolshed-on b04a63d0298fb621.
+# - Lunch OFF store totals are 407 (l1a), 407 (l1b), 405 (l2b): the adjacent
+#   pair is byte-equal, the trailing rep is a -2 variant (principal space 401
+#   vs 403). The dossier's SS2d carries the corrected witness reading.
+== smoke0-chat
+start_utc=2026-08-22T21:52:50Z
+load_before={ 3.67 4.06 4.81 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-off sha256=db152c149819e559 repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=99009
+  posture: gitSha=? define=None servingLoop_pre=False
+default_model=(default-model line ABSENT - check log)
+test_rc=0 test_wall_s=26 (rc 124 = hard cap 520s hit)
+load_after={ 6.54 4.68 5.00 }
+port_free=yes
+orphan_headless=none
+store_commits: total=252 authored=252 derived=0 system=0 per-space: did:key:z6Mkh9bYqLBbTDY57huxAnAS7zMdQbc9Rk53HFiCHfe1iMDm.sqlite:1/0/0 did:key:z6MkmPouK3afAVtyeZNwWALyaQfnn1cu8mae3SJFd96uBZ6E.sqlite:1/0/0 did:key:z6MkpFUWaDb7Apat2ungSBrTDEh85bn98DeT5N94aVyNJMSR.sqlite:250/0/0
+
+== smoke0-lunch
+start_utc=2026-08-22T21:58:21Z
+load_before={ 4.71 5.69 5.48 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-off sha256=f9ebb1b71038acde repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=17844
+  posture: gitSha=0c0261df3a9c define=None servingLoop_pre=False
+test_rc=0 test_wall_s=22 (rc 124 = hard cap 520s hit)
+load_after={ 5.46 5.79 5.52 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=407 authored=407 derived=0 system=0 per-space: did:key:z6Mkk1UGZgsx3pibSuELbcBNi7groszLsCLbhk5ZzVXcjwyV.sqlite:2/0/0 did:key:z6MktMGdD5otGfqznEVcMp3CGVNYGGsijqJ5AkNmD6PUUTGD.sqlite:2/0/0 did:key:z6Mkvqmvt3o2cwTFG3ZKoSkTnzA5Bj45nJFw2CojgYd6s7CE.sqlite:403/0/0
+
+== c1a
+start_utc=2026-08-22T21:59:17Z
+load_before={ 4.74 5.58 5.45 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-off sha256=f9ebb1b71038acde repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=19567
+  posture: gitSha=0c0261df3a9c define=None servingLoop_pre=False
+test_rc=0 test_wall_s=61 (rc 124 = hard cap 520s hit)
+load_after={ 5.44 5.62 5.47 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=611 authored=611 derived=0 system=0 per-space: did:key:z6MkhVRDsvyg4CocRH66NgxhyvYafDRCC1J95s37E2EbmrP9.sqlite:1/0/0 did:key:z6Mkn2JdgAm4NStKDDdvGurGAFCnDXE7yRqXyUVWkhgmpt1P.sqlite:609/0/0 did:key:z6MkwGhGq6hgccUYhnd4LdDvdDHMzEAFRvbn9peit1oUrKVW.sqlite:1/0/0
+
+== c1
+start_utc=2026-08-22T22:00:24Z
+load_before={ 5.44 5.62 5.47 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-on sha256=b04a63d0298fb621 repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=21434
+  posture: gitSha=0c0261df3a9c define=true servingLoop_pre=True
+test_rc=0 test_wall_s=64 (rc 124 = hard cap 520s hit)
+load_after={ 5.80 5.74 5.53 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=236 authored=64 derived=172 system=0 per-space: did:key:z6MkmS4pmJ8Qd7tpojcvcz5Zm7SbBEDue8en4PfjuPNm5G4o.sqlite:1/1/0 did:key:z6Mkn4ozm2ccjnpYLpzVuv4H1xQPnRuNuDKmunTSUqy9sZ5d.sqlite:62/170/0 did:key:z6MksAN8nyMudA3Td5iX41dka72L2LV6Y7FUmZ2yLnKDs45V.sqlite:1/1/0
+
+== c1b
+start_utc=2026-08-22T22:01:33Z
+load_before={ 5.80 5.74 5.53 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-off sha256=f9ebb1b71038acde repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=23367
+  posture: gitSha=0c0261df3a9c define=None servingLoop_pre=False
+test_rc=0 test_wall_s=60 (rc 124 = hard cap 520s hit)
+load_after={ 5.83 5.84 5.59 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=609 authored=609 derived=0 system=0 per-space: did:key:z6MkoRGZb5gBpGnDSMc7BVrc2Zhpj4ZbZACfrduBpXei7nA1.sqlite:607/0/0 did:key:z6MkrCN6GY4HVJZTYPnU2MmuPfmCCetTZzQPDrgKVMRdDunG.sqlite:1/0/0 did:key:z6MkwcGT1pwHk79nY1BK3PUh4L2LLFXua2ABsz2GwuXmVWRB.sqlite:1/0/0
+
+== l1a
+start_utc=2026-08-22T22:04:56Z
+load_before={ 3.72 5.18 5.37 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-off sha256=f9ebb1b71038acde repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=33551
+  posture: gitSha=0c0261df3a9c define=None servingLoop_pre=False
+test_rc=0 test_wall_s=16 (rc 124 = hard cap 520s hit)
+load_after={ 5.54 5.50 5.48 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=407 authored=407 derived=0 system=0 per-space: did:key:z6MkgYSiK8UXQ3yDRG7FS7pw6CgVgeG77uG7Yu6YTtg3jtqD.sqlite:2/0/0 did:key:z6MknKvGWXTizATd3BMzVeD5jcWJiMn4M29p72AvnijtcCaZ.sqlite:403/0/0 did:key:z6Mkvf5xPSK96akMC7NL9mnWLyHG5DCq5e9kYBaQj9DAhntD.sqlite:2/0/0
+
+== l1
+start_utc=2026-08-22T22:05:16Z
+load_before={ 5.42 5.48 5.47 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-on sha256=b04a63d0298fb621 repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=34083
+  posture: gitSha=0c0261df3a9c define=true servingLoop_pre=True
+test_rc=0 test_wall_s=16 (rc 124 = hard cap 520s hit)
+load_after={ 5.52 5.50 5.48 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=83 authored=27 derived=56 system=0 per-space: did:key:z6MkeypUqAFWMUwm9hAwqLn8fAkLSYY4gJNy4gRa5fRfJfpV.sqlite:1/1/0 did:key:z6Mkj332iz7QBnn9ezcNC1JFF7CgXQsfNeLDS2TDLf1pDjfV.sqlite:25/54/0 did:key:z6MkwdacGXQXFkuCHYF2smDgxm1fjm2w1vSKG81UCJ3tihKS.sqlite:1/1/0
+
+== l1b
+start_utc=2026-08-22T22:05:35Z
+load_before={ 5.52 5.50 5.48 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-off sha256=f9ebb1b71038acde repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=34600
+  posture: gitSha=0c0261df3a9c define=None servingLoop_pre=False
+test_rc=0 test_wall_s=12 (rc 124 = hard cap 520s hit)
+load_after={ 5.19 5.42 5.45 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=407 authored=407 derived=0 system=0 per-space: did:key:z6Mko35LUigtPTqJusebSgp67sdZXh6hoNCodh9f5unRmBWB.sqlite:2/0/0 did:key:z6MkrLh1c2977eXzCz4DnfYvsX1Z7jAA9zkxLk34wLZnPkFj.sqlite:403/0/0 did:key:z6MkvouJc5dcz1bSWMZkEHd7EHr9LKtMryuJ4UUsn4PrnyQ6.sqlite:2/0/0
+
+== l2
+start_utc=2026-08-22T22:10:51Z
+load_before={ 4.41 6.14 5.90 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-on sha256=b04a63d0298fb621 repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=47192
+  posture: gitSha=0c0261df3a9c define=true servingLoop_pre=True
+test_rc=0 test_wall_s=15 (rc 124 = hard cap 520s hit)
+load_after={ 5.46 6.25 5.94 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=85 authored=27 derived=58 system=0 per-space: did:key:z6MkiEkXF5bn9BLrCNdMKSc22LHgDQAPgACZxSTLiX1o21mM.sqlite:1/1/0 did:key:z6Mko1KsNYHBAeQynwJQShjMSR8398k3zEu93BbRcK9Ub76n.sqlite:25/56/0 did:key:z6Mko51VbvandQuojZ75Q2dvRYRFpQW2s75sgsjU8miyfkVe.sqlite:1/1/0
+
+== l3
+start_utc=2026-08-22T22:12:09Z
+load_before={ 4.24 5.77 5.79 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-on sha256=b04a63d0298fb621 repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=49593
+  posture: gitSha=0c0261df3a9c define=true servingLoop_pre=True
+test_rc=0 test_wall_s=16 (rc 124 = hard cap 520s hit)
+load_after={ 4.98 5.84 5.81 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=89 authored=27 derived=62 system=0 per-space: did:key:z6Mkne4C18BictfasaQvLw8U6tAJceyNVVo4vJFU6mqsWrqB.sqlite:25/60/0 did:key:z6MkpsryJn63RUuFnxy9o5caEkQwcJ9h9ayCjLSSBNykMoaN.sqlite:1/1/0 did:key:z6Mkqse3BDZchfDJG8wS4GPFqT3WQ6BAnYB6QpiFpAF2QXEr.sqlite:1/1/0
+
+== n1a
+start_utc=2026-08-22T22:12:56Z
+load_before={ 4.44 5.64 5.74 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-off sha256=f9ebb1b71038acde repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=51042
+  posture: gitSha=0c0261df3a9c define=None servingLoop_pre=False
+test_rc=0 test_wall_s=76 (rc 124 = hard cap 520s hit)
+load_after={ 7.49 6.47 6.05 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=953 authored=953 derived=0 system=0 per-space: did:key:z6MkgvB4fFtiVpBVYPd3SZeG59TPCHf6ZqPFszQjZ2kVHvJs.sqlite:186/0/0 did:key:z6MkkFSNJMeLkhWyK1rWxVRsNRqM2ZSWeBcSdWH7gGzGqHPP.sqlite:765/0/0 did:key:z6Mkpuvw9MYGGgrceo8kx5xySDxHGpTL6pK2gYsjaPp3kjGZ.sqlite:1/0/0 did:key:z6MkrxjApr7BERkq8qvN5KizZxPMBTu9vFyp9oefSXa6kHqN.sqlite:1/0/0
+
+== n1
+start_utc=2026-08-22T22:14:18Z
+load_before={ 7.05 6.39 6.03 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-on sha256=b04a63d0298fb621 repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=57513
+  posture: gitSha=0c0261df3a9c define=true servingLoop_pre=True
+test_rc=0 test_wall_s=74 (rc 124 = hard cap 520s hit)
+load_after={ 6.07 6.21 5.99 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=392 authored=113 derived=279 system=0 per-space: did:key:z6MkswSk8DmEvPPJrmBHg7JFWcQYWZ9x4Jq1hZipSLHyH5xs.sqlite:112/278/0 did:key:z6Mku41WQ8RuwFo6RmGC4DQH17coRRY26LLpPd6WCtorUS2A.sqlite:1/1/0
+
+== n1b
+start_utc=2026-08-22T22:15:38Z
+load_before={ 6.07 6.21 5.99 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-off sha256=f9ebb1b71038acde repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=59943
+  posture: gitSha=0c0261df3a9c define=None servingLoop_pre=False
+test_rc=0 test_wall_s=89 (rc 124 = hard cap 520s hit)
+load_after={ 6.61 6.37 6.07 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=989 authored=989 derived=0 system=0 per-space: did:key:z6Mkg7JKbY8jddD11rZNYhm3mkbVp3NBhYGEVR2HPZ2WV15D.sqlite:1/0/0 did:key:z6MkhLPkJJ7gZqJVz38cenWxmFVm5v2b4tQWCWbRaHULTVak.sqlite:801/0/0 did:key:z6Mkv7sYBpjvjioTkzQYxegZ6mrB5uCB5TJjMeBvpptDLJQ8.sqlite:1/0/0 did:key:z6MkvfW2NeWXfXFAnncV4nzzDH3RvoGozrhoYiytZBiF5Fv2.sqlite:186/0/0
+
+== c2
+start_utc=2026-08-22T22:23:35Z
+load_before={ 4.44 5.90 5.99 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-on sha256=b04a63d0298fb621 repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=77058
+  posture: gitSha=0c0261df3a9c define=true servingLoop_pre=True
+test_rc=0 test_wall_s=62 (rc 124 = hard cap 520s hit)
+load_after={ 4.16 5.53 5.84 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=243 authored=64 derived=179 system=0 per-space: did:key:z6MkhibZZkCzwbF5ukt2zbw6vJRxr9Hz9ZZ1vqtGC8GUEMjL.sqlite:62/177/0 did:key:z6MkmpVaEVWQKyS8v274W9jdByJ78zyvv3jUgm1UntkFh7c1.sqlite:1/1/0 did:key:z6Mkq14gB1cdKoKJMx4KeKWJUQRhe4whU5WxDcsmiVdNiMVJ.sqlite:1/1/0
+
+== c2b
+start_utc=2026-08-22T22:24:40Z
+load_before={ 4.16 5.53 5.84 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-off sha256=f9ebb1b71038acde repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=83588
+  posture: gitSha=0c0261df3a9c define=None servingLoop_pre=False
+test_rc=0 test_wall_s=57 (rc 124 = hard cap 520s hit)
+load_after={ 4.40 5.34 5.74 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=611 authored=611 derived=0 system=0 per-space: did:key:z6Mkqed95zTYUg7ZGgb9ic1d6qHXATNZUu7W6nPuGb4oY73w.sqlite:1/0/0 did:key:z6Mkt7xRgHtWtKVyvo6p1UdxWp9TfmNGafhzH42igWhx551x.sqlite:1/0/0 did:key:z6MkvnZRfwYhSUunGRyUjBcmeqAKASLQDWs8aTRZsQ6eaVJX.sqlite:609/0/0
+
+== n2
+start_utc=2026-08-22T22:25:41Z
+load_before={ 4.40 5.34 5.74 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-on sha256=b04a63d0298fb621 repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=85249
+  posture: gitSha=0c0261df3a9c define=true servingLoop_pre=True
+test_rc=0 test_wall_s=74 (rc 124 = hard cap 520s hit)
+load_after={ 5.08 5.36 5.72 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=378 authored=113 derived=265 system=0 per-space: did:key:z6Mkm2UUPUQ1xnj2ud2fCA1QnK34gK9CkczgCX5YVJ83rBSr.sqlite:1/1/0 did:key:z6MktaavBX7bWbqrFCo2fmUrfudsmnnf5hdUzjkjNpWRWnWN.sqlite:112/264/0
+
+== n2b
+start_utc=2026-08-22T22:26:58Z
+load_before={ 5.08 5.36 5.72 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-off sha256=f9ebb1b71038acde repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=87317
+  posture: gitSha=0c0261df3a9c define=None servingLoop_pre=False
+test_rc=0 test_wall_s=81 (rc 124 = hard cap 520s hit)
+load_after={ 6.84 5.82 5.85 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=989 authored=989 derived=0 system=0 per-space: did:key:z6MkgfC1iJkXM6YHP8vomCADqZqqZKiD96ETW9nif1KdJft7.sqlite:1/0/0 did:key:z6MkmQarxk1WXMiA34rNzqSToahLAerqaoAYaU7hsM2tFnyy.sqlite:801/0/0 did:key:z6MkncJk7UGibaobQQKyaje1iTrL2Cwn35jdo1GJLmKZkiPN.sqlite:186/0/0 did:key:z6MkpQHazFtcv61PDwxxG3yfGzzrXeFzVs7ZpZxfHv1B4RRL.sqlite:1/0/0
+
+== l2b
+start_utc=2026-08-22T22:35:24Z
+load_before={ 4.26 5.62 5.82 }
+binary=/private/tmp/claude-501/-Users-berni-looms-primary--claude-worktrees-fervent-franklin-9af4cf/4ab986f8-e409-4e80-91aa-571ec1c5f1c4/scratchpad/bench/bin/toolshed-off sha256=f9ebb1b71038acde repo=/Users/berni/labs-worktrees/flip-dossier head=0c0261df3a9c
+llm_env_check: CFTS_AI_LLM keys in env=0 toolshed_dotenv=absent
+toolshed_pid=11020
+  posture: gitSha=0c0261df3a9c define=None servingLoop_pre=False
+test_rc=0 test_wall_s=13 (rc 124 = hard cap 520s hit)
+load_after={ 4.68 5.65 5.82 }
+default_model=No default model available
+port_free=yes
+orphan_headless=none
+store_commits: total=405 authored=405 derived=0 system=0 per-space: did:key:z6MkgUMETdhbjajNTvKsUJCdL9HctHjysTMtxN1jB2hGgsmm.sqlite:401/0/0 did:key:z6MkpWZ8LD9uiL7VXs26vzkYpRcqDebpj5h5g4koxM9S8g7r.sqlite:2/0/0 did:key:z6MkqAtDxr82bNTxD92JhCzLgbDXZXfVar9Vdj4hQ6ATc8Li.sqlite:2/0/0
+

@@ -1,7 +1,44 @@
-import { type Pattern } from "../builder/types.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
+import { getLogger } from "@commonfabric/utils/logger";
 
-const MAP_INPUT_SCHEMA = internSchema({
+import { type Pattern } from "../builder/types.ts";
+import { type AddCancel } from "../cancel.ts";
+import { type Cell } from "../cell.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+import type { RawBuiltinReturnType } from "../module.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
+import type { Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import {
+  linkResolutionProbe,
+  machineryRead,
+} from "../storage/reactivity-log.ts";
+import {
+  listElementKeys,
+  releaseRemovedElements,
+} from "./list-element-keys.ts";
+import {
+  listCoordinatorPlan,
+  listElementResultCell,
+} from "./list-coordinator-plan.ts";
+import {
+  type ElementRun,
+  type SetupRecord,
+  trackListSetupRollback,
+} from "./list-element-rollback.ts";
+import { seedResultContainerWhenPullSettles } from "./list-result-container-seed.ts";
+import { issueResultContainerSetup } from "./list-result-container.ts";
+import { resumeSettleRunKind } from "./resume-republish.ts";
+import {
+  boundPatternFactoryScope,
+  exposedResultCell,
+  resolvedCellScope,
+} from "./scope-policy.ts";
+import { createListPatternFactorySupervisor } from "./list-factory-materialization.ts";
+import { narrowestScope } from "../scope.ts";
+
+export const MAP_INPUT_SCHEMA = internSchema({
   type: "object",
   properties: {
     // `processDefaultValue()` treats `asCell` as an opaque cell boundary, so
@@ -22,34 +59,6 @@ const RESULT_PRESENCE_SCHEMA = internSchema({
   type: "array",
   items: { asCell: ["cell"], type: "unknown" },
 });
-
-import { type Cell } from "../cell.ts";
-import { type Action, RetryWhenReady } from "../scheduler.ts";
-import { type AddCancel } from "../cancel.ts";
-import type { Runtime } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { RawBuiltinReturnType } from "../module.ts";
-import type { NormalizedFullLink } from "../link-types.ts";
-import { listResultSchema } from "./list-result-schema.ts";
-import { setPatternCell, setResultCell } from "../result-utils.ts";
-import {
-  boundPatternFactoryScope,
-  cellIdentityKey,
-  exposedResultCell,
-  outputSpotFromBinding,
-  resolvedCellScope,
-  scopedCell,
-} from "./scope-policy.ts";
-import { narrowestScope } from "../scope.ts";
-import { resolveLink } from "../link-resolution.ts";
-import { listElementLink } from "./list-element-link.ts";
-import {
-  ignoreReadForScheduling,
-  linkResolutionProbe,
-  machineryRead,
-} from "../storage/reactivity-log.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import { createListPatternFactorySupervisor } from "./list-factory-materialization.ts";
 
 const logger = getLogger("runner.map", { enabled: true, level: "warn" });
 
@@ -89,14 +98,34 @@ export function map(
   awaitSync?: boolean,
 ): RawBuiltinReturnType {
   let result: Cell<any[]> | undefined;
+  // The containing piece's root: every element sub-piece this coordinator
+  // starts is that piece's structure, so its actions' demand roots carry
+  // the parent's chain (server-execution v2 Phase 7's demand-root chain;
+  // RunnerRunOptions.parentPieceRootId) — a serving runtime resolves the
+  // element's demanded instances through the OUTER root a client watches
+  // instead of falling to the service identity (P7 review finding 4).
+  const parentPieceRootId = parentCell.getAsNormalizedFullLink().id;
+
+  // Whether the writes that make `result` reachable are owed. The coordinator
+  // keeps the container across reconciles, so one that stages those writes and
+  // then does not commit leaves it holding a container nothing links to; the
+  // next reconcile issues them again. See list-element-rollback.ts.
+  const containerSetup: SetupRecord = { needsSetup: false };
+
+  // An element's links back to this coordinator. They are setup writes like the
+  // element's pattern run: issued when the element is created, and again when
+  // the transaction carrying them did not commit. Without them the element's
+  // document names no owning piece, so nothing can start that piece for an
+  // event addressed to it.
+  const linkElementCell = (cell: Cell<any>): void => {
+    setResultCell(cell, parentCell);
+    setPatternCell(cell, parentCell.key("pattern"));
+  };
 
   // Identity-based tracking: maps element address key → { resultCell, lastIndex }
   // for reuse across position changes. We pass list[i] directly each time, so
   // there's no need to store the element cell separately.
-  const elementRuns = new Map<
-    string,
-    { resultCell: Cell<any>; lastIndex: number; runGeneration?: number }
-  >();
+  const elementRuns = new Map<string, ElementRun>();
   const factorySupervisor = createListPatternFactorySupervisor(
     runtime,
     addCancel,
@@ -107,16 +136,22 @@ export function map(
     },
   );
 
+  // Cleared when the coordinator is torn down, so the asynchronous resume work
+  // below stops writing to a container nothing owns any more. The same teardown
+  // releases the children the coordinator still holds; the ones whose elements
+  // left the list were released when they left.
+  let active = true;
+  addCancel(() => {
+    active = false;
+    releaseRemovedElements(runtime, elementRuns, new Set());
+  });
+
   // Only the initial (resume) reconcile should defer its per-element sub-pattern
-  // runs until storage sync completes. This coordinator registers as
-  // resumeMode "always-run" with a synced-hold (it never rehydrates clean —
-  // see the return below), so its first reconcile runs against synced data;
-  // the per-element runs it starts carry the same intent, which is what lets
-  // each child rehydrate its own persisted state at registration. Elements
-  // added by later (post-resume) reconciles are fresh and must not wait.
+  // runs until storage sync completes: with a synced-hold, its first
+  // reconcile runs against synced data, and the per-element runs it starts
+  // carry the same intent. Elements added by later (post-resume) reconciles
+  // are fresh and must not wait.
   let resumeBatchAwaitSync = !!awaitSync;
-  let resumeRowsReadyKey: string | undefined;
-  let resumeRowsReadiness: Promise<void> | undefined;
 
   // Hold the durable container while the input list itself confirms. On a resume
   // reconcile the input can be undefined or a transient empty default standing in
@@ -129,17 +164,21 @@ export function map(
     runtime.storageManager.trackUntilSettled(
       inputListCell.sync()
         .then(() =>
-          runtime.editWithRetry((settleTx) => {
-            if (!result) return;
+          !active ? undefined : runtime.editWithRetry((settleTx) => {
+            if (!active || !result) return;
+            // Out-of-band recovery write; the kind decision (bookkeeping
+            // on the serving posture, derivation on clients — the settle
+            // writes DERIVED content) is shared across map/filter/flatMap
+            // in resumeSettleRunKind (r3756175819).
+            runtime.stampServerRun(settleTx, {
+              actionId: `map/resume-settle/${parentCell.sourceURI}`,
+              kind: resumeSettleRunKind(runtime),
+            });
             const raw = inputsCell.key("list").withTx(settleTx).resolveAsCell()
               .withTx(settleTx).getRaw();
             if (raw === undefined || (Array.isArray(raw) && raw.length === 0)) {
               settleTx.runWithAmbientReadMeta(
-                {
-                  ...ignoreReadForScheduling,
-                  ...linkResolutionProbe,
-                  ...machineryRead,
-                },
+                { ...linkResolutionProbe, ...machineryRead },
                 () =>
                   result!.asSchema(RESULT_PRESENCE_SCHEMA).withTx(settleTx).set(
                     [],
@@ -163,125 +202,75 @@ export function map(
   };
 
   const reconcile: Action = (tx: IExtendedStorageTransaction) => {
-    if (resumeRowsReadiness !== undefined) {
-      // A dependency notification may supersede the invocation that began the
-      // row pre-sync. Park that newer invocation without collecting another
-      // copy of the coordinator's broad setup read set. Readiness always
-      // schedules a fresh invocation, which then rereads the current list and
-      // factory and starts another pre-sync if their key changed meanwhile.
-      throw new RetryWhenReady(
-        resumeRowsReadiness,
-        "map: resumed row patterns are waiting for durable state",
-        { keepDependenciesWhileWaiting: false },
-      );
-    }
+    const rollback = trackListSetupRollback(tx, runtime, elementRuns);
     // Captured before the loop consumes it: this reconcile's element runs use
     // the current value; the flag is cleared only once a non-empty resume batch
     // has been processed (below), so a transient empty first reconcile doesn't
     // burn it.
     const elementAwaitSync = resumeBatchAwaitSync;
-    inputsCell.asSchema(MAP_INPUT_SCHEMA).withTx(tx).key("op").get();
-    const sourceListCell = inputsCell.key("list");
-    const listTarget = resolveLink(
-      runtime,
-      tx,
-      sourceListCell.getAsNormalizedFullLink(),
-      "writeRedirect",
-    );
-    const listScope = listTarget.scope;
-    // `array` callback arguments should observe the actual list entity, not the
-    // alias/boxed reference used to pass that list into the builtin.
-    const listCell = sourceListCell.withTx(tx).resolveAsCell();
-    // Identity-only list materialization: read the raw slots (journals the
-    // list-doc read for reactivity and label flow — membership/order ARE
-    // the list's content) and build element cells from the slot links
-    // directly. The asCell traversal here used to dereference each slot's
-    // target ("arrays dereference one more link"), journaling a content
-    // read of every element doc the coordinator never consumes — under
-    // flow labels (S16) that joined every element's label into the
-    // coordinator's J and smeared it across sibling scaffolding.
-    // resolveLink's probes belong to the dereferences it records, so flow
-    // derivation treats them as resolution machinery, not followRef
-    // observations (observation classes C1); no element value is loaded at
-    // all.
-    const rawList = listCell.withTx(tx).getRaw() as unknown;
-    const listBase = listCell.getAsNormalizedFullLink();
-    const list: Cell<any>[] | undefined = rawList === undefined
-      ? undefined
-      : !Array.isArray(rawList)
-      ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
-      : rawList.map((slot, i) => {
-        const slotLink = listElementLink(runtime.cfc, listBase, slot, i);
-        const dereferenceSources: NormalizedFullLink[] = [];
-        const resolved = tx.runWithAmbientReadMeta(
-          {
-            ...ignoreReadForScheduling,
-            ...linkResolutionProbe,
-            ...machineryRead,
-          },
-          () =>
-            resolveLink(runtime, tx, slotLink, "value", {
-              onDereferenceSource: (source) => {
-                dereferenceSources.push(source);
-              },
-            }),
-        );
-        // Resolution probes at the terminal element must not make the list
-        // coordinator depend on element content. Actual pointer hops are
-        // different: if an intermediate redirect retargets, this coordinator
-        // must rebind the row. Replay just those hop-source reads outside the
-        // non-scheduling resolver scope, retaining their followRef/CFC class.
-        for (const source of dereferenceSources) {
-          tx.runWithAmbientReadMeta(
-            { ...linkResolutionProbe, ...machineryRead },
-            () => tx.readValueOrThrow(source),
-          );
-        }
-        return runtime.getCellFromLink(resolved, undefined, tx);
-      });
-    const selection = factorySupervisor.materialize(
+    // The identity-bearing prefix — op, list materialization, scope, the
+    // result container — is the plan the resume pre-sync shares, naming the
+    // children this reconcile runs before the parent instantiates; its
+    // reads and their rationale live in list-coordinator-plan.ts.
+    const factorySelection = factorySupervisor.materialize(
       tx,
       inputsCell.key("op"),
       "map",
     );
-    const opPattern = selection.pattern;
-    const factoryGeneration = selection.generation;
-    const factorySelectionLink = selection.factorySelectionLink;
-    const factoryResultScope = selection.factorySourceLink === undefined
-      ? undefined
-      : boundPatternFactoryScope(
-        runtime,
-        tx,
-        opPattern,
-        selection.factorySourceLink,
-      );
+    const plan = listCoordinatorPlan(
+      runtime,
+      tx,
+      "map",
+      inputsCell,
+      factorySelection,
+      parentCell,
+      outputBinding,
+    );
+    const {
+      opPattern,
+      factoryGeneration,
+      factorySelectionLink,
+      factorySourceLink,
+      listCell,
+      list,
+    } = plan;
+    const listScope = plan.scope;
+    const factoryResultScope = boundPatternFactoryScope(
+      runtime,
+      tx,
+      opPattern,
+      factorySourceLink,
+    );
 
+    // Whether this reconcile issues the container's links: a container it
+    // mints needs them, and one whose last issuance did not commit owes them.
+    let issueLinks = containerSetup.needsSetup;
     if (!result || result.getAsNormalizedFullLink().scope !== listScope) {
-      const resultSchema = listResultSchema(opPattern.resultSchema);
-      // CT-1623: identify the result container by the reserved output spot —
-      // the fully-resolved write-redirect target the runner supplies as the
-      // `outputBinding`. It is a stable, position-derived, program-independent
-      // identity, unlike the serialized `op` / inputs, both of which drag in the
-      // session-varying `program` and force the container id (and every per-row
-      // id derived from it) to churn across reloads. A `map` node always writes
-      // through a write redirect, so the absence of an output spot is a bug.
-      const outputSpot = outputSpotFromBinding(outputBinding);
-      if (!outputSpot) {
-        throw new Error(
-          "map: result container requires a write-redirect output binding",
-        );
-      }
-      const baseResult = runtime.getCell<any[]>(
-        parentCell.space,
-        { map: parentCell.entityId, outputSpot },
-        resultSchema,
+      const previousResult = result;
+      // The container outlives this reconcile's transaction; a cell bound to
+      // it would pin the settled transaction and its journal for the life of
+      // the coordinator. Rebind per use instead.
+      result = plan.container.withTx();
+      const installedResult = result;
+      // Give back only what this reconcile installed. An overlapping reconcile
+      // that has already replaced the container owns it, and its bookkeeping
+      // matches durable writes of its own.
+      rollback.resultReplaced(() => {
+        if (result === installedResult) result = previousResult;
+      });
+      issueLinks = true;
+    }
+    // A container this coordinator holds is reachable only through the links
+    // below, and the reconcile that last issued them may not have committed.
+    if (issueLinks) {
+      issueResultContainerSetup(
         tx,
+        result.withTx(tx),
+        parentCell,
+        sendResult,
+        rollback,
+        containerSetup,
       );
-      result = scopedCell(runtime, tx, baseResult, listScope);
-      setResultCell(result, parentCell);
-      // Link the new result cells to the pattern cell too
-      setPatternCell(result, parentCell.key("pattern"));
-      sendResult(tx, result);
     }
     // The coordinator's view of the result container is links-only
     // (RESULT_PRESENCE_SCHEMA): get() probes presence and set() diffs
@@ -312,19 +301,7 @@ export function map(
     // plumbing containers now that the generic mint route is on (SC-8).
     const probeScoped = <T>(fn: () => T): T =>
       tx.runWithAmbientReadMeta(
-        {
-          ...ignoreReadForScheduling,
-          ...linkResolutionProbe,
-          ...machineryRead,
-        },
-        fn,
-      );
-    const resumePresenceProbeScoped = <T>(fn: () => T): T =>
-      tx.runWithAmbientReadMeta(
-        {
-          ...linkResolutionProbe,
-          ...machineryRead,
-        },
+        { ...linkResolutionProbe, ...machineryRead },
         fn,
       );
     // Resume against confirmed state, not the not-yet-loaded value: on the
@@ -336,38 +313,24 @@ export function map(
     // reconcile, which then no-ops against the durable value.
     if (
       elementAwaitSync &&
-      resumePresenceProbeScoped(() => resultWithLog.get()) === undefined
+      probeScoped(() => resultWithLog.get()) === undefined
     ) {
-      // Capture this container: a later row-readiness attempt deliberately
-      // clears `result` so its aborted binding is rebuilt, while this async
-      // seed still has to finish against the container it originally probed.
-      const pendingResult = result;
-      const pending = pendingResult.sync();
       // The container's durable value is still streaming in; its arrival
-      // re-triggers this reconcile (the probe read above is journaled). If the
-      // container was never persisted — so nothing will ever stream in to
-      // re-trigger — seed [] once the pull settles, so the coordinator is not
-      // left wedged waiting for a value that will never arrive.
-      const seedIfStillAbsent = () =>
-        runtime.editWithRetry((seedTx) => {
-          const container = pendingResult.withTx(seedTx);
-          if (container.getRaw() === undefined) container.set([]);
-        }).then(({ error }) => {
-          if (error) {
-            logger.warn(
-              "resume-seed",
-              "seeding the empty result container failed",
-              { error },
-            );
-          }
-        });
-      // Run on either outcome (resolve or reject); the seed recovers from the
-      // pull's own rejection, so log it rather than dropping it silently.
-      pending.finally(seedIfStillAbsent).catch((error) => {
-        logger.warn("resume-pull", "resume container pull rejected", {
-          error,
-        });
-      });
+      // re-triggers this reconcile (the probe read above is journaled). A
+      // container that was never persisted has nothing to stream in, so the
+      // seed below ends the wait once the pull settles. The id names the
+      // seed's out-of-band recovery write; the helper stamps it with the
+      // sanctioned bookkeeping kind (serving-loop.md §3d) so a SERVING
+      // runtime's wave accepts the seal. Same shape in filter.ts/flatmap.ts.
+      const container = result;
+      seedResultContainerWhenPullSettles(
+        runtime,
+        container,
+        () => active && result === container,
+        container.sync(),
+        logger,
+        `map/resume-seed/${parentCell.sourceURI}`,
+      );
       return;
     }
     // Resume preservation: on a resume reconcile the input list itself may not be
@@ -401,10 +364,7 @@ export function map(
     // distinguish empty inputs from undefined inputs?
     if (list === undefined) {
       probeScoped(() => resultWithLog.set([]));
-      for (const entry of elementRuns.values()) {
-        runtime.runner.stop(entry.resultCell);
-      }
-      elementRuns.clear();
+      releaseRemovedElements(runtime, elementRuns, new Set());
       return;
     }
 
@@ -412,108 +372,60 @@ export function map(
       throw new Error("map currently only supports arrays");
     }
 
-    // List-generated row patterns are not statically reachable from the
-    // containing pattern's resume graph, so the normal resume pre-sync cannot
-    // discover their deterministic result/params/internal cells. Park the
-    // first resumed reconcile until those row subtrees are confirmed. Without
-    // this, setup observes missing params metadata in the cold cache and
-    // re-publishes it; several concurrently resumed pieces then conflict on
-    // the space sequence even though every durable value is unchanged.
-    if (elementAwaitSync) {
-      const keyCounts = new Map<string, number>();
-      const rowCells: Cell<unknown>[] = [];
-      const rowKeys: string[] = [];
-      for (let i = 0; i < list.length; i++) {
-        if (!(i in list)) continue;
-        const { dedupKey, linkKey } = cellIdentityKey(list[i]);
-        const occurrence = keyCounts.get(dedupKey) ?? 0;
-        keyCounts.set(dedupKey, occurrence + 1);
-        const elementKey = JSON.stringify([...linkKey, occurrence]);
-        rowKeys.push(elementKey);
-        rowCells.push(runtime.getCell(
-          parentCell.space,
-          { map: result, elementKey },
-        ));
-      }
-      const readyKey = JSON.stringify([factoryGeneration, rowKeys]);
-      if (resumeRowsReadyKey !== readyKey) {
-        resumeRowsReadiness = Promise.all(
-          rowCells.map((rowCell) =>
-            runtime.runner.syncCellsForPatternResume(rowCell, opPattern)
-          ),
-        ).then(
-          () => {
-            resumeRowsReadyKey = readyKey;
-          },
-          (error) => {
-            // A row pre-sync failure is transient supervisor state, not a
-            // permanent failure of the map. Fulfill this readiness attempt so
-            // the scheduler re-invokes the coordinator; because the ready key
-            // is not recorded, that invocation starts a fresh pre-sync.
-            logger.warn(
-              "resume-rows",
-              "syncing resumed row patterns failed; retrying",
-              { error },
-            );
-          },
-        ).finally(() => {
-          resumeRowsReadiness = undefined;
-        });
-        // The result binding was established in this transaction. It will be
-        // aborted with RetryWhenReady, so force the retry to establish it again
-        // against the same deterministic container identity.
-        result = undefined;
-        throw new RetryWhenReady(
-          resumeRowsReadiness,
-          "map: resumed row patterns are waiting for durable state",
-          { keepDependenciesWhileWaiting: false },
-        );
-      }
-    }
-
     // The resume batch has now been observed; later reconciles are post-resume.
     if (list.length > 0) resumeBatchAwaitSync = false;
 
-    const keyCounts = new Map<string, number>();
+    // The whole current key set has to exist before any element is touched:
+    // it is what says which children the list has stopped holding.
+    const elementKeys = listElementKeys(list);
+    releaseRemovedElements(
+      runtime,
+      elementRuns,
+      new Set(elementKeys.values()),
+    );
+
     const newArrayValue = new Array<any>(list.length);
     for (let i = 0; i < list.length; i++) {
       // Skip sparse holes — don't create pattern runs for them
       if (!(i in list)) continue;
 
-      const { dedupKey, linkKey } = cellIdentityKey(list[i]);
+      const elementKey = elementKeys.get(i)!;
       const rowScope = narrowestScope([
         resolvedCellScope(runtime, tx, list[i]),
         factoryResultScope,
       ]);
-      const occurrence = keyCounts.get(dedupKey) ?? 0;
-      keyCounts.set(dedupKey, occurrence + 1);
-      const elementKey = JSON.stringify([...linkKey, occurrence]);
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
-        const staleFactoryGeneration = factoryGeneration !== undefined &&
-          existing.runGeneration !== factoryGeneration;
-        if (staleFactoryGeneration || existing.lastIndex !== i) {
-          tx.runWithAmbientReadMeta(
-            { ...ignoreReadForScheduling, ...machineryRead },
-            () =>
-              runtime.runner.run(
-                tx,
-                opPattern,
-                createRunInput(list[i], i),
-                existing.resultCell,
-                {
-                  doNotUpdateOnPatternChange: true,
-                  awaitSyncBeforeInitialRun: elementAwaitSync,
-                  ...(factorySelectionLink === undefined
-                    ? {}
-                    : { factorySelectionLink }),
-                },
-              ),
+        const previousIndex = existing.lastIndex;
+        if (
+          existing.needsSetup ||
+          existing.runGeneration !== factoryGeneration ||
+          existing.lastIndex !== i
+        ) {
+          runtime.runner.run(
+            tx,
+            opPattern,
+            createRunInput(list[i], i),
+            existing.resultCell,
+            {
+              doNotUpdateOnPatternChange: true,
+              awaitSyncBeforeInitialRun: elementAwaitSync,
+              parentPieceRootId,
+              factorySelectionLink,
+            },
           );
           existing.runGeneration = factoryGeneration;
+          // The whole setup, every time, because issuing it takes the debt for
+          // it: an overlapping reconcile that wrote the links and has not
+          // settled hands them to this one, and a partial issuance would leave
+          // nobody owing them. Links already durable cost a comparison, since
+          // a write of the value a leaf already holds does not reach storage.
+          linkElementCell(existing.resultCell.withTx(tx));
+          rollback.setupIssued(existing);
         }
         existing.lastIndex = i;
+        if (previousIndex !== i) rollback.indexChanged(existing, previousIndex);
         newArrayValue[i] = exposedResultCell(
           runtime,
           tx,
@@ -521,39 +433,39 @@ export function map(
           rowScope,
         );
       } else {
-        const resultCell = runtime.getCell(
-          parentCell.space,
-          { map: result, elementKey },
-          undefined,
+        const boundResultCell = listElementResultCell(
+          runtime,
           tx,
+          "map",
+          result,
+          elementKey,
         );
-        tx.runWithAmbientReadMeta(
-          { ...ignoreReadForScheduling, ...machineryRead },
-          () =>
-            runtime.runner.run(
-              tx,
-              opPattern,
-              createRunInput(list[i], i),
-              resultCell,
-              {
-                doNotUpdateOnPatternChange: true,
-                awaitSyncBeforeInitialRun: elementAwaitSync,
-                ...(factorySelectionLink === undefined
-                  ? {}
-                  : { factorySelectionLink }),
-              },
-            ),
+        // The stored cell outlives this reconcile's transaction: it lives in
+        // `elementRuns` and in the cancel closure below, both of which last as
+        // long as the coordinator. A cell bound to the transaction would pin
+        // the settled transaction, its journal, and everything it read.
+        const resultCell = boundResultCell.withTx();
+        runtime.runner.run(
+          tx,
+          opPattern,
+          createRunInput(list[i], i),
+          resultCell,
+          {
+            doNotUpdateOnPatternChange: true,
+            awaitSyncBeforeInitialRun: elementAwaitSync,
+            parentPieceRootId,
+            factorySelectionLink,
+          },
         );
-        // Link these individual cells to the top cell
-        setResultCell(resultCell, parentCell);
-        // Link the new result cells to the pattern cell too
-        setPatternCell(resultCell, parentCell.key("pattern"));
-        addCancel(() => runtime.runner.stop(resultCell));
-        elementRuns.set(elementKey, {
+        linkElementCell(boundResultCell);
+        const entry = {
           resultCell,
           lastIndex: i,
+          needsSetup: false,
           runGeneration: factoryGeneration,
-        });
+        };
+        elementRuns.set(elementKey, entry);
+        rollback.created(elementKey, entry);
         newArrayValue[i] = exposedResultCell(
           runtime,
           tx,
@@ -563,19 +475,9 @@ export function map(
       }
     }
     probeScoped(() => resultWithLog.set(newArrayValue));
-
-    // NOTE: We leave prior results in elementRuns for now, so they reuse
-    // prior runs when items reappear. This means elementRuns grows
-    // unboundedly when elements are removed — the runner is stopped via
-    // addCancel when the parent is disposed, but the Map entries (and their
-    // resultCell references) are not pruned. TODO: Consider pruning entries
-    // not present in the current list if this becomes a problem for
-    // long-lived maps with high element churn.
   };
 
-  // Child-starting coordinator: never rehydrates clean on resume — the
-  // reconcile must run to re-attach the per-element children (which then
-  // rehydrate their own persisted state). See
-  // docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
-  return { action: reconcile, resumeMode: "always-run" };
+  // Child-starting coordinator: its reconcile must run on resume to
+  // re-attach the per-element children.
+  return { action: reconcile };
 }

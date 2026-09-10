@@ -4,9 +4,6 @@ import { REQUEST_SCHEMA_CAS_REF_PREFIX } from "./schema-table-links.ts";
 
 export const SYNC_SCHEMA_REF_PREFIX = "schema-ref@2:";
 
-const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
-  isPlainObject(value);
-
 const isReservedSchemaRef = (value: string): boolean =>
   value.startsWith(SYNC_SCHEMA_REF_PREFIX) ||
   value.startsWith(REQUEST_SCHEMA_CAS_REF_PREFIX);
@@ -54,7 +51,7 @@ const payloadSchemaRef = (
  * superset relationship with the recursive mapper — equal on link
  * positions, wider by exactly the legacy alias positions — is enforced
  * mechanically by the walker-agreement test in
- * test/v2-sync-schema-table-test.ts; teach both (and
+ * test/v2-sync-schema-table.test.ts; teach both (and
  * `containsSyncSchemaRefString`) in the same change or that test fails.
  */
 export const findSyncSchemaRef = (value: unknown): string | undefined => {
@@ -71,7 +68,7 @@ export const findSyncSchemaRef = (value: unknown): string | undefined => {
 
     if (isLinkRef(current)) {
       const payload = linkRefPayload(current);
-      if (isPlainRecord(payload)) {
+      if (isPlainObject(payload)) {
         const ref = payloadSchemaRef(payload);
         if (ref !== undefined) {
           return ref;
@@ -87,12 +84,12 @@ export const findSyncSchemaRef = (value: unknown): string | undefined => {
       // Fall through to the ordinary record walk, mirroring the mapper.
     }
 
-    if (!isPlainRecord(current)) {
+    if (!isPlainObject(current)) {
       continue;
     }
 
     const legacyAlias = current.$alias;
-    const hasLegacyAlias = isPlainRecord(legacyAlias);
+    const hasLegacyAlias = isPlainObject(legacyAlias);
     if (hasLegacyAlias) {
       const ref = payloadSchemaRef(legacyAlias);
       if (ref !== undefined) {
@@ -149,7 +146,7 @@ export const containsSyncSchemaRefString = (value: unknown): boolean => {
       }
       continue;
     }
-    if (isLinkRef(current) && !isPlainRecord(current)) {
+    if (isLinkRef(current) && !isPlainObject(current)) {
       // A FabricLink's payload is not reachable by plain-record iteration.
       // The legacy envelope IS a plain record and takes the ordinary walk
       // below, which reaches its payload — malformed or not — and any
@@ -157,7 +154,7 @@ export const containsSyncSchemaRefString = (value: unknown): boolean => {
       pending.push(linkRefPayload(current));
       continue;
     }
-    if (!isPlainRecord(current)) {
+    if (!isPlainObject(current)) {
       continue;
     }
     for (const key in current) {

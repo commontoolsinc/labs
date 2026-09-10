@@ -24,6 +24,13 @@ import { type JSONSchema } from "../src/builder/types.ts";
 import type { EventHandler } from "../src/scheduler/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
+// The shaper keys are per scope INSTANCE (stage F); the tests resolve
+// against one fixed identity, mirroring the OFF arm's cardinality 1.
+const TEST_IDENTITY = {
+  principal: "did:test:shaper",
+  sessionId: "shaper-session",
+};
+
 const signer = await Identity.fromPassphrase("delivery shaping test");
 const space = signer.did();
 
@@ -31,9 +38,9 @@ function link(id: string, path: string[] = []): NormalizedFullLink {
   return { space, id, path } as unknown as NormalizedFullLink;
 }
 
-// ---------------------------------------------------------------------------
+//
 // stripClockFields
-// ---------------------------------------------------------------------------
+//
 
 describe("stripClockFields", () => {
   it("removes a top-level timestamp without mutating the input", () => {
@@ -80,9 +87,9 @@ describe("stripClockFields", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // shouldShapeDelivery
-// ---------------------------------------------------------------------------
+//
 
 describe("shouldShapeDelivery", () => {
   it("is true only for renderer-trusted events", () => {
@@ -94,9 +101,9 @@ describe("shouldShapeDelivery", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Wake shaper, event path (unit, deterministic zero-length window)
-// ---------------------------------------------------------------------------
+//
 
 // The old DeliveryShaper surface, expressed over the unified WakeShaper +
 // holdShapedEvent adapter, so the event-path contract assertions below stay
@@ -122,6 +129,7 @@ function eventShaper(
         deliver,
         groupKey,
         eventLink,
+        TEST_IDENTITY,
         event,
         retries,
         onCommit,
@@ -305,6 +313,35 @@ describe("wake shaper (event path)", () => {
     shaper.dispose();
   });
 
+  it("carries runtimeInjectedEventKeys through both burst and overflow delivery", async () => {
+    // Injection provenance must ride a held delivery unchanged: dropping it
+    // at release would strip the closed-world gate's exemption from a shaped
+    // event, turning a legitimate runtime-injected key into a rejection.
+    const calls: Array<{ opts: DeliverOpts }> = [];
+    const deliver: DeliverFn = (
+      _eventLink,
+      _event,
+      _retries,
+      _onCommit,
+      opts,
+    ) => {
+      calls.push({ opts });
+    };
+    const shaper = eventShaper(deliver, 0, 1); // burst budget of 1
+    shaper.hold(undefined, link("a"), { n: 1 }, true, undefined, {
+      runtimeInjectedEventKeys: ["result"],
+    }); // burst
+    shaper.hold(undefined, link("a"), { n: 2 }, true, undefined, {
+      runtimeInjectedEventKeys: ["result"],
+    }); // overflow
+    await shaper.whenDrained();
+    expect(calls.map((c) => c.opts.runtimeInjectedEventKeys)).toEqual([
+      ["result"],
+      ["result"],
+    ]);
+    shaper.dispose();
+  });
+
   it("delivers no held overflow after dispose", async () => {
     const { calls, deliver } = recorder();
     const shaper = eventShaper(deliver, 0, 1); // burst 1
@@ -319,9 +356,9 @@ describe("wake shaper (event path)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Unified engine (plan C): properties specific to one shaper serving both paths
-// ---------------------------------------------------------------------------
+//
 
 describe("WakeShaper (unified engine)", () => {
   it("keeps event-path and cell-path budgets separate for the same pattern", async () => {
@@ -337,6 +374,7 @@ describe("WakeShaper (unified engine)", () => {
       deliver,
       "piece-1",
       link("a"),
+      TEST_IDENTITY,
       { n: 1 },
       true,
       undefined,
@@ -357,6 +395,7 @@ describe("WakeShaper (unified engine)", () => {
       deliver,
       "piece-1",
       link("a"),
+      TEST_IDENTITY,
       { n: 1 },
       true,
       undefined,
@@ -366,6 +405,7 @@ describe("WakeShaper (unified engine)", () => {
       deliver,
       "piece-1",
       link("a"),
+      TEST_IDENTITY,
       { n: 2 },
       true,
       undefined,
@@ -395,9 +435,9 @@ describe("WakeShaper (unified engine)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Scheduler integration (real Runtime, default shaper)
-// ---------------------------------------------------------------------------
+//
 
 const STREAM_SCHEMA = {
   type: "object",
@@ -521,9 +561,10 @@ describe("delivery shaping (scheduler integration)", () => {
     }
   });
 
-  // W4: the in-queue backlog cap. Non-renderer events go straight to the queue
-  // (the shaper only holds renderer input), so they exercise the cap.
   it("caps the per-stream in-queue backlog, collapsing the overflow", async () => {
+    // W4: the in-queue backlog cap. Non-renderer events go straight to the
+    // queue (the shaper only holds renderer input), so they exercise the cap.
+
     const runtime = makeRuntime();
     try {
       const { tx, linkRef, received } = streamWithHandler(runtime, "w4/cap");
@@ -542,12 +583,161 @@ describe("delivery shaping (scheduler integration)", () => {
     }
   });
 
-  // The collapse is last-wins for the event TIME as well as the payload: a
-  // dispatched handler must read the instant of the event it actually runs, not
-  // the first event that happened to occupy the collapsed slot. These events are
-  // origin-less (no originTx) with distinct instants — the case where the times
-  // genuinely differ (a same-origin flood shares one frozen instant).
+  it("refuses a caller-id send at the backlog cap instead of collapsing it", async () => {
+    // W4 exclusion: a caller-supplied durable id names an invocation whose
+    // receipt address derives from it, so it must never be last-wins-merged.
+    // At the cap it is refused loudly before dispatch — callback settled
+    // errored, nothing executed — rather than silently folded into another
+    // event's identity.
+
+    const runtime = makeRuntime();
+    try {
+      const { tx, linkRef, received } = streamWithHandler(runtime, "w4/refuse");
+      await tx.commit();
+      for (let i = 1; i <= MAX_EVENT_BACKLOG_PER_STREAM; i++) {
+        runtime.scheduler.queueEvent(linkRef, { n: i });
+      }
+      const outcomes: string[] = [];
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { marker: "caller-payload" },
+        true,
+        (t: IExtendedStorageTransaction) => {
+          const status = t.status();
+          if (status.status === "error") {
+            // The drop settles the callback with an aborted transaction whose
+            // error carries the refusal as its `reason`.
+            const error = status.error as {
+              message?: unknown;
+              reason?: unknown;
+            };
+            const reason = error.reason as { message?: unknown } | undefined;
+            outcomes.push(String(reason?.message ?? error.message));
+          } else {
+            outcomes.push(status.status);
+          }
+        },
+        false,
+        { eventId: "inv-refused" },
+      );
+      // The refusal settles the callback before dispatch, with the reason.
+      expect(outcomes.length).toBe(1);
+      expect(outcomes[0]).toContain("backlog");
+      await runtime.idle();
+      // Nothing of the refused send was delivered, and no queued payload was
+      // rewritten by it: the cap-many minted events arrive as sent.
+      expect(received.length).toBe(MAX_EVENT_BACKLOG_PER_STREAM);
+      expect(received).not.toContainEqual({ marker: "caller-payload" });
+      expect(received[received.length - 1]).toEqual({
+        n: MAX_EVENT_BACKLOG_PER_STREAM,
+      });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("coalesces a same-id send at the cap onto its pending invocation", async () => {
+    // Same pair, same stream: the same invocation. At the cap a retry rides the
+    // already-pending entry — first payload wins, matching the create-only
+    // receipt arbitration it would get after dispatch — and both senders settle
+    // on the one outcome.
+
+    const runtime = makeRuntime();
+    try {
+      const { tx, linkRef, received } = streamWithHandler(
+        runtime,
+        "w4/coalesce",
+      );
+      await tx.commit();
+      for (let i = 1; i < MAX_EVENT_BACKLOG_PER_STREAM; i++) {
+        runtime.scheduler.queueEvent(linkRef, { n: i });
+      }
+      let settledOriginal = 0;
+      let settledRetry = 0;
+      let settledSecondRetry = 0;
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { marker: "original" },
+        true,
+        () => settledOriginal++,
+        false,
+        { eventId: "inv-coalesced" },
+      );
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { marker: "retry" },
+        true,
+        () => settledRetry++,
+        false,
+        { eventId: "inv-coalesced" },
+      );
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { marker: "second-retry" },
+        true,
+        () => settledSecondRetry++,
+        false,
+        { eventId: "inv-coalesced" },
+      );
+      await runtime.idle();
+      // One delivery carries the FIRST payload. Every retry callback settles
+      // on that outcome, including a callback appended to the existing flat
+      // callback chain.
+      expect(received).toContainEqual({ marker: "original" });
+      expect(received).not.toContainEqual({ marker: "retry" });
+      expect(received).not.toContainEqual({ marker: "second-retry" });
+      expect(received.length).toBe(MAX_EVENT_BACKLOG_PER_STREAM);
+      expect(settledOriginal).toBe(1);
+      expect(settledRetry).toBe(1);
+      expect(settledSecondRetry).toBe(1);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("never rewrites a queued caller-id entry when a minted flood collapses", async () => {
+    // The other direction of the exclusion: a minted flood collapsing at the
+    // cap must never select a caller-id entry as its survivor, which would
+    // rewrite the payload that entry's receipt is about to witness.
+
+    const runtime = makeRuntime();
+    try {
+      const { tx, linkRef, received } = streamWithHandler(runtime, "w4/keep");
+      await tx.commit();
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { marker: "keep" },
+        true,
+        undefined,
+        false,
+        { eventId: "inv-kept" },
+      );
+      const total = MAX_EVENT_BACKLOG_PER_STREAM + 3;
+      for (let i = 1; i <= total; i++) {
+        runtime.scheduler.queueEvent(linkRef, { n: i });
+      }
+      await runtime.idle();
+      // The caller-id payload arrives exactly as sent, once; the overflow
+      // collapsed into the newest MINTED entry instead.
+      expect(
+        received.filter((e) => (e as { marker?: string }).marker === "keep")
+          .length,
+      ).toBe(1);
+      expect(received.length).toBe(MAX_EVENT_BACKLOG_PER_STREAM);
+      expect(received[received.length - 1]).toEqual({ n: total });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("collapse carries the newest event's time, not the first collapsed one", async () => {
+    // The collapse is last-wins for the event TIME as well as the payload: a
+    // dispatched handler must read the instant of the event it actually runs,
+    // not the first event that happened to occupy the collapsed slot. These
+    // events are origin-less (no originTx) with distinct instants — the case
+    // where the times genuinely differ (a same-origin flood shares one frozen
+    // instant).
+
     const runtime = makeRuntime();
     try {
       const tx = runtime.edit();

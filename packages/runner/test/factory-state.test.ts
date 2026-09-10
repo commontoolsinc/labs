@@ -6,8 +6,7 @@ import {
   factoryStateOf,
   sealFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { deepFreeze, hashOf } from "@commonfabric/data-model";
 import type { Frame, JSONSchema } from "../src/builder/types.ts";
 import { byRef, handler, lift } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";

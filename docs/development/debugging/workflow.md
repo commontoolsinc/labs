@@ -29,7 +29,7 @@ context menu".
 ### 4. Inspect Deployed Piece
 
 ```bash
-deno task cf piece inspect --identity key.json --api-url URL --space SPACE --piece ID
+deno task cf piece inspect --identity key.json --api-url URL --space SPACE --cell ID
 ```
 
 ### 5. Simplify Until It Works
@@ -86,5 +86,5 @@ See [console-commands](./console-commands.md) for the full reference.
 ## See Also
 
 - [Console Commands](./console-commands.md) - Browser console reference
-- [Logger Internals](../logger-internals.md) - Creating loggers in runtime code
+- [Logger Internals](../../features/logger-internals.md) - Creating loggers in runtime code
 - [cli-debugging](./cli-debugging.md) - CLI-based debugging and testing workflows

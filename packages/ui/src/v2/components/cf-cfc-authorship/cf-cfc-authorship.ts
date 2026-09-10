@@ -1,7 +1,8 @@
+import type { CfcLabelView } from "@commonfabric/runner/cfc";
 import { css, html } from "lit";
+
 import { BaseElement } from "../../core/base-element.ts";
 import { initialsForName } from "../cf-avatar/index.ts";
-import type { CfcLabelView } from "@commonfabric/runner/cfc";
 
 export type CfcAuthorshipState = "verified" | "unverified" | "unknown";
 
@@ -176,6 +177,7 @@ const readClaimValue = async (
 
 interface LabelViewResult {
   readonly view: CfcLabelView | undefined;
+
   /**
    * True when the fallback `resolveAsCell()` path read a resolved cell's label
    * and got nothing back. `getCfcLabel` is a pure, non-blocking store read, so
@@ -790,11 +792,13 @@ export class CFCFCAuthorship extends BaseElement {
     }
   }
 
-  // Re-read the label(s) while a resolved cell's doc is still loading. The
-  // resolved cell is queried one-shot inside `readLabelView` and is not
-  // subscribed to, so without this poll a cold linked/bound-prop author would
-  // stay unverified until an unrelated `value`/`author` change happened to
-  // re-run the read. Bounded by MAX_LABEL_RETRY_COUNT.
+  /**
+   * Re-reads the label(s) while a resolved cell's doc is still loading. The
+   * resolved cell is queried one-shot inside `readLabelView()` and is not
+   * subscribed to, so without this poll a cold linked/bound-prop author would
+   * stay unverified until an unrelated `value`/`author` change happened to
+   * re-run the read. Bounded by `MAX_LABEL_RETRY_COUNT`.
+   */
   private reconcileLabelRetry(): void {
     if (this._valueResolutionPending || this._authorResolutionPending) {
       this.scheduleLabelRetry();

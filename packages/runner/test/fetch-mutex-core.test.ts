@@ -93,9 +93,10 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     }, resultCell);
     tx.commit();
 
-    // Pull the result to trigger computation
+    // Pull the result to trigger computation, then drain the in-flight
+    // transport frames and post-commit fetch work.
     await result.pull();
-    await result.pull();
+    await clock.settle();
 
     const rawData = result.get() as {
       pending: any;
@@ -139,7 +140,7 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     tx.commit();
 
     await result.pull();
-    await result.pull();
+    await clock.settle();
 
     expect(fetchCalls.length).toBeGreaterThan(0);
     expect(fetchCalls[0].url).toBe(
@@ -176,7 +177,7 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     try {
       tx.commit();
       await result.pull();
-      await runtime.idle();
+      await clock.settle();
 
       expect(committed).toBe(true);
       expect(fetchCalls.length).toBeGreaterThan(0);
@@ -309,6 +310,7 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     // Pull first to trigger computation (starts the fetch)
     await resultCell1.pull();
     await resultCell2.pull();
+    await clock.settle();
 
     // Pull again to get final results
     const data1 = (await resultCell1.pull()) as { result?: unknown };

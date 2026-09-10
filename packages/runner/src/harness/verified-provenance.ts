@@ -5,14 +5,14 @@ import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-con
  *
  * An entry exists ONLY for a function object recorded through the single
  * runner-owned registration channel: post-evaluation module indexing
- * (`Engine.recordModuleProvenance`, gated by `isTrustedBuilderArtifact` and
+ * (`Engine.#recordModuleProvenance`, gated by `isTrustedBuilderArtifact` and
  * the defining-module guard), which records the implementation function of an
  * exported / `__cfReg`-registered builder artifact with the module's content
  * identity and the artifact's export/`__cfReg` symbol. There is NO in-action
  * registration channel: a builder artifact minted DURING a running action has
  * no content-addressed identity, and the runner fails closed at creation time
  * instead of admitting it (identity E5 — see
- * `Runner.invokeJavaScriptImplementation` / `builder/action-context.ts`).
+ * `Runner.#invokeJavaScriptImplementation` / `builder/action-context.ts`).
  *
  * The WeakMap itself is the anti-spoof proof for CFC: an attacker-supplied
  * function — even with byte-identical source text — was never registered
@@ -24,8 +24,10 @@ import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-con
 export type VerifiedProvenance = {
   /** Module content identity (prefix-free `cf:module/<hash>` hash). */
   identity: string;
+
   /** Export / `__cfReg` symbol of the registered factory (absent: dynamic). */
   symbol?: string;
+
   /**
    * Symbol-less dynamic provenance: in-session-only authority — never
    * serializable to a cross-session `$implRef`. No production writer exists
@@ -35,6 +37,7 @@ export type VerifiedProvenance = {
    * honor.
    */
   dynamic?: true;
+
   /** CT-1665 verified binding identity, when the factory carried one. */
   bindingIdentity?: { sourceFile: string; bindingPath: string[] };
 };

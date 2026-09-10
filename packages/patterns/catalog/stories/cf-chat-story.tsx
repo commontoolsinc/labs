@@ -10,10 +10,6 @@ export interface ChatStoryOutput {
 }
 
 const sampleMessages = [
-  {
-    role: "system",
-    content: "You are a helpful assistant with access to tools.",
-  },
   { role: "user", content: "What's the weather in San Francisco?" },
   {
     role: "assistant",

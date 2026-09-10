@@ -18,14 +18,19 @@
 export type IdentitySeal = {
   /** The DID this seal was derived from (normalized). */
   did: string;
+
   /** Primary hue (0–360), the main per-identity differentiator. */
   hue: number;
+
   /** The ring's ordered hues (degrees), used to build the conic aura. */
   hues: readonly number[];
+
   /** Conic-gradient rotation offset, in degrees. */
   angle: number;
+
   /** Ready-to-use CSS `conic-gradient(...)` for the aura ring. */
   ringGradient: string;
+
   /** Accent color (HSL string) for the seal mark when verified. */
   accent: string;
 };

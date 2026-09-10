@@ -1,8 +1,8 @@
+import { consume } from "@lit/context";
 import { html, type PropertyValues } from "lit";
-import { styles } from "./styles.ts";
 import { property } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
-import { consume } from "@lit/context";
+
 import { BaseElement } from "../../core/base-element.ts";
 import { oneOf } from "../../core/property-guards.ts";
 import {
@@ -13,6 +13,7 @@ import {
   type ComponentSize,
   defaultTheme,
 } from "../theme-context.ts";
+import { styles } from "./styles.ts";
 
 /**
  * CFButton - Interactive button element with multiple variants and sizes
@@ -40,7 +41,8 @@ const buttonColors = ["neutral", "primary", "accent", "danger"] as const;
 const buttonSizes = ["xs", "sm", "md", "lg", "xl", "icon"] as const;
 const buttonTypes = ["button", "submit", "reset"] as const;
 
-// ── Accessibility strategy ───────────────────────────────────────────
+//
+// Accessibility strategy
 //
 // The host carries role="button" so agents can find it via getByRole.
 // The shadow DOM contains a <button> for styling (part="button") with
@@ -56,7 +58,7 @@ const buttonTypes = ["button", "submit", "reset"] as const;
 // the host's aria-label from the light DOM textContent via slotchange.
 // This is skipped when the author provides their own aria-label or
 // aria-labelledby.
-// ─────────────────────────────────────────────────────────────────────
+//
 
 export class CFButton extends BaseElement {
   static override styles = [BaseElement.baseStyles, styles];

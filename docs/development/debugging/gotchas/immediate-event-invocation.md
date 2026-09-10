@@ -68,7 +68,7 @@ When a failure names `raw:map`:
 
 ## See Also
 
-- [Handler Binding Error](handler-binding-error.md)
-- [onClick Inside computed()](onclick-inside-computed.md)
+- [Handler binding error: unknown property](quick.md#handler-binding-error-unknown-property)
+- [onClick inside computed()](quick.md#onclick-inside-computed)
 - [Reactivity Issues](../reactivity-issues.md)
 - [Non-Idempotent Detection](../non-idempotent-detection.md)

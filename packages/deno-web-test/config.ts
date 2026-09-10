@@ -1,7 +1,9 @@
-import { build } from "@commonfabric/felt";
-import { LaunchOptions } from "@astral/astral";
-import * as path from "@std/path";
 import { exists } from "@std/fs/exists";
+import * as path from "@std/path";
+
+import { LaunchOptions } from "@astral/astral";
+import { astralBinaryPath } from "@commonfabric/integration/astral-adapter";
+import { build } from "@commonfabric/felt";
 
 // These configurations can be applied
 // by placing a `deno-web-test.config.ts` in package root.
@@ -23,6 +25,12 @@ export type Config = {
   // The keys are relative file paths and the values are the destination from
   // the server root.
   include?: Record<string, string>;
+  // A map of relative module paths to bundle onto the static server during
+  // testing. The keys are relative module paths and the values are the
+  // destination from the server root. Each is bundled the way a test module is,
+  // so it can be loaded by URL from a realm the test page creates -- an iframe
+  // or a worker -- which cannot share the test's own bundle.
+  bundle?: Record<string, string>;
   esbuildConfig?: Parameters<typeof build>[0];
 };
 
@@ -83,25 +91,64 @@ export const applyDefaults = (config: object): Config => {
   return applied;
 };
 
-export const extractAstralConfig = (config: Config): LaunchOptions => {
+export const extractAstralConfig = (
+  config: Config,
+  profileDir: string,
+): LaunchOptions => {
   const astralConfig: LaunchOptions = {};
   if ("headless" in config) astralConfig.headless = config.headless;
   if ("product" in config) astralConfig.product = config.product;
-  if ("args" in config) astralConfig.args = config.args;
+
+  // The browser keeps its profile in `profileDir`, which belongs to the run
+  // and goes when the run ends. Astral reads `--user-data-dir` to tell
+  // whether the launch names a profile at all, so it goes in whatever the
+  // product; Firefox reads the directory from `-profile`, and is given the
+  // same one.
+  astralConfig.args = [
+    ...config.args ?? [],
+    `--user-data-dir=${profileDir}`,
+  ];
+  if (config.product === "firefox") {
+    astralConfig.args.push("-profile", profileDir);
+  }
+
+  // Left unset, astral downloads a browser of its own choosing, whose version
+  // is a constant inside astral rather than anything decided here. A system
+  // browser is preferred so that a local run drives what CI drives; when there
+  // is none, this stays unset and astral decides as before.
+  //
+  // Only for Chrome, which is what the search knows how to find. A config that
+  // asked for another product gets no `path` at all, which leaves astral to
+  // resolve that product exactly as it did before this existed.
+  if ((astralConfig.product ?? "chrome") === "chrome") {
+    const path = astralBinaryPath();
+    if (path !== undefined) astralConfig.path = path;
+  }
+
   return astralConfig;
 };
 
+// Reads the project's `deno-web-test.config.ts` and applies the defaults on
+// top of it. A project with no such file runs on the defaults alone. A file
+// that is there but cannot be imported throws, naming the path and the failure
+// importing it produced, so the run ends rather than reaching the browser on
+// settings the project did not ask for.
 export const getConfig = async (projectDir: string): Promise<Config> => {
   const configPath = path.join(projectDir, "deno-web-test.config.ts");
 
-  if (await exists(configPath, { isFile: true })) {
-    // Try to evaluate it
-    try {
-      const config = (await import(configPath)).default;
-      return applyDefaults(config);
-    } catch (_) {
-      console.error(`Unable to execute deno-web-test.config.ts`);
-    }
+  if (!await exists(configPath, { isFile: true })) {
+    return applyDefaults({});
   }
-  return applyDefaults({});
+
+  let config: object;
+  try {
+    config = (await import(configPath)).default;
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `Unable to import ${configPath}: ${detail}`,
+      { cause },
+    );
+  }
+  return applyDefaults(config);
 };

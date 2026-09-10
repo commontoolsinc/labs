@@ -1,0 +1,99 @@
+// Re-export everything from `interface.ts`, which declares the types and the
+// base class.
+export {
+  type CompactDebugStringOptions,
+  type DebugValueOptions,
+  type FabricArray,
+  type FabricContainerValue,
+  type FabricConvertibleValue,
+  type FabricFactory,
+  FabricInstance,
+  type FabricNativeObject,
+  type FabricPlainObject,
+  FabricPrimitive,
+  FabricSpecialObject,
+  type FabricValue,
+  type FabricValueLayer,
+  type FromNativeErrorOptions,
+  type MutableFabricArrayLayer,
+  type MutableFabricContainerValueLayer,
+  type MutableFabricPlainObjectLayer,
+  type MutableFabricValueLayer,
+  type NonNullableFabricValue,
+} from "./interface.ts";
+
+export {
+  cloneForMutation,
+  CloneForMutationError,
+  type CloneForMutationErrorKind,
+  type CloneForMutationOptions,
+  type CloneForMutationResult,
+  cloneIfNecessary,
+  type CloneOptions,
+  cloneWithoutValueAtPath,
+  cloneWithValueAtPath,
+  shallowMutableClone,
+} from "./value-clone.ts";
+
+export {
+  isFabricArray,
+  isFabricContainerValue,
+  isFabricObjectOrArray,
+  isFabricPlainContainer,
+  isFabricPlainObject,
+  isKeyableObjectNotArray,
+  isKeyableObjectOrArray,
+  isWalkableObjectNotArray,
+  isWalkableObjectOrArray,
+} from "./type-check.ts";
+
+export {
+  assertValidFabricValueLayer,
+  isValidFabricNativeObject,
+  isValidFabricPlainObject,
+  isValidFabricValue,
+  isValidFabricValueLayer,
+} from "./validity-check.ts";
+
+export {
+  fabricFromNativeValue,
+  isValidFabricConvertibleValue,
+  nativeFromFabricValue,
+  shallowCleanArray,
+  shallowCleanPlainObject,
+  shallowFabricFromNativeObjectElseUndefined,
+  shallowFabricFromNativeValue,
+} from "./native-conversion.ts";
+
+export { fabricAwareEqual } from "./fabricAwareEqual.ts";
+
+export { refuseFabricInstance } from "./refuseFabricInstance.ts";
+
+export { valueEqual } from "./valueEqual.ts";
+
+export {
+  deepFreeze,
+  isDeepFrozen,
+  isValidDeepFrozenFabricValue,
+} from "./deep-freeze.ts";
+
+export {
+  toCompactDebugString,
+  toDebugKindString,
+  toIndentedDebugString,
+  toStructuredDebugValue,
+} from "./value-debug.ts";
+
+export { hashOf, hashStringOf, taggedHashStringOf } from "./value-hash.ts";
+
+export {
+  FABRIC_PRIMITIVE_VALUE_TAGS,
+  type FabricPrimitiveValueTag,
+  tagFromFabricPrimitive,
+  tagFromFabricPrimitiveElseNull,
+  tagFromFabricValue,
+  tagFromFabricValueElseNull,
+  tagFromNativeValueElseNull,
+  VALUE_TAGS,
+  type ValueTag,
+} from "./value-tags.ts";

@@ -1,25 +1,31 @@
 // Cell commit callback tests: verifying that onCommit callbacks fire correctly
 // after cell writes reach a final commit result.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/codec-data-uri";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+
 import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Writable } from "@commonfabric/api";
-import {
-  createFactoryShell,
-  isAdmittedFabricFactory,
-} from "@commonfabric/data-model/fabric-factory";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { isCell } from "../src/cell.ts";
-import { JSONSchema } from "../src/builder/types.ts";
+
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { JSONSchema } from "../src/builder/types.ts";
+import { isCell } from "../src/cell.ts";
+import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { parseLink, toMemorySpaceAddress } from "../src/link-utils.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import {
+  type IExtendedStorageTransaction,
+  type IStorageTransaction,
+} from "../src/storage/interface.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
+import { refuseAtCommitBoundary } from "./refused-commit.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -129,7 +135,7 @@ describe("Cell commit callbacks", () => {
     expect(callOrder).toEqual([1, 2]);
   });
 
-  it("should not call callback if transaction fails", () => {
+  it("should call callback when the transaction is aborted", () => {
     const cell = runtime.getCell<number>(
       space,
       "callback-fail-test",
@@ -137,36 +143,25 @@ describe("Cell commit callbacks", () => {
       tx,
     );
 
-    let callbackCalled = false;
+    const statuses: string[] = [];
 
-    cell.set(42, () => {
-      callbackCalled = true;
+    cell.set(42, (settledTx) => {
+      statuses.push(settledTx.status().status);
     });
 
-    // Abort the transaction instead of committing
+    // An abort discards the staged writes exactly as a rejected commit does,
+    // and the callback exists to compensate for writes that did not become
+    // durable. It reports the same errored transaction either way.
     tx.abort("test abort");
 
-    expect(callbackCalled).toBe(false);
+    expect(statuses).toEqual(["error"]);
   });
 
   it("should call callback when commit returns an error", async () => {
-    await runtime.dispose();
-    await storageManager.close();
-
-    storageManager = StorageManager.emulate({
-      as: signer,
-    });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-      cfcEnforcementMode: "enforce-explicit",
-    });
-    tx = runtime.edit();
-
     const cell = runtime.getCell<number>(
       space,
       "callback-commit-error-test",
-      { type: "number", ifc: { confidentiality: ["secret"] } } as JSONSchema,
+      undefined,
       tx,
     );
 
@@ -174,9 +169,14 @@ describe("Cell commit callbacks", () => {
     cell.set(42, (committedTx) => {
       statuses.push(committedTx.status().status);
     });
+    refuseAtCommitBoundary(
+      tx,
+      space,
+      "the callback reports a rejected commit",
+    );
 
     const result = await tx.commit();
-    expect(result.error).toBeDefined();
+    expect(isCfcEnforcementRejection(result.error)).toBe(true);
     expect(statuses).toEqual(["error"]);
   });
 
@@ -256,6 +256,54 @@ describe("Cell commit callbacks", () => {
     await tx.commit();
 
     expect(callbackStatuses).toEqual(["error"]);
+  });
+
+  it("runs generic commit callbacks when the storage promise rejects", async () => {
+    const rejection = new Error("storage promise rejected");
+    const inner = {
+      journal: {},
+      clearReadOnly() {},
+      status: () => ({ status: "ready", journal: {} }),
+      commit: () => Promise.reject(rejection),
+    } as unknown as IStorageTransaction;
+    const extended = new ExtendedStorageTransaction(inner);
+    const callbackErrors: unknown[] = [];
+    const callbackStatuses: string[] = [];
+    extended.enqueuePostCommitEffect({
+      id: "rejected-commit-effect",
+      kind: "test",
+      flush() {
+        throw new Error("a rejected commit must not flush its outbox");
+      },
+    });
+    extended.addCommitCallback((committedTx, result) => {
+      callbackStatuses.push(committedTx.status().status);
+      callbackErrors.push(result.error);
+    });
+    extended.setReadOnly("commit callback rejection test");
+
+    let thrown: unknown;
+    try {
+      await extended.commit();
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe(rejection);
+    expect(callbackStatuses).toEqual(["error"]);
+    expect(callbackErrors).toHaveLength(1);
+    expect(callbackErrors[0]).toMatchObject({
+      name: "StorageTransactionAborted",
+      reason: rejection,
+    });
+    expect(extended.status()).toMatchObject({
+      status: "error",
+      error: {
+        name: "StorageTransactionAborted",
+        reason: rejection,
+      },
+    });
+    expect(extended.hasPendingPostCommitEffects()).toBe(false);
   });
 
   describe("set operations with arrays", () => {
@@ -572,6 +620,69 @@ describe("Cell commit callbacks", () => {
       expect(result[1].name).toBe("alice-copy");
     });
 
+    it("removes a fabric element matching by content", () => {
+      // A special object keeps its state in private fields, so a link
+      // comparison can only tell whether two are the same object -- and a
+      // value read back out of the array never is. It matches by content, the
+      // way `removeByValue()` matches.
+      const frame = pushFrame();
+      const cell = runtime.getCell<FabricBytes[]>(
+        space,
+        "remove-fabric-test",
+        { type: "array" },
+        tx,
+      );
+
+      cell.set([
+        new FabricBytes(new Uint8Array([1, 2])),
+        new FabricBytes(new Uint8Array([3, 4])),
+      ]);
+      cell.remove(new FabricBytes(new Uint8Array([1, 2])));
+      popFrame(frame);
+
+      const result = cell.get();
+      expect(result.length).toBe(1);
+      expect(result[0].slice()).toEqual(new Uint8Array([3, 4]));
+    });
+
+    it("removes every fabric element matching by content", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<FabricBytes[]>(
+        space,
+        "removeall-fabric-test",
+        { type: "array" },
+        tx,
+      );
+
+      cell.set([
+        new FabricBytes(new Uint8Array([1, 2])),
+        new FabricBytes(new Uint8Array([3, 4])),
+        new FabricBytes(new Uint8Array([1, 2])),
+      ]);
+      cell.removeAll(new FabricBytes(new Uint8Array([1, 2])));
+      popFrame(frame);
+
+      const result = cell.get();
+      expect(result.length).toBe(1);
+      expect(result[0].slice()).toEqual(new Uint8Array([3, 4]));
+    });
+
+    it("keeps a fabric element whose content differs", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<FabricBytes[]>(
+        space,
+        "remove-fabric-miss-test",
+        { type: "array" },
+        tx,
+      );
+
+      cell.set([new FabricBytes(new Uint8Array([1, 2]))]);
+      cell.remove(new FabricBytes(new Uint8Array([9, 9])));
+      popFrame(frame);
+
+      expect(cell.get().length).toBe(1);
+    });
+
     it("should do nothing when removing element not in array", () => {
       const frame = pushFrame();
       const cell = runtime.getCell<number[]>(
@@ -818,87 +929,6 @@ describe("Cell commit callbacks", () => {
         ).toBe(true);
         expect(resolvedLink.path).toEqual([]);
         expect(resolved.get()).toEqualIgnoringSymbols({ name: "first" });
-      });
-
-      it("resolves persisted array objects containing factories", async () => {
-        const ref = {
-          identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-          symbol: "resolved-array-factory",
-        } as const;
-        const factory = createFactoryShell({ kind: "module", ref });
-        const arrayCell = runtime.getCell<Array<{ factory: unknown }>>(
-          space,
-          "resolve-array-factory-object",
-          {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                factory: {
-                  asFactory: {
-                    kind: "module",
-                    argumentSchema: true,
-                    resultSchema: true,
-                  },
-                },
-              },
-            },
-          },
-          tx,
-        );
-        // Seed the storage layer directly to model a cold runtime reading a
-        // value that was durably published elsewhere. The ordinary Cell writer
-        // correctly refuses to create such a value without publication proof.
-        // Bypass this Runtime's commit hook as well: a normal Runtime-issued
-        // commit now owns factory-artifact publication and correctly rejects a
-        // shell with no local publication proof. The raw storage transaction
-        // models bytes that were already committed by another runtime.
-        const seeded = tx.tx.write(
-          toMemorySpaceAddress(arrayCell.getAsNormalizedFullLink()),
-          [{ factory }],
-        );
-        expect(seeded.error).toBeUndefined();
-        await tx.tx.commit();
-        tx = runtime.edit();
-        const persistedArrayCell = runtime.getCell<
-          Array<{ factory: unknown }>
-        >(
-          space,
-          "resolve-array-factory-object",
-          {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                factory: {
-                  asFactory: {
-                    kind: "module",
-                    argumentSchema: true,
-                    resultSchema: true,
-                  },
-                },
-              },
-            },
-          },
-          tx,
-        );
-
-        const resolved = persistedArrayCell.key(0).resolveAsCell();
-        expect(
-          resolved.getAsNormalizedFullLink().id.startsWith(
-            `data:${DATA_URI_MEDIA_TYPE},`,
-          ),
-        ).toBe(true);
-        expect(() =>
-          runtime.assertFactoryArtifactsPublishableForWrite(factory, space)
-        ).toThrow("not available in space");
-        const value = resolved.getWithoutFactoryMaterialization() as {
-          factory: unknown;
-        };
-        expect(isAdmittedFabricFactory(value.factory)).toBe(true);
-        expect(() => (value.factory as () => void)()).toThrow(
-          "factory requires runner materialization",
-        );
       });
 
       it("resolves array element links to the target cell", () => {

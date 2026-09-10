@@ -21,7 +21,7 @@
  *
  * Run: deno task cf test packages/patterns/notes/notebook.test.tsx --verbose
  */
-import { action, assert, NAME, pattern } from "commonfabric";
+import { action, assert, NAME, pattern, TESTS } from "commonfabric";
 import Notebook from "./notebook.tsx";
 import Note from "./note.tsx";
 
@@ -437,7 +437,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Initial state ===
       { assertion: assert_initial_title },
       { assertion: assert_initial_note_count },

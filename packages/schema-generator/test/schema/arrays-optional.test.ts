@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Arrays and optional properties", () => {
@@ -9,7 +9,7 @@ describe("Schema: Arrays and optional properties", () => {
       interface X { ids?: number[]; }
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "X");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(gen.generateSchema(type, checker, typeNode));
     expect(result.type).toBe("object");
     const ids = result.properties?.ids as Record<string, unknown>;
@@ -25,7 +25,7 @@ describe("Schema: Arrays and optional properties", () => {
     `;
     const a = await getTypeFromCode(code, "A");
     const b = await getTypeFromCode(code, "B");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const sa = asObjectSchema(
       gen.generateSchema(a.type, a.checker, a.typeNode),
     );

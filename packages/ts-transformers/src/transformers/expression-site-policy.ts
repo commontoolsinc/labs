@@ -3,12 +3,15 @@ import {
   classifyArrayMethodCall,
   classifyArrayMethodCallSite,
   detectCallKind,
+  getCallArgumentPosition,
   getTypeAtLocationWithFallback,
+  hasAuthoredSourceSite,
   isCollectionType,
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
   isInRestrictedReactiveContext,
   isReactiveOriginTaggedTemplate,
+  isSyntheticNode,
   type ReactiveContextInfo,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
@@ -23,6 +26,7 @@ import {
   classifyCallRootPolicy,
   type ExpressionSiteCallRootKind,
   type ExpressionSiteHelperBoundaryKind,
+  isCellReadTerminalCall,
   type SupportedCallRootKind,
   type UnsupportedCallRootKind,
 } from "./call-root-support.ts";
@@ -322,6 +326,61 @@ function isSharedPostClosureCallRootKind(
   return kind === "ordinary-call" || kind === "parameterized-inline-call";
 }
 
+/**
+ * True when a call site reads a cell — `count.get()` itself, or a call whose
+ * receiver chain reaches one (`rows.get().toSorted(byDate)`,
+ * `rows.get().items.join(", ")`).
+ *
+ * A cell read yields a plain snapshot, so the site holding it has to become a
+ * lift for the value to stay reactive. `classifyCallRootPolicy` reports the read
+ * as `restricted-get-call` and declines to classify a call over one, leaving
+ * both shapes without a supported call root; the JSX router admits them anyway
+ * (a bare read as an owned `jsx-root` site, a call over one as a shared
+ * post-closure site). This is the same admission for the other container kinds,
+ * so a binding, a return, an argument, or an object property holding a cell read
+ * lowers into the lift its JSX spelling already gets.
+ *
+ * Receivers that are not cells are excluded by {@link isCellReadTerminalCall}:
+ * a `.get()` on an opaque value is a mistake with its own diagnostic, not a
+ * computation to lower.
+ */
+function isCellReadCallRootExpression(
+  expression: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  let current: ts.Expression = unwrapExpression(expression);
+  if (!ts.isCallExpression(current)) {
+    return false;
+  }
+
+  while (true) {
+    if (ts.isCallExpression(current)) {
+      if (isCellReadTerminalCall(current, context)) {
+        return true;
+      }
+      const callee = unwrapExpression(current.expression);
+      if (
+        !ts.isPropertyAccessExpression(callee) &&
+        !ts.isElementAccessExpression(callee)
+      ) {
+        return false;
+      }
+      current = unwrapExpression(callee.expression);
+      continue;
+    }
+
+    if (
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current)
+    ) {
+      current = unwrapExpression(current.expression);
+      continue;
+    }
+
+    return false;
+  }
+}
+
 const STRUCTURAL_NESTED_CONTAINER_KINDS = new Set<ExpressionContainerKind>([
   "call-argument",
   "object-property",
@@ -405,12 +464,9 @@ function hasEnclosingComputeLikeCallback(
   let current: ts.Node | undefined = callbackContext.call.parent;
   while (current) {
     if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-      const parent: ts.Node | undefined = current.parent;
-      if (
-        parent && ts.isCallExpression(parent) &&
-        parent.arguments.includes(current)
-      ) {
-        const callKind = detectCallKind(parent, context.checker);
+      const position = getCallArgumentPosition(current);
+      if (position) {
+        const callKind = detectCallKind(position.call, context.checker);
         if (callKind?.kind === "lift-applied") {
           return true;
         }
@@ -559,6 +615,12 @@ function isReactiveRuntimeCallTaggedTemplateSpan(
   return isReactiveOriginTaggedTemplate(tagged, context.checker);
 }
 
+/**
+ * Deliberately parent-literal, unlike `getCallArgumentPosition`: visitors
+ * classify a parenthesized expression at its paren node (the inner expression
+ * reports no container), so looking through parens here would classify the
+ * same site at two nesting levels and lower it twice.
+ */
 export function getExpressionContainerKind(
   expression: ts.Expression,
 ): ExpressionContainerKind | undefined {
@@ -596,18 +658,6 @@ export function getExpressionContainerKind(
   }
 
   return undefined;
-}
-
-function hasAuthoredSourceSite(node: ts.Node): boolean {
-  const original = ts.getOriginalNode(node);
-
-  if (node.getSourceFile() && node.pos >= 0) {
-    return true;
-  }
-
-  return original !== node &&
-    !!original.getSourceFile() &&
-    original.pos >= 0;
 }
 
 function isWithinEventHandlerJsxAttribute(
@@ -670,7 +720,7 @@ function getHelperBoundaryKind(
     if (
       parent &&
       ts.isCallExpression(parent) &&
-      parent.pos >= 0 &&
+      !isSyntheticNode(parent) &&
       ts.isExpression(current) &&
       parent.arguments.includes(current)
     ) {
@@ -718,9 +768,21 @@ function isDeferredJsxArrayMethodExpression(
     }
   }
 
+  // The registry is what lets this stage agree with the closure stage about
+  // a local it rewrote an array method over (`const view =
+  // rows.get().filter(...)` — site-lifted, so structurally invisible to the
+  // provenance walk). Without it the rewritten `*WithPattern` call reads as
+  // plain, misses the deferral, and gets wrapped in a second, incoherent
+  // lift. The typeRegistry keeps the walk's type rooting working on the
+  // synthetic nodes that rewrite produced.
   const arrayMethodCallSite = classifyArrayMethodCallSite(
     current,
     context.checker,
+    {
+      typeRegistry: context.state.typeRegistry,
+      syntheticReactiveCollectionRegistry: context.state
+        .syntheticReactiveCollectionRegistry,
+    },
   );
   return !!arrayMethodCallSite &&
     arrayMethodCallSite.ownership === "reactive";
@@ -935,8 +997,7 @@ function arrayMethodCallbackValueResolvesToCollection(
     getTypeAtLocationWithFallback(
       expression,
       context.checker,
-      context.options.state?.typeRegistry,
-      context.options.logger,
+      context.state.typeRegistry,
     ),
     context.checker,
   );
@@ -1198,8 +1259,14 @@ export function classifyExpressionSiteHandling(
     );
     const patternOwnedReceiverMethod = supportedCallRootKind ===
       "pattern-owned-receiver-method";
-    if (!sharedPostClosureCallRoot && !patternOwnedReceiverMethod) {
-      if (!isPostClosureWrapperRewriteExpression(expression, context)) {
+    if (
+      !sharedPostClosureCallRoot &&
+      !patternOwnedReceiverMethod
+    ) {
+      if (
+        !isPostClosureWrapperRewriteExpression(expression, context) &&
+        !isCellReadCallRootExpression(expression, context)
+      ) {
         return { kind: "skip", reason: "not-lowerable" };
       }
 
@@ -1318,6 +1385,51 @@ export function findLowerableExpressionSite(
   }
 
   return deferredArrayMethodReceiverSite;
+}
+
+/**
+ * A carrier site for an expression whose own site walk stops at a callback
+ * boundary: the expression sits inside an inline callback argument, and the
+ * callback's owning call lowers at an expression site of its own. The lift
+ * wrapping that site absorbs the callback, so the expression runs on resolved
+ * values — `rows.get().toSorted((a, b) => (a?.sentAt ?? 0) - (b?.sentAt ?? 0))`
+ * carries the comparator's `?.` inside the lift body.
+ *
+ * Callbacks of the array-method families (`map`/`filter`/`flatMap`) are
+ * excluded: those lower through their `*WithPattern` counterparts, whose
+ * callback-pattern machinery models elements on its own terms.
+ */
+export function findInlineCallbackCarrierSite(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): LowerableExpressionSite | undefined {
+  let current: ts.Node | undefined = expression.parent;
+
+  while (current) {
+    if (ts.isFunctionLike(current)) {
+      const position = getCallArgumentPosition(current);
+      if (!position) {
+        return undefined;
+      }
+
+      if (classifyArrayMethodCall(position.call)) {
+        return undefined;
+      }
+
+      const site = findLowerableExpressionSite(position.call, context, analyze);
+      if (site) {
+        return site;
+      }
+
+      current = position.call.parent;
+      continue;
+    }
+
+    current = current.parent;
+  }
+
+  return undefined;
 }
 
 export function findPreferredNestedLowerableExpressionSite(

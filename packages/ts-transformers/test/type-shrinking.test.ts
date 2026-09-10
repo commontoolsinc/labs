@@ -16,7 +16,7 @@ import {
 import { collect, parseModule } from "./transformed-ast.ts";
 import { registerTrustedCommonFabricTestSources } from "./trusted-commonfabric-sources.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Structural inspection of printed type nodes.
 //
 // `printTypeNode` renders a `ts.TypeNode` to text. Asserting on that text with
@@ -25,7 +25,7 @@ import { registerTrustedCommonFabricTestSources } from "./trusted-commonfabric-s
 // helpers reparse the printed type node and expose its members as real AST
 // nodes so tests can assert on property names, optional flags, exact member
 // types, and the shape of the root node.
-// ---------------------------------------------------------------------------
+//
 
 /** Reparse a printed type node into a `ts.TypeNode`. */
 function parseType(printed: string): ts.TypeNode {

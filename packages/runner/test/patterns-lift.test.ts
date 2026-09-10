@@ -1,20 +1,21 @@
 // Lifted functions: pure transformations via lift(), error and recovery behavior,
 // cell creation inside lifts, reactivity control (sample), and evaluation timing.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
+import { getPatternIdentityRef } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type Cell, type JSONSchema } from "../src/builder/types.ts";
+
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { Runtime } from "../src/runtime.ts";
-import { type ErrorWithContext } from "../src/scheduler.ts";
+import { type Cell, type JSONSchema } from "../src/builder/types.ts";
 import { isCell } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
+import { Runtime } from "../src/runtime.ts";
+import { type ErrorWithContext } from "../src/scheduler.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { getPatternIdentityRef } from "@commonfabric/runner";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -165,9 +166,17 @@ describe("Pattern Runner - Lift", () => {
 
     value = await result.pull();
 
+    // `multiplyGenerator` FORWARDS `args` into `multiply(args)` without ever
+    // reading through it, so under lazy materialization it takes no dependency
+    // on the values inside and does not re-run when `x` changes. That is the
+    // point of the mode, and it is safe here because what forwarding passes is
+    // a LINK: the inner `multiply` node re-reads through it and re-runs, which
+    // is why `multiply` still counts 4 and the result below is still 9.
+    // `multiplyGenerator2` destructures `{ x, y }`, so it reads both and keeps
+    // its dependency in either mode.
     expect(runCounts).toMatchObject({
       multiply: 4,
-      multiplyGenerator: 2,
+      multiplyGenerator: runtime.experimental.lazyMaterialization ? 1 : 2,
       multiplyGenerator2: 2,
     });
 
@@ -241,8 +250,14 @@ describe("Pattern Runner - Lift", () => {
     expect(errors).toBe(1);
     expect(value.result).toBeUndefined();
 
-    const patternIdentity = getPatternIdentityRef(piece)?.identity;
-    expect(patternIdentity).toBeDefined();
+    // A hand-built (keyless) piece carries no durable pattern pointer
+    // (the never-durable contract; L3(a), RULED 2026-08-27); the scheduler
+    // diagnostics fall back to the in-hand pattern's session entry ref.
+    expect(getPatternIdentityRef(piece)).toBeUndefined();
+    const patternIdentity = runtime.patternManager.getArtifactEntryRef(
+      divPattern as unknown as object,
+    )?.identity;
+    expect(patternIdentity).toMatch(/^keyless:/);
     expect(lastError?.patternId).toBe(patternIdentity);
     expect(lastError?.space).toBe(space);
     // Diagnostics carry the FULL schemed sourceURI (see diagnostics.ts:
@@ -504,7 +519,7 @@ describe("Pattern Runner - Lift", () => {
   it("stores a lifted array-of-objects result inline as a single doc (no per-element entity docs)", async () => {
     // Pin the write-path contract for DERIVED output: `Cell.set()` of an
     // array of plain objects decomposes each element into its own entity
-    // doc (editable-array semantics, see cell.ts recursivelyAddIDIfNeeded),
+    // doc (editable-array semantics; data-updating.ts array anchoring),
     // but a lift's RESULT is not editable and is written via the raw path
     // (runner.ts setRawUntyped) — so an N-element derived list must land as
     // ONE document with the elements stored INLINE, not as N element docs
@@ -557,7 +572,7 @@ describe("Pattern Runner - Lift", () => {
 
     // Follow the result indirection to the doc that actually holds the
     // array, then assert its RAW stored form: a plain inline array of
-    // records — not element links, and not element `[ID]` markers.
+    // records — not element links, and not anchored element documents.
     const indexCell = result.key("index");
     const link = resolveLink(
       runtime,

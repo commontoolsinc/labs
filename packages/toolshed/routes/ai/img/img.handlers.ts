@@ -1,12 +1,14 @@
+import { ensureDir } from "@std/fs";
+
 import { fal } from "@fal-ai/client";
-import type { AppRouteHandler } from "@/lib/types.ts";
+
 import type {
   GenerateImageAdvancedRoute,
   GenerateImageRoute,
 } from "./img.routes.ts";
 import env from "@/env.ts";
 import { sha256 } from "@/lib/sha2.ts";
-import { ensureDir } from "@std/fs";
+import type { AppRouteHandler } from "@/lib/types.ts";
 
 // Configure FAL client
 fal.config({ credentials: env.FAL_API_KEY });

@@ -1,7 +1,10 @@
-// Plan B: the wake shaper's cell path is owned by the scheduler. These tests
-// exercise its runtime lifecycle through the public holdShapedCellNotification
-// seam — that a held notification is not delivered synchronously, that idle()
-// waits for its release, and that dispose() cancels it.
+/**
+ * Plan B: the wake shaper's cell path is owned by the scheduler. These tests
+ * exercise its runtime lifecycle through the public holdShapedCellNotification
+ * seam — that a held notification is not delivered synchronously, that idle()
+ * waits for its release, and that dispose() cancels it.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";

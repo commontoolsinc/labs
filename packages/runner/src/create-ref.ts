@@ -1,7 +1,4 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { hasEntityUriScheme } from "./entity-kind.ts";
-import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
-import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { FabricSpecialObject, hashOf } from "@commonfabric/data-model";
 import {
   factoryStateOf,
   isAdmittedFabricFactory,
@@ -12,19 +9,26 @@ import {
   entityRefFromString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
-import { isRecord } from "@commonfabric/utils/types";
-import { isModule, isPattern, isReactive } from "./builder/types.ts";
-import {
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "./query-result-proxy.ts";
-import { isCell } from "./cell.ts";
-import { fromURI } from "./uri-utils.ts";
-import { isSigilLink, parseLink } from "./link-utils.ts";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import {
   createFactoryTraversalContext,
   mapFactoryForTraversal,
 } from "./builder/factory-traversal.ts";
+import { isModule, isPattern, isReactive } from "./builder/types.ts";
+import { isCell } from "./cell.ts";
+import { encodableFormOf } from "./encodable-form.ts";
+import {
+  hasEntityUriScheme,
+  hashStringForEntityAddress,
+} from "./entity-kind.ts";
+import { isSigilLink, parseLink } from "./link-utils.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "./query-result-proxy.ts";
+import { fromURI } from "./uri-utils.ts";
 
 declare const ENTITY_ID_BRAND: unique symbol;
 
@@ -38,19 +42,32 @@ declare const ENTITY_ID_BRAND: unique symbol;
  */
 export type EntityId = FabricHash & { readonly [ENTITY_ID_BRAND]: true };
 
-/** Brands a content-hash string (or `FabricHash`) as an {@link EntityId}. */
+/**
+ * Brands a content-hash string (or `FabricHash`) as an {@link EntityId}.
+ *
+ * A string may arrive in either spelling of an unkinded entity: the bare
+ * tagged hash (`fid1:<hash>`) or the `of:`-schemed URI over it. This is the
+ * entity-specific intake seam, so it is where the URI scheme is understood —
+ * `FabricHash.fromString` below parses a tagged hash, in which `of:` is not a
+ * tag but a second colon, and would reject the schemed form.
+ *
+ * A kinded id (`computed:fid1:<hash>`) throws by name rather than being
+ * stripped to the different entity its bare hash names; see
+ * {@link hashStringForEntityAddress}.
+ */
 export function entityIdFrom(hash: string | FabricHash): EntityId {
   return (typeof hash === "string"
-    ? FabricHash.fromString(hash)
+    ? FabricHash.fromString(hashStringForEntityAddress(hash))
     : hash) as EntityId;
 }
 
 /**
  * Generates an entity ID.
  *
- * Derivation inputs must resolve: a Cell with no entityId or a Reactive with
- * no value throws rather than minting a random substitute, so a derived id never
- * silently becomes non-deterministic (audit S14). A missing `cause`, by
+ * Derivation inputs must resolve: a Cell with no entityId, a Reactive with no
+ * value, and a cell's method -- which names no value of its own -- each throw
+ * rather than minting a substitute, so a derived id never silently becomes
+ * non-deterministic or unresolvable (audit S14). A missing `cause`, by
  * contrast, deliberately mints a fresh random id.
  *
  * @param source - The source object.
@@ -70,9 +87,9 @@ export function createRef(
   const factoryContext = createFactoryTraversalContext();
   const factoryStateAncestors = new WeakSet<object>();
 
-  // Unwrap query result proxies and replace docs with their ids. Admitted
-  // factories retain their callable value and map only their hidden semantic
-  // state; every other JavaScript function fails closed.
+  // Unwrap query result proxies and replace docs with their links. Admitted
+  // factories map only their hidden semantic state; every other JavaScript
+  // function fails closed.
   function traverse(
     obj: any,
     insideFactoryState = false,
@@ -82,10 +99,10 @@ export function createRef(
     if (isAdmittedFabricFactory(obj)) {
       const state = factoryStateOf(obj);
       const legacyPattern = obj as unknown as { toJSON?: () => unknown };
-      // Keyless hand-built patterns have no Factory@1 identity to hash. Keep
-      // the explicit legacy structural-identity fallback used by
-      // ensureKeylessPatternIdentity; every ref-backed factory takes the
-      // canonical hidden-state path below.
+
+      // A hand-built pattern has no Factory@1 ref to hash. Its session-only
+      // identity keeps the established structural graph fallback; every
+      // ref-backed factory takes the canonical hidden-state path below.
       if (
         state.ref === undefined && state.kind === "pattern" &&
         typeof legacyPattern.toJSON === "function"
@@ -116,20 +133,22 @@ export function createRef(
           true,
         );
       }
-      // A keyless root pattern's structural graph can also contain keyless
-      // module/handler factories. They are not Fabric values and must never
-      // reach the canonical Factory@1 codec, but the long-standing session
-      // identity fallback still needs to hash their builder descriptors. Keep
-      // this exception scoped to an already-recognized legacy pattern graph;
-      // ordinary factory values continue to require a durable artifact ref.
+
+      // Keyless module and handler descriptors are permitted only inside the
+      // already-recognized legacy pattern graph. They remain invalid as
+      // standalone Fabric values and have no cold reconstruction path.
       if (state.ref === undefined && insideLegacyPatternGraph) {
+        const legacyFactory = obj as unknown as { toJSON?: () => unknown };
         return traverse(
-          Object.fromEntries(Object.entries(obj)),
+          typeof legacyFactory.toJSON === "function"
+            ? legacyFactory.toJSON() ?? obj
+            : Object.fromEntries(Object.entries(obj)),
           insideFactoryState,
           false,
           true,
         );
       }
+
       return mapFactoryForTraversal(
         obj,
         (nested) => traverse(nested, true),
@@ -146,9 +165,28 @@ export function createRef(
       );
     }
 
-    // Fabric-special values and serialized references are logical atoms. In
-    // particular, inspect neither protocol internals nor enumerable wrapper
-    // implementation details; hashOf() dispatches through their codecs.
+    // A primitive is its own preimage. Nothing below applies to one -- it
+    // carries no members to serialize, is no kind of reference, and holds
+    // nothing to descend into -- and `obj` is `any`, so `null`, `undefined` and
+    // every scalar arrive here.
+    if (
+      obj === null || (typeof obj !== "object" && typeof obj !== "function")
+    ) {
+      return obj;
+    }
+
+    // Don't traverse into atomic values or already-serialized references. A
+    // Fabric-special object is hashed through its codec rather than decomposed
+    // into enumerable implementation details. A serialized entity-ref or
+    // sigil link is likewise an atomic reference to another cell.
+    //
+    // A link is hashed as it stands, schema and all. This walk takes what it
+    // is given: a caller deriving an id has to hand over a preimage that is
+    // causal, and reducing one here would only hide the difference between a
+    // caller that did and one that did not. `causalFormOfBinding()` does the
+    // reducing for a node's cause, at the seam that knows which links a bound
+    // tree holds and why they carry a schema at all.
+    //
     if (obj instanceof FabricSpecialObject) return obj;
     if (isSigilLink(obj) || isEntityRef(obj)) return obj;
 
@@ -164,30 +202,22 @@ export function createRef(
     }
 
     try {
-      // Avoid cycles — only track objects/arrays/functions (not primitives).
-      // Primitives use value equality in Set, so repeated strings like
-      // "primary" would be incorrectly deduplicated, causing hash collisions
-      // for patterns that differ only in the position of repeated values.
-      if (
-        obj !== null && (typeof obj === "object" || typeof obj === "function")
-      ) {
-        if (seen.has(obj)) return null;
-        seen.add(obj);
-      }
+      // Avoid cycles. Primitives and codec-owned atoms are gone by here; those
+      // use value equality and must remain occurrence-sensitive.
+      if (seen.has(obj)) return null;
+      seen.add(obj);
 
-      // If there is a .toJSON method, replace obj with it, then descend.
-      if (
-        isRecord(obj) &&
-        typeof obj.toJSON === "function"
-      ) {
-        obj = obj.toJSON() ?? obj;
-      }
+      // A builder artifact is replaced by its encodable form, then descended
+      // into: what the ref is derived from is the form that gets written. A
+      // nullish form leaves the original value in place so a not-yet-linked
+      // Cell can be handled below.
+      obj = encodableFormOf(obj) ?? obj;
 
       if (isReactive(obj)) {
         const val = obj.export().value;
         if (val == null) {
-          // An Reactive feeding a derived id must carry a value; otherwise the
-          // id would silently become non-deterministic (audit S14). Fail closed.
+          // A Reactive feeding a derived id must carry a value; otherwise the
+          // id would silently become non-deterministic (audit S14).
           throw new Error(
             "[createRef] Reactive has no value; cannot derive a stable id",
           );
@@ -196,27 +226,35 @@ export function createRef(
       }
 
       if (isCellResultForDereferencing(obj)) {
-        // It'll traverse this and call .toJSON on the doc in the reference.
+        // A query result stands for the cell it dereferences to, and derives
+        // what that cell derives.
         obj = getCellOrThrow(obj);
       }
 
-      // If referencing other docs, return their ids.
       if (isCell(obj)) {
+        // Reading the entity id materializes a link from an explicit cause.
         const id = obj.entityId;
         if (id == null) {
-          // A Cell referenced from a derived id must have an entityId; otherwise
-          // the id would silently become non-deterministic (audit S14). Fail
-          // closed rather than mint a random substitute.
+          // A referenced Cell must already name an entity; otherwise the id
+          // would silently become non-deterministic (audit S14).
           throw new Error(
             "[createRef] Cell has no entityId; cannot derive a stable id",
           );
         }
-        return id;
+
+        // The path participates in cell identity, so derive from the complete
+        // link rather than from the document id alone.
+        return traverse(
+          encodableFormOf(obj),
+          insideFactoryState,
+          false,
+          insideLegacyPatternGraph,
+        );
       } else if (Array.isArray(obj)) {
         return obj.map((value) =>
           traverse(value, insideFactoryState, false, insideLegacyPatternGraph)
         );
-      } else if (isRecord(obj)) {
+      } else if (isObjectOrArray(obj)) {
         return Object.fromEntries(
           Object.entries(obj).map(([key, value]) => [
             key,
@@ -229,7 +267,12 @@ export function createRef(
             ),
           ]),
         );
-      } else return obj;
+      } else {
+        // A primitive reaches here only as an encodable form. A form is its
+        // own preimage; stringifying it would collapse values such as 7 and
+        // "7" onto one identity.
+        return obj;
+      }
     } finally {
       if (factoryStateContainer !== undefined) {
         factoryStateAncestors.delete(factoryStateContainer);

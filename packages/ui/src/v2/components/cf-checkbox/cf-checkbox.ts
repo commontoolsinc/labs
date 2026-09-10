@@ -1,8 +1,9 @@
+import { booleanSchema } from "@commonfabric/runner/schemas";
+import { type CellHandle } from "@commonfabric/runtime-client";
 import { css, html, LitElement } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
+
 import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle } from "@commonfabric/runtime-client";
-import { booleanSchema } from "@commonfabric/runner/schemas";
 import { createBooleanCellController } from "../../core/cell-controller.ts";
 import { createFormFieldController } from "../../core/form-field-controller.ts";
 
@@ -193,7 +194,10 @@ export class CFCheckbox extends BaseElement {
       },
     });
 
-    // Form field controller handles buffering when in cf-form context
+    /**
+     * Form field controller, which handles buffering when in a `cf-form`
+     * context.
+     */
     private _formField = createFormFieldController<boolean>(this, {
       cellController: this._checkedCellController,
       validate: () => {

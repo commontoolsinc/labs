@@ -1,20 +1,23 @@
-// The storage manager's pending-commit durability barrier and the scheduler's
-// client-facing quiescence built on it.
-//
-// Every write flows through a transaction from `storageManager.edit()`, and
-// `commit()` registers itself with the manager's barrier synchronously at the
-// entry point, so `hasPendingCommits()` is true from the moment a commit is
-// issued until the server confirms (or terminally rejects) it. The scheduler's
-// `idleWithPendingCommits()` — what the client-facing idle awaits — resolves
-// only when reactive quiescence and an empty barrier hold together, so a
-// client that treats "idle" as a safe point to navigate or reload cannot lose
-// an in-flight write. Plain `idle()` (internal reactive quiescence) ignores
-// the barrier by design.
-//
-// These tests drive REAL commits against the emulated server and gate its
-// responses, so they fail if the barrier ever stops observing the actual
-// commit pipeline (e.g. registration decoupled from the real commit promise)
-// and if the joint fixpoint ever stops re-checking after a commit settles.
+/**
+ * The storage manager's pending-commit durability barrier and the scheduler's
+ * client-facing quiescence built on it.
+ *
+ * Every write flows through a transaction from `storageManager.edit()`, and
+ * `commit()` registers itself with the manager's barrier synchronously at the
+ * entry point, so `hasPendingCommits()` is true from the moment a commit is
+ * issued until the server confirms (or terminally rejects) it. The scheduler's
+ * `idleWithPendingCommits()` — what the client-facing idle awaits — resolves
+ * only when reactive quiescence and an empty barrier hold together, so a
+ * client that treats "idle" as a safe point to navigate or reload cannot lose
+ * an in-flight write. Plain `idle()` (internal reactive quiescence) ignores
+ * the barrier by design.
+ *
+ * These tests drive REAL commits against the emulated server and gate its
+ * responses, so they fail if the barrier ever stops observing the actual
+ * commit pipeline (e.g. registration decoupled from the real commit promise)
+ * and if the joint fixpoint ever stops re-checking after a commit settles.
+ */
+
 import {
   afterEach,
   beforeEach,
@@ -39,8 +42,12 @@ type TransactResponse = {
   ok?: unknown;
   error?: { name: string; message: string; precondition?: string };
 };
+type PublishTransactVerdict = (response: TransactResponse) => void;
 type TestMemoryServer = {
-  transact(message: TransactMessage): Promise<TransactResponse>;
+  transact(
+    message: TransactMessage,
+    publishVerdict?: PublishTransactVerdict,
+  ): Promise<TransactResponse>;
 };
 
 function emulatedServer(
@@ -62,10 +69,10 @@ function holdServerTransacts(
   const original = server.transact.bind(server);
   let held = 0;
   const gates: (() => void)[] = [];
-  server.transact = async (message) => {
+  server.transact = async (message, publishVerdict) => {
     held++;
     await new Promise<void>((resolve) => gates.push(resolve));
-    return original(message);
+    return original(message, publishVerdict);
   };
   return {
     held: () => held,
@@ -90,16 +97,18 @@ function rejectServerTransacts(
   const server = emulatedServer(storageManager);
   const original = server.transact.bind(server);
   let rejected = 0;
-  server.transact = (message) => {
+  server.transact = (message, publishVerdict) => {
     if (rejected < count) {
       rejected++;
-      return Promise.resolve({
+      const response: TransactResponse = {
         type: "response",
         requestId: message.requestId,
         error,
-      });
+      };
+      publishVerdict?.(response);
+      return Promise.resolve(response);
     }
-    return original(message);
+    return original(message, publishVerdict);
   };
   return {
     rejected: () => rejected,

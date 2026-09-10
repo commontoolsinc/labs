@@ -5,14 +5,15 @@
  * where cells are accessed synchronously via cell.get() and cell.sink().
  */
 
-import type { Cancel, Cell, JSONSchema } from "@commonfabric/runner";
-import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import type { CfcAtom } from "@commonfabric/api/cfc";
+import type { Cancel, Cell, JSONSchema } from "@commonfabric/runner";
 import type {
+  CfcConfClause,
   RenderConfidentialityResolver,
   SpaceMembershipProvider,
 } from "@commonfabric/runner/cfc";
 import type { CellRef, JSONValue } from "@commonfabric/runtime-client";
+import type { VDomOp } from "../vdom-ops.ts";
 
 /**
  * A render node in the worker VDOM tree.
@@ -79,8 +80,10 @@ export function isWorkerVNode(value: unknown): value is WorkerVNode {
 export interface PropState {
   /** The Cell being subscribed to (if reactive), or undefined for static props */
   cell: Cell<unknown> | undefined;
+
   /** Cancel function for this prop's subscription */
   cancel: Cancel;
+
   /** The specific value bound (for equality checking of static props/handlers) */
   currentValue?: unknown;
 }
@@ -91,6 +94,7 @@ export interface PropState {
 export interface ChildrenState {
   /** The Cell being subscribed to (if reactive), or undefined for static children */
   cell: Cell<unknown> | undefined;
+
   /** Cancel function for the children subscription */
   cancel: Cancel;
 }
@@ -127,6 +131,7 @@ export interface RenderPolicy {
   textIntegrity?: {
     requiredIntegrity: readonly CfcAtom[];
     allowLiteralText: boolean;
+
     /**
      * The enclosing text-integrity boundaries this policy applies to, innermost
      * included. A block under this policy is attributed to every id in the set
@@ -182,6 +187,24 @@ export interface NodeState {
   /** Original authored props, used to recompute child render policy. */
   sourceProps?: WorkerVNode["props"];
 
+  /**
+   * Whether this node is the `span` the reconciler wraps a child position's
+   * array in, rather than an element the author wrote. (The `cf-fragment` an
+   * array renders as at a node position of its own does not carry this.) Only
+   * a wrapper may be reused for a new array: an authored element that happens
+   * to share the wrapper's tag holds the author's props and children, not a
+   * list.
+   */
+  isArrayWrapper?: boolean;
+
+  /**
+   * The space this node's descendants inherit — the one stamped on this node
+   * if it stamped one, and otherwise whatever it inherited itself. Rendering
+   * more children into an existing node has to restore this, or they re-stamp
+   * a space their parent already carries.
+   */
+  childEmittedSpace?: string;
+
   /** Text-integrity boundaries that blocked this whole rendered node. */
   textIntegrityBlockedFor?: ReadonlySet<number>;
 
@@ -210,6 +233,9 @@ export interface ChildNodeState {
 
   /** Source cell for reactive child nodes; used to decide same-key reuse. */
   cell?: Cell<unknown>;
+
+  /** Whether this element provides a piece boundary to its descendants. */
+  hasPieceBoundary?: boolean;
 }
 
 /**
@@ -232,7 +258,7 @@ export interface ReconcileContext {
 
   /** Function to emit VDOM operations */
   emit: (
-    ops: import("../vdom-ops.ts").VDomOp[],
+    ops: VDomOp[],
   ) => void;
 
   /** Generate a new unique node ID */
@@ -336,7 +362,7 @@ export function normalizeRenderConfidentialityCeiling(
 export interface WorkerReconcilerOptions {
   /** Callback when operations are ready to send to main thread */
   onOps: (
-    ops: import("../vdom-ops.ts").VDomOp[],
+    ops: VDomOp[],
   ) => number | void;
 
   /** Optional: callback when an error occurs */

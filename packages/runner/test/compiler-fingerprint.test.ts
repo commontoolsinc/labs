@@ -11,6 +11,7 @@ import {
   renderVersionModule,
   VERSION_NAMESPACE,
 } from "../src/compilation-cache/compiler-fingerprint.deno.ts";
+import type * as cellCacheModule from "../src/compilation-cache/cell-cache.ts";
 import {
   COMPILE_CACHE_RUNTIME_VERSION,
   getCompileCacheRuntimeVersion,
@@ -28,7 +29,7 @@ const denoWorkflowPath = fromFileUrl(
 
 const repoRoot = fromFileUrl(new URL("../../../", import.meta.url));
 
-type CellCacheModule = typeof import("../src/compilation-cache/cell-cache.ts");
+type CellCacheModule = typeof cellCacheModule;
 type CompileCacheVersionGlobal = typeof globalThis & {
   __cfCompileCacheRuntimeVersion?: string;
 };
@@ -255,13 +256,15 @@ describe("compile-cache version axis", () => {
   it("CI compile-cache key mirrors the fingerprint input set", async () => {
     // The workflow carries a literal copy of the input globs (GitHub Actions
     // cannot import the TS list). The pattern and generated-pattern cache keys
-    // hash exactly the args `ciHashFilesArgs()` renders.
+    // hash exactly the args `ciHashFilesArgs()` renders — including the
+    // server-execution ON arm's read-only restore (key + restore-keys), which
+    // reuses the OFF arm's entries and must therefore stay key-compatible.
     const workflow = await Deno.readTextFile(denoWorkflowPath);
     const expected = `hashFiles(${ciHashFilesArgs()})`;
     const occurrences = workflow.split(expected).length - 1;
-    expect(occurrences).toBe(6);
+    expect(occurrences).toBe(8);
     expect(workflow).toContain(
-      "hashFiles('packages/generated-patterns/**/*.ts')",
+      "hashFiles('packages/generated-patterns/**/*.ts', 'tasks/select-generated-pattern-files.ts')",
     );
   });
 

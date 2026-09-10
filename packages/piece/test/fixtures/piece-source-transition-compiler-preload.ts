@@ -8,7 +8,8 @@ import {
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { sourceDocKey } from "../../../runner/src/compilation-cache/cell-cache.ts";
-import { PieceManager } from "../../src/manager.ts";
+import { PiecesController } from "../../src/ops/pieces-controller.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 const SOURCE = "export default 1;\n";
 const SOURCE_IDENTITY = "Qxkzi6OeLOLPP3A3-e-8kLe0DyNgoDZMZVIKr4PLz3w";
@@ -28,7 +29,7 @@ const runtime = new Runtime({
 
 let outcome: { baseline?: string; history?: string[]; error?: string };
 try {
-  const manager = new PieceManager(
+  const pieces = new PiecesController(
     await createSession({
       identity: storageManager.as as Identity,
       spaceName:
@@ -36,7 +37,7 @@ try {
     }),
     runtime,
   );
-  await manager.synced();
+  await pieces.synced();
 
   const currentPattern = {
     identity: MISSING_IDENTITY,
@@ -47,19 +48,24 @@ try {
     symbol: "default",
   };
   const piece = runtime.getCell(
-    manager.getSpace(),
+    pieces.getSpace(),
     "source-transition-compiler-preload",
   );
   const seedTx = runtime.edit();
   const seededPiece = piece.withTx(seedTx);
   seededPiece.set({});
-  seededPiece.setMetaRaw("patternIdentity", currentPattern);
+  seededPiece.setMetaRaw(
+    "patternIdentity",
+    currentPattern,
+    rawMetaWriteAuthorization,
+  );
   seededPiece.setMetaRaw(
     "patternSource",
     "https://example.test/missing-pattern.tsx",
+    rawMetaWriteAuthorization,
   );
   runtime.getCell(
-    manager.getSpace(),
+    pieces.getSpace(),
     sourceDocKey(SOURCE_IDENTITY),
     undefined,
     seedTx,
@@ -98,7 +104,11 @@ try {
       expected,
     },
   );
-  piece.withTx(transitionTx).setMetaRaw("patternIdentity", nextPattern);
+  piece.withTx(transitionTx).setMetaRaw(
+    "patternIdentity",
+    nextPattern,
+    rawMetaWriteAuthorization,
+  );
   runtime.prepareTxForCommit(transitionTx);
   const transitionCommit = await transitionTx.commit();
   if (transitionCommit.error !== undefined) throw transitionCommit.error;

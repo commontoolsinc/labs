@@ -20,9 +20,10 @@ import {
 } from "./tslib-helpers.ts";
 
 /**
- * Structural pre-flight verification for a module-record graph (Phase 3 of
- * docs/specs/module-loading.md): it validates the *shape and wiring* of the
- * graph before any module executes — every specifier is content-addressed,
+ * Structural pre-flight verification for a module-record graph; see
+ * docs/specs/module-loading.md §"Graph shape and wiring". It validates the
+ * *shape and wiring* of the graph before any module executes — every specifier
+ * is content-addressed,
  * every record is well-formed, and every resolved import points at a present
  * record.
  *
@@ -43,10 +44,10 @@ const EMPTY_BINDING_SET: ReadonlySet<string> = new Set<string>();
 // imported specifier. Both `const` and `var` are matched: TypeScript's CommonJS
 // emit declares the module reference for a *re-export* (`export { x } from
 // "./m"`) with `var` (hoisted ahead of the live `Object.defineProperty(exports,
-// …, { get })` getter) while plain imports use `const`. The AMD verifier accepts
-// the re-export form (imports arrive as `define` factory params), so accepting
-// `var` here keeps the ESM verdict in parity — barrel re-exports load instead of
-// failing SES at runtime (CT-1661).
+// …, { get })` getter) while plain imports use `const`. Accepting `var` is what
+// lets a barrel re-export load instead of failing SES at runtime (CT-1661); it
+// is canonical compiler output for an import edge the graph verifier has already
+// checked.
 //
 // The `var` form is gated on a *non-runtime* (local) specifier at the call site:
 // a `const` runtime binding is immutable (reassigning a `const` throws at
@@ -62,13 +63,13 @@ const REQUIRE_IMPORT = new RegExp(
 );
 
 // A bare side-effect import preamble statement, e.g. `require("./styles.ts");`
-// (compiled from `import "./styles.ts"`). It binds nothing; AMD treats this as
-// a plain dependency, so for parity it is allowed (when the specifier is) and
-// skipped rather than classified as executable code.
+// (compiled from `import "./styles.ts"`). It binds nothing and names an ordinary
+// dependency, so it is allowed (when the specifier is) and skipped rather than
+// classified as executable code.
 const SIDE_EFFECT_REQUIRE = /^require\(\s*["']([^"']+)["']\s*\)\s*;?$/;
 
-// `export * from "./m"` compiles to `__exportStar(require("./m"), exports);`
-// (require inline, unlike AMD where the dep is a param). This re-export form
+// `export * from "./m"` compiles to `__exportStar(require("./m"), exports);`,
+// with the require inline rather than as a separate binding. This re-export form
 // binds nothing; allow it when the specifier is allowed, otherwise let it fall
 // through to classification (which rejects it).
 const EXPORT_STAR_REQUIRE =
@@ -119,19 +120,19 @@ function shadowNamesInStatement(
 }
 
 /**
- * Security-classify a module's compiled-CommonJS body (Phase D2). It recognizes
- * the `const x = require("…")` import preamble — seeding `env` with import
- * bindings (marking runtime modules as trusted) — and hands the remaining
- * top-level items to the shared {@link classifyModuleItems} core with empty
- * shadow-guard / reserved-binding sets (ESM modules have no AMD wrapper to
- * shadow). Throws on any violation; the byte-level rules are identical to the
- * AMD path, so a malicious module is rejected the same way under either loader.
+ * Security-classify a module's compiled-CommonJS body. It recognizes the
+ * `const x = require("…")` import preamble — seeding `env` with import bindings
+ * (marking runtime modules as trusted) — and hands the remaining top-level items
+ * to the shared {@link classifyModuleItems} core with empty shadow-guard /
+ * reserved-binding sets: the module wrapper puts no loader binding in scope
+ * around the body, so there is nothing to shadow or reserve. Throws on any
+ * violation.
  */
 export function verifyCompiledModuleBody(
   compiled: string,
   filename = "<module>",
 ): { hasHoistRegistration: boolean } {
-  // Wrap so the AMD parser can extract the top-level statements as a function
+  // Wrap so the shared parser can extract the top-level statements as a function
   // body; offsets stay consistent with `wrapped` for classification.
   const wrapped = `function () {\n${compiled}\n}`;
   const parsed = parseFunctionText(wrapped, 0, wrapped.length);
@@ -146,8 +147,8 @@ export function verifyCompiledModuleBody(
   // `function __exportStar(m){ globalThis.steal = m; }` invoked by an
   // `__exportStar(require("./m"), exports)` re-export). Detect such shadows and
   // disable the affected fast-path so the statement falls through to
-  // classifyModuleItems, which rejects the call as a local-callable result —
-  // matching AMD, where a non-canonical helper has no special treatment.
+  // classifyModuleItems, which rejects the call as a local-callable result: a
+  // non-canonical helper gets no special treatment.
   //
   // Canonical TS interop helper declarations (`var __exportStar = (this && …)`)
   // are the trusted helpers themselves, not shadows, so they are excluded.
@@ -171,8 +172,9 @@ export function verifyCompiledModuleBody(
     const text = statementTexts[index];
     // Only fast-path imports whose specifier is allowed (runtime module or a
     // local path); arbitrary specifiers (e.g. "node:fs") fall through and are
-    // rejected by classification, matching the AMD dependency allowlist. The
-    // fast-path is disabled entirely when `require` is shadowed.
+    // rejected by classification, per the dependency allowlist in
+    // runtime-module-policy.ts. The fast-path is disabled entirely when
+    // `require` is shadowed.
     // Inline TS interop helper declarations (`var __importDefault = …`, etc.)
     // are emitted per-module for default/namespace imports and re-exports. They
     // are canonical compiler output (byte-matched), trusted, and `var` — skip

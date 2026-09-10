@@ -11,6 +11,7 @@
  * unwrapping wrappers — the dependency was still captured, but in a less
  * structured shape that downstream readers don't expect).
  */
+
 import { pattern, UI, type VNode } from "commonfabric";
 
 type Entry = { name: string };

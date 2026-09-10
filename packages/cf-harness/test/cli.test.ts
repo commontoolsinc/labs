@@ -1,15 +1,23 @@
-import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import {
-  chatViewOfRequest,
-  responsesBodyFromChatFixture,
-} from "./support/responses-fixture.ts";
-
+  assertEquals,
+  assertMatch,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
+
+import type { HarnessRunArtifacts } from "../src/artifacts.ts";
+import {
+  harnessFabricSessionPosture,
+  renderCfcPostureReport,
+} from "../src/cfc-posture.ts";
+import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
 import {
   buildCfHarnessBaseSystemPrompt,
   buildCfHarnessBatchSystemPrompt,
   buildCfHarnessOperatorSystemPrompt,
+  cfHarnessCliInformationalControl,
   type CfHarnessCliIO,
   type CfHarnessCliSignalHandler,
   createCfHarnessBatchResult,
@@ -22,16 +30,21 @@ import {
   resolveCfHarnessCliSystemPrompt,
   runCfHarnessCli,
 } from "../src/cli.ts";
-import { CfHarnessEngine } from "../src/engine.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
+import { HarnessControlError } from "../src/control-errors.ts";
+import { CfHarnessEngine } from "../src/engine.ts";
+import type { HarnessModelClient } from "../src/model/client.ts";
 import {
   CfHarnessPromptLoop,
   type HarnessPromptLoopResult,
   type RunHarnessPromptOptions,
   type RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
-import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
-import type { HarnessModelClient } from "../src/model/client.ts";
+import type { HarnessRunState } from "../src/run-state.ts";
+import {
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
 
 const ONE_PIXEL_PNG = decodeBase64(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p94AAAAASUVORK5CYII=",
@@ -94,7 +107,7 @@ Deno.test("parseCfHarnessCliArgs resolves defaults from cwd and positional promp
   }
   assertEquals(parsed.workspace, "/tmp/project");
   assertEquals(parsed.prompt, "Summarize this workspace");
-  assertEquals(parsed.model, "gpt-5.6-terra");
+  assertEquals(parsed.model, "gpt-5.6-sol");
   assertEquals(parsed.gatewayAuthMode, "bearer");
   assertEquals(parsed.outputMode, "operator");
   assertEquals(parsed.streamEvents, false);
@@ -107,6 +120,56 @@ Deno.test("parseCfHarnessCliArgs resolves defaults from cwd and positional promp
   assertEquals(parsed.printTranscript, false);
   assertEquals(parsed.sandboxImage, undefined);
   assertEquals(parsed.imageAttachments, []);
+});
+
+Deno.test("parseCfHarnessCliArgs collects every --docs-corpus-root", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--docs-corpus-root",
+      "reference/one",
+      "--docs-corpus-root",
+      "reference/two",
+      "Ask",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.docsCorpus, {
+    type: "cf-harness.docs-corpus-record",
+    source: "configured",
+    roots: ["/tmp/project/reference/one", "/tmp/project/reference/two"],
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs lets --no-docs-corpus override a named root", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--docs-corpus-root", "reference", "--no-docs-corpus", "Ask"],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.docsCorpus, {
+    type: "cf-harness.docs-corpus-record",
+    source: "configured",
+    roots: [],
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs leaves the corpus unset when no docs flag is given", async () => {
+  const parsed = await parseCfHarnessCliArgs(["Ask"], {
+    cwd: "/tmp/project",
+    env: {},
+  });
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.docsCorpus, undefined);
 });
 
 Deno.test("parseCfHarnessCliArgs resolves image attachments within the workspace", async () => {
@@ -312,6 +375,451 @@ Deno.test("parseCfHarnessCliArgs accepts CFC mode from environment", async () =>
   assertEquals(parsed.cfcEnforcementModeOverride, "enforce-strict");
 });
 
+Deno.test("parseCfHarnessCliArgs parses the three --fabric-* session flags together", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/tmp/project/keys/agent.pkcs8",
+    space: "my-space",
+  });
+
+  const unset = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    { cwd: "/tmp/project", env: {} },
+  );
+  if ("help" in unset) {
+    throw new Error("expected config result");
+  }
+  assertEquals(unset.fabricSession, undefined);
+});
+
+Deno.test("parseCfHarnessCliArgs accepts fabric session settings from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_FABRIC_API_URL: "https://toolshed.example/",
+        CF_HARNESS_FABRIC_IDENTITY: "/keys/agent.pkcs8",
+        CF_HARNESS_FABRIC_SPACE: "did:key:z6MkfExample",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "did:key:z6MkfExample",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a partial fabric session naming the missing flags", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--fabric-space", "my-space"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --fabric-api-url, --fabric-identity",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects --allow-tool run_pattern without the fabric session flags", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--allow-tool", "run_pattern"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --fabric-api-url, --fabric-identity, and --fabric-space",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs accepts --allow-tool run_pattern alongside the fabric session flags", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--allow-tool",
+      "run_pattern",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.allowedToolIds, ["run_pattern"]);
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/tmp/project/keys/agent.pkcs8",
+    space: "my-space",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a fabric API URL that does not parse", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "not a url",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--fabric-api-url must be a valid URL",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs carries the fabric CFC dials into the session config", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--fabric-cfc-enforcement-mode",
+      "enforce-strict",
+      "--fabric-cfc-flow-labels",
+      "persist",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/tmp/project/keys/agent.pkcs8",
+    space: "my-space",
+    cfcEnforcementMode: "enforce-strict",
+    cfcFlowLabels: "persist",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs accepts fabric CFC dials from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_FABRIC_API_URL: "https://toolshed.example/",
+        CF_HARNESS_FABRIC_IDENTITY: "/keys/agent.pkcs8",
+        CF_HARNESS_FABRIC_SPACE: "my-space",
+        CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE: "enforce-explicit",
+        CF_HARNESS_FABRIC_CFC_FLOW_LABELS: "observe",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcEnforcementMode: "enforce-explicit",
+    cfcFlowLabels: "observe",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a fabric CFC enforcement mode below the preset pin", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+          "--fabric-cfc-enforcement-mode",
+          "observe",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--fabric-cfc-enforcement-mode must be enforce-explicit or enforce-strict",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an unknown fabric CFC flow-labels mode", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+          "--fabric-cfc-flow-labels",
+          "always",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--fabric-cfc-flow-labels must be off, observe, or persist",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs carries the fabric CFC posture into the session config", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--fabric-cfc-posture",
+      "max-enforcement",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/tmp/project/keys/agent.pkcs8",
+    space: "my-space",
+    cfcPosture: "max-enforcement",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs accepts the fabric CFC posture from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_FABRIC_API_URL: "https://toolshed.example/",
+        CF_HARNESS_FABRIC_IDENTITY: "/keys/agent.pkcs8",
+        CF_HARNESS_FABRIC_SPACE: "my-space",
+        CF_HARNESS_FABRIC_CFC_POSTURE: "max-enforcement",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcPosture: "max-enforcement",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs reads the fabric CFC posture from the process environment", async () => {
+  // Through the DEFAULT env projection (no injected `deps.env`), the path a
+  // real invocation takes: a key missing from that projection reads as unset
+  // even when the process environment carries it.
+  const names = [
+    "CF_HARNESS_FABRIC_API_URL",
+    "CF_HARNESS_FABRIC_IDENTITY",
+    "CF_HARNESS_FABRIC_SPACE",
+    "CF_HARNESS_FABRIC_CFC_POSTURE",
+  ] as const;
+  const previous = new Map(names.map((name) => [name, Deno.env.get(name)]));
+  Deno.env.set("CF_HARNESS_FABRIC_API_URL", "https://toolshed.example/");
+  Deno.env.set("CF_HARNESS_FABRIC_IDENTITY", "/keys/agent.pkcs8");
+  Deno.env.set("CF_HARNESS_FABRIC_SPACE", "my-space");
+  Deno.env.set("CF_HARNESS_FABRIC_CFC_POSTURE", "max-enforcement");
+  try {
+    const parsed = await parseCfHarnessCliArgs(
+      ["--prompt", "hi"],
+      { cwd: "/tmp/project" },
+    );
+    if ("help" in parsed) {
+      throw new Error("expected config result");
+    }
+    assertEquals(parsed.fabricSession?.cfcPosture, "max-enforcement");
+  } finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an unknown fabric CFC posture", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+          "--fabric-cfc-posture",
+          "maximum",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--fabric-cfc-posture must be max-enforcement",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects the fabric CFC posture without a fabric session", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-cfc-posture",
+          "max-enforcement",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "need --fabric-api-url, --fabric-identity, and --fabric-space",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects fabric CFC dials without a fabric session", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-cfc-flow-labels",
+          "persist",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "need --fabric-api-url, --fabric-identity, and --fabric-space",
+  );
+});
+
+const withFabricSession = (...extra: string[]) => [
+  "--prompt",
+  "hi",
+  "--fabric-api-url",
+  "https://toolshed.example/",
+  "--fabric-identity",
+  "keys/agent.pkcs8",
+  "--fabric-space",
+  "my-space",
+  ...extra,
+];
+
+Deno.test("parseCfHarnessCliArgs resolves the space database against the working directory", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    withFabricSession("--space-db", "cache/memory/space.sqlite"),
+    { cwd: "/tmp/project", env: {} },
+  );
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.spaceDbPath, "/tmp/project/cache/memory/space.sqlite");
+});
+
+Deno.test("parseCfHarnessCliArgs takes the space database from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(withFabricSession(), {
+    cwd: "/tmp/project",
+    env: { CF_HARNESS_SPACE_DB: "/srv/toolshed/space.sqlite" },
+  });
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.spaceDbPath, "/srv/toolshed/space.sqlite");
+});
+
+Deno.test("parseCfHarnessCliArgs leaves the space database unset when nothing names one", async () => {
+  const parsed = await parseCfHarnessCliArgs(withFabricSession(), {
+    cwd: "/tmp/project",
+    env: {},
+  });
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.spaceDbPath, undefined);
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a space database without a fabric session", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--space-db", "space.sqlite"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "needs --fabric-api-url, --fabric-identity, and --fabric-space",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an empty space database value", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(withFabricSession("--space-db", "  "), {
+        cwd: "/tmp/project",
+        env: {},
+      }),
+    Error,
+    "--space-db requires a non-empty value",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs resolves run manifest paths", async () => {
   const parsed = await parseCfHarnessCliArgs(
     ["--prompt", "hi", "--run-manifest", "loom-run.json"],
@@ -355,6 +863,61 @@ Deno.test("parseCfHarnessCliArgs supports gateway auth mode override", async () 
     throw new Error("expected config result");
   }
   assertEquals(parsed.gatewayAuthMode, "none");
+});
+
+Deno.test("parseCfHarnessCliArgs accepts cache and reasoning experiment controls", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--reasoning-effort",
+      "low",
+      "--prompt-cache-mode",
+      "explicit",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(parsed.reasoningEffort, "low");
+  assertEquals(parsed.promptCacheMode, "explicit");
+});
+
+Deno.test("parseCfHarnessCliArgs reads cache and reasoning defaults from the process environment", async () => {
+  const names = [
+    "CF_HARNESS_REASONING_EFFORT",
+    "CF_HARNESS_PROMPT_CACHE_MODE",
+  ] as const;
+  const previous = new Map(names.map((name) => [name, Deno.env.get(name)]));
+  try {
+    Deno.env.set("CF_HARNESS_REASONING_EFFORT", "medium");
+    Deno.env.set("CF_HARNESS_PROMPT_CACHE_MODE", "implicit");
+    const parsed = await parseCfHarnessCliArgs(
+      ["--prompt", "hi", "--gateway-auth-mode", "none"],
+      { cwd: "/tmp/project" },
+    );
+
+    if ("help" in parsed) throw new Error("expected config result");
+    assertEquals(parsed.reasoningEffort, "medium");
+    assertEquals(parsed.promptCacheMode, "implicit");
+  } finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an empty reasoning effort flag", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--reasoning-effort", "  "],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--reasoning-effort requires a non-empty value",
+  );
 });
 
 Deno.test("parseCfHarnessCliArgs resolves sandbox docker runtime from flag and environment", async () => {
@@ -483,7 +1046,7 @@ Deno.test("parseCfHarnessCliArgs ignores blank gateway environment values", asyn
   }
   assertEquals(parsed.gatewayBaseUrl, "https://llm.stage.commontools.dev/");
   assertEquals(parsed.gatewayAuthMode, "bearer");
-  assertEquals(parsed.model, "gpt-5.6-terra");
+  assertEquals(parsed.model, "gpt-5.6-sol");
 });
 
 Deno.test("parseCfHarnessCliArgs supports batch output mode override", async () => {
@@ -565,18 +1128,33 @@ Deno.test({
   },
 });
 
-Deno.test("parseCfHarnessCliArgs rejects skill preloads without a skills root", async () => {
+Deno.test("parseCfHarnessCliArgs preloads a skill out of the checkout's own skills tree", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi", "--skill", "pattern-dev"],
+    { cwd: "/tmp/project", env: {} },
+  );
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.skillNames, ["pattern-dev"]);
+  assertEquals(parsed.skillsRootRecord?.source, "checkout-default");
+  assertEquals(parsed.skillsRoot, parsed.skillsRootRecord?.hostPath);
+  // The default is read on the host, so it has no sandbox address; a skill
+  // script, which needs one, still asks for the flag.
+  assertEquals(parsed.skillsRootSandboxPath, undefined);
   await assertRejects(
     () =>
       parseCfHarnessCliArgs(
-        ["--prompt", "hi", "--skill", "pattern-dev"],
-        {
-          cwd: "/tmp/project",
-          env: {},
-        },
+        [
+          "--prompt",
+          "hi",
+          "--allow-skill-script",
+          "pattern-dev:scripts/probe.ts",
+        ],
+        { cwd: "/tmp/project", env: {} },
       ),
     Error,
-    "--skill requires --skills-root",
+    "--allow-skill-script requires --skills-root",
   );
 });
 
@@ -1005,6 +1583,110 @@ Deno.test("parseCfHarnessCliArgs supports a Browser Access lease", async () => {
   });
 });
 
+Deno.test("parseCfHarnessCliArgs collects handle-value destination origins", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--handle-value-origin",
+      "https://example.com",
+      "--handle-value-origin",
+      "http://localhost:8000",
+      "--handle-value-origin",
+      "https://example.com",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.handleValueOrigins, [
+    "https://example.com",
+    "http://localhost:8000",
+  ]);
+});
+
+Deno.test("parseCfHarnessCliArgs allows no handle-value destination by default", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.handleValueOrigins, []);
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a handle-value origin that is not one", async () => {
+  for (
+    const value of [
+      "example.com",
+      "https://example.com/login",
+      "file:///etc/passwd",
+    ]
+  ) {
+    await assertRejects(
+      () =>
+        parseCfHarnessCliArgs(
+          ["--prompt", "hi", "--handle-value-origin", value],
+          { cwd: "/tmp/project", env: {} },
+        ),
+      Error,
+      "--handle-value-origin must be an http(s) origin",
+    );
+  }
+});
+
+Deno.test("parseCfHarnessCliArgs collects operator input cells", async () => {
+  const cellRef = `/of:fid1:${"A".repeat(43)}/travellerName`;
+  const citiesRef = `/of:fid1:${"B".repeat(43)}/cities`;
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--input-cell",
+      `travellerName=${cellRef}`,
+      "--input-cell",
+      `cities=${citiesRef}`,
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.inputCells, [
+    { name: "travellerName", ref: cellRef },
+    { name: "cities", ref: citiesRef },
+  ]);
+});
+
+Deno.test("parseCfHarnessCliArgs passes no input cells by default", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.inputCells, []);
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an input cell that does not fit the grammar", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--input-cell", "no-reference-here"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--input-cell must be <name>=<link>",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs rejects malformed Browser Access leases", async () => {
   await assertRejects(
     () =>
@@ -1333,11 +2015,11 @@ Deno.test("parseCfHarnessCliArgs rejects unknown subagent profiles", async () =>
   );
 });
 
-Deno.test("parseCfHarnessCliArgs rejects bash-no-sandbox as a parent allow-tool", async () => {
+Deno.test("parseCfHarnessCliArgs rejects browser as a parent allow-tool", async () => {
   await assertRejects(
     () =>
       parseCfHarnessCliArgs(
-        ["--prompt", "hi", "--allow-tool", "bash-no-sandbox"],
+        ["--prompt", "hi", "--allow-tool", "browser"],
         {
           cwd: "/tmp/project",
           env: {},
@@ -1513,6 +2195,36 @@ Deno.test("runCfHarnessCli prints usage for help", async () => {
   assertEquals(stderr, []);
 });
 
+Deno.test("cfHarnessCliInformationalControl mirrors global control parsing", () => {
+  assertEquals(cfHarnessCliInformationalControl(["--help"]), "help");
+  assertEquals(cfHarnessCliInformationalControl(["-h"]), "help");
+  assertEquals(
+    cfHarnessCliInformationalControl(["--describe-capabilities"]),
+    "describe-capabilities",
+  );
+  assertEquals(
+    cfHarnessCliInformationalControl([
+      "--describe-capabilities",
+      "--help",
+    ]),
+    "help",
+  );
+  assertEquals(cfHarnessCliInformationalControl(["--", "--help"]), "help");
+  assertEquals(
+    cfHarnessCliInformationalControl([
+      "--output-mode",
+      "batch",
+      "--",
+      "--help",
+    ]),
+    undefined,
+  );
+  assertEquals(
+    cfHarnessCliInformationalControl(["config", "inspect", "--help"]),
+    undefined,
+  );
+});
+
 Deno.test("runCfHarnessCli prints machine-readable capabilities", async () => {
   const { io, stdout, stderr } = createIoBuffers();
   const exitCode = await runCfHarnessCli(["--describe-capabilities"], { io });
@@ -1525,8 +2237,13 @@ Deno.test("runCfHarnessCli prints machine-readable capabilities", async () => {
   assertEquals(capabilities.type, "cf-harness.capabilities");
   assertEquals(capabilities.version, 1);
   assertEquals(capabilities.parentToolIds.includes("web_fetch"), true);
-  assertEquals(capabilities.parentToolIds.includes("bash-no-sandbox"), false);
-  assertEquals(capabilities.builtinToolIds.includes("bash-no-sandbox"), true);
+  assertEquals(capabilities.parentToolIds.includes("run_pattern"), true);
+  assertEquals(capabilities.parentToolIds.includes("browser"), false);
+  assertEquals(capabilities.builtinToolIds.includes("run_pattern"), true);
+  assertEquals(capabilities.builtinToolIds.includes("search_skills"), true);
+  assertEquals(capabilities.builtinToolIds.includes("acquire_skill"), true);
+  assertEquals(capabilities.features.runPattern, true);
+  assertEquals(capabilities.builtinToolIds.includes("browser"), true);
   assertEquals(capabilities.subagentProfiles.includes("web_search"), true);
   assertEquals(capabilities.nativeModelToolIds.includes("google_search"), true);
   assertEquals(
@@ -1543,6 +2260,10 @@ Deno.test("runCfHarnessCli prints machine-readable capabilities", async () => {
   );
   assertEquals(capabilities.cliFlags.includes("--describe-capabilities"), true);
   assertEquals(capabilities.repeatableCliFlags.includes("--allow-tool"), true);
+  assertEquals(capabilities.features.persistentProviderConfig, true);
+  assertEquals(capabilities.features.structuredAuthControl, true);
+  assertEquals(capabilities.features.credentialHealth, true);
+  assertEquals(capabilities.features.loomLocalOwnerBinding, true);
 });
 
 Deno.test("installCfHarnessSignalHandlers terminalizes the active run before exiting", async () => {
@@ -1557,7 +2278,7 @@ Deno.test("installCfHarnessSignalHandlers terminalizes the active run before exi
       return () => timestamps.shift() ?? "2026-04-16T20:00:02.000Z";
     })(),
   });
-  engine.setRunStatus("running");
+  engine.startRun();
   let handler: CfHarnessCliSignalHandler | undefined;
   let disposed = false;
   let exitCode: number | undefined;
@@ -1599,7 +2320,14 @@ Deno.test("runCfHarnessCli registers and disposes signal handlers around a run",
   let registeredSignals: readonly string[] = [];
   let disposed = false;
   const exitCode = await runCfHarnessCli(
-    ["--prompt", "hello", "--gateway-auth-mode", "none"],
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--prompt",
+      "hello",
+      "--gateway-auth-mode",
+      "none",
+    ],
     {
       io,
       env: {},
@@ -1665,12 +2393,149 @@ Deno.test("runCfHarnessCli registers and disposes signal handlers around a run",
   ]);
 });
 
+/** The record a max-enforcement session resolves, as the engine records it. */
+const POSTURED_SESSION_RECORD = harnessFabricSessionPosture({
+  apiUrl: "https://toolshed.example/",
+  identityKeyPath: "/keys/agent.pkcs8",
+  space: "my-space",
+  cfcPosture: "max-enforcement",
+});
+
+Deno.test("runCfHarnessCli prints the fabric-session posture bundle in the operator summary", async () => {
+  const { io, stdout } = createIoBuffers();
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--prompt",
+      "hello",
+      "--gateway-auth-mode",
+      "none",
+    ],
+    {
+      io,
+      env: {},
+      createPromptLoop: () => ({
+        runPrompt: () =>
+          Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Done.",
+              transcript: [],
+              modelTurns: 1,
+              runState: {
+                runId: "run-postured-summary",
+                status: "completed",
+                createdAt: "2026-04-16T20:10:00.000Z",
+                updatedAt: "2026-04-16T20:10:01.000Z",
+                cfcEnforcementMode: "enforce-explicit",
+                fabricSessionCfc: {
+                  enforcementMode: "enforce-explicit",
+                  enforcementModeSource: "preset-pin",
+                  flowLabels: "persist",
+                  flowLabelsSource: "posture",
+                  posture: "max-enforcement",
+                  record: POSTURED_SESSION_RECORD,
+                },
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          ),
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  const summary = stdout.join("");
+  assertEquals(
+    summary.includes(
+      "fabricSessionCfc: enforce-explicit (preset-pin), flow-labels persist (posture), posture max-enforcement",
+    ),
+    true,
+  );
+  // The two itemized dials say which the operator set; the record under them
+  // says what every dial resolved to, which sinks release ungated, and that
+  // the record is a projection. A summary carrying only the first reads as a
+  // posture without showing one.
+  assertEquals(
+    summary.includes("provenance"),
+    true,
+  );
+  assertEquals(summary.includes("UNGATED"), true);
+  for (
+    const line of renderCfcPostureReport(POSTURED_SESSION_RECORD)
+  ) {
+    assertEquals(summary.includes(line), true);
+  }
+});
+
+Deno.test("runCfHarnessCli omits the posture record for a run that recorded none", async () => {
+  // A run predating the record keeps the two itemized dials and nothing
+  // invented under them.
+  const { io, stdout } = createIoBuffers();
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--prompt",
+      "hello",
+      "--gateway-auth-mode",
+      "none",
+    ],
+    {
+      io,
+      env: {},
+      createPromptLoop: () => ({
+        runPrompt: () =>
+          Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Done.",
+              transcript: [],
+              modelTurns: 1,
+              runState: {
+                runId: "run-legacy-posture-summary",
+                status: "completed",
+                createdAt: "2026-04-16T20:10:00.000Z",
+                updatedAt: "2026-04-16T20:10:01.000Z",
+                cfcEnforcementMode: "enforce-explicit",
+                fabricSessionCfc: {
+                  enforcementMode: "enforce-explicit",
+                  enforcementModeSource: "preset-pin",
+                  flowLabels: "persist",
+                  flowLabelsSource: "posture",
+                  posture: "max-enforcement",
+                },
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          ),
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  const summary = stdout.join("");
+  assertEquals(summary.includes("fabricSessionCfc: enforce-explicit"), true);
+  assertEquals(summary.includes("provenance"), false);
+});
+
 Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata", async () => {
   const { io, stdout, stderr } = createIoBuffers();
   let createdOptions: Record<string, unknown> | undefined;
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--focus-root",
@@ -1783,6 +2648,469 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
   assertEquals(stderr, []);
 });
 
+Deno.test("runCfHarnessCli announces well-known grants to the model and the operator", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  const registrySpace =
+    "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+  const registryId = `of:fid1:${"D".repeat(43)}`;
+  // The grant persists run state, so the workspace must really be writable.
+  const workspace = await Deno.makeTempDir();
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--workspace",
+      workspace,
+      "--prompt",
+      "List the pieces",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "/keys/agent.pkcs8",
+      "--fabric-space",
+      "demo-space",
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      fabricSessionFactory: () =>
+        Promise.resolve(
+          {
+            pieces: {
+              getSpace: () => registrySpace,
+              getDefaultPattern: (_runIt: boolean) =>
+                Promise.resolve({
+                  getMetaRaw: () => undefined,
+                  key: (segment: string) => ({
+                    getAsNormalizedFullLink: () => ({
+                      space: registrySpace,
+                      id: registryId,
+                      path: [segment],
+                    }),
+                  }),
+                }),
+            },
+            // deno-lint-ignore no-explicit-any
+          } as any,
+        ),
+      createPromptLoop: () => ({
+        runPrompt: (options) => {
+          runPromptOptions = options;
+          return Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Done.",
+              transcript: [],
+              modelTurns: 1,
+              runState: {
+                runId: "run-grants",
+                status: "completed",
+                createdAt: "2026-04-15T22:00:00.000Z",
+                updatedAt: "2026-04-15T22:00:01.000Z",
+                cfcEnforcementMode: "enforce-explicit",
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+                wellKnownGrants: [{
+                  name: "piece-registry",
+                  token: "cfh:a:granted1",
+                  ref: `/${registryId}/pieceRegistry`,
+                }],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          );
+        },
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  const grantMessages = (runPromptOptions?.contextMessages ?? []).filter((
+    message,
+  ) => message.includes("Granted references"));
+  assertEquals(grantMessages.length, 1);
+  assertEquals(grantMessages[0]!.includes("cfh:a:"), true);
+  assertEquals(grantMessages[0]!.includes(registryId), false);
+  assertEquals(
+    stdout.join("").includes("fabricGrants: piece-registry cfh:a:granted1"),
+    true,
+  );
+  assertEquals(stderr, []);
+});
+
+Deno.test("runCfHarnessCli announces operator input cells to the model and the operator", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  const cellSpace = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+  const cellId = `of:fid1:${"E".repeat(43)}`;
+  const cellRef = `/${cellId}/travellerName`;
+  // The input cell persists run state, so the workspace must really be writable.
+  const workspace = await Deno.makeTempDir();
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--workspace",
+      workspace,
+      "--prompt",
+      "Plan the trip",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "/keys/agent.pkcs8",
+      "--fabric-space",
+      "demo-space",
+      "--input-cell",
+      `travellerName=${cellRef}`,
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      fabricSessionFactory: () =>
+        Promise.resolve(
+          {
+            pieces: {
+              getSpace: () => cellSpace,
+              getDefaultPattern: (_runIt: boolean) =>
+                Promise.resolve(undefined),
+            },
+            // deno-lint-ignore no-explicit-any
+          } as any,
+        ),
+      createPromptLoop: () => ({
+        runPrompt: (options) => {
+          runPromptOptions = options;
+          return Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Done.",
+              transcript: [],
+              modelTurns: 1,
+              runState: {
+                runId: "run-input-cells",
+                status: "completed",
+                createdAt: "2026-04-15T22:00:00.000Z",
+                updatedAt: "2026-04-15T22:00:01.000Z",
+                cfcEnforcementMode: "enforce-explicit",
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+                inputCells: [{
+                  name: "travellerName",
+                  token: "cfh:a:cell0001",
+                  ref: cellRef,
+                }],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          );
+        },
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  const cellMessages = (runPromptOptions?.contextMessages ?? []).filter((
+    message,
+  ) => message.includes("Input cells"));
+  assertEquals(cellMessages.length, 1);
+  assertEquals(cellMessages[0]!.includes("travellerName"), true);
+  assertEquals(cellMessages[0]!.includes("cfh:a:"), true);
+  assertEquals(cellMessages[0]!.includes(cellId), false);
+  assertEquals(
+    stdout.join("").includes("inputCells: travellerName cfh:a:cell0001"),
+    true,
+  );
+  // The grants failed to resolve (no default pattern), which is said on
+  // stderr; the input cells must still be established and announced.
+  assertEquals(
+    stderr.some((line) => line.includes("fabric grants: unavailable")),
+    true,
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an input cell alongside --resume-run", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--resume-run",
+          "/tmp/project/.cf-harness-artifacts/run-1",
+          "--prompt",
+          "hi",
+          "--input-cell",
+          `travellerName=/of:fid1:${"A".repeat(43)}/travellerName`,
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--input-cell is not supported with --resume-run",
+  );
+});
+
+Deno.test("runCfHarnessCli refuses duplicate input-cell names before any run setup", async () => {
+  const { io, stderr } = createIoBuffers();
+  const cellRef = `/of:fid1:${"A".repeat(43)}/travellerName`;
+  let startupWorkReached = false;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "Plan the trip",
+      "--input-cell",
+      `travellerName=${cellRef}`,
+      "--input-cell",
+      `travellerName=${cellRef}`,
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      fabricSessionFactory: () => {
+        startupWorkReached = true;
+        return Promise.reject(new Error("must not be reached"));
+      },
+      createPromptLoop: () => {
+        startupWorkReached = true;
+        throw new Error("must not be reached");
+      },
+    },
+  );
+
+  assertEquals(exitCode, 1);
+  assertEquals(startupWorkReached, false);
+  assertEquals(
+    stderr.some((line) =>
+      line.includes("--input-cell names `travellerName` twice")
+    ),
+    true,
+  );
+});
+
+Deno.test("runCfHarnessCli says so when the well-known grants cannot be established", async () => {
+  const { io, stderr } = createIoBuffers();
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "List the pieces",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "/keys/agent.pkcs8",
+      "--fabric-space",
+      "demo-space",
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("space unauthorized")),
+      createPromptLoop: () => ({
+        runPrompt: (options) => {
+          runPromptOptions = options;
+          return Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Done.",
+              transcript: [],
+              modelTurns: 1,
+              runState: {
+                runId: "run-no-grants",
+                status: "completed",
+                createdAt: "2026-04-15T22:00:00.000Z",
+                updatedAt: "2026-04-15T22:00:01.000Z",
+                cfcEnforcementMode: "enforce-explicit",
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          );
+        },
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(
+    (runPromptOptions?.contextMessages ?? []).some((message) =>
+      message.includes("Granted references")
+    ),
+    false,
+  );
+  assertEquals(
+    stderr.some((line) =>
+      line.includes("fabric grants: unavailable (space unauthorized)")
+    ),
+    true,
+  );
+});
+
+Deno.test("runCfHarnessCli forwards --compact-threshold to a fresh run", async () => {
+  // Parsing was already covered; this pins the handoff. The option was
+  // forwarded on the resume path only, so a fresh run silently lost it.
+  const { io } = createIoBuffers();
+  let createdOptions: Record<string, unknown> | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--workspace",
+      "/tmp/project",
+      "--focus-root",
+      "packages/cf-harness",
+      "--prompt",
+      "Inspect the workspace",
+      "--model",
+      "gpt-5.4",
+      "--compact-threshold",
+      "12000",
+      "--print-transcript",
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      createPromptLoop: (options) => {
+        createdOptions = options as Record<string, unknown>;
+        return {
+          runPrompt: () => {
+            return Promise.resolve(
+              ({
+                model: "gpt-5.4",
+                finalAssistantText: "Inspection complete.",
+                transcript: [
+                  { role: "user", content: "Inspect the workspace" },
+                  { role: "assistant", content: "Inspection complete." },
+                ],
+                modelTurns: 1,
+                runState: {
+                  runId: "run-cli",
+                  status: "completed",
+                  createdAt: "2026-04-15T22:00:00.000Z",
+                  updatedAt: "2026-04-15T22:00:01.000Z",
+                  cfcEnforcementMode: "disabled",
+                  currentDir: "/workspace",
+                  artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli",
+                  transcriptPath:
+                    "/tmp/project/.cf-harness-artifacts/run-cli/transcript.json",
+                  runReportPath:
+                    "/tmp/project/.cf-harness-artifacts/run-cli/run-report.json",
+                  policyEvents: [],
+                  toolOutputs: [],
+                },
+              }) satisfies HarnessPromptLoopResult,
+            );
+          },
+          runTranscript: () =>
+            Promise.reject(new Error("unexpected resume path")),
+        };
+      },
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(createdOptions?.compactThreshold, 12_000);
+});
+
+Deno.test("runCfHarnessCli reads CF_HARNESS_COMPACT_THRESHOLD from the process environment", async () => {
+  // Every other CLI test injects `env`, which bypasses the default projection
+  // built from `Deno.env.get` — exactly where this variable was missing:
+  // documented and parsed, but never populated in a real run.
+  const projected = [
+    "CF_HARNESS_COMPACT_THRESHOLD",
+    "CF_HARNESS_API_KEY",
+    "CF_HARNESS_MODEL",
+    "CF_HARNESS_MODEL_PROVIDER",
+    "CF_HARNESS_REASONING_EFFORT",
+    "CF_HARNESS_PROMPT_CACHE_MODE",
+    "CF_HARNESS_GATEWAY_BASE_URL",
+    "CF_HARNESS_GATEWAY_AUTH_MODE",
+  ];
+  const saved = new Map(projected.map((name) => [name, Deno.env.get(name)]));
+  for (const name of projected) Deno.env.delete(name);
+  Deno.env.set("CF_HARNESS_API_KEY", "test-key");
+  Deno.env.set("CF_HARNESS_COMPACT_THRESHOLD", "9000");
+  // The projection is what this test is about, and provider selection reads it
+  // too: without a projected selection the run is refused before the threshold
+  // is ever consulted, on any machine whose harness home configured none.
+  Deno.env.set("CF_HARNESS_MODEL_PROVIDER", "openai-compatible-gateway");
+  try {
+    const { io } = createIoBuffers();
+    let createdOptions: Record<string, unknown> | undefined;
+    const exitCode = await runCfHarnessCli(
+      [
+        "--workspace",
+        "/tmp/project",
+        "--focus-root",
+        "packages/cf-harness",
+        "--prompt",
+        "Inspect the workspace",
+        "--model",
+        "gpt-5.4",
+        "--print-transcript",
+      ],
+      {
+        io,
+        createPromptLoop: (options) => {
+          createdOptions = options as Record<string, unknown>;
+          return {
+            runPrompt: () => {
+              return Promise.resolve(
+                ({
+                  model: "gpt-5.4",
+                  finalAssistantText: "Inspection complete.",
+                  transcript: [
+                    { role: "user", content: "Inspect the workspace" },
+                    { role: "assistant", content: "Inspection complete." },
+                  ],
+                  modelTurns: 1,
+                  runState: {
+                    runId: "run-cli",
+                    status: "completed",
+                    createdAt: "2026-04-15T22:00:00.000Z",
+                    updatedAt: "2026-04-15T22:00:01.000Z",
+                    cfcEnforcementMode: "disabled",
+                    currentDir: "/workspace",
+                    artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli",
+                    transcriptPath:
+                      "/tmp/project/.cf-harness-artifacts/run-cli/transcript.json",
+                    runReportPath:
+                      "/tmp/project/.cf-harness-artifacts/run-cli/run-report.json",
+                    policyEvents: [],
+                    toolOutputs: [],
+                  },
+                }) satisfies HarnessPromptLoopResult,
+              );
+            },
+            runTranscript: () =>
+              Promise.reject(new Error("unexpected resume path")),
+          };
+        },
+      },
+    );
+    assertEquals(exitCode, 0);
+    assertEquals(createdOptions?.compactThreshold, 9_000);
+  } finally {
+    for (const [name, value] of saved) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
+});
+
 Deno.test("runCfHarnessCli passes image attachments to the prompt loop", async () => {
   const workspace = await Deno.makeTempDir();
   await Deno.writeFile(join(workspace, "capture.png"), ONE_PIXEL_PNG);
@@ -1790,6 +3118,8 @@ Deno.test("runCfHarnessCli passes image attachments to the prompt loop", async (
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       workspace,
       "--image",
@@ -1893,6 +3223,8 @@ Deno.test("runCfHarnessCli passes tool and subagent profile allowlists", async (
     let createdOptions: Record<string, unknown> | undefined;
     const exitCode = await runCfHarnessCli(
       [
+        "--model-provider",
+        "openai-compatible-gateway",
         "--workspace",
         "/tmp/project",
         "--prompt",
@@ -1960,6 +3292,8 @@ Deno.test("runCfHarnessCli passes Browser Access leases to the prompt loop", asy
   let createdOptions: Record<string, unknown> | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -2028,6 +3362,8 @@ Deno.test("runCfHarnessCli can override the prompt-slot role for testing", async
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -2101,6 +3437,8 @@ Deno.test("runCfHarnessCli passes a Loom run manifest and its prompt slot", asyn
   } as const;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -2165,6 +3503,8 @@ Deno.test("runCfHarnessCli can stream transcript events as they happen", async (
   const { io, stdout, stderr } = createIoBuffers();
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -2270,6 +3610,8 @@ Deno.test("runCfHarnessCli uses plain stdout and no operator guidance in batch m
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -2331,6 +3673,8 @@ Deno.test("runCfHarnessCli writes a structured batch result sidecar when request
   const writes: Array<{ path: string; text: string }> = [];
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -2440,6 +3784,8 @@ Deno.test("runCfHarnessCli validates a top-level structured result sidecar", asy
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -2539,6 +3885,8 @@ Deno.test("runCfHarnessCli exits nonzero when top-level structured result is inv
   const writes: Array<{ path: string; text: string }> = [];
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -2649,6 +3997,8 @@ Deno.test({
 
       const exitCode = await runCfHarnessCli(
         [
+          "--model-provider",
+          "openai-compatible-gateway",
           "--workspace",
           workspace,
           "--prompt",
@@ -2744,8 +4094,8 @@ Deno.test({
         "set -euo pipefail",
         'echo "target=$CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET"',
         'echo "skill=$SKILL_NAME"',
-        'echo "cdp=$2"',
-        'echo "url=$3"',
+        'echo "cdp=$AGENT_BROWSER_CDP"',
+        'echo "url=$1"',
         "",
       ].join("\n");
       await Deno.mkdir(join(skillDir, "scripts"), { recursive: true });
@@ -2769,6 +4119,8 @@ Deno.test({
       let engine: CfHarnessEngine | undefined;
       const exitCode = await runCfHarnessCli(
         [
+          "--model-provider",
+          "openai-compatible-gateway",
           "--workspace",
           workspace,
           "--prompt",
@@ -2823,11 +4175,7 @@ Deno.test({
                             arguments: JSON.stringify({
                               skill: "agent-browser",
                               path: "scripts/capture-workflow.sh",
-                              args: [
-                                "--cdp",
-                                "http://localhost:9362",
-                                "http://localhost:8000/piece",
-                              ],
+                              args: ["http://localhost:8000/piece"],
                             }),
                           },
                         }],
@@ -2874,9 +4222,11 @@ Deno.test({
       assertEquals(toolOutput.executionTarget, "host");
       assertStringIncludes(toolOutput.stdout ?? "", "target=host\n");
       assertStringIncludes(toolOutput.stdout ?? "", "skill=agent-browser\n");
+      // The script sees the lease endpoint through AGENT_BROWSER_CDP, and
+      // what it echoes back reaches the model with the endpoint scrubbed.
       assertStringIncludes(
         toolOutput.stdout ?? "",
-        "cdp=http://localhost:9362\n",
+        "cdp=<lease endpoint>\n",
       );
       assertStringIncludes(
         toolOutput.stdout ?? "",
@@ -2961,6 +4311,58 @@ Deno.test("formatCfHarnessTranscriptEvent formats assistant tool calls and tool 
         role: "assistant",
         content: "",
         toolCalls: [{
+          id: "call-acquire-1",
+          type: "function",
+          function: {
+            name: "acquire_skill",
+            arguments: '{"id":"membranedev/application-skills/plaid"}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: acquire_skill(id="membranedev/application-skills/plaid")\n',
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-acquire-2",
+          type: "function",
+          function: { name: "acquire_skill", arguments: '{"id":42}' },
+        }],
+      },
+      transcript: [],
+    }),
+    "assistant -> tools: acquire_skill\n",
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-skills-1",
+          type: "function",
+          function: {
+            name: "search_skills",
+            arguments:
+              '{"query":"react native","owner":"vercel-labs","limit":3}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: search_skills(query="react native" owner="vercel-labs" limit=3)\n',
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
           id: "call-1",
           type: "function",
           function: { name: "bash", arguments: '{"command":"ls"}' },
@@ -2987,6 +4389,100 @@ Deno.test("formatCfHarnessTranscriptEvent formats assistant tool calls and tool 
       transcript: [],
     }),
     'assistant -> tools: read_file(path="/workspace/README.md")\n',
+  );
+  // A browser call is summarized by its action and inert selectors; a fill
+  // value is what a run would disclose to the page, so it stays out of the
+  // operator line.
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-browser-1",
+          type: "function",
+          function: {
+            name: "browser",
+            arguments: '{"action":"open","url":"https://example.com/checkout"}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: browser(action="open" url="https://example.com/checkout")\n',
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-browser-2",
+          type: "function",
+          function: {
+            name: "browser",
+            arguments: '{"action":"fill","ref":"@e2","value":"a secret"}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: browser(action="fill" ref="@e2")\n',
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-browser-3",
+          type: "function",
+          function: { name: "browser", arguments: "{}" },
+        }],
+      },
+      transcript: [],
+    }),
+    "assistant -> tools: browser\n",
+  );
+  // A `describe_handle` call is summarized by the token it asks about, which
+  // is what tells a transcript reader which reference the model checked.
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-3",
+          type: "function",
+          function: {
+            name: "describe_handle",
+            arguments: '{"token":"cfh:a:abcde"}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: describe_handle(token="cfh:a:abcde")\n',
+  );
+  // A call whose token is not a string has no summary to show, so the tool
+  // name stands alone rather than a summary of something unread.
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-4",
+          type: "function",
+          function: {
+            name: "describe_handle",
+            arguments: '{"token":42}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    "assistant -> tools: describe_handle\n",
   );
   assertEquals(
     formatCfHarnessTranscriptEvent({
@@ -3022,7 +4518,7 @@ Deno.test("runCfHarnessCli reports argument errors to stderr", async () => {
 Deno.test("runCfHarnessCli fails early when no API key is configured", async () => {
   const { io, stdout, stderr } = createIoBuffers();
   const exitCode = await runCfHarnessCli(
-    ["--prompt", "hello"],
+    ["--model-provider", "openai-compatible-gateway", "--prompt", "hello"],
     { io, env: {} },
   );
 
@@ -3033,11 +4529,49 @@ Deno.test("runCfHarnessCli fails early when no API key is configured", async () 
   ]);
 });
 
+Deno.test("runCfHarnessCli refuses a run that selected no model provider", async () => {
+  // No store is injected, so the run reads the harness home the CLI resolves
+  // for itself — the one place an operator's persisted selection would be.
+  const home = await Deno.makeTempDir({ prefix: "cf-harness-no-provider-" });
+  try {
+    const { io, stdout, stderr } = createIoBuffers();
+    const exitCode = await runCfHarnessCli(
+      ["--prompt", "hello"],
+      {
+        io,
+        env: {
+          CF_HARNESS_HOME: home,
+          CF_HARNESS_API_KEY: "key-for-a-gateway-nobody-asked-for",
+        },
+        createModelClient: () => {
+          throw new Error("unselected provider must not reach a model client");
+        },
+      },
+    );
+
+    assertEquals(exitCode, 1);
+    assertEquals(stdout, []);
+    assertEquals(stderr, [
+      "No model provider is selected; choose one with --model-provider, " +
+      "CF_HARNESS_MODEL_PROVIDER, or `config set`\n",
+    ]);
+  } finally {
+    await Deno.remove(home, { recursive: true });
+  }
+});
+
 Deno.test("runCfHarnessCli allows no-auth gateway mode without an API key", async () => {
   const { io, stdout, stderr } = createIoBuffers();
   let createdOptions: Record<string, unknown> | undefined;
   const exitCode = await runCfHarnessCli(
-    ["--prompt", "hello", "--gateway-auth-mode", "none"],
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--prompt",
+      "hello",
+      "--gateway-auth-mode",
+      "none",
+    ],
     {
       io,
       env: {},
@@ -3125,6 +4659,10 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
     {
       io,
       env: { CF_HARNESS_API_KEY: "test-key" },
+      // The resume path must forward the same session override a fresh run
+      // honors; the assertion below reads it back off the resumed engine.
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("factory is forwarded, not invoked")),
       readRunArtifacts: (path) => {
         assertEquals(
           path,
@@ -3197,6 +4735,10 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
   assertEquals(exitCode, 0);
   assertEquals(createdOptions?.allowedToolIds, ["delegate_task"]);
   assertEquals(createdOptions?.allowedSubagentProfiles, ["default"]);
+  assertEquals(
+    (createdOptions?.engine as CfHarnessEngine).fabricSessionAvailable,
+    true,
+  );
   assertEquals(runTranscriptOptions?.promptSlotBinding, promptSlotBinding);
   assertEquals(stdout, [
     formatCfHarnessCliResult({
@@ -3224,6 +4766,95 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
     }),
   ]);
   assertEquals(stderr, []);
+});
+
+const resumeHandleRunState = (
+  overrides: Record<string, unknown> = {},
+) => ({
+  runId: "run-1",
+  status: "failed",
+  createdAt: "2026-04-15T22:10:00.000Z",
+  updatedAt: "2026-04-15T22:10:01.000Z",
+  cfcEnforcementMode: "disabled",
+  currentDir: "/workspace",
+  model: "gpt-5.4",
+  artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+  transcriptPath: "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+  policyEvents: [],
+  toolOutputs: [],
+  handleTable: {
+    type: "cf-harness.handle-table",
+    version: 1,
+    salt: "run-1",
+    entries: [{
+      token: "cfh:a:22222",
+      kind: "address",
+      ref: `/of:fid1:${"A".repeat(43)}`,
+      addressKey: "key-a",
+    }],
+  },
+  ...overrides,
+});
+
+const resumeHandleRunArtifacts = (
+  runStateOverrides: Record<string, unknown> = {},
+) =>
+(path: string) => {
+  assertEquals(path, "/tmp/project/.cf-harness-artifacts/run-1/run-state.json");
+  return Promise.resolve(
+    {
+      runRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+      runStatePath: "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
+      transcriptPath:
+        "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+      runState: resumeHandleRunState(runStateOverrides),
+      transcript: [
+        { role: "user", content: "Continue." },
+      ],
+    } as unknown as HarnessRunArtifacts,
+  );
+};
+
+Deno.test("runCfHarnessCli resume rehydrates the recorded handle table", async () => {
+  const { io, stderr } = createIoBuffers();
+  let createdOptions: Record<string, unknown> | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--resume-run",
+      "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      readRunArtifacts: resumeHandleRunArtifacts(),
+      createPromptLoop: (options) => {
+        createdOptions = options as unknown as Record<string, unknown>;
+        return {
+          runPrompt: () => Promise.reject(new Error("unexpected prompt path")),
+          runTranscript: () =>
+            Promise.resolve(
+              {
+                model: "gpt-5.4",
+                finalAssistantText: "Resumed.",
+                transcript: [
+                  { role: "user", content: "Continue." },
+                  { role: "assistant", content: "Resumed." },
+                ],
+                modelTurns: 1,
+                runState: resumeHandleRunState({
+                  status: "completed",
+                }) as unknown as HarnessPromptLoopResult["runState"],
+              } satisfies HarnessPromptLoopResult,
+            ),
+        };
+      },
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(stderr, []);
+  const engine = createdOptions?.engine as CfHarnessEngine;
+  assertEquals(engine.handleTable?.entries[0]?.token, "cfh:a:22222");
 });
 
 Deno.test("formatCfHarnessCliResult includes policy event summaries", () => {
@@ -3260,10 +4891,71 @@ Deno.test("formatCfHarnessCliResult includes policy event summaries", () => {
       "runId: run-policy",
       "status: completed",
       "modelTurns: 1",
+      "cfcMode: observe (harness)",
+      "docsCorpus: none — query_docs is absent and children cannot look documentation up",
+      "skillsRoot: none — this run scanned no skills tree, so no profile preloads any skill",
       "policyEvents: 1",
       "- warning bash: bash would require direct-command authorization in enforce modes",
       "",
     ].join("\n"),
+  );
+});
+
+Deno.test("formatCfHarnessCliResult names the skills tree and a docs channel that answered nothing", () => {
+  const result = completedCliResult("run-docs-blind");
+  result.runState.skillsRoot = {
+    type: "cf-harness.skills-root-record",
+    source: "checkout-default",
+    hostPath: "/checkout/skills",
+  };
+  result.runState.docsQueryFailures = 3;
+
+  const text = formatCfHarnessCliResult(result);
+
+  assertEquals(
+    text.includes("skillsRoot: checkout-default /checkout/skills"),
+    true,
+  );
+  // The model read an error and carried on; the operator has no other place
+  // to learn the run's documentation channel was down.
+  assertEquals(text.includes("docsQueryFailures: 3"), true);
+  assertEquals(text.includes("ended with no answer"), true);
+});
+
+Deno.test("formatCfHarnessCliResult summarizes cache usage and cost", () => {
+  const result = completedCliResult("run-usage");
+  result.usage = {
+    inputTokens: 2_000,
+    cachedInputTokens: 1_500,
+    cacheWriteTokens: 200,
+    outputTokens: 100,
+    reasoningTokens: 40,
+    totalTokens: 2_100,
+    costUsd: 0.003456,
+    estimatedCostUsd: 0.002345,
+  };
+
+  assertStringIncludes(
+    formatCfHarnessCliResult(result),
+    "usage: input=2000 cachedInput=1500 cacheWrite=200 output=100 " +
+      "reasoning=40 total=2100 cacheRead=75.0% providerCostUsd=0.003456 " +
+      "estimatedCostUsd=0.002345",
+  );
+  assertEquals(createCfHarnessBatchResult(result, 50).usage, result.usage);
+});
+
+Deno.test("formatCfHarnessCliResult explains why a cost estimate is absent", () => {
+  const result = completedCliResult("run-usage-withheld");
+  result.usage = {
+    inputTokens: 2_000,
+    outputTokens: 100,
+    totalTokens: 2_100,
+    estimateWithheldReason: "missing-cache-detail",
+  };
+
+  assertStringIncludes(
+    formatCfHarnessCliResult(result),
+    "estimateWithheld=missing-cache-detail",
   );
 });
 
@@ -3584,6 +5276,8 @@ Deno.test("runCfHarnessCli threads fabric-mount into engine additionalMounts", a
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -3633,7 +5327,7 @@ Deno.test("runCfHarnessCli threads fabric-mount into engine additionalMounts", a
   assertEquals(exitCode, 0);
   assertEquals(stderr, []);
   const engine = createdOptions?.engine as CfHarnessEngine | undefined;
-  const mounts = engine?.sandbox.describe?.()?.cfc?.mounts;
+  const mounts = engine?.sandbox.describe().cfc?.mounts;
   assertEquals(mounts?.length, 2);
   assertEquals(mounts?.[1]?.kind, "fabric-fuse");
   assertEquals(mounts?.[1]?.sandboxPath, "/fabric");
@@ -3653,6 +5347,8 @@ Deno.test("runCfHarnessCli threads host-mount into engine additionalMounts", asy
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       workspace,
       "--prompt",
@@ -3702,7 +5398,7 @@ Deno.test("runCfHarnessCli threads host-mount into engine additionalMounts", asy
   assertEquals(exitCode, 0);
   assertEquals(stderr, []);
   const engine = createdOptions?.engine as CfHarnessEngine | undefined;
-  const mounts = engine?.sandbox.describe?.()?.cfc?.mounts;
+  const mounts = engine?.sandbox.describe().cfc?.mounts;
   assertEquals(mounts?.[1], {
     kind: "host-bind",
     name: "file-cabinet",
@@ -3724,6 +5420,8 @@ Deno.test("runCfHarnessCli threads sandbox-image into engine sandbox config", as
   let createdOptions: Record<string, unknown> | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -3772,9 +5470,74 @@ Deno.test("runCfHarnessCli threads sandbox-image into engine sandbox config", as
   assertEquals(stderr, []);
   const engine = createdOptions?.engine as CfHarnessEngine | undefined;
   assertEquals(
-    engine?.sandbox.describe?.()?.cfc?.image,
+    engine?.sandbox.describe().cfc?.image,
     "registry.example/cf:deno2",
   );
+});
+
+Deno.test("runCfHarnessCli routes skills.sh discovery through its injected fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  let defaultFetchCalls = 0;
+  const injectedUrls: string[] = [];
+  let toolStatus: string | undefined;
+  globalThis.fetch = (() => {
+    defaultFetchCalls += 1;
+    return Promise.resolve(Response.json({ skills: [] }));
+  }) as typeof globalThis.fetch;
+
+  let exitCode: number;
+  try {
+    exitCode = await runCfHarnessCli(
+      [
+        "--model-provider",
+        "openai-compatible-gateway",
+        "--gateway-auth-mode",
+        "none",
+        "--cfc-enforcement-mode",
+        "disabled",
+        "--workspace",
+        "/tmp/project",
+        "--skills-registry-url",
+        "https://registry.example",
+        "--prompt",
+        "Find a skill",
+      ],
+      {
+        env: {},
+        fetchFn: (input) => {
+          injectedUrls.push(String(input));
+          return Promise.resolve(Response.json({ skills: [] }));
+        },
+        createPromptLoop: (options) => {
+          if (options.engine === undefined) {
+            throw new Error("expected CLI-created engine");
+          }
+          const engine = options.engine;
+          return {
+            runPrompt: async () => {
+              const result = await engine.invokeBuiltinTool(
+                "search_skills",
+                { query: "react native" },
+              );
+              toolStatus = (result.output as { status?: string }).status;
+              return completedCliResult("run-skills-sh-fetch");
+            },
+            runTranscript: () =>
+              Promise.reject(new Error("unexpected resume path")),
+          };
+        },
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assertEquals(exitCode, 0);
+  assertEquals(defaultFetchCalls, 0);
+  assertEquals(injectedUrls, [
+    "https://registry.example/api/search?q=react+native&limit=20",
+  ]);
+  assertEquals(toolStatus, "ok");
 });
 
 Deno.test("parseCfHarnessCliArgs selects openai-codex without an API key", async () => {
@@ -3785,6 +5548,18 @@ Deno.test("parseCfHarnessCliArgs selects openai-codex without an API key", async
   if ("help" in parsed) throw new Error("expected config result");
   assertEquals(parsed.modelProvider, "openai-codex");
   assertEquals(parsed.apiKey, undefined);
+});
+
+Deno.test("parseCfHarnessCliArgs applies explicit provider before environment validation", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--model-provider", "openai-codex", "--prompt", "hello"],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_MODEL_PROVIDER: "not-a-provider" },
+    },
+  );
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(parsed.modelProvider, "openai-codex");
 });
 
 Deno.test("parseCfHarnessCliArgs rejects gateway configuration for openai-codex", async () => {
@@ -3891,6 +5666,34 @@ Deno.test("Loom Codex invocation requires an authenticated owner reference", asy
   assertEquals(modelClients, 0);
   assertEquals(stderr, [
     "Loom openai-codex runs require an authenticated credential owner reference\n",
+  ]);
+});
+
+Deno.test("Loom Codex invocation requires an injected owner-bound resolver", async () => {
+  const { io, stderr } = createIoBuffers();
+  const exitCode = await runCfHarnessCli(
+    ["--run-manifest", "/tmp/loom-owner.json", "--prompt", "hello"],
+    {
+      io,
+      cwd: "/tmp/project",
+      env: {},
+      readTextFile: () =>
+        Promise.resolve(JSON.stringify({
+          type: "cf-harness.loom-run-manifest",
+          version: 1,
+          source: "loom",
+          modelProvider: "openai-codex",
+          credentialOwner: {
+            type: "cf-harness.credential-owner-ref",
+            version: 1,
+            ownerKey: "local",
+          },
+        })),
+    },
+  );
+  assertEquals(exitCode, 1);
+  assertEquals(stderr, [
+    "Loom openai-codex runs require an injected owner-bound credential resolver\n",
   ]);
 });
 
@@ -4017,6 +5820,545 @@ Deno.test("local auth status and logout are provider-scoped and secret-free", as
   assertEquals(await store.get("local", "openai-codex"), undefined);
 });
 
+Deno.test("structured config commands expose stable success and failure envelopes", async () => {
+  const home = await Deno.makeTempDir();
+  const env = { CF_HARNESS_HOME: home };
+
+  const missing = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["config", "inspect", "--json"], {
+      io: missing.io,
+      env,
+    }),
+    0,
+  );
+  assertEquals(JSON.parse(missing.stdout[0]), {
+    type: "cf-harness.control-result",
+    version: 1,
+    ok: true,
+    command: "config.inspect",
+    result: { state: "missing" },
+  });
+
+  const initialized = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(
+      ["config", "init", "openai-compatible-gateway", "--json"],
+      { io: initialized.io, env },
+    ),
+    0,
+  );
+  assertEquals(JSON.parse(initialized.stdout[0]).result, {
+    settings: {
+      version: 1,
+      modelProvider: "openai-compatible-gateway",
+    },
+    changed: true,
+  });
+  if (Deno.build.os !== "windows") {
+    assertEquals(
+      (await Deno.stat(join(home, "config.json"))).mode! & 0o777,
+      0o600,
+    );
+  }
+
+  const persisted = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["config", "inspect", "--json"], {
+      io: persisted.io,
+      env,
+    }),
+    0,
+  );
+  assertEquals(JSON.parse(persisted.stdout[0]).result, {
+    state: "configured",
+    configuredProvider: "openai-compatible-gateway",
+    effectiveProvider: "openai-compatible-gateway",
+    effectiveSource: "persistent",
+  });
+
+  await Deno.writeTextFile(join(home, "config.json"), "{secret-corruption", {
+    mode: 0o600,
+  });
+  const failed = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(
+      ["config", "set", "openai-codex", "--json"],
+      { io: failed.io, env },
+    ),
+    1,
+  );
+  assertEquals(JSON.parse(failed.stdout[0]), {
+    type: "cf-harness.control-result",
+    version: 1,
+    ok: false,
+    command: "config.set",
+    error: {
+      code: "provider-configuration-required",
+      message: "Provider settings are invalid",
+    },
+  });
+  assertEquals(failed.stdout[0].includes("secret-corruption"), false);
+});
+
+Deno.test("config inspect reports environment precedence and rejects invalid environment", async () => {
+  const home = await Deno.makeTempDir();
+  const overridden = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["config", "inspect", "--json"], {
+      io: overridden.io,
+      env: {
+        CF_HARNESS_HOME: home,
+        CF_HARNESS_MODEL_PROVIDER: "openai-codex",
+      },
+    }),
+    0,
+  );
+  assertEquals(JSON.parse(overridden.stdout[0]).result, {
+    state: "missing",
+    effectiveProvider: "openai-codex",
+    effectiveSource: "environment",
+  });
+
+  const invalid = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["config", "inspect", "--json"], {
+      io: invalid.io,
+      env: {
+        CF_HARNESS_HOME: home,
+        CF_HARNESS_MODEL_PROVIDER: "not-a-provider",
+      },
+    }),
+    1,
+  );
+  assertEquals(JSON.parse(invalid.stdout[0]).error.code, "invalid-request");
+});
+
+Deno.test("structured control usage failures always return one bounded envelope", async () => {
+  const cases = [
+    ["config", "bogus", "--json"],
+    ["config", "inspect", "extra", "--json"],
+    ["auth", "status", "bad-provider", "--json"],
+    ["auth", "status", "openai-codex", "--unexpected", "--json"],
+    ["auth", "logout", "openai-codex", "--device", "--json"],
+    ["auth", "login", "openai-codex", "--unexpected", "--json"],
+  ];
+  for (const argv of cases) {
+    const buffers = createIoBuffers();
+    assertEquals(
+      await runCfHarnessCli(argv, {
+        io: buffers.io,
+        env: {},
+        credentialStore: new InMemoryHarnessCredentialStore(),
+      }),
+      1,
+    );
+    assertEquals(buffers.stdout.length, 1);
+    const envelope = JSON.parse(buffers.stdout[0]);
+    assertEquals(envelope.ok, false);
+    assertEquals(envelope.error.code, "invalid-request");
+    assertEquals(buffers.stderr, []);
+  }
+});
+
+Deno.test("config provider validation is structured only when requested", async () => {
+  const structured = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["config", "set", "invalid", "--json"], {
+      io: structured.io,
+      env: {},
+    }),
+    1,
+  );
+  assertEquals(
+    JSON.parse(structured.stdout[0]).error.code,
+    "provider-configuration-required",
+  );
+
+  const human = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["config", "set", "invalid"], {
+      io: human.io,
+      env: {},
+    }),
+    1,
+  );
+  assertEquals(human.stdout, []);
+  assertStringIncludes(human.stderr[0], "Model provider must be");
+});
+
+Deno.test("structured logout success and control failures stay bounded", async () => {
+  const successStore = new InMemoryHarnessCredentialStore();
+  const success = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(
+      ["auth", "logout", "openai-codex", "--json"],
+      { io: success.io, env: {}, credentialStore: successStore },
+    ),
+    0,
+  );
+  assertEquals(JSON.parse(success.stdout[0]).result.status, "disconnected");
+
+  const failingStore = new InMemoryHarnessCredentialStore();
+  failingStore.delete = () => Promise.reject(new Error("secret-delete"));
+  const failedLogout = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(
+      ["auth", "logout", "openai-codex", "--json"],
+      { io: failedLogout.io, env: {}, credentialStore: failingStore },
+    ),
+    1,
+  );
+  assertEquals(
+    JSON.parse(failedLogout.stdout[0]).error.code,
+    "provider-unavailable",
+  );
+  assertEquals(failedLogout.stdout[0].includes("secret-delete"), false);
+
+  const failedHuman = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["auth", "logout", "openai-codex"], {
+      io: failedHuman.io,
+      env: {},
+      credentialStore: failingStore,
+    }),
+    1,
+  );
+  assertStringIncludes(failedHuman.stderr[0], "secret-delete");
+});
+
+Deno.test("structured config output redacts corrupt values and unreadable details", async () => {
+  const sentinel = "refresh-secret-sentinel";
+  for (
+    const state of [
+      { state: "unsupported-version" as const, version: null },
+      { state: "unreadable" as const, detail: sentinel },
+    ]
+  ) {
+    const store = {
+      inspect: () => Promise.resolve(state),
+      initialize: () => Promise.reject(new Error("unused")),
+      set: () => Promise.reject(new Error("unused")),
+    };
+    const inspect = createIoBuffers();
+    assertEquals(
+      await runCfHarnessCli(["config", "inspect", "--json"], {
+        io: inspect.io,
+        env: { CF_HARNESS_MODEL_PROVIDER: "openai-codex" },
+        providerSettingsStore: store,
+      }),
+      1,
+    );
+    assertEquals(inspect.stdout[0].includes(sentinel), false);
+    const inspectResult = JSON.parse(inspect.stdout[0]).result;
+    assertEquals(inspectResult.effectiveProvider, "openai-codex");
+    assertEquals(inspectResult.effectiveSource, "environment");
+
+    const mutate = createIoBuffers();
+    const rejectingStore = {
+      ...store,
+      set: () =>
+        Promise.reject(
+          new HarnessControlError(
+            "provider-configuration-required",
+            state.state === "unreadable"
+              ? "Provider settings are unreadable"
+              : "Provider settings use an unsupported version",
+          ),
+        ),
+    };
+    assertEquals(
+      await runCfHarnessCli(
+        ["config", "set", "openai-codex", "--json"],
+        { io: mutate.io, env: {}, providerSettingsStore: rejectingStore },
+      ),
+      1,
+    );
+    assertEquals(mutate.stdout[0].includes(sentinel), false);
+  }
+});
+
+Deno.test("structured config cancellation is typed and preserves missing state", async () => {
+  const home = await Deno.makeTempDir();
+  const controller = new AbortController();
+  controller.abort(new Error("cancel-secret-sentinel"));
+  const buffers = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(
+      ["config", "set", "openai-codex", "--json"],
+      {
+        io: buffers.io,
+        env: { CF_HARNESS_HOME: home },
+        controlSignal: controller.signal,
+      },
+    ),
+    1,
+  );
+  assertEquals(JSON.parse(buffers.stdout[0]).error.code, "operation-canceled");
+  assertEquals(buffers.stdout[0].includes("cancel-secret-sentinel"), false);
+  await assertRejects(
+    () => Deno.stat(join(home, "config.json")),
+    Deno.errors.NotFound,
+  );
+});
+
+Deno.test("persisted provider preference selects the direct-run model client", async () => {
+  const providerSettingsStore = {
+    inspect: () =>
+      Promise.resolve({
+        state: "configured" as const,
+        settings: {
+          version: 1 as const,
+          modelProvider: "openai-codex" as const,
+        },
+      }),
+    initialize: () => Promise.reject(new Error("unused")),
+    set: () => Promise.reject(new Error("unused")),
+  };
+  let selectedProvider: string | undefined;
+  const buffers = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["--prompt", "hello"], {
+      io: buffers.io,
+      cwd: "/tmp/project",
+      env: {},
+      providerSettingsStore,
+      createModelClient: (options) => {
+        selectedProvider = options.provider;
+        return {
+          providerId: "openai-codex",
+          complete: () => Promise.reject(new Error("unused")),
+        };
+      },
+      createPromptLoop: () => ({
+        runPrompt: () =>
+          Promise.resolve(completedCliResult("persisted-provider")),
+        runTranscript: () => Promise.reject(new Error("unexpected resume")),
+      }),
+    }),
+    0,
+  );
+  assertEquals(selectedProvider, "openai-codex");
+});
+
+Deno.test("human config and auth controls preserve operator output", async () => {
+  const providerSettingsStore = {
+    inspect: () => Promise.resolve({ state: "missing" as const }),
+    initialize: () =>
+      Promise.resolve({
+        settings: {
+          version: 1 as const,
+          modelProvider: "openai-compatible-gateway" as const,
+        },
+        changed: true,
+      }),
+    set: () =>
+      Promise.resolve({
+        settings: {
+          version: 1 as const,
+          modelProvider: "openai-codex" as const,
+        },
+        changed: false,
+      }),
+  };
+  for (
+    const [argv, expected] of [
+      [["config", "inspect"], '"state": "missing"'],
+      [["config", "init", "openai-compatible-gateway"], "(saved)"],
+      [["config", "set", "openai-codex"], "(unchanged)"],
+    ] as const
+  ) {
+    const buffers = createIoBuffers();
+    assertEquals(
+      await runCfHarnessCli(argv, {
+        io: buffers.io,
+        env: {},
+        providerSettingsStore,
+      }),
+      0,
+    );
+    assertStringIncludes(buffers.stdout[0], expected);
+  }
+
+  const store = new InMemoryHarnessCredentialStore();
+  await store.set("local", "openai-codex", {
+    type: "oauth",
+    providerId: "openai-codex",
+    accessToken: "access",
+    refreshToken: "refresh",
+    expiresAt: 0,
+    accountId: "account",
+  });
+  const expired = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["auth", "status", "openai-codex"], {
+      io: expired.io,
+      env: {},
+      credentialStore: store,
+    }),
+    0,
+  );
+  assertEquals(expired.stdout, [
+    "openai-codex: connected (refresh required)\n",
+  ]);
+  const logout = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["auth", "logout", "openai-codex"], {
+      io: logout.io,
+      env: {},
+      credentialStore: store,
+    }),
+    0,
+  );
+  assertEquals(logout.stdout, ["openai-codex: disconnected\n"]);
+});
+
+Deno.test("structured auth status exposes bounded health without credential fields", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  await store.updateRecord("local", "openai-codex", () => ({
+    credential: {
+      type: "oauth",
+      providerId: "openai-codex",
+      accessToken: "access-secret",
+      refreshToken: "refresh-secret",
+      expiresAt: 0,
+      accountId: "account-secret",
+    },
+    health: { status: "reconnect-required", reason: "invalid-grant" },
+  }));
+  const { io, stdout } = createIoBuffers();
+
+  assertEquals(
+    await runCfHarnessCli(["auth", "status", "openai-codex", "--json"], {
+      io,
+      env: {},
+      credentialStore: store,
+    }),
+    1,
+  );
+  assertEquals(JSON.parse(stdout[0]), {
+    type: "cf-harness.control-result",
+    version: 1,
+    ok: true,
+    command: "auth.status",
+    result: {
+      providerId: "openai-codex",
+      status: "reconnect-required",
+      refreshHealth: "reconnect-required",
+      reason: "invalid-grant",
+    },
+  });
+  assertEquals(stdout[0].includes("secret"), false);
+  assertEquals(stdout[0].includes("expiresAt"), false);
+});
+
+Deno.test("structured browser login emits JSON events and a bounded result", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  const { io, stdout } = createIoBuffers();
+
+  assertEquals(
+    await runCfHarnessCli(["auth", "login", "openai-codex", "--json"], {
+      io,
+      env: {},
+      credentialStore: store,
+      openUrl: () => {},
+      loginOpenAICodex: async (options) => {
+        await options.onAuthorizationUrl("https://auth.example/authorize");
+        const credential = {
+          type: "oauth" as const,
+          providerId: "openai-codex" as const,
+          accessToken: "access-secret",
+          refreshToken: "refresh-secret",
+          expiresAt: 4_000_000_000_000,
+          accountId: "account-secret",
+        };
+        await options.authService.save(credential);
+        return credential;
+      },
+    }),
+    0,
+  );
+  assertEquals(JSON.parse(stdout[0]), {
+    type: "cf-harness.control-event",
+    version: 1,
+    command: "auth.login",
+    event: "authorization-required",
+    data: {
+      method: "browser",
+      url: "https://auth.example/authorize",
+    },
+  });
+  assertEquals(JSON.parse(stdout[1]), {
+    type: "cf-harness.control-result",
+    version: 1,
+    ok: true,
+    command: "auth.login",
+    result: {
+      providerId: "openai-codex",
+      status: "connected",
+      refreshHealth: "ready",
+    },
+  });
+  assertEquals(JSON.stringify(stdout).includes("secret"), false);
+});
+
+Deno.test("structured login cancellation preserves prior auth and provider state", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  const previous = {
+    type: "oauth" as const,
+    providerId: "openai-codex" as const,
+    accessToken: "previous-access",
+    refreshToken: "previous-refresh",
+    expiresAt: 4_000_000_000_000,
+    accountId: "previous-account",
+  };
+  await store.set("local", "openai-codex", previous);
+  const controller = new AbortController();
+  controller.abort(new DOMException("cancel-secret", "AbortError"));
+  const { io, stdout } = createIoBuffers();
+
+  assertEquals(
+    await runCfHarnessCli(["auth", "login", "openai-codex", "--json"], {
+      io,
+      env: {},
+      credentialStore: store,
+      controlSignal: controller.signal,
+    }),
+    1,
+  );
+  assertEquals(JSON.parse(stdout[0]), {
+    type: "cf-harness.control-result",
+    version: 1,
+    ok: false,
+    command: "auth.login",
+    error: {
+      code: "operation-canceled",
+      message: "The cf-harness control operation was canceled",
+    },
+  });
+  assertEquals(await store.get("local", "openai-codex"), previous);
+  assertEquals(stdout[0].includes("cancel-secret"), false);
+});
+
+Deno.test("structured auth failures discard secret-bearing cause graphs", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  store.getRecord = () => Promise.reject(new Error("storage-secret-sentinel"));
+  const { io, stdout } = createIoBuffers();
+
+  assertEquals(
+    await runCfHarnessCli(["auth", "status", "openai-codex", "--json"], {
+      io,
+      env: {},
+      credentialStore: store,
+    }),
+    1,
+  );
+  const result = JSON.parse(stdout[0]);
+  assertEquals(result.ok, false);
+  assertEquals(result.error.code, "provider-unavailable");
+  assertEquals(stdout[0].includes("storage-secret-sentinel"), false);
+});
+
 Deno.test("models openai-codex reports live provider order", async () => {
   const { io, stdout, stderr } = createIoBuffers();
   const exitCode = await runCfHarnessCli(["models", "openai-codex"], {
@@ -4132,6 +6474,204 @@ Deno.test("resume preserves the recorded Codex provider and continuation", async
   );
   assertEquals(mismatchIo.stderr, [
     "resume provider mismatch: run uses openai-codex, requested openai-compatible-gateway\n",
+  ]);
+});
+
+Deno.test("CLI resume keeps the corpus the run recorded and refuses a differing one", async () => {
+  const transcript = [{ role: "user" as const, content: "Ask" }];
+  const readRunArtifacts = () =>
+    Promise.resolve({
+      runRoot: "/tmp/project/.cf-harness-artifacts/run-docs-resume",
+      runStatePath:
+        "/tmp/project/.cf-harness-artifacts/run-docs-resume/run-state.json",
+      transcriptPath:
+        "/tmp/project/.cf-harness-artifacts/run-docs-resume/transcript.json",
+      runState: {
+        runId: "run-docs-resume",
+        status: "failed" as const,
+        createdAt: "2026-09-04T12:00:00.000Z",
+        updatedAt: "2026-09-04T12:00:01.000Z",
+        cfcEnforcementMode: "disabled" as const,
+        currentDir: "/workspace",
+        model: "gpt-5.4",
+        modelProvider: "openai-compatible-gateway" as const,
+        docsCorpus: {
+          type: "cf-harness.docs-corpus-record" as const,
+          source: "configured" as const,
+          roots: ["/tmp/project/recorded-reference"],
+        },
+        policyEvents: [],
+        toolOutputs: [],
+      },
+      transcript,
+    });
+
+  const { io, stderr } = createIoBuffers();
+  let resumedCorpus: unknown;
+  assertEquals(
+    await runCfHarnessCli(
+      ["--resume-run", "/tmp/project/.cf-harness-artifacts/run-docs-resume"],
+      {
+        io,
+        cwd: "/tmp/project",
+        env: { CF_HARNESS_API_KEY: "gateway-key" },
+        readRunArtifacts,
+        createPromptLoop: (options) => {
+          resumedCorpus = options.engine?.docsCorpus;
+          return {
+            runPrompt: () => Promise.reject(new Error("unexpected prompt")),
+            runTranscript: () =>
+              Promise.resolve(completedCliResult("run-docs-resume")),
+          };
+        },
+      },
+    ),
+    0,
+  );
+  assertEquals(stderr, []);
+  assertEquals(resumedCorpus, {
+    type: "cf-harness.docs-corpus-record",
+    source: "configured",
+    roots: ["/tmp/project/recorded-reference"],
+  });
+
+  const mismatchIo = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli([
+      "--resume-run",
+      "/tmp/project/.cf-harness-artifacts/run-docs-resume",
+      "--docs-corpus-root",
+      "other-reference",
+    ], {
+      io: mismatchIo.io,
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_API_KEY: "gateway-key" },
+      readRunArtifacts,
+    }),
+    1,
+  );
+  assertEquals(mismatchIo.stderr, [
+    "resume docs corpus mismatch: run uses configured /tmp/project/recorded-reference, requested configured /tmp/project/other-reference\n",
+  ]);
+});
+
+Deno.test("CLI resume keeps the CFC enforcement mode the run recorded and refuses a differing one", async () => {
+  const transcript = [{ role: "user" as const, content: "Ask" }];
+  const readRunArtifacts = () =>
+    Promise.resolve({
+      runRoot: "/tmp/project/.cf-harness-artifacts/run-cfc-resume",
+      runStatePath:
+        "/tmp/project/.cf-harness-artifacts/run-cfc-resume/run-state.json",
+      transcriptPath:
+        "/tmp/project/.cf-harness-artifacts/run-cfc-resume/transcript.json",
+      runState: {
+        runId: "run-cfc-resume",
+        status: "failed" as const,
+        createdAt: "2026-09-04T12:00:00.000Z",
+        updatedAt: "2026-09-04T12:00:01.000Z",
+        cfcEnforcementMode: "observe" as const,
+        currentDir: "/workspace",
+        model: "gpt-5.4",
+        modelProvider: "openai-compatible-gateway" as const,
+        policyEvents: [],
+        toolOutputs: [],
+      },
+      transcript,
+    });
+
+  // A resume that states no dial runs at the mode the run recorded, rather
+  // than at the harness default the flag would otherwise fall to.
+  const { io, stderr } = createIoBuffers();
+  let resumedMode: unknown;
+  let resumedModeSource: unknown;
+  assertEquals(
+    await runCfHarnessCli(
+      ["--resume-run", "/tmp/project/.cf-harness-artifacts/run-cfc-resume"],
+      {
+        io,
+        cwd: "/tmp/project",
+        env: { CF_HARNESS_API_KEY: "gateway-key" },
+        readRunArtifacts,
+        createPromptLoop: (options) => {
+          resumedMode = options.engine?.config.cfcEnforcementMode;
+          resumedModeSource = options.engine?.config.cfcEnforcementModeSource;
+          return {
+            runPrompt: () => Promise.reject(new Error("unexpected prompt")),
+            runTranscript: () =>
+              Promise.resolve(completedCliResult("run-cfc-resume")),
+          };
+        },
+      },
+    ),
+    0,
+  );
+  assertEquals(stderr, []);
+  assertEquals(resumedMode, "observe");
+  assertEquals(resumedModeSource, "inherited");
+
+  // A fleet's environment pin names the posture for the runs it starts, not a
+  // decision about this one, so a resume ignores it and runs at the recorded
+  // mode — the reading `CF_HARNESS_MODEL` already gets.
+  const pinnedIo = createIoBuffers();
+  let pinnedMode: unknown;
+  assertEquals(
+    await runCfHarnessCli(
+      ["--resume-run", "/tmp/project/.cf-harness-artifacts/run-cfc-resume"],
+      {
+        io: pinnedIo.io,
+        cwd: "/tmp/project",
+        env: {
+          CF_HARNESS_API_KEY: "gateway-key",
+          CF_CFC_MODE: "enforce-strict",
+        },
+        readRunArtifacts,
+        createPromptLoop: (options) => {
+          pinnedMode = options.engine?.config.cfcEnforcementMode;
+          return {
+            runPrompt: () => Promise.reject(new Error("unexpected prompt")),
+            runTranscript: () =>
+              Promise.resolve(completedCliResult("run-cfc-resume")),
+          };
+        },
+      },
+    ),
+    0,
+  );
+  assertEquals(pinnedIo.stderr, []);
+  assertEquals(pinnedMode, "observe");
+
+  // A dial the run cannot move to is refused, naming both modes, and refused
+  // before the run reaches a model client.
+  const mismatchIo = createIoBuffers();
+  let modelClientsCreated = 0;
+  assertEquals(
+    await runCfHarnessCli([
+      "--resume-run",
+      "/tmp/project/.cf-harness-artifacts/run-cfc-resume",
+      "--cfc-enforcement-mode",
+      "disabled",
+    ], {
+      io: mismatchIo.io,
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_API_KEY: "gateway-key" },
+      readRunArtifacts,
+      createModelClient: () => {
+        modelClientsCreated += 1;
+        return {
+          providerId: "openai-compatible-gateway",
+          complete: () => Promise.reject(new Error("must not run")),
+        };
+      },
+      createPromptLoop: () => ({
+        runPrompt: () => Promise.reject(new Error("must not run")),
+        runTranscript: () => Promise.reject(new Error("must not run")),
+      }),
+    }),
+    1,
+  );
+  assertEquals(modelClientsCreated, 0);
+  assertEquals(mismatchIo.stderr, [
+    "resumed run CFC enforcement mode observe does not match requested CFC enforcement mode disabled\n",
   ]);
 });
 
@@ -4253,6 +6793,146 @@ Deno.test("Codex cross-model resume fails before creating a model client", async
   ]);
 });
 
+Deno.test("a refused resume names the setting, whichever tier refused it", async () => {
+  // The CLI checks the argv and the run manifest against the recorded run,
+  // and the engine constructor checks the settings the CLI hands it. A host
+  // that reports structured failures reads both tiers through one mapping, so
+  // a refusal from either arrives carrying the setting that was refused. The
+  // provider case is the anchor: it already refused this way, and the rest
+  // report as it does.
+
+  const baseRunState = {
+    status: "failed" as const,
+    createdAt: "2026-07-23T20:00:00.000Z",
+    updatedAt: "2026-07-23T20:00:01.000Z",
+    cfcEnforcementMode: "disabled" as const,
+    currentDir: "/workspace",
+    model: "gpt-recorded",
+    credentialOwnerKey: "local",
+    policyEvents: [],
+    toolOutputs: [],
+  };
+  const refuse = async (
+    argv: readonly string[],
+    runState: Partial<HarnessRunState> & { runId: string },
+    manifest?: Record<string, unknown>,
+  ): Promise<{ code: string; message: string }> => {
+    const buffers = createIoBuffers();
+    let modelClientsCreated = 0;
+    let promptLoopsCreated = 0;
+    let providerRequests = 0;
+    const exitCode = await runCfHarnessCli(argv, {
+      io: buffers.io,
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      structuredHostFailures: true,
+      readRunArtifacts: () =>
+        Promise.resolve({
+          runRoot: "/tmp/run",
+          runStatePath: "/tmp/run/run-state.json",
+          transcriptPath: "/tmp/run/transcript.json",
+          runState: { ...baseRunState, ...runState },
+          transcript: [{ role: "user" as const, content: "Continue" }],
+        }),
+      ...(manifest !== undefined
+        ? { readTextFile: () => Promise.resolve(JSON.stringify(manifest)) }
+        : {}),
+      createModelClient: () => {
+        modelClientsCreated += 1;
+        throw new Error("must not create a model client");
+      },
+      createPromptLoop: () => {
+        promptLoopsCreated += 1;
+        throw new Error("must not construct a prompt loop");
+      },
+      fetchFn: () => {
+        providerRequests += 1;
+        return Promise.reject(new Error("must not request a provider"));
+      },
+    });
+    assertEquals(exitCode, 1);
+    // The refusal is settled against the recorded run alone, so nothing has
+    // reached a credential store or a provider by the time it is reported.
+    assertEquals(modelClientsCreated, 0);
+    assertEquals(promptLoopsCreated, 0);
+    assertEquals(providerRequests, 0);
+    assertEquals(buffers.stdout, []);
+    assertEquals(buffers.stderr.length, 1);
+    const failure = JSON.parse(buffers.stderr[0]);
+    assertEquals(failure.type, "cf-harness.host-failure");
+    assertEquals(failure.version, 1);
+    assertEquals(failure.ok, false);
+    return failure.error;
+  };
+
+  // The CLI's own checks: the provider the argv asks for, and a run whose
+  // lineage makes it somebody else's child.
+  const provider = await refuse(
+    ["--resume-run", "/tmp/run", "--model-provider", "openai-codex"],
+    { runId: "run-gateway", modelProvider: "openai-compatible-gateway" },
+  );
+  assertEquals(provider.code, "provider-mismatch");
+  assertStringIncludes(provider.message, "openai-compatible-gateway");
+  assertStringIncludes(provider.message, "openai-codex");
+
+  const subagent = await refuse(["--resume-run", "/tmp/run"], {
+    runId: "root.subagent.1",
+    modelProvider: "openai-codex",
+    lineage: {
+      role: "subagent",
+      rootRunId: "root",
+      parentRunId: "root",
+      parentToolCallId: "call-child",
+      depth: 1,
+    },
+  });
+  assertEquals(subagent.code, "provider-mismatch");
+  assertStringIncludes(subagent.message, "root.subagent.1");
+  assertStringIncludes(subagent.message, "resume root run root");
+
+  // The engine constructor's checks: a Codex run asked for another model, and
+  // a run asked to answer out of another credential home.
+  const model = await refuse(
+    ["--resume-run", "/tmp/run", "--model", "gpt-different"],
+    { runId: "run-codex", modelProvider: "openai-codex" },
+  );
+  assertEquals(model.code, "provider-mismatch");
+  assertStringIncludes(model.message, "gpt-recorded");
+  assertStringIncludes(model.message, "gpt-different");
+
+  const home = await refuse(
+    ["--resume-run", "/tmp/run", "--run-manifest", "/tmp/resume.json"],
+    {
+      runId: "run-home",
+      modelProvider: "openai-compatible-gateway",
+      harnessHomeIdentity: "sha256:recorded-home",
+    },
+    {
+      type: "cf-harness.loom-run-manifest",
+      version: 1,
+      source: "loom",
+      harnessHomeIdentity: "sha256:requested-home",
+    },
+  );
+  assertEquals(home.code, "provider-mismatch");
+  assertStringIncludes(home.message, "harness home");
+
+  // Gateway options against a run that recorded Codex contradict the record
+  // rather than the rest of the argv, which the message says.
+  const gateway = await refuse(
+    [
+      "--resume-run",
+      "/tmp/run",
+      "--gateway-base-url",
+      "https://gateway.example/",
+    ],
+    { runId: "run-codex-gateway", modelProvider: "openai-codex" },
+  );
+  assertEquals(gateway.code, "provider-mismatch");
+  assertStringIncludes(gateway.message, "gateway URL/auth options");
+  assertStringIncludes(gateway.message, "this run recorded");
+});
+
 Deno.test("resume rejects manifest provider and credential-owner switches", async () => {
   const recordedOwner = {
     type: "cf-harness.credential-owner-ref" as const,
@@ -4325,4 +7005,801 @@ Deno.test("resume rejects manifest provider and credential-owner switches", asyn
   assertEquals(ownerSwitch.stderr, [
     "resume credential owner mismatch: requested owner does not match the recorded run\n",
   ]);
+});
+
+Deno.test("parseCfHarnessCliArgs validates --compact-threshold", async () => {
+  const parse = (args: string[], env: Record<string, string> = {}) =>
+    parseCfHarnessCliArgs(args, { cwd: "/tmp/project", env });
+
+  const ok = await parse(["--compact-threshold", "12000", "hi"]);
+  if ("help" in ok) throw new Error("expected config result");
+  assertEquals(ok.compactThreshold, 12_000);
+
+  // 0 is meaningful — it disables compaction — so it must not read as absent.
+  const zero = await parse(["--compact-threshold", "0", "hi"]);
+  if ("help" in zero) throw new Error("expected config result");
+  assertEquals(zero.compactThreshold, 0);
+
+  const omitted = await parse(["hi"]);
+  if ("help" in omitted) throw new Error("expected config result");
+  assertEquals(omitted.compactThreshold, undefined);
+
+  const fromEnv = await parse(["hi"], { CF_HARNESS_COMPACT_THRESHOLD: "9000" });
+  if ("help" in fromEnv) throw new Error("expected config result");
+  assertEquals(fromEnv.compactThreshold, 9_000);
+
+  // Every rejection names the requirement. `--compact-threshold -5` is the
+  // subtle one: the parser reads `-5` as a separate flag, so the option
+  // arrives with no string value and must not report merely "non-empty".
+  for (
+    const args of [
+      ["--compact-threshold", "abc", "hi"],
+      ["--compact-threshold", "1.5", "hi"],
+      ["--compact-threshold=-5", "hi"],
+      ["--compact-threshold", "-5", "hi"],
+      ["--compact-threshold", "hi"],
+    ]
+  ) {
+    await assertRejects(
+      () => parse(args),
+      Error,
+      "--compact-threshold requires a non-negative integer token count",
+    );
+  }
+});
+
+Deno.test("local Loom binding conflicts become structured provider mismatches before execution", async () => {
+  const buffers = createIoBuffers();
+  let promptLoopsCreated = 0;
+  let providerRequests = 0;
+  const exitCode = await runCfHarnessCli(
+    ["--run-manifest", "/tmp/loom-run-manifest.json", "hello"],
+    {
+      cwd: "/tmp/project",
+      env: {},
+      io: buffers.io,
+      structuredHostFailures: true,
+      loomLocalHostBinding: {
+        source: "loom",
+        modelProvider: "openai-codex",
+        modelAuthSource: "cf-harness-local-store",
+        credentialOwner: {
+          type: "cf-harness.credential-owner-ref",
+          version: 1,
+          ownerKey: "local",
+        },
+        harnessHomeIdentity: "sha256:local-home",
+      },
+      readTextFile: () =>
+        Promise.resolve(JSON.stringify({
+          type: "cf-harness.loom-run-manifest",
+          version: 1,
+          source: "loom",
+          modelProvider: "openai-compatible-gateway",
+        })),
+      createPromptLoop: () => {
+        promptLoopsCreated += 1;
+        throw new Error("must not construct a prompt loop");
+      },
+      fetchFn: () => {
+        providerRequests += 1;
+        return Promise.reject(new Error("must not request a provider"));
+      },
+    },
+  );
+
+  assertEquals(exitCode, 1);
+  assertEquals(promptLoopsCreated, 0);
+  assertEquals(providerRequests, 0);
+  assertEquals(buffers.stdout, []);
+  assertEquals(buffers.stderr.length, 1);
+  const failure = JSON.parse(buffers.stderr[0]);
+  assertEquals(failure.type, "cf-harness.host-failure");
+  assertEquals(failure.error.code, "provider-mismatch");
+  assertStringIncludes(failure.error.message, "provider");
+});
+
+Deno.test("a startup fault is internal, and only bad argv is an invalid request", async () => {
+  const workspace = await Deno.makeTempDir();
+
+  const rejected = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["--model-provider", "unsupported", "hello"], {
+      cwd: workspace,
+      env: {},
+      io: rejected.io,
+      structuredHostFailures: true,
+    }),
+    1,
+  );
+  assertEquals(JSON.parse(rejected.stderr[0]).error.code, "invalid-request");
+
+  // The argv is well-formed and the binding holds; only building the run
+  // fails. A host that retries on `internal-error` and gives up on
+  // `invalid-request` needs this one classified as the transient it is.
+  const startup = createIoBuffers();
+  let promptLoopsCreated = 0;
+  assertEquals(
+    await runCfHarnessCli(
+      [
+        "--workspace",
+        workspace,
+        "--model-provider",
+        "openai-codex",
+        "--cfc-enforcement-mode",
+        "disabled",
+        "hello",
+      ],
+      {
+        cwd: workspace,
+        env: {},
+        io: startup.io,
+        structuredHostFailures: true,
+        createModelClient: () =>
+          Promise.reject(new Error("artifact store unavailable")),
+        createPromptLoop: () => {
+          promptLoopsCreated += 1;
+          throw new Error("must not construct a prompt loop");
+        },
+      },
+    ),
+    1,
+  );
+  assertEquals(promptLoopsCreated, 0);
+  assertEquals(startup.stdout, []);
+  const failure = JSON.parse(startup.stderr[0]);
+  assertEquals(failure.error.code, "internal-error");
+  assertEquals(JSON.stringify(failure).includes("artifact store"), false);
+});
+
+Deno.test("a resume reads a missing run as bad argv and an unreadable one as internal", async () => {
+  const workspace = await Deno.makeTempDir();
+  const run = async (
+    error: Error,
+  ): Promise<{ code: string; message: string }> => {
+    const buffers = createIoBuffers();
+    assertEquals(
+      await runCfHarnessCli(["--resume-run", "/runs/one"], {
+        cwd: workspace,
+        env: {},
+        io: buffers.io,
+        structuredHostFailures: true,
+        readRunArtifacts: () => Promise.reject(error),
+      }),
+      1,
+    );
+    return JSON.parse(buffers.stderr[0]).error;
+  };
+
+  // Naming a run that was never written is the caller's mistake, and no retry
+  // will change it. A run that exists and will not read is the host's problem,
+  // and the argv that asked for it was fine.
+  assertEquals(
+    (await run(new Deno.errors.NotFound("no such run"))).code,
+    "invalid-request",
+  );
+  const unreadable = await run(new Deno.errors.PermissionDenied("run-state"));
+  assertEquals(unreadable.code, "internal-error");
+  assertEquals(unreadable.message.includes("run-state"), false);
+});
+
+Deno.test("parseCfHarnessCliArgs parses --pattern-index-url alongside the fabric session flags", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--pattern-index-url",
+      "https://index.example/api",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.patternIndex, { baseUrl: "https://index.example/api" });
+});
+
+Deno.test("parseCfHarnessCliArgs parses --skills-registry-url", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--skills-registry-url",
+      "https://registry.example",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.skillsSh, { baseUrl: "https://registry.example" });
+});
+
+Deno.test("parseCfHarnessCliArgs reads the skills registry URL from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_SKILLS_REGISTRY_URL: "https://registry.example" },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.skillsSh, { baseUrl: "https://registry.example" });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a skills registry URL that does not parse", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--skills-registry-url", "not a url"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--skills-registry-url must be a valid URL",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an empty skills registry flag", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--skills-registry-url", "   "],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--skills-registry-url requires a non-empty value",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects --allow-tool search_skills without a skills registry", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--allow-tool", "search_skills"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --skills-registry-url",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects --allow-tool acquire_skill without both backings", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--allow-tool", "acquire_skill"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "requires a fabric session",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--allow-tool",
+          "acquire_skill",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --skills-registry-url",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs accepts --allow-tool acquire_skill with both backings", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--allow-tool",
+      "acquire_skill",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--skills-registry-url",
+      "https://registry.example",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(parsed.allowedToolIds, ["acquire_skill"]);
+});
+
+Deno.test("parseCfHarnessCliArgs reads the pattern index URL from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_PATTERN_INDEX_URL: "https://index.example/api" },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.patternIndex, { baseUrl: "https://index.example/api" });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects --pattern-index-url without the fabric session flags", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--pattern-index-url",
+          "https://index.example/api",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--pattern-index-url needs a fabric session",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a pattern index URL that does not parse", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+          "--pattern-index-url",
+          "not a url",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--pattern-index-url must be a valid URL",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects --allow-tool search_patterns without a pattern index", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+          "--allow-tool",
+          "search_patterns",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --pattern-index-url",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs records the publish opt-out from --no-pattern-index-publish", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--pattern-index-url",
+      "https://index.example/api",
+      "--no-pattern-index-publish",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.patternIndex, {
+    baseUrl: "https://index.example/api",
+    publish: false,
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs reads the pattern index publish opt-out from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_PATTERN_INDEX_URL: "https://index.example/api",
+        CF_HARNESS_PATTERN_INDEX_PUBLISH: "0",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.patternIndex, {
+    baseUrl: "https://index.example/api",
+    publish: false,
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs reads deliberate discoverable publishing from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_PATTERN_INDEX_URL: "https://index.example/api",
+        CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE: "1",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.patternIndex, {
+    baseUrl: "https://index.example/api",
+    publishDiscoverable: true,
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects --allow-tool record_feedback without a pattern index", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+          "--allow-tool",
+          "record_feedback",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --pattern-index-url",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs carries --max-confidentiality into the fabric session as its read ceiling", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--max-confidentiality",
+      JSON.stringify([
+        "did:key:zOwner",
+        { type: "Facet", owner: "did:key:zOwner", id: "work" },
+      ]),
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/tmp/project/keys/agent.pkcs8",
+    space: "my-space",
+    cfcReadMaxConfidentiality: [
+      "did:key:zOwner",
+      { type: "Facet", owner: "did:key:zOwner", id: "work" },
+    ],
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs refuses a --max-confidentiality that is not a ceiling", async () => {
+  const fabric = [
+    "--prompt",
+    "hi",
+    "--fabric-api-url",
+    "https://toolshed.example/",
+    "--fabric-identity",
+    "keys/agent.pkcs8",
+    "--fabric-space",
+    "my-space",
+  ];
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [...fabric, "--max-confidentiality", "did:key:zOwner"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--max-confidentiality must be JSON",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [...fabric, "--max-confidentiality", "[]"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--max-confidentiality: an empty ceiling admits",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [...fabric, "--max-confidentiality", '{"anyOf":["did:key:zOwner"]}'],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--max-confidentiality: expected an array of clauses",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs refuses --max-confidentiality without a fabric session", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--max-confidentiality", '["did:key:zOwner"]'],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--max-confidentiality bounds the fabric session's reads and needs --fabric-api-url, --fabric-identity, and --fabric-space",
+  );
+});
+
+Deno.test("a resume whose manifest declares another read ceiling is refused as a structured mismatch", async () => {
+  const buffers = createIoBuffers();
+  let promptLoopsCreated = 0;
+  const recordedManifest = {
+    type: "cf-harness.loom-run-manifest",
+    version: 1,
+    source: "loom",
+    cfc: { maxConfidentiality: ["did:key:zOwner", "did:key:zFacet"] },
+  } as const;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--resume-run",
+      "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
+      "--run-manifest",
+      "/tmp/loom-run-manifest.json",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      io: buffers.io,
+      structuredHostFailures: true,
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("factory is forwarded, not invoked")),
+      readTextFile: () =>
+        Promise.resolve(JSON.stringify({
+          ...recordedManifest,
+          cfc: { maxConfidentiality: ["did:key:zOwner"] },
+        })),
+      readRunArtifacts: () =>
+        Promise.resolve({
+          runRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+          runStatePath:
+            "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
+          transcriptPath:
+            "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+          runState: {
+            runId: "run-1",
+            status: "failed",
+            createdAt: "2026-04-15T22:10:00.000Z",
+            updatedAt: "2026-04-15T22:10:01.000Z",
+            cfcEnforcementMode: "disabled",
+            currentDir: "/workspace",
+            model: "gpt-5.4",
+            artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+            transcriptPath:
+              "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+            policyEvents: [],
+            toolOutputs: [],
+            runManifest: recordedManifest,
+          },
+          transcript: [{ role: "user", content: "Continue." }],
+        }),
+      createPromptLoop: () => {
+        promptLoopsCreated += 1;
+        throw new Error("must not construct a prompt loop");
+      },
+    },
+  );
+  assertEquals(exitCode, 1);
+  assertEquals(promptLoopsCreated, 0);
+  const failure = JSON.parse(buffers.stderr[0]);
+  assertEquals(failure.type, "cf-harness.host-failure");
+  assertEquals(failure.error.code, "provider-mismatch");
+  assertStringIncludes(failure.error.message, "resume read ceiling mismatch");
+});
+
+Deno.test("a resume whose manifest respells the recorded ceiling (anyOf reordered) is not a mismatch", async () => {
+  const buffers = createIoBuffers();
+  let promptLoopsCreated = 0;
+  const recordedManifest = {
+    type: "cf-harness.loom-run-manifest",
+    version: 1,
+    source: "loom",
+    cfc: {
+      maxConfidentiality: [{ anyOf: ["did:key:zOwner", "did:key:zFacet"] }],
+    },
+  } as const;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--resume-run",
+      "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
+      "--run-manifest",
+      "/tmp/loom-run-manifest.json",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      io: buffers.io,
+      structuredHostFailures: true,
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("factory is forwarded, not invoked")),
+      readTextFile: () =>
+        Promise.resolve(JSON.stringify({
+          ...recordedManifest,
+          cfc: {
+            maxConfidentiality: [{
+              anyOf: ["did:key:zFacet", "did:key:zOwner"],
+            }],
+          },
+        })),
+      readRunArtifacts: () =>
+        Promise.resolve({
+          runRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+          runStatePath:
+            "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
+          transcriptPath:
+            "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+          runState: {
+            runId: "run-1",
+            status: "failed",
+            createdAt: "2026-04-15T22:10:00.000Z",
+            updatedAt: "2026-04-15T22:10:01.000Z",
+            cfcEnforcementMode: "disabled",
+            currentDir: "/workspace",
+            model: "gpt-5.4",
+            artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+            transcriptPath:
+              "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+            policyEvents: [],
+            toolOutputs: [],
+            runManifest: recordedManifest,
+          },
+          transcript: [{ role: "user", content: "Continue." }],
+        }),
+      createPromptLoop: () => {
+        promptLoopsCreated += 1;
+        throw new Error("must not construct a prompt loop");
+      },
+    },
+  );
+  // The mismatch guard let it through, so the resume reached the prompt
+  // loop the fixture refuses to build; that refusal, not the ceiling, is
+  // what failed the run.
+  assertEquals(promptLoopsCreated, 1);
+  assertEquals(exitCode, 1);
+  const failure = JSON.parse(buffers.stderr[0]);
+  assertEquals(
+    String(failure.error?.message ?? failure.error).includes(
+      "resume read ceiling mismatch",
+    ),
+    false,
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs refuses a present --max-confidentiality with no value rather than running unbounded", async () => {
+  const fabric = [
+    "--prompt",
+    "hi",
+    "--fabric-api-url",
+    "https://toolshed.example/",
+    "--fabric-identity",
+    "keys/agent.pkcs8",
+    "--fabric-space",
+    "my-space",
+  ];
+  // Bare at the end of the line, bare before another flag, and with an
+  // empty value: each is a ceiling the operator meant to state and did not,
+  // never a run with no ceiling.
+  for (
+    const args of [
+      [...fabric, "--max-confidentiality"],
+      [...fabric, "--max-confidentiality", "--print-transcript"],
+      [...fabric, "--max-confidentiality="],
+      [...fabric, "--max-confidentiality", "   "],
+    ]
+  ) {
+    // Two refusals cover the shapes: the parser reads a bare flag as an
+    // empty string, which the JSON step refuses; a non-string value is
+    // refused before it. Either way the run never starts unbounded.
+    const err = await assertRejects(
+      () => parseCfHarnessCliArgs(args, { cwd: "/tmp/project", env: {} }),
+      Error,
+    );
+    assertMatch(
+      err.message,
+      /--max-confidentiality (requires a JSON array|must be JSON)/,
+    );
+  }
 });

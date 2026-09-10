@@ -56,7 +56,9 @@ function node(
   };
 }
 
-// --- cursorScreenPos / layout ------------------------------------------------
+//
+// cursorScreenPos / layout
+//
 
 Deno.test("cursorScreenPos: null when there is no cursor", () => {
   const doc = parseDocument(SAMPLE);
@@ -156,7 +158,9 @@ Deno.test("cursorScreenPos: null when a dialog covers the content", () => {
   assertEquals(cursorScreenPos(doc, view), null);
 });
 
-// --- notice rows -------------------------------------------------------------
+//
+// notice rows
+//
 
 Deno.test("renderFrame: notice overwrites the bottom content rows", () => {
   const doc = parseDocument(SAMPLE);
@@ -196,7 +200,9 @@ Deno.test("renderFrame: an empty notice array leaves content untouched", () => {
   assertEquals(withNotice, without);
 });
 
-// --- selectionSpan: schema / closure / selection backgrounds -----------------
+//
+// selectionSpan: schema / closure / selection backgrounds
+//
 
 Deno.test("renderFrame: a schema node tints its line", () => {
   const doc = parseDocument("const x = 1;\n");
@@ -235,7 +241,9 @@ Deno.test("renderFrame: a plain node uses the selection background", () => {
   assert(/48;2;/.test(rows[0]), "selection region tinted");
 });
 
-// --- search-match column clamping --------------------------------------------
+//
+// search-match column clamping
+//
 
 Deno.test("renderFrame: search matches off the left edge are clipped", () => {
   const doc = parseDocument("hello world\n");
@@ -255,7 +263,9 @@ Deno.test("renderFrame: search matches off the right edge are clipped", () => {
   assert(/48;2;/.test(rows[0]), "in-bounds match columns highlighted");
 });
 
-// --- renderStatus branches ---------------------------------------------------
+//
+// renderStatus branches
+//
 
 Deno.test("renderStatus: the input line replaces the status bar", () => {
   const doc = parseDocument(SAMPLE);
@@ -291,15 +301,15 @@ Deno.test("renderStatus: an edit hint shows when there is no message", () => {
   assert(status.includes("Esc Done"), `edit hint shown: "${status}"`);
 });
 
-Deno.test("renderStatus: key hints are highlighted in colour", () => {
+Deno.test("renderStatus: key hints are highlighted in color", () => {
   const doc = parseDocument(SAMPLE);
   const rows = renderFrame(
     doc,
     baseView({ editHint: [{ key: "Esc", label: "Done" }], color: true }),
   );
   const status = rows[rows.length - 1];
-  // The key is painted in the status-key colour on the status-bar background.
-  assert(status.includes(fgCode(ui.statusKey.fg!)), "the key colour");
+  // The key is painted in the status-key color on the status-bar background.
+  assert(status.includes(fgCode(ui.statusKey.fg!)), "the key color");
   assert(status.includes(bgCode(ui.statusBar.bg!)), "on the status bar");
 });
 
@@ -397,7 +407,9 @@ Deno.test("renderStatus: a narrow bar drops the lowest-priority hints first", ()
   assert(!tight.includes("WASD Tree"), "WASD drops before Q");
 });
 
-// --- kindGlyph: every branch -------------------------------------------------
+//
+// kindGlyph: every branch
+//
 
 Deno.test("renderStatus: kindGlyph maps every node kind to a glyph", () => {
   const doc = parseDocument("x\n");
@@ -430,7 +442,9 @@ Deno.test("renderStatus: kindGlyph maps every node kind to a glyph", () => {
   }
 });
 
-// --- display modes: tabs and control characters ------------------------------
+//
+// display modes: tabs and control characters
+//
 
 Deno.test("renderFrame: a tab renders as its Control Pictures glyph", () => {
   const doc = parseDocument("a\tb\n");
@@ -450,7 +464,9 @@ Deno.test("renderFrame: a control character renders as its Control Pictures glyp
   assert(!text.includes("\x01"), "control char scrubbed");
 });
 
-// --- overlay: span past the inner width / truncCenter truncation -------------
+//
+// overlay: span past the inner width / truncCenter truncation
+//
 
 Deno.test("overlay: a span wider than the box is clipped at the inner edge", () => {
   const doc = parseDocument(SAMPLE);
@@ -569,7 +585,7 @@ const SAVE_DIALOG: DialogState = {
   ],
 };
 
-Deno.test("dialog: frames a centred title, body and button row", () => {
+Deno.test("dialog: frames a centered title, body and button row", () => {
   const rows = renderFrame(
     parseDocument(SAMPLE),
     baseView({ width: 60, height: 18, color: false, dialog: SAVE_DIALOG }),
@@ -594,14 +610,14 @@ Deno.test("dialog: the default button is brighter and the shortcuts are yellow",
   );
   const raw = rows.join("");
   const face = bgCode(ui.button.bg!);
-  assert(raw.includes(face), "button face colour");
+  assert(raw.includes(face), "button face color");
   assert(
     raw.includes(fgCode(ui.buttonDefault.fg!) + ";" + face),
-    "default-button label colour on the face",
+    "default-button label color on the face",
   );
   assert(
     raw.includes(fgCode(ui.buttonKey.fg!) + ";" + face),
-    "shortcut-letter colour on the face",
+    "shortcut-letter color on the face",
   );
   // The button shadows are half-block glyphs, not solid cells.
   const plain = stripAnsi(raw);
@@ -694,7 +710,7 @@ Deno.test("dialog: the focused button — not just the default — is highlighte
         dialog: { ...dlg, focus },
       }),
     );
-  // The bright face is the default-button colour on the button-face background;
+  // The bright face is the default-button color on the button-face background;
   // it only appears where a button is highlighted.
   const brightFace = fgCode(ui.buttonDefault.fg!) + ";" + bgCode(ui.button.bg!);
 
@@ -799,7 +815,9 @@ Deno.test("renderFrame: the guide rail is blank on lines outside the selected no
   assertEquals(stripAnsi(rows[1])[0], "▶", "single-line node carries a glyph");
 });
 
-// --- SGR encoding helpers (rich modifiers and background merge) ---------------
+//
+// SGR encoding helpers (rich modifiers and background merge)
+//
 
 Deno.test("cellsToAnsi: encodes rich text attributes", () => {
   const cells = [
@@ -840,7 +858,9 @@ Deno.test("darkenSpan: repaints a shadow span and clips out-of-bounds cells", ()
   assertEquals(stripAnsi(rows[0]), "hello world", "the characters are kept");
 });
 
-// --- status-bar fitting (file, and left truncation) --------------------------
+//
+// status-bar fitting (file, and left truncation)
+//
 
 Deno.test("renderStatus: a long current file is tail-truncated with a leading ellipsis", () => {
   const doc = parseDocument(SAMPLE);
@@ -898,7 +918,7 @@ Deno.test("dialog: control characters in the body are shown as glyphs", () => {
       },
     }),
   );
-  // The frame carries its own resets even without colour, so the check is that
+  // The frame carries its own resets even without color, so the check is that
   // the body's own escape and bell are not among what reaches the terminal.
   const joined = rows.join("\n");
   assert(!joined.includes("\x1b[31m"), "the body's escape is not passed on");

@@ -18,16 +18,22 @@ export interface PatternParameter {
 }
 
 export class PatternBuilder {
-  private parameters: PatternParameter[] = [];
-  private captureTree: Map<string, CaptureTreeNode> = new Map();
-  private usedBindingNames = new Set<string>();
+  #parameters: PatternParameter[] = [];
+  #captureTree: Map<string, CaptureTreeNode> = new Map();
+  #usedBindingNames = new Set<string>();
 
-  private captureRenames: Map<string, string> = new Map();
+  #captureRenames: Map<string, string> = new Map();
+
+  #context: TransformationContext;
+  #factory: ts.NodeFactory;
 
   constructor(
-    private context: TransformationContext,
-    private factory: ts.NodeFactory = context.factory,
-  ) {}
+    context: TransformationContext,
+    factory: ts.NodeFactory = context.factory,
+  ) {
+    this.#context = context;
+    this.#factory = factory;
+  }
 
   /**
    * Add a parameter to the destructured input object.
@@ -38,13 +44,15 @@ export class PatternBuilder {
     propertyName?: string,
     initializer?: ts.Expression,
   ): this {
-    this.parameters.push({ name, bindingName, propertyName, initializer });
+    this.#parameters.push({ name, bindingName, propertyName, initializer });
     return this;
   }
 
-  /** Set the capture tree consumed by the selected callback shape. */
+  /**
+   * Set the capture tree to generate the 'params' object or merged captures.
+   */
   setCaptureTree(tree: Map<string, CaptureTreeNode>): this {
-    this.captureTree = tree;
+    this.#captureTree = tree;
     return this;
   }
 
@@ -53,7 +61,7 @@ export class PatternBuilder {
    */
   registerUsedNames(names: Set<string> | string[]): this {
     for (const name of names) {
-      this.usedBindingNames.add(name);
+      this.#usedBindingNames.add(name);
     }
     return this;
   }
@@ -61,10 +69,10 @@ export class PatternBuilder {
   /**
    * Set a map of renamed captures.
    * Key: original capture name
-   * Value: new property name in the private or merged capture record
+   * Value: new property name in the destructured object
    */
   setCaptureRenames(renames: Map<string, string>): this {
-    this.captureRenames = renames;
+    this.#captureRenames = renames;
     return this;
   }
 
@@ -73,9 +81,8 @@ export class PatternBuilder {
    *
    * @param originalCallback The original callback function (to preserve modifiers/types)
    * @param body The transformed body of the function
-   * @param paramsPropertyName The name of the property containing captures
-   *                           (default: "params"). If null, captures are
-   *                           merged into the top-level object.
+   * @param paramsPropertyName The name of the property containing captures (default: "params").
+   *                           If null, captures are merged into the top-level object (for lift-applied).
    */
   buildCallback(
     originalCallback: ts.ArrowFunction | ts.FunctionExpression,
@@ -86,17 +93,17 @@ export class PatternBuilder {
     const bindingElements: ts.BindingElement[] = [];
 
     // 1. Add explicitly registered parameters
-    for (const param of this.parameters) {
+    for (const param of this.#parameters) {
       const bindingName = param.bindingName ||
-        this.factory.createIdentifier(param.name);
+        this.#factory.createIdentifier(param.name);
       const propertyName = param.propertyName
-        ? this.factory.createIdentifier(param.propertyName)
+        ? this.#factory.createIdentifier(param.propertyName)
         : (param.name !== (bindingName as any)?.text
-          ? this.factory.createIdentifier(param.name)
+          ? this.#factory.createIdentifier(param.name)
           : undefined);
 
       bindingElements.push(
-        this.factory.createBindingElement(
+        this.#factory.createBindingElement(
           undefined,
           propertyName,
           bindingName,
@@ -104,27 +111,28 @@ export class PatternBuilder {
         ),
       );
       for (const name of extractBindingNames(bindingName)) {
-        this.usedBindingNames.add(name);
+        this.#usedBindingNames.add(name);
       }
     }
 
     // 2. Add captures
     const createBindingIdentifier = (name: string): ts.Identifier => {
-      return reserveIdentifier(name, this.usedBindingNames, this.factory);
+      return reserveIdentifier(name, this.#usedBindingNames, this.#factory);
     };
 
     // If we have renames, we need to handle them
     const captureBindings: ts.BindingElement[] = [];
-    for (const originalName of this.captureTree.keys()) {
-      const renamedName = this.captureRenames.get(originalName) ?? originalName;
+    for (const originalName of this.#captureTree.keys()) {
+      const renamedName = this.#captureRenames.get(originalName) ??
+        originalName;
 
       const bindingName = createBindingIdentifier(renamedName);
       const propertyName = renamedName !== bindingName.text
-        ? this.factory.createIdentifier(renamedName)
+        ? this.#factory.createIdentifier(renamedName)
         : undefined;
 
       captureBindings.push(
-        this.factory.createBindingElement(
+        this.#factory.createBindingElement(
           undefined,
           propertyName,
           bindingName,
@@ -134,15 +142,15 @@ export class PatternBuilder {
     }
 
     if (paramsPropertyName) {
-      // Group captures under the explicitly requested property, preserving an
-      // empty container when this legacy/general-purpose shape requests one.
-      const paramsPattern = this.factory.createObjectBindingPattern(
+      // Group captures under a 'params' property (for map/handler)
+      // Always add params property to match existing behavior (e.g. params: {})
+      const paramsPattern = this.#factory.createObjectBindingPattern(
         captureBindings,
       );
       bindingElements.push(
-        this.factory.createBindingElement(
+        this.#factory.createBindingElement(
           undefined,
-          this.factory.createIdentifier(paramsPropertyName),
+          this.#factory.createIdentifier(paramsPropertyName),
           paramsPattern,
           undefined,
         ),
@@ -155,15 +163,43 @@ export class PatternBuilder {
     // 3. Create the destructured parameter
     const destructuredParam = createParameterFromBindings(
       bindingElements,
-      this.factory,
+      this.#factory,
     );
 
-    return this.createCallback(
-      originalCallback,
-      body,
-      [destructuredParam],
-      returnType,
-    );
+    // 4. Create the function
+    // If returnType is null, we explicitly want no return type.
+    // If returnType is undefined, we preserve the original type.
+    // If returnType is a node, we use it.
+    const typeNode = returnType === null
+      ? undefined
+      : (returnType || originalCallback.type);
+
+    // Carry the authored callback's source-map position onto the rebuilt
+    // closure so the hoisting stage can recover where it was written (every
+    // strategy — computed-origin, array-method, inline-handler — routes its
+    // callback through here). Source-map-range ONLY, not full preserveLineage:
+    // these callbacks are re-emitted as arrow heads and their types feed schema
+    // derivation, so textRange/original would perturb emit. See
+    // preserveSourceMapRange / CT-1868.
+    const built = ts.isArrowFunction(originalCallback)
+      ? this.#factory.createArrowFunction(
+        originalCallback.modifiers,
+        originalCallback.typeParameters,
+        [destructuredParam],
+        typeNode,
+        originalCallback.equalsGreaterThanToken,
+        body,
+      )
+      : this.#factory.createFunctionExpression(
+        originalCallback.modifiers,
+        originalCallback.asteriskToken,
+        originalCallback.name,
+        originalCallback.typeParameters,
+        [destructuredParam],
+        typeNode,
+        body as ts.Block,
+      );
+    return preserveSourceMapRange(built, originalCallback);
   }
 
   /**
@@ -180,16 +216,16 @@ export class PatternBuilder {
     returnType?: ts.TypeNode | null,
   ): ts.ArrowFunction | ts.FunctionExpression {
     const publicBindings: ts.BindingElement[] = [];
-    for (const param of this.parameters) {
+    for (const param of this.#parameters) {
       const bindingName = param.bindingName ||
-        this.factory.createIdentifier(param.name);
+        this.#factory.createIdentifier(param.name);
       const propertyName = param.propertyName
-        ? this.factory.createIdentifier(param.propertyName)
+        ? this.#factory.createIdentifier(param.propertyName)
         : (param.name !== (bindingName as { text?: string }).text
-          ? this.factory.createIdentifier(param.name)
+          ? this.#factory.createIdentifier(param.name)
           : undefined);
       publicBindings.push(
-        this.factory.createBindingElement(
+        this.#factory.createBindingElement(
           undefined,
           propertyName,
           bindingName,
@@ -197,39 +233,39 @@ export class PatternBuilder {
         ),
       );
       for (const name of extractBindingNames(bindingName)) {
-        this.usedBindingNames.add(name);
+        this.#usedBindingNames.add(name);
       }
     }
 
     const parameters: ts.ParameterDeclaration[] = [
-      createParameterFromBindings(publicBindings, this.factory),
+      createParameterFromBindings(publicBindings, this.#factory),
     ];
-    if (this.captureTree.size > 0) {
+    if (this.#captureTree.size > 0) {
       const captureBindings: ts.BindingElement[] = [];
-      for (const originalName of this.captureTree.keys()) {
-        const renamedName = this.captureRenames.get(originalName) ??
+      for (const originalName of this.#captureTree.keys()) {
+        const renamedName = this.#captureRenames.get(originalName) ??
           originalName;
         const bindingName = reserveIdentifier(
           renamedName,
-          this.usedBindingNames,
-          this.factory,
+          this.#usedBindingNames,
+          this.#factory,
         );
         captureBindings.push(
-          this.factory.createBindingElement(
+          this.#factory.createBindingElement(
             undefined,
             renamedName === bindingName.text
               ? undefined
-              : this.factory.createIdentifier(renamedName),
+              : this.#factory.createIdentifier(renamedName),
             bindingName,
             undefined,
           ),
         );
       }
       parameters.push(
-        this.factory.createParameterDeclaration(
+        this.#factory.createParameterDeclaration(
           undefined,
           undefined,
-          this.factory.createObjectBindingPattern(captureBindings),
+          this.#factory.createObjectBindingPattern(captureBindings),
           undefined,
           undefined,
           undefined,
@@ -237,34 +273,11 @@ export class PatternBuilder {
       );
     }
 
-    return this.createCallback(
-      originalCallback,
-      body,
-      parameters,
-      returnType,
-    );
-  }
-
-  private createCallback(
-    originalCallback: ts.ArrowFunction | ts.FunctionExpression,
-    body: ts.ConciseBody,
-    parameters: readonly ts.ParameterDeclaration[],
-    returnType?: ts.TypeNode | null,
-  ): ts.ArrowFunction | ts.FunctionExpression {
-    // If returnType is null, explicitly omit it. If undefined, preserve the
-    // authored return annotation. Otherwise use the supplied synthetic type.
     const typeNode = returnType === null
       ? undefined
       : (returnType || originalCallback.type);
-    // Carry the authored callback's source-map position onto the rebuilt
-    // closure so the hoisting stage can recover where it was written (every
-    // strategy — computed-origin, array-method, inline-handler — routes its
-    // callback through here). Source-map-range ONLY, not full preserveLineage:
-    // these callbacks are re-emitted as arrow heads and their types feed schema
-    // derivation, so textRange/original would perturb emit. See
-    // preserveSourceMapRange / CT-1868.
     const built = ts.isArrowFunction(originalCallback)
-      ? this.factory.createArrowFunction(
+      ? this.#factory.createArrowFunction(
         originalCallback.modifiers,
         originalCallback.typeParameters,
         parameters,
@@ -272,7 +285,7 @@ export class PatternBuilder {
         originalCallback.equalsGreaterThanToken,
         body,
       )
-      : this.factory.createFunctionExpression(
+      : this.#factory.createFunctionExpression(
         originalCallback.modifiers,
         originalCallback.asteriskToken,
         originalCallback.name,
@@ -296,13 +309,13 @@ export class PatternBuilder {
   ): ts.ArrowFunction {
     const eventParam = originalCallback.parameters[0];
     const stateParam = originalCallback.parameters[1];
-    const additionalParams = originalCallback.parameters.slice(2);
+    const extraParams = originalCallback.parameters.slice(2);
 
     // 1. Create event parameter
     // Ensure event parameter doesn't collide with captures
-    const conflicts = new Set(this.usedBindingNames);
-    for (const key of this.captureTree.keys()) {
-      const renamed = this.captureRenames.get(key) ?? key;
+    const conflicts = new Set(this.#usedBindingNames);
+    for (const key of this.#captureTree.keys()) {
+      const renamed = this.#captureRenames.get(key) ?? key;
       conflicts.add(renamed);
     }
 
@@ -311,16 +324,16 @@ export class PatternBuilder {
       // Use original parameter name if possible
       const bindingName = normalizeBindingName(
         eventParam.name,
-        this.factory,
+        this.#factory,
         conflicts,
       );
 
       // Register the chosen name as used
       if (ts.isIdentifier(bindingName)) {
-        this.usedBindingNames.add(bindingName.text);
+        this.#usedBindingNames.add(bindingName.text);
       }
 
-      eventParameter = this.factory.createParameterDeclaration(
+      eventParameter = this.#factory.createParameterDeclaration(
         undefined,
         undefined,
         bindingName,
@@ -333,11 +346,11 @@ export class PatternBuilder {
       const name = reserveIdentifier(
         eventParamName,
         conflicts,
-        this.factory,
+        this.#factory,
       );
-      this.usedBindingNames.add(name.text);
+      this.#usedBindingNames.add(name.text);
 
-      eventParameter = this.factory.createParameterDeclaration(
+      eventParameter = this.#factory.createParameterDeclaration(
         undefined,
         undefined,
         name,
@@ -349,12 +362,12 @@ export class PatternBuilder {
 
     // 2. Create params parameter (destructured captures)
     const createBindingIdentifier = (name: string): ts.Identifier => {
-      return reserveIdentifier(name, this.usedBindingNames, this.factory);
+      return reserveIdentifier(name, this.#usedBindingNames, this.#factory);
     };
 
     const captureBindings = createBindingElementsFromNames(
-      this.captureTree.keys(),
-      this.factory,
+      this.#captureTree.keys(),
+      this.#factory,
       createBindingIdentifier,
     );
 
@@ -362,22 +375,22 @@ export class PatternBuilder {
     if (stateParam) {
       paramsBindingName = normalizeBindingName(
         stateParam.name,
-        this.factory,
-        this.usedBindingNames,
+        this.#factory,
+        this.#usedBindingNames,
       );
     } else if (captureBindings.length > 0) {
-      paramsBindingName = this.factory.createObjectBindingPattern(
+      paramsBindingName = this.#factory.createObjectBindingPattern(
         captureBindings,
       );
     } else {
       paramsBindingName = reserveIdentifier(
         paramsParamName,
-        this.usedBindingNames,
-        this.factory,
+        this.#usedBindingNames,
+        this.#factory,
       );
     }
 
-    const paramsParameter = this.factory.createParameterDeclaration(
+    const paramsParameter = this.#factory.createParameterDeclaration(
       undefined,
       undefined,
       paramsBindingName,
@@ -387,14 +400,14 @@ export class PatternBuilder {
     );
 
     // 3. Handle extra parameters
-    const additionalParameters = additionalParams.map(
+    const additionalParameters = extraParams.map(
       (param: ts.ParameterDeclaration) => {
         const bindingName = normalizeBindingName(
           param.name,
-          this.factory,
-          this.usedBindingNames,
+          this.#factory,
+          this.#usedBindingNames,
         );
-        return this.factory.createParameterDeclaration(
+        return this.#factory.createParameterDeclaration(
           undefined,
           undefined,
           bindingName,
@@ -410,7 +423,7 @@ export class PatternBuilder {
       : (returnType || originalCallback.type);
 
     return preserveSourceMapRange(
-      this.factory.createArrowFunction(
+      this.#factory.createArrowFunction(
         originalCallback.modifiers,
         originalCallback.typeParameters,
         [eventParameter, paramsParameter, ...additionalParameters],

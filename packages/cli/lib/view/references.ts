@@ -5,6 +5,7 @@
  * the definition index. Pure and dependency-free, so they unit-test easily and
  * power the Enter info card's "uses" and "depends on" sections.
  */
+
 import type { Document, StructureNode, TokenClass } from "./model.ts";
 
 /** Token classes that count as an identifier occurrence of a symbol. */
@@ -24,8 +25,10 @@ export interface Reference {
   readonly line: number;
   readonly col: number;
   readonly cls: TokenClass;
+
   /** The full source line, for context in the card. */
   readonly lineText: string;
+
   /** True when this occurrence sits inside the node being described. */
   readonly inside: boolean;
 }
@@ -33,10 +36,13 @@ export interface Reference {
 export interface Dependency {
   readonly name: string;
   readonly kind: StructureNode["kind"];
+
   /** 0-based line of the declaration this node depends on. */
   readonly line: number;
+
   /** Char offset of the declaration, to select its node when jumped to. */
   readonly startOffset: number;
+
   /** Char offset of the first use inside the node, for a semantic definition
    * lookup that resolves the exact binding (and reaches other files). */
   readonly useOffset: number;
@@ -100,7 +106,7 @@ export function findDependencies(
       const spanOffset = charOffset;
       charOffset += span.text.length;
       // Stay within the node's actual span, not the whole boundary lines, so a
-      // sibling on the same line (e.g. the `const page =` it initialises) is
+      // sibling on the same line (e.g. the `const page =` it initializes) is
       // not mistaken for a dependency.
       if (line === node.startLine && span.col < node.startCol) continue;
       if (line === node.endLine && span.col >= node.endCol) continue;

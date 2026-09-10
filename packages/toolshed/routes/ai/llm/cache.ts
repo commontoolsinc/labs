@@ -1,7 +1,10 @@
 import { ensureDir } from "@std/fs";
+
+import { type BuiltInLLMMessage } from "@commonfabric/api";
+import { type LLMRequest } from "@commonfabric/llm/types";
+
 import { colors, timestamp } from "./cli.ts";
 import env from "@/env.ts";
-import { type BuiltInLLMMessage } from "@commonfabric/api";
 
 export const CACHE_DIR = `${env.CACHE_DIR}/llm-api-cache`;
 
@@ -11,6 +14,15 @@ export interface CacheItem {
   model?: string;
   system?: string;
   stopSequences?: string[];
+}
+
+/**
+ * Whether `request` asks for its response to be cached. A request that leaves
+ * `cache` out asks for caching; only `false` declines it. This is the whole of
+ * what the field says, and a route may answer live for reasons of its own.
+ */
+export function requestsCaching(request: Pick<LLMRequest, "cache">): boolean {
+  return request.cache !== false;
 }
 
 export async function hashKey(key: string): Promise<string> {

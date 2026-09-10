@@ -1,25 +1,35 @@
-import type { MemorySpace } from "@commonfabric/runner";
-import type { Runtime } from "@commonfabric/runner";
+import type { MemorySpace, Runtime } from "@commonfabric/runner";
+import {
+  DEFAULT_APP_PATTERN_SOURCE,
+  HOME_PATTERN_SOURCE,
+  patternSourceUrl,
+} from "@commonfabric/runner";
 
-// System space-root patterns, served as raw TSX by the toolshed patterns route.
-// Shared by PiecesController (boot-path reconciliation) and PieceManager (the
-// default-root heal-on-load-failure retry) — a home of its own so the manager
-// does not import the controller that wraps it.
-export const HOME_PATTERN_URL = "/api/patterns/system/home.tsx";
-export const DEFAULT_APP_PATTERN_URL = "/api/patterns/system/default-app.tsx";
+// The system space-root pattern refs and the source→URL resolution moved
+// into the runner's ensure-space-root.ts with the OW45 arm-B server-ensure
+// stage 1 (design PR #6209 §1: the SpaceServer's ensure and the controller
+// must share ONE definition — the creation CAUSE and source refs are
+// identity-bearing, so a drifted copy would fork the OCC convergence).
+// Re-exported here for the existing piece-side importers.
+export { DEFAULT_APP_PATTERN_SOURCE, HOME_PATTERN_SOURCE, patternSourceUrl };
 
 /**
- * The official system space-root pattern URL for a space type — the home DID
+ * The official system space-root pattern ref for a space type — the home DID
  * gets home.tsx, every other space gets the default app. This derivation only
  * selects the identity to check; it never proves that a sourceless root tracks
- * that URL. Exact equality with the official content identity supplies
+ * that ref. Exact equality with the official content identity supplies
  * that proof at the check site.
+ *
+ * CLIENT semantics, deliberately kept out of the runner core: the home
+ * predicate compares against `runtime.userIdentityDID`, which on a SERVING
+ * runtime is the SERVICE DID — the server-side ensure derives home-ness
+ * from the ACL instead (self-owned = home; see ensure-space-root.ts).
  */
-export function deriveSystemPatternUrl(
+export function deriveSystemPatternSource(
   space: MemorySpace,
   runtime: Runtime,
 ): string {
   return space === runtime.userIdentityDID
-    ? HOME_PATTERN_URL
-    : DEFAULT_APP_PATTERN_URL;
+    ? HOME_PATTERN_SOURCE
+    : DEFAULT_APP_PATTERN_SOURCE;
 }

@@ -104,10 +104,10 @@ export class CFTabs extends BaseElement {
   declare value: CellHandle<string> | string;
   declare orientation: "horizontal" | "vertical";
 
-  // Track last known value to detect external cell changes
+  /** The last known value, kept to detect external cell changes. */
   private _lastKnownValue: string = "";
 
-  /* ---------- Cell controller for value binding ---------- */
+  /** Cell controller for value binding */
   private _cellController = createStringCellController(this, {
     timing: { strategy: "immediate" }, // Tab changes should be immediate
     onChange: (newValue: string, _oldValue: string) => {
@@ -227,11 +227,14 @@ export class CFTabs extends BaseElement {
 
   private _pendingRetry: number | null = null;
 
-  // `valueOverride` carries an authoritative just-delivered value (a user
-  // click or a cell delivery via the controller's onChange). It matters for
-  // PLAIN string bindings, where a click's setValue has no backing store to
-  // write — a getValue() re-read here would return the stale bound literal
-  // and silently no-op the sync.
+  /**
+   * Syncs the tabs and panels to the selected value. `valueOverride` carries
+   * an authoritative just-delivered value (a user click or a cell delivery via
+   * the controller's `onChange`). It matters for _plain_ string bindings,
+   * where a click's `setValue()` has no backing store to write — a
+   * `getValue()` re-read here would return the stale bound literal and
+   * silently no-op the sync.
+   */
   private updateTabSelection(valueOverride?: string): void {
     // Every sync pass supersedes any pending deferred retry. The retry
     // captures its call's valueOverride, so a retry left armed across a NEWER
@@ -337,12 +340,13 @@ export class CFTabs extends BaseElement {
     this.updateTabSelection();
   };
 
-  // The cf-tab-list element whose internal slot currently carries our
-  // slotchange listener. Tracked by ELEMENT (not a one-shot boolean): a VDOM
-  // consumer that re-renders its tab list re-CREATES the cf-tab-list element,
-  // and a listener left on the discarded element observes nothing — cf-tabs
-  // then never hears about the replacement tabs (part of the plain-value
-  // "one-behind" highlight bug).
+  /**
+   * The `cf-tab-list` element whose internal slot currently carries our
+   * `slotchange` listener. Tracked by _element_ (not a one-shot boolean): a
+   * VDOM consumer that re-renders its tab list _re-creates_ the `cf-tab-list`
+   * element, and a listener left on the discarded element observes nothing —
+   * `cf-tabs` then never hears about the replacement tabs.
+   */
   private _tabListWithSlotListener: Element | null = null;
 
   /**

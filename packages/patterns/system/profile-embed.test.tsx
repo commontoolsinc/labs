@@ -1,4 +1,4 @@
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import ProfileEmbed from "./profile-embed.tsx";
 import ProfileHome from "./profile-home.tsx";
 
@@ -7,7 +7,7 @@ import ProfileHome from "./profile-home.tsx";
  *
  * WISH LIMITATION (documented): `ProfileEmbed` resolves the viewer's profile via
  * `wish({ query: "#profile" })`. The lane-2 test harness only seeds the
- * `#default` pattern (pieceRegistry/recentPieces), never a `profiles` roster,
+ * `#default` pattern (including `pieceRegistry`), never a `profiles` roster,
  * and a valid profile MUST live in its own (cross-)space — seeding one would drive the
  * exact cross-space create surface the pattern-unit lane forbids (it fails a
  * file on ANY console error). So `#profile` stays unresolved here and we test:
@@ -78,7 +78,7 @@ export default pattern(() => {
   const assert_bio_cleared = assert(() => profile.bio === "");
 
   return {
-    tests: [
+    [TESTS]: [
       // (1) Fallback branch — no profile resolves in the harness.
       { assertion: assert_no_profile_in_harness },
       { assertion: assert_not_editing_by_default },

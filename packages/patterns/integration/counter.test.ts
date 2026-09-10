@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   initializePiecesController,
   PieceController,
@@ -43,7 +43,7 @@ describe("counter direct operations test", () => {
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
     cc = await initializePiecesController({
-      spaceName: SPACE_NAME,
+      space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
     });
@@ -53,10 +53,10 @@ describe("counter direct operations test", () => {
       "counter",
       "counter.tsx",
     );
-    const program = await cc.manager().runtime.harness
-      .resolve(
-        new FileSystemProgramResolver(sourcePath),
-      );
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: sourcePath },
+    );
     piece = await cc.create(
       program, // We operate on the piece in this thread
       { start: true },
@@ -66,7 +66,7 @@ describe("counter direct operations test", () => {
     // Without this, setting values won't trigger pattern re-computation. The
     // sink also drives awaitResultValue: it records the latest committed value
     // and resolves a pending waiter when its target is reached.
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink((value) => {
       latestResultValue = (value as { value?: number } | undefined)?.value;
       if (resultWaiter && latestResultValue === resultWaiter.target) {

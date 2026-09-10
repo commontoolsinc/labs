@@ -19,6 +19,11 @@ export const propsOf = (
   return isRecord(props) ? props : undefined;
 };
 
+export const propValue = (node: unknown, prop: string): unknown => {
+  const props = propsOf(node);
+  return props ? readValue(props[prop]) : undefined;
+};
+
 const childrenArray = (children: unknown): unknown[] => {
   const value = readValue(children);
   if (Array.isArray(value)) return value;
@@ -70,10 +75,34 @@ export const findNode = (
     .find((child) => child !== undefined);
 };
 
+export const findNodeByProp = (
+  root: unknown,
+  prop: string,
+  expected: unknown,
+): unknown | undefined =>
+  findNode(root, (node) => {
+    const props = propsOf(node);
+    return props !== undefined && readValue(props[prop]) === expected;
+  });
+
+export const findNodeById = (
+  root: unknown,
+  id: string,
+): unknown | undefined => findNodeByProp(root, "id", id);
+
 export const findNodeByText = (
   root: unknown,
   expected: string,
 ): unknown | undefined => findNode(root, (node) => hasText(node, expected));
+
+export const findElement = (
+  root: unknown,
+  name: string,
+): unknown | undefined =>
+  findNode(root, (node) => {
+    const value = readValue(node);
+    return isRecord(value) && readValue(value.name) === name;
+  });
 
 export const findElementByText = (
   root: unknown,

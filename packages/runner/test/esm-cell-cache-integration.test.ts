@@ -31,10 +31,11 @@ if (resolvedRuntimeVersion === undefined) {
 const runtimeVersion = resolvedRuntimeVersion;
 const coverageRuntimeVersion = `${runtimeVersion}/pattern-coverage`;
 
-// Step 5: PatternManager drives the content-addressed cell cache on the ESM
-// path — cold compiles write the module set back (CFC-stamped), warm compiles
-// reuse it, and the cache is gated on CFC enforcement.
 describe("ESM compile via content-addressed cell cache", () => {
+  // Step 5: PatternManager drives the content-addressed cell cache on the ESM
+  // path — cold compiles write the module set back (CFC-stamped), warm compiles
+  // reuse it, and the cache is gated on CFC enforcement.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -73,7 +74,7 @@ describe("ESM compile via content-addressed cell cache", () => {
   afterEach(async () => {
     await runtime?.patternManager.flushCompileCacheWrites();
     await tx.commit();
-    await runtime?.dispose();
+    await runtime?.dispose({ closeStorage: false });
     await storageManager?.close();
   });
 
@@ -246,11 +247,11 @@ describe("ESM compile via content-addressed cell cache", () => {
         }
         inspectTx.abort?.("repaired coverage closure inspection complete");
       } finally {
-        await restoredRuntime.dispose();
+        await restoredRuntime.dispose({ closeStorage: false });
       }
     } finally {
       firstTx.abort?.("coverage format recovery test complete");
-      await firstRuntime.dispose();
+      await firstRuntime.dispose({ closeStorage: false });
     }
   });
 
@@ -420,7 +421,7 @@ describe("ESM compile via content-addressed cell cache", () => {
       expect(recovered.has(compiled.entryIdentity)).toBe(true);
     } finally {
       runtime2.editWithRetry = originalEditWithRetry;
-      await runtime2.dispose();
+      await runtime2.dispose({ closeStorage: false });
     }
   });
 
@@ -514,7 +515,7 @@ describe("ESM compile via content-addressed cell cache", () => {
           readTx2.abort?.("source-only reload assertion complete");
         }
       } finally {
-        await runtime2.dispose();
+        await runtime2.dispose({ closeStorage: false });
       }
     } finally {
       restoreRuntimeVersion();
@@ -620,7 +621,7 @@ describe("ESM compile via content-addressed cell cache", () => {
       expect(typeof warm).toBe("function");
     } finally {
       await tx2.commit();
-      await runtime2.dispose();
+      await runtime2.dispose({ closeStorage: false });
     }
   });
 
@@ -628,6 +629,8 @@ describe("ESM compile via content-addressed cell cache", () => {
     const disabled = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      // The disabled rung is what this test is about. The compile cache stats
+      // assertion below reads back all zeroes only at this rung.
       cfcEnforcementMode: "disabled",
     });
     const dtx = disabled.edit();
@@ -644,18 +647,19 @@ describe("ESM compile via content-addressed cell cache", () => {
       expect(typeof compiled).toBe("function");
     } finally {
       await dtx.commit();
-      await disabled.dispose();
+      await disabled.dispose({ closeStorage: false });
     }
   });
 });
 
-// Step 4.4 (required): a pattern compiled bound to space B writes its source +
-// compiled docs into B (not the ambient space A), the link closure resolves in
-// B, and the compiled docs carry the required integrity. This is exactly the
-// per-space routing `PatternFactory.inSpace(B)` relies on: instantiating a child
-// in space B loads it via `loadPattern(id, rootCell.space === B)`, whose core is
-// `compilePattern(source, { space: B })`.
 describe("ESM compile cache — Pattern.inSpace A → B routing", () => {
+  // Step 4.4 (required): a pattern compiled bound to space B writes its source
+  // + compiled docs into B (not the ambient space A), the link closure resolves
+  // in B, and the compiled docs carry the required integrity. This is exactly
+  // the per-space routing `PatternFactory.inSpace(B)` relies on: instantiating
+  // a child in space B loads it via `loadPattern(id, rootCell.space === B)`,
+  // whose core is `compilePattern(source, { space: B })`.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   const spaceA = signer.did();
 
@@ -736,7 +740,7 @@ describe("ESM compile cache — Pattern.inSpace A → B routing", () => {
       readTx.abort?.();
     } finally {
       await tx.commit();
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
     }
   });
 
@@ -775,8 +779,8 @@ describe("ESM compile cache — Pattern.inSpace A → B routing", () => {
       });
       await tx2.commit();
     } finally {
-      await rt2?.dispose();
-      await rt1.dispose();
+      await rt2?.dispose({ closeStorage: false });
+      await rt1.dispose({ closeStorage: false });
     }
   });
 });

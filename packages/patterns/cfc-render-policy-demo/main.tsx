@@ -9,6 +9,7 @@ import {
   Stream,
   type TrustedActionWrite,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -42,7 +43,7 @@ type LabelledContentArgument = {
 
 export type TrustedHealthDisclosureOutput = {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   revealSensitive: TrustedActionWrite<
     boolean,
     typeof setRevealSensitive,
@@ -55,7 +56,7 @@ export type TrustedHealthDisclosureOutput = {
 
 export type RenderPolicyDemoOutput = {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   revealSensitive: TrustedActionWrite<
     boolean,
     typeof setRevealSensitive,
@@ -91,7 +92,7 @@ const makeConfidentialHealthText = lift<
 
 export const UntrustedDirectHealthRender = pattern<
   DirectHealthRenderInput,
-  { [NAME]: string; [UI]: unknown }
+  { [NAME]: string; [UI]: VNode }
 >(({ content }) => ({
   [NAME]: "Untrusted direct health render",
   [UI]: (

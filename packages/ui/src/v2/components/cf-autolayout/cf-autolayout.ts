@@ -35,15 +35,18 @@ export class CFAutoLayout extends BaseElement {
     tabNames: { type: Array, attribute: false },
     leftTabName: { type: String, attribute: false },
     rightTabName: { type: String, attribute: false },
+
     /**
      * Position of tabs on mobile: "top" | "bottom".
      * Default is "bottom".
      */
     tabsPosition: { type: String, reflect: true },
+
     /**
      * Whether the left sidebar is open. Reflected to attribute.
      */
     leftOpen: { type: Boolean, reflect: true },
+
     /**
      * Whether the right sidebar is open. Reflected to attribute.
      */
@@ -440,8 +443,10 @@ export class CFAutoLayout extends BaseElement {
     globalThis.removeEventListener("keydown", this._onKeydown);
   }
 
-  // Keep attributes/props as the single source of truth and
-  // enforce mobile exclusivity even when set programmatically.
+  /**
+   * Keeps attributes/props as the single source of truth and enforces mobile
+   * exclusivity even when set programmatically.
+   */
   override updated(changed: Map<string, unknown>) {
     if (changed.has("leftOpen") || changed.has("rightOpen")) {
       // Enforce exclusivity on mobile when both become true.

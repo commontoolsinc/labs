@@ -1,13 +1,19 @@
-import { describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/interface";
+import { describe, it } from "@std/testing/bdd";
+
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
 import type { URI } from "@commonfabric/memory/interface";
+
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import { preparedDigestFor, type PreparedDigestInput } from "../src/cfc/mod.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-write-prefix");
 
@@ -78,13 +84,12 @@ const makeRuntime = (options: {
   new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager: options.storageManager,
-    cfcEnforcementMode: "enforce-explicit",
     ...(options.cfcTriggerReadGating !== undefined
       ? { cfcTriggerReadGating: options.cfcTriggerReadGating }
       : {}),
-    ...(options.cfcWriteFloor !== undefined
-      ? { cfcWriteFloor: options.cfcWriteFloor }
-      : {}),
+    // The subject here is prefix-provenance measurement, so unless an arm
+    // dials the floor itself it measures but does not decide.
+    cfcWriteFloor: options.cfcWriteFloor ?? "observe",
   });
 
 // Seed a doc's stored CFC metadata directly via an ungated path-[]
@@ -99,6 +104,7 @@ const seedLabeledDoc = async (
   const seed = runtime.edit();
   const cell = runtime.getCell(signer.did(), id, undefined, seed);
   const docId = cell.getAsNormalizedFullLink().id as URI;
+  writeSeedEnvelopeDoc(seed, signer.did());
   seed.writeOrThrow({
     space: signer.did(),
     id: docId,
@@ -108,7 +114,7 @@ const seedLabeledDoc = async (
     value,
     cfc: {
       version: 1,
-      schemaHash: `seed-${id}`,
+      schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
       labelMap: { version: 1, entries: [{ path: [], label }] },
     },
   });

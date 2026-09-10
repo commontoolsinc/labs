@@ -2,8 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromFileUrl, join } from "@std/path";
 import ts from "typescript";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
-import { registerCommonFabricDeclarationSources } from "../../src/typescript/common-fabric-symbols.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema } from "../utils.ts";
 
 const REPO_ROOT = fromFileUrl(new URL("../../../../", import.meta.url));
@@ -12,6 +11,29 @@ const DEEP_FREEZE_STUB = join(
   REPO_ROOT,
   "__schema_factory_input_deep_freeze.d.ts",
 );
+const DATA_MODEL_API = join(REPO_ROOT, "packages/data-model/src/api.ts");
+
+/**
+ * The workspace specifiers `packages/api/index.ts` names, resolved by hand
+ * because this program compiles without an import map. The
+ * `@commonfabric/data-model` barrel is reached for one value, `deepFreeze()`
+ * in `packages/api/cfc.ts`, which no part of the surface under test calls, so
+ * a stub declaring just that function stands in for the whole module; the
+ * fabric value declarations are part of that surface, so they resolve to the
+ * real module.
+ */
+const WORKSPACE_MODULES: ReadonlyMap<string, ts.ResolvedModuleFull> = new Map([
+  ["@commonfabric/data-model", {
+    resolvedFileName: DEEP_FREEZE_STUB,
+    extension: ts.Extension.Dts,
+    isExternalLibraryImport: false,
+  }],
+  ["@commonfabric/data-model/api", {
+    resolvedFileName: DATA_MODEL_API,
+    extension: ts.Extension.Ts,
+    isExternalLibraryImport: false,
+  }],
+]);
 
 function formatDiagnostics(diagnostics: readonly ts.Diagnostic[]): string {
   return diagnostics.map((diagnostic) => {
@@ -37,7 +59,6 @@ function getTypeFromRealApiCode(
 ): {
   type: ts.Type;
   checker: ts.TypeChecker;
-  program: ts.Program;
   sourceFile: ts.SourceFile;
 } {
   const compilerOptions: ts.CompilerOptions = {
@@ -91,12 +112,9 @@ function getTypeFromRealApiCode(
     virtualFiles.get(fileName) ?? originalReadFile(fileName);
   host.resolveModuleNames = (moduleNames, containingFile) =>
     moduleNames.map((moduleName) => {
-      if (moduleName === "@commonfabric/data-model/deep-freeze") {
-        return {
-          resolvedFileName: DEEP_FREEZE_STUB,
-          extension: ts.Extension.Dts,
-          isExternalLibraryImport: false,
-        };
+      const workspaceModule = WORKSPACE_MODULES.get(moduleName);
+      if (workspaceModule !== undefined) {
+        return workspaceModule;
       }
       return ts.resolveModuleName(
         moduleName,
@@ -134,13 +152,7 @@ function getTypeFromRealApiCode(
     throw new Error(`Type ${typeName} not found`);
   }
 
-  const commonFabricApi = program.getSourceFile(
-    join(REPO_ROOT, "packages/api/index.ts"),
-  );
-  if (!commonFabricApi) throw new Error("Real Common Fabric API not resolved");
-  registerCommonFabricDeclarationSources(checker, [commonFabricApi]);
-
-  return { type: foundType, checker, program, sourceFile };
+  return { type: foundType, checker, sourceFile };
 }
 
 describe("Schema: real API FactoryInput", () => {
@@ -167,7 +179,7 @@ describe("Schema: real API FactoryInput", () => {
       code,
       "SchemaRoot",
     );
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const result = asObjectSchema(
       gen.generateSchema(
         type,
@@ -189,85 +201,6 @@ describe("Schema: real API FactoryInput", () => {
     const llmState = defs.LLMState as { properties?: Record<string, unknown> };
     expect(llmState.properties?.cancelGeneration).toEqual({
       asCell: ["stream", "opaque"],
-    });
-  });
-
-  it("formats real API factories, aliases, nested captures, and byRef results", () => {
-    const code = `
-      import {
-        byRef,
-        type HandlerFactory,
-        type ModuleFactory,
-        type PatternFactory,
-      } from "./packages/api/index.ts";
-
-      type PatternAlias<T, R> = PatternFactory<T, R>;
-      declare const captureBrand: unique symbol;
-      type CapturedModule<T, R> = ModuleFactory<T, R> & {
-        readonly [captureBrand]: true;
-      };
-      const referenced = byRef<{ id: string }, { ok: boolean }>("test:ref");
-
-      interface SchemaRoot {
-        inputFactory: PatternAlias<{ query: string }, { count: number }>;
-        outputFactory: CapturedModule<{ value: number }, string>;
-        capture: {
-          handlers: HandlerFactory<{ room: string }, { body: string }>[];
-        };
-        referenced: typeof referenced;
-      }
-    `;
-    const { type, checker, sourceFile } = getTypeFromRealApiCode(
-      code,
-      "SchemaRoot",
-    );
-    const result = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(
-        type,
-        checker,
-        undefined,
-        undefined,
-        undefined,
-        sourceFile,
-      ),
-    );
-
-    expect((result.properties?.inputFactory as any).asFactory).toEqual({
-      kind: "pattern",
-      argumentSchema: {
-        type: "object",
-        properties: { query: { type: "string" } },
-        required: ["query"],
-      },
-      resultSchema: {
-        type: "object",
-        properties: { count: { type: "number" } },
-        required: ["count"],
-      },
-    });
-    expect((result.properties?.outputFactory as any).asFactory.kind).toBe(
-      "module",
-    );
-    const handler = (result.properties?.capture as any).properties.handlers
-      .items;
-    expect(handler.asFactory.kind).toBe("handler");
-    expect(handler.asFactory.contextSchema.properties.room.type).toBe(
-      "string",
-    );
-    expect(handler.asFactory.eventSchema.properties.body.type).toBe("string");
-    expect(handler).not.toHaveProperty("asCell");
-    expect((result.properties?.referenced as any).asFactory).toEqual({
-      kind: "module",
-      argumentSchema: {
-        type: "object",
-        properties: { id: { type: "string" } },
-        required: ["id"],
-      },
-      resultSchema: {
-        type: "object",
-        properties: { ok: { type: "boolean" } },
-        required: ["ok"],
-      },
     });
   });
 });

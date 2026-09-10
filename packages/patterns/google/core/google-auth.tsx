@@ -271,14 +271,18 @@ export interface Output {
   auth: GoogleAuthCell;
   scopes: string[];
   selectedScopes: SelectedScopes;
+
   /** Compact user display with avatar, name, and email */
   userChip: VNode;
+
   /** Minimal preview for picker display with scope summary */
   [TILE_UI]: VNode;
+
   /**
    * Refresh the OAuth token. Call this from other pieces when the token expires.
    */
   refreshToken: Stream<Record<string, never>>;
+
   /** Background updater for proactive token refresh via background-piece-service */
   bgUpdater: Stream<Record<string, never>>;
 }

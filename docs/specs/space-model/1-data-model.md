@@ -13,13 +13,13 @@ Draft — based on codebase investigation.
 
 ### Overview
 
-The system stores **fabric values** — data that can be serialized to JSON with
-some extensions. All persistent data and in-flight messages use this
+The system stores **fabric values** — data that can be serialized to JSON
+text with some extensions. All persistent data and in-flight messages use this
 representation.
 
 ### Base Types
 
-Fabric values are JSON-compatible with specific constraints:
+`FabricValue`s are JSON-compatible with specific constraints:
 
 | Type | Notes |
 |------|-------|
@@ -27,8 +27,8 @@ Fabric values are JSON-compatible with specific constraints:
 | `boolean` | `true` or `false` |
 | `number` | Any IEEE 754 binary64 value, including `-0`, `NaN`, and `±Infinity` (see Numbers below). |
 | `string` | Unicode text |
-| `array` | Ordered sequence of fabric values |
-| `object` | String-keyed map of fabric values |
+| `array` | Ordered sequence of `FabricValue`s |
+| `object` | String-keyed map of `FabricValue`s |
 
 #### Numbers
 
@@ -45,21 +45,33 @@ All IEEE 754 binary64 values are accepted, including `-0`, `NaN`,
 
 - May be dense or sparse; holes are preserved, and are distinct from an
   explicitly-stored `undefined`
-- Elements may be `undefined`, that being a first-class fabric value
-- Non-index keys cause rejection as non-fabric, `length` aside: named
+- Elements may be `undefined`, that being a first-class `FabricValue`
+- Non-index keys cause rejection as a non-`FabricValue`, `length` aside:
+  named
   (string-keyed) and symbol-keyed properties alike, whether or not they are
   enumerable
+- Every present index must hold a *data* property; an accessor-backed
+  (getter and/or setter) index causes rejection as a non-`FabricValue`
 
 See `space-model-formal-spec/1-fabric-values.md` Section 1.5 for the
 authoritative statement of these rules.
 
 #### Objects
 
-- Plain objects only (no class instances)
-- Keys must be strings; symbol keys cause rejection as non-fabric
-- Values must be valid fabric values
-- No distinction between regular and null-prototype objects; reconstruction
-  produces regular plain objects
+- Direct `Object` instances only: the prototype must be `Object.prototype`
+  itself, so class instances and null-prototype objects alike cause rejection
+- Keys must be strings; symbol keys cause rejection as a non-`FabricValue`
+- Every property must be an enumerable *data* property; accessor-backed
+  (getter and/or setter) and non-enumerable properties cause rejection as a
+  non-`FabricValue`
+- The names `__proto__` and `constructor` cause rejection in the JavaScript
+  implementation. This is a reservation of that implementation — one name its
+  copy loops cannot rebuild, one that its other boundaries already refuse —
+  rather than a rule of the model; see Section 1.5 of
+  `space-model-formal-spec/1-fabric-values.md`
+- Values must be valid `FabricValue`s
+- Decoding produces regular plain objects, which is the only object
+  shape a `FabricValue` has
 
 ### Special Values
 
@@ -78,18 +90,19 @@ These types cannot be stored directly:
 
 - `symbol` — only registry-interned symbols are storable; unique symbols
   throw (see Symbols below)
-- `function` — throws error unless it has a `toJSON()` method
-- Class instances — throws error unless they have `toJSON()` or special handling
+- `function` — throws
+- Class instances — throw unless the class has special handling (a recognized
+  native class, or the fabric protocol)
 
 #### Symbols
 
-Symbol handling at the fabric-value conversion gate:
+Symbol handling at the `FabricValue` conversion gate:
 
 - Registry-interned symbols (`Symbol.for(key)`, where `Symbol.keyFor(s)`
-  returns a string) are first-class fabric values, portable across realms
+  returns a string) are first-class `FabricValue`s, portable across realms
   and processes via their registry key
 - Unique symbols (`Symbol(desc)`) throw with the message
-  `"Cannot store unique (uninterned) symbol"`
+  ``"Not representable as a `FabricValue`: unique (uninterned) symbol"``
 - Round-trip via the `Symbol@1` JSON envelope (see
   `space-model-formal-spec/3-json-encoding.md` Section 3) and via the
   byte-level form in `space-model-formal-spec/2-hash-byte-format.md`
@@ -163,7 +176,7 @@ correctly.
 
 Cycles *across* documents are supported via explicit links (sigil links). Two
 cells can reference each other, forming a cycle in the broader data graph. The
-no-cycles constraint applies only to the serializable content of a single cell.
+no-cycles constraint applies only to the encodable content of a single cell.
 
 The within-document prohibition is inherited from JSON's tree structure, not from
 a deep architectural requirement. If a future storage format supports cyclic
@@ -290,9 +303,9 @@ shapes via `isSigilLink()`, `isStreamValue()`, `isErrorWrapper()`, etc.
 Keep rich types as themselves within the runtime:
 
 - **Cells remain Cells** through the reactive graph and transactions
-- **Errors remain Errors** until they cross a serialization boundary
+- **Errors remain Errors** until they cross an encoding boundary
 - **Streams are first-class** rather than marker objects
-- Serialization becomes a "last mile" concern at specific boundary points
+- Encoding becomes a "last mile" concern at specific boundary points
 
 The `FabricValue` type would expand to a union of three categories:
 
@@ -319,9 +332,9 @@ type FabricValue =
   | { [key: string]: FabricValue }
 ```
 
-Built-in JS types require explicit serialization handling — we cannot (and
+Built-in JS types require explicit encoding handling — we cannot (and
 should not) patch `Error.prototype` with symbol-keyed methods. The
-serialization context must recognize these types directly.
+codec engine must recognize these types directly.
 
 #### The Fabric Protocol
 
@@ -330,13 +343,17 @@ well-known symbols:
 
 ```typescript
 // Shown inside a pattern body.
-const CODEC = Symbol.for('data-model.codec');
-const DEEP_FREEZE = Symbol.for('data-model.deepFreeze');
-const IS_DEEP_FROZEN = Symbol.for('data-model.isDeepFrozen');
-// If protocol evolution is needed: Symbol.for('data-model.codec@2')
+// Unique symbols, not registry-interned ones: a member keyed by one is
+// reachable only by importing the symbol, and the string is a description
+// rather than a lookup key.
+const CODEC: unique symbol = Symbol('data-model.codec');
+const DEEP_FREEZE: unique symbol = Symbol('data-model.deepFreeze');
+const IS_DEEP_FROZEN: unique symbol = Symbol('data-model.isDeepFrozen');
+// If protocol evolution is needed: a further symbol,
+// e.g. `Symbol('data-model.codec@2')`.
 
 // Instance protocol: "here's how to freeze me deeply, and here's how to
-// clone me." (In-process lifecycle only -- serialization is class-level.)
+// clone me." (In-process lifecycle only -- encoding is class-level.)
 abstract class FabricInstance {
   abstract [DEEP_FREEZE](subFreeze: (v: FabricValue) => FabricValue): FabricValue;
   abstract [IS_DEEP_FROZEN](subIsDeepFrozen: (v: FabricValue) => boolean): boolean;
@@ -345,23 +362,42 @@ abstract class FabricInstance {
 }
 
 // Codec protocol: each class hosts an encoder-decoder object -- the
-// single source of truth for how its instances serialize -- as a static
-// getter keyed by `CODEC`.
-interface FabricCodec {
+// single source of truth for how its instances encode -- as a static
+// getter keyed by a well-known symbol. `Encoded` is the domain the
+// essential state lives in.
+interface FabricCodec<Encoded> {
   get uniqueHandledClass(): Constructor | undefined;
   get recognizedTypeTag(): string | undefined;
   canEncode(value: FabricValue): boolean;
   tagForValue(value: FabricValue): string;
-  encode(value: FabricValue): FabricValue;   // shallow
+  encode(value: FabricValue): Encoded;       // shallow
   decode(                                    // shallow
     typeTag: string,
-    state: FabricValue,
-    context: ReconstructionContext,
+    state: Encoded,
+    env: LiveEnvironment,
   ): FabricValue;
 }
 
-interface FabricClassWithCodec {
-  get [CODEC](): FabricCodec;
+// Nonterminal: state made of `FabricValue`s, which the walker expands in
+// turn. One such instance can serve every wire format.
+type NonterminalCodec = FabricCodec<FabricValue>;
+
+// Terminal: state already in one format's own domain, which the walker
+// passes through. Serves that one format alone.
+type TerminalCodec<Encoded> = FabricCodec<Encoded>;
+
+// The symbol a class binds under is a separate question from the kind.
+// `CODEC` is the claim that one codec serves every format, which a
+// terminal codec cannot truthfully make, so only a nonterminal codec
+// belongs there; nothing enforces that. A class the formats treat
+// differently binds per format instead, under that format's own symbol,
+// and what it supplies there may be of either kind.
+
+// Which kind a codec is cannot be read off its signature -- the domains
+// overlap -- so a codec declares it by which base class it extends.
+
+interface FabricClassWithNonterminalCodec {
+  get [CODEC](): NonterminalCodec;
 }
 ```
 
@@ -377,8 +413,8 @@ contracts.
 `decode()` lives on the codec rather than being a constructor for two
 reasons:
 
-1. **Reconstruction-specific context**: It receives a `ReconstructionContext`
-   (and potentially other context) which shouldn't be mandated in a regular
+1. **Decoding-specific environment**: It receives a `LiveEnvironment`
+   (and potentially more besides) which shouldn't be mandated in a regular
    constructor's signature.
 2. **Instance interning**: It can return existing instances rather than always
    creating new ones — essential for types like `Cell` where identity matters.
@@ -398,7 +434,7 @@ Example implementation:
 ```typescript
 // Shown for illustration only.
 class Cell<T> extends FabricInstance {
-  static #codec = new (class extends BaseFabricCodec {
+  static #codec = new (class extends BaseNonterminalCodec {
     constructor() {
       super('Cell@1', Cell);
     }
@@ -410,13 +446,13 @@ class Cell<T> extends FabricInstance {
     decode(
       _typeTag: string,
       state: FabricValue,
-      context: ReconstructionContext,
+      env: LiveEnvironment,
     ): Cell<unknown> {
-      return context.getCell(state as CellState);
+      return env.getCell(state as CellState);
     }
   })();
 
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }
@@ -438,31 +474,31 @@ The value returned by a codec's `encode()` can contain any value that is
 itself a `FabricValue` — including other `FabricInstance`s, primitives,
 and plain objects/arrays.
 
-The **serialization system handles recursion**, not the individual codecs.
+The **codec system handles recursion**, not the individual codecs.
 An `encode()` implementation simply returns one shallow layer of essential
 state; it does not (and should not) recursively encode nested values. The
-codecs won't have access to the serialization machinery required
+codecs won't have access to the codec machinery required
 for that — by design, as it would be a layering violation.
 
 Similarly, `decode()` receives state where nested values have already been
-decoded by the serialization system.
+decoded by the codec system.
 
-#### Reconstruction Guarantees
+#### Decode Guarantees
 
 The system aims for an **immutable-forward** design:
 
-- **Plain objects and arrays** are frozen (`Object.freeze()`) upon reconstruction
+- **Plain objects and arrays** are frozen (`Object.freeze()`) upon decoding
 - **`FabricInstance`s** should ideally be frozen as well — this is the north
   star, though not yet a strict requirement
-- **No distinction** is made between regular and null-prototype plain objects;
-  reconstruction always produces regular plain objects
+- Decoding always produces regular plain objects, that being the only
+  object shape a `FabricValue` has
 
-This immutability guarantee enables safe sharing of reconstructed values and
+This immutability guarantee enables safe sharing of decoded values and
 aligns with the reactive system's assumption that values don't mutate in place.
 
 #### Unknown Types
 
-When deserializing, a context may encounter a type tag it doesn't recognize —
+When decoding, a codec engine may encounter a type tag it doesn't recognize —
 for example, data written by a newer version of the system. Unknown types should
 be **passed through** rather than rejected, preserving forward compatibility.
 
@@ -476,7 +512,7 @@ class UnknownValue extends FabricInstance {
     readonly state: FabricValue,  // the raw state, already recursively processed
   ) { super(); }
 
-  static #codec = new (class extends BaseFabricCodec {
+  static #codec = new (class extends BaseNonterminalCodec {
     constructor() {
       // No recognized tag: the instance carries its own.
       super(undefined, UnknownValue);
@@ -495,59 +531,54 @@ class UnknownValue extends FabricInstance {
     }
   })();
 
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }
 ```
 
-The serialization system has special knowledge of `UnknownValue`: when it
-encounters an unknown type tag during deserialization, it constructs an
+The codec system has special knowledge of `UnknownValue`: when it
+encounters an unknown type tag during decoding, it constructs an
 `UnknownValue` directly from the original tag and state. When
-re-serializing, the codec's `tagForValue()` reads back the preserved tag
+re-encoding, the codec's `tagForValue()` reads back the preserved tag
 and `encode()` re-emits the preserved bare state, reproducing the original
 wire format and allowing data to round-trip through systems that don't
 understand it.
 
-#### Serialization Contexts
+#### Codec Engines
 
-Classes provide the *capability* to serialize (via their codecs) but don't
-own the wire format. A **serialization context** owns the format-specific
+Classes provide the *capability* to encode (via their codecs) but don't
+own the wire format. A **codec engine** owns the format-specific
 pipeline, dispatching per-type work to the codecs through a registry:
 
 ```typescript
 // Shown at module scope.
-// The public boundary (formal spec Section 4.3):
-interface SerializationContext<SerializedForm = unknown> {
-  readonly lenient: boolean;
-  encode(value: FabricValue): SerializedForm;
-  decode(data: SerializedForm, context: ReconstructionContext): FabricValue;
-}
-
+// The public boundary (formal spec Section 4.3): an engine exposes
+// `encode()` and `decode()`, and mints a context per act of each.
 // Internally, a registry maps classes -> codecs (for encoding) and
 // tags -> codecs (for decoding); see formal spec Section 4.5.
 ```
 
 This separation enables:
 - **Protocol versioning**: Same class, different tags in v1 vs v2
-- **Format flexibility**: JSON context vs CBOR context vs Automerge context
+- **Format flexibility**: JSON engine vs CBOR engine vs Automerge engine
 - **Migration paths**: A registry can route a legacy decode-only tag to an
   equivalent codec without touching the owning class
-- **Testing**: Mock contexts for unit tests
+- **Testing**: Mock engines for unit tests
 
 The flow becomes:
 
 ```
-Serialize:   codec.encode(instance) → state
-             → wrap(codec.tagForValue(instance), state) → wire
-Deserialize: wire → unwrap() → { tag, state }
-             → registry.codecFromTag(tag).decode(tag, state, ctx)
-             → instance
+Encode: codec.encode(instance) → state
+        → wrap(codec.tagForValue(instance), state) → wire
+Decode: wire → unwrap() → { tag, state }
+        → registry.codecFromTag(tag).decode(tag, state, env)
+        → instance
 ```
 
-#### Serialization Boundaries
+#### Encoding Boundaries
 
-The boundaries where serialization occurs in the current architecture:
+The boundaries where encoding occurs in the current architecture:
 
 | Boundary | Packages | Direction |
 |----------|----------|-----------|
@@ -557,38 +588,38 @@ The boundaries where serialization occurs in the current architecture:
 | **Network sync** | `toolshed` ↔ remote peers | WebSocket/HTTP |
 | **Cross-space** | space A ↔ space B | if in separate processes |
 
-Each boundary would use a serialization context (sketches of the context's
+Each boundary would use a codec engine (sketches of the engine's
 internal walkers):
 
 ```typescript
 // Shown inside a pattern body.
-// At boundary exit (inside the context's encode walk)
-function encodeValue(value: FabricValue): JsonWireValue {
+// At boundary exit (inside the engine's encode walk)
+function encodeValue(value: FabricValue): JsonCodecValue {
   const codec = registry.codecFromValue(value);
   if (codec) {
-    const state = encodeValue(codec.encode(value)); // context recurses
+    const state = encodeValue(codec.encode(value)); // engine recurses
     return wrapTag(codec.tagForValue(value), state);
   }
   // Handle self-representing primitives, arrays, plain objects...
 }
 
-// At boundary entry (inside the context's decode walk)
+// At boundary entry (inside the engine's decode walk)
 function decodeValue(
-  data: JsonWireValue,
-  ctx: ReconstructionContext,
+  data: JsonCodecValue,
+  env: LiveEnvironment,
 ): FabricValue {
   const unwrapped = unwrapTag(data);
   if (unwrapped) {
     const { tag, state } = unwrapped;
     const codec = registry.codecFromTag(tag);
-    if (codec) return codec.decode(tag, decodeValue(state, ctx), ctx);
-    return new UnknownValue(tag, decodeValue(state, ctx));
+    if (codec) return codec.decode(tag, decodeValue(state, env), env);
+    return new UnknownValue(tag, decodeValue(state, env));
   }
   // Handle primitives, arrays, plain objects recursively...
 }
 ```
 
-The decode path needs runtime context (`ReconstructionContext`) to
+The decode path needs a live environment (`LiveEnvironment`) to
 reconstitute rich types (e.g., looking up existing Cell instances rather
 than creating duplicates).
 
@@ -597,7 +628,7 @@ than creating duplicates).
 - **Type safety**: Rich types carry more information than JSON shapes
 - **Simpler internal code**: No `isSigilLink()` checks scattered throughout
 - **Single conversion point**: Easier to maintain, audit, and change
-- **Format flexibility**: Different boundaries can use different contexts
+- **Format flexibility**: Different boundaries can use different engines
 - **Better tooling**: Debuggers show actual Cells, not JSON blobs
 - **Extensible**: New fabric types only need to implement the protocol
 
@@ -611,10 +642,10 @@ This makes identity hashing independent of any particular wire encoding.
 #### Trade-offs
 
 - **Migration complexity**: Existing code assumes JSON forms internally
-- **Runtime context required**: Deserialization needs access to the runtime
+- **Live environment required**: Decoding needs access to the runtime
 - **Comparison semantics**: Must define equality for rich types (by identity?
   by encoded state?)
-- **Not "zero transformations"**: Late serialization eliminates serialization
+- **Not "zero transformations"**: Late encoding eliminates encoding
   copies within the runtime, but does not eliminate all transformations.
   Schema-driven reads still select and shape data (resolving links, projecting
   fields). Link construction still needs to know which data belongs to which
@@ -627,16 +658,16 @@ This makes identity hashing independent of any particular wire encoding.
 - What is the migration path from early to late conversion?
 - How do rich types participate in change detection and diffing?
 - Should cycles in encoded state be detected and rejected, or is this
-  left to the serialization system?
-- How are serialization contexts configured and selected at each boundary?
-- How is the type registry within a context managed? (Static registration?
+  left to the codec system?
+- How are codec engines configured and selected at each boundary?
+- How is the type registry within an engine managed? (Static registration?
   Dynamic discovery? Who owns the registry?)
 - What happens when a codec's `encode()` or `decode()` fails partway
   through? (Answered in the formal spec: a `ProblematicValue`, with
-  similar structure/use to `UnknownValue`, plus a lenient context mode.)
+  similar structure/use to `UnknownValue`, plus a lenient engine mode.)
 - How do schemas integrate with the fabric protocol? Each `FabricInstance`
   type implies a schema for its encoded state. The fabric layer should
-  provide serialization contexts access to these schemas. What changes to the
+  provide codec engines access to these schemas. What changes to the
   schema language are required? (See [Schemas](./7-schemas.md).)
 - Which built-in JS types should be included?
   - Byte arrays: `Uint8Array`, `ArrayBuffer`, or both?
@@ -667,7 +698,7 @@ types more directly — for example, using CBOR's native byte array rather than 
 
 #### Encoding Prefix: `fvj1:`
 
-Every encoded fabric value carries a literal `fvj1:` prefix in front of the
+Every encoded `FabricValue` carries a literal `fvj1:` prefix in front of the
 JSON itself. The prefix lets a recipient distinguish, at a glance, JSON that
 came from the fabric encoder from arbitrary JSON of unrelated origin.
 "`fvj1`" stands for "Fabric Value JSON, version 1"; the trailing version
@@ -711,7 +742,7 @@ Examples:
 ```
 
 **Note:** The `/<type>@<version>` convention described here applies specifically
-to the JSON encoding. Serialization contexts for other formats are free to use
+to the JSON encoding. Codec engines for other formats are free to use
 whatever representation makes the most sense in their context.
 
 #### Benefits
@@ -736,7 +767,7 @@ keeping the boundary between encoding signals and user data unambiguous.
 
 #### Stateless Types
 
-Types that require no reconstruction state use `null` as the value:
+Types that require no decoding state use `null` as the value:
 
 ```json
 { "/Stream@1": null }
@@ -758,27 +789,27 @@ are still processed normally:
 { "/object": { "/myKey": { "/Link@1": { "id": "..." } } } }
 ```
 
-Deserializes to: `{ "/myKey": <reconstructed Link> }`
+Decodes to: `{ "/myKey": <decoded Link> }`
 
 The `/object` wrapper is stripped, the inner object's keys are taken literally,
-but its values go through normal deserialization (the Link is reconstructed).
+but its values go through normal decoding (the Link is decoded).
 
 **`/quote` — Fully literal, no interpretation**
 
-Wraps a value that should be returned exactly as-is, with no deserialization of
+Wraps a value that should be returned exactly as-is, with no decoding of
 any nested special forms:
 
 ```json
 { "/quote": { "/Link@1": { "id": "..." } } }
 ```
 
-Deserializes to: `{ "/Link@1": { "id": "..." } }` — the inner structure is *not*
-reconstructed as a Link; it remains a plain object.
+Decodes to: `{ "/Link@1": { "id": "..." } }` — the inner structure is *not*
+decoded as a Link; it remains a plain object.
 
 Use cases for `/quote`:
 - Storing schemas or examples that describe special types without instantiating them
 - Metaprogramming and introspection
-- Optimization: skip deserialization when the subtree is known to be plain data
+- Optimization: skip decoding when the subtree is known to be plain data
 - Round-tripping JSON structures that happen to look like special types
 
 **When to use which:**
@@ -812,25 +843,26 @@ Concretely:
   a known type, a built-in escape (`/object`, `/quote`), or an unrecognized
   tag (preserved as `UnknownValue` for round-tripping).
 - A multi-key object containing one or more `/`-prefixed keys among its
-  keys is a structural encoding error — also `ProblematicValue`. It is not
-  a valid plain object.
+  keys is a structural encoding error, and is rejected the same way: a
+  `ProblematicValue` from a lenient engine, a raise from a strict one. It is
+  not a valid plain object.
 
 See Section 9 of the formal spec for the full rule and the
 `ProblematicValue` interpretation across the cases above.
 
 #### Unknown Type Handling
 
-When a JSON context encounters a `/<type>@<version>` key it doesn't recognize,
+When a JSON engine encounters a `/<type>@<version>` key it doesn't recognize,
 it uses `UnknownValue` (see [Unknown Types](#unknown-types) in the Fabric
 Protocol section) to preserve the data for round-tripping.
 
-#### Relationship to Serialization Contexts
+#### Relationship to Codec Engines
 
-This wire format is what serialization contexts produce. The context's `wrap()`
+This wire format is what codec engines produce. The engine's `wrap()`
 and `unwrap()` methods would generate and parse these `/<type>@<version>` keys,
-mapping between rich runtime types and their serialized form. The context is
+mapping between rich runtime types and their serialized form. The engine is
 also responsible for:
-- Applying `/object` or `/quote` escaping when serializing plain objects that
+- Applying `/object` or `/quote` escaping when encoding plain objects that
   happen to have slash-prefixed keys
 - Wrapping unknown types using the `wireTypeTag` preserved in `UnknownValue`
 

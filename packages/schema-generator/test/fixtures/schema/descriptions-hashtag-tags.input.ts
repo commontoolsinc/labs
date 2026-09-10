@@ -2,6 +2,7 @@
 interface SchemaRoot {
   /** The note body. */
   content: string;
+
   /** Linked #annotation entries. */
   annotations: string[];
 }

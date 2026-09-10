@@ -145,10 +145,15 @@ describe("cold bound PatternFactory list readiness", () => {
     tx = runtime.edit();
   }
 
-  function makeBase(label: "A" | "B", ref: typeof REFS.a | typeof REFS.b) {
+  function makeBase(
+    label: "A" | "B",
+    ref: typeof REFS.a | typeof REFS.b,
+    onExecution: () => void = () => {},
+  ) {
     const calculate = commonfabric.lift(
       ({ element, factor }: { element: number; factor: number }) => {
         executions.push(`${label}:${element}`);
+        onExecution();
         return element * factor;
       },
     );
@@ -225,7 +230,10 @@ describe("cold bound PatternFactory list readiness", () => {
   }
 
   it("loads from the op source and reruns the current list after readiness", async () => {
-    const baseA = makeBase("A", REFS.a);
+    const executedCurrentList = Promise.withResolvers<void>();
+    const baseA = makeBase("A", REFS.a, () => {
+      if (executions.length === 2) executedCurrentList.resolve();
+    });
     const selector = await seedSelector(shell(baseA, 10));
     const load = installColdLoader(baseA);
     const outer = outerPattern();
@@ -242,8 +250,7 @@ describe("cold bound PatternFactory list readiness", () => {
       resultCell,
     );
     await commitAndRenew();
-    const pendingOutput = result.key("mapped").pull();
-
+    const cancelDemand = result.key("mapped").sink(() => {});
     expect(await within(load.entered.promise, "cold list load")).toEqual({
       ...REFS.a,
       artifactSpace: sourceSpace,
@@ -254,10 +261,13 @@ describe("cold bound PatternFactory list readiness", () => {
     await commitAndRenew();
     expect(executions).toEqual([]);
     load.release.resolve();
+    await within(load.returned.promise, "ready current list");
+    await executedCurrentList.promise;
+    await runtime.idle();
 
-    expect(await within(pendingOutput, "ready current list"))
-      .toEqual([30, 40]);
+    expect(result.key("mapped").get()).toEqual([30, 40]);
     expect(executions).toEqual(["A:3", "A:4"]);
+    cancelDemand();
   });
 
   it("drops a cold selection when the op changes before readiness", async () => {

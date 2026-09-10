@@ -2,6 +2,7 @@ import type {
   Activity,
   IMemorySpaceAddress,
   Metadata,
+  StorageTransactionRejected,
   TransactionReactivityLog,
 } from "./interface.ts";
 import { normalizeCellScope } from "../scope.ts";
@@ -104,19 +105,69 @@ export function isReadIgnoredForCommit(meta?: Metadata): boolean {
   return meta?.[ignoreReadForCommitMarker] === true;
 }
 
-// Transaction-level UI-input "blind leaf overwrite" mode. handleCellSet marks
-// the transaction around a scalar `$value` set (and unmarks before
-// prepareTxForCommit, so CFC boundary-commit read-then-writes keep their
-// preconditions); while marked, read() tags every read with `ignoreReadForCommit`
-// and skips `validated`, so the write carries no value-equality precondition on
-// its leaf (last-write-wins, which is correct for raw scalar UI input) — buildReads
-// downgrades the tagged reads to a single nonRecursive entity-root existence read,
-// which still catches a concurrent whole-doc delete/replace. Read-modify-write
-// and structured (array/object) writes are NOT marked and retain compare-and-set.
-// Both the wrapper and the inner storage transaction(s) are marked, since
-// read()/buildReads run on the inner one; the chain walk tolerates extra wrapper
-// layers.
+// Rejection listeners, registered per inner transaction (CT-1950). A
+// rejected commit's promise resolves only after finalizeRejection's
+// read-repair gate — the caller's retry needs the repaired base — but the
+// commit's FATE is sealed the moment the rejection is received, and the
+// verdict-gated effect layer (verdict callbacks, outbox clearing) must not
+// wait out the repair round trip; commit callbacks ride the promise and DO
+// wait. The transaction registers its verdict resolver at commit() entry;
+// the push path notifies every contributing source at rejection receipt,
+// and finalizeRejection covers the cascade paths. Rejections only: an
+// accept does not seal a multi-space commit's aggregate fate, so accepts
+// keep resolving the verdict with the final result.
+const commitRejectionListeners = new WeakMap<
+  object,
+  (rejection: StorageTransactionRejected) => void
+>();
+
+export function registerCommitRejectionListener(
+  tx: object,
+  listener: (rejection: StorageTransactionRejected) => void,
+): void {
+  commitRejectionListeners.set(tx, listener);
+}
+
+export function notifyCommitRejected(
+  tx: object,
+  rejection: StorageTransactionRejected,
+): void {
+  const listener = commitRejectionListeners.get(tx);
+  if (listener !== undefined) {
+    commitRejectionListeners.delete(tx);
+    listener(rejection);
+  }
+}
+
+// Fan-out coverage waits, recorded per transaction (CT-1950). The push path
+// resolves its result at the server verdict and records the parked
+// application's promise here; the transaction layer drains the record so
+// that its commit() promise resolves only once the subscribed view reflects
+// the committed write. The split exists so post-commit effects gated on
+// durability alone (verdict callbacks, the outbox flush) can hook the
+// verdict instead of inheriting the fan-out window.
+const coverageWaits = new WeakMap<object, Promise<void>[]>();
+
+export function recordCoverageWait(tx: object, wait: Promise<void>): void {
+  const waits = coverageWaits.get(tx);
+  if (waits === undefined) {
+    coverageWaits.set(tx, [wait]);
+  } else {
+    waits.push(wait);
+  }
+}
+
+export function takeCoverageWaits(tx: object): Promise<void>[] {
+  const waits = coverageWaits.get(tx);
+  if (waits === undefined) {
+    return [];
+  }
+  coverageWaits.delete(tx);
+  return waits;
+}
+
 const uiInputBlindWriteTxs = new WeakSet<object>();
+const durableReadTxs = new WeakSet<object>();
 
 function* blindWriteTxChain(tx: object): Generator<object> {
   let current: object | undefined = tx;
@@ -128,6 +179,20 @@ function* blindWriteTxChain(tx: object): Generator<object> {
   }
 }
 
+/**
+ * Transaction-level UI-input "blind leaf overwrite" mode. handleCellSet marks
+ * the transaction around a scalar `$value` set (and unmarks before
+ * prepareTxForCommit, so CFC boundary-commit read-then-writes keep their
+ * preconditions); while marked, read() tags every read with `ignoreReadForCommit`
+ * and skips `validated`, so the write carries no value-equality precondition on
+ * its leaf (last-write-wins, which is correct for raw scalar UI input) — buildReads
+ * downgrades the tagged reads to a single nonRecursive entity-root existence read,
+ * which still catches a concurrent whole-doc delete/replace. Read-modify-write
+ * and structured (array/object) writes are NOT marked and retain compare-and-set.
+ * Both the wrapper and the inner storage transaction(s) are marked, since
+ * read()/buildReads run on the inner one; the chain walk tolerates extra wrapper
+ * layers.
+ */
 export function markUiInputBlindWriteTx(tx: object): void {
   for (const layer of blindWriteTxChain(tx)) uiInputBlindWriteTxs.add(layer);
 }
@@ -136,6 +201,91 @@ export function unmarkUiInputBlindWriteTx(tx: object): void {
 }
 export function isUiInputBlindWriteTx(tx: object): boolean {
   return uiInputBlindWriteTxs.has(tx);
+}
+
+/**
+ * Marks an authored direct-capability transaction to read the durable replica
+ * view. Its values and commit basis both exclude process-local speculation,
+ * which cannot be named by a commit sent to the server.
+ */
+export function markDurableReadTx(tx: object): void {
+  for (const layer of blindWriteTxChain(tx)) durableReadTxs.add(layer);
+}
+
+export function isDurableReadTx(tx: object): boolean {
+  for (const layer of blindWriteTxChain(tx)) {
+    if (durableReadTxs.has(layer)) return true;
+  }
+  return false;
+}
+
+const lazyMaterializationTxs = new WeakSet<object>();
+
+/**
+ * Lazy materialization: a marked transaction hands a reader views that resolve
+ * each path as it is touched, rather than a value built in one pass before the
+ * reader looks at any of it.
+ *
+ * The mark also decides how a view treats the transaction it was made against.
+ * Unmarked, a query-result proxy is a standing handle: it resolves the
+ * transaction on every access, so a holder keeps reading current state after
+ * that transaction has finished — which long-lived consumers depend on, an LLM
+ * tool call dispatched later and a SQLite result flushed post-commit among
+ * them. Marked, a view keeps the transaction it was created with, so the value
+ * it describes stays the value that was there when it was taken, and reading
+ * after that transaction finishes throws rather than quietly reading from
+ * committed state.
+ *
+ * Nothing outside the mark changes, so an unmarked transaction reads exactly as
+ * it did before lazy materialization existed. Marked on the same wrapper chain
+ * as the marks above, so a wrapper and the transaction it wraps read alike.
+ */
+export function markLazyMaterializationTx(tx: object): void {
+  for (const layer of blindWriteTxChain(tx)) lazyMaterializationTxs.add(layer);
+}
+export function unmarkLazyMaterializationTx(tx: object): void {
+  for (const layer of blindWriteTxChain(tx)) {
+    lazyMaterializationTxs.delete(layer);
+  }
+}
+export function isLazyMaterializationTx(tx: object): boolean {
+  // Walk the chain rather than testing the object: a wrapper built over a
+  // transaction that was marked earlier has never been marked itself, and must
+  // still report the mark of what it wraps.
+  for (const layer of blindWriteTxChain(tx)) {
+    if (lazyMaterializationTxs.has(layer)) return true;
+  }
+  return false;
+}
+
+// A refusal recorded on the transaction, so it survives being caught. A reader
+// can swallow a `SchemaMismatchError` — its own `try`/`catch`, or an `await`
+// that discards the rejection — and still hand back a plausible-looking result.
+// The runner reads the mark after the body returns and disposes of the run as
+// an argument that did not resolve either way.
+const schemaRefusals = new WeakMap<object, unknown>();
+
+export function noteSchemaRefusalTx(tx: object, refusal: unknown): void {
+  for (const layer of blindWriteTxChain(tx)) {
+    if (!schemaRefusals.has(layer)) schemaRefusals.set(layer, refusal);
+  }
+}
+
+export function takeSchemaRefusalTx(tx: object): unknown {
+  for (const layer of blindWriteTxChain(tx)) {
+    const refusal = schemaRefusals.get(layer);
+    if (refusal !== undefined) return refusal;
+  }
+  return undefined;
+}
+
+// Only this refusal, and only where it is the one recorded: a view that catches
+// a mismatch it asked for is the one clearing it, and a different refusal held
+// on the same transaction is somebody else's and still owed to the runner.
+export function clearSchemaRefusalTx(tx: object, refusal: unknown): void {
+  for (const layer of blindWriteTxChain(tx)) {
+    if (schemaRefusals.get(layer) === refusal) schemaRefusals.delete(layer);
+  }
 }
 
 // Renderer-input (user-keystroke `$value`) provenance for timing-mitigation

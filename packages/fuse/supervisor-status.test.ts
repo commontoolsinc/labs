@@ -9,8 +9,9 @@
 // channel and records it in the status file.
 
 import { assert, assertEquals } from "@std/assert";
-import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import { dirname, fromFileUrl, join } from "@std/path";
+
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 
 const packageDir = dirname(fromFileUrl(import.meta.url));
 const repoRoot = join(packageDir, "..", "..");

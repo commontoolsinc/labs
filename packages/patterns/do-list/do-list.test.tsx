@@ -19,7 +19,7 @@
  *
  * Run: deno task cf test packages/patterns/do-list/do-list.test.tsx --verbose
  */
-import { action, assert, equals, pattern, Writable } from "commonfabric";
+import { action, assert, equals, pattern, TESTS, Writable } from "commonfabric";
 import DoList, { type DoItem } from "./do-list.tsx";
 
 export default pattern(() => {
@@ -194,7 +194,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // Initial empty
       { assertion: assert_initial_empty },
 

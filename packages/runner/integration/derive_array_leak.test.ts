@@ -9,17 +9,22 @@
  * Expected behavior: Memory should stabilize or grow modestly
  * Actual behavior: Memory grows by gigabytes (1GB+ per 100 increments)
  */
+
 import { Identity, Session } from "@commonfabric/identity";
+import {
+  experimentalOptionsFromEnv,
+  withServerExecutionDefault,
+} from "@commonfabric/runner";
 import { env } from "@commonfabric/integration";
-import { StorageManager } from "../src/storage/cache.deno.ts";
+import { PiecesController } from "@commonfabric/piece/ops";
+
 import { compileAndSavePattern, Runtime } from "../src/index.ts";
-import { PieceManager } from "@commonfabric/piece";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 (Error as any).stackTraceLimit = 100;
 
 const { API_URL } = env;
 const SPACE_NAME_PREFIX = "runner_integration";
-const TIMEOUT_MS = 300000;
 
 // Test parameters
 const INCREMENTS_PER_CLICK = 50; // How many times each click increments (must match .tsx file)
@@ -101,16 +106,27 @@ async function runTest() {
   // Create runtime
   const runtime = new Runtime({
     apiUrl: new URL(API_URL),
+    // The posture this client runs (server-execution v2, testing.md §2):
+    // resolved exactly like a deployed entry point — the canonical env
+    // mapping, else the first-party default (ON since the flip) — so this
+    // process runs the arm the lane's toolshed runs: the DEFAULT lane's
+    // unset flag resolves ON, the OFF regression-guard lane's explicit
+    // `false` the OFF arm. A bare construction resolves the AMBIENT
+    // baseline instead, which post-flip is the P7 review's finding-7
+    // mixed posture.
+    experimental: withServerExecutionDefault(
+      experimentalOptionsFromEnv(Deno.env.get),
+    ),
     storageManager,
   });
 
-  // Create piece manager for the specified space
-  const pieceManager = new PieceManager(session, runtime);
-  await pieceManager.ready;
+  // Create the pieces controller for the specified space
+  const pieces = new PiecesController(session, runtime);
+  await pieces.ready;
 
   // Read the pattern file content
   const patternContent = await Deno.readTextFile(
-    "./integration/derive_array_leak.test.tsx",
+    "./integration/derive_array_leak.tsx",
   );
 
   const pattern = await compileAndSavePattern(
@@ -120,7 +136,7 @@ async function runTest() {
   );
   console.log("Pattern compiled successfully");
 
-  const piece = (await pieceManager.runPersistent(pattern, {})).asSchema({
+  const piece = (await pieces.runPersistent(pattern, {})).asSchema({
     type: "object",
     properties: {
       value: { type: "number" },
@@ -132,13 +148,13 @@ async function runTest() {
   });
   console.log("Piece created:", piece.entityId);
 
-  // Wait for initial state
+  // Settle the piece's initialization writes before sampling the baseline.
+  // runtime.idle() drains client-side reactivity; synced() then waits for every
+  // pending commit to be confirmed durable by the memory server. The
+  // after-measurement below settles the same way, so both samples follow the
+  // same barrier.
   await runtime.idle();
   await runtime.storageManager.synced();
-
-  // Give it 5 seconds to settle after initialization
-  console.log("Waiting 5 seconds for memory to settle...");
-  await new Promise((resolve) => setTimeout(resolve, 5000));
 
   // Measure baseline server memory (where the leak occurs)
   const serverMemoryBeforeMB = await getServerMemoryMB();
@@ -208,24 +224,11 @@ async function runTest() {
   console.log(`Counter reached ${finalValue} (expected ${expectedValue})`);
 }
 
-// Run the test with timeout
+// The test runs without a per-test deadline. See
+// docs/development/waiting-in-tests.md.
 Deno.test({
   name: "derive array leak test",
-  fn: async () => {
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-      }, TIMEOUT_MS);
-    });
-
-    try {
-      await Promise.race([runTest(), timeoutPromise]);
-      console.log("Test completed successfully");
-    } finally {
-      clearTimeout(timeoutHandle!);
-    }
-  },
+  fn: runTest,
   sanitizeResources: false,
   sanitizeOps: false,
 });

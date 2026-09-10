@@ -1,35 +1,23 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { stub } from "@std/testing/mock";
+
 import "@commonfabric/utils/equal-ignoring-symbols";
+
 import { Identity } from "@commonfabric/identity";
-import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import {
   type JSONSchema,
   type Module,
   NAME,
   type Pattern,
 } from "../src/builder/types.ts";
+import type { Cell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
-import {
-  extractDefaultValues,
-  getPatternIdentityRef,
-  getPatternSetupIdentityRef,
-  mergeObjects,
-  mergeSchemaDefaults,
-  schemaAcceptsOpaqueCellValue,
-  schemaHasDefaultValue,
-} from "../src/runner.ts";
+import { entityKey } from "../src/scheduler/keys.ts";
 import { validateSchemaValue } from "../src/cfc/mod.ts";
-import {
-  type ICommitNotification,
-  type IExtendedStorageTransaction,
-  type IStorageSubscription,
-  type MediaType,
-  type URI,
-} from "../src/storage/interface.ts";
-import { trustExecutable } from "./support/trusted-builder.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
 import {
   areNormalizedLinksSame,
   getDerivedInternalCell,
@@ -37,6 +25,29 @@ import {
   isWriteRedirectLink,
   parseLink,
 } from "../src/link-utils.ts";
+import {
+  extractDefaultValues,
+  getPatternIdentityRef,
+  getPatternSetupIdentityRef,
+  getPieceSourceSnapshot,
+  mergeObjects,
+  mergeSchemaDefaults,
+  PatternSetupPostCommitError,
+  type PieceSourceTransition,
+  preparePieceSourceTransitionBaseline,
+  schemaAcceptsOpaqueCellValue,
+  schemaHasDefaultValue,
+  SEALING_RECEIPT_REFUSAL,
+} from "../src/runner.ts";
+import {
+  type ICommitNotification,
+  type IExtendedStorageTransaction,
+  type MediaType,
+  type URI,
+} from "../src/storage/interface.ts";
+import { trustExecutable } from "./support/trusted-builder.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -69,6 +80,75 @@ function setupTrusted(
     argument as never,
     resultCell as never,
   );
+}
+
+async function compileReceiptPattern(
+  runtime: Runtime,
+  marker: string,
+): Promise<Pattern> {
+  return await runtime.patternManager.compilePattern({
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        "import { pattern } from 'commonfabric';",
+        "interface Args { label?: string }",
+        "export default pattern<Args, { marker: string }>(() => ({",
+        `  marker: ${JSON.stringify(marker)},`,
+        "}));",
+      ].join("\n"),
+    }],
+  }, { space });
+}
+
+/** Returns the receipt fixture's durable or session-side source state. */
+function receiptSourceSnapshot(
+  runtime: Runtime,
+  resultCell: Cell<unknown>,
+) {
+  const snapshot = getPieceSourceSnapshot(
+    resultCell,
+    runtime.runner.sessionPatternPointerFor(resultCell),
+  );
+  if (snapshot === undefined) {
+    throw new Error("the receipt fixture has no source snapshot");
+  }
+  return snapshot;
+}
+
+async function receiptSourceTransition(
+  runtime: Runtime,
+  resultCell: Cell<unknown>,
+): Promise<PieceSourceTransition> {
+  const expected = receiptSourceSnapshot(runtime, resultCell);
+  return {
+    revisionId: crypto.randomUUID(),
+    baseline: await preparePieceSourceTransitionBaseline(
+      runtime,
+      resultCell,
+      expected,
+    ),
+    timestamp: Date.now(),
+    operation: "edit",
+    origin: null,
+    expected,
+  };
+}
+
+/** Transition for tests which must refuse before source setup is reached. */
+function unreachableReceiptSourceTransition(): PieceSourceTransition {
+  return {
+    revisionId: crypto.randomUUID(),
+    baseline: { kind: "unavailable" },
+    timestamp: Date.now(),
+    operation: "edit",
+    origin: null,
+    expected: {
+      pattern: { identity: "of:fid1:unreachable", symbol: "default" },
+      origin: null,
+      revisionId: null,
+    },
+  };
 }
 
 describe("runPattern", () => {
@@ -199,7 +279,10 @@ describe("runPattern", () => {
     expect(derivedLink).toBeDefined();
     expect(derivedLink!.id).not.toBe(resultCell.getAsNormalizedFullLink().id);
     expect(derivedLink!.path).toEqual([]);
-    expect(derivedLink!.schema).toEqual({ type: "number", default: 0 });
+    expect(resolvedSchema(derivedLink!.schema)).toEqual({
+      type: "number",
+      default: 0,
+    });
 
     const derivedCell = runtime.getCellFromLink(derivedLink!);
     expect(await derivedCell.get()).toBe(5);
@@ -238,7 +321,7 @@ describe("runPattern", () => {
     const firstLink = Array.isArray(firstManifest)
       ? parseLink(firstManifest[0].link, resultCell)
       : undefined;
-    expect(firstLink?.schema).toEqual(wide);
+    expect(resolvedSchema(firstLink?.schema)).toEqual(wide);
 
     await setupTrusted(runtime, undefined, pattern(narrow), {}, resultCell);
     const nextManifest = resultCell.getMetaRaw("internal");
@@ -246,7 +329,7 @@ describe("runPattern", () => {
       ? parseLink(nextManifest[0].link, resultCell)
       : undefined;
     expect(nextLink?.id).toBe(firstLink?.id);
-    expect(nextLink?.schema).toEqual(narrow);
+    expect(resolvedSchema(nextLink?.schema)).toEqual(narrow);
   });
 
   it("sets scoped write-redirect metadata links for argument and internal cells", async () => {
@@ -314,7 +397,7 @@ describe("runPattern", () => {
     expect(argumentLink!.path).toEqual([]);
     expect(argumentLink!.space).toBe(space);
     expect(argumentLink!.scope).toBe("user");
-    expect(argumentLink!.schema).toEqual(argumentSchema);
+    expect(resolvedSchema(argumentLink!.schema)).toEqual(argumentSchema);
     expect(argumentLink!.overwrite).toBe("redirect");
 
     const argumentCell = runtime.getCellFromLink(argumentLink!);
@@ -327,11 +410,19 @@ describe("runPattern", () => {
     expect(outputLink.path).toEqual([]);
     expect(outputLink.space).toBe(space);
     expect(outputLink.scope).toBe("user");
-    expect(outputLink.schema).toEqual({ type: "number" });
-    expect(getMetaLink(argumentCell, "result")).toEqual({
+    expect(resolvedSchema(outputLink.schema)).toEqual({ type: "number" });
+    const resultMetaLink = getMetaLink(argumentCell, "result")!;
+    expect({
+      ...resultMetaLink,
+      schema: resolvedSchema(resultMetaLink.schema),
+    }).toEqual({
       ...resultCellLink,
       schema: resultSchema,
       overwrite: "redirect",
+      // getMetaLink parses the stored sigil, which carries the read-side
+      // data-derived mark (OW51 `viaLinkHop`); resultCellLink came off a
+      // Cell and does not, so add it to the expected shape.
+      viaLinkHop: true,
     });
     // getDerivedInternalCell doesn't generate a redirect link,
     // but that's what we want to match, so add that property.
@@ -1255,15 +1346,22 @@ describe("storage subscription", () => {
     await storageManager?.close();
   });
 
-  it("retains structural selections across result writes", () => {
-    const internals = runtime.runner as unknown as {
-      resultPatternCache: Map<string, string>;
-      createStorageSubscription(): IStorageSubscription;
-    };
+  it("clears cached patterns when storage notifies of changes — every scope INSTANCE of the changed doc (r3739139481)", () => {
+    const internals = runtime.runner.accessForTestingOnly;
 
     const uri = "pattern-cache-test" as URI;
-    const key = `${space}/space/${uri}`;
-    internals.resultPatternCache.set(key, "cached-pattern");
+    // The memo is keyed doc-then-instance: notifications name the DOC
+    // (scope arrives by NAME, which cannot address a per-run instance
+    // on a serving runtime), so one change clears every instance's
+    // memo — the documented safe over-eviction.
+    const key = `${space}/${uri}` as const;
+    internals.resultPatternCache.set(
+      key,
+      new Map([
+        ["space", "cached-pattern"],
+        ["user:did%3Akey%3Aalice", "cached-pattern-alice"],
+      ]),
+    );
 
     const notification = {
       type: "commit",
@@ -1281,10 +1379,22 @@ describe("storage subscription", () => {
       ],
     } satisfies ICommitNotification;
 
-    const subscription = internals.createStorageSubscription();
-    subscription.next(notification);
+    const evicted: string[] = [];
+    const listener = (event: Event) => {
+      const { marker } = (event as RuntimeTelemetryEvent).detail;
+      if (marker.type === "runner.result-pattern.evict") {
+        evicted.push(marker.key);
+      }
+    };
+    runtime.telemetry.addEventListener("telemetry", listener);
+    try {
+      const subscription = internals.createStorageSubscription();
+      subscription.next(notification);
+    } finally {
+      runtime.telemetry.removeEventListener("telemetry", listener);
+    }
 
-    expect(internals.resultPatternCache.has(key)).toBe(true);
+    expect(evicted).toEqual([key]);
   });
 });
 
@@ -1340,70 +1450,49 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 1 });
   });
 
-  it("retries startup after a raw node's factory input replicates", async () => {
-    const ref = {
-      identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      symbol: "coldFactory",
-    } as const;
-    const factory = createFactoryShell({ kind: "module", ref });
+  it("reports the start failure, not a failure of the cleanup it triggers", () => {
+    // A start that fails cancels what it already registered, and a cancel can
+    // itself throw -- a builtin winding down state it had not finished
+    // building, say. Were that allowed to escape it would REPLACE the error
+    // being handled, and what surfaced would describe the cleanup rather than
+    // the failure that caused it.
     const pattern: Pattern = {
       argumentSchema: { type: "object", properties: {} },
-      resultSchema: { type: "object", properties: {} },
+      resultSchema: {},
       result: {},
-      nodes: [{
-        module: {
-          type: "raw",
-          implementation: () => () => undefined,
+      nodes: [
+        {
+          // Registers a cancel that fails, then the node below fails the
+          // start, so the cancel runs against a half-built piece.
+          module: {
+            type: "raw",
+            implementation: (
+              _inputs: unknown,
+              _sendResult: unknown,
+              addCancel: (cancel: () => void) => void,
+            ) => {
+              addCancel(() => {
+                throw new Error("cleanup blew up");
+              });
+            },
+          } as unknown as Module,
+          inputs: {},
+          outputs: {},
         },
-        inputs: { factory },
-        outputs: {},
-      }],
+        {
+          // `instantiateRawNode` rejects a raw module with no implementation.
+          module: { type: "raw" } as unknown as Module,
+          inputs: {},
+          outputs: {},
+        },
+      ],
     };
-    const resultCell = runtime.getCell(
-      space,
-      "start retries cold raw factory input",
-    );
-    setupTrusted(runtime, undefined, pattern, {}, resultCell);
 
-    const sourceSpace = (await Identity.fromPassphrase(
-      "cold raw factory source",
-    )).did();
-    const manager = runtime.patternManager;
-    const originalIsAvailable = manager.isArtifactAvailableInSpace;
-    const originalSourceSpace = manager.artifactSourceSpace;
-    const originalEnsure = manager.ensureArtifactClosureInSpace;
-    let available = false;
-    let replications = 0;
-    manager.isArtifactAvailableInSpace = (identity, artifactSpace) =>
-      identity === ref.identity && artifactSpace === space
-        ? available
-        : originalIsAvailable.call(manager, identity, artifactSpace);
-    manager.artifactSourceSpace = (identity, destination) =>
-      identity === ref.identity && destination === space
-        ? sourceSpace
-        : originalSourceSpace.call(manager, identity, destination);
-    manager.ensureArtifactClosureInSpace = (
-      identity,
-      fromSpace,
-      toSpace,
-    ) => {
-      if (identity !== ref.identity) {
-        return originalEnsure.call(manager, identity, fromSpace, toSpace);
-      }
-      expect([fromSpace, toSpace]).toEqual([sourceSpace, space]);
-      replications++;
-      return Promise.resolve().then(() => {
-        available = true;
-      });
-    };
-    try {
-      expect(await runtime.start(resultCell)).toBe(true);
-      expect(replications).toBe(1);
-    } finally {
-      manager.isArtifactAvailableInSpace = originalIsAvailable;
-      manager.artifactSourceSpace = originalSourceSpace;
-      manager.ensureArtifactClosureInSpace = originalEnsure;
-    }
+    const resultCell = runtime.getCell(space, "start failure beats cleanup");
+
+    expect(() => runtime.run(undefined, pattern, {}, resultCell)).toThrow(
+      /Raw module is not a function/,
+    );
   });
 
   it("reports a missing stream marker when a handler's $event reads undefined", async () => {
@@ -1524,6 +1613,7 @@ describe("setup/start", () => {
     resultCell.withTx(metaTx).setMetaRaw(
       "internal",
       legacyInternalCell.getAsWriteRedirectLink({ base: resultCell }),
+      rawMetaWriteAuthorization,
     );
     await metaTx.commit();
 
@@ -1617,8 +1707,8 @@ describe("setup/start", () => {
 
   it("run() with a given pattern leaves no running registration when instantiation throws", () => {
     // Same regression as above, via the fresh-run entry (the path a live
-    // `cf piece new` takes): startCore's givenPattern branch must also clean
-    // up when node instantiation throws.
+    // `cf piece new` takes): `Runner.#startCore()`'s givenPattern branch must
+    // also clean up when node instantiation throws.
     const pattern: Pattern = {
       argumentSchema: { type: "object", properties: {} },
       resultSchema: {},
@@ -1728,6 +1818,459 @@ describe("setup/start", () => {
     expect(result).toBe(resultCell);
   });
 
+  it("runSynced returns the untyped cell when the durable pattern cannot be loaded", async () => {
+    // After post-commit work, the returned view is re-typed by the pattern
+    // that is durable NOW. When that pattern cannot be loaded, the answer is
+    // the raw cell rather than a stale schema. What the branch responds to is
+    // the load's answer, so the load is answered directly instead of staging
+    // the timing that would produce it.
+    const resultCell = runtime.getCell(space, "runSynced unloadable winner");
+    const pattern = await compileReceiptPattern(runtime, "unloadable");
+    await runtime.runSynced(resultCell, pattern, {});
+    expect(getPatternIdentityRef(resultCell)).toBeDefined();
+
+    const manager = runtime.patternManager;
+    const originalLoad = manager.loadPatternByIdentity.bind(manager);
+    manager.loadPatternByIdentity = () => Promise.resolve(undefined);
+
+    try {
+      const result = await runtime.runSynced(resultCell, pattern, {});
+      expect(result).toBe(resultCell);
+    } finally {
+      manager.loadPatternByIdentity = originalLoad;
+    }
+  });
+
+  it("runSynced follows the durable identity when it moves during the schema load", async () => {
+    // The recheck after each load is what makes the loop settle on the
+    // pattern that is durable now: a pointer that moved while its pattern
+    // loaded restarts the resolution instead of typing the view by the
+    // pattern that was current a moment ago. The move is performed from
+    // inside the load itself, which is the window the recheck exists for.
+    const resultCell = runtime.getCell(space, "runSynced moving winner");
+    const first = await compileReceiptPattern(runtime, "moving-first");
+    const second = await compileReceiptPattern(runtime, "moving-second");
+    const secondRef = runtime.patternManager.getArtifactEntryRef(second);
+    if (secondRef === undefined) {
+      throw new Error("the compiled pattern has no entry ref");
+    }
+    await runtime.runSynced(resultCell, first, {});
+    expect(getPatternIdentityRef(resultCell)).toBeDefined();
+
+    const manager = runtime.patternManager;
+    const originalLoad = manager.loadPatternByIdentity.bind(manager);
+    let moved = false;
+    manager.loadPatternByIdentity = async (identity, symbol, loadSpace) => {
+      if (!moved) {
+        moved = true;
+        const { error } = await runtime.editWithRetry((tx) => {
+          resultCell.withTx(tx).setMetaRaw(
+            "patternIdentity",
+            secondRef,
+            rawMetaWriteAuthorization,
+          );
+        });
+        if (error !== undefined) throw error;
+      }
+      return await originalLoad(identity, symbol, loadSpace);
+    };
+
+    try {
+      const result = await runtime.runSynced(resultCell, first, {});
+
+      expect(moved).toBe(true);
+      expect(getPatternIdentityRef(resultCell)).toEqual(secondRef);
+      expect(result.getAsNormalizedFullLink().schema).toEqual(
+        second.resultSchema,
+      );
+    } finally {
+      manager.loadPatternByIdentity = originalLoad;
+    }
+  });
+
+  it("runSyncedWithCommit returns the pattern accepted by its setup transaction", async () => {
+    const resultCell = runtime.getCell(space, "runSynced commit receipt");
+    const initialPattern = await compileReceiptPattern(runtime, "v1");
+    const nextPattern = await compileReceiptPattern(runtime, "v2");
+
+    await runtime.runSynced(
+      resultCell,
+      initialPattern,
+      {},
+    );
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
+    const pieceSourceTransition = await receiptSourceTransition(
+      runtime,
+      resultCell,
+    );
+
+    const result = await runtime.runSyncedWithCommit(
+      resultCell,
+      nextPattern,
+      {},
+      { expectedPatternIdentity: previous, pieceSourceTransition },
+    );
+
+    expect(result.commit.pattern).toEqual(
+      receiptSourceSnapshot(runtime, resultCell).pattern,
+    );
+    expect(result.cell.get()).toEqual({ marker: "v2" });
+  });
+
+  it("runSyncedWithCommit carries its receipt through post-commit failures", async () => {
+    const resultCell = runtime.getCell(
+      space,
+      "runSynced post-commit receipt",
+    );
+    const initialPattern = await compileReceiptPattern(runtime, "v1");
+    const nextPattern = await compileReceiptPattern(runtime, "v2");
+    await runtime.runSynced(
+      resultCell,
+      initialPattern,
+      {},
+    );
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
+    const pieceSourceTransition = await receiptSourceTransition(
+      runtime,
+      resultCell,
+    );
+
+    const postCommitFailure = new Error("injected post-commit failure");
+    let syncCount = 0;
+    runtime.runner.accessForTestingOnly.dependencySyncer = async (
+      resultCell,
+      executable,
+      inputs,
+      sync,
+    ) => {
+      syncCount++;
+      if (syncCount === 2) throw postCommitFailure;
+      return await sync(resultCell, executable, inputs);
+    };
+
+    try {
+      let reported: unknown;
+      try {
+        await runtime.runSyncedWithCommit(
+          resultCell,
+          nextPattern,
+          {},
+          { expectedPatternIdentity: previous, pieceSourceTransition },
+        );
+      } catch (error) {
+        reported = error;
+      }
+
+      expect(reported).toBeInstanceOf(PatternSetupPostCommitError);
+      const failure = reported as PatternSetupPostCommitError;
+      expect(failure.cause).toBe(postCommitFailure);
+      expect(failure.commit.pattern).toEqual(
+        receiptSourceSnapshot(runtime, resultCell).pattern,
+      );
+    } finally {
+      runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
+    }
+  });
+
+  it("runSyncedWithCommit refuses a receipt without a fresh source transition", async () => {
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit no-op receipt refusal",
+    );
+    const executable = trustExecutable(runtime, pattern);
+    await runtime.runSynced(resultCell, executable, {});
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
+
+    await expect(runtime.runSyncedWithCommit(
+      resultCell,
+      executable,
+      {},
+      // JavaScript callers can bypass the required TypeScript field; the
+      // runtime boundary must still refuse rather than minting a receipt for
+      // the zero-write setup this exact fixture produces.
+      { expectedPatternIdentity: previous } as never,
+    )).rejects.toThrow("requires a fresh source transition");
+  });
+
+  it("runSyncedWithCommit refuses a source revision ID already in history", async () => {
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit reused source revision",
+    );
+    const initialPattern = await compileReceiptPattern(runtime, "v1");
+    const secondPattern = await compileReceiptPattern(runtime, "v2");
+    const thirdPattern = await compileReceiptPattern(runtime, "v3");
+
+    await runtime.runSynced(resultCell, initialPattern, {});
+    const initial = receiptSourceSnapshot(runtime, resultCell);
+    const firstTransition = await receiptSourceTransition(runtime, resultCell);
+    await runtime.runSyncedWithCommit(resultCell, secondPattern, {}, {
+      expectedPatternIdentity: initial.pattern,
+      pieceSourceTransition: firstTransition,
+    });
+    const current = receiptSourceSnapshot(runtime, resultCell);
+    const reusedTransition = {
+      ...await receiptSourceTransition(runtime, resultCell),
+      revisionId: firstTransition.revisionId,
+    };
+
+    await expect(runtime.runSyncedWithCommit(
+      resultCell,
+      thirdPattern,
+      {},
+      {
+        expectedPatternIdentity: current.pattern,
+        pieceSourceTransition: reusedTransition,
+      },
+    )).rejects.toThrow("source revision ID already exists");
+    expect(receiptSourceSnapshot(runtime, resultCell)).toEqual(current);
+    expect(resultCell.get()).toEqual({ marker: "v2" });
+  });
+
+  it("runSyncedWithCommit refuses to issue a receipt while sealing into a wave", async () => {
+    // A serving runtime seals rather than commits: acceptance means the wave
+    // took the contribution, and a later withdrawal — superseded, requeued,
+    // lease lost — can undo it. A receipt saying `committed` would overstate
+    // that, and waiting for the wave to settle from inside the action feeding
+    // it can deadlock, so the boundary refuses instead of weakening the word.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    // A serving runtime of its own: installing a seal destination is the ON
+    // arm's posture, which the suite's shared client runtime does not have.
+    const servingStorage = StorageManager.emulate({ as: signer });
+    const serving = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: servingStorage,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    const resultCell = serving.getCell(
+      space,
+      "runSyncedWithCommit while sealing",
+    );
+    const sealed: IExtendedStorageTransaction[] = [];
+    serving.installSealDestination({
+      seal: (tx: IExtendedStorageTransaction) => {
+        sealed.push(tx);
+        return tx.commit();
+      },
+    });
+
+    try {
+      await expect(serving.runSyncedWithCommit(
+        resultCell,
+        trustExecutable(serving, pattern),
+        {},
+        {
+          expectedPatternIdentity: {
+            identity: "of:fid1:expected",
+            symbol: "default",
+          },
+          pieceSourceTransition: unreachableReceiptSourceTransition(),
+        },
+      )).rejects.toThrow(SEALING_RECEIPT_REFUSAL);
+      // Refused at the boundary, so nothing reached the wave to be withdrawn.
+      expect(sealed).toEqual([]);
+    } finally {
+      serving.clearSealDestination();
+      await serving.dispose();
+      await servingStorage.close();
+    }
+  });
+
+  it("runSyncedWithCommit refuses a wave that starts sealing mid-call", async () => {
+    // The entry check answers for the moment the call started, and the call
+    // then awaits. A destination installed during those awaits would seal the
+    // very transaction the receipt describes, so the condition is asked again
+    // inside the transaction — which is also what covers `editWithRetry`
+    // building a fresh one per retry.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const servingStorage = StorageManager.emulate({ as: signer });
+    const serving = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: servingStorage,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    const resultCell = serving.getCell(
+      space,
+      "runSyncedWithCommit sealing mid-call",
+    );
+    await serving.runSynced(resultCell, trustExecutable(serving, pattern), {});
+    const previous = receiptSourceSnapshot(serving, resultCell).pattern;
+
+    // Installed from the synchronization the call performs before it opens
+    // its transaction, which is the window the entry check cannot see.
+    const sealed: IExtendedStorageTransaction[] = [];
+    const mutableCell = resultCell as unknown as {
+      sync: typeof resultCell.sync;
+    };
+    const originalSync = resultCell.sync.bind(resultCell);
+    mutableCell.sync = (async (...args: Parameters<typeof resultCell.sync>) => {
+      const synced = await originalSync(...args);
+      if (!serving.sealDestinationInstalled) {
+        serving.installSealDestination({
+          seal: (tx: IExtendedStorageTransaction) => {
+            sealed.push(tx);
+            return tx.commit();
+          },
+        });
+      }
+      return synced;
+    }) as typeof resultCell.sync;
+
+    try {
+      await expect(serving.runSyncedWithCommit(
+        resultCell,
+        trustExecutable(serving, pattern),
+        {},
+        {
+          expectedPatternIdentity: previous,
+          pieceSourceTransition: unreachableReceiptSourceTransition(),
+        },
+      )).rejects.toThrow(SEALING_RECEIPT_REFUSAL);
+      expect(sealed).toEqual([]);
+    } finally {
+      mutableCell.sync = originalSync;
+      serving.clearSealDestination();
+      await serving.dispose();
+      await servingStorage.close();
+    }
+  });
+
+  it("runSyncedWithCommit refuses a result cell bound to an open transaction", async () => {
+    // Writes staged in a transaction the caller still owns have no storage
+    // verdict yet — the caller decides their fate — so there is nothing to
+    // issue a receipt for. Refusing up front is what makes "resolved means
+    // storage accepted it" true of every receipt this method returns.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit bound transaction",
+    );
+    const tx = runtime.edit();
+
+    try {
+      await expect(runtime.runSyncedWithCommit(
+        resultCell.withTx(tx),
+        trustExecutable(runtime, pattern),
+        {},
+        {
+          expectedPatternIdentity: {
+            identity: "of:fid1:expected",
+            symbol: "default",
+          },
+          pieceSourceTransition: unreachableReceiptSourceTransition(),
+        },
+      )).rejects.toThrow("requires an unbound result cell");
+    } finally {
+      await tx.commit();
+    }
+  });
+
+  it("runSyncedWithCommit rejects a commit storage refused", async () => {
+    // The receipt's whole claim is that storage accepted the transaction, so
+    // a rejected commit has to reach the caller as that rejection. Reported
+    // through a resolved `{ error }` — the shape `editWithRetry` uses for a
+    // refusal it did not throw — because a receipt path that treats it as
+    // anything other than a failure would report success for a write storage
+    // turned down.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit rejected commit",
+    );
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    const failure = new Error("commit refused by storage");
+    runtime.editWithRetry = (() => Promise.resolve({ error: failure })) as any;
+
+    try {
+      await expect(runtime.runSyncedWithCommit(
+        resultCell,
+        trustExecutable(runtime, pattern),
+        {},
+        {
+          expectedPatternIdentity: {
+            identity: "of:fid1:expected",
+            symbol: "default",
+          },
+          pieceSourceTransition: unreachableReceiptSourceTransition(),
+        },
+      )).rejects.toThrow("commit refused by storage");
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+    }
+  });
+
+  it("runSynced preserves its legacy error when post-commit work fails", async () => {
+    const pattern = (marker: string): Pattern => ({
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: { type: "object", properties: {} },
+      result: { marker },
+      nodes: [],
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "runSynced legacy post-commit error",
+    );
+    await runtime.runSynced(
+      resultCell,
+      trustExecutable(runtime, pattern("v1")),
+      {},
+    );
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
+
+    let syncCount = 0;
+    runtime.runner.accessForTestingOnly.dependencySyncer = async (
+      resultCell,
+      executable,
+      inputs,
+      sync,
+    ) => {
+      syncCount++;
+      if (syncCount === 2) {
+        throw new Error("injected legacy post-commit failure");
+      }
+      return await sync(resultCell, executable, inputs);
+    };
+
+    try {
+      await expect(runtime.runSynced(
+        resultCell,
+        trustExecutable(runtime, pattern("v2")),
+        {},
+        { expectedPatternIdentity: previous },
+      )).rejects.toThrow("injected legacy post-commit failure");
+    } finally {
+      runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
+    }
+  });
+
   it("setup rethrows callback failures from editWithRetry", async () => {
     const pattern: Pattern = {
       argumentSchema: {
@@ -1813,7 +2356,13 @@ describe("setup/start", () => {
     const resultCell = runtime.getCell(space, "opaque replay result");
 
     await runtime.runSynced(resultCell, trusted, { myProfile: profile });
-    const expectedPatternIdentity = getPatternIdentityRef(resultCell);
+    // A hand-built (keyless) piece writes no durable pattern pointer (the
+    // never-durable contract); the expected-identity guard resolves the
+    // session mint through the runner's session-side map.
+    expect(getPatternIdentityRef(resultCell)).toBeUndefined();
+    const expectedPatternIdentity = runtime.patternManager.getArtifactEntryRef(
+      trusted as unknown as object,
+    );
     expect(expectedPatternIdentity).toBeDefined();
 
     // Both a live same-pattern update and a stopped-piece replay receive the
@@ -1867,6 +2416,52 @@ describe("setup/start", () => {
     setupTrusted(runtime, undefined, pattern, { input: 9 }, resultCell);
     cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 9 });
+  });
+
+  it("does not retain direct ownership after stop wins a start race", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (v: { input: number }) => v.input,
+          },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(space, "stopped direct start");
+    setupTrusted(runtime, undefined, pattern, { input: 1 }, resultCell);
+    await runtime.start(resultCell);
+
+    // The redundant start resolves on the already-running fast path, so its
+    // claim to a direct lifetime is decided by the bookkeeping that runs when
+    // its promise settles — after the stop and the replacement run below.
+    const redundantStart = runtime.start(resultCell);
+    runtime.runner.stop(resultCell);
+    runTrusted(runtime, undefined, pattern, { input: 2 }, resultCell);
+
+    // The stop superseded the redundant start: it reports that it left
+    // nothing running and claims no lifetime for the replacement's
+    // registration.
+    await expect(redundantStart).resolves.toBe(false);
+
+    await resultCell.pull();
+    const resultKey = entityKey(
+      resultCell.getAsNormalizedFullLink(),
+      runtime.scopeKeyIdentity,
+    );
+    expect(runtime.runner.cancels.has(resultKey)).toBe(true);
+    runtime.runner.releaseChild(resultCell, undefined);
+    expect(runtime.runner.cancels.has(resultKey)).toBe(false);
   });
 
   it("stop and restart works with setup/start", async () => {
@@ -1974,10 +2569,12 @@ describe("setup/start", () => {
     const rawValue = resultCell.get();
     expect(rawValue).toMatchObjectIgnoringSymbols({ output: 10 });
 
-    // Verify the pattern identity pointer is present after setup without
-    // passing the pattern (it was reused from the stored pointer).
+    // A hand-built (keyless) pattern writes no durable pattern pointer (the
+    // never-durable contract; L3(a), RULED 2026-08-27) — the reuse above
+    // resolved through the runner's session-side pointer instead, which the
+    // fresh-argument read and the restart below are the evidence for.
     const patternValue = resultCell.getMetaRaw("patternIdentity");
-    expect(patternValue).toBeDefined();
+    expect(patternValue).toBeUndefined();
 
     // Also verify the argument metadata cell was updated
     await resultCell.pull();
@@ -2014,7 +2611,11 @@ describe("setup/start", () => {
       undefined,
       tx,
     );
-    candidate.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    candidate.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
+    );
 
     expect(guard(candidate)).toBe(false);
     tx.abort();
@@ -2047,6 +2648,7 @@ describe("setup/start", () => {
     resultCell.setMetaRaw(
       "argument",
       argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
     );
     await setupTx.commit();
     await runtime.idle();
@@ -2077,6 +2679,7 @@ describe("setup/start", () => {
     differentCandidate.setMetaRaw(
       "argument",
       differentArgument.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
     );
     expect(guard(differentCandidate)).toBe(false);
     differentTx.abort();
@@ -2117,6 +2720,7 @@ describe("setup/start", () => {
     resultCell.setMetaRaw(
       "argument",
       argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
     );
     await setupTx.commit();
     await runtime.idle();
@@ -2209,7 +2813,13 @@ describe("setup/start", () => {
     await runtime.runSynced(resultCell, trusted, { input: 1 });
     runtime.runner.stop(resultCell);
     const boundTx = runtime.edit();
-    const currentIdentity = getPatternIdentityRef(resultCell);
+    // The piece is keyless: no durable pointer (never-durable contract). Its
+    // current identity is the session mint on the pattern object, and the
+    // expected-identity guard resolves it through the runner's session map.
+    expect(getPatternIdentityRef(resultCell)).toBeUndefined();
+    const currentIdentity = runtime.patternManager.getArtifactEntryRef(
+      trusted as unknown as object,
+    );
     expect(currentIdentity).toBeDefined();
 
     try {
@@ -2236,6 +2846,49 @@ describe("setup/start", () => {
       expect(runtime.runner.cancels.size).toBe(1);
     } finally {
       await boundTx.commit();
+    }
+  });
+
+  it("rethrows post-setup failures when writes remain transaction-bound", async () => {
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    };
+    const trusted = trustExecutable(runtime, pattern);
+    const resultCell = runtime.getCell(
+      space,
+      "transaction-bound post-setup failure",
+    );
+    await runtime.runSynced(resultCell, trusted, {});
+    const currentIdentity = receiptSourceSnapshot(runtime, resultCell).pattern;
+
+    const boundTx = runtime.edit();
+    let syncCount = 0;
+    runtime.runner.accessForTestingOnly.dependencySyncer = async (
+      resultCell,
+      executable,
+      inputs,
+      sync,
+    ) => {
+      syncCount++;
+      if (syncCount === 2) {
+        throw new Error("transaction-bound post-setup failure");
+      }
+      return await sync(resultCell, executable, inputs);
+    };
+
+    try {
+      await expect(runtime.runSynced(
+        resultCell.withTx(boundTx),
+        trusted,
+        {},
+        { expectedPatternIdentity: currentIdentity },
+      )).rejects.toThrow("transaction-bound post-setup failure");
+    } finally {
+      runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
+      boundTx.abort();
     }
   });
 });
@@ -2361,7 +3014,7 @@ describe("runner utils", () => {
     resultCell.setMetaRaw("patternSetupIdentity", {
       identity: "pattern-identity",
       symbol: "main",
-    });
+    }, rawMetaWriteAuthorization);
     expect(getPatternSetupIdentityRef(resultCell)).toEqual({
       identity: "pattern-identity",
       symbol: "main",
@@ -2370,7 +3023,7 @@ describe("runner utils", () => {
     resultCell.setMetaRaw("patternSetupIdentity", {
       identity: 42,
       symbol: "main",
-    });
+    }, rawMetaWriteAuthorization);
     expect(getPatternSetupIdentityRef(resultCell)).toBeUndefined();
   });
 
@@ -3258,14 +3911,18 @@ describe("runner utils", () => {
       // Simulate a persisted piece being resumed. In that path start() syncs
       // dependencies before registering handlers, which is where this race
       // used to allow duplicate starts for the same result cell.
-      (runtime.runner as any).locallyPreparedResults.clear();
-      (resultCell as any).synced = true;
+      runtime.runner.accessForTestingOnly.locallyPreparedResults.clear();
 
-      const runner = runtime.runner as any;
-      const originalSync = runner.syncCellsForRunningPattern.bind(runner);
-      runner.syncCellsForRunningPattern = async (...args: any[]) => {
+      let dependencySyncRuns = 0;
+      runtime.runner.accessForTestingOnly.dependencySyncer = async (
+        resultCell,
+        executable,
+        inputs,
+        sync,
+      ) => {
+        dependencySyncRuns++;
         await clock.settle();
-        return originalSync(...args);
+        return sync(resultCell, executable, inputs);
       };
 
       try {
@@ -3275,6 +3932,10 @@ describe("runner utils", () => {
         ]);
         expect(first).toBe(true);
         expect(second).toBe(true);
+        // The second start joins the first attempt, so the dependency
+        // pre-sync — the expensive phase concurrent starts used to repeat —
+        // runs once for the pair.
+        expect(dependencySyncRuns).toBe(1);
 
         resultCell.key("increment").send();
         await runtime.idle();
@@ -3282,7 +3943,7 @@ describe("runner utils", () => {
 
         expect(resultCell.key("value").get()).toBe(1);
       } finally {
-        runner.syncCellsForRunningPattern = originalSync;
+        runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
       }
     });
 
@@ -3314,7 +3975,9 @@ describe("runner utils", () => {
       const started = runtime.start(resultCell);
       // Should be running now (check via runner.cancels having the key)
       expect(
-        runtime.runner["cancels"].has(runtime.runner["getDocKey"](resultCell)),
+        runtime.runner.cancels.has(
+          runtime.runner.accessForTestingOnly.getDocKey(resultCell),
+        ),
       ).toBe(true);
 
       expect(await started).toBe(true);
@@ -3363,7 +4026,9 @@ describe("runner utils", () => {
 
       // Verify root cell is running
       expect(
-        runtime.runner["cancels"].has(runtime.runner["getDocKey"](resultCell)),
+        runtime.runner.cancels.has(
+          runtime.runner.accessForTestingOnly.getDocKey(resultCell),
+        ),
       ).toBe(true);
     });
 

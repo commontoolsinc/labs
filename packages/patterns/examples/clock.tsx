@@ -48,8 +48,10 @@ function formatDate(ms: number): string {
 export interface ClockOutput {
   [NAME]: string;
   [UI]: VNode;
+
   /** "HH:MM:SS" once #now resolves, "--:--:--" during the load window. */
   time: string;
+
   /** "Wed 9 Jul 2026" once #now resolves, "" during the load window. */
   date: string;
 }

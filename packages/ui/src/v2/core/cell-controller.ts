@@ -38,24 +38,10 @@ export interface CellControllerOptions<T> {
   onChange?: (newValue: T, oldValue: T) => void;
 
   /**
-   * Custom transaction strategy
-   * - "auto" (default): Create transaction, set value, commit immediately
-   * - "manual": Only call setValue, let caller handle transactions
-   * - "batch": Collect changes and commit in batches (advanced usage)
-   */
-  transactionStrategy?: "auto" | "manual" | "batch";
-
-  /**
    * Whether to trigger host.requestUpdate() on Cell changes
    * Defaults to true
    */
   triggerUpdate?: boolean;
-
-  /**
-   * Custom focus/blur handlers for timing integration
-   */
-  onFocus?: () => void;
-  onBlur?: () => void;
 }
 
 /**
@@ -92,9 +78,7 @@ export interface CellControllerOptions<T> {
  * ```typescript
  * class MyInput extends BaseElement {
  *   private cellController = new CellController<string>(this, {
- *     timing: { strategy: "blur" },
- *     onFocus: () => this.classList.add("focused"),
- *     onBlur: () => this.classList.remove("focused")
+ *     timing: { strategy: "blur" }
  *   });
  *
  *   private handleFocus() {
@@ -114,38 +98,57 @@ export class CellController<T> implements ReactiveController {
   private _cellUnsubscribe: (() => void) | null = null;
   private _inputTiming?: InputTimingController;
 
-  // --- Pending-local-edit tracking (early-boot wipe guard) -----------------
-  // A locally-edited value that bound state has not yet confirmed. While set,
-  // it wins over stale bound state in getValue(), so a re-render cannot
-  // repaint a pre-write snapshot over what the user just typed. Released when
-  // the echo confirms it (a delivery equal to the edit), when a post-settle
-  // delivery supersedes it, or when the binding moves to a different cell.
+  /**
+   * Pending-local-edit tracking (early-boot wipe guard)
+   * A locally-edited value that bound state has not yet confirmed. While set,
+   * it wins over stale bound state in getValue(), so a re-render cannot
+   * repaint a pre-write snapshot over what the user just typed. Released when
+   * the echo confirms it (a delivery equal to the edit), when a post-settle
+   * delivery supersedes it, or when the binding moves to a different cell.
+   */
   private _localEdit: { value: T } | undefined;
-  // Number of in-flight cell writes started by the default setter.
+
+  /** Number of in-flight cell writes started by the default setter. */
   private _inFlightWrites = 0;
-  // Re-entrancy marker: a subscription delivery firing synchronously from our
-  // own optimistic set() (as opposed to a backend push). A local echo must not
-  // release the edit — only durable/bound state catching up may.
+
+  /**
+   * Re-entrancy marker: a subscription delivery firing synchronously from our
+   * own optimistic set() (as opposed to a backend push). A local echo must not
+   * release the edit — only durable/bound state catching up may.
+   */
   private _applyingLocalWrite = false;
-  // All writes settled but bound state never converged (e.g. a rebind swapped
-  // in a pre-write snapshot first): deliveries are FIFO, so the next one
-  // reflects post-write state and is authoritative.
+
+  /**
+   * All writes settled but bound state never converged (e.g. a rebind swapped
+   * in a pre-write snapshot first): deliveries are FIFO, so the next one
+   * reflects post-write state and is authoritative.
+   */
   private _settledAwaitingRelease = false;
-  // Last authoritative user-visible value. Survives same-cell rebinds so a
-  // replacement handle that has not hydrated yet (get() still undefined)
-  // does not repaint emptiness over it.
+
+  /**
+   * Last authoritative user-visible value. Survives same-cell rebinds so a
+   * replacement handle that has not hydrated yet (get() still undefined)
+   * does not repaint emptiness over it.
+   */
   private _lastKnownValue: T | undefined;
-  // Whether the current subscription has received a real (asynchronous)
-  // delivery. subscribe()'s synchronous initial callback merely echoes the
-  // handle's local cache — for a freshly minted rebound handle that is
-  // "no information yet", NOT an authoritative undefined. Once any real
-  // delivery arrives, an undefined value is an authoritative clear and must
-  // repaint (it may not be masked by _lastKnownValue).
+
+  /**
+   * Whether the current subscription has received a real (asynchronous)
+   * delivery. subscribe()'s synchronous initial callback merely echoes the
+   * handle's local cache — for a freshly minted rebound handle that is
+   * "no information yet", NOT an authoritative undefined. Once any real
+   * delivery arrives, an undefined value is an authoritative clear and must
+   * repaint (it may not be masked by _lastKnownValue).
+   */
   private _bindingHydrated = false;
-  // True only while subscribe() runs its synchronous initial callback.
+
+  /** True only while subscribe() runs its synchronous initial callback. */
   private _subscribeEcho = false;
-  // Bumped when binding to a different persistent cell, so settle callbacks
-  // from writes against a previous binding cannot release the new one.
+
+  /**
+   * Bumped when binding to a different persistent cell, so settle callbacks
+   * from writes against a previous binding cannot release the new one.
+   */
   private _bindEpoch = 0;
 
   constructor(
@@ -158,10 +161,7 @@ export class CellController<T> implements ReactiveController {
       getValue: options.getValue || this.defaultGetValue.bind(this),
       setValue: options.setValue || this.defaultSetValue.bind(this),
       onChange: options.onChange || (() => {}),
-      transactionStrategy: options.transactionStrategy || "auto",
       triggerUpdate: options.triggerUpdate ?? true,
-      onFocus: options.onFocus || (() => {}),
-      onBlur: options.onBlur || (() => {}),
     };
 
     // Create timing controller if timing options are provided
@@ -262,12 +262,7 @@ export class CellController<T> implements ReactiveController {
     const performUpdate = () => {
       this._applyingLocalWrite = true;
       try {
-        if (this.options.transactionStrategy === "auto") {
-          this.options.setValue(this._currentValue!, newValue, oldValue);
-        } else {
-          // For manual/batch strategies, just call setValue without transaction handling
-          this.options.setValue(this._currentValue!, newValue, oldValue);
-        }
+        this.options.setValue(this._currentValue!, newValue, oldValue);
       } finally {
         this._applyingLocalWrite = false;
       }
@@ -307,7 +302,6 @@ export class CellController<T> implements ReactiveController {
    */
   onFocus(): void {
     this._inputTiming?.onFocus();
-    this.options.onFocus();
   }
 
   /**
@@ -315,7 +309,6 @@ export class CellController<T> implements ReactiveController {
    */
   onBlur(): void {
     this._inputTiming?.onBlur();
-    this.options.onBlur();
   }
 
   /**
@@ -353,7 +346,10 @@ export class CellController<T> implements ReactiveController {
       : null;
   }
 
+  //
   // ReactiveController implementation
+  //
+
   hostConnected(): void {
     this._setupCellSubscription();
   }
@@ -363,11 +359,10 @@ export class CellController<T> implements ReactiveController {
     this._inputTiming?.cancel();
   }
 
-  hostUpdated(): void {
-    // Override in subclasses if needed
-  }
-
+  //
   // Private methods
+  //
+
   private defaultGetValue(value: CellHandle<T> | T): T {
     if (isCellHandle(value)) {
       const cellValue = (value as CellHandle<T>).get();

@@ -5,8 +5,9 @@
  * the stack surface, so lockdown used to leave the realm without
  * `Error.isError` entirely — host code and compartments alike. That is a
  * silent gap until something calls it, at which point classification code that
- * uses the cross-realm-correct error test (data-model's `tagFromNativeValue`,
- * for one) throws `TypeError: Error.isError is not a function`.
+ * uses the cross-realm-correct error test (data-model's
+ * `tagFromNativeValueElseNull`, for one) throws `TypeError: Error.isError is
+ * not a function`.
  *
  * Both halves matter and fail independently: repair mints a separate
  * constructor for the host realm and for compartments, and each has to carry
@@ -16,7 +17,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { tagFromNativeValue } from "@commonfabric/data-model/native-type-tags";
+import { tagFromNativeValueElseNull } from "@commonfabric/data-model";
 import { restoreErrorIsError } from "../src/sandbox/error-taming.ts";
 import {
   ensureSESLockdown,
@@ -58,8 +59,11 @@ describe("Error.isError under SES lockdown", () => {
     });
 
     it("installs nothing when handed a non-function", () => {
-      // How a runtime without `Error.isError` declines. The pinned browser
-      // integration runtime takes this path. The shim defines nothing because
+      // How a runtime without `Error.isError` declines. Nothing this project
+      // runs on takes this path any more: a browser test drives a system
+      // Chrome, and astral's own download -- the one browser old enough to
+      // lack the method -- is reached only on a machine that has no browser
+      // installed at all. The shim defines nothing because
       // an `undefined` property fails SES's `isError: fn` permit and gets
       // stripped back out with an unpermitted-intrinsic report.
       //
@@ -92,7 +96,7 @@ describe("Error.isError under SES lockdown", () => {
     it("recognizes an error handed in from the host", () => {
       // The reason to restore the genuine intrinsic rather than polyfill with
       // `instanceof`: the compartment's `Error` is not the host's, so only the
-      // internal-slot test answers this correctly.
+      // internal-slot test is correct here.
       const check = evaluateFunctionSourceInSES(
         `function (value) { return Error.isError(value); }`,
         { lockdown: true },
@@ -104,8 +108,8 @@ describe("Error.isError under SES lockdown", () => {
 
   describe("the caller this shim exists for", () => {
     it("classifies a constructor-less error post-lockdown", () => {
-      // data-model's `tagFromNativeValue` reaches `Error.isError` for values
-      // whose constructor is unreachable, and reaches it before its other
+      // data-model's `tagFromNativeValueElseNull` reaches `Error.isError` for
+      // values whose constructor is unreachable, and reaches it before its other
       // fallbacks — so under lockdown the missing method turned a
       // classification into a `TypeError` thrown from deep inside conversion,
       // taking pattern setup down with it. Cross-package on purpose: only the
@@ -113,7 +117,7 @@ describe("Error.isError under SES lockdown", () => {
       ensureSESLockdown();
       const severed = new Error("severed");
       Object.setPrototypeOf(severed, null);
-      expect(tagFromNativeValue(severed)).toBe("Error");
+      expect(tagFromNativeValueElseNull(severed)).toBe("Error");
     });
   });
 });

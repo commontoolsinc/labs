@@ -9,7 +9,7 @@ import { Database } from "@db/sqlite";
 import {
   buildCrossSpaceLinkIndex,
   convergence,
-  convergenceScan,
+  convergenceScanExact,
   openSpaces,
 } from "../multispace.ts";
 
@@ -98,10 +98,11 @@ Deno.test("cross-space replica classification", async (t) => {
       );
 
       await t.step("scan tallies one drift, one instance", () => {
-        const scan = convergenceScan(refs);
+        const scan = convergenceScanExact(refs);
         assertEquals(scan.crossSpaceLinkEdges, 1);
         assertEquals(scan.linkedFindings, 1);
         assertEquals(scan.unlinkedFindings, 1);
+        assertEquals(scan.unknownFindings, 0);
       });
     } finally {
       for (const r of refs) r.space.close();

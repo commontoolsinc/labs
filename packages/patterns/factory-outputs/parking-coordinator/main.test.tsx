@@ -14,15 +14,30 @@
  *
  * NOTE: Uses .filter(() => true).length for array lengths per reactivity tracking note.
  */
-import { action, assert, computed, pattern, UI, wish } from "commonfabric";
+import {
+  action,
+  assert,
+  computed,
+  pattern,
+  TESTS,
+  UI,
+  wish,
+  Writable,
+} from "commonfabric";
 import {
   findNodeById,
   findNodeByProp,
-  nodeIncludesText,
+  hasText,
   propValue,
-} from "../../test-ui-helpers.ts";
+} from "../../test/vnode-helpers.ts";
 import ParkingCoordinator, { DEFAULT_SPOTS } from "./main.tsx";
-import type { ParkingSpot, Person, SpotRequest, Vehicle } from "./main.tsx";
+import type {
+  ParkingProfile,
+  ParkingSpot,
+  Person,
+  SpotRequest,
+  Vehicle,
+} from "./main.tsx";
 
 const len = <T,>(arr: T[]): number => arr.filter(() => true).length;
 
@@ -59,10 +74,15 @@ export default pattern(() => {
   // ============================================================
   // Subject 1: People Management
   // ============================================================
+  // A role binds to a profile cell, so every subject that exercises admin
+  // authority needs an identity for the viewer, and every person who is to
+  // hold a role needs one on their row.
+  const s1Viewer = Writable.of<ParkingProfile>({ name: "Alice" });
   const s1 = ParkingCoordinator({
     spots: DEFAULT_SPOTS,
     people: [],
     requests: [],
+    viewer: { name: "Alice", profile: s1Viewer },
   });
 
   const action_enable_s1_admin_manager = action(() =>
@@ -71,7 +91,7 @@ export default pattern(() => {
 
   const assert_s1_manager_can_start_people_flow = assert(() =>
     s1.currentUserCanManageAdmins === true &&
-    nodeIncludesText(
+    hasText(
       findNodeById(s1[UI], "parking-admin-add-person-open"),
       "+ Add Person",
     )
@@ -223,7 +243,9 @@ export default pattern(() => {
   // ============================================================
   // Subject 3: Spot Management
   // ============================================================
+  const alice3Profile = Writable.of<ParkingProfile>({ name: "Alice" });
   const adminAlice3: Person = {
+    profile: alice3Profile,
     name: "Alice",
     email: "alice@co.com",
     commuteMode: "drive",
@@ -235,6 +257,7 @@ export default pattern(() => {
     spots: DEFAULT_SPOTS,
     people: [adminAlice3],
     requests: [],
+    viewer: { name: "Alice", profile: alice3Profile },
   });
 
   const action_add_spot7_without_admin = action(() =>
@@ -244,7 +267,7 @@ export default pattern(() => {
     s3.enableAdminManager.send()
   );
   const action_make_alice_spot_admin = action(() =>
-    s3.togglePersonAdmin.send({ name: "Alice" })
+    s3.togglePersonAdmin.send({ profile: alice3Profile })
   );
   const action_add_spot7 = action(() =>
     s3.addSpot.send({ spotNumber: "7", label: "Level 2", notes: "Covered" })
@@ -479,10 +502,12 @@ export default pattern(() => {
   // ============================================================
   // Subject 7: Admin Override
   // ============================================================
+  const alice7Profile = Writable.of<ParkingProfile>({ name: "Alice" });
   const s7 = ParkingCoordinator({
     spots: DEFAULT_SPOTS,
-    people: [alice4, bob4],
+    people: [{ ...alice4, profile: alice7Profile }, bob4],
     requests: [],
+    viewer: { name: "Alice", profile: alice7Profile },
   });
 
   const action_try_admin_override_without_admin = action(() => {
@@ -496,7 +521,7 @@ export default pattern(() => {
     s7.enableAdminManager.send()
   );
   const action_make_alice_override_admin = action(() =>
-    s7.togglePersonAdmin.send({ name: "Alice" })
+    s7.togglePersonAdmin.send({ profile: alice7Profile })
   );
   const action_admin_override_bob_spot5 = action(() => {
     s7.adminOverride.send({
@@ -553,10 +578,12 @@ export default pattern(() => {
   // ============================================================
   // Subject 8: Admin mode toggle
   // ============================================================
+  const alice8Profile = Writable.of<ParkingProfile>({ name: "Alice" });
   const s8 = ParkingCoordinator({
     spots: DEFAULT_SPOTS,
-    people: [alice4],
+    people: [{ ...alice4, profile: alice8Profile }],
     requests: [],
+    viewer: { name: "Alice", profile: alice8Profile },
   });
 
   const action_toggle_admin = action(() => s8.toggleAdminMode.send());
@@ -564,7 +591,7 @@ export default pattern(() => {
     s8.enableAdminManager.send()
   );
   const action_make_alice_mode_admin = action(() =>
-    s8.togglePersonAdmin.send({ name: "Alice" })
+    s8.togglePersonAdmin.send({ profile: alice8Profile })
   );
 
   const assert_s8_admin_off = assert(() => s8.adminMode === false);
@@ -580,8 +607,11 @@ export default pattern(() => {
       "data-parking-admin-toggle",
       "Alice",
     );
-    return nodeIncludesText(adminAccess, "Cannot manage admins") &&
-      nodeIncludesText(aliceAdminToggle, "Make admin") &&
+    // The access chip carries its text in a `label` prop, so this looks for
+    // the prop rather than for rendered text.
+    return findNodeByProp(adminAccess, "label", "Cannot manage admins") !==
+        undefined &&
+      hasText(aliceAdminToggle, "Make admin") &&
       propValue(enableManager, "disabled") === false &&
       propValue(aliceAdminToggle, "disabled") === true &&
       propValue(adminToggle, "disabled") === true &&
@@ -601,8 +631,9 @@ export default pattern(() => {
       "data-parking-admin-toggle",
       "Alice",
     );
-    return nodeIncludesText(adminAccess, "Can manage admins") &&
-      nodeIncludesText(aliceAdminToggle, "Make admin") &&
+    return findNodeByProp(adminAccess, "label", "Can manage admins") !==
+        undefined &&
+      hasText(aliceAdminToggle, "Make admin") &&
       propValue(enableManager, "disabled") === true &&
       propValue(aliceAdminToggle, "disabled") === false;
   });
@@ -621,22 +652,24 @@ export default pattern(() => {
       "data-parking-admin-toggle",
       "Alice",
     );
-    return nodeIncludesText(aliceRow, "Admin") &&
-      nodeIncludesText(aliceAdminToggle, "Remove admin") &&
+    // Alice's role chip carries its text in a `label` prop, so this looks for
+    // the prop rather than for rendered text.
+    return findNodeByProp(aliceRow, "label", "Admin") !== undefined &&
+      hasText(aliceAdminToggle, "Remove admin") &&
       propValue(adminToggle, "disabled") === false &&
-      nodeIncludesText(adminToggle, "Admin: OFF");
+      hasText(adminToggle, "Admin: OFF");
   });
   const assert_s8_admin_on = assert(() => s8.adminMode === true);
   const assert_s8_admin_view_admin_mode_visible = assert(() =>
-    nodeIncludesText(
+    hasText(
       findNodeById(s8[UI], "parking-admin-mode-toggle"),
       "Admin: ON",
     ) &&
-    nodeIncludesText(
+    hasText(
       findNodeById(s8[UI], "parking-admin-people-section"),
       "People",
     ) &&
-    nodeIncludesText(
+    hasText(
       findNodeById(s8[UI], "parking-admin-add-person-open"),
       "+ Add Person",
     )
@@ -967,7 +1000,7 @@ export default pattern(() => {
   // ============================================================
 
   return {
-    tests: [
+    [TESTS]: [
       // People management
       { assertion: assert_s1_no_people },
       { assertion: assert_s1_three_spots },

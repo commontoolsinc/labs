@@ -1,0 +1,46 @@
+[
+  {
+    "role": "user",
+    "content": "Author a reading list piece."
+  },
+  {
+    "role": "assistant",
+    "content": "Checking what exists.",
+    "toolCalls": [
+      {
+        "id": "d1",
+        "type": "function",
+        "function": {
+          "name": "search_patterns",
+          "arguments": "{\"tags\": [\"rating\"]}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "toolCallId": "d1",
+    "toolName": "search_patterns",
+    "content": "{\"outputId\": \"fixture-child:search_patterns:1\", \"status\": \"ok\", \"results\": [{\"patternId\": \"pub-rating\", \"description\": \"A rating.\", \"hashtags\": [\"rating\"], \"importHint\": \"import X from \\\"cf:pattern:pub-rating\\\"\"}]}"
+  },
+  {
+    "role": "assistant",
+    "content": "Composing it.",
+    "toolCalls": [
+      {
+        "id": "d2",
+        "type": "function",
+        "function": {
+          "name": "run_pattern",
+          "arguments": "{\"sourceText\": \"import Shelf from \\\"cf:pattern:pub-reading-shelf\\\";\\nimport Rating from \\\"cf:pattern:pub-rating\\\";\\nimport Again from \\\"cf:pattern:pub-rating\\\";\\nexport default () => ({ shelf: Shelf, rating: Rating, again: Again });\\n\"}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "toolCallId": "d2",
+    "toolName": "run_pattern",
+    "content": "{\"outputId\": \"fixture-child:run_pattern:1\", \"status\": \"ok\", \"handle\": \"cfh:a:fixture3\"}"
+  }
+]

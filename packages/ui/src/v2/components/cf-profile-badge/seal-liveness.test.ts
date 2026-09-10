@@ -17,12 +17,14 @@ describe("seal-liveness", () => {
     expect(typeof prefersReducedMotion()).toBe("boolean");
   });
 
-  // The visual sheen math needs a real browser (cursor geometry,
-  // getBoundingClientRect) and is exercised by the prototype, not here. What we
-  // CAN guard cheaply is the leak: the shared controller must add exactly one
-  // pointer listener + rAF on the first seal and remove both when the last seal
-  // unregisters — otherwise a mount/unmount churn leaks listeners and frames.
   it("starts one pointer listener + rAF on the first seal and tears both down when the last unregisters", () => {
+    // The visual sheen math needs a real browser (cursor geometry,
+    // getBoundingClientRect) and is exercised by the prototype, not here. What
+    // we CAN guard cheaply is the leak: the shared controller must add exactly
+    // one pointer listener + rAF on the first seal and remove both when the
+    // last seal unregisters — otherwise a mount/unmount churn leaks listeners
+    // and frames.
+
     const g = globalThis as Record<string, unknown>;
     const saved = {
       raf: g.requestAnimationFrame,

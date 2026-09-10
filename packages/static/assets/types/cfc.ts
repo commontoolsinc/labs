@@ -107,13 +107,31 @@ type CfcLlmDerivedAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.LlmDerived;
   readonly model?: string;
 };
-export type CfcExternalIngestAtom = CfcAtomObject & {
+export type CfcExternalFetchSource = CfcAtomObject & {
+  readonly url: string;
+  readonly commitSha: string;
+};
+export type CfcVouchedChannelExternalIngestAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.ExternalIngest;
   readonly channel: string;
   readonly audience: string;
   readonly receivedAt: string;
   readonly valueDigest: string;
+  readonly kind?: never;
+  readonly pinnedSource?: never;
 };
+export type CfcFetchExternalIngestAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.ExternalIngest;
+  readonly kind: "fetch";
+  readonly pinnedSource: CfcExternalFetchSource;
+  readonly receivedAt: string;
+  readonly valueDigest: string;
+  readonly channel?: never;
+  readonly audience?: never;
+};
+export type CfcExternalIngestAtom =
+  | CfcVouchedChannelExternalIngestAtom
+  | CfcFetchExternalIngestAtom;
 export type CfcUserAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.User;
   readonly subject: string;
@@ -349,7 +367,12 @@ export declare const cfcAtom: {
     audience: string,
     receivedAt: string,
     valueDigest: string,
-  ) => CfcExternalIngestAtom;
+  ) => CfcVouchedChannelExternalIngestAtom;
+  readonly externalFetchIngest: (
+    pinnedSource: CfcExternalFetchSource,
+    receivedAt: string,
+    valueDigest: string,
+  ) => CfcFetchExternalIngestAtom;
   readonly promptSlotBound: <Source extends CfcAtom, Role extends string>(
     source: Source,
     role: Role,

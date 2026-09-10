@@ -1,5 +1,7 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write
+import { walk } from "@std/fs/walk";
 import * as path from "@std/path";
+import { type LcovFileCoverage, parseLcovReports } from "./lcov.ts";
 
 /**
  * Rewrite an LCOV `SF:` source path to a repository-relative POSIX path.
@@ -31,73 +33,23 @@ export function normalizeSourcePath(
   return posix;
 }
 
-interface FileCoverage {
-  testName?: string;
-  lineHits: Map<number, number>;
-}
-
 /**
- * Parse one or more LCOV reports, normalize their source paths, and merge every
- * record that refers to the same source file into a single line-coverage
- * record. Per-line execution counts are summed, matching how the repository's
- * own coverage tooling (tasks/coverage-metrics.ts) accumulates hits, so a file
- * exercised by several test jobs is reported once with its combined coverage
- * rather than as repeated records that some LCOV consumers keep only the last
- * of.
+ * Merge one or more LCOV reports into a single report whose source paths are
+ * repository-relative. Records that refer to the same source file collapse into
+ * one, with per-line execution counts summed, so a file exercised by several
+ * test jobs is reported once with its combined coverage rather than as repeated
+ * records that some LCOV consumers keep only the last of.
  *
- * Only line coverage (`DA`/`LF`/`LH`) is carried through. Function (`FN`) and
- * branch (`BRDA`) records are dropped: LCOV keys function hits by name, and a
- * single source file can declare several functions with the same name (for
- * example a free function and a method), so merging them faithfully is not
- * possible from the report alone. Line coverage is what IDEs use to colour the
- * gutter and is the signal the combined report exists to provide.
+ * Only line coverage (`DA`/`LF`/`LH`) is carried through; `parseLcovReports`
+ * explains what the other record kinds cost to merge.
  */
 export function mergeLcovReports(
   reports: string[],
   repoName: string,
 ): { lcov: string; fileCount: number; rewritten: number; unchanged: number } {
-  const files = new Map<string, FileCoverage>();
-  const anchored = new Set<string>();
-
-  for (const report of reports) {
-    let current: FileCoverage | undefined;
-    // An LCOV record opens with an optional `TN:` test-name line before its
-    // `SF:` line, so a test name is held until the source path is known.
-    let pendingTestName: string | undefined;
-    for (const line of report.split(/\r?\n/)) {
-      if (line.startsWith("TN:")) {
-        pendingTestName = line.slice(3) || undefined;
-      } else if (line.startsWith("SF:")) {
-        const original = line.slice(3);
-        const normalized = normalizeSourcePath(original, repoName);
-        current = files.get(normalized);
-        if (!current) {
-          current = { lineHits: new Map() };
-          files.set(normalized, current);
-          if (normalized !== original) anchored.add(normalized);
-        }
-        if (pendingTestName && !current.testName) {
-          current.testName = pendingTestName;
-        }
-        pendingTestName = undefined;
-      } else if (!current) {
-        continue;
-      } else if (line.startsWith("DA:")) {
-        const [lineNumber, hits] = line.slice(3).split(",");
-        const parsedLine = Number(lineNumber);
-        const parsedHits = Number(hits);
-        if (Number.isInteger(parsedLine) && Number.isFinite(parsedHits)) {
-          current.lineHits.set(
-            parsedLine,
-            (current.lineHits.get(parsedLine) ?? 0) + parsedHits,
-          );
-        }
-      } else if (line === "end_of_record") {
-        current = undefined;
-        pendingTestName = undefined;
-      }
-    }
-  }
+  const files = parseLcovReports(reports, {
+    mapPath: (sourcePath) => normalizeSourcePath(sourcePath, repoName),
+  });
 
   const paths = [...files.keys()].sort();
   const blocks = paths.map((sourcePath) =>
@@ -105,17 +57,22 @@ export function mergeLcovReports(
   );
   const lcov = blocks.length === 0 ? "" : `${blocks.join("\n")}\n`;
 
+  let rewritten = 0;
+  for (const [normalized, file] of files) {
+    if (normalized !== file.sourcePath) rewritten++;
+  }
+
   return {
     lcov,
     fileCount: files.size,
-    rewritten: anchored.size,
-    unchanged: files.size - anchored.size,
+    rewritten,
+    unchanged: files.size - rewritten,
   };
 }
 
 function serializeFileCoverage(
   sourcePath: string,
-  file: FileCoverage,
+  file: LcovFileCoverage,
 ): string {
   const lines: string[] = [];
   if (file.testName) lines.push(`TN:${file.testName}`);
@@ -134,23 +91,27 @@ function serializeFileCoverage(
   return lines.join("\n");
 }
 
-async function* collectLcovFiles(dir: string): AsyncGenerator<string> {
-  let entries: Deno.DirEntry[];
+/**
+ * Every `.lcov` report under `dir`. A missing input directory means no coverage
+ * was downloaded and yields no files; anything that goes wrong once the walk is
+ * under way is reported, so a report that is present but unreadable cannot
+ * shorten the merged output unnoticed.
+ */
+async function collectLcovFiles(dir: string): Promise<string[]> {
   try {
-    entries = await Array.fromAsync(Deno.readDir(dir));
+    await Deno.stat(dir);
   } catch (error) {
-    // A missing input directory (no coverage was downloaded) yields no files.
-    if (error instanceof Deno.errors.NotFound) return;
+    if (error instanceof Deno.errors.NotFound) return [];
     throw error;
   }
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory) {
-      yield* collectLcovFiles(full);
-    } else if (entry.name.endsWith(".lcov")) {
-      yield full;
-    }
+
+  const files: string[] = [];
+  for await (
+    const entry of walk(dir, { includeDirs: false, exts: [".lcov"] })
+  ) {
+    files.push(entry.path);
   }
+  return files;
 }
 
 /**
@@ -163,9 +124,7 @@ export async function combineCoverageLcov(
 ): Promise<
   { lcov: string; fileCount: number; rewritten: number; unchanged: number }
 > {
-  const files: string[] = [];
-  for await (const file of collectLcovFiles(inputDir)) files.push(file);
-  files.sort();
+  const files = (await collectLcovFiles(inputDir)).sort();
 
   const reports: string[] = [];
   for (const file of files) {

@@ -1,13 +1,15 @@
+/**
+ * Module-scope function hardening emits an identity annotation for a top-level
+ * binding that a WriteAuthorizedBy type references. The existing coverage of
+ * that annotation comes from `const name = handler(...)` variable bindings;
+ * the statement-form path for a plain `function` declaration ran only as a
+ * side effect of patterns compiling through the transformer in CI. These tests
+ * drive it directly.
+ */
+
 import { assertEquals } from "@std/assert";
 import { transformSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
-
-// Module-scope function hardening emits an identity annotation for a top-level
-// binding that a WriteAuthorizedBy type references. The existing coverage of
-// that annotation comes from `const name = handler(...)` variable bindings; the
-// statement-form path for a plain `function` declaration ran only as a side
-// effect of patterns compiling through the transformer in CI. These tests drive
-// it directly.
 
 Deno.test(
   "trusted WriteAuthorizedBy function declaration gets a statement-form binding annotation",

@@ -12,6 +12,7 @@ import {
   runWithSchedulerTiming,
   type SchedulerBenchEnv,
 } from "./scheduler-bench-helpers.ts";
+import { benchDiagnostic } from "./bench-diagnostics.ts";
 
 const benchDiagnosticsEnabled = Deno.env.get("BENCH_DIAGNOSTICS") === "1";
 
@@ -195,7 +196,7 @@ for (const fanout of FANOUT_SIZES) {
             0,
           );
           if (benchDiagnosticsEnabled) {
-            console.error(
+            benchDiagnostic(
               `materializer fanout ${fanout}: materializerRuns=${graph.getMaterializerRuns()}, readerRuns=${totalReaderRuns}`,
             );
           }
@@ -222,7 +223,7 @@ Deno.bench(
         await graph.env.runtime.scheduler.idle();
 
         if (benchDiagnosticsEnabled) {
-          console.error(
+          benchDiagnostic(
             `static declared write: computationRuns=${graph.getComputationRuns()}, effectRuns=${graph.effectRuns.value}`,
           );
         }

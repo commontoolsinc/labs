@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import {
   assert,
   assertEquals,
@@ -6,20 +6,19 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
-import { Identity } from "@commonfabric/identity";
-import { EXPERIMENTAL_ENV_VARS, Runtime } from "@commonfabric/runner";
+import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
+import {
+  ADOPT_SERVER_FLAGS_ENV,
+  EXPERIMENTAL_ENV_VARS,
+  Runtime,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   isWorkerIPCResponse,
   WorkerIPCMessageType,
 } from "../src/worker-ipc.ts";
 import { loadEnv } from "../src/env.ts";
-import {
-  getIdentity,
-  isValidDID,
-  isValidPieceId,
-  setBGPiece,
-} from "../src/utils.ts";
+import { getIdentity, isValidDID, isValidPieceId } from "../src/utils.ts";
 import {
   BackgroundPieceService,
   type BackgroundPieceServiceOptions,
@@ -49,11 +48,13 @@ import {
   runIfMain as runCastIfMain,
 } from "../cast-admin.ts";
 import * as backgroundPieceService from "../src/lib.ts";
+import { installDisconnectedWebSocket } from "./disconnected-websocket.ts";
 
 const TEST_DID = "did:key:z6Mktestspace";
 const OTHER_DID = "did:key:z6Mkotherspace";
 const PIECE_ID = `fid1:${"a".repeat(54)}`;
 const OTHER_PIECE_ID = `fid1:${"b".repeat(54)}`;
+const TEST_API_URL = "https://background-piece-service.invalid";
 
 async function runDenoSubprocess(args: string[]): Promise<void> {
   const coverageDir = Deno.env.get("DENO_COVERAGE_DIR");
@@ -108,6 +109,17 @@ class FakeEntryCell {
       this.sinks = this.sinks.filter((sink) => sink !== fn);
     };
   }
+}
+
+/**
+ * Installs a stand-in for `manager`'s worker controller, supplying only the
+ * members the case exercises.
+ */
+function installWorker(
+  manager: SpaceManager,
+  stub: Partial<WorkerController>,
+): void {
+  manager.accessForTestingOnly.workerController = stub as WorkerController;
 }
 
 class FakePiecesCell {
@@ -183,7 +195,6 @@ function fakeRuntime(piecesCell: FakePiecesCell) {
   return {
     experimental: {
       modernCellRep: true,
-      persistentSchedulerState: false,
     },
     storageManager: {
       syncedCount: 0,
@@ -198,20 +209,12 @@ function fakeRuntime(piecesCell: FakePiecesCell) {
     },
     lastGetCell: undefined as unknown,
     editWithRetry(fn: (tx: unknown) => void) {
-      fn({});
+      // The real one returns a Result and re-invokes `fn` on commit conflict.
+      // This models only the success shape; anything whose behavior depends on
+      // the conflict path wants a real `Runtime` (see `set-bg-piece.test.ts`).
+      return Promise.resolve({ ok: fn({}) });
     },
   };
-}
-
-function createUncachedCompileRuntime(url: string, identity: Identity) {
-  return new Runtime({
-    apiUrl: new URL(url),
-    storageManager: StorageManager.open({
-      as: identity,
-      memoryHost: new URL(url),
-    }),
-    cfcEnforcementMode: "disabled",
-  });
 }
 
 class MockWorker extends EventTarget {
@@ -282,9 +285,10 @@ async function withRealWorker<T>(
     ) => Promise<Record<string, unknown>>,
   ) => Promise<T>,
 ): Promise<T> {
-  const worker = new Worker(new URL("../src/worker.ts", import.meta.url).href, {
-    type: "module",
-  });
+  const worker = new Worker(
+    new URL("./worker-test-entry.ts", import.meta.url).href,
+    { type: "module" },
+  );
   const messages: Record<string, unknown>[] = [];
   const waiters: {
     predicate: (message: Record<string, unknown>) => boolean;
@@ -393,6 +397,15 @@ describe("background piece utility functions", () => {
     const fromPassphrase = await getIdentity(undefined, "operator");
     assertEquals(fromPassphrase.did().startsWith("did:key:"), true);
 
+    // Both hold key handles rather than material, which is the point of
+    // leaving the implementation to the platform: what the service keeps, and
+    // what it hands a worker, is a handle. Asserted rather than guarded on
+    // support -- this service runs on Deno, which has ed25519 in Web Crypto,
+    // and a build that quietly lost it would have this service holding its own
+    // signing secret again.
+    assertEquals(fromFile.keyPair.hasMaterial, false);
+    assertEquals(fromPassphrase.keyPair.hasMaterial, false);
+
     await assertRejects(
       () => getIdentity(`${dir}/missing.pem`),
       Error,
@@ -401,41 +414,9 @@ describe("background piece utility functions", () => {
     await assertRejects(
       () => getIdentity(),
       Error,
-      "No IDENTITY or OPERATOR_PASS environemnt set.",
+      "No IDENTITY or OPERATOR_PASS environment set.",
     );
     await Deno.remove(dir, { recursive: true });
-  });
-
-  it("adds a new background piece and re-enables an existing one", async () => {
-    const piecesCell = new FakePiecesCell();
-    const runtime = fakeRuntime(piecesCell);
-
-    assertEquals(
-      await setBGPiece({
-        space: TEST_DID,
-        pieceId: PIECE_ID,
-        integration: "gmail",
-        runtime: runtime as never,
-      }),
-      true,
-    );
-    assertEquals(piecesCell.pushed.length, 1);
-
-    const existing = new FakeEntryCell(
-      pieceEntry({ disabledAt: Date.now(), status: "Disabled" }),
-    );
-    piecesCell.entries = [existing];
-    assertEquals(
-      await setBGPiece({
-        space: TEST_DID,
-        pieceId: PIECE_ID,
-        integration: "gmail",
-        runtime: runtime as never,
-      }),
-      false,
-    );
-    assertEquals(existing.value.disabledAt, 0);
-    assertEquals(existing.value.status, "Re-initializing");
   });
 });
 
@@ -544,11 +525,11 @@ describe("BackgroundPieceService", () => {
 describe("SpaceManager", () => {
   // One freezeAround wraps this whole describe, so its timer map and logical
   // clock persist across cases. Several cases leave a fire-and-forget
-  // WorkerController.shutdown() (from setupWorkerController) parked on a worker
-  // that never answers, so its cleanup timeout lingers in the map. Dropping
-  // every pending timer after each case keeps a leftover from firing in a later
-  // case — here or in a following describe once this one's trailing
-  // auto-advance runs.
+  // WorkerController.shutdown() (from `#setupWorkerController`) parked on a
+  // worker that never answers, so its cleanup timeout lingers in the map.
+  // Dropping every pending timer after each case keeps a leftover from firing
+  // in a later case — here or in a following describe once this one's
+  // trailing auto-advance runs.
   afterEach(() => clock.reset());
 
   it("schedules, runs, retries, disables, and removes pieces", async () => {
@@ -564,9 +545,9 @@ describe("SpaceManager", () => {
         rerunIntervalMs: 5,
       });
 
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         isReady: () => true,
-        runPiece: (cell: FakeEntryCell) => {
+        runPiece: (cell) => {
           workerCalls.push(cell.get().pieceId);
           return Promise.resolve();
         },
@@ -574,22 +555,19 @@ describe("SpaceManager", () => {
           workerCalls.push("shutdown");
           return Promise.resolve();
         },
-      };
+      });
 
       const cancel = manager.watch([entry as never]);
       assertEquals(
-        (manager as never as { enabledPieces: Map<string, unknown> })
-          .enabledPieces.has(PIECE_ID),
+        manager.accessForTestingOnly.enabledPieces.has(PIECE_ID),
         true,
       );
 
-      await (manager as never as {
-        processPiece: (pieceId: string, entry: FakeEntryCell) => Promise<void>;
-      }).processPiece(PIECE_ID, entry);
+      await manager.accessForTestingOnly.processPiece(PIECE_ID, entry as never);
       assertEquals(workerCalls, [PIECE_ID]);
       assertEquals(entry.value.status, "Success");
 
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         isReady: () => true,
         runPiece: () => {
           throw new Error("graph failed");
@@ -598,23 +576,18 @@ describe("SpaceManager", () => {
           workerCalls.push("shutdown");
           return Promise.resolve();
         },
-      };
-      await (manager as never as {
-        processPiece: (pieceId: string, entry: FakeEntryCell) => Promise<void>;
-      }).processPiece(PIECE_ID, entry);
+      });
+      await manager.accessForTestingOnly.processPiece(PIECE_ID, entry as never);
       assertEquals(entry.value.status, "graph failed");
-      await (manager as never as {
-        processPiece: (pieceId: string, entry: FakeEntryCell) => Promise<void>;
-      }).processPiece(PIECE_ID, entry);
-      await (manager as never as {
-        processPiece: (pieceId: string, entry: FakeEntryCell) => Promise<void>;
-      }).processPiece(PIECE_ID, entry);
+      // A failed run clears the active slot, which is what lets `stop()` return
+      // without waiting out the deactivation deadline.
+      assertEquals(manager.accessForTestingOnly.activePiece, null);
+      await manager.accessForTestingOnly.processPiece(PIECE_ID, entry as never);
+      await manager.accessForTestingOnly.processPiece(PIECE_ID, entry as never);
       assert(entry.value.disabledAt > 0);
       assertStringIncludes(entry.value.status, "Disabled: graph failed");
 
-      await (manager as never as {
-        processPiece: (pieceId: string, entry: FakeEntryCell) => Promise<void>;
-      }).processPiece(PIECE_ID, entry);
+      await manager.accessForTestingOnly.processPiece(PIECE_ID, entry as never);
       manager.watch([]);
       cancel();
       await manager.stop();
@@ -631,21 +604,21 @@ describe("SpaceManager", () => {
         pollingIntervalMs: 1,
         deactivationTimeoutMs: 1,
       });
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         isReady: () => false,
         shutdown: async () => {},
-      };
+      });
 
       manager.start();
       manager.start();
-      // execLoop parks on sleep(pollingIntervalMs) each pass; let it reach the
+      // `#execLoop` parks on sleep(pollingIntervalMs) each pass; let it reach the
       // first park, stop it, then fire the parked sleep so the loop observes
       // isRunning === false and exits.
       await clock.settle();
       await manager.stop();
       await clock.tick(1);
       assertEquals(
-        (manager as never as { isRunning: boolean }).isRunning,
+        manager.accessForTestingOnly.isRunning,
         false,
       );
     });
@@ -664,34 +637,30 @@ describe("SpaceManager", () => {
         deactivationTimeoutMs: 10,
       });
 
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         isReady: () => true,
         shutdown: () => {
           shutdowns.push("shutdown");
           return Promise.resolve();
         },
-      };
+      });
 
       manager.watch([first as never, second as never]);
       first.set({ ...first.value, disabledAt: Date.now() });
       assertEquals(
-        (manager as never as { enabledPieces: Map<string, unknown> })
-          .enabledPieces.has(PIECE_ID),
+        manager.accessForTestingOnly.enabledPieces.has(PIECE_ID),
         false,
       );
 
       manager.watch([first as never]);
       assertEquals(
-        (manager as never as { enabledPieces: Map<string, unknown> })
-          .enabledPieces.has(OTHER_PIECE_ID),
+        manager.accessForTestingOnly.enabledPieces.has(OTHER_PIECE_ID),
         false,
       );
 
-      (manager as never as { activePiece: FakeEntryCell | null }).activePiece =
-        second;
+      manager.accessForTestingOnly.activePiece = second as never;
       setTimeout(() => {
-        (manager as never as { activePiece: FakeEntryCell | null })
-          .activePiece = null;
+        manager.accessForTestingOnly.activePiece = null;
       }, 0);
       await manager.stop();
       assertEquals(shutdowns, ["shutdown"]);
@@ -709,78 +678,76 @@ describe("SpaceManager", () => {
         deactivationTimeoutMs: 1,
       });
 
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         isReady: () => false,
         shutdown: () => Promise.resolve(),
-      };
-      (manager as never as { isRunning: boolean }).isRunning = true;
+      });
+      manager.accessForTestingOnly.isRunning = true;
       // isReady() === false: the loop parks on sleep(pollingIntervalMs). Let it
       // reach the park, clear isRunning, then fire the parked sleep so it exits.
-      const idleLoop = (manager as never as { execLoop: () => Promise<void> })
-        .execLoop();
+      const idleLoop = manager.accessForTestingOnly.execLoop();
       await clock.settle();
-      (manager as never as { isRunning: boolean }).isRunning = false;
+      manager.accessForTestingOnly.isRunning = false;
       await clock.tick(1);
       await idleLoop;
 
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         isReady: () => true,
         shutdown: () => Promise.resolve(),
-      };
-      (manager as never as { activePiece: FakeEntryCell | null }).activePiece =
-        entry;
-      (manager as never as { isRunning: boolean }).isRunning = true;
+      });
+      manager.accessForTestingOnly.activePiece = entry as never;
+      manager.accessForTestingOnly.isRunning = true;
       // isReady() === true with an active piece: the loop parks until the active
       // piece clears.
-      const activeLoop = (manager as never as { execLoop: () => Promise<void> })
-        .execLoop();
+      const activeLoop = manager.accessForTestingOnly.execLoop();
       await clock.settle();
-      (manager as never as { activePiece: FakeEntryCell | null }).activePiece =
-        null;
-      (manager as never as { isRunning: boolean }).isRunning = false;
+      manager.accessForTestingOnly.activePiece = null;
+      manager.accessForTestingOnly.isRunning = false;
       await clock.tick(1);
       await activeLoop;
 
-      (manager as never as { pendingTasks: unknown[] }).pendingTasks = [{
+      manager.accessForTestingOnly.pendingTasks = [{
         pieceId: PIECE_ID,
-        entry,
+        entry: entry as never,
         timestamp: Date.now() + 10,
       }];
-      (manager as never as { isRunning: boolean }).isRunning = true;
+      manager.accessForTestingOnly.isRunning = true;
       // The only pending task is scheduled in the future: the loop parks until
       // it comes due.
-      const futureLoop = (manager as never as { execLoop: () => Promise<void> })
-        .execLoop();
+      const futureLoop = manager.accessForTestingOnly.execLoop();
       await clock.settle();
-      (manager as never as { isRunning: boolean }).isRunning = false;
+      manager.accessForTestingOnly.isRunning = false;
       await clock.tick(1);
       await futureLoop;
 
       const calls: string[] = [];
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         isReady: () => true,
         runPiece: () => {
           calls.push("run");
-          (manager as never as { isRunning: boolean }).isRunning = false;
+          manager.accessForTestingOnly.isRunning = false;
           return Promise.resolve();
         },
         shutdown: () => Promise.resolve(),
-      };
-      (manager as never as { enabledPieces: Map<string, FakeEntryCell> })
-        .enabledPieces.set(PIECE_ID, entry);
-      (manager as never as { failureTracking: Map<string, number> })
-        .failureTracking.set(PIECE_ID, 1);
-      (manager as never as { pendingTasks: unknown[] }).pendingTasks = [{
+      });
+      manager.accessForTestingOnly.enabledPieces.set(PIECE_ID, entry as never);
+      manager.accessForTestingOnly.failureTracking.set(PIECE_ID, 1);
+      manager.accessForTestingOnly.pendingTasks = [{
         pieceId: PIECE_ID,
-        entry,
+        entry: entry as never,
         timestamp: Date.now() - 1,
       }];
-      (manager as never as { isRunning: boolean }).isRunning = true;
-      await (manager as never as { execLoop: () => Promise<void> }).execLoop();
+      manager.accessForTestingOnly.isRunning = true;
+      await manager.accessForTestingOnly.execLoop();
       assertEquals(calls, ["run"]);
+      // The loop consumed the due task, and the successful run put the next
+      // run in its place.
+      assertEquals(manager.accessForTestingOnly.pendingTasks.length, 1);
+      assert(
+        manager.accessForTestingOnly.pendingTasks[0].timestamp > Date.now(),
+      );
       assertEquals(
-        (manager as never as { failureTracking: Map<string, number> })
-          .failureTracking.has(PIECE_ID),
+        manager.accessForTestingOnly.failureTracking.has(PIECE_ID),
         false,
       );
       await manager.stop();
@@ -852,16 +819,14 @@ describe("SpaceManager", () => {
         deactivationTimeoutMs: 1,
       });
       let removed = false;
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         removeEventListener: () => {
           removed = true;
         },
         shutdown: () => Promise.reject(new Error("old shutdown failed")),
-      };
+      });
 
-      await (manager as never as {
-        setupWorkerController: () => Promise<void>;
-      }).setupWorkerController();
+      await manager.accessForTestingOnly.setupWorkerController();
       await clock.settle();
 
       assertEquals(removed, true);
@@ -873,17 +838,41 @@ describe("SpaceManager", () => {
 describe("background worker", () => {
   it("handles ready, invalid requests, initialization, run errors, and cleanup", async () => {
     await withRealWorker(async (worker, nextMessage) => {
-      const identity = await Identity.generate({ implementation: "noble" });
+      // The platform's own implementation, as `getIdentity()` leaves it, so
+      // this exercises the key pair the service actually sends: one holding
+      // `CryptoKey` handles, which only the realm encoding can carry.
+      const identity = await Identity.generate();
+      assertEquals(identity.keyPair.hasMaterial, false);
       const ready = await nextMessage((message) => message.type === "ready");
       assertEquals(ready.msgId, -1);
 
       worker.postMessage({
         msgId: 1,
         type: "initialize",
-        data: { rawIdentity: { privateKey: "secret" } },
+        data: { encodedIdentity: { privateKey: "secret" } },
       });
       const invalid = await nextMessage((message) => message.msgId === 1);
       assertStringIncludes(String(invalid.error), "<REDACTED>");
+
+      // Well-formed as an encoding and wrong as a payload, which the shape
+      // guard cannot tell apart from the real thing: only the decode says so.
+      const notAKeyPair = await workerRequest(
+        worker,
+        nextMessage,
+        9,
+        WorkerIPCMessageType.Initialize,
+        {
+          did: TEST_DID,
+          toolshedUrl: TEST_API_URL,
+          encodedIdentity: realmValueFromKeyPair(
+            "not a key pair" as unknown as never,
+          ),
+        },
+      );
+      assertStringIncludes(
+        String(notAKeyPair.error),
+        "is not a key pair",
+      );
 
       const cleanupBeforeInitialize = await workerRequest(
         worker,
@@ -912,8 +901,8 @@ describe("background worker", () => {
         WorkerIPCMessageType.Initialize,
         {
           did: identity.did(),
-          toolshedUrl: "memory://bg-worker-test",
-          rawIdentity: identity.serialize(),
+          toolshedUrl: TEST_API_URL,
+          encodedIdentity: realmValueFromKeyPair(identity.keyPair),
           experimental: { modernCellRep: true },
         },
       );
@@ -926,8 +915,8 @@ describe("background worker", () => {
         WorkerIPCMessageType.Initialize,
         {
           did: identity.did(),
-          toolshedUrl: "memory://bg-worker-test",
-          rawIdentity: identity.serialize(),
+          toolshedUrl: TEST_API_URL,
+          encodedIdentity: realmValueFromKeyPair(identity.keyPair),
         },
       );
       assertEquals("error" in initializedAgain, false);
@@ -1050,9 +1039,9 @@ describe("WorkerController", () => {
       });
       await assertRejects(
         () =>
-          (timeoutController as never as {
-            exec: (type: WorkerIPCMessageType) => Promise<void>;
-          }).exec(WorkerIPCMessageType.Cleanup),
+          timeoutController.accessForTestingOnly.exec(
+            WorkerIPCMessageType.Cleanup,
+          ),
         Error,
         "Worker timed out.",
       );
@@ -1084,19 +1073,17 @@ describe("WorkerController", () => {
       );
       assertThrows(
         () =>
-          (controller as never as {
-            exec: (type: WorkerIPCMessageType) => Promise<void>;
-          }).exec(WorkerIPCMessageType.Initialize),
+          controller.accessForTestingOnly.exec(WorkerIPCMessageType.Initialize),
         Error,
         "invalid IPC request.",
       );
 
-      (controller as never as {
-        onWorkerMessage: (event: MessageEvent) => void;
-      }).onWorkerMessage(new MessageEvent("message", { data: { bad: true } }));
-      (controller as never as {
-        onWorkerMessage: (event: MessageEvent) => void;
-      }).onWorkerMessage(new MessageEvent("message", { data: { msgId: 999 } }));
+      controller.accessForTestingOnly.onWorkerMessage(
+        new MessageEvent("message", { data: { bad: true } }),
+      );
+      controller.accessForTestingOnly.onWorkerMessage(
+        new MessageEvent("message", { data: { msgId: 999 } }),
+      );
     });
   });
 
@@ -1135,13 +1122,11 @@ describe("WorkerController", () => {
       const worker = MockWorker.instances.at(-1)!;
       worker.respond = false;
 
-      const pending = (controller as never as {
-        exec: (type: WorkerIPCMessageType) => Promise<void>;
-      }).exec(WorkerIPCMessageType.Cleanup);
+      const pending = controller.accessForTestingOnly.exec(
+        WorkerIPCMessageType.Cleanup,
+      );
       const message = worker.messages.at(-1) as { msgId: number };
-      (controller as never as {
-        onWorkerMessage: (event: MessageEvent) => void;
-      }).onWorkerMessage(
+      controller.accessForTestingOnly.onWorkerMessage(
         new MessageEvent("message", {
           data: { msgId: message.msgId, error: "worker failed" },
         }),
@@ -1166,7 +1151,7 @@ describe("background piece service entry point", () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const runtime = createMainRuntime(
       {
-        API_URL: "memory://main-runtime-test",
+        API_URL: TEST_API_URL,
         OPERATOR_PASS: "operator",
         IDENTITY: undefined,
         ENV: "test",
@@ -1342,6 +1327,17 @@ describe("background piece service entry point", () => {
 });
 
 describe("cast admin entry point", () => {
+  let restoreWebSocket: (() => void) | undefined;
+
+  beforeEach(() => {
+    restoreWebSocket = installDisconnectedWebSocket();
+  });
+
+  afterEach(() => {
+    restoreWebSocket?.();
+    restoreWebSocket = undefined;
+  });
+
   function fakeCastDependencies(
     overrides: Partial<CastAdminDependencies> = {},
   ): CastAdminDependencies & { exitCodes: number[] } {
@@ -1382,7 +1378,7 @@ describe("cast admin entry point", () => {
       readTextFile: () =>
         Promise.resolve("export default pattern(() => ({}));"),
       createSession: () => Promise.resolve({ fakeSession: true } as never),
-      createPieceManager: () => ({
+      createPiecesController: () => ({
         ready: Promise.resolve(),
         runPersistent: () => Promise.resolve({ entityId: "fid1:cast" }),
       }),
@@ -1411,14 +1407,14 @@ describe("cast admin entry point", () => {
     assertEquals(dependencies.envGet, Deno.env.get);
 
     const identity = await Identity.generate({ implementation: "noble" });
-    const runtime = createCastRuntime("memory://cast-default-deps", identity);
+    const runtime = await createCastRuntime(TEST_API_URL, identity);
     try {
       const session = await dependencies.createSession({
         identity,
         spaceDid: identity.did() as never,
       });
-      const pieceManager = dependencies.createPieceManager(session, runtime);
-      await pieceManager.ready;
+      const pieces = dependencies.createPiecesController(session, runtime);
+      await pieces.ready;
     } finally {
       await runtime.dispose();
     }
@@ -1426,11 +1422,16 @@ describe("cast admin entry point", () => {
 
   it("compiles the actual admin pattern source", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
-    const runtime = createUncachedCompileRuntime(
-      "memory://cast-admin-compile",
-      identity,
-    );
+    // A compile writes its content-addressed cache back through a transaction.
+    // The emulated memory server answers that write.
+    let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
+    let runtime: Runtime | undefined;
     try {
+      storageManager = StorageManager.emulate({ as: identity });
+      runtime = new Runtime({
+        apiUrl: new URL(TEST_API_URL),
+        storageManager,
+      });
       const source = await Deno.readTextFile(
         new URL("../bgAdmin.tsx", import.meta.url),
       );
@@ -1442,7 +1443,9 @@ describe("cast admin entry point", () => {
         );
       assert(pattern);
     } finally {
-      await runtime.dispose();
+      // `dispose()` closes the storage manager it owns.
+      if (runtime !== undefined) await runtime.dispose();
+      else await storageManager?.close();
     }
   });
 
@@ -1476,7 +1479,7 @@ describe("cast admin entry point", () => {
 
   it("creates the cast runtime", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
-    const runtime = createCastRuntime("memory://cast-runtime-test", identity);
+    const runtime = await createCastRuntime(TEST_API_URL, identity);
     const cell = runtime.getCell(identity.did(), "cast-runtime-test", {
       type: "object",
       properties: {},
@@ -1489,8 +1492,8 @@ describe("cast admin entry point", () => {
   it("threads the injected env reader into the cast runtime's experimental flags", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const consulted = new Set<string>();
-    const runtime = createCastRuntime(
-      "memory://cast-env-reader",
+    const runtime = await createCastRuntime(
+      TEST_API_URL,
       identity,
       (key) => {
         consulted.add(key);
@@ -1504,6 +1507,9 @@ describe("cast admin entry point", () => {
       for (const envVar of Object.values(EXPERIMENTAL_ENV_VARS)) {
         if (envVar !== null) assert(consulted.has(envVar));
       }
+      // The opt-out over server-flag adoption rides the same boundary; this
+      // admin CLI reads nothing from process env directly.
+      assert(consulted.has(ADOPT_SERVER_FLAGS_ENV));
     } finally {
       await runtime.dispose();
     }

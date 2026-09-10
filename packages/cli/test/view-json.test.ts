@@ -1,11 +1,11 @@
 /**
- * The JSON / JSONC language: a `.json` or `.jsonc` file (opened directly or seen
- * in a diff) is coloured as data — object keys apart from string values,
- * numbers, `true`/`false`/`null`, rainbow brackets, JSONC comments — with its
- * object keys forming the navigation tree, and is never run through the
- * TypeScript parser. The highlighter is hand-written and lenient: malformed
- * input colours without throwing.
+ * The JSON, JSONC, and JSON Lines language: a selected file is colored as data
+ * with object keys apart from string values, numbers,
+ * `true`/`false`/`null`, rainbow brackets, and JSONC comments. Object keys in a
+ * single top-level value form the navigation tree. The highlighter is
+ * hand-written and lenient: malformed input colors without throwing.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import {
@@ -13,13 +13,17 @@ import {
   jsonDocument,
   jsonHighlightLines,
 } from "../lib/view/languages/json/json.ts";
-import { languageForFile } from "../lib/view/languages/language.ts";
+import {
+  decodeLanguageInput,
+  languageForFile,
+  languageForSource,
+} from "../lib/view/languages/language.ts";
 import type { Line, TokenClass } from "../lib/view/model.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { createDiffHighlighter } from "../lib/view/diffedit.ts";
 
-/** The verbatim text of a set of lines — colouring must never change it. */
+/** The verbatim text of a set of lines — coloring must never change it. */
 function verbatim(lines: readonly Line[]): string {
   return lines.map((l) => l.spans.map((s) => s.text).join("")).join("\n");
 }
@@ -36,11 +40,172 @@ function classesOf(lines: readonly Line[], token: string): Set<TokenClass> {
 Deno.test("json: language metadata selects JSON filenames", () => {
   assertEquals(languageForFile("deno.json").id, "json");
   assertEquals(languageForFile("/a/b/tsconfig.jsonc").id, "json");
+  assertEquals(languageForFile("records.jsonl").id, "json-lines");
+  assertEquals(languageForFile("events.ndjson").id, "json-lines");
+  assertEquals(languageForFile("EVENTS.NDJSON").id, "json-lines");
   assertEquals(languageForFile("UPPER.JSON").id, "json");
   assertEquals(languageForFile("config.json.example").id, "json");
   assertEquals(languageForFile("main.ts").id, "typescript");
   assertEquals(languageForFile("README.md").id, "markdown");
   assertEquals(languageForFile(undefined).id, "plain-text");
+});
+
+Deno.test("json: language metadata selects JSON-shaped names without a JSON suffix", () => {
+  assertEquals(
+    languageForFile("packages/shell/public/manifest.webmanifest").id,
+    "json",
+  );
+  assertEquals(languageForFile("packages/memory/memory.tldr").id, "json");
+  assertEquals(languageForFile("/repo/deno.lock").id, "json");
+  assertEquals(languageForFile("bay.code-workspace").id, "json");
+  assertEquals(languageForFile("ios/Package.resolved").id, "json");
+  assertEquals(languageForFile("Cargo.lock").id, "plain-text");
+  assertEquals(languageForFile("package.resolved").id, "plain-text");
+});
+
+Deno.test("json: a shared .cfg extension needs an opening brace in the source", () => {
+  const syzkaller = '{\n\t"name": "gvisor",\n\t"cover": false\n}\n';
+  const tlc = "\\* A model.\nSPECIFICATION Spec\nCONSTANT Keys = {k1}\n";
+  const ini = "[defaults]\nroles_path = roles\n";
+
+  assertEquals(
+    languageForSource("images/syzkaller/default-gvisor-config.cfg", syzkaller)
+      .id,
+    "json",
+  );
+  assertEquals(languageForSource("tlaplus/LeaseOps.cfg", tlc).id, "plain-text");
+  assertEquals(languageForSource("ansible/ansible.cfg", ini).id, "plain-text");
+  assertEquals(languageForSource("model.cfg", "").id, "plain-text");
+  // The name alone never selects JSON, because a diff of a `.cfg` file shows
+  // no source that could settle which syntax it holds.
+  assertEquals(
+    languageForFile("images/syzkaller/default-gvisor-config.cfg").id,
+    "plain-text",
+  );
+  assertEquals(
+    decodeLanguageInput(
+      "images/syzkaller/default-gvisor-config.cfg",
+      new TextEncoder().encode(syzkaller),
+    ).language.id,
+    "json",
+  );
+});
+
+Deno.test("json: line-oriented files use JSON token classes", () => {
+  const src = [
+    '{"testId":"old","canonicalId":"new"}',
+    '{"testId":"next","canonicalId":"current"}',
+  ].join("\n");
+  const lines = languageForFile("tasks/test-identity-aliases.jsonl")
+    .highlightLines(src);
+
+  assertEquals(classesOf(lines, '"testId"'), new Set(["propertyName"]));
+  assertEquals(classesOf(lines, '"old"'), new Set(["string"]));
+  assertEquals(classesOf(lines, '"current"'), new Set(["string"]));
+  assertEquals(verbatim(lines), src);
+});
+
+Deno.test("json: malformed records leave following records highlighted", () => {
+  for (
+    const malformed of [
+      '{"broken":"unterminated',
+      '{"broken":/* unterminated',
+      '{"broken":[',
+    ]
+  ) {
+    const src = `${malformed}\n{"next":true}`;
+    const lines = languageForFile("events.jsonl").highlightLines(
+      src,
+      "events.jsonl",
+    );
+    const brackets = lines[1].spans.filter((span) => span.cls === "bracket");
+
+    assertEquals(
+      classesOf(lines.slice(1), '"next"'),
+      new Set([
+        "propertyName",
+      ]),
+    );
+    assertEquals(classesOf(lines.slice(1), "true"), new Set(["boolean"]));
+    assertEquals(brackets.map((span) => span.bracketDepth), [0, 0]);
+    assertEquals(verbatim(lines), src);
+  }
+});
+
+Deno.test("json: large line-oriented records highlight without throwing", () => {
+  const properties = Array.from(
+    { length: 40_000 },
+    (_, index) => `"key${index}":${index}`,
+  );
+  const src = `{${properties.join(",")}}`;
+  const lines = languageForFile("large.jsonl").highlightLines(
+    src,
+    "large.jsonl",
+  );
+
+  assertEquals(classesOf(lines, '"key39999"'), new Set(["propertyName"]));
+  assertEquals(verbatim(lines), src);
+});
+
+Deno.test("json: line-oriented live edits preserve record isolation", () => {
+  const before = '{"event":"created","sequence":1}\n';
+  const after = [
+    '{"event":"created","sequence":1}',
+    '{"event":"updated","sequence":2}',
+    "",
+  ].join("\n");
+  const highlighter = languageForFile("events.ndjson").createHighlighter(
+    before,
+    "events.ndjson",
+  );
+  const lines = highlighter.update(after);
+
+  assertEquals(classesOf(lines, '"event"'), new Set(["propertyName"]));
+  assertEquals(classesOf(lines, '"updated"'), new Set(["string"]));
+  assertEquals(classesOf(lines, "2"), new Set(["number"]));
+  assertEquals(verbatim(lines), after);
+
+  const malformed = [
+    '{"event":"unterminated',
+    '{"event":"recovered","sequence":3}',
+  ].join("\n");
+  const recoveredLines = highlighter.update(malformed);
+
+  assertEquals(
+    classesOf(recoveredLines.slice(1), '"event"'),
+    new Set(["propertyName"]),
+  );
+  assertEquals(
+    classesOf(recoveredLines.slice(1), '"recovered"'),
+    new Set(["string"]),
+  );
+  assertEquals(classesOf(recoveredLines.slice(1), "3"), new Set(["number"]));
+  assertEquals(verbatim(recoveredLines), malformed);
+});
+
+Deno.test("json: line-oriented documents expose no partial structure", () => {
+  const language = languageForFile("events.jsonl");
+  const source = [
+    '{"first":1}',
+    '{"second":2}',
+  ].join("\n");
+  const doc = language.parseDocument(source, "events.jsonl");
+
+  assertEquals(doc.structure, []);
+  assertEquals(doc.definitions.size, 0);
+});
+
+Deno.test("json: one line-oriented record exposes its structure", () => {
+  const language = languageForFile("event.jsonl");
+  const source = '{"event":"created","sequence":1}\n';
+  const doc = language.parseDocument(source, "event.jsonl");
+
+  assertEquals(doc.structure.map((node) => node.label), [
+    "event",
+    "sequence",
+  ]);
+  assert(doc.definitions.has("event"));
+  assert(doc.definitions.has("sequence"));
 });
 
 Deno.test("json: keys, values, and literals get distinct classes", () => {
@@ -59,7 +224,7 @@ Deno.test("json: keys, values, and literals get distinct classes", () => {
   assert(classesOf(lines, ",").has("punctuation"));
 });
 
-Deno.test("json: brackets carry a nesting depth for rainbow colouring", () => {
+Deno.test("json: brackets carry a nesting depth for rainbow coloring", () => {
   const lines = jsonHighlightLines(`{ "a": [ 1 ] }`);
   const brackets = lines[0].spans.filter((s) => s.cls === "bracket");
   const byText = new Map(brackets.map((s) => [s.text, s.bracketDepth]));
@@ -71,7 +236,7 @@ Deno.test("json: brackets carry a nesting depth for rainbow colouring", () => {
   assertEquals(byText.get("]"), 1);
 });
 
-Deno.test("json: JSONC line and block comments are coloured, not rejected", () => {
+Deno.test("json: JSONC line and block comments are colored, not rejected", () => {
   const src = [
     "{",
     "  // a line comment",
@@ -83,10 +248,10 @@ Deno.test("json: JSONC line and block comments are coloured, not rejected", () =
   ].join("\n");
   const lines = jsonHighlightLines(src);
   assertEquals(lines[1].spans.map((s) => s.cls), ["whitespace", "comment"]);
-  // The block comment spans two lines; both are coloured as comment.
+  // The block comment spans two lines; both are colored as comment.
   assert(lines[3].spans.some((s) => s.cls === "comment"));
   assert(lines[4].spans.some((s) => s.cls === "comment"));
-  // The trailing comma after `2` is punctuation, and colouring is lossless.
+  // The trailing comma after `2` is punctuation, and coloring is lossless.
   assert(classesOf(lines, ",").has("punctuation"));
   assertEquals(verbatim(lines), src);
 });
@@ -99,7 +264,7 @@ Deno.test("json: a bare non-BMP character stays one span", () => {
   assertEquals(spans[0].text, "😀");
 });
 
-Deno.test("json: colouring is byte-for-byte lossless", () => {
+Deno.test("json: coloring is byte-for-byte lossless", () => {
   const src = `{
   "emoji": "🎉 é ✓",
   "nums": [1, -2.5, 3e10],
@@ -138,7 +303,7 @@ Deno.test("json: a non-string object key is skipped, not treated as a member", (
 
 Deno.test("json: pathologically deep nesting degrades to no structure", () => {
   // Deep enough to overflow the structure walk's recursion; `jsonDocument`
-  // catches it and returns colouring with an empty tree rather than throwing.
+  // catches it and returns coloring with an empty tree rather than throwing.
   const deep = "[".repeat(100000);
   const doc = jsonDocument(deep);
   assertEquals(doc.structure, []);
@@ -196,7 +361,7 @@ Deno.test("json: the incremental highlighter matches a whole re-highlight", () =
   );
 });
 
-Deno.test("json: malformed input colours without throwing", () => {
+Deno.test("json: malformed input colors without throwing", () => {
   for (
     const bad of [
       '{ "unterminated: 1',
@@ -214,7 +379,7 @@ Deno.test("json: malformed input colours without throwing", () => {
   }
 });
 
-Deno.test("json: a .json file in a diff is coloured and navigated as JSON", () => {
+Deno.test("json: a .json file in a diff is colored and navigated as JSON", () => {
   const root = Deno.makeTempDirSync();
   try {
     const file = `{\n  "name": "widget",\n  "count": 2\n}\n`;
@@ -241,7 +406,7 @@ Deno.test("json: a .json file in a diff is coloured and navigated as JSON", () =
 `;
     const model = parseDiff(diff)!;
     const { doc } = buildDiffDocument(diff, model, ws);
-    // The context line for the key is coloured as JSON: the key is a
+    // The context line for the key is colored as JSON: the key is a
     // propertyName, proving the JSON language (not TypeScript) ran.
     const keyLine = doc.lines.find((l) =>
       l.spans.some((s) => s.text === '"count"')
@@ -274,7 +439,39 @@ Deno.test("json: a .json file in a diff is coloured and navigated as JSON", () =
   }
 });
 
-Deno.test("json: editing a line in a json diff recolours it as json", () => {
+Deno.test("json: a .jsonl file in a diff uses JSON token classes", () => {
+  const diff = [
+    "diff --git a/events.jsonl b/events.jsonl",
+    "--- a/events.jsonl",
+    "+++ b/events.jsonl",
+    "@@ -1 +1 @@",
+    '-{"event":"created","sequence":1}',
+    '+{"event":"updated","sequence":2}',
+    "",
+  ].join("\n");
+  const model = parseDiff(diff)!;
+  const workspace: DiffWorkspace = {
+    resolve: () => null,
+    read: () => null,
+  };
+  const { doc } = buildDiffDocument(diff, model, workspace);
+  const removed = doc.lines.find((line) => line.bg === "del")!;
+  const added = doc.lines.find((line) => line.bg === "add")!;
+
+  assert(
+    removed.spans.some((span) =>
+      span.text === '"event"' && span.cls === "propertyName"
+    ),
+  );
+  assert(
+    added.spans.some((span) =>
+      span.text === '"updated"' && span.cls === "string"
+    ),
+  );
+  assertEquals(verbatim(doc.lines), diff);
+});
+
+Deno.test("json: editing a line in a json diff recolors it as json", () => {
   const diff = [
     "diff --git a/c.json b/c.json",
     "--- a/c.json",

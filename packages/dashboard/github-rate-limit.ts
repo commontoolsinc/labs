@@ -1,7 +1,9 @@
-// A shared budget for GitHub requests made by the performance history views.
-// GitHub reports the primary core budget in every API response. Each guarded
-// request batch reads /rate_limit so the token-wide spend is known before
-// collection starts.
+/**
+ * Shares one budget of GitHub requests out among the performance history
+ * views. GitHub reports the primary core budget in every API response, and
+ * each guarded request batch reads /rate_limit as well, so the token-wide
+ * spend is known before collection starts.
+ */
 
 import { dashboardCacheFile } from "./history-files.ts";
 

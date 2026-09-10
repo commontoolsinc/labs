@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/map-demo.test.tsx --root packages/patterns --verbose
  */
-import { action, assert, pattern, UI } from "commonfabric";
+import { action, assert, pattern, TESTS, UI } from "commonfabric";
 import { findElementByText, propsOf } from "./test/vnode-helpers.ts";
 import MapDemo from "./map-demo.tsx";
 
@@ -120,7 +120,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_no_areas_initially },
       { assertion: assert_fit_bounds_not_triggered },
 

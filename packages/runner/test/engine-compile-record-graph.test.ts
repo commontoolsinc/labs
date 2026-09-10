@@ -48,6 +48,31 @@ describe("Engine.compileToRecordGraph()", () => {
     expect(joinedBodies(result.graph).length).toBeGreaterThan(0);
   });
 
+  it("compiles an empty attached source root", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      sourceRoots: ["/main.test.ts"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: "export default 42;",
+        },
+        {
+          name: "/main.test.ts",
+          contents: "",
+        },
+      ],
+    };
+
+    const result = await engine.compileToRecordGraph(program);
+
+    expect(
+      [...result.graph.specifierByPath.keys()].some((path) =>
+        path.endsWith("/main.test.ts")
+      ),
+    ).toBe(true);
+  });
+
   it("compiles a multi-file program", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
@@ -97,7 +122,7 @@ describe("Engine.compileToRecordGraph()", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toBe(21);
   });
@@ -250,7 +275,7 @@ describe("Engine.compileToRecordGraph()", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toBe("Open");
   });
@@ -288,7 +313,7 @@ describe("Engine.compileToRecordGraph()", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
 
     // The compiled body wired up the gated ambient intrinsics, not the real

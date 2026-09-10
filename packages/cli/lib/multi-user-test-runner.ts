@@ -6,7 +6,7 @@
  * ```tsx
  * export const setup = pattern(() => ({ chat: GroupChatDemo({}) }));
  * export const alice = pattern<{ setup: Setup }>(({ setup }) => ({
- *   tests: [
+ *   [TESTS]: [
  *     { action: action_save_alice },
  *     { label: "alice-saved" },
  *     { await: "bob-saved" },
@@ -14,7 +14,7 @@
  *   ],
  * }));
  * export const bob = pattern<{ setup: Setup }>(({ setup }) => ({
- *   tests: [
+ *   [TESTS]: [
  *     { await: "alice-saved" },
  *     { assertion: assert_sees_alice },
  *     { action: action_save_bob },
@@ -35,12 +35,19 @@
  * `{ await: marker }` for a marker no other participant has announced via
  * `{ label: marker }` yet; the orchestrator then switches to the next
  * runnable participant. If every unfinished participant is parked, the test
- * fails with a deadlock report. Assertions retry (with settling) until the
- * step timeout, since asserted state may still be propagating from another
- * runtime.
+ * fails with a deadlock report.
+ *
+ * A marker is also a durable write in the shared space, which is what makes
+ * the handshake a data barrier. Each participant announces into its own
+ * marker document, committing after everything it has already committed;
+ * crossing a marker waits for it to arrive in the awaiting participant's
+ * replica. By then the server holds what the announcing participant wrote
+ * first, so the reads that follow resolve against it. An assertion placed
+ * after a marker is therefore read once, and a false value is a failure.
  */
 
-import { Identity } from "@commonfabric/identity";
+import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import type {
   TestResult,
@@ -56,6 +63,7 @@ import type {
 
 export interface MultiUserParticipantSpec {
   name: string;
+
   /** Identity seed; participants with the same `user` share an identity. */
   user: string;
 }
@@ -102,7 +110,6 @@ export function multiUserDescriptorMeta(
 }
 
 const RPC_TIMEOUT_MS = 120_000;
-const ASSERTION_RETRY_DELAY_MS = 100;
 
 class ParticipantWorker {
   readonly name: string;
@@ -189,11 +196,45 @@ interface ParticipantState {
   allowConsoleWarnings: boolean;
 }
 
+/**
+ * Check one participant against the rung the run named.
+ *
+ * A participant builds its own runtime in its own worker, so the mode a run
+ * names is honored in as many places as there are participants. The rung read
+ * back off each built runtime is checked here, and the participant that is not
+ * on it is named. A run that names no mode leaves every participant to its
+ * preset.
+ */
+export function assertParticipantRung(
+  participant: string,
+  named: CfcEnforcementMode | undefined,
+  reached: CfcEnforcementMode,
+): void {
+  if (named !== undefined && reached !== named) {
+    throw new Error(
+      `participant "${participant}" came up at CFC ${reached}, not the ` +
+        `${named} this run names`,
+    );
+  }
+}
+
 export async function runMultiUserTestPattern(
   testPath: string,
   meta: MultiUserDescriptorMeta,
   options: TestRunnerOptions = {},
 ): Promise<TestRunResult> {
+  // A caller supplying a store means to read what the run wrote, and to be
+  // told what it instantiated (see `TestRunnerOptions.storageHost`). The
+  // participants do both in workers of their own, against a storage server
+  // this function starts, so the caller's store and observer come back empty
+  // while the participants' assertions pass.
+  if (options.storageHost !== undefined) {
+    throw new Error(
+      `${testPath} is a multi-user test: its participants run in workers of ` +
+        `their own, against a storage server this runner starts, so a ` +
+        `caller-supplied \`storageHost\` would be handed back unwritten`,
+    );
+  }
   const startTime = performance.now();
   const stepTimeout = options.timeout ?? 5000;
   const results: TestResult[] = [];
@@ -223,16 +264,31 @@ export async function runMultiUserTestPattern(
       const worker = new ParticipantWorker(spec.name);
       try {
         const init = await worker.call("init", {
-          rawIdentity: identities.get(spec.user)!.serialize(),
+          identity: realmValueFromKeyPair(
+            identities.get(spec.user)!.keyPair,
+          ),
           spaceName,
           apiUrl: server.url.href,
           testPath,
           root: options.root,
+          // Each participant compiles the pattern in its own worker, so the
+          // attachment has to cross that boundary: a participant reading a data
+          // file otherwise fails for want of a closure the parent had.
+          dataFilePaths: options.dataFilePaths,
           patternCoverageDir: options.patternCoverageDir,
           continuousUI: options.continuousUI,
           participant: spec.name,
+          participants: meta.participants.map((p) => p.name),
           seedDefaults: index === 0,
+          // A test that names a mode names it for every participant, the way
+          // the single-user runner honors it.
+          cfcEnforcementMode: options.cfcEnforcementMode,
         }) as ParticipantInitResult;
+        assertParticipantRung(
+          spec.name,
+          options.cfcEnforcementMode,
+          init.cfcEnforcementMode,
+        );
         participants.push({
           spec,
           worker,
@@ -260,7 +316,7 @@ export async function runMultiUserTestPattern(
 
     // Marker scheduler: round-robin in declaration order; each turn runs a
     // participant's steps until it parks on an unannounced marker or ends.
-    const announced = new Set<string>();
+    const announced = new Map<string, string>();
     while (participants.some((p) => p.cursor < p.steps.length)) {
       let progressed = false;
       for (const participant of participants) {
@@ -268,7 +324,23 @@ export async function runMultiUserTestPattern(
           const index = participant.cursor;
           const step = participant.steps[index];
           if (step.kind === "await" && !step.skip) {
-            if (!announced.has(step.marker!)) break; // parked
+            const announcedBy = announced.get(step.marker!);
+            if (announcedBy === undefined) break; // parked
+            // The marker is announced, so the server holds it. Wait for it to
+            // reach this participant's replica; whatever the announcing
+            // participant committed first is already on the server, so the
+            // reads that follow resolve against it.
+            await participant.worker.call("awaitMarker", {
+              announcedBy,
+              marker: step.marker,
+            }).catch((cause: Error) => {
+              throw new Error(
+                `[${participant.spec.name}] waiting for marker ` +
+                  `"${step.marker}" announced by ${announcedBy}: ` +
+                  cause.message,
+                { cause },
+              );
+            });
             participant.cursor++;
             progressed = true;
             if (options.verbose) {
@@ -283,7 +355,10 @@ export async function runMultiUserTestPattern(
             continue;
           }
           if (step.kind === "label") {
-            announced.add(step.marker!);
+            // Commit before announcing, so a participant released by the
+            // announcement always finds a marker the server already holds.
+            await participant.worker.call("label", { marker: step.marker });
+            announced.set(step.marker!, participant.spec.name);
             if (options.verbose) {
               console.log(`  [${participant.spec.name}] ⇡ ${step.marker}`);
             }
@@ -318,31 +393,37 @@ export async function runMultiUserTestPattern(
             }
             continue;
           }
-          // Assertion: retry with settling until the step timeout — the
-          // asserted state may still be propagating from another runtime.
+          if (step.kind === "settle") {
+            const stepStart = performance.now();
+            await participant.worker.call("settleStep", {}, stepTimeout);
+            if (options.verbose) {
+              console.log(
+                `  [${participant.spec.name}] ⋯ settle (${
+                  Math.round(performance.now() - stepStart)
+                }ms)`,
+              );
+            }
+            continue;
+          }
+          // Assertion: read once. The step that preceded it settled this
+          // participant's own work, and a marker it crossed carried the other
+          // participants' work with it, so a false value here is a failure.
           participant.assertionCount++;
           const name =
             `${participant.spec.name}/assertion_${participant.assertionCount}`;
           const stepStart = performance.now();
           let passed = false;
           let error: string | undefined;
-          while (true) {
-            try {
-              const outcome = await participant.worker.call("assertion", {
-                index,
-              }) as { passed: boolean };
-              passed = outcome.passed;
-              error = undefined;
-            } catch (assertionError) {
-              passed = false;
-              error = String(
-                (assertionError as Error).message ?? assertionError,
-              );
-            }
-            if (passed || performance.now() - stepStart >= stepTimeout) break;
-            await participant.worker.call("settle");
-            await new Promise((resolve) =>
-              setTimeout(resolve, ASSERTION_RETRY_DELAY_MS)
+          try {
+            const outcome = await participant.worker.call("assertion", {
+              index,
+            }) as { passed: boolean; error?: string };
+            passed = outcome.passed;
+            error = outcome.error;
+          } catch (assertionError) {
+            passed = false;
+            error = String(
+              (assertionError as Error).message ?? assertionError,
             );
           }
           const durationMs = performance.now() - stepStart;

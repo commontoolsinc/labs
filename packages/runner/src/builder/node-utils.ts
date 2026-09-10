@@ -1,28 +1,22 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { FabricInstance, refuseFabricInstance } from "@commonfabric/data-model";
 import {
   factoryStateOf,
   isAdmittedFabricFactory,
   mapFactoryStateValues,
 } from "@commonfabric/data-model/fabric-factory";
-import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
-import {
-  type Cell,
-  type FactoryInput,
-  isPattern,
-  isReactive,
-  type JSONSchema,
-  type NodeRef,
-} from "./types.ts";
-import type { CfcConfClause } from "../cfc/clause.ts";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
+import { isCell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { traverseValue } from "./traverse-utils.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
-import { isCell } from "../cell.ts";
+import { getAuthoredDebugSource } from "../harness/authored-debug-source.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
-import { resolveLocationFromFunctionSource } from "./module.ts";
+import { traverseValue } from "./traverse-utils.ts";
+import { type FactoryInput, type JSONSchema, type NodeRef } from "./types.ts";
 
 export function connectInputAndOutputs(node: NodeRef) {
   function connect(value: any): any {
@@ -30,15 +24,17 @@ export function connectInputAndOutputs(node: NodeRef) {
     if (isCell(value)) {
       const exported = value.export();
       if (exported.frame !== node.frame) {
-        const implementation = isRecord(node.module)
+        const implementation = isObjectOrArray(node.module)
           ? node.module.implementation
           : undefined;
-        const sourceLocation = typeof implementation === "function"
-          ? resolveLocationFromFunctionSource(
-            implementation as (...args: any[]) => unknown,
-            node.frame,
-          )
-          : null;
+        // A factory applied during module evaluation predates the provenance
+        // walk that records authored positions, so the location is routinely
+        // absent here. The body preview is stamped at mint time and does not
+        // depend on that walk, so it names the offending callback either way.
+        const debugSource = getAuthoredDebugSource(implementation);
+        const preview = typeof implementation === "function"
+          ? (implementation as { preview?: string }).preview
+          : undefined;
         throw new Error(
           closureCaptureErrorMessage({
             capturedCell: {
@@ -46,7 +42,8 @@ export function connectInputAndOutputs(node: NodeRef) {
               scope: exported.scope,
               name: exported.name,
             },
-            sourceLocation,
+            sourceLocation: debugSource?.src ?? null,
+            implementationPreview: preview ?? null,
           }),
         );
       }
@@ -55,36 +52,15 @@ export function connectInputAndOutputs(node: NodeRef) {
     return undefined;
   }
 
-  // A symbolic factory occupies the module slot as a cell/link. Static module
-  // records are metadata and must not be traversed as graph input.
-  if (
-    isReactive(node.module) || isCellResultForDereferencing(node.module) ||
-    isCell(node.module)
-  ) {
-    node.module = connect(node.module) ?? node.module;
-  }
-
   node.inputs = traverseValue(node.inputs, connect);
   node.outputs = traverseValue(node.outputs, connect);
 
   // We will also apply ifc tags from inputs to outputs, unless the module has
   // precise built-in flow handling for its result.
-  if (!isRecord(node.module) || node.module.propagateInputIfc !== false) {
-    applyInputIfcToOutput(
-      node.expectedFactory === undefined
-        ? node.inputs
-        : { factory: node.module, input: node.inputs },
-      node.outputs,
-    );
-  }
-
-  // Handler factories route their output through the event stream, which is
-  // conventionally stored at `$event` rather than in `node.outputs`.
   if (
-    node.expectedFactory?.kind === "handler" && isRecord(node.inputs) &&
-    "$event" in node.inputs
+    !isObjectOrArray(node.module) || node.module.propagateInputIfc !== false
   ) {
-    applyInputIfcToOutput(node.module, node.inputs.$event);
+    applyInputIfcToOutput(node.inputs, node.outputs);
   }
 }
 
@@ -93,11 +69,13 @@ export function applyArgumentIfcToResult(
   resultSchema?: JSONSchema,
 ): JSONSchema | undefined {
   if (argumentSchema !== undefined) {
-    const cfc = new ContextualFlowControl();
     const joined = new Set<unknown>();
     ContextualFlowControl.joinSchema(joined, argumentSchema);
     return (joined.size !== 0)
-      ? cfc.schemaWithLub(resultSchema ?? true, cfc.lub(joined))
+      ? ContextualFlowControl.schemaWithLub(
+        resultSchema ?? true,
+        ContextualFlowControl.lub(joined),
+      )
       : resultSchema;
   }
   return resultSchema;
@@ -109,102 +87,89 @@ export function applyInputIfcToOutput<T, R>(
   outputs: FactoryInput<R>,
 ) {
   const collectedClassifications = new Set<unknown>();
-  const cfc = new ContextualFlowControl();
-  visitGraphCells(inputs, (item) => {
-    const { schema: inputSchema } = item.export();
-    if (inputSchema !== undefined) {
-      ContextualFlowControl.joinSchema(collectedClassifications, inputSchema);
+  traverseValue(inputs, (item: unknown) => {
+    if (isCell(item)) {
+      const { schema: inputSchema } = item.export();
+      if (inputSchema !== undefined) {
+        ContextualFlowControl.joinSchema(collectedClassifications, inputSchema);
+      }
     }
   });
   if (collectedClassifications.size !== 0) {
-    const confidentiality = cfc.lub(collectedClassifications);
-    visitGraphCells(outputs, (output) => {
-      attachCfcToOutput(output, cfc, confidentiality);
-    });
+    attachCfcToOutputs(
+      outputs,
+      ContextualFlowControl.lub(collectedClassifications),
+    );
   }
 }
 
-/**
- * Visit Cells in the same semantic graph view used by factory serialization:
- * factory params and space selectors are traversed, while the callable itself
- * and Fabric-special values remain atomic.
- */
-function visitGraphCells(
-  unprocessedValue: unknown,
-  visit: (cell: Cell<unknown>) => void,
-  seen: Set<object> = new Set(),
-  insideFactoryState = false,
-): void {
-  let value = unprocessedValue;
-  if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
-  if (isCell(value)) {
-    visit(value);
-    return;
-  }
-
-  if (isAdmittedFabricFactory(value)) {
-    if (seen.has(value)) return;
-    seen.add(value);
-    mapFactoryStateValues(factoryStateOf(value), (nested) => {
-      visitGraphCells(nested, visit, seen, true);
-      return nested;
-    });
-    return;
-  }
-
-  if (typeof value === "function") {
-    if (insideFactoryState) {
-      throw new TypeError(
-        "Arbitrary functions are not valid factory state values",
-      );
-    }
-    return;
-  }
-  if (
-    value === null || typeof value !== "object" || Boolean(isReactive(value)) ||
-    value instanceof FabricSpecialObject
-  ) {
-    return;
-  }
-  if (seen.has(value)) return;
-  seen.add(value);
-
-  if (Array.isArray(value)) {
-    for (const nested of value) visitGraphCells(nested, visit, seen);
-  } else if (isRecord(value) || isPattern(value)) {
-    for (const nested of Object.values(value)) {
-      visitGraphCells(nested, visit, seen, insideFactoryState);
-    }
-  }
-}
-
-function attachCfcToOutput(
-  output: Cell<unknown>,
-  cfc: ContextualFlowControl,
+// Attach ifc confidentiality to Reactive objects reachable
+// from the outputs without descending into Reactive objects
+// TODO(@ubik2) Investigate: can we have cycles here?
+function attachCfcToOutputs(
+  outputs: unknown,
   lubConfidentiality: readonly CfcConfClause[],
-): void {
-  const exported = output.export();
-  const outputSchema = exported.schema ?? true;
-  // We may have fields in the output schema, so incorporate those.
-  const joined = new Set<unknown>(lubConfidentiality);
-  ContextualFlowControl.joinSchema(joined, outputSchema);
-  const ifc = (isRecord(outputSchema) && outputSchema.ifc !== undefined)
-    ? { ...outputSchema.ifc }
-    : {};
-  ifc.confidentiality = cfc.lub(joined);
-  const outputSchemaObject = outputSchema === true
-    ? {}
-    : outputSchema === false
-    ? { not: true }
-    : outputSchema;
-  const cfcSchema: JSONSchema = {
-    ...outputSchemaObject,
-    ifc,
-  };
-  try {
-    output.setSchema(cfcSchema);
-  } catch {
-    // Cell already has a cause (computed/derived output) — its schema was set
-    // during construction, so we cannot override it here.
+) {
+  if (isCell(outputs)) {
+    const exported = outputs.export();
+    const outputSchema = exported.schema ?? true;
+    // we may have fields in the output schema, so incorporate those
+    const joined = new Set<unknown>(lubConfidentiality);
+    ContextualFlowControl.joinSchema(joined, outputSchema);
+    const ifc =
+      (isObjectOrArray(outputSchema) && outputSchema.ifc !== undefined)
+        ? { ...outputSchema.ifc }
+        : {};
+    ifc.confidentiality = ContextualFlowControl.lub(joined);
+    const outpuSchemaObj = (outputSchema === true || outputSchema === undefined)
+      ? {}
+      : outputSchema === false
+      ? { not: true }
+      : outputSchema;
+    const cfcSchema: JSONSchema = {
+      ...outpuSchemaObj,
+      ifc,
+    };
+    try {
+      outputs.setSchema(cfcSchema);
+    } catch {
+      // Cell already has a cause (computed/derived output) — its schema was
+      // set during construction, so we cannot override it here.
+    }
+    return;
+  } else if (isAdmittedFabricFactory(outputs)) {
+    const state = factoryStateOf(outputs);
+    mapFactoryStateValues(state, (value) => {
+      attachCfcToOutputs(value, lubConfidentiality);
+      return value;
+    });
+    return;
+  } else if (isObjectOrArray(outputs)) {
+    // Descend into objects and arrays.
+    //
+    // A `FabricPrimitive` among them is inert here and correctly so: it has
+    // zero enumerable own properties, so the descent ends at it, and a leaf
+    // holds no cell to label.
+    //
+    // A `FabricInstance` is refused. Its codec contents can hold a `Cell`,
+    // unreachable by property name, so passing one through leaves that cell
+    // _unlabelled_ while its plain siblings are labeled -- confidentiality
+    // silently not applied, which is the unsafe direction, unlike the
+    // policy-input walks in `runner.ts` whose equivalent gap fails closed.
+    //
+    // Nothing reaches this in production today, de facto rather than by
+    // construction: a `FabricError` is ungated and exposed to pattern authors,
+    // so what keeps this safe is that no pattern yet returns one holding a
+    // cell.
+    //
+    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
+    // at which point this becomes a walk rather than a refusal.
+    if (outputs instanceof FabricInstance) {
+      refuseFabricInstance(outputs, "when attaching CFC labels to outputs");
+    }
+
+    for (const [_, value] of Object.entries(outputs)) {
+      attachCfcToOutputs(value, lubConfidentiality);
+    }
   }
 }

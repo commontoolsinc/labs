@@ -21,10 +21,22 @@ export const buildTestDir = async (manifest: Manifest) => {
       "dist",
       tsToJs(testPath),
     );
-    await bundleTestFile(manifest, testPath, input, output);
+    await bundleModule(manifest, testPath, input, output);
   }
 
-  // Bundle all extra includes and move to server root.
+  // Bundle all extra modules and move to server root.
+  for (
+    const [filepath, outpath] of Object.entries(manifest.config.bundle ?? {})
+  ) {
+    const input = path.join(manifest.projectDir, filepath);
+    const output = path.join(
+      manifest.serverDir,
+      outpath,
+    );
+    await bundleModule(manifest, filepath, input, output);
+  }
+
+  // Copy all extra includes to server root.
   for (
     const [filepath, outpath] of Object.entries(manifest.config.include ?? {})
   ) {
@@ -66,9 +78,9 @@ export function summarize(results: TestFileResults[]): Summary {
   return { passed, duration, failed };
 }
 
-async function bundleTestFile(
+async function bundleModule(
   manifest: Manifest,
-  testPath: string,
+  sourcePath: string,
   input: string,
   output: string,
 ): Promise<void> {
@@ -101,7 +113,7 @@ async function bundleTestFile(
         stderr: "piped",
       }).output(),
     () => downlevelBundleIfNeeded(output, manifest),
-    testPath,
+    sourcePath,
   );
 }
 

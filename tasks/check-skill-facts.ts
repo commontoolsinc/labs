@@ -1,12 +1,20 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run=git
 //
-// Deterministic "tripwire" for the repo-local skills under skills/: a cheap,
-// instant, zero-token CI gate that fails when a fact a skill cites stops
-// resolving against the tree.
+// Deterministic "tripwire" for the text an agent receives without asking for
+// it: the repo-local skills under skills/, the agent guides named AGENTS.md,
+// the path-scoped rules under .claude/rules/, and the Claude Code hook scripts
+// under .claude/scripts/, whose messages reach an agent the same way. It is a
+// cheap, instant, zero-token CI gate that fails when a fact one of them cites
+// stops resolving against the tree.
 //
-// It checks two kinds of citation across every markdown file under skills/, and
-// deliberately hardcodes no fact list (that would just re-introduce the rot it
-// guards — the facts are derived from the skill text itself):
+// These documents are summaries: they name a path or a symbol instead of
+// restating what is there, which is what keeps them short enough to be worth
+// loading. That only works while the names are right, and nothing about
+// renaming a file tells you that a summary somewhere named it.
+//
+// It checks two kinds of citation, and deliberately hardcodes no fact list
+// (that would just re-introduce the rot it guards — the facts are derived from
+// the document text itself):
 //
 //   1. Every `@commonfabric/...` import specifier resolves. A bare package
 //      reference needs a root (".") export; a subpath needs that subpath in the
@@ -229,6 +237,7 @@ function resolvesExport(exports: unknown, key: string): boolean {
 export interface SkillDoc {
   /** Repo-relative path, e.g. "skills/cf-review/SKILL.md". */
   path: string;
+
   text: string;
 }
 
@@ -236,8 +245,10 @@ export interface SkillDoc {
 export interface Drift {
   /** Repo-relative path of the doc making the citation. */
   file: string;
+
   /** 1-based line within that doc. */
   line: number;
+
   message: string;
 }
 
@@ -269,6 +280,7 @@ export function skillDirOf(docPath: string): string {
  * PascalCase and dots (e.g. data-model/SchemaAndHash).
  */
 const SPECIFIER_RE = /(@commonfabric\/[a-z0-9-]+)((?:\/[\w.-]+)*)/g;
+
 const BACKTICKED_RE = /`([^`\n]+)`/g;
 
 /**
@@ -352,12 +364,33 @@ export async function readWorkspaceExports(
   return exportsByName;
 }
 
-/** Reads every markdown file under skills/ that is part of the tree. */
+/**
+ * The documents this check covers: everything under skills/, every AGENTS.md
+ * at any depth, the path-scoped rules under .claude/rules/, and the hook
+ * scripts under .claude/scripts/. CLAUDE.md files are excluded because each is
+ * a single `@AGENTS.md` import, and an import is not written in backticks so
+ * there would be nothing here to check.
+ *
+ * The hook scripts are TypeScript rather than Markdown. They are covered for
+ * the property they share with the rest: an agent reads their messages without
+ * having asked for them, and cannot tell whether a path in one still exists. A
+ * test file beside a hook is not read that way, so it is excluded.
+ *
+ * TypeScript does contain backticks, in template literals. The shape rules
+ * below are what keep those from being reported, rather than any absence of
+ * backticks. A template literal's body contains whitespace and an
+ * interpolation contains `${`, and neither counts as a path citation. A short
+ * backticked token that does look like a path is checked, which is intended.
+ */
+const COVERED_RE =
+  /^(?:skills\/.*\.md|(?:.*\/)?AGENTS\.md|\.claude\/(?:rules\/.*\.md|scripts\/(?!.*\.test\.ts$).*\.ts))$/;
+
+/** Reads every covered file that is part of the tree. */
 export async function readSkillDocs(
   root: string,
   tree: Tree,
 ): Promise<SkillDoc[]> {
-  const paths = tree.filesMatching(/^skills\/.*\.md$/);
+  const paths = tree.filesMatching(COVERED_RE);
   return await Promise.all(paths.map(async (path) => ({
     path,
     text: await Deno.readTextFile(`${root}/${path}`),
@@ -365,15 +398,16 @@ export async function readSkillDocs(
 }
 
 function reportDrift(drift: Drift[]): void {
-  console.error("\nSkill facts that no longer resolve:\n");
+  console.error("\nAgent-facing facts that no longer resolve:\n");
   for (const { file, line, message } of drift) {
     console.error(`  ${file}:${line}  ${message}`);
   }
   console.error(
     [
       "",
-      "Skills are live documentation (skills/README.md): a citation that stops",
-      "resolving is a reader sent somewhere that isn't there. Fix the skill to",
+      "Skills, AGENTS.md guides, the rules under .claude/rules/ and the hook",
+      "scripts under .claude/scripts/ are live documentation. A citation that",
+      "stops resolving sends a reader to a path that does not exist. Fix it to",
       "name the current path or specifier.",
       "",
       "A path cited as an illustration rather than a real location should say so",
@@ -395,7 +429,7 @@ export async function main(root: string = REPO_ROOT): Promise<number> {
     reportDrift(drift);
     return 1;
   }
-  console.log(`Skill facts OK (${docs.length} docs under skills/).`);
+  console.log(`Agent-facing facts OK (${docs.length} documents).`);
   return 0;
 }
 

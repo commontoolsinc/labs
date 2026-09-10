@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model";
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import {
   decodeMemoryBoundary,
@@ -9,6 +9,8 @@ import {
   type SessionSync,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { newLoopbackServer } from "../src/storage/v2-emulate.ts";
 import type {
   IStorageNotification,
   StorageNotification,
@@ -46,6 +48,24 @@ export const TEST_MEMORY_SERVER_AUTH = {
     audience: TEST_SESSION_OPEN_AUDIENCE,
   },
 } as const;
+
+/**
+ * A shared in-process memory server for multi-manager harnesses (pair with
+ * `EmulatedStorageManager.connectTo`), pinned to the runner test audience.
+ * `subscriptionRefreshDelayMs: "manual"` disables timer-driven fan-out
+ * entirely; either explicit synchronization point — `flushSessions()`, or
+ * `idle()`, which drains held fan-out to keep its quiescence contract —
+ * delivers it. The controlled-staleness shape.
+ */
+export const newSharedServer = (options?: {
+  subscriptionRefreshDelayMs?: number | "manual";
+  store?: URL;
+  sessionTtlMs?: number;
+}): MemoryV2Server.Server =>
+  newLoopbackServer({
+    ...options,
+    audience: TEST_SESSION_OPEN_AUDIENCE,
+  });
 
 export const testSessionOpenAuthFactory: MemoryV2Client.SessionOpenAuthFactory =
   (
@@ -125,16 +145,31 @@ export abstract class ScriptedSessionTransport
   #sessionOpenCount = 0;
   #helloCount = 0;
 
+  readonly #script: {
+    /** Challenge-id prefix; keep unique per transport class. */
+    name: string;
+
+    /** sessionId confirmed on session.open and stamped on effect frames. */
+    sessionId: string;
+
+    /** The space effect frames (emitSync) are addressed to. */
+    space: MemorySpace;
+  };
+
   constructor(
-    private readonly script: {
+    script: {
       /** Challenge-id prefix; keep unique per transport class. */
       name: string;
+
       /** sessionId confirmed on session.open and stamped on effect frames. */
       sessionId: string;
+
       /** The space effect frames (emitSync) are addressed to. */
       space: MemorySpace;
     },
-  ) {}
+  ) {
+    this.#script = script;
+  }
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -158,9 +193,13 @@ export abstract class ScriptedSessionTransport
   protected onHello(_helloCount: number): void {}
 
   /** Flags advertised on hello.ok — override to script an older server
-   * (e.g. one without `pendingReadStacks`). */
+   * (e.g. one without `pendingReadStacks`) or a newer one. Scripted
+   * transports do NOT advertise `verdictCatchUpMarkers` by default: a
+   * client that believed it would park every accept's promotion on markers
+   * a hand-rolled script never emits. Tests that script markers
+   * (pushSync with caughtUpLocalSeq) opt in by overriding this. */
   protected helloFlags(): ReturnType<typeof getMemoryProtocolFlags> {
-    return getMemoryProtocolFlags();
+    return { ...getMemoryProtocolFlags(), verdictCatchUpMarkers: false };
   }
 
   /** Wire codec seams — override together when a harness needs a specific
@@ -168,6 +207,7 @@ export abstract class ScriptedSessionTransport
   protected decode(payload: string): ScriptedTransportMessage {
     return decodeMemoryBoundary(payload) as unknown as ScriptedTransportMessage;
   }
+
   protected encode(message: unknown): string {
     return encodeMemoryBoundary(message as FabricValue);
   }
@@ -184,7 +224,7 @@ export abstract class ScriptedSessionTransport
       case "hello":
         this.onHello(++this.#helloCount);
         this.#sessionOpen = testSessionOpenAuthMetadata(
-          `${this.script.name}-hello-${this.#helloCount}`,
+          `${this.#script.name}-hello-${this.#helloCount}`,
         );
         this.respond({
           type: "hello.ok",
@@ -200,13 +240,13 @@ export abstract class ScriptedSessionTransport
           this.#sessionOpen.challenge.value,
         );
         this.#sessionOpen = testSessionOpenAuthMetadata(
-          `${this.script.name}-open-${++this.#sessionOpenCount}`,
+          `${this.#script.name}-open-${++this.#sessionOpenCount}`,
         );
         this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
-            sessionId: message.session?.sessionId ?? this.script.sessionId,
+            sessionId: message.session?.sessionId ?? this.#script.sessionId,
             serverSeq: this.openServerSeq(),
             sessionOpen: this.#sessionOpen,
           },
@@ -253,27 +293,44 @@ export abstract class ScriptedSessionTransport
   emitSync(sync: SessionSync): void {
     this.respond({
       type: "session/effect",
-      space: this.script.space,
-      sessionId: this.script.sessionId,
+      space: this.#script.space,
+      sessionId: this.#script.sessionId,
       effect: sync,
+    });
+  }
+
+  /** Revoke the session from the server side: the client terminates it and
+   * closes its watch view — the sync/marker channel dies with it. */
+  emitRevoked(reason: "taken-over" | "unauthorized" = "taken-over"): void {
+    this.respond({
+      type: "session/revoked",
+      space: this.#script.space,
+      sessionId: this.#script.sessionId,
+      reason,
     });
   }
 }
 
 export class SingleSessionFactory implements SessionFactory {
   client: MemoryV2Client.Client | null = null;
+  session: MemoryV2Client.SpaceSession | null = null;
 
-  constructor(private readonly transport: MemoryV2Client.Transport) {}
+  readonly #transport: MemoryV2Client.Transport;
+
+  constructor(transport: MemoryV2Client.Transport) {
+    this.#transport = transport;
+  }
 
   async create(space: MemorySpace) {
     if (this.client !== null) {
       throw new Error(`Session already created for ${space}`);
     }
     const client = await MemoryV2Client.connect({
-      transport: this.transport,
+      transport: this.#transport,
     });
     const session = await client.mount(space, {}, testSessionOpenAuthFactory);
     this.client = client;
+    this.session = session;
     return { client, session };
   }
 }

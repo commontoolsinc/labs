@@ -1,7 +1,21 @@
+/**
+ * The clone shaped for "write the top, then freeze the whole thing": a fresh
+ * mutable container whose every child is already deep-frozen.
+ *
+ * That combination is what makes a single `Object.freeze()` of the result
+ * sufficient, with no mutable remnant hiding underneath. Getting there costs
+ * nothing for children that were already deep-frozen, since they ride along by
+ * identity, while a mutable child is cloned rather than frozen where it lies,
+ * so the input is left as it was found.
+ *
+ * The top level is copied unconditionally, even when the input was already
+ * mutable, the caller being handed something it is expected to write to.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { shallowMutableClone } from "@/fabric-value.ts";
+import { shallowMutableClone } from "@/index.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";

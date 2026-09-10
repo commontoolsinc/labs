@@ -1,4 +1,11 @@
-import { action, computed, pattern, Writable } from "commonfabric";
+import {
+  action,
+  assert,
+  computed,
+  pattern,
+  TESTS,
+  Writable,
+} from "commonfabric";
 import { lateVDOMBranch } from "./subject.tsx";
 
 export default pattern(() => {
@@ -13,10 +20,10 @@ export default pattern(() => {
       )}
     </div>
   );
-  const isLate = computed(() => phase.get() === "late");
+  const isLate = assert(() => phase.get() === "late");
 
   return {
-    tests: [
+    [TESTS]: [
       { action: advance },
       { render: view },
       { assertion: isLate },

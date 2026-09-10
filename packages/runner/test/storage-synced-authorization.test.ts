@@ -1,15 +1,17 @@
 import { assert, assertEquals } from "@std/assert";
+
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import * as MemoryV2Client from "@commonfabric/memory/v2/client";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
 } from "@commonfabric/memory/v2";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+
 import type { SessionFactory } from "../src/storage/v2.ts";
 import {
   TEST_MEMORY_SERVER_AUTH,
@@ -36,13 +38,19 @@ function makeServer(): MemoryV2Server.Server {
  * pull, and thus the sync) fails authorization.
  */
 class DenyingWatchSessionFactory implements SessionFactory {
+  readonly #server: MemoryV2Server.Server;
+  readonly #retriable: boolean;
+
   constructor(
-    private readonly server: MemoryV2Server.Server,
-    private readonly retriable: boolean,
-  ) {}
+    server: MemoryV2Server.Server,
+    retriable: boolean,
+  ) {
+    this.#server = server;
+    this.#retriable = retriable;
+  }
 
   async create(id: string, signer?: Signer) {
-    const base = MemoryV2Client.loopback(this.server);
+    const base = MemoryV2Client.loopback(this.#server);
     let receive: (payload: string) => void = () => {};
     const transport: MemoryV2Client.Transport = {
       send: (payload: string) => {
@@ -57,7 +65,7 @@ class DenyingWatchSessionFactory implements SessionFactory {
             error: {
               name: "AuthorizationError",
               message: "Principal lacks READ on space",
-              ...(this.retriable ? { retriable: true } : {}),
+              ...(this.#retriable ? { retriable: true } : {}),
             },
           }));
           return Promise.resolve();

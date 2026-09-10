@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import type { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
 
 export type DID = `did:${string}:${string}`;
 export type DIDKey = `did:key:${string}`;
@@ -54,6 +54,7 @@ export type Result<T extends Unit = Unit, E extends Error = Error> =
 
 export interface Ok<T extends Unit> {
   ok: T;
+
   /**
    * Discriminant to differentiate between Ok and Fail.
    */
@@ -62,6 +63,7 @@ export interface Ok<T extends Unit> {
 
 export interface Fail<E extends Error> {
   error: E;
+
   /**
    * Discriminant to differentiate between Ok and Fail.
    */
@@ -73,7 +75,17 @@ export interface Signer<ID extends DID = DID> extends Principal<ID> {
 
   verifier: Verifier<ID>;
 
-  serialize(): KeyPairRaw;
+  /**
+   * This signer's key pair, in a form no holder can use to reach or alter this
+   * signer. Callers may rely on that rather than defending themselves.
+   *
+   * A `FabricKeyPair` is immutable, and immutable through to the key material
+   * where it holds any, so the same instance can serve every reader. It is
+   * also a `FabricValue`, so it travels as an IPC payload under a
+   * `codec-realm` encoding, which carries either state -- handles included --
+   * across a realm boundary whole.
+   */
+  keyPair: FabricKeyPair;
 }
 
 export interface Verifier<ID extends DID = DID> extends Principal<ID> {
@@ -85,59 +97,4 @@ export interface Verifier<ID extends DID = DID> extends Principal<ID> {
 
 export interface AuthorizationError extends Error {
   name: "AuthorizationError";
-}
-
-export type InsecureCryptoKeyPair = {
-  privateKey: Uint8Array;
-  publicKey: Uint8Array;
-};
-
-export type TransferrableInsecureCryptoKeyPair = {
-  privateKey: Array<number>;
-  publicKey: Array<number>;
-};
-
-export type KeyPairRaw = CryptoKeyPair | InsecureCryptoKeyPair;
-
-export function isCryptoKeyPair(input: unknown): input is CryptoKeyPair {
-  return !!(
-    globalThis.CryptoKey &&
-    isRecord(input) &&
-    input.privateKey instanceof globalThis.CryptoKey &&
-    input.publicKey instanceof globalThis.CryptoKey
-  );
-}
-
-export function isInsecureCryptoKeyPair(
-  input: unknown,
-): input is InsecureCryptoKeyPair {
-  return !!(
-    isRecord(input) &&
-    input.privateKey instanceof Uint8Array &&
-    input.publicKey instanceof Uint8Array
-  );
-}
-
-export function isKeyPairRaw(value: unknown): value is KeyPairRaw {
-  return isCryptoKeyPair(value) || isInsecureCryptoKeyPair(value);
-}
-
-export function serializeKeyPairRaw(
-  keyPairRaw: KeyPairRaw,
-): TransferrableInsecureCryptoKeyPair | null {
-  return isInsecureCryptoKeyPair(keyPairRaw)
-    ? {
-      privateKey: Array.from(keyPairRaw.privateKey),
-      publicKey: Array.from(keyPairRaw.publicKey),
-    }
-    : null;
-}
-
-export function deserializeKeyPairRaw(
-  transferrable: TransferrableInsecureCryptoKeyPair,
-): InsecureCryptoKeyPair {
-  return {
-    privateKey: Uint8Array.from(transferrable.privateKey),
-    publicKey: Uint8Array.from(transferrable.publicKey),
-  };
 }

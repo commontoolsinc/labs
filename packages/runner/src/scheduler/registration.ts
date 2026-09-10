@@ -1,15 +1,14 @@
 import { getLogger } from "@commonfabric/utils/logger";
+
 import type { Cancel } from "../cancel.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
-import type { IMemorySpaceAddress } from "../storage/interface.ts";
-import type { ChangeGroup } from "../storage/interface.ts";
+import type { ChangeGroup, IMemorySpaceAddress } from "../storage/interface.ts";
 import {
   type DependencyGraphState,
   hasInvalidUpstream,
   isLive,
   notifyNodeLivenessChange,
-  recomputeLiveRefs,
   setNodeProvisionalDemand,
   unregisterDependentEdge,
 } from "./dependency-graph.ts";
@@ -17,13 +16,13 @@ import {
   type DependencyUpdateState,
   setSchedulerDependencies,
 } from "./dependency-updates.ts";
-import { filterIgnoredAddresses } from "./reactivity.ts";
-import { type WriterIndexState } from "./scheduling-writes.ts";
 import {
   type NodeKind,
   NodeRegistry,
   type SchedulerNode,
 } from "./node-record.ts";
+import { filterIgnoredAddresses } from "./reactivity.ts";
+import { type WriterIndexState } from "./scheduling-writes.ts";
 import {
   applyActionReadDelta,
   ensureCancelForActionTriggers,
@@ -469,7 +468,11 @@ function clearActionSchedulingState(
   state.pending.delete(action);
   const record = state.nodes.get(action);
   if (record) {
-    record.invalidCauses = [];
+    record.invalidCauses.clear();
+    // Stage B: the fan-out record (known-scope ratchet, per-instance
+    // logs) is scheduling state of the LIVE subscription — a re-registered
+    // action starts unnarrowed and re-learns by its probe run.
+    record.fanOut = undefined;
   }
   state.clearInvalid(action);
 }
@@ -478,31 +481,27 @@ function removeReverseDependencyEdges(
   state: SchedulerUnsubscribeActionState,
   action: Action,
 ): void {
-  let changed = false;
   const dependencies = state.reverseDependencies.get(action);
   if (dependencies) {
     for (const dependency of [...dependencies]) {
-      changed = unregisterDependentEdge(
+      unregisterDependentEdge(
         state.dependencyGraphState,
         dependency,
         action,
-        { recompute: false },
-      ) || changed;
+      );
     }
   }
 
   const dependents = state.dependents.get(action);
   if (dependents) {
     for (const dependent of [...dependents]) {
-      changed = unregisterDependentEdge(
+      unregisterDependentEdge(
         state.dependencyGraphState,
         action,
         dependent,
-        { recompute: false },
-      ) || changed;
+      );
     }
   }
-  if (changed) recomputeLiveRefs(state.dependencyGraphState);
 }
 
 function clearActionTypeTracking(

@@ -24,8 +24,8 @@ import { computed, fetchJson, pattern } from "commonfabric";
 // unknown types properly; `{type:"unknown"}` is the CORRECT behavior (confirmed
 // w/ Berni), so typing the call is the right fix, not restoring `true`.
 //
-// An `unknown`-inferred capture fails this way silently — undefined at runtime
-// rather than a compile error. The transformer now emits a
+// An `unknown`-inferred capture fails this way silently — a reference
+// carrying no fields at runtime rather than a compile error. The transformer now emits a
 // `reactive-capture:unknown-type` warning for such captures, so the silent case
 // surfaces at build time; typing the call (as below) is the fix and supplies the
 // schema the assertion semantically requires.

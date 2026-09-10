@@ -12,7 +12,7 @@
  *
  * Run: deno task cf test packages/patterns/google/extractors/email-pattern-launcher.test.tsx --root packages/patterns/google --verbose
  */
-import { assert, pattern } from "commonfabric";
+import { assert, pattern, TESTS } from "commonfabric";
 
 // =============================================================================
 // HELPER FUNCTIONS (duplicated for testing - same as in main pattern)
@@ -191,7 +191,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Email pattern matching ===
       { assertion: assert_wildcard_matches_domain },
       { assertion: assert_wildcard_matches_different_user },

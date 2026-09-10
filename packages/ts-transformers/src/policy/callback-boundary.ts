@@ -1,16 +1,20 @@
 import ts from "typescript";
 
+import { getCallArgumentPosition } from "../ast/call-arguments.ts";
 import {
   classifyArrayCallbackContainerCall,
   detectCallKind,
   findEnclosingPatternBuilderCallbackDescriptor,
   getPatternBuilderCallbackArgument,
+  isCollectingPlainArrayMethodCallback,
 } from "../ast/call-kind.ts";
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import { isEventHandlerJsxAttribute } from "../ast/event-handlers.ts";
+import { outermostTransparentWrapper } from "../utils/expression.ts";
 
 export interface CallbackBoundaryLookup {
   isArrayMethodCallback(node: ts.Node): boolean;
+  isSourceFileDefaultLibrary(sourceFile: ts.SourceFile): boolean;
 }
 
 export type SupportedCallbackBoundaryKind =
@@ -111,7 +115,9 @@ export function classifyCallbackBoundary(
   checker: ts.TypeChecker,
   lookup?: CallbackBoundaryLookup,
 ): CallbackBoundaryDecision {
-  const jsxParent = callback.parent;
+  // The attribute holds the outermost wrapper around the callback, so the
+  // JSX lookup starts from the usage site rather than the callback itself.
+  const jsxParent = outermostTransparentWrapper(callback).parent;
   if (
     ts.isJsxExpression(jsxParent) &&
     ts.isJsxAttribute(jsxParent.parent) &&
@@ -127,6 +133,12 @@ export function classifyCallbackBoundary(
       },
     };
   }
+
+  const position = getCallArgumentPosition(callback);
+  if (!position) {
+    return { kind: "none" };
+  }
+  const parent = position.call;
 
   if (lookup?.isArrayMethodCallback(callback)) {
     return {
@@ -156,14 +168,6 @@ export function classifyCallbackBoundary(
     };
   }
 
-  const parent = callback.parent;
-  if (
-    !parent || !ts.isCallExpression(parent) ||
-    !parent.arguments.includes(callback)
-  ) {
-    return { kind: "none" };
-  }
-
   const callKind = detectCallKind(parent, checker);
   if (callKind?.kind === "lift-applied") {
     return {
@@ -183,7 +187,7 @@ export function classifyCallbackBoundary(
   // callback is a compute-owned boundary like lift-applied: legitimate inside
   // a pattern body, never a reactive closure.
   if (
-    parent.arguments.length >= 2 && parent.arguments[1] === callback &&
+    position.index === 1 &&
     isSqliteTableCallee(parent.expression, checker)
   ) {
     return {
@@ -352,6 +356,13 @@ export function getCallbackBoundarySemantics(
     isPlainArrayValueCallback: supportedKind === "plain-array-value",
     supportsPatternOwnedWrapperCallbackSite: supportedKind ===
         "reactive-array-method" ||
+      (supportedKind === "plain-array-value" &&
+        !!lookup &&
+        isCollectingPlainArrayMethodCallback(
+          callback,
+          checker,
+          (sourceFile) => lookup.isSourceFileDefaultLibrary(sourceFile),
+        )) ||
       supportedKind === "pattern-builder" ||
       supportedKind === "render-builder",
     supportsPatternOwnedStatements: supportedKind === "reactive-array-method" ||

@@ -1,3 +1,14 @@
+/**
+ * Smoke tests: confirm each route is mounted and its first-line validation
+ * returns a sensible error. These deliberately hit only the fast-fail paths
+ * (bad input / missing auth) that reject *before* any runtime/storage access,
+ * so they need no runtime fixture. End-to-end delivery is covered separately.
+ *
+ * Driven through the real `app` (not a freshly-mounted router) because the
+ * webhook handlers import the `runtime` singleton from `@/index.ts`, which
+ * imports `@/app.ts` — re-mounting the router standalone hits that import cycle.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import env from "@/env.ts";
@@ -6,15 +17,6 @@ import app from "@/app.ts";
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
 }
-
-// Smoke tests: confirm each route is mounted and its first-line validation
-// returns a sensible error. These deliberately hit only the fast-fail paths
-// (bad input / missing auth) that reject *before* any runtime/storage access,
-// so they need no runtime fixture. End-to-end delivery is covered separately.
-//
-// Driven through the real `app` (not a freshly-mounted router) because the
-// webhook handlers import the `runtime` singleton from `@/index.ts`, which
-// imports `@/app.ts` — re-mounting the router standalone hits that import cycle.
 
 describe("Webhook routes (smoke: wired up + error paths)", () => {
   it("POST /api/webhooks rejects an invalid cellLink with 400", async () => {

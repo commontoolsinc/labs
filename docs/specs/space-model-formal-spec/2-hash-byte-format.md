@@ -46,9 +46,9 @@ produce different hashes even though both could be represented as a zero byte).
 The authoritative tag assignments are in formal spec Section 6.3. Tags are
 organized into four categories by high nibble: **meta** (`0x0N`) for structural
 markers like `TAG_END` and `TAG_HOLE`, **compound** (`0x1N`) for containers
-whose children are tagged values, **primitive** (`0x2N`) for leaf value
-types, and **optimized** (`0xFN`) for hash-level encodings of primitive values
-that substitute a digest for the raw payload (see Section 4.4 for the long-string
+whose children are tagged values, **primitive** (`0x2N`) for leaf value types,
+and **optimized** (`0xFN`) for hash-level encodings of primitive values that
+substitute a digest for the raw payload (see Section 4.4 for the long-string
 optimization). All unassigned values are reserved for future use.
 
 ---
@@ -63,8 +63,8 @@ optimization). All unassigned values are reserved for future use.
   arrays) and hole run counts.
 
   Examples: `0` encodes as `0x00` (1 byte); `5` as `0x05` (1 byte); `127` as
-  `0x7F` (1 byte); `128` as `0x80 0x01` (2 bytes); `300` as `0xAC 0x02`
-  (2 bytes).
+  `0x7F` (1 byte); `128` as `0x80 0x01` (2 bytes); `300` as `0xAC 0x02` (2
+  bytes).
 
 - **`TAG_END` sentinel** — compound types (arrays and objects) use `TAG_END`
   (`0x00`) to mark the end of their element or key-value sequence, instead of
@@ -77,8 +77,8 @@ optimization). All unassigned values are reserved for future use.
 
 For each type, the subsections below specify the exact byte sequence fed to the
 SHA-256 context. "Feed" means the bytes are appended to the running hash state
-in order; the overall hash is finalized only after the entire value tree has been
-traversed.
+in order; the overall hash is finalized only after the entire value tree has
+been traversed.
 
 ### 4.1 `null`
 
@@ -128,13 +128,13 @@ four special values that JSON cannot represent natively (`-0`, `NaN`,
   payload `7F F8 00 00 00 00 00 00`. Any input NaN bit pattern (signaling,
   quiet, with arbitrary payload bits) hashes via this canonical 8-byte
   sequence. This ensures all NaN values produce identical hashes, matching
-  fabric value-equality, under which all `NaN`s are equal (`Object.is(NaN,
+  `FabricValue` equality, under which all `NaN`s are equal (`Object.is(NaN,
   NaN)` is `true`; see `1-fabric-values.md` Section 6.7). Note this is
   distinct from the `===` operator, under which a `NaN` compares unequal even
   to itself.
 
-> **Conversion-gate cross-reference.** Whether `-0`, `NaN`, or `±Infinity`
-> reach this layer depends on the fabric-value conversion gate; see
+> **Conversion-gate cross-reference.** Whether `-0`, `NaN`, or `±Infinity` reach
+> this layer depends on the `FabricValue` conversion gate; see
 > `1-fabric-values.md` Section 4.9. The byte-level encoding above is the
 > hasher's contract regardless of how the values arrived.
 
@@ -186,15 +186,15 @@ the byte stream fed to the outer hasher and enables a string-representation
 cache keyed by the JavaScript string. Because the two encodings use different
 type tags (`0x24` vs. `0xF0`), they are unambiguous and cannot collide.
 
-**The two forms produce different hashes for the same string.** The
-64-byte threshold is part of the format, and conforming implementations
-must use the threshold when deciding which form to emit.
+**The two forms produce different hashes for the same string.** The 64-byte
+threshold is part of the format, and conforming implementations must use the
+threshold when deciding which form to emit.
 
 The hashed form applies everywhere this spec encodes a string via the
-`TAG_STRING` layout: standalone strings (this section), `symbol` keys
-(Section 4.6), object keys (Section 4.13), `FabricInstance` type tags
-(Section 4.14), `FabricHash` algorithm tags (Section 4.11), and
-`FabricRegExp` source/flags/flavor strings (Section 4.16).
+`TAG_STRING` layout: standalone strings (this section), `symbol` keys (Section
+4.6), object keys (Section 4.13), `FabricInstance` type tags (Section 4.14),
+`FabricHash` algorithm tags (Section 4.11), `FabricRegExp` source/flags/flavor
+strings (Section 4.16), and `FabricKeyPair` algorithm names (Section 4.17).
 
 ### 4.5 `bigint`
 
@@ -242,10 +242,10 @@ ensures that a `Symbol.for("foo")` and the string `"foo"` produce different
 hashes, while inheriting the short/long string-encoding delegation
 unchanged.
 
-> **Conversion-gate cross-reference.** Whether a symbol value reaches this
-> layer depends on the fabric-value conversion gate; see
-> `1-fabric-values.md` Section 4.9. The byte-level encoding above is the
-> hasher's contract regardless of how the value arrived.
+> **Conversion-gate cross-reference.** Whether a symbol value reaches this layer
+> depends on the `FabricValue` conversion gate; see `1-fabric-values.md` Section
+> 4.9. The byte-level encoding above is the hasher's contract regardless of how
+> the value arrived.
 
 ### 4.7 `undefined`
 
@@ -292,16 +292,16 @@ The encoding is structurally identical to `TAG_BIGINT` but uses a different type
 tag (`0x27` instead of `0x26`), ensuring that `FabricEpochNsec(42n)` and
 `42n` produce distinct hashes.
 
-### 4.10 `FabricEpochDays`
+### 4.10 `FabricEpochDay`
 
 ```
-Bytes: TAG_EPOCH_DAYS  LENGTH_LEB128  TWO_COMP_BYTES
+Bytes: TAG_EPOCH_DAY   LENGTH_LEB128  TWO_COMP_BYTES
        0x28            <1+ bytes>     <length bytes>
 ```
 
 Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
 
-`FabricEpochDays` represents a day-precision Unix epoch timestamp. It is a
+`FabricEpochDay` represents a day-precision Unix epoch timestamp. It is a
 `FabricPrimitive` subclass and has a dedicated type tag.
 
 - **Length**: The number of bytes in the two's-complement representation of the
@@ -310,7 +310,7 @@ Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
   two's-complement, big-endian, minimal bytes.
 
 The encoding is structurally identical to `TAG_BIGINT` but uses a different type
-tag (`0x28` instead of `0x26`), ensuring that `FabricEpochDays(42n)` and
+tag (`0x28` instead of `0x26`), ensuring that `FabricEpochDay(42n)` and
 `42n` produce distinct hashes. It also differs from `FabricEpochNsec` (`0x27`)
 so the two temporal types are always distinguishable.
 
@@ -396,26 +396,12 @@ Bytes: TAG_INSTANCE  TYPE_TAG_STRING  STATE
 - **Encoded state**: The value returned by the codec's `encode()`, hashed
   recursively as a complete tagged value.
 
-`Factory@1` uses this existing arm without a factory-specific tag byte:
-
-```
-TAG_INSTANCE  string("Factory@1")  FactoryStateV1-as-recursive-value
-```
-
-The value being callable does not affect its byte format. Hashing first seals
-the admitted factory's exact canonical codec state, then hashes that state
-recursively in the same way as every other codec value. An independently
-decoded inert shell and a trusted live builder factory with equal canonical
-state therefore hash identically. Arbitrary JavaScript functions never reach
-this arm and are rejected.
-
-> **Note on types with dedicated tags.** `FabricBytes`,
-> `FabricEpochNsec`, `FabricEpochDays`, `FabricHash`, and `FabricRegExp` are
+> **Note on types with dedicated tags.** `FabricBytes`, `FabricEpochNsec`,
+> `FabricEpochDay`, `FabricHash`, `FabricRegExp`, and `FabricKeyPair` are
 > **not** hashed via `TAG_INSTANCE`. Each has a dedicated type tag and is
-> encoded directly (see Sections 4.8, 4.9, 4.10, 4.11, and 4.16
-> respectively). These are all `FabricPrimitive` subclasses — at this
-> layer they are hashed from their own stored values, not via their wire
-> codecs.
+> encoded directly (see Sections 4.8, 4.9, 4.10, 4.11, 4.16 and 4.17
+> respectively). These are all `FabricPrimitive` subclasses — at this layer they
+> are hashed from their own stored values, not via their wire codecs.
 
 ### 4.15 Holes (sparse array elements)
 
@@ -465,6 +451,36 @@ enclosing container and no `TAG_END` terminator, since the field count is
 fixed. Distinct regex dialects with identical source and flags therefore
 produce distinct hashes (the `flavor` field disambiguates them).
 
+### 4.17 `FabricKeyPair`
+
+```
+Bytes: TAG_KEY_PAIR  ALGORITHM_STRING  PUBLIC_KEY      PRIVATE_KEY
+       0x2C          <string, §4.4>    <bytes, §4.8>   <bytes, §4.8>
+```
+
+`FabricKeyPair` represents an asymmetric key pair. It is a `FabricPrimitive`
+subclass and has a dedicated type tag; it is hashed from its own stored values
+(below) and is **not** hashed via `TAG_INSTANCE`.
+
+- **Algorithm**: The algorithm name (e.g. `"Ed25519"`), encoded as a complete
+  tagged string value per Section 4.4.
+- **Public key**: The public key's bytes, encoded as a complete tagged
+  `FabricBytes` value per Section 4.8 — `TAG_BYTES`, a LEB128 length, then the
+  raw bytes.
+- **Private key**: The private key's bytes, in the same form.
+
+The three fields are fed in order — algorithm, then public key, then private
+key — with no enclosing container and no `TAG_END` terminator, since the field
+count is fixed. The two keys are self-delimiting through their own length
+prefixes, so a pair holding the two keys the other way round hashes
+differently.
+
+**Only a pair holding key material has a hash.** A `FabricKeyPair` holding
+`CryptoKey` handles has no hash at all, and computing one throws: its material
+is by construction unreachable, and its algorithm name alone is shared by every
+key of that algorithm, so hashing that would give distinct keys one identity.
+See `1-fabric-values.md` Section 1.4.11.
+
 ---
 
 ## 5. Object Key Sorting
@@ -496,14 +512,14 @@ the sort order and the hash encoding use the same byte representation.
 >   for U+FFFF).
 >
 > For example, U+10000 (UTF-16: `D800 DC00`; UTF-8: `F0 90 80 80`) sorts
-> *before* U+E000 (UTF-16: `E000`; UTF-8: `EE 80 80`) in UTF-16 code unit
-> order, but *after* it in UTF-8 byte order.
+> *before* U+E000 (UTF-16: `E000`; UTF-8: `EE 80 80`) in UTF-16 code unit order,
+> but *after* it in UTF-8 byte order.
 >
 > For strings containing only BMP characters (U+0000--U+FFFF) — the practical
 > common case for object keys — the two orderings are equivalent. An
-> implementation that needs to match the hash sort order must sort by
-> UTF-8 bytes (or equivalently, by Unicode code point), not by JavaScript's
-> default string comparison, if supplementary characters may appear in keys.
+> implementation that needs to match the hash sort order must sort by UTF-8
+> bytes (or equivalently, by Unicode code point), not by JavaScript's default
+> string comparison, if supplementary characters may appear in keys.
 
 ---
 
@@ -513,7 +529,7 @@ The overall traversal is depth-first, left-to-right:
 
 1. Feed the type tag byte.
 2. For primitive types with variable-length payloads (string, bigint, bytes,
-   epoch-nsec, epoch-days, content-id), feed the LEB128 byte-length prefix(es),
+   epoch-nsec, epoch-day, content-id), feed the LEB128 byte-length prefix(es),
    then the payload.
 3. For compound types (array, object), recursively hash each child, then feed
    `TAG_END`. Each child's bytes (starting with its own type tag) are fed to
@@ -596,7 +612,7 @@ Length 5 in LEB128 is `0x05`.
 `TAG_EPOCH_NSEC` (`0x27`), followed by the bigint `0n` encoded as minimal
 two's-complement: length 1 (LEB128 `0x01`) and payload `0x00`.
 
-### 7.10 `FabricEpochDays(42n)`
+### 7.10 `FabricEpochDay(42n)`
 
 `42n` in minimal two's-complement is `0x2A` (1 byte).
 
@@ -604,7 +620,7 @@ two's-complement: length 1 (LEB128 `0x01`) and payload `0x00`.
 28  01  2A
 ```
 
-`TAG_EPOCH_DAYS` (`0x28`), length 1 (`0x01`), payload `0x2A`.
+`TAG_EPOCH_DAY` (`0x28`), length 1 (`0x01`), payload `0x2A`.
 
 ### 7.11 `FabricHash("fid1", <4 bytes: 0xDE 0xAD 0xBE 0xEF>)`
 
@@ -646,7 +662,32 @@ Full byte stream:
 24 06 65 73 32 30 32 35
 ```
 
-### 7.13 `[1, , 3]` (sparse array)
+### 7.13 `FabricKeyPair("Ed25519", [DE AD], [BE EF 01])`
+
+`FabricKeyPair` is a `FabricPrimitive` with the dedicated tag `TAG_KEY_PAIR`
+(`0x2C`); it is hashed by feeding its algorithm name and then its two keys —
+public first, then private — in that order (Section 4.17). The algorithm name
+is under the 64-byte threshold, so it uses the direct string form; each key is
+a complete tagged `FabricBytes` value.
+
+- KeyPair tag: `2C`
+- Algorithm `"Ed25519"` (7 bytes UTF-8): `24 07 45 64 32 35 35 31 39`
+- Public key (2 bytes): `25 02 DE AD`
+- Private key (3 bytes): `25 03 BE EF 01`
+
+There is no enclosing object and no `TAG_END` terminator — the three fields are
+fed positionally. The two keys carry their own length prefixes, so a pair
+holding them the other way round produces a different byte stream.
+
+Full byte stream:
+```
+2C
+24 07 45 64 32 35 35 31 39
+25 02 DE AD
+25 03 BE EF 01
+```
+
+### 7.14 `[1, , 3]` (sparse array)
 
 Three elements: number `1`, one hole, number `3`. Terminated by `TAG_END`.
 
@@ -665,7 +706,7 @@ Full byte stream:
 00
 ```
 
-### 7.14 `[]` (empty array)
+### 7.15 `[]` (empty array)
 
 ```
 10 00
@@ -673,7 +714,7 @@ Full byte stream:
 
 `TAG_ARRAY` immediately followed by `TAG_END`.
 
-### 7.15 `{ a: 1, b: 2 }` (object)
+### 7.16 `{ a: 1, b: 2 }` (object)
 
 Two keys. UTF-8 sort order: `"a"` (0x61) < `"b"` (0x62). Terminated by
 `TAG_END`.
@@ -695,7 +736,7 @@ Full byte stream:
 00
 ```
 
-### 7.16 `{}` (empty object)
+### 7.17 `{}` (empty object)
 
 ```
 11 00
@@ -703,7 +744,7 @@ Full byte stream:
 
 `TAG_OBJECT` immediately followed by `TAG_END`.
 
-### 7.17 `[1, undefined, 3]` vs. `[1, , 3]` vs. `[1, null, 3]`
+### 7.18 `[1, undefined, 3]` vs. `[1, , 3]` vs. `[1, null, 3]`
 
 These three arrays produce different byte streams at the middle element:
 
@@ -711,7 +752,7 @@ These three arrays produce different byte streams at the middle element:
 - `[1, , 3]`: middle element is `01 01` (`TAG_HOLE` + run of 1)
 - `[1, null, 3]`: middle element is `20` (`TAG_NULL`)
 
-### 7.18 Long string (hashed form)
+### 7.19 Long string (hashed form)
 
 A string whose UTF-8 encoding exceeds 64 bytes uses the hashed form (Section
 4.4). Let `S` be any such string and let `H = SHA-256(utf8(S))` be its 32-byte
@@ -728,13 +769,13 @@ The **boundary case** at exactly 64 UTF-8 bytes uses the direct form, since
 the rule is "64 bytes or fewer → direct". A 65-byte UTF-8 string uses the
 hashed form.
 
-This rule applies to every string the hasher feeds, including standalone
-strings (Section 4.4), `symbol` keys (Section 4.6), object keys (Section
-4.13), `FabricInstance` type tags (Section 4.14), `FabricHash`
-algorithm tags (Section 4.11), and `FabricRegExp` source/flags/flavor
-strings (Section 4.16). The threshold is evaluated per-string
-independently: an object may mix short keys (direct form) and long keys
-(hashed form) in the same key-value sequence.
+This rule applies to every string the hasher feeds, including standalone strings
+(Section 4.4), `symbol` keys (Section 4.6), object keys (Section 4.13),
+`FabricInstance` type tags (Section 4.14), `FabricHash` algorithm tags (Section
+4.11), `FabricRegExp` source/flags/flavor strings (Section 4.16), and
+`FabricKeyPair` algorithm names (Section 4.17). The threshold is evaluated
+per-string independently: an object may mix short keys (direct form) and long
+keys (hashed form) in the same key-value sequence.
 
 ---
 
@@ -742,16 +783,17 @@ independently: an object may mix short keys (direct form) and long keys
 
 The following JavaScript values must never be passed to the hasher:
 
-- **Unique (uninterned) `Symbol` values** — those for which
-  `Symbol.keyFor(s)` returns `undefined`. Registry-interned symbols
-  (`Symbol.for(key)`) **are** hashable; see Section 4.6. The required
-  error message is `"Cannot hash unique (uninterned) symbol"`.
+- **Unique (uninterned) `Symbol` values** — those for which `Symbol.keyFor(s)`
+  returns `undefined`. Registry-interned symbols (`Symbol.for(key)`) **are**
+  hashable; see Section 4.6. The required error message is `"Cannot hash unique
+  (uninterned) symbol"`.
 - **`Function` values** — opaque closures with no portable representation.
+- **A `FabricKeyPair` holding `CryptoKey` handles** — the keys' material is
+  unreachable, so the value has no content to hash; see Section 4.17.
 
-A conforming implementation should throw an error if it encounters either
-of these rather than producing a hash. (`NaN`, `±Infinity`, and `-0` are
-**not** rejected; they have well-defined byte encodings — see Section
-4.3.)
+A conforming implementation should throw an error if it encounters any of these
+rather than producing a hash. (`NaN`, `±Infinity`, and `-0` are **not**
+rejected; they have well-defined byte encodings — see Section 4.3.)
 
 ---
 
@@ -764,7 +806,7 @@ of these rather than producing a hash. (`NaN`, `±Infinity`, and `-0` are
 | Bigint payload bytes              | unsigned LEB128 | Byte count of two's complement   |
 | Byte sequence (`FabricBytes`)     | unsigned LEB128 | Byte count of raw payload        |
 | `FabricEpochNsec` payload         | unsigned LEB128 | Byte count of two's complement   |
-| `FabricEpochDays` payload         | unsigned LEB128 | Byte count of two's complement   |
+| `FabricEpochDay` payload          | unsigned LEB128 | Byte count of two's complement   |
 | `FabricHash` algorithm tag        | string (§4.4)   | Emitted as a complete tagged string value (direct or hashed form) |
 | `FabricHash` hash bytes           | unsigned LEB128 | Byte count of raw hash payload   |
 | `FabricInstance` type tag         | string (§4.4)   | Emitted as a complete tagged string value (direct or hashed form) |

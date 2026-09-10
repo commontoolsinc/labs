@@ -1,51 +1,29 @@
 // tree-builder.test.ts — Unit tests for JSON-to-tree conversion and symlink parsing
-import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
-import {
-  createFactoryShell,
-  factoryStateOf,
-  registerFabricFactory,
-} from "@commonfabric/data-model/fabric-factory";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { FsTree } from "./tree.ts";
 import {
   buildCallableScript,
   classifyCallableEntry,
-  decodeFactoryProjection,
-  decodeFactoryProjections,
-  decodeHandlerWritePayload,
-  isPatternFactoryValue,
+  isPatternToolValue,
 } from "./callables.ts";
 import {
+  buildFsProjection,
   buildJsonTree,
   buildJsonTreeAsync,
   buildPendingJsonTreeAsync,
+  type FsValue,
   isHandlerCell,
   isSigilLink,
   isStreamValue,
+  MAX_DEPTH_MARKER,
+  MAX_JSON_DEPTH,
   safeStringify,
+  stringifyEntryValue,
   transformStreamValues,
 } from "./tree-builder.ts";
 import { CellBridge } from "./cell-bridge.ts";
 
 const decoder = new TextDecoder();
-
-const patternArgumentSchema = {
-  type: "object",
-  properties: { query: { type: "string" } },
-  required: ["query"],
-} as const;
-const patternResultSchema = {
-  type: "object",
-  properties: { answer: { type: "string" } },
-} as const;
-const patternFactory = createFactoryShell({
-  kind: "pattern",
-  ref: {
-    identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    symbol: "search",
-  },
-  argumentSchema: patternArgumentSchema,
-  resultSchema: patternResultSchema,
-});
 
 function getFileContent(tree: FsTree, parentIno: bigint, name: string): string {
   const ino = tree.lookup(parentIno, name);
@@ -263,6 +241,73 @@ Deno.test("buildJsonTreeAsync matches synchronous nested tree structure", async 
   );
 });
 
+function describeSubtree(tree: FsTree, ino: bigint): unknown {
+  const node = tree.getNode(ino);
+  if (!node) throw new Error(`Inode ${ino} not found`);
+  // The inode is part of the description: two builds of the same value into
+  // fresh trees allocate from the same starting number, so equal inodes mean
+  // the two builds created the same entries in the same order.
+  if (node.kind === "dir") {
+    return {
+      ino: String(ino),
+      kind: node.kind,
+      jsonType: node.jsonType,
+      children: [...node.children].map((
+        [name, childIno],
+      ) => [name, describeSubtree(tree, childIno)]),
+    };
+  }
+  if (node.kind === "file") {
+    return {
+      ino: String(ino),
+      kind: node.kind,
+      jsonType: node.jsonType,
+      content: decoder.decode(node.content),
+    };
+  }
+  return { ino: String(ino), kind: node.kind };
+}
+
+Deno.test("buildJsonTreeAsync matches synchronous build across many batches", async () => {
+  // Wide and deep enough that both entry points run several batches, so a
+  // batch boundary falls in the middle of a directory's children.
+  const data = Object.fromEntries(
+    Array.from({ length: 40 }, (_, group) => [
+      `group${group}`,
+      {
+        index: group,
+        items: Array.from({ length: 12 }, (_, item) => ({
+          label: `g${group}i${item}`,
+          nested: { deep: item },
+        })),
+      },
+    ]),
+  );
+
+  const syncTree = new FsTree();
+  buildJsonTree(syncTree, syncTree.rootIno, "data", data);
+
+  const asyncTree = new FsTree();
+  await buildJsonTreeAsync(asyncTree, asyncTree.rootIno, "data", data);
+
+  assertEquals(
+    describeSubtree(asyncTree, asyncTree.rootIno),
+    describeSubtree(syncTree, syncTree.rootIno),
+  );
+
+  // The last node queued sits many batches past the first, so a batch that
+  // dropped or repeated a node would show up here even if it did so on both
+  // paths alike.
+  const dataIno = asyncTree.lookup(asyncTree.rootIno, "data")!;
+  const groupIno = asyncTree.lookup(dataIno, "group39")!;
+  const itemIno = asyncTree.lookup(asyncTree.lookup(groupIno, "items")!, "11")!;
+  assertEquals(getFileContent(asyncTree, itemIno, "label"), "g39i11");
+  assertEquals(
+    getFileContent(asyncTree, asyncTree.lookup(itemIno, "nested")!, "deep"),
+    "11",
+  );
+});
+
 Deno.test("FsTree - clear removes subtree", () => {
   const tree = new FsTree();
   const data = { a: { b: 1, c: 2 }, d: 3 };
@@ -357,6 +402,180 @@ Deno.test("safeStringify - preserves shared DAG objects", () => {
   });
 });
 
+/** A chain of `depth` nested objects, each under the key `next`. */
+function nestedChain(depth: number): Record<string, unknown> {
+  let value: Record<string, unknown> = { leaf: "bottom" };
+  for (let i = 0; i < depth; i++) value = { next: value };
+  return value;
+}
+
+/** How many levels of `next` the parsed chain spells out, and what ends it. */
+function chainDepth(value: unknown): { depth: number; tail: unknown } {
+  let depth = 0;
+  let cursor = value;
+  while (cursor !== null && typeof cursor === "object") {
+    const next = (cursor as Record<string, unknown>).next;
+    if (next === undefined) break;
+    depth++;
+    cursor = next;
+  }
+  return { depth, tail: cursor };
+}
+
+Deno.test("safeStringify - a circular edge at the depth bound reads as circular", () => {
+  // Objects at nesting levels 0 to the bound, the deepest pointing at the
+  // root, so the back edge falls exactly where the depth bound would bite.
+  const nodes: Record<string, unknown>[] = [];
+  for (let level = 0; level < MAX_JSON_DEPTH; level++) nodes.push({});
+  for (let level = 0; level < MAX_JSON_DEPTH - 1; level++) {
+    nodes[level].next = nodes[level + 1];
+  }
+  nodes[MAX_JSON_DEPTH - 1].next = nodes[0];
+
+  // Circular, not out of depth: nothing lies below the back edge that a
+  // deeper bound would have shown.
+  assertEquals(chainDepth(JSON.parse(safeStringify(nodes[0]))), {
+    depth: MAX_JSON_DEPTH,
+    tail: "[Circular]",
+  });
+});
+
+Deno.test("safeStringify - spells out nesting up to the depth bound", () => {
+  const shallow = JSON.parse(safeStringify(nestedChain(MAX_JSON_DEPTH - 2)));
+  assertEquals(chainDepth(shallow), {
+    depth: MAX_JSON_DEPTH - 2,
+    tail: { leaf: "bottom" },
+  });
+});
+
+Deno.test("safeStringify - marks values nested below the depth bound", () => {
+  const deep = JSON.parse(safeStringify(nestedChain(MAX_JSON_DEPTH * 4)));
+  assertEquals(chainDepth(deep), {
+    depth: MAX_JSON_DEPTH,
+    tail: MAX_DEPTH_MARKER,
+  });
+});
+
+Deno.test("safeStringify - survives nesting deeper than the call stack", () => {
+  // A serializer that recurses per level overflows well before this depth.
+  const result = JSON.parse(safeStringify(nestedChain(100_000)));
+  assertEquals(chainDepth(result).tail, MAX_DEPTH_MARKER);
+});
+
+Deno.test("safeStringify - bounds depth per value, not across siblings", () => {
+  const wide = { a: nestedChain(4), b: nestedChain(4) };
+  const result = JSON.parse(safeStringify(wide)) as Record<string, unknown>;
+  assertEquals(chainDepth(result.a).tail, { leaf: "bottom" });
+  assertEquals(chainDepth(result.b).tail, { leaf: "bottom" });
+});
+
+Deno.test("buildJsonTree - projects nesting deeper than the call stack", () => {
+  const depth = MAX_JSON_DEPTH * 8;
+  const tree = new FsTree();
+  buildJsonTree(tree, tree.rootIno, "deep", nestedChain(depth));
+
+  // Every level keeps its directory entry, so the leaf the root's `.json`
+  // sibling elides is still reachable through the directory tree.
+  let ino = tree.lookup(tree.rootIno, "deep")!;
+  for (let level = 0; level < depth; level++) {
+    const next = tree.lookup(ino, "next");
+    assertEquals(next !== undefined, true, `level ${level} is missing`);
+    ino = next!;
+  }
+  assertEquals(getFileContent(tree, ino, "leaf"), "bottom");
+
+  // A `.json` sibling far enough down the chain spells out what the root's
+  // elided, so the bound hides no data.
+  assertEquals(
+    chainDepth(JSON.parse(getFileContent(tree, tree.rootIno, "deep.json")))
+      .tail,
+    MAX_DEPTH_MARKER,
+  );
+  const parentIno = tree.parents.get(ino)!;
+  assertEquals(
+    JSON.parse(getFileContent(tree, parentIno, "next.json")),
+    { leaf: "bottom" },
+  );
+});
+
+Deno.test("buildFsProjection - application/json writes index.json", () => {
+  const tree = new FsTree();
+  const fsValue: FsValue = {
+    type: "application/json",
+    content: { title: "My Todos", count: 3 },
+  };
+
+  const ino = buildFsProjection(tree, tree.rootIno, fsValue, "of:entity-1");
+
+  assertEquals(tree.lookup(tree.rootIno, "index.json"), ino);
+  const node = tree.getNode(ino);
+  assertEquals(node?.kind === "file" ? node.jsonType : undefined, "object");
+  // `entityId` leads, so a reader sees which entity the projection came from.
+  assertEquals(
+    JSON.parse(getFileContent(tree, tree.rootIno, "index.json")),
+    { entityId: "of:entity-1", title: "My Todos", count: 3 },
+  );
+});
+
+Deno.test("buildFsProjection - a pattern cannot overwrite entityId", () => {
+  const tree = new FsTree();
+  const fsValue = {
+    type: "application/json",
+    content: { entityId: "of:forged", title: "My Todos" },
+  } as FsValue;
+
+  buildFsProjection(tree, tree.rootIno, fsValue, "of:entity-1");
+
+  assertEquals(
+    JSON.parse(getFileContent(tree, tree.rootIno, "index.json")),
+    { entityId: "of:entity-1", title: "My Todos" },
+  );
+});
+
+Deno.test("buildFsProjection - an unknown type falls back to index.txt", () => {
+  const tree = new FsTree();
+  const fsValue = { type: "text/csv", content: "a,b" } as unknown as FsValue;
+
+  const ino = buildFsProjection(tree, tree.rootIno, fsValue, "of:entity-1");
+
+  assertEquals(tree.lookup(tree.rootIno, "index.txt"), ino);
+  assertEquals(tree.lookup(tree.rootIno, "index.json"), undefined);
+  assertEquals(tree.lookup(tree.rootIno, "index.md"), undefined);
+  assertEquals(
+    JSON.parse(getFileContent(tree, tree.rootIno, "index.txt")),
+    { type: "text/csv", content: "a,b" },
+  );
+});
+
+Deno.test("buildFsProjection - names the failing entry when a value cannot serialize", () => {
+  const tree = new FsTree();
+  const piece = tree.addDir(tree.rootIno, "todo-app");
+  const fsValue = {
+    type: "application/json",
+    content: { count: 1n },
+  } as unknown as FsValue;
+
+  assertThrows(
+    () => buildFsProjection(tree, piece, fsValue, "of:entity-1"),
+    Error,
+    "/todo-app/index.json",
+  );
+});
+
+Deno.test("stringifyEntryValue - names the failing entry's mounted path", () => {
+  const tree = new FsTree();
+  const space = tree.addDir(tree.rootIno, "did:key:zSpace");
+  const pieces = tree.addDir(space, "pieces");
+  const piece = tree.addDir(pieces, "todo-app");
+
+  const error = assertThrows(
+    () => stringifyEntryValue(tree, piece, "result.json", { count: 1n }),
+    Error,
+    "/did:key:zSpace/pieces/todo-app/result.json",
+  );
+  assertEquals((error as Error).cause instanceof TypeError, true);
+});
+
 Deno.test("FsTree - addSymlink", () => {
   const tree = new FsTree();
   tree.addSymlink(tree.rootIno, "link", "../target/path");
@@ -370,7 +589,9 @@ Deno.test("FsTree - addSymlink", () => {
   }
 });
 
-// --- Sigil link tests ---
+//
+// Sigil link tests
+//
 
 Deno.test("isSigilLink - detects valid sigil links", () => {
   assertEquals(
@@ -447,7 +668,6 @@ Deno.test("buildJsonTree - handler cells skipped via skipEntry", () => {
     tree.rootIno,
     "result",
     data,
-    undefined,
     resolveLink,
     0,
     skipEntry,
@@ -483,7 +703,7 @@ Deno.test("buildJsonTree - sigil link becomes symlink via resolveLink", () => {
     name: "Alice",
   };
 
-  buildJsonTree(tree, tree.rootIno, "result", data, undefined, resolveLink, 0);
+  buildJsonTree(tree, tree.rootIno, "result", data, resolveLink, 0);
 
   const resultIno = tree.lookup(tree.rootIno, "result")!;
 
@@ -513,7 +733,7 @@ Deno.test("buildJsonTree - sigil link in nested array gets correct depth", () =>
     ],
   };
 
-  buildJsonTree(tree, tree.rootIno, "result", data, undefined, resolveLink, 0);
+  buildJsonTree(tree, tree.rootIno, "result", data, resolveLink, 0);
 
   const resultIno = tree.lookup(tree.rootIno, "result")!;
   const itemsIno = tree.lookup(resultIno, "items")!;
@@ -536,7 +756,7 @@ Deno.test("buildJsonTree - unresolvable sigil link falls through to object", () 
     ref: { "/": { "link@1": { id: "bafy123" } } },
   };
 
-  buildJsonTree(tree, tree.rootIno, "result", data, undefined, resolveLink, 0);
+  buildJsonTree(tree, tree.rootIno, "result", data, resolveLink, 0);
 
   const resultIno = tree.lookup(tree.rootIno, "result")!;
   const refIno = tree.lookup(resultIno, "ref")!;
@@ -545,7 +765,9 @@ Deno.test("buildJsonTree - unresolvable sigil link falls through to object", () 
   assertEquals(refNode?.kind, "dir");
 });
 
-// --- Stream / handler tests ---
+//
+// Stream / handler tests
+//
 
 Deno.test("isStreamValue - detects stream markers", () => {
   assertEquals(isStreamValue({ $stream: true }), true);
@@ -647,93 +869,6 @@ Deno.test("classifyCallableEntry does not treat ordinary data as a tool when lin
   } as const;
 
   assertEquals(classifyCallableEntry(value, schema), null);
-});
-
-Deno.test("classifyCallableEntry admits direct and metadata-wrapped PatternFactories", () => {
-  assertEquals(classifyCallableEntry(patternFactory), "tool");
-  assertEquals(
-    classifyCallableEntry({
-      pattern: patternFactory,
-      description: "Search stored notes",
-    }),
-    "tool",
-  );
-});
-
-Deno.test("classifyCallableEntry rejects arbitrary functions and non-pattern factories", () => {
-  const moduleFactory = createFactoryShell({
-    kind: "module",
-    ref: {
-      identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      symbol: "lift",
-    },
-  });
-  assertEquals(classifyCallableEntry(() => ({ ok: true })), null);
-  assertEquals(classifyCallableEntry(moduleFactory), null);
-});
-
-Deno.test("safeStringify projects factories through the tagged Fabric codec", () => {
-  const parsed = JSON.parse(safeStringify({ search: patternFactory }));
-  assertEquals(typeof parsed.search, "string");
-  assertEquals(parsed.search.startsWith("fvj1:"), true);
-  assertEquals(parsed.search.includes("Factory@1"), true);
-  assertEquals(parsed.search.includes("function"), false);
-});
-
-Deno.test("safeStringify projects live factories before their legacy toJSON", () => {
-  const liveFactory = registerFabricFactory(
-    Object.assign(() => undefined, {
-      toJSON: () => ({ legacyGraph: true }),
-    }),
-    "pattern",
-    factoryStateOf(patternFactory),
-  );
-
-  const parsed = JSON.parse(safeStringify({ search: liveFactory }));
-  assertEquals(typeof parsed.search, "string");
-  assertEquals(parsed.search.startsWith("fvj1:"), true);
-  assertEquals(parsed.search.includes("Factory@1"), true);
-  assertEquals(parsed.search.includes("legacyGraph"), false);
-});
-
-Deno.test("decodeFactoryProjection returns an inert callable shell", () => {
-  const encoded = JSON.parse(safeStringify({ search: patternFactory })).search;
-  const decoded = decodeFactoryProjection(encoded);
-  assertEquals(factoryStateOf(decoded), factoryStateOf(patternFactory));
-  assertThrows(
-    () =>
-      (decoded as (...args: unknown[]) => unknown)({
-        query: "milk",
-      }),
-    Error,
-    "requires runner materialization",
-  );
-});
-
-Deno.test("decodeFactoryProjections restores nested factory leaves", () => {
-  const projected = JSON.parse(safeStringify({ nested: [patternFactory] }));
-  const decoded = decodeFactoryProjections(projected) as {
-    nested: unknown[];
-  };
-  assertEquals(
-    factoryStateOf(decoded.nested[0]),
-    factoryStateOf(patternFactory),
-  );
-});
-
-Deno.test("decodeFactoryProjections preserves ordinary JSON container identity", () => {
-  const object = { nested: { value: 1 }, list: [1, 2, 3] };
-  assertStrictEquals(decodeFactoryProjections(object), object);
-});
-
-Deno.test("handler payload decoding does not downgrade a malformed factory tag to text", () => {
-  assertEquals(
-    decodeHandlerWritePayload("plain shell text\n"),
-    "plain shell text",
-  );
-  assertThrows(
-    () => decodeHandlerWritePayload(JSON.stringify("fvj1:not-a-factory")),
-  );
 });
 
 Deno.test("buildJsonTree - nested .json siblings keep ordinary pattern-shaped objects intact", () => {
@@ -852,7 +987,15 @@ Deno.test("buildJsonTree - .tool callables appear beside ordinary fields", () =>
   const tree = new FsTree();
   const data = {
     count: 3,
-    search: patternFactory,
+    search: {
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+      },
+      extraParams: { source: "items" },
+    },
   };
 
   const resultIno = buildJsonTree(
@@ -861,9 +1004,8 @@ Deno.test("buildJsonTree - .tool callables appear beside ordinary fields", () =>
     "result",
     data,
     undefined,
-    undefined,
     0,
-    (value) => isPatternFactoryValue(value),
+    (value) => isPatternToolValue(value),
   );
   const script = buildCallableScript("/tmp/cf-exec");
   const callableIno = tree.addCallable(
@@ -893,7 +1035,15 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
   const data = {
     count: 3,
     addItem: { $stream: true },
-    search: patternFactory,
+    search: {
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+      },
+      extraParams: { source: "items" },
+    },
   };
 
   buildJsonTree(
@@ -902,12 +1052,11 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
     "result",
     data,
     undefined,
-    undefined,
     0,
-    (value) => isHandlerCell(value) || isPatternFactoryValue(value),
+    (value) => isHandlerCell(value) || isPatternToolValue(value),
     (_key, value) => {
       if (isHandlerCell(value) || isStreamValue(value)) return "handler";
-      return isPatternFactoryValue(value) ? "tool" : null;
+      return isPatternToolValue(value) ? "tool" : null;
     },
   );
 
@@ -966,7 +1115,7 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
     result: {
       getCell: () => Promise.resolve(makeChannel("piece", "result")),
     },
-    manager: () => ({
+    pieces: () => ({
       runtime: { idle: () => Promise.resolve() },
       synced: () => Promise.resolve(),
     }),
@@ -979,7 +1128,7 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
     result: {
       getCell: () => Promise.resolve(makeChannel("entity", "result")),
     },
-    manager: () => ({
+    pieces: () => ({
       runtime: { idle: () => Promise.resolve() },
       synced: () => Promise.resolve(),
     }),
@@ -1012,7 +1161,6 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
   );
 
   bridge.spaces.set("home", {
-    manager: {} as never,
     pieces: {} as never,
     spaceIno,
     piecesIno,
@@ -1077,7 +1225,7 @@ Deno.test("CellBridge.sendToHandlerTarget survives callable inode rebuilds", asy
     result: {
       getCell: () => Promise.resolve(makeChannel("result")),
     },
-    manager: () => ({
+    pieces: () => ({
       runtime: { idle: () => Promise.resolve() },
       synced: () => Promise.resolve(),
     }),
@@ -1100,7 +1248,6 @@ Deno.test("CellBridge.sendToHandlerTarget survives callable inode rebuilds", asy
   );
 
   bridge.spaces.set("home", {
-    manager: {} as never,
     pieces: {} as never,
     spaceIno,
     piecesIno,
@@ -1169,14 +1316,18 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
   }
 
   const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
-  const toolCell = makeCell(patternFactory, undefined);
-  const directToolCell = makeCell(undefined, {
-    asFactory: {
-      kind: "pattern",
-      argumentSchema: patternArgumentSchema,
-      resultSchema: patternResultSchema,
+  const toolCell = makeCell(
+    {
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+      },
+      extraParams: { source: "bound-source" },
     },
-  });
+    undefined,
+  );
   const resultCell = makeCell(
     undefined,
     {
@@ -1184,13 +1335,11 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
       properties: {
         recordMessage: { type: "object" },
         search: { type: "object" },
-        directSearch: { type: "object" },
       },
     },
     {
       recordMessage: handlerCell,
       search: toolCell,
-      directSearch: directToolCell,
     },
   );
 
@@ -1225,22 +1374,13 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
     };
   }
 
-  type LoadPieceTree = (
-    piece: SparsePiece,
-    parentIno: bigint,
-    name: string,
-    spaceName: string,
-  ) => Promise<bigint>;
-  type HydratePieceProp = (
-    pieceIno: bigint,
-    propName: "input" | "result",
-  ) => Promise<boolean>;
-
-  const pieceIno = await (bridge as unknown as {
-    loadPieceTree: LoadPieceTree;
-  }).loadPieceTree(piece, tree.rootIno, "Sparse Fixture", "home");
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
-    .hydratePieceProp.call(bridge, pieceIno, "result");
+  const pieceIno = await bridge.accessForTestingOnly.loadPieceTree(
+    piece as never,
+    tree.rootIno,
+    "Sparse Fixture",
+    "home",
+  );
+  await bridge.accessForTestingOnly.hydratePieceProp(pieceIno, "result");
 
   const resultIno = tree.lookup(pieceIno, "result");
   assertEquals(resultIno !== undefined, true);
@@ -1248,21 +1388,6 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
     tree.lookup(resultIno!, "recordMessage.handler") !== undefined,
     true,
   );
-  const directToolIno = tree.lookup(resultIno!, "directSearch.tool");
-  assertEquals(directToolIno !== undefined, true);
-  const directToolNode = tree.getNode(directToolIno!);
-  assertEquals(directToolNode?.kind, "callable");
-  if (directToolNode?.kind === "callable") {
-    const script = decoder.decode(directToolNode.script);
-    const schemaLine = script.split("\n").find((line) =>
-      line.startsWith("# schema: ")
-    );
-    assertEquals(schemaLine !== undefined, true);
-    assertEquals(
-      JSON.parse(schemaLine!.slice("# schema: ".length)),
-      patternArgumentSchema,
-    );
-  }
   assertEquals(tree.lookup(resultIno!, "search.tool") !== undefined, true);
 
   const resultJson = JSON.parse(getFileContent(tree, pieceIno, "result.json"));
@@ -1305,7 +1430,18 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
 
   const titleCell = makeCell("hello", { type: "string" });
   const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
-  const toolCell = makeCell(patternFactory, undefined);
+  const toolCell = makeCell(
+    {
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+      },
+      extraParams: { source: "bound-source" },
+    },
+    undefined,
+  );
   const resultCell = makeCell(
     { title: "hello" },
     {
@@ -1354,22 +1490,13 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     };
   }
 
-  type LoadPieceTree = (
-    piece: MixedPiece,
-    parentIno: bigint,
-    name: string,
-    spaceName: string,
-  ) => Promise<bigint>;
-  type HydratePieceProp = (
-    pieceIno: bigint,
-    propName: "input" | "result",
-  ) => Promise<boolean>;
-
-  const pieceIno = await (bridge as unknown as {
-    loadPieceTree: LoadPieceTree;
-  }).loadPieceTree(piece, tree.rootIno, "Mixed Fixture", "home");
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
-    .hydratePieceProp.call(bridge, pieceIno, "result");
+  const pieceIno = await bridge.accessForTestingOnly.loadPieceTree(
+    piece as never,
+    tree.rootIno,
+    "Mixed Fixture",
+    "home",
+  );
+  await bridge.accessForTestingOnly.hydratePieceProp(pieceIno, "result");
 
   const resultIno = tree.lookup(pieceIno, "result");
   assertEquals(resultIno !== undefined, true);
@@ -1386,7 +1513,9 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
   assertEquals(resultJson.search, { "/tool": "search" });
 });
 
-// --- parseSymlinkTarget tests ---
+//
+// parseSymlinkTarget tests
+//
 
 /** Helper: build a minimal tree mimicking a space with pieces. */
 function buildTestTree(): {
@@ -1514,15 +1643,9 @@ Deno.test("parseSymlinkTarget - unknown cross-space uses name as fallback", () =
   assertEquals(result, { id: "abc", space: "unknown" });
 });
 
-type MakeLinkResolver = (
-  spaceName: string,
-) => (value: unknown, depth: number) => string | null;
-
 Deno.test("makeLinkResolver encodes unsafe link components", () => {
   const bridge = new CellBridge(new FsTree());
-  const resolveLink =
-    (bridge as unknown as { makeLinkResolver: MakeLinkResolver })
-      .makeLinkResolver("home");
+  const resolveLink = bridge.accessForTestingOnly.makeLinkResolver("home");
 
   assertEquals(
     resolveLink({
@@ -1540,9 +1663,7 @@ Deno.test("makeLinkResolver encodes unsafe link components", () => {
 
 Deno.test("makeLinkResolver leaves malformed link paths inert", () => {
   const bridge = new CellBridge(new FsTree());
-  const resolveLink =
-    (bridge as unknown as { makeLinkResolver: MakeLinkResolver })
-      .makeLinkResolver("home");
+  const resolveLink = bridge.accessForTestingOnly.makeLinkResolver("home");
 
   assertEquals(
     resolveLink({
@@ -1554,5 +1675,46 @@ Deno.test("makeLinkResolver leaves malformed link paths inert", () => {
       },
     }, 0),
     null,
+  );
+});
+
+Deno.test("a failure during a rebuild names where the entry mounts", async () => {
+  // A rebuild of a prop that already exists assembles under a staging root and
+  // reconciles onto the live tree afterwards. The staging name is internal and
+  // never appears in the mount, so the failure names the live path instead.
+  const tree = new FsTree();
+  const piece = tree.addDir(tree.addDir(tree.rootIno, "pieces"), "todo-app");
+  const unserializable = { items: [{ count: 1n }] };
+
+  const rebuild = await assertRejects(
+    () => buildPendingJsonTreeAsync(tree, piece, "result", unserializable),
+    Error,
+    "/pieces/todo-app/result.json",
+  );
+  assertEquals(rebuild.message.includes(".result.pending"), false);
+
+  const firstHydration = await assertRejects(
+    () => buildJsonTreeAsync(tree, piece, "result", unserializable),
+    Error,
+  );
+  // Both routes reach the same mounted file, so both name the same path.
+  assertEquals(firstHydration.message, rebuild.message);
+});
+
+Deno.test("a failure under the [FS] staging container names the piece entry", () => {
+  const tree = new FsTree();
+  const piece = tree.addDir(tree.addDir(tree.rootIno, "pieces"), "todo-app");
+  const stage = tree.addDir(piece, ".fs.pending");
+  const fsValue = {
+    type: "application/json",
+    content: { count: 1n },
+  } as unknown as FsValue;
+
+  // The staging container's children land on the piece directory itself, so
+  // the container drops out of the path rather than being renamed.
+  assertThrows(
+    () => buildFsProjection(tree, stage, fsValue, "of:entity-1"),
+    Error,
+    "/pieces/todo-app/index.json",
   );
 });

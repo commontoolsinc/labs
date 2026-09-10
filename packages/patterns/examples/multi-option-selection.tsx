@@ -1,4 +1,4 @@
-import { Default, NAME, pattern, UI, Writable } from "commonfabric";
+import { Default, NAME, pattern, UI, type VNode, Writable } from "commonfabric";
 
 type Input = {
   selected: Writable<string | Default<"opt_1">>;
@@ -8,6 +8,8 @@ type Input = {
 };
 
 export type Result = {
+  [NAME]: string;
+  [UI]: VNode;
   selected: string;
   numericChoice: number;
   category: string;

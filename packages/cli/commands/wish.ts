@@ -1,12 +1,19 @@
 import { Command, ValidationError } from "@cliffy/command";
 import { type DID, isDID } from "@commonfabric/identity";
 import { parseCellPath } from "@commonfabric/runner";
+import { normalizeApiUrl } from "../lib/api-url.ts";
 import { cliText } from "../lib/cli-name.ts";
+import { refuseSectionMarker } from "../lib/section-marker.ts";
 import { render } from "../lib/render.ts";
 import { getDidFromFile } from "../lib/identity.ts";
 import { absPath } from "../lib/utils.ts";
-import { normalizeApiUrl, setQuietMode } from "./piece.ts";
+import { setQuietMode } from "./piece.ts";
 import { projectWishValue, readWish } from "../lib/wish.ts";
+import {
+  type CellSelection,
+  CellSelectionError,
+  parseCellSelectionOptions,
+} from "../lib/cell-selection.ts";
 
 /** Options the `cf wish` action receives (cliffy-parsed flags + env). */
 export interface WishCommandOptions {
@@ -18,6 +25,9 @@ export interface WishCommandOptions {
   quiet?: boolean;
   allowEmpty?: boolean;
   json?: boolean;
+  filter?: string;
+  select?: string;
+  schema?: string;
 }
 
 /** Injectable effects so the action body is unit-testable in-process. */
@@ -76,16 +86,54 @@ export async function wishAction(
 
   const path = options.path ? parseCellPath(options.path).map(String) : [];
   const scope = parseScopeFlags(options.scope);
+  // Read before the wish is issued: a malformed selection is a fact about the
+  // flags, so it is reported without a resolution having been attempted. The
+  // same grammar and the same messages `cf cell get` and `cf piece call`
+  // report, because it is the same parser.
+  // Through the command's own exit seam rather than `exitWithDataError`, whose
+  // `exit` is typed `never`: this command's seam returns, because its unit
+  // tests inject a non-terminating exit and go on to read what was written. A
+  // direct `Deno.exit` here would take the test runner — or an embedder — down
+  // with it.
+  const exitSelectionError = (message: string): void => {
+    console.error(message);
+    deps.exit(1);
+  };
 
-  const { result, error } = await deps.readWish({
-    apiUrl: normalizeApiUrl(options.apiUrl),
-    space,
-    identity,
-    query: target,
-    path,
-    scope,
-    jsonOutput: true,
-  });
+  let selection: CellSelection | undefined;
+  try {
+    selection = await parseCellSelectionOptions(options);
+  } catch (error) {
+    if (error instanceof CellSelectionError) {
+      exitSelectionError(error.message);
+      return; // Reached only when a test injects a non-terminating exit.
+    }
+    throw error;
+  }
+
+  let result: unknown;
+  let error: string | undefined;
+  try {
+    ({ result, error } = await deps.readWish({
+      apiUrl: normalizeApiUrl(options.apiUrl),
+      space,
+      identity,
+      query: target,
+      path,
+      scope,
+      jsonOutput: true,
+      ...(selection === undefined ? {} : { selection }),
+    }));
+  } catch (thrown) {
+    // A selection that does not fit what the wish resolved to — a `--filter`
+    // over a non-array, a projection that kept nothing — is a data error about
+    // the target in hand, not a usage error about the command line.
+    if (thrown instanceof CellSelectionError) {
+      exitSelectionError(thrown.message);
+      return; // Reached only when a test injects a non-terminating exit.
+    }
+    throw thrown;
+  }
 
   if (error && result === null && !options.allowEmpty) {
     console.error(`wish "${target}": ${error}`);
@@ -119,7 +167,7 @@ PROFILE TARGETS (resolve against the IDENTITY's home space; '--space' optional):
   #profileSpace   Its own space cell
 
 OTHER TARGETS (space-relative; pass '--space'):
-  #favorites  #journal  #learned  #mentionable  #recent  /  #pieceRegistry  …
+  #favorites  #journal  #learned  #mentionable  /  #pieceRegistry  …
 
 ZERO-PROFILE: when no profile exists yet, the wish surfaces an error; this
 command prints it to stderr and exits non-zero (use --allow-empty to instead
@@ -129,18 +177,22 @@ print 'null' on stdout and exit 0).`,
 export const wish = new Command()
   .name("wish")
   .description(description)
-  .env("CF_API_URL=<url:string>", "URL of the fabric instance.", {
+  .env("CF_API_URL=<url:string>", "URL of the fabric server instance.", {
     prefix: "CF_",
   })
-  .option("-a,--api-url <url:string>", "URL of the fabric instance.")
+  .option("-a,--api-url <url:string>", "URL of the fabric server instance.")
   .env("CF_IDENTITY=<path:string>", "Path to an identity keyfile.", {
     prefix: "CF_",
   })
   .option("-i,--identity <path:string>", "Path to an identity keyfile.")
+  .env("CF_SPACE=<space:string>", "The space name or DID.", {
+    prefix: "CF_",
+  })
   .option(
     "-s,--space <space:string>",
-    "Space name or DID to connect to. Defaults to the identity's home space " +
-      "(where profile targets resolve regardless).",
+    "Space name or DID to connect to, overriding CF_SPACE. Falls back to " +
+      "CF_SPACE, then to the identity's home space (where profile targets " +
+      "resolve regardless).",
   )
   .option(
     "-p,--path <path:string>",
@@ -164,6 +216,23 @@ export const wish = new Command()
     "--json",
     "Select JSON output explicitly. This command always outputs JSON.",
   )
+  .option(
+    "--filter <predicate:string>",
+    "Filter an array with a jq-inspired predicate",
+  )
+  .option(
+    "--select <fields:string>",
+    "Project output to comma-separated field paths; a trailing @ asks for a " +
+      "position's address, and @ alone for the resolved target's own",
+  )
+  .option(
+    "--schema <schema:string>",
+    "Project output with an inline JSON Schema, @file, or the --select " +
+      "field list",
+    // Both flags carry the one projection, so a command naming both has not
+    // said which shape it wants. Refuse before the wish rather than pick.
+    { conflicts: ["select"] },
+  )
   .example(
     cliText(`cf wish '#profile' -i ./claude.key`),
     "Read the viewer's active profile object as JSON.",
@@ -176,7 +245,18 @@ export const wish = new Command()
     cliText(`cf wish '#mentionable' -i ./claude.key -s my-space`),
     "Read a space-relative target (needs an explicit --space).",
   )
+  .example(
+    cliText(`cf wish '#profile' -i ./claude.key --select name,avatar`),
+    "Project the resolved target to selected fields.",
+  )
+  .example(
+    cliText(`cf wish '#profile' -i ./claude.key --select '@'`),
+    "Return the resolved target's address instead of its contents.",
+  )
   .arguments("<target:string>")
-  .action(async (options, target) => {
+  .action(async function (options, target) {
+    // `wish` reads a target directly, so it has no callable section and no
+    // marker to close one. See lib/section-marker.ts.
+    refuseSectionMarker("wish", this.getRawArgs());
     await wishAction(options, target);
   });

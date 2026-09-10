@@ -23,7 +23,7 @@ import {
 import {
   BaseFabricInstance,
   IS_DEEP_FROZEN,
-} from "./fabric-instances/BaseFabricInstance.ts";
+} from "./fabric-bases/BaseFabricInstance.ts";
 
 /** Content-addressed reference to a builder factory artifact. */
 export interface FactoryArtifactRef extends FabricPlainObject {

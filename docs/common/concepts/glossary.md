@@ -61,7 +61,8 @@ permissions via [UCAN]s and [ACL]s.
 > its state.
 
 Space can be queried and updated using [memory protocol], which describes state
-in terms of [fact](../../development/runtime-glossary.md#fact)s.
+in terms of
+[entity document](../../development/runtime-glossary.md#entity-document)s.
 
 ## [did:key]
 
@@ -128,9 +129,8 @@ Typescript dialect that is pre-processed in patterns to preserve familiar
 Typescript patterns when using Cells and shared storage. This leverages the
 typescript compiler to parse the AST (Abstract Syntax Tree) of the code, and
 make appropriate transformations, including generating runtime schemas from
-TypeScript types (e.g. for `generateObject<T>`). Use
-`/// <cf-disable-transform />` on the first non-empty line of a file to opt
-out of CTS transforms.
+TypeScript types (e.g. for `generateObject<T>`). Every file a program carries
+is transformed.
 
 ## Safe Rendering
 
@@ -155,8 +155,9 @@ turns into rendered HTML.
 
 ---
 
-Storage internals (Fact, Memory, Storage Cache / Heap / Nursery) are documented
-in the [Runtime Glossary](../../development/runtime-glossary.md).
+Storage internals (entity documents, seq, scope, commits, and the confirmed
+and pending tiers) are documented in the
+[Runtime Glossary](../../development/runtime-glossary.md).
 
 [pattern]: #pattern
 [cell]: #cell

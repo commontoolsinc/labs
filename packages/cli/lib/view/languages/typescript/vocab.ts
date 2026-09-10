@@ -1,15 +1,16 @@
 /**
  * Common Fabric naming vocabulary used to give the transformed output its
- * domain-aware colouring (highlighting `pattern`/`lift`/`handler` builders and
+ * domain-aware coloring (highlighting `pattern`/`lift`/`handler` builders and
  * the synthetic helpers the transformer injects).
  *
  * The builder/call name sets are imported from the transformer's own registry
- * so new builders are recognised automatically and we never drift out of sync.
+ * so new builders are recognized automatically and we never drift out of sync.
  * The synthetic-name prefixes are stable internal strings declared alongside
  * the transformer that emits them; they are mirrored here (with citations) to
  * avoid pulling the heavy `ast/call-kind.ts` graph into the pager. A unit test
  * (`test/view/vocab.test.ts`) pins them against the transformer source.
  */
+
 import {
   COMMONFABRIC_BUILDER_EXPORT_NAMES,
   COMMONFABRIC_CALL_EXPORT_NAMES,
@@ -22,20 +23,28 @@ export const BUILDER_NAMES: ReadonlySet<string> =
 /** Reactive call helpers, e.g. `ifElse`, `when`, `cell`, `wish`. */
 export const CALL_NAMES: ReadonlySet<string> = COMMONFABRIC_CALL_EXPORT_NAMES;
 
-// --- Synthetic identifiers emitted by ts-transformers ------------------------
+//
+// Synthetic identifiers emitted by ts-transformers
+//
 // Mirrors of constants in `packages/ts-transformers/src`. Kept as literals so
 // the pager does not import the transformer's analysis graph. See vocab.test.ts.
+//
 
 /** `packages/ts-transformers/src/core/cf-helpers.ts` `CF_HELPERS_IDENTIFIER`. */
 export const CF_HELPERS_IDENTIFIER = "__cfHelpers";
+
 /** `cf-helpers.ts` `CF_DATA_HELPER_IDENTIFIER`. */
 export const CF_DATA_HELPER_IDENTIFIER = "__cfDataHelper";
+
 /** `ast/call-kind.ts` `SYNTHETIC_LIFT_HOIST_PREFIX` (`const __cfLift_N = …`). */
 export const SYNTHETIC_LIFT_HOIST_PREFIX = "__cfLift";
+
 /** `ast/call-kind.ts` `SYNTHETIC_PATTERN_HOIST_PREFIX` (`const __cfPattern_N = …`). */
 export const SYNTHETIC_PATTERN_HOIST_PREFIX = "__cfPattern";
+
 /** `ast/call-kind.ts` `FUNCTION_HARDENING_HELPER_PREFIX`. */
 export const FUNCTION_HARDENING_HELPER_PREFIX = "__cfHardenFn";
+
 /** `ast/call-kind.ts` `SYNTHETIC_MODULE_CALLBACK_PREFIX`. */
 export const SYNTHETIC_MODULE_CALLBACK_PREFIX = "__cfModuleCallback";
 
@@ -47,6 +56,7 @@ const SYNTHETIC_PREFIXES = [
   SYNTHETIC_MODULE_CALLBACK_PREFIX,
   "__cfHandler",
   "__cfAction",
+  "__cfBindVerifiedBinding",
   "__cf_pattern_input",
   "__cfAmdHooks",
 ];
@@ -54,7 +64,7 @@ const SYNTHETIC_PREFIXES = [
 /**
  * Names the transformer emits for the module wrapper itself. These are ordinary
  * identifiers (no `__cf` prefix), so they are listed by exact name rather than
- * recognised by prefix.
+ * recognized by prefix.
  */
 const SCAFFOLDING_NAMES: ReadonlySet<string> = new Set([
   "define",

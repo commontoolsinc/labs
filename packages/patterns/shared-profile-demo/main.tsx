@@ -30,7 +30,7 @@ export default pattern<never, SharedProfileDemoOutput>(
             </h2>
             <div id="shared-profile-name">{displayName}</div>
             <div id="shared-profile-status">{status}</div>
-            <div id="shared-profile-wish-ui">{profileWish}</div>
+            <div id="shared-profile-wish-ui">{profileWish[UI]}</div>
           </cf-vstack>
         </cf-screen>
       ),

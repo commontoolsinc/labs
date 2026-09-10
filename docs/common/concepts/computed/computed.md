@@ -146,6 +146,57 @@ Like `handler()`, `lift()` must be defined at module scope, never inside the
 pattern body — see [Module Scope Requirement](../handler.md#module-scope-requirement)
 for why.
 
+### Reading a Value Narrowly and Handing It Back Whole
+
+A `lift()`'s declared parameter is what it reads, and reading is what it becomes
+reactive to — so declaring the few fields the body touches is how a derivation
+over a large collection stays cheap. Often the body then hands an element
+straight back, and the caller wants the whole element, not the sliver that was
+read.
+
+Declare that with a type parameter. The result type is the element type, so the
+caller gets back exactly what it passed in:
+
+```typescript
+// Shown at module scope.
+const nonEmpty = lift(<T extends { key: string }>(
+  { rows }: { rows: T[] | Default<[]> },
+): T[] => rows.filter((row) => row.key !== ""));
+```
+
+```typescript
+// Shown inside a pattern body.
+// `kept` is Row[] — `payload` is readable through it, though `nonEmpty` never
+// declared it and never became reactive to it.
+const kept = nonEmpty({ rows });
+```
+
+The schema generated for the lift comes from the constraint, argument and result
+alike, so `nonEmpty` reads `{ key: string }` and nothing more. The elements
+survive because a value forwarded out of a derivation is written as a reference,
+and a reference resolves to its whole document however little the derivation
+declared.
+
+This works only for elements passed **through**. An element the body rebuilds —
+`rows.map((row) => ({ key: row.key }))` — carries only what was read, and a
+consumer declaring more finds the rest missing. The type parameter is what makes
+that distinction checkable rather than a matter of care: a body cannot
+manufacture a `T`, so the only `T` it can return is one it was given.
+
+The same shape works when the parameter sits inside a cell wrapper, which is how
+a derivation says it compares references without reading through them:
+
+```typescript
+// Shown at module scope.
+const pivot = lift(<T extends { mentions: unknown[] }>(
+  { sources }: { sources: ReadonlyCell<T>[] | Default<[]> },
+): { source: ReadonlyCell<T>; count: number }[] =>
+  sources.map((source) => ({
+    source,
+    count: source.get().mentions.length,
+  })));
+```
+
 ## Escape Hatches
 
 - **`.sample()`** reads a cell **without creating a reactive dependency** —

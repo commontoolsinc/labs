@@ -1,27 +1,38 @@
+/**
+ * `stripUndefinedProps()` removes `undefined`-valued properties, and the cases
+ * that say what it is are the things it leaves alone: a `null` property, an
+ * empty nested object, and an array holding `undefined` elements.
+ *
+ * That last one is the boundary a caller is most likely to assume wrongly.
+ * Dropping an element from an array would renumber the rest, so array contents
+ * pass through untouched however much they look like the properties being
+ * stripped.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { stripUndefinedProps } from "@commonfabric/utils/strip-undefined-props";
 
-describe("stripUndefinedProps", () => {
+describe("stripUndefinedProps()", () => {
   it("returns an empty object given an empty object", () => {
     expect(stripUndefinedProps({})).toEqual({});
   });
 
-  it("returns a shallow copy when no properties are undefined", () => {
+  it("returns a shallow copy when no properties are `undefined`", () => {
     const input = { a: 1, b: "two", c: true, d: null };
     const out = stripUndefinedProps(input);
     expect(out).toEqual(input);
     expect(out).not.toBe(input);
   });
 
-  it("drops undefined-valued top-level properties", () => {
+  it("drops `undefined`-valued top-level properties", () => {
     expect(stripUndefinedProps({ a: 1, b: undefined, c: 3 })).toEqual({
       a: 1,
       c: 3,
     });
   });
 
-  it("drops undefined-valued properties at nested depths", () => {
+  it("drops `undefined`-valued properties at nested depths", () => {
     expect(stripUndefinedProps({
       a: 1,
       b: { c: undefined, d: 4, e: { f: undefined, g: 7 } },

@@ -139,6 +139,12 @@ export class MockDoc {
           return DomUtils.appendChild(this as any, nodeOrText);
         },
       },
+      removeChild: {
+        value(child: any) {
+          DomUtils.removeElement(child);
+          return child;
+        },
+      },
       insertBefore: {
         value(child: any, ref: any | null) {
           return ref !== null

@@ -13,6 +13,22 @@ Common Fabric is a nascent distributed computing platform that provides both a
 runtime and storage layer. The design allows instrumentation of all information
 flow in the system, enabling safe & private collaboration at scale.
 
+All networked software today runs on one rule: hand your data to the software,
+and trust the software. This runtime inverts it. The software is untrusted, and
+safety attaches to the data — every datum carries its own policies, anything
+derived from it carries them too, and code that cannot prove it honors those
+policies does not compile.
+
+Three ways in, depending on how much you want:
+
+- [**Why**](docs/why.md) — what that rule has cost, and why it is worth
+  replacing. Prose, five minutes.
+- [**How it works**](docs/how.md) — the same argument as code: a real pattern,
+  what the compiler emits for it, where the runtime checks the result, and what
+  is not built yet. Every snippet is verbatim from a file in this repository.
+- [**The long form**](docs/inverting-the-physics-of-trust.md) — the physics, the
+  hardware, and the objections.
+
 ### Core Concepts
 
 **Patterns** are reactive programs that can be linked together to create data
@@ -36,19 +52,24 @@ can run their own spaces or use hosted versions.
 1. Install [mise](https://mise.jdx.dev/getting-started.html) and activate it in
    your shell
 2. Clone this repo
-3. Run `mise trust && mise install` in the repo to install the pinned Deno
-   version
+3. Run `mise install` in the repo to install the pinned Deno version
 4. Install the Git hooks: `deno task install-hooks` (optional)
-   - mise puts this checkout's `bin/` on PATH, so `cf` works as a plain command.
-     Without mise: `deno task install-cf`. Shell completion needs it — see
+   - Put `cf` on PATH once: `deno task install-cf`. The copy it installs serves
+     every checkout, and shell completion needs it — see
      [Installing `cf` on PATH](./packages/cli/README.md#installing-cf-on-path).
 5. Start local dev servers: `./scripts/start-local-dev.sh`
 6. Access the application at <http://localhost:8000>
+7. Team members: get a test-reporting key (`deno task test-records-key setup`)
+   so your local test runs feed the shared flake and duration history — see
+   [test-records.md](./docs/development/test-records.md). Contributing without
+   commit access? Then there is nothing to set up here: tests run identically
+   without a key, and CI records your pull requests' runs on its own.
 
 Installing
 [Deno 2 directly](https://docs.deno.com/runtime/getting_started/installation/)
-also works. `deno task check` accepts the supported range in `tasks/check.sh`
-and warns when the installed version differs from the pin in `mise.toml`.
+also works. `deno task check` refuses a version that differs from the pin in
+`mise.toml`; set `DENO_CHECK_VERSION_LENIENT=1` to accept one inside the
+supported range in `tasks/check.sh`.
 
 For Claude Code users, run [`/deps`](.claude/commands/deps.md) to verify
 prerequisites, [`/start-local-dev`](.claude/commands/start-local-dev.md) to
@@ -117,7 +138,9 @@ When adding or rolling repository dependencies, follow the
 ### Development Practices
 
 - **CI/CD**: All changes must pass automated checks before merging
-- **Testing**: Tests are critical - run with `deno task test`
+- **Testing**: Tests are critical - run with `deno task test`. Every run can
+  report per-test records to the shared history; see
+  [test-records.md](./docs/development/test-records.md)
 - **Linting**: Use `deno task check` for type checking
 - **Formatting**: Always run `deno fmt` before committing
 - See [CLAUDE.md](./CLAUDE.md) for detailed coding guidelines
@@ -173,7 +196,7 @@ norms have not yet been established and techniques change weekly. We may
 "review" your PR by recreating it, or by providing extensive feedback from an
 agent.
 
-Using agents is not a substitute for judgement. Check your agent's output; see
+Using agents is not a substitute for judgment. Check your agent's output; see
 what it is doing. Have it prove its hypotheses and assumptions; perform manual
 testing to check the user experience makes sense with your change. We rely
 heavily on unit tests, integration tests, and lints to guide agents; add your
@@ -182,7 +205,7 @@ own to help future agents do even better.
 When communicating with humans, make it clear what you are writing versus what
 your bot is writing.
 
-If you have commit access, we trust you to use your own judgement for when a PR
+If you have commit access, we trust you to use your own judgment for when a PR
 needs review by another human or not. If you are not sure if the PR should land,
 it definitely needs review.
 

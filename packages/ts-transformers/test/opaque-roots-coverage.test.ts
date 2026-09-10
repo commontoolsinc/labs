@@ -12,8 +12,10 @@
  * - `addBindingTargetSymbols` — collects the declared symbols of a binding name,
  *   descending into array/object binding patterns and skipping holes.
  */
-import ts from "typescript";
+
 import { assert, assertEquals, assertFalse } from "@std/assert";
+
+import ts from "typescript";
 
 import type { TransformationContext } from "../src/core/mod.ts";
 import {
@@ -101,9 +103,9 @@ function findVariable(
   return found;
 }
 
-// ---------------------------------------------------------------------------
+//
 // classifyOpaquePathTerminalCall
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("classifyOpaquePathTerminalCall recognizes .get() and .key() property-access terminals", () => {
   const { sourceFile } = createProgram(`
@@ -168,9 +170,9 @@ Deno.test("classifyOpaquePathTerminalCall returns undefined for a bare identifie
   assertEquals(classifyOpaquePathTerminalCall(call), undefined);
 });
 
-// ---------------------------------------------------------------------------
+//
 // getOpaqueAccessInfo
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("getOpaqueAccessInfo records the root identifier and property path", () => {
   const { sourceFile, checker } = createProgram(`const a = root.foo.bar;`);
@@ -276,9 +278,9 @@ Deno.test("getOpaqueAccessInfo returns no root when the chain does not bottom ou
   assertEquals(info.path, ["foo"]);
 });
 
-// ---------------------------------------------------------------------------
+//
 // addBindingTargetSymbols
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("addBindingTargetSymbols collects a simple identifier binding symbol", () => {
   const { sourceFile, checker } = createProgram(`const single = 1;`);

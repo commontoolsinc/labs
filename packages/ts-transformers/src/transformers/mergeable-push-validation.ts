@@ -28,6 +28,7 @@
  * today (the kept read forces the retry), so this nudges toward the better
  * expression without failing the build.
  */
+
 import ts from "typescript";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { getCapabilitySummaryCallbackArgument } from "../ast/mod.ts";
@@ -76,7 +77,7 @@ export class MergeablePushValidationTransformer extends HelpersOnlyTransformer {
         );
         if (callback && !checked.has(callback)) {
           checked.add(callback);
-          this.checkCallback(callback, context);
+          this.#checkCallback(callback, context);
         }
       }
       ts.forEachChild(node, visit);
@@ -86,7 +87,7 @@ export class MergeablePushValidationTransformer extends HelpersOnlyTransformer {
     return context.sourceFile;
   }
 
-  private checkCallback(
+  #checkCallback(
     callback: ts.ArrowFunction | ts.FunctionExpression,
     context: TransformationContext,
   ): void {
@@ -97,7 +98,7 @@ export class MergeablePushValidationTransformer extends HelpersOnlyTransformer {
     const byCollection = new Map<string, MergeablePushMisuse>();
     analyzeFunctionCapabilities(callback, {
       checker: context.checker,
-      typeRegistry: context.options.state?.typeRegistry,
+      typeRegistry: context.state.typeRegistry,
       mergeablePushMisuseSink: (finding) => {
         const key = JSON.stringify([finding.rootName, ...finding.path]);
         const existing = byCollection.get(key);

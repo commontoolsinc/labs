@@ -11,13 +11,15 @@
 > the executed v1→v2 phase plan;
 > [`implementation/`](../../history/specs/scheduler-v2/implementation/00-README.md)
 > — the executed work orders (start at `00-README.md`).
-> **Persistence**: builds on
-> [persistent scheduler state](../persistent-scheduler-state.md). The
-> observation and rehydration model carries over with a smaller payload.
-> [Per-document rehydration](per-doc-rehydration.md) defines restoration for
-> descendant piece documents.
-> [Incremental observation adoption](incremental-observation-adoption.md)
-> extends that state into ongoing multi-user operation.
+> **Persistence**: none — server-execution v2 Phase 1 stage C deleted the
+> persisted observation form (the archived accounts:
+> [persistent scheduler state](../../history/specs/persistent-scheduler-state.md),
+> [the per-doc persisted-form record](../../history/specs/scheduler-v2/per-doc-rehydration-persisted-form.md),
+> [incremental observation adoption](../../history/specs/scheduler-v2/incremental-observation-adoption.md)).
+> The live remainder — the per-doc identity invariant and the resume hold —
+> is [per-document rehydration](per-doc-rehydration.md); the durable
+> successor is the basis index
+> ([serving-loop.md §3b](../server-side-execution/serving-loop.md)).
 
 This document re-derives the scheduler from first principles. It specifies the
 model, the invariants, the node state machine, the algorithms, and the
@@ -81,11 +83,16 @@ computations feeding the data it will read must be brought up to date
 Handlers commit real writes and are not idempotent, so they cannot be
 optimistically run-and-retried the way computations can.
 
-**D8 — Scheduler state persists across process restarts.** With persistent
-scheduler observations (see persistent-scheduler-state.md), a resumed piece
-restores its read sets and clean/dirty status instead of re-running everything.
-"Initial run" is therefore not a fundamental concept — it is the degenerate
-case of "no valid observation exists".
+**D8 — Scheduler state is reconstructible, not persisted.** The persisted
+observation form was deleted (server-execution v2 Phase 1 stage C; the
+archived account is
+[persistent scheduler state](../../history/specs/persistent-scheduler-state.md)):
+a resumed piece re-runs its actions fresh, held until the space syncs. The
+durable successor is the serving loop's basis index — ids + seqs only,
+re-marking the dirty frontier on activation
+([serving-loop.md §3b](../server-side-execution/serving-loop.md)) — so
+"initial run" stays a degenerate case, now of "nothing marks this node
+current".
 
 **D9 — Confidentiality flows through scheduling.** A run exists *because*
 certain addresses changed; CFC (§8.9.2 of the CFC spec) requires the labels of
@@ -221,7 +228,7 @@ interface SchedulerNode {
   // Dynamic:
   reads: ReadSet;                // registered read set (drives the reader index)
   status: "never-ran" | "clean" | "invalid";
-  invalidCauses: Address[];      // CFC trigger reads (§10); cleared on run
+  invalidCauses: Map<string, Address>; // CFC trigger reads (§10), keyed by address; cleared on run
   liveRefs: number;              // demand refcount (§5)
   provisionalDemand: boolean;    // (§5.3)
   gate: GateState;               // debounce/throttle/backoff (§8)
@@ -314,11 +321,19 @@ special rules, and only these:
    only the materializer's *actual* committed changes do (through the normal
    change channel, P1/P2).
 
+The declaration contract, concretely: for generated `computed()` callbacks
+the transformer emits `materializerWriteInputPaths` only when capability
+analysis observes actual writes through captured cell inputs (each path an
+array of static string segments), and the runner resolves those input paths
+to concrete `materializerWriteEnvelopes` for the action instance. A runtime
+fallback covers only opaque-result generated computations carrying no
+write-path metadata — no normal output surface, observable work limited to
+side-writing captured Writable inputs.
+
 This carries over v1's hard-won materializer semantics essentially unchanged;
 they were redesigned recently and are sound. What v2 removes is run-time
 write-surface discovery and historical expansion for ordinary computations;
-the persisted `currentKnownWrites` field is the fixed registered surface
-described by P4.
+`currentKnownWrites` is the fixed registered surface described by P4.
 
 ### 4.4 Registration and removal
 
@@ -370,23 +385,49 @@ live(N) ⇔ N is an effect (registered, not cancelled)
 
 ### 5.2 Maintenance
 
-Liveness is stored as a reference count (`liveRefs`) and recomputed only after
-an **actual edge or demand-root change** — a run whose read set changed,
-register/unregister, or provisional-root transition — never per data change.
-Updates in one registration/resubscribe operation are batched. If its edge set
-is unchanged, no rebuild occurs.
+Liveness is stored as a reference count (`liveRefs`) — the number of live direct
+readers — and updated only on an **actual edge or demand-root change**: a run
+whose read set changed, register/unregister, or a provisional-root transition.
+Ordinary value changes pay nothing. A node is live when it is registered and
+either holds demand on its own (effect, materializer, provisional demand) or has
+at least one live reader.
 
-The rebuild starts at explicit roots (effects, materializers, and provisional
-demand), walks reader→writer edges to form the root-reachable set, then counts
-each reachable node's live direct readers. This is cycle-safe (a rootless cycle
-cannot keep itself live) and diamond-accurate (both arms count; removing one arm
-does not strand the shared writer). A single visited-set delta walk cannot
-provide both properties because path deduplication undercounts diamonds.
+Maintenance is incremental, and the two directions are not symmetric.
+
+**Granting** — a new edge, or a node becoming a root — can only add demand. The
+new reader hands one reference to each writer it reads, and a writer that
+crosses from dormant to live passes the same contribution further upstream. A
+node is enqueued only on that crossing, so a cycle settles instead of looping.
+Each arm of a diamond hands over its own reference, so the shared writer counts
+two.
+
+A reference is granted only while the writer is registered, so an edge naming a
+node that has not registered yet leaves it holding none. Registration therefore
+recounts the node's own references from its live readers before deciding whether
+it came alive, which keeps edge and registration order independent of each
+other.
+
+**Withdrawing** — an edge removed, or a root status lost — can strand nodes, and
+a reference count cannot tell a genuine supporter from a rootless cycle holding
+itself up. A node that loses a root status is therefore re-derived even when it
+still looks live, because the references it holds may be exactly that cycle. So
+withdrawal re-derives, over the region that can be affected and no further:
+`origin`'s transitive upstream, which is closed under the writer edge.
+Any node whose support routes through `origin` is upstream of it, so a live
+reader *outside* that region cannot owe its own liveness to anything inside, and
+its support is taken at face value. Clearing the region and re-seeding from the
+roots inside it plus the live readers outside is cycle-safe (a rootless cycle
+finds no seed and settles dormant) and diamond-accurate (each surviving arm
+re-contributes its own reference).
+
+`recomputeLiveRefs` derives the same state from the roots in one pass over the
+whole graph. Nothing on the maintenance path calls it: it is the definition the
+incremental updates implement, and the reference the unit tests check them
+against after every mutation.
 
 This replaces v1's per-query graph walks (`isDemandedPullComputation` walked
-dependents transitively on every candidate check) with O(V+E) work per changed
-edge/root batch and O(1) liveness queries; ordinary value changes pay zero
-liveness-maintenance cost.
+dependents transitively on every candidate check) with O(1) liveness queries and
+maintenance proportional to the change rather than to the size of the graph.
 
 ### 5.3 Provisional demand
 
@@ -437,7 +478,7 @@ ancestor-path, or child-key-set changes.
 `markInvalid(N, cause)`:
 
 ```
-N.invalidCauses += cause                       // CFC §8.9.2 accumulation
+N.invalidCauses[key(cause)] = cause            // CFC §8.9.2 accumulation; an address already recorded stays recorded once
 if N.status == "clean": N.status = "invalid"
 ```
 
@@ -609,6 +650,18 @@ and a per-origin sequence number. The id orders events within a lane,
 carries speculation lineage, derives receipt ids (§7.6), and names the
 event in telemetry.
 
+An external ingress id never enters the queue raw. The send surface binds
+the caller's `{id, session}` pair to the resolved stream link with a
+type-tagged content hash (`scopeCallerEventId`,
+`packages/runner/src/scheduler/event-identity.ts`), and the scoped result is
+the durable delivery id. The session is required — a send naming an id
+without one is refused — because the id is the caller's own word and only
+the pair names one invocation: the same pair on the same stream is the same
+invocation (a retry deduplicates on the receipt, §7.6), while that id under
+another session, or on another stream, is a different one. The receipt
+address a caller can be handed is therefore a function of the pair, which is
+what makes it safe to publish before the outcome exists.
+
 Per pass, for each lane's head event:
 
 1. **Preflight.** Compute the handler's read closure in a read-only,
@@ -675,6 +728,20 @@ Implemented behavior:
   their handler's piece must load asynchronously. The event and any
   handler-result pieces are recorded under the sending transaction's
   speculation lineage.
+- The per-(stream, handler) backlog cap (`MAX_EVENT_BACKLOG_PER_STREAM`) is a
+  collapse policy, not a hard ceiling. At the cap, a minted-id send collapses
+  last-wins into the last pending same-origin entry, so a same-origin flood
+  cannot grow an unbounded post-block event count. Events carrying a
+  **caller-supplied durable id** are excluded from that merge in both
+  directions, because the receipt address derives from the id: at the cap
+  such a send coalesces onto an already-queued entry with the same delivery
+  id (the same invocation — first payload wins, matching the receipt
+  arbitration), and is otherwise refused before dispatch, settling its
+  commit callback errored with nothing executed and no receipt created, so
+  the same pair is safe to send again. A minted-id send with no safe
+  survivor — the pending entries carry other origins, or durable ids — still
+  enqueues past the cap; whether such an event should instead be refused is
+  an open scheduler-policy question, not something this section decides.
 - A failed origin cancels every undispatched descendant through one terminal
   drop path, settles its internal commit callback exactly once, and stops
   locally started descendant pieces. Same-space descendants additionally carry
@@ -694,7 +761,12 @@ identity (§7.5) and a **rejection taxonomy**: commit rejections split into
 StorageTransactionInconsistent guard — re-running against fresher confirmed
 state can succeed, so it retries with capped exponential backoff within a
 bounded window, then surfaces a terminal CommitConvergenceError),
-*terminal* (a deterministic commit-rule refusal — never retried, surfaced),
+*terminal* (a deterministic commit-rule refusal — the server's commit-time
+evaluation or the client's CFC boundary refusing the committed data itself —
+never retried, surfaced; a terminal reactive-commit rejection reaches the
+scheduler's error channel carrying the refusal, both its reason texts and the
+structured refusal details their producers recorded, so a consumer can name
+the offending input rather than only the offending label — see §10),
 *non-retryable* (every other non-permanent rejection — deterministic with
 respect to confirmed state, drops on the first attempt), and
 *permanent* (a commit-time precondition failed — drop, never retry).
@@ -749,7 +821,9 @@ correctness comes from cancellation, not staging:
    Ownership of a commit-gated start begins when the start is scheduled, not
    when its post-commit callback installs it. Cancelling the parent or lineage
    before that commit tombstones the pending start, so the callback must not
-   install it. After installation, cancellation may stop only the exact local
+   install it; stopping the result key does the same, so a piece the user
+   stopped before the origin commit does not start afterwards. After
+   installation, cancellation may stop only the exact local
    registration installed by that attempt; if another attempt has replaced or
    won the same result key, its registration remains live. This prevents a
    receipt-losing duplicate from stopping the winner.
@@ -784,11 +858,40 @@ the same `{ resultFor: cause }` cell that hosts a launched pattern when the
 handler returns one; when the handler launches nothing, the cell is simply
 the receipt. This gives handlers the same shape as computations: one
 canonical output document per unit of work, whose creation doubles as the
-exactly-once witness. A receipt-only handling writes `{}`; under the
-experimental `plainResultReceipts` flag it instead carries the handler's
-normalized plain JSON return, so the verb's result is readable back by
-receipt address (`docs/development/EXPERIMENTAL_OPTIONS.md`; verb-contract
-plan) — the create-only witness semantics are unchanged either way.
+exactly-once witness. A receipt-only handling carries the handler's normalized
+return, so the verb's result is readable back by receipt address; the
+experimental `plainResultReceipts` flag governs that projection and defaults
+on — an explicit `false` restores the older discard-everything-to-`{}`
+behavior while the flag exists (`docs/development/EXPERIMENTAL_OPTIONS.md`;
+verb-contract plan). A value-less handler still writes `{}`. That value is
+written through the receipt cell's standard write conversion — plain JSON
+persists as-is, a live cell handle converts to a link, so a one-line setter
+verb's receipt links to the cell it mutated. The create-only witness
+semantics are unchanged either way.
+
+A receipt-only handling also describes what it wrote, in the same transaction,
+on the cell's durable `schema` metadata — so a receipt says what it holds the
+way any other cell does, which is what lets a reader's selection narrow the
+fetch instead of filtering an already-loaded value. The description is
+structural and nothing more: the root container kind, plus the property names
+when that kind is a record. Every property is left admissible, which is what
+keeps a link position honest, since the spelling that would name one is
+`asCell` and `["cell"]` asserts a writable handle on a document nothing can be
+written through. A value with no container kind of its own — a scalar, or a
+link, whose kind is its target's — goes undeclared. A `data:` link is the one
+link that is described: it carries its value inside its own identifier and the
+write inlines it, so the receipt holds that value rather than a link to it, and
+the description is taken after the same inlining. None of this constrains a
+later write: the create-only mark means the value the schema describes is the
+only value that document ever holds. A verb's *declared* result type is a
+separate question: lowered onto `module.resultSchema`, it reaches the runtime —
+a launched result pattern carries it as its result schema, which
+`Runner.#setupInternal()` records as that receipt's stored schema, and the CLI
+serves it from the compiled graph (`cf piece verbs`,
+`cf piece call <verb> --help`). What it never enters is the pattern's own
+durable schema — the shape the update gate compares across versions — and
+whichever source a receipt's stored schema came from, it describes one handling
+and constrains nothing written later.
 
 For an inline, non-navigation handler result, an `inSpace` child does not move
 that canonical handler-result wrapper into the child space. The result/receipt
@@ -859,7 +962,12 @@ phase E).
 **Computation-launched children are outside I10.** Computations are
 idempotent and re-runnable; their children converge through deterministic
 ids and normal re-runs, and orphaned registrations are bounded by the same
-retry budget. (The exhausted-retry zombie is accepted as pre-existing; the
+retry budget. The runner is nonetheless stricter for the launches it can tie
+to a transaction: a child whose setup transaction does not become durable has
+its registration stopped rather than left for a re-run to converge over, since
+the bookkeeping a coordinator keeps would otherwise make that re-run skip the
+staging the child needs. [Runner child-run
+ownership](../runner-child-run-ownership.md) states the rules. (The exhausted-retry zombie is accepted as pre-existing; the
 implementation should leave a watch-this comment at the retry-exhaustion
 sites.)
 
@@ -880,10 +988,20 @@ work order is archived with the migration records.
 - Exhaustion (iterations or budget): remaining runnable nodes keep
   `status = invalid` and receive an escalating backoff gate
   (`gate.backoffUntil`, ×2 per consecutive exhaustion, capped); one wake is
-  scheduled; `scheduler.non-settling` telemetry and one author-facing warning
-  fire per episode. The warning names the deferred actions, points to
-  `commonfabric.detectNonIdempotent()`, and does not turn the bounded retry into
-  an action error.
+  scheduled; a `scheduler.non-settling` telemetry marker fires for every such
+  episode, carrying the busy-window summary along with `deferredActions`
+  (the first ten actions the pass held back, each as its label plus the
+  piece the action serves when its scheduler observation identity says —
+  the attribution a builtin's `raw:` label cannot provide) and
+  `deferredActionCount`, observable through `runtime.telemetry`. A marker says
+  a pass exhausted its budget, which a wave that needs several passes to
+  converge also does; it is not on its own a report that the graph will never
+  converge. The author-facing warning naming those actions and pointing to
+  `commonfabric.detectNonIdempotent()` is emitted at most once per run of
+  settle passes — the latch lives on the settling tracker, which a new
+  continuation replaces, and is the same boundary `scheduler.isNonSettling()`
+  reports — so a permanently non-converging graph does not flood the log.
+  Neither signal turns the bounded retry into an action error.
 
 No node is force-run or force-cleaned. A non-converging subgraph degrades to
 rate-limited convergence attempts while the rest of the system stays
@@ -927,10 +1045,15 @@ skipped by `collectWorkSet`, and nothing downstream of them runs early
 
 At pass end, if no work is runnable now but some `invalid ∧ live` node (or
 parked head event) has a future `eligibleAt`, set a single timer for the
-minimum. `idle()` resolves when: no run in flight, no background piece-start
-task, no tick queued, no runnable work now, and no parked event — i.e.
+minimum. `idle()` resolves when: no run in flight, no tracked background task,
+no tick queued, no runnable work now, and no parked event — i.e.
 exactly v1's contract with the special cases collapsed into the gate
-primitive. Dormant invalid computations (not live) never hold `idle()` open,
+primitive. A background task is work the runtime has undertaken off the graph
+and whose result the graph is waiting on: a piece being started so a queued
+event can be delivered, or a system pattern being fetched so a surface a
+builtin has already emitted can be filled in. Work the graph does not depend
+on — an LLM call, a pattern's outbound fetch — is not tracked here; the
+barrier for that is `runtime.settled()`. Dormant invalid computations (not live) never hold `idle()` open,
 and a shared timer belonging only to dormant work does not delay current idle
 waiters.
 
@@ -942,66 +1065,49 @@ the bound is exhausted, `idle()` resolves while retry wakes continue at their
 rate-limited cadence; every actual idle boundary resets the episode counters so
 a later, unrelated demand wave receives its own full convergence allowance.
 
+A disposed scheduler releases idle waiters — those already parked, at dispose,
+and any requested afterwards. Quiescence is final once nothing can run again,
+and the conditions above are all reached through the execute loop, which a
+disposed scheduler no longer enters: waiting on them would be waiting forever,
+not waiting. This is what lets `Runtime.dispose()` run over a scheduler a caller
+has already disposed, since its teardown awaits `idle()`.
+
+Releasing is not immediate, because disposing does not cancel a run already
+under way. Waiters with a wake source outside the execute loop — a run in
+flight, background tasks, held wakes, in-flight commits — still settle on their
+own first, and only then does the disposed case apply. This matters for waiters
+parked BEFORE dispose: every parking branch is reached with no run in flight, so
+a waiter parked while execution was merely scheduled is still parked once the
+run begins, and releasing it at dispose would report quiescence while an action
+and its commit were still going.
+
 ---
 
 ## 9. Persistence and rehydration
 
-The durable model is
-[Persistent Scheduler State](../persistent-scheduler-state.md); v2 keeps its
-architecture (observation rows attached to commits, server-side read/write
-indexes for dirtying inactive pieces, durable dirty/stale markers, fingerprint
-validation) and shrinks the per-observation payload.
+Deleted, by reduction: server-execution v2 Phase 1 stage C removed the
+persisted observation form this section used to define — the observation
+rows, the server-side read/write indexes, the durable dirty/stale markers,
+the boot-time snapshot listing, and the incremental adoption that extended
+them into live operation. The archived accounts are
+[persistent scheduler state](../../history/specs/persistent-scheduler-state.md),
+[the per-doc persisted-form record](../../history/specs/scheduler-v2/per-doc-rehydration-persisted-form.md),
+and
+[incremental observation adoption](../../history/specs/scheduler-v2/incremental-observation-adoption.md).
 
-### 9.1 Node identity
+What remains live here:
 
-Unchanged from the persistent-state spec v1 identity: owner space, branch,
-piece id (result-cell scope:id), process generation, action id with
-implementation hash preferred (`impl:` > `src:` > derived). The runtime
-fingerprint loses its `pull`/`push` mode component (only one engine exists);
-the fingerprint string is versioned so v1 observations are simply misses.
-
-### 9.2 Start modes
-
-- **`fresh`** (new piece, locally re-run after stop): nodes register
-  `never-ran`; demand decides everything else.
-- **`resume`** (piece loaded from storage): the runner awaits the space's
-  sync and **one space-wide snapshot listing** before registering nodes
-  (subsumes v1's per-action `awaitSync` + shared-deadline machinery). The
-  listing is bucketed per piece doc, so the resume phase covers the whole
-  resumed piece **tree**: descendants — sub-pattern nodes and
-  map/filter/flatMap per-element runs, each persisted under its own
-  `pieceId` — register against their own bucket from the same listing
-  ([per-document rehydration](per-doc-rehydration.md)). Each node registers in
-  resume mode: look up the observation; on fingerprint match, install `reads`
-  (+ gate config)
-  directly into the indexes, set `status = clean`, or `invalid` if durable
-  dirty markers say so; on miss/mismatch, degrade that node to `fresh`
-  behind a bounded synced-hold. The successful listing path has already synced,
-  so that hold releases immediately; after a flag-off or failed-listing fallback
-  it waits briefly for sync and then releases on timeout. It is an anti-churn
-  optimization, not a correctness precondition. Child-starting coordinators
-  (map/filter/flatMap reconciles) never rehydrate clean — they run on resume to
-  re-attach their children, which then rehydrate individually.
-
-Rehydrated-clean nodes cost index inserts only. The v1 race-guard apparatus
-(per-action rehydration tokens, superseded checks, per-action timeout sharing)
-collapses because resume stays a boot-level phase — one listing loaded before
-registration — rather than per-action async lookups.
-
-### 9.3 Observation payload (slimmed)
-
-Per node: identity, kind, `reads` (+depth), the fixed registered write surface
-(`currentKnownWrites`), gate config, status (`success`/`failed` + error
-fingerprint), and watermark seq. Dropped relative to v1: `declaredWrites`,
-write-set history, and the mode fingerprint. `currentKnownWrites` is required:
-annotation-less actions may receive their static surface from the registration
-log, which is unavailable after restart.
-`sideWriteEnvelope` is declared metadata and also needs no observation copy,
-but keeping it inline is acceptable as a denormalization if graph-snapshot
-lookup at rehydration time is not yet available.
-
-Observations attach to the run's transaction at commit (including no-op
-commits, which the memory layer accepts for observation carriage — unchanged).
+- **Node identity is durable and restart-stable** — owner space, branch,
+  piece id (result-cell `scope:id`), action id with implementation hash
+  preferred. Nothing persists it per run anymore, but everything that keys
+  scheduler state per instance still constructs it the same way
+  ([per-document rehydration](per-doc-rehydration.md)), and the
+  server-execution basis index keys its rows by the same durable action
+  identity ([serving-loop.md §3b](../server-side-execution/serving-loop.md)).
+- **Start modes** collapse to `fresh`: a resumed piece registers every
+  action `never-ran`; resume intent holds each initial run until the space
+  finishes syncing (`awaitSyncBeforeInitialRun`), a bounded anti-churn
+  gate, not a correctness precondition.
 
 ---
 
@@ -1020,6 +1126,22 @@ commits, which the memory layer accepts for observation carriage — unchanged).
   gating (unchanged).
 - The implementation-identity stamping on run transactions
   (`setCfcImplementationIdentity`) is runner-level and unchanged.
+- **Refusal surfacing.** A CFC prepare refusal carries two channels. The
+  *reasons* are prose, one per rule that refused. The *refusal details*
+  (`cfc/refusal-detail.ts`) are the structured form: the boundary that
+  refused, the label atoms outside it, the reads that carried each one, and
+  whether those reads account for every offending atom. A consumer reads the
+  details to state a remedy — dropping the named inputs — which the reasons
+  alone cannot support. Details are recorded by the gates that can describe
+  themselves; a refusal whose producers recorded none carries an empty list
+  and its reasons still stand.
+- **`cfc.prepare-reject` telemetry.** Only a refusal every one of whose
+  reasons is a verdict is terminal, so only that one reaches the error
+  channel; a refusal mixing a verdict with an input prepare could not
+  evaluate is retried, and upstream it looks like a graph that stopped
+  converging. The marker fires on every refusal, terminal or not, carrying
+  the reasons, the details, and which arm the commit boundary took. It
+  reports and decides nothing.
 
 ---
 
@@ -1095,7 +1217,7 @@ field bag.)
 | Component | Owns | Key operations |
 | --- | --- | --- |
 | `registry` | Node records, identity, lifecycle | `register`, `remove`, `get` |
-| `graph` | Reader index (trigger semantics), static writer map, envelope index, node edges, liveness refcounts | `applyReadDelta`, `match(change)`, `edgesFor`, `recomputeLiveRefs` |
+| `graph` | Reader index (trigger semantics), static writer map, envelope index, node edges, liveness refcounts | `applyReadDelta`, `match(change)`, `edgesFor`, `registerDependentEdge`/`unregisterDependentEdge` |
 | `invalidation` | Storage subscription → `markInvalid` + tick | `onNotification` |
 | `settle` | The pass: work set, toposort, run-gating, iteration/budget bounds | `pass()` |
 | `runner` | One-tx run, commit watch, retries, read-delta handoff, observation attach | `runNode` |
@@ -1159,7 +1281,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
 | v1 mechanism | v2 disposition | Safety argument |
 | --- | --- | --- |
 | Push mode (5 modules, mode branches, APIs) | Deleted | Pull is the only production mode; push exists only as test toggles. |
-| `pending`/`dirty`/`stale` + upstream-stale counts | One `status` + liveness refcount; downstream closure per pass | P2 holds for the **run** decision (effects gate on their own value-accurate invalid bit). The one reachability query that survives — the event-preflight consistency gate (§7.5/I4) — is served without per-data-change transitive marking by **inverting** it over the maintained invalid-node set (decision 15); liveness rebuilds from explicit roots only when graph topology or demand roots change. |
+| `pending`/`dirty`/`stale` + upstream-stale counts | One `status` + liveness refcount; downstream closure per pass | P2 holds for the **run** decision (effects gate on their own value-accurate invalid bit). The one reachability query that survives — the event-preflight consistency gate (§7.5/I4) — is served without per-data-change transitive marking by **inverting** it over the maintained invalid-node set (decision 15); liveness is maintained incrementally, and only when graph topology or demand roots change. |
 | `scheduleAffectedEffects` + `conditionallyScheduledEffects` + `changedWritesHistory` | Deleted | Effects run-gate on their own value-accurate invalid bit (§7.2/§7.3) — same observable filter, no watermarks. |
 | Post-run `recordChangedComputationWrites` / `markReadersDirtyForChangedWrites` | Deleted | Local commit notifications are synchronous + value-bearing (P1); the channel already delivers exactly this. |
 | `pullDemandedFirstRunComputations` / continuation set / `activePullDemandActions` | Provisional demand (§5.3) | Continuations are ordinary invalidation under P1; first-run demand is creation-context inheritance. |
@@ -1402,7 +1524,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
     `isMine`, an aggregate), it **evaluated that computed inline inside the aborted
     tx — value produced, but no commit, no separate `run()`, no counted run** — so
     those sites report literal 0 in `actionStats` while still computing. v2 deleted
-    that whole run-to-observe path in favour of the transformer's *declared* reads
+    that whole run-to-observe path in favor of the transformer's *declared* reads
     annotation + pure P3 demand-gating. With no collect pass there is no
     inline-fold: when the live apex render propagates `liveRefs` up to the
     computeds it reads, each becomes live → demanded → **run in its own transaction
@@ -1416,7 +1538,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
     does not produce discretely. Coarsening it back inline — the only lever for the
     +73 — would forfeit exactly that per-row incremental-edit granularity, per-node
     provenance, and rehydration. So the 2.2× is the genuine price of v2 making
-    every reactive value a persisted, independently-incremental, CFC-labelled,
+    every reactive value a persisted, independently-incremental, CFC-labeled,
     rehydratable node, not extra re-execution (actions +123% but wall only +12–16%).
 
     *Levers ruled out — do not re-try without new evidence.* The surplus is

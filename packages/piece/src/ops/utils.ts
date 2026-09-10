@@ -2,18 +2,18 @@ import {
   compileAndSavePattern,
   type RuntimeProgram,
 } from "@commonfabric/runner";
-import { PieceManager } from "../manager.ts";
+import type { PiecesController } from "./pieces-controller.ts";
 
 export async function compileProgram(
-  manager: PieceManager,
+  pieces: PiecesController,
   program: RuntimeProgram | string,
   options: { previousEntryIdentity?: string } = {},
 ) {
   const pattern = await compileAndSavePattern(
-    manager.runtime,
+    pieces.runtime,
     program,
     {
-      space: manager.getSpace(),
+      space: pieces.getSpace(),
       ...(options.previousEntryIdentity === undefined
         ? {}
         : { previousEntryIdentity: options.previousEntryIdentity }),

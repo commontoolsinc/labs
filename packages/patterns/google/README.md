@@ -253,12 +253,26 @@ pieces via CLI.
 #### 1. Deploy both pieces
 
 ```bash
-# Deploy google-auth
-cf piece new google-auth.tsx
+# Run the authored pattern tests
+deno task cf test packages/patterns/google/core/auth-pieces.test.tsx \
+  --root packages/patterns
+deno task cf test packages/patterns/google/core/gmail-importer.test.tsx \
+  --root packages/patterns
 
-# Deploy gmail-importer
-cf piece new gmail-importer.tsx
+# Deploy google-auth with its test attached
+deno task cf piece new packages/patterns/google/core/google-auth.tsx \
+  --root packages/patterns \
+  --test packages/patterns/google/core/auth-pieces.test.tsx
+
+# Deploy gmail-importer with its test attached
+deno task cf piece new packages/patterns/google/core/gmail-importer.tsx \
+  --root packages/patterns \
+  --test packages/patterns/google/core/gmail-importer.test.tsx
 ```
+
+Deployment packages and type-checks attached tests but does not run them. If
+either source changes, rerun its test before deployment. Repeat the complete set
+of `--test` flags on every later `piece setsrc`.
 
 #### 2. Authenticate with Google Auth piece
 

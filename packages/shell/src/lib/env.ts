@@ -1,18 +1,26 @@
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
+import { parseFlagValue } from "@commonfabric/runner/experimental-posture";
+import { optionalPresenceUrl } from "./presence-url.ts";
+
 declare global {
   var $ENVIRONMENT: string | undefined;
   var $API_URL: string | undefined;
+  var $PRESENCE_URL: string | undefined;
   var $COMMIT_SHA: string | undefined;
   var $EXPERIMENTAL_MODERN_CELL_REP: string | undefined;
-  var $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: string | undefined;
   var $EXPERIMENTAL_COMPUTED_CELL_IDS: string | undefined;
-  var $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: string | undefined;
-  var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE: string | undefined;
+  var $EXPERIMENTAL_SERVER_EXECUTION: string | undefined;
+  var $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS: string | undefined;
+  var $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE: string | undefined;
 }
 
 const ENVIRONMENT_DEFINE = typeof $ENVIRONMENT === "string"
   ? $ENVIRONMENT
   : undefined;
 const API_URL_DEFINE = typeof $API_URL === "string" ? $API_URL : undefined;
+const PRESENCE_URL_DEFINE = typeof $PRESENCE_URL === "string"
+  ? $PRESENCE_URL
+  : undefined;
 const COMMIT_SHA_DEFINE = typeof $COMMIT_SHA === "string"
   ? $COMMIT_SHA
   : undefined;
@@ -20,21 +28,23 @@ const EXPERIMENTAL_MODERN_CELL_REP_DEFINE =
   typeof $EXPERIMENTAL_MODERN_CELL_REP === "string"
     ? $EXPERIMENTAL_MODERN_CELL_REP
     : undefined;
-const EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE_DEFINE =
-  typeof $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE === "string"
-    ? $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE
-    : undefined;
 const EXPERIMENTAL_COMPUTED_CELL_IDS_DEFINE =
   typeof $EXPERIMENTAL_COMPUTED_CELL_IDS === "string"
     ? $EXPERIMENTAL_COMPUTED_CELL_IDS
     : undefined;
-const EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE =
-  typeof $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION === "string"
-    ? $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION
+const EXPERIMENTAL_SERVER_EXECUTION_DEFINE =
+  typeof $EXPERIMENTAL_SERVER_EXECUTION === "string"
+    ? $EXPERIMENTAL_SERVER_EXECUTION
     : undefined;
-const EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE =
-  typeof $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE === "string"
-    ? $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE
+
+const EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS_DEFINE =
+  typeof $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS === "string"
+    ? $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS
+    : undefined;
+
+const EXPERIMENTAL_READER_SCHEMA_PRECEDENCE_DEFINE =
+  typeof $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE === "string"
+    ? $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE
     : undefined;
 
 export const ENVIRONMENT: "development" | "production" =
@@ -45,32 +55,50 @@ export const API_URL: URL = new URL(
     `${globalThis.location.protocol}//${globalThis.location.host}`,
 );
 
+/** Optional browser-visible endpoint for ephemeral editor co-presence. */
+export const PRESENCE_URL = optionalPresenceUrl(PRESENCE_URL_DEFINE);
+
 export const COMMIT_SHA: string | undefined = COMMIT_SHA_DEFINE;
 
 /**
- * Results in `true` (on), `false` (off), or `undefined` (default).
+ * The one canonical flag parse, shared with the server side's env mapping:
+ * exactly `"true"` / `"false"`; anything else — including a garbled define —
+ * is ignored with a warning rather than coerced, leaving the flag's default
+ * in force.
  */
 function flagValue(flag: string | undefined): boolean | undefined {
-  return (typeof flag === "string") ? (flag === "true") : undefined;
+  return typeof flag === "string"
+    ? parseFlagValue(flag, "shell experimental define")
+    : undefined;
 }
 
 /** Build-time experimental flags, injected via felt.config.ts defines. */
 export const EXPERIMENTAL = {
   modernCellRep: flagValue(EXPERIMENTAL_MODERN_CELL_REP_DEFINE),
-  persistentSchedulerState: flagValue(
-    EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE_DEFINE,
-  ),
   computedCellIds: flagValue(EXPERIMENTAL_COMPUTED_CELL_IDS_DEFINE),
-  // Debug `.src` source annotation: ON in development builds (so per-primitive
-  // source locations keep working for debugging), OFF in production (it is the
-  // boot floor's largest single cost). The define overrides either way.
-  eagerSourceAnnotation:
-    flagValue(EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE) ??
-      (ENVIRONMENT === "development"),
-  // Auto-update space-root system patterns (default-app AND home) in place.
-  // Default ON; a build define (`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE=false`)
-  // can force it off. Home state survival across an in-place roll is pinned by
-  // home-golden-replay.test.ts, so the home root no longer needs a second flag.
-  systemPatternAutoUpdate:
-    flagValue(EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE) ?? true,
+  // Server-execution v2 (docs/specs/server-side-execution/): the
+  // first-party default (the constant; the registry states its current
+  // value), overridable by the build define either way (CI's `opposite`
+  // lane bakes the inverse of the constant into its shell). The worker
+  // refuses to
+  // initialize if its resolved posture disagrees with this declaration
+  // (runtime-client's posture agreement).
+  serverExecution: flagValue(EXPERIMENTAL_SERVER_EXECUTION_DEFINE) ??
+    SERVER_EXECUTION_DEFAULT_ENABLED,
+  // Content-addressed schemas Phases 1 and 2: link writers and selectors
+  // emit cid: references. On by default in the runner; the define is the
+  // rollback override (`EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS=false` bakes
+  // a shell that emits inline schemas again).
+  contentAddressedSchemas: flagValue(
+    EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS_DEFINE,
+  ),
+  // Reader precedence at link crossings. On by default in the runner; the
+  // define is the rollback override
+  // (`EXPERIMENTAL_READER_SCHEMA_PRECEDENCE=false` bakes a shell whose
+  // worker runs the strict combine, matching a server deployed with the
+  // same env — the flag is server-authoritative and both sides must
+  // resolve hops under one rule).
+  readerSchemaPrecedence: flagValue(
+    EXPERIMENTAL_READER_SCHEMA_PRECEDENCE_DEFINE,
+  ),
 };

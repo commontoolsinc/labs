@@ -1,17 +1,19 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+
+import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 import { isOrClause } from "../src/cfc/clause.ts";
-import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
+import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import {
   CFC_LABEL_READ_FAILED_ATOM,
   cfcObservationFitsCeiling,
 } from "../src/cfc/observation.ts";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
+import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-clause-authoring");
 
@@ -37,7 +39,6 @@ describe("CFC authored disjunctive confidentiality", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const schema = {
@@ -88,7 +89,6 @@ describe("CFC authored disjunctive confidentiality", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const schema = {
@@ -168,7 +168,6 @@ describe("CFC authored disjunctive confidentiality", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const schema = {
@@ -193,12 +192,12 @@ describe("CFC authored disjunctive confidentiality", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const caveat = {
         type: "https://commonfabric.org/cfc/atom/Caveat",
-        kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+        kind:
+          "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
         source: userA,
       };
       const schema = {
@@ -257,7 +256,6 @@ describe("CFC authored disjunctive confidentiality", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const expires = {

@@ -37,9 +37,13 @@ export type ChecklistOutput = {
  */
 const Checklist = pattern<ChecklistInput, ChecklistOutput>(
   ({ topic, context }) => {
+    // An empty prompt holds the request back: `generateObject` clears its
+    // state and makes no call until one arrives. A checklist with no topic
+    // has no steps to draw up, so the model is asked only once a caller names
+    // what the steps are for.
     const prompt = computed(() => {
-      const t = topic || "the following";
-      return `Generate a checklist of actionable steps for: ${t}`;
+      if (!topic) return "";
+      return `Generate a checklist of actionable steps for: ${topic}`;
     });
 
     const response = generateObject<{ items: ChecklistItem[] }>({

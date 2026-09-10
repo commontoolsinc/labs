@@ -1,25 +1,26 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { describe, it } from "@std/testing/bdd";
+
 import type { SchemaPathSelector } from "@commonfabric/api";
+import type { FabricValue } from "@commonfabric/data-model";
 import type {
   Entity,
   Revision,
   State,
   URI,
 } from "@commonfabric/memory/interface";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
+import type { JSONSchema } from "../src/builder/types.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import { StoreObjectManager } from "../src/storage/query.ts";
 import {
   CompoundCycleTracker,
+  createDefaultTraversalContext,
+  IMemorySpaceValueAttestation,
   ManagedStorageTransaction,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
-import { StoreObjectManager } from "../src/storage/query.ts";
-import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 
 // These tests pin down the cycle-detection fallback in the traverser. When a
 // value is reachable from itself, the traversal of a property eventually visits
@@ -32,6 +33,13 @@ import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 const TYPE = "application/json" as const;
 const SPACE = "did:null:null";
 
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E).
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+
 function getTraverser(
   store: Map<string, Revision<State>>,
   selector: SchemaPathSelector,
@@ -39,7 +47,11 @@ function getTraverser(
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const tx = new ExtendedStorageTransaction(managedTx);
-  return new SchemaObjectTraverser(tx, selector);
+  return new SchemaObjectTraverser(
+    tx,
+    selector,
+    createDefaultTraversalContext(TEST_SCOPE_IDENTITY),
+  );
 }
 
 function storeWith(
@@ -48,12 +60,10 @@ function storeWith(
 ): Map<string, Revision<State>> {
   const store = new Map<string, Revision<State>>();
   const entity = docUri as Entity;
-  // hashOf only hashes { the, of }, so a cyclic value here is fine.
   store.set(`${entity}/${TYPE}`, {
     the: TYPE,
     of: entity,
     is: { value },
-    cause: hashOf({ the: TYPE, of: entity }),
     since: 1,
   });
   return store;

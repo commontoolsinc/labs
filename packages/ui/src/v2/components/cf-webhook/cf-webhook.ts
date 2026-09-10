@@ -1,6 +1,8 @@
-import { css, html } from "lit";
-import { BaseElement } from "../../core/base-element.ts";
 import { CellHandle } from "@commonfabric/runtime-client";
+import { css, html } from "lit";
+
+import { BaseElement } from "../../core/base-element.ts";
+
 import "../cf-button/index.ts";
 import "../cf-secret-viewer/index.ts";
 

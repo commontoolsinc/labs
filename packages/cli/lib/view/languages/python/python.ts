@@ -1,13 +1,14 @@
 /**
  * A lossless Python highlighter for the pager. The scanner follows Python's
- * lexical tokens while remaining lenient enough to colour a file during an
- * incomplete edit. It recognises current string prefixes, multiline strings,
+ * lexical tokens while remaining lenient enough to color a file during an
+ * incomplete edit. It recognizes current string prefixes, multiline strings,
  * identifiers, keywords, numeric forms, comments, operators, and delimiters.
  *
  * The scanner consumes the complete document because a triple-quoted string can
- * determine the colour of later lines. It does not execute Python or require a
+ * determine the color of later lines. It does not execute Python or require a
  * Python installation.
  */
+
 import type { Document, Line, Span, TokenClass } from "../../model.ts";
 import { cpLen } from "../../ansi.ts";
 import { computeLineStarts, lineIndexOf } from "../../lines.ts";
@@ -314,8 +315,8 @@ function identifierClass(
 }
 
 /**
- * `match`, `case`, and `type` are soft keywords. They retain identifier colour
- * in assignments and calls, while their statement forms receive keyword colour.
+ * `match`, `case`, and `type` are soft keywords. They retain identifier color
+ * in assignments and calls, while their statement forms receive keyword color.
  */
 function softKeywordAt(
   text: string,
@@ -836,7 +837,7 @@ export function pythonHighlightLines(text: string): Line[] {
   }));
 }
 
-/** A full Python document with syntax colouring and no semantic structure. */
+/** A full Python document with syntax coloring and no semantic structure. */
 export function pythonDocument(text: string): Document {
   return {
     text,

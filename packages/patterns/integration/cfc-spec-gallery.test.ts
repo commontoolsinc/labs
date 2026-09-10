@@ -1,6 +1,6 @@
 import { env, Page, waitForCondition } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -10,7 +10,8 @@ import {
 } from "./pieces-controller.ts";
 import {
   clickTrustedActionAndWaitForText,
-  waitForText,
+  waitForSettledText,
+  waitForTextAbsent,
 } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
@@ -27,7 +28,7 @@ describe("cfc spec gallery integration test", () => {
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
     cc = await initializePiecesController({
-      spaceName: SPACE_NAME,
+      space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity,
     });
@@ -45,12 +46,13 @@ describe("cfc spec gallery integration test", () => {
       "main.tsx",
     );
     const rootPath = join(import.meta.dirname!, "..");
-    const program = await cc.manager().runtime.harness.resolve(
-      new FileSystemProgramResolver(sourcePath, rootPath),
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: sourcePath, root: rootPath },
     );
     piece = await cc.create(program, { start: true });
 
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink(() => {});
   });
 
@@ -76,14 +78,21 @@ describe("cfc spec gallery integration test", () => {
       "#trusted-forward-prepared",
       "Prepared for",
     );
-    await waitForText(page, "#forward-stage", "prepared");
+    // Settled waits throughout: every stage indicator below is the
+    // EFFECT of the preceding trusted click's served round trip, and a
+    // plain DOM watch cannot pump the page's own pending pull work —
+    // the state can sit one settle away from being drawn until the
+    // stuck-condition net fires (docs/development/waiting-in-tests.md;
+    // the cfc-staged-publish/#stage-pill and this file's own ON-lane
+    // occurrence in the 2026-08-20 attribution ledger were this shape).
+    await waitForSettledText(page, "#forward-stage", "prepared");
     await clickTrustedActionAndWaitForText(
       page,
       "TrustedForwardNote",
       "#trusted-forward-result",
       "Only the bounded itinerary excerpt will be forwarded.",
     );
-    await waitForText(page, "#forward-stage", "forwarded");
+    await waitForSettledText(page, "#forward-stage", "forwarded");
 
     await clickTrustedActionAndWaitForText(
       page,
@@ -91,21 +100,21 @@ describe("cfc spec gallery integration test", () => {
       "#research-stage",
       "captured",
     );
-    await waitForText(page, "#research-stage", "captured");
+    await waitForSettledText(page, "#research-stage", "captured");
     await clickTrustedActionAndWaitForText(
       page,
       "TrustedPrepareResearchBrief",
       "#trusted-command-prepared",
       "Prepared outbound",
     );
-    await waitForText(page, "#research-stage", "prepared");
+    await waitForSettledText(page, "#research-stage", "prepared");
     await clickTrustedActionAndWaitForText(
       page,
       "TrustedAuthorizeResearchSend",
       "#trusted-command-result",
       "Authorized outbound message",
     );
-    await waitForText(page, "#research-stage", "sent");
+    await waitForSettledText(page, "#research-stage", "sent");
 
     await clickTrustedActionAndWaitForText(
       page,
@@ -113,14 +122,14 @@ describe("cfc spec gallery integration test", () => {
       "#trusted-safe-link-prepared",
       "?view=summary",
     );
-    await waitForText(page, "#safe-link-stage", "prepared");
+    await waitForSettledText(page, "#safe-link-stage", "prepared");
     await clickTrustedActionAndWaitForText(
       page,
       "TrustedReleaseSafeLink",
       "#trusted-safe-link-result",
       "?view=summary",
     );
-    await waitForText(page, "#safe-link-stage", "released");
+    await waitForSettledText(page, "#safe-link-stage", "released");
   });
 
   it("renders disclaimer-style labels without a trusted click", async () => {
@@ -132,6 +141,14 @@ describe("cfc spec gallery integration test", () => {
         pieceId: piece.id,
       },
       identity,
+      // The subject is what a `cf-cfc-label` shows for each of these three
+      // labels. Two of them sit outside the §8.10.6 display profile, so the
+      // render ceiling blocks their cards and takes those labels with them;
+      // this case runs the profile without the ceiling, and the case below
+      // runs the same page with it. `isCfcRenderCeilingEnabled` reads the key
+      // as `=== "true"`, so `false` selects the profile this page would take
+      // with no key at all until that reader changes.
+      renderCeiling: false,
     });
 
     await waitForCfcLabelText(page, [
@@ -139,6 +156,29 @@ describe("cfc spec gallery integration test", () => {
       "SourceProvenance",
       "fact-check-required",
     ]);
+  });
+
+  it("renders the admitted label and no other under the render ceiling", async () => {
+    const page = shell.page();
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: {
+        spaceName: SPACE_NAME,
+        pieceId: piece.id,
+      },
+      identity,
+      renderCeiling: true,
+    });
+
+    // The ceiling admits the acting user's own identity atoms and the
+    // influence-class caveat kinds, `prompt-influence` among them, so that
+    // card's label renders and a blocked placeholder stands where the other
+    // two cards were. The three strings below are the three the case above
+    // waits for, so the pair states the same page under each profile.
+    await waitForCfcLabelText(page, ["prompt-influence"]);
+    await waitForSettledText(page, "cf-screen", "Content hidden by policy");
+    await waitForTextAbsent(page, "cf-screen", "SourceProvenance");
+    await waitForTextAbsent(page, "cf-screen", "fact-check-required");
   });
 });
 

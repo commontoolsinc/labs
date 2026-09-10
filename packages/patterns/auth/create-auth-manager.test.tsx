@@ -6,7 +6,7 @@
  *
  * Run: deno task cf test packages/patterns/auth/create-auth-manager.test.tsx --verbose
  */
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import type { AuthManagerDescriptor } from "./auth-manager-descriptor.ts";
 import { AuthManagerBase } from "./create-auth-manager.tsx";
 import { hasText } from "../test/vnode-helpers.ts";
@@ -83,7 +83,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_loading_state },
       { assertion: assert_availability_is_loading },
       { assertion: assert_auth_info_matches_state },

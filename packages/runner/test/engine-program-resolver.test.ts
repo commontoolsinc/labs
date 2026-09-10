@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import { StaticCacheFS } from "@commonfabric/static";
+import { StaticCache } from "@commonfabric/static";
 
 import {
   EngineProgramResolver,
@@ -18,7 +18,7 @@ Deno.test("EngineProgramResolver records exact compiler-owned Common Fabric type
         contents: "export declare function pattern(): unknown;",
       },
     ],
-  }, new StaticCacheFS());
+  }, StaticCache.fromFileSystem());
 
   assert(await resolver.resolveSource("commonfabric/cfc.d.ts"));
   assert(await resolver.resolveSource("commontools"));
@@ -44,7 +44,7 @@ Deno.test("trusted Common Fabric source names stay bound to resolver-supplied by
   const resolver = new EngineProgramResolver({
     main: "/main.ts",
     files: [{ name: "/main.ts", contents: "export default 1;" }],
-  }, new StaticCacheFS());
+  }, StaticCache.fromFileSystem());
   const trusted = await resolver.resolveSource("commonfabric.d.ts");
   assert(trusted);
 

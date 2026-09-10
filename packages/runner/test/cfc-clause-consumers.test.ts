@@ -28,7 +28,8 @@ const B = {
 
 const PROMPT_RISK = {
   type: "https://commonfabric.org/cfc/atom/Caveat",
-  kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+  kind:
+    "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
 };
 
 // An instruction-inert schema: an enum of primitives. Sanitizing it strips
@@ -78,14 +79,12 @@ describe("A5 flat-assumption consumer sweep", () => {
   });
 
   describe("legacy classification walker (cfc.ts lubSchema)", () => {
-    const cfc = new ContextualFlowControl();
-
     it("carries an OR-clause through the coarse join opaquely (no crash, no drop)", () => {
       const schema = {
         type: "string",
         ifc: { confidentiality: [{ anyOf: [A, B] }] },
       } as const satisfies JSONSchema;
-      const atoms = cfc.lubSchema(schema);
+      const atoms = ContextualFlowControl.lubSchema(schema);
       expect(atoms).toBeDefined();
       // The clause survives as one opaque member — not flattened into its
       // alternatives (which would under-represent the AND-of-the-clause).
@@ -104,7 +103,7 @@ describe("A5 flat-assumption consumer sweep", () => {
           },
         },
       } as const satisfies JSONSchema;
-      const atoms = cfc.lubSchema(schema) ?? [];
+      const atoms = ContextualFlowControl.lubSchema(schema) ?? [];
       // Both the flat A and the {A∨B} clause are present as distinct members.
       expect(atoms).toContainEqual(A);
       expect(atoms.some(isOrClause)).toBe(true);

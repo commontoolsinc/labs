@@ -1,10 +1,5 @@
-import {
-  type CellHandle,
-  isCellHandle,
-  UI,
-} from "@commonfabric/runtime-client";
+import { type CellHandle, UI, type VNode } from "@commonfabric/runtime-client";
 import { render } from "@commonfabric/html/client";
-import { mayContainCfcRenderBoundary } from "./cfc-render-boundary-scan.ts";
 import "../components/cf-cell-link/index.ts";
 
 /**
@@ -13,16 +8,22 @@ import "../components/cf-cell-link/index.ts";
 export interface DragState {
   /** The CellHandle being dragged */
   cell: CellHandle;
+
   /** Optional type identifier for filtering drop zones */
   type?: string;
+
   /** The source element that initiated the drag */
   sourceElement: HTMLElement;
+
   /** The preview element being shown during drag */
   preview: HTMLElement;
+
   /** Optional cleanup function to call when drag ends */
   previewCleanup?: () => void;
+
   /** Current pointer X position (updated during drag) */
   pointerX: number;
+
   /** Current pointer Y position (updated during drag) */
   pointerY: number;
 }
@@ -33,7 +34,10 @@ export interface DragState {
  */
 export type DragListener = (state: DragState | null) => void;
 
+//
 // Module-level singleton state
+//
+
 let currentDrag: DragState | null = null;
 const listeners: Set<DragListener> = new Set();
 
@@ -82,11 +86,10 @@ export function endDrag(): void {
   notifyListeners(null);
 }
 
-/**
- * Callbacks for when drag is ending (before cleanup).
- * Used by drop zones to emit drop events.
- */
+/** A callback run when a drag is ending, before cleanup. */
 type DragEndListener = (state: DragState) => void;
+
+/** The registered such callbacks; drop zones use them to emit drop events. */
 const endListeners: Set<DragEndListener> = new Set();
 
 /**
@@ -174,15 +177,28 @@ export function subscribeToDrag(listener: DragListener): () => void {
   };
 }
 
+/** A drag preview element and, when it renders a piece, its teardown. */
+export interface DragPreview {
+  /** The preview element (not yet added to the DOM). */
+  preview: HTMLElement;
+
+  /** Stops the preview's render; pass as {@link DragState.previewCleanup}. */
+  cleanup?: () => void;
+}
+
 /**
  * Create a drag preview element for a cell.
  * Uses the cell's [UI] property if available, otherwise falls back to
  * a static cf-cell-link pill.
  *
+ * The preview renders the cell's `[UI]` through the same renderer the page
+ * uses, so the confidentiality policy that decides what a piece may show
+ * decides what its drag preview shows.
+ *
  * @param cell - The CellHandle to create a preview for
- * @returns The preview element (not yet added to DOM)
+ * @returns The preview element and its teardown
  */
-export function createDragPreview(cell: CellHandle): HTMLElement {
+export function createDragPreview(cell: CellHandle): DragPreview {
   const preview = document.createElement("div");
   preview.style.cssText = `
     position: fixed;
@@ -200,28 +216,27 @@ export function createDragPreview(cell: CellHandle): HTMLElement {
   `;
 
   const cellValue = cell.get();
-  if (cellValue && typeof cellValue === "object" && UI in cellValue) {
-    const ui = (cellValue as Record<string, unknown>)[UI];
-    // A CellHandle [UI] renders through the worker renderer, which enforces
-    // the CFC render policy itself. A plain-VNode [UI] renders through the
-    // legacy main-thread renderer, which has no CFC awareness — so any tree
-    // that may contain a <cf-cfc-render-boundary> must not be rendered here
-    // and gets the generic pill instead.
-    if (!isCellHandle(ui) && mayContainCfcRenderBoundary(ui)) {
-      _addFallbackPreview(preview, cell);
-      return preview;
-    }
-    try {
-      render(preview, ui as any);
-    } catch (error) {
-      console.warn("[drag-state] Failed to render [UI] preview:", error);
-      _addFallbackPreview(preview, cell);
-    }
-  } else {
+  if (!cellValue || typeof cellValue !== "object" || !(UI in cellValue)) {
     _addFallbackPreview(preview, cell);
+    return { preview };
   }
 
-  return preview;
+  try {
+    const cleanup = render(
+      preview,
+      (cell as CellHandle<Record<string, VNode>>).key(UI),
+      {
+        onError: (error) => {
+          console.warn("[drag-state] Failed to render [UI] preview:", error);
+        },
+      },
+    );
+    return { preview, cleanup };
+  } catch (error) {
+    console.warn("[drag-state] Failed to render [UI] preview:", error);
+    _addFallbackPreview(preview, cell);
+    return { preview };
+  }
 }
 
 function _addFallbackPreview(container: HTMLElement, cell: CellHandle) {

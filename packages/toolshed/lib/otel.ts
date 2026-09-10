@@ -1,15 +1,16 @@
+import { OpenInferenceBatchSpanProcessor } from "@arizeai/openinference-vercel";
 import { context, diag, trace } from "@opentelemetry/api";
-import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
+import { AsyncHooksContextManager } from "@opentelemetry/context-async-hooks";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import {
   defaultResource,
   resourceFromAttributes,
 } from "@opentelemetry/resources";
-import { AsyncHooksContextManager } from "@opentelemetry/context-async-hooks";
-import env from "@/env.ts";
+import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { registerTelemetry } from "ai";
+
+import env from "@/env.ts";
 import { createAiSdkTelemetry } from "@/lib/ai-telemetry.ts";
-import { OpenInferenceBatchSpanProcessor } from "@arizeai/openinference-vercel";
 import { samplerFromEnv } from "@/lib/otel-sampler.ts";
 import { detachRuntimeOtelBridgeIfAttached } from "@/runtime-options.ts";
 
@@ -32,21 +33,19 @@ export const provider = new BasicTracerProvider({
       "service.name": env.OTEL_SERVICE_NAME || "toolshed-dev",
       "service.version": "1.0.0",
       "deployment.environment": env.ENV || "development",
-      "openinference.project.name": env.CFTS_AI_LLM_PHOENIX_PROJECT,
     }),
   ),
   // The sampler is built from OTEL_TRACES_SAMPLER and OTEL_TRACES_SAMPLER_ARG
   // here; passing one takes precedence over the SDK's own reading of those
   // variables. Defaults (always_on / 1.0) keep 100% sampling.
   // NOTE: head sampling here applies to LLM/OpenInference spans too, so a ratio
-  // below 1.0 also thins the spans the collector forwards to Phoenix.
+  // below 1.0 also thins the spans the collector forwards to SigNoz.
   sampler: samplerFromEnv(env.OTEL_TRACES_SAMPLER, env.OTEL_TRACES_SAMPLER_ARG),
   // Export ALL spans (HTTP request spans from the otel middleware AND LLM spans) to
-  // the OTLP collector. The collector fans them out: its Phoenix pipeline filters to
-  // LLM/OpenInference spans, while its SigNoz pipeline ingests everything. We keep the
+  // the OTLP collector, which forwards everything to SigNoz. We keep the
   // OpenInferenceBatchSpanProcessor (rather than a plain BatchSpanProcessor) so LLM
-  // spans still get OpenInference semantic-convention formatting for Phoenix; a
-  // pass-through spanFilter lets non-LLM spans through to SigNoz as well. (The
+  // spans get OpenInference / GenAI semantic-convention enrichment, which SigNoz
+  // consumes; a pass-through spanFilter lets non-LLM spans through as well. (The
   // processor tags passed-through spans with an `openinference.span.kind`
   // attribute, so they are not strictly byte-for-byte unchanged.)
   spanProcessors: [

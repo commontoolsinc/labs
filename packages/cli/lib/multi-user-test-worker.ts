@@ -10,11 +10,35 @@
  * participant pattern, whose `tests` steps the orchestrator drives via a
  * small request/response protocol.
  *
+ * The `{ label }` / `{ await }` markers travel through that same shared
+ * space, each participant announcing into its own marker document.
+ * Announcing commits the marker; awaiting waits for it to arrive here. The
+ * announcing participant settles each step before the next, so the server
+ * holds everything it wrote before it holds the marker. A replica that has
+ * the marker therefore reads the rest from a server that already has it:
+ * documents inside this replica's watch set arrive in a fan-out frame the
+ * server computes by diffing current storage, which cannot carry the marker
+ * while omitting an earlier write it has not yet sent, and a document
+ * outside that set is fetched on demand by the assertion's own `pull()`.
+ * That is what lets an assertion be read once.
+ *
  * Realm isolation is required, not an optimization: two runtimes in one
  * realm cross-talk through module-level state (verified-load registries,
  * frame stack).
  */
 
+import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
+import {
+  CFC_ENFORCEMENT_MODES,
+  type CfcEnforcementMode,
+  isCfcEnforcementMode,
+} from "@commonfabric/runner/cfc";
+import {
+  createSession,
+  Identity,
+  keyPairFromRealmValue,
+} from "@commonfabric/identity";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   type Cell,
   type ConsoleHandler,
@@ -26,25 +50,23 @@ import {
   patternCoverageOutputPath,
   Runtime,
   runtimePresets,
+  TESTS,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { defer } from "@commonfabric/utils/defer";
+
+import { assertionOutcome } from "./assert-record.ts";
 import {
   flushDefaultModuleByteCache,
   getDefaultModuleByteCache,
 } from "./compile-byte-cache.ts";
-import { buildActionEvent } from "./trusted-test-event.ts";
 import {
   appendLoggerDeltaMessages,
   type LoggerErrorWarnSnapshot,
   snapshotLoggerErrorWarnCounts,
 } from "./console-capture.ts";
-import {
-  createSession,
-  Identity,
-  type KeyPairRaw,
-} from "@commonfabric/identity";
 import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
+import { buildActionEvent } from "./trusted-test-event.ts";
 
 export interface WorkerRequest {
   id: number;
@@ -56,12 +78,20 @@ export type WorkerResponse =
   | { id: number; ok: unknown }
   | { id: number; error: string };
 
-export type StepKind = "action" | "assertion" | "render" | "label" | "await";
+export type StepKind =
+  | "action"
+  | "assertion"
+  | "render"
+  | "settle"
+  | "label"
+  | "await";
 
 export interface StepMeta {
   kind: StepKind;
+
   /** Marker name for label/await steps. */
   marker?: string;
+
   skip?: boolean;
 }
 
@@ -71,30 +101,64 @@ export interface ParticipantInitResult {
   expectNonIdempotent: boolean;
   allowConsoleErrors: boolean;
   allowConsoleWarnings: boolean;
+
+  /**
+   * The CFC enforcement mode this participant's runtime resolved to, read off
+   * the runtime itself. The orchestrator checks it against the mode the run
+   * named, so a participant that came up on another rung says so.
+   */
+  cfcEnforcementMode: CfcEnforcementMode;
 }
 
 const SETUP_CAUSE = "multi-user-test-setup";
 const SETTLE_FAST_MS = 2;
+
+/**
+ * One marker document per participant, so the only writer of a document is
+ * the participant it belongs to. Announcing is then conflict-free whatever
+ * order participants announce in, including from a replica that predates
+ * another participant's announcement.
+ */
+function markersCause(participant: string): string {
+  return `multi-user-test-markers:${participant}`;
+}
+
+/** Markers one participant has announced, one property per marker name. */
+const markersSchema = {
+  type: "object",
+  additionalProperties: { type: "boolean" },
+  default: {},
+} as const;
 
 let runtime: Runtime | undefined;
 let storageManager:
   | { synced(): Promise<void>; close(): Promise<void> }
   | undefined;
 let engine: Engine | undefined;
+
+/** Every participant's marker document, keyed by participant name. */
+const markersCells = new Map<string, Cell<Record<string, boolean>>>();
+
+let selfParticipant: string | undefined;
 let stepCells: Cell<unknown>[] = [];
 let patternCoverage: PatternCoverageCollector | undefined;
 let patternCoveragePath: string | undefined;
 let patternCoverageRoot: string | undefined;
 const runtimeErrors: string[] = [];
-/** Channel 1: console.error/warn captured via the harness console event. */
+
+/** Channel 1: console.error calls captured via the harness console event. */
 const consoleErrors: string[] = [];
+
+/** Channel 1: console.warn calls, captured the same way. */
 const consoleWarnings: string[] = [];
+
 const continuousUiErrors: Error[] = [];
 let continuousUiCancel: (() => void) | undefined;
 // Run-phase gate for channel 1 (mirrors test-runner.ts): flips true at the
 // post-compile point where the channel-2 snapshot is taken, so compile-time
 // module-evaluation console output does not fail tests.
 let consoleCaptureActive = false;
+
 /** Channel 2: logger error/warn count snapshot taken after compile, before run. */
 let loggerCountsBeforeRun: LoggerErrorWarnSnapshot = new Map();
 
@@ -112,15 +176,65 @@ async function settle(maxIterations = 20): Promise<void> {
   }
 }
 
+function markersCellFor(participant: string): Cell<Record<string, boolean>> {
+  const cell = markersCells.get(participant);
+  if (!cell) {
+    throw new Error(`No marker document for participant "${participant}"`);
+  }
+  return cell;
+}
+
+/**
+ * Resolve once `marker` is present in this replica's copy of the marker
+ * document `announcedBy` writes.
+ *
+ * The wait sleeps on the cell's sink, so it wakes on the commit that carries
+ * the marker rather than on a clock, and it reads the value once the
+ * scheduler is quiescent.
+ */
+async function waitForMarker(
+  announcedBy: string,
+  marker: string,
+): Promise<void> {
+  const cell = markersCellFor(announcedBy);
+  let changed = defer<void>();
+  const cancel = cell.sink(() => {
+    changed.resolve();
+    changed = defer<void>();
+  });
+  try {
+    while (true) {
+      await rt().idle();
+      // Captured before the read, so a change racing the check wakes the next
+      // attempt instead of being missed.
+      const next = changed.promise;
+      if (cell.get()?.[marker] === true) return;
+      await next;
+    }
+  } finally {
+    // Cancelling while the action that reported a value is still finalizing
+    // does not stick, because finalizing an action resubscribes it.
+    await rt().idle();
+    cancel();
+  }
+}
+
 const stepPeekSchema = {
   type: "object",
   properties: {
     action: { type: "unknown" },
     assertion: { type: "unknown" },
     render: { type: "unknown" },
+    settle: { type: "boolean" },
     label: { type: "string" },
     await: { type: "string" },
-    event: { type: "unknown" },
+    // The payload is what the step sends, so it is read as authored: an
+    // object arrives as an object, reaching the handler as a reference into
+    // this step rather than a snapshot of it. `type: "unknown"` marks a value
+    // the traversal must not descend into, which is right for the fields this
+    // schema only tests for presence and wrong here, where it drops an object
+    // payload to `undefined`.
+    event: true,
     trustedUi: {
       type: "object",
       properties: {
@@ -137,6 +251,7 @@ function classifyStep(stepCell: Cell<unknown>, index: number): StepMeta {
     action?: unknown;
     assertion?: unknown;
     render?: unknown;
+    settle?: boolean;
     label?: string;
     await?: string;
     skip?: boolean;
@@ -148,6 +263,7 @@ function classifyStep(stepCell: Cell<unknown>, index: number): StepMeta {
   if (typeof peek?.await === "string") {
     return { kind: "await", marker: peek.await, ...skip };
   }
+  if (peek?.settle === true) return { kind: "settle", ...skip };
   // Streams/computeds peek as present-but-opaque; key presence is the signal.
   if (Object.hasOwn(peek ?? {}, "render")) return { kind: "render", ...skip };
   if (Object.hasOwn(peek ?? {}, "action")) return { kind: "action", ...skip };
@@ -155,9 +271,36 @@ function classifyStep(stepCell: Cell<unknown>, index: number): StepMeta {
     return { kind: "assertion", ...skip };
   }
   throw new Error(
-    `Test step ${index} has none of action/assertion/render/label/await ` +
-      `(keys: ${Object.keys(peek ?? {}).join(",") || "none"})`,
+    `Test step ${index} has none of ` +
+      `action/assertion/render/settle/label/await ` +
+      // The step's own keys, not the peek's: the peek schema has already
+      // dropped every key it does not declare, which is exactly the set an
+      // author needs named here.
+      `(keys: ${
+        Object.keys(stepCell.get() as object ?? {}).join(",") || "none"
+      })`,
   );
+}
+
+/**
+ * The CFC enforcement mode an `init` request names, if it names one.
+ *
+ * The request crosses a worker boundary as plain data, so the name arrives
+ * untyped. A name off the ladder is reported here rather than installed: the
+ * ladder is a closed set, and a runtime holding a mode outside it is on no
+ * rung.
+ */
+function requestedEnforcementMode(
+  input: unknown,
+): CfcEnforcementMode | undefined {
+  if (input === undefined) return undefined;
+  if (!isCfcEnforcementMode(input)) {
+    throw new Error(
+      `Initialization \`cfcEnforcementMode\` is ${String(input)}, not one ` +
+        `of ${CFC_ENFORCEMENT_MODES.join(", ")}`,
+    );
+  }
+  return input;
 }
 
 const handlers: Record<
@@ -169,12 +312,21 @@ const handlers: Record<
    * participant pattern, and return the classified step list.
    */
   async init(args) {
-    const identity = await Identity.deserialize(args.rawIdentity as KeyPairRaw);
+    const requestedMode = requestedEnforcementMode(args.cfcEnforcementMode);
+    const identity = await Identity.fromKeyPair(
+      keyPairFromRealmValue(
+        args.identity as RealmEncodedValue,
+        "Initialization `identity`",
+      ),
+    );
     const session = await createSession({
       identity,
       spaceName: args.spaceName as string,
     });
     const space = session.space;
+    // The Deno storage cache opens SQLite as it loads, so it waits for the
+    // session it will open against.
+    // deno-lint-ignore cf-imports/no-inline-module-import
     const { StorageManager } = await import(
       "@commonfabric/runner/storage/cache.deno"
     );
@@ -196,6 +348,9 @@ const handlers: Record<
       experimental: experimentalOptionsFromEnv(Deno.env.get),
       errorHandlers: [(error: Error) => runtimeErrors.push(String(error))],
       moduleByteCache: getDefaultModuleByteCache(),
+      ...(requestedMode !== undefined
+        ? { cfcEnforcementMode: requestedMode }
+        : {}),
     }));
     runtime.enableIdempotencyCheck();
     // Channel 1: capture pattern-code console.error / console.warn calls.
@@ -232,12 +387,13 @@ const handlers: Record<
       : undefined;
     patternCoverageRoot = typeof args.root === "string" ? args.root : undefined;
 
-    const program = await engine.resolve(
-      new FileSystemProgramResolver(
-        args.testPath as string,
-        args.root as string | undefined,
-      ),
-    );
+    const program = await resolveLocalProgram((r) => engine!.resolve(r), {
+      main: args.testPath as string,
+      ...(typeof args.root === "string" ? { root: args.root } : {}),
+      ...(Array.isArray(args.dataFilePaths)
+        ? { dataFilePaths: args.dataFilePaths as string[] }
+        : {}),
+    });
     // `compileAndRegisterModules` seals compile + evaluate + register (see
     // test-runner.ts): map/filter/flatMap ops resolve via their content-addressed
     // canonical artifact instead of the defer-corrupted embedded graph (CT-1811).
@@ -264,6 +420,20 @@ const handlers: Record<
       );
     }
 
+    // Subscribe to every participant's marker document before any step runs,
+    // so an announcement is already in this replica's watch set when it is
+    // made rather than being fetched after the fact.
+    selfParticipant = args.participant as string;
+    for (const name of args.participants as string[]) {
+      const cell = rt().getCell<Record<string, boolean>>(
+        space,
+        markersCause(name),
+        markersSchema,
+      );
+      await cell.sync();
+      markersCells.set(name, cell);
+    }
+
     // Minimal wish("#default") environment, seeded once by the first worker.
     if (args.seedDefaults === true) {
       const setupTx = rt().edit();
@@ -276,7 +446,6 @@ const handlers: Record<
       );
       const pieceRegistry = (defaultPatternCell as any).key("pieceRegistry");
       pieceRegistry.set([]);
-      (defaultPatternCell as any).key("recentPieces").set([]);
       (defaultPatternCell as any).key("backlinksIndex").set({
         mentionable: [],
       });
@@ -328,7 +497,7 @@ const handlers: Record<
     }
     await settle();
 
-    const stepsValue = resultCell.key("tests").asSchema(
+    const stepsValue = resultCell.key(TESTS).asSchema(
       {
         type: "array",
         items: { type: "object", asCell: ["cell"] },
@@ -337,7 +506,7 @@ const handlers: Record<
     ).get();
     if (!Array.isArray(stepsValue)) {
       throw new Error(
-        `Participant "${args.participant}" must return { tests: TestStep[] }`,
+        `Participant "${args.participant}" must return { [TESTS]: TestStep[] }`,
       );
     }
     stepCells = stepsValue as Cell<unknown>[];
@@ -356,6 +525,7 @@ const handlers: Record<
       allowConsoleWarnings:
         await (resultCell.key("allowConsoleWarnings") as Cell<unknown>)
           .pull() === true,
+      cfcEnforcementMode: rt().cfcEnforcementMode,
     };
     return result;
   },
@@ -378,12 +548,14 @@ const handlers: Record<
     return {};
   },
 
-  /** Pull an assertion step's value; the orchestrator handles retries. */
+  /** Evaluate an assertion step, reporting what a false value held. */
   async assertion({ index }) {
     const stepCell = stepCells[index as number];
     const value = await (stepCell.key("assertion" as never) as Cell<unknown>)
       .pull();
-    return { passed: value === true };
+    // An `assert(...)` assertion carries the operands recorded while the
+    // condition ran, so a failure names them and their values.
+    return assertionOutcome(value);
   },
 
   /** Materialize one VDOM target, then remove its renderer demand. */
@@ -396,9 +568,40 @@ const handlers: Record<
     return {};
   },
 
-  /** Let in-flight work and incoming subscription pushes land. */
-  async settle() {
-    await settle(6);
+  /**
+   * Settle fully (scheduler, storage, and in-flight async builtin I/O) for an
+   * explicit `{ settle: true }` step. Every step already settles before the
+   * next, so this is a demand for full settlement at a point the author names.
+   */
+  async settleStep() {
+    await settle();
+    return {};
+  },
+
+  /**
+   * Announce a coordination marker as a durable write, ordered after every
+   * commit this participant has already made.
+   */
+  async label({ marker }) {
+    const tx = rt().edit();
+    markersCellFor(selfParticipant!).withTx(tx).key(marker as string).set(true);
+    rt().prepareTxForCommit?.(tx);
+    // A dropped marker is a wait that never ends, so the commit's verdict is
+    // read rather than assumed.
+    const result = await tx.commit();
+    if (result.error) {
+      throw new Error(
+        `Announcing marker "${marker}" failed: ${result.error.message}`,
+      );
+    }
+    await settle();
+    return {};
+  },
+
+  /** Wait for another participant's marker to reach this replica. */
+  async awaitMarker({ announcedBy, marker }) {
+    await waitForMarker(announcedBy as string, marker as string);
+    await settle();
     return {};
   },
 
@@ -446,6 +649,8 @@ const handlers: Record<
 
   async dispose() {
     stepCells = [];
+    markersCells.clear();
+    selfParticipant = undefined;
     continuousUiCancel?.();
     continuousUiCancel = undefined;
     continuousUiErrors.length = 0;

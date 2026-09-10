@@ -1,32 +1,34 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import type {
+  BuiltInGenerateTextParams,
+  BuiltInLLMParams,
+} from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { LLMClient } from "@commonfabric/llm";
 import {
   addMockResponse,
   clearMockResponses,
   enableMockMode,
 } from "@commonfabric/llm/client";
-import { LLMClient } from "@commonfabric/llm";
-import type {
-  BuiltInGenerateTextParams,
-  BuiltInLLMParams,
-} from "@commonfabric/api";
-import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { waitForLlmSettled } from "./support/llm-result.ts";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { defer } from "@commonfabric/utils/defer";
-import { Runtime } from "../src/runtime.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import {
-  ExtendedStorageTransaction,
-  TransactionWrapper,
-} from "../src/storage/extended-storage-transaction.ts";
+
+import { createBuilder } from "../src/builder/factory.ts";
 import {
   generateText as rawGenerateText,
   llm as rawLlm,
 } from "../src/builtins/llm.ts";
 import { createCell } from "../src/cell.ts";
+import { Runtime } from "../src/runtime.ts";
+import {
+  ExtendedStorageTransaction,
+  TransactionWrapper,
+} from "../src/storage/extended-storage-transaction.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { waitForLlmSettled } from "./support/llm-result.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test generate-text outbox");
 const space = signer.did();
@@ -181,11 +183,15 @@ describe("generateText outbox mechanism", () => {
 
     try {
       const rejectedTx = runtime.edit();
-      rejectedTx.setCfcEnforcementMode("enforce-explicit");
-      rejectedTx.markCfcRelevant("generateText retry regression");
       action(rejectedTx);
+      // Advancing the inputs document after the action has read it makes the
+      // staged transaction's commit fail, which is the rejection the outbox
+      // has to survive.
+      const conflictTx = runtime.edit();
+      inputsCell.withTx(conflictTx).set({ prompt, maxTokens: 128 });
+      expect((await conflictTx.commit()).ok).toBeDefined();
       const rejectedResult = await rejectedTx.commit();
-      expect(rejectedResult.error).toBeDefined();
+      expect(rejectedResult.error?.name).toBe("StorageTransactionInconsistent");
       await runtime.idle();
       expect(sendRequestCalls).toEqual([]);
 
@@ -258,11 +264,18 @@ describe("generateText outbox mechanism", () => {
 
     try {
       const rejectedTx = runtime.edit();
-      rejectedTx.setCfcEnforcementMode("enforce-explicit");
-      rejectedTx.markCfcRelevant("llm retry regression");
       action(rejectedTx);
+      // Advancing the inputs document after the action has read it makes the
+      // staged transaction's commit fail, which is the rejection the outbox
+      // has to survive.
+      const conflictTx = runtime.edit();
+      inputsCell.withTx(conflictTx).set({
+        messages: [{ role: "user", content: prompt }],
+        maxTokens: 128,
+      });
+      expect((await conflictTx.commit()).ok).toBeDefined();
       const rejectedResult = await rejectedTx.commit();
-      expect(rejectedResult.error).toBeDefined();
+      expect(rejectedResult.error?.name).toBe("StorageTransactionInconsistent");
       await runtime.idle();
       expect(sendRequestCalls).toEqual([]);
 

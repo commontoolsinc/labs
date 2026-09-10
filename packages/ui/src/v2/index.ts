@@ -119,8 +119,6 @@ export * from "./components/cf-keybind/index.ts";
 export * from "./components/cf-tools-chip/index.ts";
 export * from "./components/keyboard-context.ts";
 export * from "./components/keyboard-router.ts";
-export * from "./components/modal-context.ts";
-export * from "./components/cf-modal-provider/index.ts";
 export * from "./components/cf-modal/index.ts";
 export * from "./components/cf-attachments-bar/index.ts";
 export * from "./components/cf-chip/index.ts";
@@ -128,6 +126,9 @@ export * from "./components/cf-cfc-authorship/index.ts";
 export * from "./components/cf-cfc-label/index.ts";
 export * from "./components/cf-question/index.ts";
 export * from "./components/cf-cell-link/index.ts";
+// Retired (#5132), kept as an inert passthrough because durable pattern source
+// still emits it. See core/retired-element.ts.
+export * from "./components/cf-cell-context/index.ts";
 export * from "./components/cf-space-link/index.ts";
 export * from "./components/cf-drag-source/index.ts";
 export * from "./components/cf-drop-zone/index.ts";
@@ -135,6 +136,3 @@ export * from "./components/cf-picker/index.ts";
 export * from "./components/cf-secret-viewer/index.ts";
 export * from "./components/cf-webhook/index.ts";
 export * from "./components/cf-router/index.ts";
-
-// Type exports
-export type * from "./utils/types.ts";

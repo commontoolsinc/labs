@@ -1,9 +1,20 @@
-import ts from "typescript";
-import type {
-  MutableJSONSchema,
-  MutableJSONSchemaObj,
+import {
+  FABRIC_SPECIAL_OBJECT_BRAND,
+  type MutableJSONSchema,
+  type MutableJSONSchemaObj,
 } from "@commonfabric/api";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+import ts from "typescript";
+
+import {
+  attachDocTags,
+  extractDocFromSymbolAndDecls,
+  getDeclDocs,
+  symbolHasDeprecatedTag,
+} from "../doc-utils.ts";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
+import type { SchemaGenerator } from "../schema-generator.ts";
 import {
   cloneSchemaDefinition,
   getNativeTypeSchema,
@@ -19,14 +30,7 @@ import {
   isDefaultNodeWithUndefined,
   isOptionalSymbol,
 } from "../typescript/property-optionality.ts";
-import type { SchemaGenerator } from "../schema-generator.ts";
-import {
-  attachDocTags,
-  extractDocFromSymbolAndDecls,
-  getDeclDocs,
-} from "../doc-utils.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
+import { attachUiContract, getUiContractHint } from "../ui-contract.ts";
 import { containsFactoryType } from "./factory-formatter.ts";
 
 const logger = getLogger("schema-generator.object", {
@@ -35,8 +39,10 @@ const logger = getLogger("schema-generator.object", {
 });
 
 /**
- * Check if a legacy callable value returns a wrapper type. First-class factory
- * types bypass this fallback and are handled by FactoryFormatter.
+ * Check if a callable type (like ModuleFactory or HandlerFactory) returns a wrapper type.
+ * ModuleFactory<T, R> when called returns Reactive<R>.
+ * If R is Stream<T>, we should generate { asCell: ["stream"] } instead of skipping.
+ * If R is Cell<T>, we should generate { asCell: ["cell"] } instead of skipping.
  *
  * Returns the schema definition for the wrapper if detected, undefined otherwise.
  */
@@ -63,6 +69,39 @@ function getWrapperSchemaFromCallable(
   }
 
   return undefined;
+}
+
+/**
+ * Attach a property's JSDoc description (and its lowered tags) to the schema
+ * about to be emitted for it. Both emission paths go through this — the
+ * ordinary delegated path and the callable-wrapper early return — so a doc
+ * written on a factory-typed verb property survives exactly like one on a
+ * data property.
+ */
+function attachPropertyDoc(
+  schema: Record<string, unknown>,
+  prop: ts.Symbol,
+  propName: string,
+  checker: ts.TypeChecker,
+): void {
+  const { text, all } = extractDocFromSymbolAndDecls(prop, checker);
+  if (!text) return;
+  const conflicts = all.filter((s) => s && s !== text);
+  schema.description = text;
+  attachDocTags(schema, text);
+  if (conflicts.length > 0) {
+    const comment = typeof schema.$comment === "string"
+      ? (schema.$comment as string)
+      : undefined;
+    schema.$comment = comment
+      ? comment
+      : "Conflicting docs across declarations; using first";
+    // Warning only
+    logger.warn(
+      "schema-gen",
+      () => `JSDoc conflict for property '${propName}'; using first doc`,
+    );
+  }
 }
 
 function typeNodeExplicitlyDeclaresProperty(
@@ -158,6 +197,13 @@ function shouldSkipInternalProperty(
     return true;
   }
 
+  // The FabricSpecialObject nominal brand exists only in the type system —
+  // no runtime value carries the key, so it must never appear in a schema's
+  // `properties` or `required`.
+  if (propName === FABRIC_SPECIAL_OBJECT_BRAND) {
+    return true;
+  }
+
   if (isCellInternalMarkerName(propName)) {
     return true;
   }
@@ -175,6 +221,16 @@ function shouldSkipInternalProperty(
     propName,
     context.typeChecker,
   );
+}
+
+function hasCompilerOwnedFactoryContract(
+  typeNode: ts.TypeNode | undefined,
+  context: GenerationContext,
+): boolean {
+  if (!typeNode) return false;
+  const contracts = context.schemaHints?.get(typeNode)?.factoryContracts ??
+    context.schemaHints?.get(ts.getOriginalNode(typeNode))?.factoryContracts;
+  return (contracts?.length ?? 0) > 0;
 }
 
 /**
@@ -201,7 +257,11 @@ function hasFabricExecPlainObjectBase(
  * Formatter for object types (interfaces, type literals, etc.)
  */
 export class ObjectFormatter implements TypeFormatter {
-  constructor(private schemaGenerator: SchemaGenerator) {}
+  #schemaGenerator: SchemaGenerator;
+
+  constructor(schemaGenerator: SchemaGenerator) {
+    this.#schemaGenerator = schemaGenerator;
+  }
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
     // Handle object types (interfaces, type literals, classes)
@@ -225,7 +285,7 @@ export class ObjectFormatter implements TypeFormatter {
       return { type: "object", additionalProperties: true };
     }
 
-    const builtin = this.lookupBuiltInSchema(type, checker);
+    const builtin = this.#lookupBuiltInSchema(type, checker);
     if (builtin) return builtin;
 
     // Do not early-return for empty object types. Instead, try to enumerate
@@ -287,21 +347,30 @@ export class ObjectFormatter implements TypeFormatter {
 
       if (
         isFunctionLike(resolvedPropType) &&
-        !containsFactoryType(resolvedPropType, checker)
+        !containsFactoryType(resolvedPropType, checker) &&
+        !hasCompilerOwnedFactoryContract(propTypeNode, context)
       ) {
-        // Preserve the legacy callable-return-wrapper behavior for non-factory
-        // callables that return Stream or Cell instead of skipping them.
+        // Special case: ModuleFactory/HandlerFactory types that return Stream or Cell
+        // should generate { asCell: ["stream"] } or { asCell: ["cell"] } instead of being skipped
         const wrapperSchema = getWrapperSchemaFromCallable(
           resolvedPropType,
           checker,
         );
         if (wrapperSchema) {
+          // This is a factory that returns a wrapper type (Stream or Cell)
           if (
             !isOptionalSymbol(prop) &&
             !isDefaultNodeWithUndefined(propTypeNode, checker)
           ) {
             required.push(propName);
           }
+          attachDeprecatedStreamMark(wrapperSchema, prop, checker);
+          attachPropertyDoc(
+            wrapperSchema as Record<string, unknown>,
+            prop,
+            propName,
+            checker,
+          );
           properties[propName] = wrapperSchema;
         }
         continue;
@@ -315,30 +384,26 @@ export class ObjectFormatter implements TypeFormatter {
       }
 
       // Delegate to the main generator (specific formatters handle wrappers/defaults)
-      const generated = this.schemaGenerator.formatChildType(
+      const generated = this.#schemaGenerator.formatChildType(
         resolvedPropType,
         context,
         propTypeNode,
       );
+      if (isObjectOrArray(generated)) {
+        attachDeprecatedStreamMark(
+          generated as Record<string, unknown>,
+          prop,
+          checker,
+        );
+      }
       // Attach property description from JSDoc (if any)
-      const { text, all } = extractDocFromSymbolAndDecls(prop, checker);
-      if (text && isRecord(generated)) {
-        const conflicts = all.filter((s) => s && s !== text);
-        (generated as Record<string, unknown>).description = text;
-        attachDocTags(generated as Record<string, unknown>, text);
-        if (conflicts.length > 0) {
-          const comment = typeof generated.$comment === "string"
-            ? (generated.$comment as string)
-            : undefined;
-          (generated as Record<string, unknown>).$comment = comment
-            ? comment
-            : "Conflicting docs across declarations; using first";
-          // Warning only
-          logger.warn(
-            "schema-gen",
-            () => `JSDoc conflict for property '${propName}'; using first doc`,
-          );
-        }
+      if (isObjectOrArray(generated)) {
+        attachPropertyDoc(
+          generated as Record<string, unknown>,
+          prop,
+          propName,
+          checker,
+        );
       }
       if (propName === "$UI") {
         const uiContract = getUiContractHint(context, propTypeNode);
@@ -359,7 +424,7 @@ export class ObjectFormatter implements TypeFormatter {
       ? undefined
       : stringIndex ?? numberIndex;
     if (chosenIndex) {
-      const apSchema = this.schemaGenerator.formatChildType(
+      const apSchema = this.#schemaGenerator.formatChildType(
         chosenIndex,
         context,
         undefined,
@@ -381,7 +446,7 @@ export class ObjectFormatter implements TypeFormatter {
           }
         }
       }
-      if (foundDocs.length > 0 && isRecord(apSchema)) {
+      if (foundDocs.length > 0 && isObjectOrArray(apSchema)) {
         (apSchema as Record<string, unknown>).description = foundDocs[0]!;
         attachDocTags(apSchema as Record<string, unknown>, foundDocs[0]!);
         if (foundDocs.length > 1) {
@@ -405,7 +470,7 @@ export class ObjectFormatter implements TypeFormatter {
     return schema;
   }
 
-  private lookupBuiltInSchema(
+  #lookupBuiltInSchema(
     type: ts.Type,
     checker: ts.TypeChecker,
   ): MutableJSONSchema | undefined {
@@ -414,59 +479,23 @@ export class ObjectFormatter implements TypeFormatter {
   }
 }
 
-function getUiContractHint(
-  context: GenerationContext,
-  typeNode: ts.TypeNode | undefined = context.typeNode,
-): {
-  readonly helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-  readonly action?: string;
-  readonly surface?: string;
-  readonly role?: string;
-  readonly kind?: string;
-  readonly trustedPattern?: string;
-  readonly requiredEventIntegrity?: readonly string[];
-} | undefined {
-  if (!context.schemaHints || !typeNode) {
-    return undefined;
+/**
+ * Verb listing mark (WS-F): a stream-valued property whose declaration carries
+ * `@deprecated` JSDoc lowers to standard JSON Schema `deprecated: true`.
+ * Annotation-class (classified in the piece compat checker), so it adds and
+ * removes freely; `cf piece verbs` hides marked verbs by default while
+ * `cf piece call` never consults it. Applied only where the property schema is
+ * stream-marked — deprecation of non-verb data is out of this mark's scope.
+ */
+function attachDeprecatedStreamMark(
+  schema: Record<string, unknown>,
+  prop: ts.Symbol,
+  checker: ts.TypeChecker,
+): void {
+  const asCell = schema.asCell;
+  const isStream = Array.isArray(asCell) && asCell.includes("stream");
+  if (!isStream) return;
+  if (symbolHasDeprecatedTag(prop, checker)) {
+    schema.deprecated = true;
   }
-
-  return context.schemaHints.get(typeNode)?.cfcUiContract ??
-    context.schemaHints.get(ts.getOriginalNode(typeNode))?.cfcUiContract;
-}
-
-function attachUiContract(
-  schema: MutableJSONSchema,
-  uiContract: {
-    readonly helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-    readonly action?: string;
-    readonly surface?: string;
-    readonly role?: string;
-    readonly kind?: string;
-    readonly trustedPattern?: string;
-    readonly requiredEventIntegrity?: readonly string[];
-  },
-): MutableJSONSchema {
-  const { requiredEventIntegrity, ...uiContractFields } = uiContract;
-  const storedUiContract = {
-    ...uiContractFields,
-    ...(requiredEventIntegrity && {
-      requiredEventIntegrity: [...requiredEventIntegrity],
-    }),
-  };
-  if (typeof schema === "boolean") {
-    return schema === false
-      ? { not: true, ifc: { uiContract: storedUiContract } }
-      : {
-        ifc: { uiContract: storedUiContract },
-      };
-  }
-
-  const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
-  return {
-    ...schema,
-    ifc: {
-      ...existingIfc,
-      uiContract: storedUiContract,
-    },
-  };
 }

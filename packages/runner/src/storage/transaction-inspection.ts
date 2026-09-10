@@ -5,6 +5,7 @@ import type {
   IStorageTransaction,
   IWriteAttempt,
   MemorySpace,
+  NativeStorageCommit,
   TransactionReactivityLog,
   TransactionReadDetail,
   TransactionWriteDetail,
@@ -21,6 +22,18 @@ export function getDirectTransactionMergeableOpAddresses(
 ): Iterable<IMemorySpaceAddress> | undefined {
   return tx.getMergeableOpAddresses?.() ??
     unwrap(tx).getMergeableOpAddresses?.();
+}
+
+/**
+ * Build the native commit for `space` without committing. Inspection-only: the
+ * build is what resolves recorded mergeable intents into wire ops, so this is
+ * how a caller observes decisions the commit makes before it is sent.
+ */
+export function getDirectTransactionNativeCommit(
+  tx: TxLike,
+  space: MemorySpace,
+): NativeStorageCommit | undefined {
+  return tx.getNativeCommit?.(space) ?? unwrap(tx).getNativeCommit?.(space);
 }
 
 export function getDirectTransactionReactivityLog(
@@ -102,7 +115,8 @@ export function getTransactionReadDetails(
     return direct;
   }
 
-  // Chronicle-style transactions record read invariants as journal history.
+  // Fallback for a transaction that records read invariants only as journal
+  // history.
   return (function* () {
     for (const attestation of tx.journal.history(space)) {
       yield {

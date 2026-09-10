@@ -1,4 +1,5 @@
 import * as ts from "typescript";
+
 import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
 
 const nodeTextCache = new WeakMap<ts.Node, string>();
@@ -51,6 +52,55 @@ export function getExpressionText(expr: ts.Expression): string {
 }
 
 /**
+ * PROVENANCE: true when the node — or, if it was cloned/replaced during
+ * transformation, its original — carries a real source range: i.e. an author
+ * wrote this code and can act on a diagnostic anchored to it. Consulted where
+ * a lowering disagreement must be routed either to an author-facing diagnostic
+ * (authored node) or a pipeline-invariant throw (synthetic node).
+ *
+ * This is one of two deliberately OPPOSITE questions about a node's origin —
+ * pick by what the answer is used for:
+ *
+ * - `hasAuthoredSourceSite` (this) looks THROUGH `getOriginalNode`: a
+ *   transformer-created clone of authored code still counts as authored,
+ *   because the author's text exists and a diagnostic can point at it.
+ * - {@link isSyntheticNode} deliberately does NOT look through originals: a
+ *   clone is synthetic no matter what it was cloned from, because the passes
+ *   asking that question care about who CREATED the node (idempotency /
+ *   ownership — "don't reprocess helper calls a pass emitted"), not whose
+ *   text it descends from.
+ *
+ * Using this predicate where {@link isSyntheticNode} is meant misclassifies
+ * synthetic clones as authored and re-enters subtrees a pass already owns;
+ * the reverse silently drops diagnostics for authored code that was cloned.
+ */
+export function hasAuthoredSourceSite(node: ts.Node): boolean {
+  if (node.getSourceFile() && node.pos >= 0) {
+    return true;
+  }
+
+  const original = ts.getOriginalNode(node);
+  return original !== node &&
+    !!original.getSourceFile() &&
+    original.pos >= 0;
+}
+
+/**
+ * IDENTITY: true when this node object was created by a transformer factory
+ * rather than the parser — it carries no real source range of its own.
+ * Deliberately ignores `getOriginalNode`: see the contrast table on
+ * {@link hasAuthoredSourceSite} before choosing between the two.
+ *
+ * This is the package's one spelling of the pos-based synthetic check
+ * (`pos < 0 || end < 0`). Factory nodes are created with `(-1, -1)`;
+ * `setTextRange`/lineage helpers set both ends together, so a half-set range
+ * is treated as synthetic rather than trusted.
+ */
+export function isSyntheticNode(node: ts.Node): boolean {
+  return node.pos < 0 || node.end < 0;
+}
+
+/**
  * Gets the type of a node, checking typeRegistry first (for synthetic nodes),
  * then falling back to the type checker.
  *
@@ -60,14 +110,12 @@ export function getExpressionText(expr: ts.Expression): string {
  * @param node - The node to get the type for
  * @param checker - The TypeScript type checker
  * @param typeRegistry - Optional registry of types for synthetic nodes
- * @param logger - Optional logger for error messages
  * @returns The type, or undefined if it couldn't be determined
  */
 export function getTypeAtLocationWithFallback(
   node: ts.Node,
   checker: ts.TypeChecker,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
-  logger?: (message: string) => void,
 ): ts.Type | undefined {
   // Check current node first
   if (typeRegistry?.has(node)) {
@@ -93,14 +141,7 @@ export function getTypeAtLocationWithFallback(
       }
     }
     return type;
-  } catch (error) {
-    if (logger) {
-      // Use getExpressionText to safely handle both regular and synthetic nodes
-      const nodeText = ts.isExpression(node)
-        ? getExpressionText(node)
-        : `<${ts.SyntaxKind[node.kind]}>`;
-      logger(`Warning: Could not get type for node "${nodeText}": ${error}`);
-    }
+  } catch {
     return undefined;
   }
 }
@@ -289,9 +330,9 @@ export function setParentPointers(node: ts.Node, parent?: ts.Node): void {
  *     identity-sensitive classifiers — e.g. a compute wrapper whose original
  *     points into the subtree `markSyntheticComputeOwnedSubtree` just marked
  *     reads as compute-owned itself. Use {@link preserveSourceMapRange} there.
- *   - Where position and checker-identity must point at DIFFERENT nodes (a
- *     node has one `original` pointer), use `CFHelpers.preserveNodeSourceMap`
- *     instead; use this where the two coincide.
+ *   - Where a node needs source-map position and checker identity but must not
+ *     acquire a text range, use `CFHelpers.preserveNodeSourceMap` instead. Its
+ *     range and identity nodes may differ or coincide.
  */
 export function preserveLineage<T extends ts.Node>(
   node: T,
@@ -351,6 +392,30 @@ export function preserveSourceMapRange<T extends ts.Node>(
   origin: ts.Node,
 ): T {
   return ts.setSourceMapRange(node, ts.getSourceMapRange(origin));
+}
+
+/**
+ * Returns the best available authored text range for a node which may be
+ * synthetic. The explicit source-map range is the principal lineage channel
+ * once intermediate transformers rebuild a node.
+ */
+export function recoverAuthoredPosition(
+  node: ts.Node,
+): ts.TextRange | undefined {
+  if (node.pos >= 0) return { pos: node.pos, end: node.end };
+
+  const sourceMapRange = ts.getSourceMapRange(node);
+  if (
+    (sourceMapRange as unknown) !== (node as unknown) && sourceMapRange.pos >= 0
+  ) {
+    return { pos: sourceMapRange.pos, end: sourceMapRange.end };
+  }
+
+  const original = ts.getOriginalNode(node);
+  if (original !== node && original.pos >= 0) {
+    return { pos: original.pos, end: original.end };
+  }
+  return undefined;
 }
 
 // Import and re-export shared checks from schema-generator

@@ -1,4 +1,4 @@
-A reusable lit controller for adding debouncing behaviour to components.
+A reusable lit controller for adding debouncing behavior to components.
 
 ```ts
 /**

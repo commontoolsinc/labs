@@ -1,7 +1,7 @@
 /**
  * Minimal ANSI escape-sequence helpers for the `cf view` pager.
  *
- * Self-contained (no dependencies) so the viewer stays lean. Colours use
+ * Self-contained (no dependencies) so the viewer stays lean. Colors use
  * 24-bit truecolor (`\x1b[38;2;r;g;bm`), which every modern macOS/Linux
  * terminal we target supports. When the output stream is not a TTY (or the
  * user passes `--no-color`) styling is suppressed at the call site, never here.
@@ -21,8 +21,11 @@ export interface Style {
 
 export const ESC = "\x1b";
 export const CSI = `${ESC}[`;
-/** Operating System Command introducer and its BEL terminator. */
+
+/** Operating System Command introducer. */
 const OSC = `${ESC}]`;
+
+/** The BEL terminator that closes an OSC sequence. */
 const BEL = "\x07";
 export const RESET = `${CSI}0m`;
 
@@ -84,22 +87,28 @@ export function visibleWidth(text: string): number {
   return cpLen(stripAnsi(text));
 }
 
-// --- Terminal control --------------------------------------------------------
+//
+// Terminal control
+//
 
 export const term = {
   enterAltScreen: `${CSI}?1049h`,
   leaveAltScreen: `${CSI}?1049l`,
+  enableMouse: `${CSI}?1000h${CSI}?1006h`,
+  disableMouse: `${CSI}?1006l${CSI}?1000l`,
   hideCursor: `${CSI}?25l`,
   showCursor: `${CSI}?25h`,
   clearScreen: `${CSI}2J`,
   clearLine: `${CSI}2K`,
   clearToEol: `${CSI}0K`,
   home: `${CSI}H`,
+
   /** Move the cursor to a 1-based (row, col). */
   moveTo(row: number, col: number): string {
     return `${CSI}${row};${col}H`;
   },
-  /** Set the terminal's default background colour (OSC 11). This is the colour
+
+  /** Set the terminal's default background color (OSC 11). This is the color
    * the terminal fills the area outside the character grid with — the sub-cell
    * padding below the last row and beside the last column — which no cell can
    * reach. */
@@ -107,6 +116,7 @@ export const term = {
     const h = rgb.map((c) => c.toString(16).padStart(2, "0")).join("");
     return `${OSC}11;#${h}${BEL}`;
   },
-  /** Restore the terminal's own default background colour (OSC 111). */
+
+  /** Restore the terminal's own default background color (OSC 111). */
   resetDefaultBg: `${OSC}111${BEL}`,
 };

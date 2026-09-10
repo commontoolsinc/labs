@@ -92,19 +92,103 @@ landed after the snapshot above:
     `builder-call-hoisting.ts`; no transformer emits it and no fixture expects
     it. See `packages/ts-transformers/docs/derive-to-lift-design.md`.
 
+### Addendum 4 (a plain-array `map` callback carries pattern-owned sites)
+
+A `map` callback on an ordinary JavaScript array inside a pattern body now
+carries pattern-owned expression sites, the same ones the pattern body carries.
+`supportsPatternOwnedWrapperCallbackSite` (`policy/callback-boundary.ts`)
+admits the `plain-array-value` boundary for that callback role, which
+`isCollectingPlainArrayMethodCallback` (`ast/call-kind.ts`) decides.
+
+The callback runs eagerly during pattern build, so its statements are pattern
+body statements that happen to be written once and executed several times. A
+value binding in one is therefore a pattern-body binding, and a reactive
+computation bound there lowers to its own lift-applied call per iteration.
+
+The permission stops at the callback's role, because the boundary kind alone is
+too coarse to carry it. `plain-array-value` also covers `filter`, `find`,
+`some`, `every`, `sort`, `flatMap`, and `reduce`, and each of those reads what
+the callback returns while it runs — as a boolean, a number, an array test, or
+the next accumulator. `map` is the one that merely collects. A lift returned to
+a predicate is an object, so `filter` keeps every element and `find` matches
+the first; those callbacks therefore keep the diagnostic. The test that admits
+a callback also requires it to be argument zero of a method whose owner symbol
+includes the configured default-library `Array`/`ReadonlyArray` declaration, so
+a comparator in a later argument position, a same-named source or ambient type,
+and a `map` belonging to some other type are all excluded.
+
+Two behaviors change:
+
+- A binding such as `const isToday = weekDates?.[colIdx] === todayDate` inside
+  `COLUMN_INDICES.map((colIdx) => …)` lowers. Previously the comparison was
+  emitted raw, so it ran on the reactive proxies rather than their values and
+  froze to `false`. Reading the binding as a JSX condition then rendered the
+  wrong branch with no diagnostic, because the JSX exemption in
+  `isInRestrictedReactiveContext` suppresses the "wrap it in `computed()`"
+  errors that the same binding draws outside JSX.
+- `pattern-context:get-call` and `pattern-context:optional-chaining` no longer
+  fire for a read that a `map` callback's own value sites can carry, so
+  `["-", "+"].map((sep) => rows.get().join(sep))` compiles to an array of
+  per-separator lifts instead of being rejected. Both still fire in the
+  result-interpreting callbacks.
+
+A reactive array-method callback keeps the older, stricter rule, and the
+difference is structural rather than stylistic: that callback is lowered into a
+sub-pattern over per-element cells, so a `.get()` on the element binding has no
+pattern-body site to become a lift.
+
+This is P-011 applied to a boundary that had been drawn by the receiver's type
+rather than by what the callback lowers to. Whether the mapped array is plain
+says nothing about whether the values the callback closes over are reactive.
+
+### Addendum 3 (`toJSON` is an ordinary member name)
+
+`pattern-context:object-member` treats `toJSON` like any other member. A
+`toJSON()` method or `toJSON:` function-valued property on an object literal in
+pattern or render context is reported, whatever its body reads.
+
+The rule previously exempted a `toJSON` member whose body read nothing
+reactive, on the grounds that such an object was storable — the data model
+converted a `toJSON`-bearing object by calling the method. It no longer does:
+the conversion reads `toJSON` as the ordinary function-valued member it is, and
+a record may hold no function. So the exemption admitted a member that compiles
+and throws at its first write, and the body check it rested on
+(`memberBodyReadsReactiveValue`) is gone with it.
+
+This narrows the accepted language. Nothing in the corpus used the exemption.
+
 ### Addendum 2 (2026-07-10 phase-4 verification findings)
 
 Language deltas found by adversarial verification of the target-language
 matrix (implementation vs normative spec). Resolution status is recorded on
 each finding:
 
-- **Top-level eager-read carve-out (#3725, 2026-05-28).** Validation accepts
-  computation-feeding top-level `.get()` reads and auto-wraps the containing
-  expression lift-applied; terminal reads still reject. Golden-pinned
-  (`cell-get-binding-autowrap`, `with-reactive`;
-  `test/validation.test.ts:3179`). Matrix row still says Unsupported
-  unconditionally. Decision open: ratify a terminal-vs-computation-feeding
-  split in the matrix, or revert (breaks two goldens + one test).
+- **Top-level eager-read carve-out (#3725, 2026-05-28) — resolved 2026-08-12 by
+  ratifying the has-a-lowerable-site rule.** A `.get()` read on a
+  `Cell`/`Writable`/`Stream` in pattern-owned context is part of the language
+  wherever a lowerable expression site can carry it; that site lowers into a
+  lift, which is what keeps the read live. The line is the site, not the shape
+  of the read: a binding, a return, an object property, an array element, an
+  argument, a computation over the read, and a call whose receiver chain
+  reaches it are all accepted, terminal or not, and parentheses, the
+  computed-key spelling, and the optional spellings do not change the
+  classification. A read with no such site — statement position, or a
+  reactive array-method callback, whose callback becomes a sub-pattern over
+  per-element cells — remains outside the language, as does a read on a value
+  that is not a cell. Addendum 4 carries the same reasoning into a plain-array
+  `map` callback, which does supply a site; the array callbacks whose result
+  the method reads as it runs do not.
+
+  What settled it: the matrix already blessed the JSX spelling, so the earlier
+  rule was really "no eager reads outside JSX" — which made extracting a JSX
+  expression into a named binding change a program's legality. The rejection's
+  main output was "wrap it in `computed()`" diagnostics that bred wrapper
+  cascades in author code, against a platform direction of needing explicit
+  `computed()` less often. Ratified in the target-language matrix and §5.7;
+  lowering-contract §3.9's eager-read bullet now names the site-less read
+  rather than the top-level read. Golden-pinned (`cell-get-binding-autowrap`,
+  `cell-get-terminal-binding-autowrap`, `with-reactive`;
+  `test/validation.test.ts:3179`).
 - **Optional-call accepted in JSX and compute callbacks — resolved 2026-07-23
   by making optionality orthogonal to call support.** The earlier location
   split was an implementation leak, and the proposed blanket rejection would
@@ -984,6 +1068,25 @@ without major compile-time regression.
    diagnostics are complete.
 
 **Exit criteria:** new path is default, old path removed or hard-deprecated.
+
+## Indirect Builder Callbacks Are Rejected At Compile Time
+
+`IndirectBuilderCallbackValidationTransformer` (stage 7) rejects a trusted
+builder whose callback arrives through a property access or an imported
+binding, matching `verifyTrustedBuilderCall`'s admitted spellings.
+
+The lowering stages continue to RECOGNIZE those spellings — schema injection
+still resolves such a callback semantically and leaves it in the position the
+runtime dispatch reads (`test/schema-first-imported-callback.test.ts`). That is
+deliberate: recognition is what lets the compiler describe the form accurately
+instead of garbling it first, and it is what would make the form work
+immediately were the verifier's rule ever widened. Only the language boundary
+moved; the lowering did not.
+
+The alternative — widening the verifier to admit a binding imported from
+another verified module — is a sandbox-contract decision rather than a
+transformer one, since it rests on whether one module's verification may vouch
+for a callable another module calls.
 
 ## Remaining Hardening Follow-Ups
 

@@ -11,10 +11,11 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-// End-to-end: a real reactive pattern compiles
-// AND runs through the ESM module-record loader path (compileToRecordGraph +
-// evaluateRecordGraph), producing correct reactive output — not just loading.
 describe("Pattern run via the ESM module loader", () => {
+  // End-to-end: a real reactive pattern compiles AND runs through the ESM
+  // module-record loader path (compileToRecordGraph + evaluateRecordGraph),
+  // producing correct reactive output — not just loading.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -78,10 +79,10 @@ describe("Pattern run via the ESM module loader", () => {
 
   it("runs a pattern through a named re-export barrel (`export { x } from`)", async () => {
     // CT-1661: a barrel that re-exports a sibling's binding compiles to a `var
-    // ... = require(...)` preamble plus a live getter. Under the ESM loader this
-    // previously failed SES verification at runtime ("Top-level mutable bindings
-    // are not allowed") even though `cf check` (AMD path) passed. The re-export
-    // must now both verify AND resolve the live binding correctly end-to-end.
+    // ... = require(...)` preamble plus a live getter, which the import-preamble
+    // fast-path once rejected at runtime ("Top-level mutable bindings are not
+    // allowed"). The re-export must both verify AND resolve the live binding
+    // correctly end-to-end.
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [

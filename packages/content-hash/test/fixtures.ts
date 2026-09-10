@@ -9,23 +9,32 @@
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { sha256 } from "@commonfabric/content-hash";
 
+/** A fixture as authored: the payload as numbers, and its expected hash. */
 interface NumbersHashTuple {
   numbers: readonly number[];
   sha256: string;
 }
 
+/** A fixture as used: a `NumbersHashTuple` with the payload also as bytes. */
 export interface ContentHashTuple extends NumbersHashTuple {
   bytes: Uint8Array;
 }
 
+/** Text of the large fixture file, used as the multi-kilobyte payload. */
 const BIG_TEXT_FILE = Deno.readTextFileSync(
   new URL("fixture-frank.txt", import.meta.url),
 );
 
+/** Returns an array of `count` copies of `value`. */
 function repeatByte(count: number, value: number): number[] {
   return new Array(count).fill(value);
 }
 
+/**
+ * Returns `count` byte values, generated deterministically from `seed` by an
+ * arbitrary mixing function. The point is a payload with no repeating run
+ * that a hasher could get right by accident.
+ */
 function rainbowBytes(count: number, seed: number): number[] {
   const result = new Array(count);
   let value = seed;
@@ -43,6 +52,7 @@ function rainbowBytes(count: number, seed: number): number[] {
   return result;
 }
 
+/** The fixtures, as authored. */
 const NUMBERS_FIXTURES: readonly NumbersHashTuple[] = [
   {
     numbers: [],
@@ -166,11 +176,10 @@ const NUMBERS_FIXTURES: readonly NumbersHashTuple[] = [
   },
 ] as const;
 
-/**
- * Were there any hashes to fill in?
- */
+/** Whether any fixture was authored with its hash left as `xx`. */
 let anyMissingHashes = false;
 
+/** The fixtures, with the bytes form of each payload filled in. */
 export const FIXTURES: readonly ContentHashTuple[] = Object.freeze(
   NUMBERS_FIXTURES.map(
     (one: NumbersHashTuple): ContentHashTuple => {

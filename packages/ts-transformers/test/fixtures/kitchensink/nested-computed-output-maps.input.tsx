@@ -14,6 +14,7 @@
  * - threadRows.map(...) lowers once the flow re-enters pattern-owned UI
  * - closures preserve thread/comment indices, state.lane, and local Writables
  */
+
 import {
   computed,
   handler,

@@ -1,4 +1,14 @@
-import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
+import { join } from "@std/path";
+import {
+  createPatternSkillsFixture,
+  PATTERN_SKILL_FIXTURE_RESOURCE_PATH,
+} from "./support/pattern-skills-fixture.ts";
 import {
   createHarnessChatEventEnvelope,
   createHarnessChatSessionStatus,
@@ -11,15 +21,43 @@ import {
   type HarnessChatTurnRecord,
 } from "../src/contracts/interactive-chat.ts";
 import {
+  CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+  type PromptSlotBinding,
+} from "../src/contracts/prompt-slot.ts";
+import { PATTERN_AUTHOR_SUBAGENT_SKILL_NAMES } from "../src/contracts/subagent.ts";
+import {
   HarnessInteractiveChatService,
   type HarnessInteractivePromptLoopFactory,
 } from "../src/interactive-chat-service.ts";
+import { HarnessControlError } from "../src/control-errors.ts";
+import { CfHarnessEngine } from "../src/engine.ts";
 import type {
-  CreateHarnessPromptLoopOptions,
-  HarnessPromptLoopResult,
-  RunHarnessTranscriptOptions,
+  SandboxCommandResult,
+  SandboxRuntime,
+  SandboxRuntimeDescription,
+} from "../src/sandbox/types.ts";
+import {
+  CfHarnessPromptLoop,
+  type CreateHarnessPromptLoopOptions,
+  type HarnessPromptLoopResult,
+  type RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
+import {
+  type HarnessTranscriptMessage,
+  inspectHarnessTranscriptPairing,
+} from "../src/contracts/transcript.ts";
+import {
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
+import {
+  FAULT_KINDS,
+  FAULT_POINTS,
+  faultingToolLoop,
+  recordingStore,
+  toolCall,
+} from "./support/chat-fault-fixture.ts";
 
 const nextIsoNow = () => {
   let counter = 0;
@@ -57,6 +95,13 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
     return {
       runTranscript: async (runOptions) => {
         const result = makeResult(runOptions, "Done.");
+        result.usage = {
+          inputTokens: 2_000,
+          cachedInputTokens: 1_500,
+          cacheWriteTokens: 0,
+          outputTokens: 100,
+          totalTokens: 2_100,
+        };
         await runOptions.onTranscriptEvent?.({
           message: result.transcript[result.transcript.length - 1],
           transcript: result.transcript,
@@ -125,10 +170,23 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
     service.listEvents({ sessionId: "session-1" }).latestSequence,
     5,
   );
+  assertEquals(service.events("session-1").at(-1)?.event, {
+    kind: "turn_completed",
+    turnId: "turn-1",
+    finalText: "Done.",
+    usage: {
+      inputTokens: 2_000,
+      cachedInputTokens: 1_500,
+      cacheWriteTokens: 0,
+      outputTokens: 100,
+      totalTokens: 2_100,
+    },
+  });
   assertEquals(loopOptions[0], {
     workspaceHostPath: "/workspace",
     cwd: "/workspace/project",
     model: "gpt-test",
+    cacheAffinityKey: "interactive:session-1",
     allowedToolIds: [
       "bash",
       "read_file",
@@ -137,6 +195,7 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
       "edit_file",
       "write_file",
       "delegate_task",
+      "describe_handle",
     ],
     allowedSubagentProfiles: ["default"],
   });
@@ -198,10 +257,20 @@ Deno.test("interactive service preserves an owner-bound Codex client across turn
     },
   });
   await service.waitForTurn("session-owner", "turn-owner");
+  await service.startTurn("req-owner-turn-2", {
+    sessionId: "session-owner",
+    turnId: "turn-owner-2",
+    input: { text: "Continue" },
+  });
+  await service.waitForTurn("session-owner", "turn-owner-2");
 
   assertEquals(loopOptions[0].modelProvider, "openai-codex");
   assertEquals(loopOptions[0].credentialOwnerKey, "loom:user-1");
   assertEquals(loopOptions[0].modelClient, modelClient);
+  assertEquals(
+    loopOptions.map((options) => options.cacheAffinityKey),
+    ["interactive:session-owner", "interactive:session-owner"],
+  );
 });
 
 Deno.test("interactive Codex services require one matching process owner", () => {
@@ -264,6 +333,199 @@ Deno.test("interactive Codex services require one matching process owner", () =>
   );
 });
 
+Deno.test("interactive service refuses a turn run-id mapper with an injected engine", () => {
+  assertThrows(
+    () =>
+      new HarnessInteractiveChatService({
+        basePromptLoopOptions: {
+          engine: new CfHarnessEngine({
+            sandboxRuntime: new StubSandboxRuntime(),
+          }),
+        },
+        runIdForTurn: (_sessionId, turnId) => turnId,
+      }),
+    Error,
+    "turn run-id mapping cannot be combined with an injected engine",
+  );
+});
+
+Deno.test("interactive service refuses a turn run-id mapper with an injected run state", () => {
+  assertThrows(
+    () =>
+      new HarnessInteractiveChatService({
+        basePromptLoopOptions: {
+          runState: {} as HarnessPromptLoopResult["runState"],
+        },
+        runIdForTurn: (_sessionId, turnId) => turnId,
+      }),
+    Error,
+    "turn run-id mapping cannot be combined with an injected run state",
+  );
+});
+
+Deno.test("Loom-local interactive services require an explicit matching provider", () => {
+  const credentialOwner = {
+    type: "cf-harness.credential-owner-ref" as const,
+    version: 1 as const,
+    ownerKey: "local",
+  };
+  assertThrows(
+    () =>
+      new HarnessInteractiveChatService({
+        credentialOwner,
+        basePromptLoopOptions: {
+          modelAuthSource: "cf-harness-local-store",
+          credentialOwner,
+          credentialOwnerKey: credentialOwner.ownerKey,
+          harnessHomeIdentity: "sha256:opaque-home",
+          runManifest: {
+            type: "cf-harness.loom-run-manifest",
+            version: 1,
+            source: "loom",
+            modelProvider: "openai-codex",
+            modelAuthSource: "cf-harness-local-store",
+            credentialOwner,
+            harnessHomeIdentity: "sha256:opaque-home",
+          },
+        },
+      }),
+    Error,
+    "provider does not match",
+  );
+});
+
+Deno.test("Loom-local interactive services reject mismatched binding fields", () => {
+  const credentialOwner = {
+    type: "cf-harness.credential-owner-ref" as const,
+    version: 1 as const,
+    ownerKey: "local",
+    tenantKey: "tenant-a",
+  };
+  const manifest = {
+    type: "cf-harness.loom-run-manifest" as const,
+    version: 1 as const,
+    source: "loom" as const,
+    modelProvider: "openai-compatible-gateway" as const,
+    modelAuthSource: "api-key" as const,
+    credentialOwner,
+    harnessHomeIdentity: "sha256:home-a",
+    model: "gpt-a",
+  };
+  const baseOptions = (
+    overrides: Partial<CreateHarnessPromptLoopOptions>,
+  ): CreateHarnessPromptLoopOptions => ({
+    modelProvider: manifest.modelProvider,
+    modelAuthSource: manifest.modelAuthSource,
+    credentialOwner,
+    credentialOwnerKey: credentialOwner.ownerKey,
+    harnessHomeIdentity: manifest.harnessHomeIdentity,
+    model: manifest.model,
+    runManifest: manifest,
+    ...overrides,
+  });
+  const cases: Array<{
+    overrides: Partial<CreateHarnessPromptLoopOptions>;
+    message: string;
+  }> = [
+    {
+      overrides: { modelAuthSource: "none" },
+      message: "auth source does not match",
+    },
+    {
+      overrides: {
+        credentialOwner: { ...credentialOwner, tenantKey: "tenant-b" },
+      },
+      message: "credential owner does not match",
+    },
+    {
+      overrides: { harnessHomeIdentity: "sha256:home-b" },
+      message: "harness home does not match",
+    },
+    { overrides: { model: "gpt-b" }, message: "model does not match" },
+  ];
+
+  for (const testCase of cases) {
+    assertThrows(
+      () =>
+        new HarnessInteractiveChatService({
+          basePromptLoopOptions: baseOptions(testCase.overrides),
+        }),
+      Error,
+      testCase.message,
+    );
+  }
+});
+
+Deno.test("Loom-local interactive sessions require a matching durable model", async () => {
+  const credentialOwner = {
+    type: "cf-harness.credential-owner-ref" as const,
+    version: 1 as const,
+    ownerKey: "local",
+  };
+  const binding = {
+    source: "loom" as const,
+    modelProvider: "openai-compatible-gateway" as const,
+    modelAuthSource: "none" as const,
+    credentialOwner,
+    harnessHomeIdentity: "sha256:home-a",
+  };
+  const fixedModelService = new HarnessInteractiveChatService({
+    basePromptLoopOptions: {
+      ...binding,
+      model: "gpt-fixed",
+      runManifest: {
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        ...binding,
+        model: "gpt-fixed",
+      },
+    },
+  });
+  const fixedModel = await fixedModelService.startSession("req-fixed", {
+    sessionId: "session-fixed",
+    workspace: { hostPath: "/workspace" },
+    model: "gpt-requested",
+  });
+  assertEquals(fixedModel.ok, false);
+  assertEquals(
+    fixedModel.ok === false ? fixedModel.error.code : undefined,
+    "provider-mismatch",
+  );
+  assertEquals(fixedModelService.status().sessions, []);
+
+  const missingModelService = new HarnessInteractiveChatService({
+    basePromptLoopOptions: {
+      ...binding,
+      runManifest: {
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        ...binding,
+      },
+    },
+  });
+  for (
+    const testCase of [
+      { requestId: "req-missing" },
+      { requestId: "req-blank", model: "  " },
+    ]
+  ) {
+    const response = await missingModelService.startSession(
+      testCase.requestId,
+      {
+        sessionId: testCase.requestId,
+        workspace: { hostPath: "/workspace" },
+        ...(testCase.model !== undefined ? { model: testCase.model } : {}),
+      },
+    );
+    assertEquals(response.ok, false);
+    assertEquals(
+      response.ok === false ? response.error.code : undefined,
+      "provider-mismatch",
+    );
+  }
+  assertEquals(missingModelService.status().sessions, []);
+});
+
 Deno.test("interactive service forces comment-thread turns to read-only prompt-loop options", async () => {
   const loopOptions: unknown[] = [];
   const createPromptLoop: HarnessInteractivePromptLoopFactory = (options) => {
@@ -307,6 +569,7 @@ Deno.test("interactive service forces comment-thread turns to read-only prompt-l
 
   assertEquals(loopOptions[0], {
     workspaceHostPath: "/workspace",
+    cacheAffinityKey: "interactive:session-1",
     allowedToolIds: ["read_file", "view_image", "read_skill_resource"],
     allowedSubagentProfiles: [],
   });
@@ -353,6 +616,7 @@ Deno.test("interactive service passes Browser Access leases to browser-profile t
 
   assertEquals(loopOptions[0], {
     workspaceHostPath: "/workspace",
+    cacheAffinityKey: "interactive:session-1",
     allowedToolIds: ["delegate_task"],
     allowedSubagentProfiles: ["browser"],
     browserAccess,
@@ -393,6 +657,10 @@ Deno.test("interactive service rejects browser-profile turns without Browser Acc
     turn.ok === false ? turn.error.code : "",
     "browser_access_required",
   );
+  // No request attaches a lease to a running session, so resending this turn
+  // unchanged fails identically forever. Waiting is not the remedy, and the
+  // response must not offer it as one.
+  assertEquals(turn.ok === false ? turn.error.retryable : "unset", undefined);
   assertEquals(createdLoop, false);
   assertEquals(
     service.events("session-1").map((event) => event.event.kind),
@@ -1133,6 +1401,16 @@ Deno.test("interactive service rejects missing sessions and concurrent turns", a
     concurrent.ok === false ? concurrent.error.code : "",
     "turn_already_running",
   );
+  // Waiting is the whole remedy here, and nothing else in this file can say
+  // that: the busy turn ends on its own and the identical request then works.
+  assertEquals(
+    concurrent.ok === false ? concurrent.error.retryable : undefined,
+    true,
+  );
+  assertEquals(
+    missing.ok === false ? missing.error.retryable : "unset",
+    undefined,
+  );
   release?.();
   await busyService.waitForTurn("session-1", "turn-1");
 });
@@ -1232,4 +1510,736 @@ Deno.test("interactive service terminalizes prompt-loop setup failures", async (
   assertEquals(second.ok, true);
   await service.waitForTurn("session-1", "turn-2");
   assertEquals(service.status("session-1").sessions[0].status, "idle");
+});
+
+Deno.test("interactive service preserves every typed provider blocker", async () => {
+  for (
+    const code of [
+      "provider-configuration-required",
+      "provider-auth-required",
+      "provider-mismatch",
+      "provider-unavailable",
+    ] as const
+  ) {
+    const service = new HarnessInteractiveChatService({
+      createPromptLoop: () => ({
+        runTranscript: () =>
+          Promise.reject(
+            new HarnessControlError(code, `provider blocker: ${code}`),
+          ),
+      }),
+      now: nextIsoNow(),
+    });
+    await service.startSession("req-1", {
+      sessionId: `session-${code}`,
+      workspace: { hostPath: "/workspace" },
+    });
+    await service.startTurn("req-2", {
+      sessionId: `session-${code}`,
+      turnId: `turn-${code}`,
+      input: { text: "Start" },
+    });
+    await service.waitForTurn(`session-${code}`, `turn-${code}`);
+
+    assertEquals(
+      service.listTurns({ sessionId: `session-${code}` }).turns[0].turn.error,
+      { code, message: `provider blocker: ${code}` },
+    );
+  }
+});
+
+Deno.test("a completed turn promotes its transcript independently of the loop's array", async () => {
+  const returnedTranscripts: HarnessTranscriptMessage[][] = [];
+  const seenTranscripts: (readonly HarnessTranscriptMessage[])[] = [];
+  const createPromptLoop: HarnessInteractivePromptLoopFactory = () => ({
+    runTranscript: (options) => {
+      seenTranscripts.push([...options.transcript]);
+      const transcript: HarnessTranscriptMessage[] = [
+        ...options.transcript,
+        { role: "assistant", content: "Done." },
+      ];
+      returnedTranscripts.push(transcript);
+      return Promise.resolve({
+        model: "gpt-test",
+        finalAssistantText: "Done.",
+        transcript,
+        modelTurns: 1,
+        runState: {} as HarnessPromptLoopResult["runState"],
+      });
+    },
+  });
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop,
+    now: nextIsoNow(),
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Hi" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+
+  // The loop owns the array it returned; the durable checkpoint must not track
+  // an append made to it after the turn settled.
+  returnedTranscripts[0].push({ role: "assistant", content: "Stray." });
+
+  await service.startTurn("req-3", {
+    sessionId: "session-1",
+    turnId: "turn-2",
+    input: { text: "Again" },
+  });
+  await service.waitForTurn("session-1", "turn-2");
+
+  assertEquals(seenTranscripts[1], [
+    { role: "user", content: "Hi" },
+    { role: "assistant", content: "Done." },
+    { role: "user", content: "Again" },
+  ]);
+});
+
+Deno.test("a completed turn whose transcript is unpaired is failed, not promoted", async () => {
+  const { store, snapshots } = recordingStore();
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      // A loop that reports success while leaving a tool call unanswered. Its
+      // history would be refused by a provider on the following turn.
+      runTranscript: (options) =>
+        Promise.resolve({
+          model: "gpt-test",
+          finalAssistantText: "Reading.",
+          transcript: [...options.transcript, {
+            role: "assistant" as const,
+            content: "Reading.",
+            toolCalls: [toolCall("call-a")],
+          }],
+          modelTurns: 1,
+          runState: {} as HarnessPromptLoopResult["runState"],
+        }),
+    }),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Read a file" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+
+  for (const snapshot of snapshots) {
+    assertEquals(inspectHarnessTranscriptPairing(snapshot).valid, true);
+  }
+  assertEquals(snapshots[snapshots.length - 1], []);
+  const turn = service.listTurns({ sessionId: "session-1" }).turns[0];
+  assertEquals(turn.turn.status, "failed");
+  assertEquals(turn.turn.error?.code, "incomplete_transcript");
+});
+
+Deno.test("a completion whose persistence fails leaves the previous checkpoint durable", async () => {
+  const snapshots: HarnessTranscriptMessage[][] = [];
+  let failCompletion = false;
+  const store: HarnessChatSessionStore = {
+    saveSession: (snapshot) => {
+      snapshots.push([...snapshot.transcript]);
+    },
+    getSession: () => undefined,
+    listSessions: () => [],
+    saveSessionAndAppendEvent: (snapshot) => {
+      snapshots.push([...snapshot.transcript]);
+    },
+    saveSessionTurnAndAppendEvent: (mutation) => {
+      if (failCompletion && mutation.event.event.kind === "turn_completed") {
+        throw new Error("the session store went away mid-commit");
+      }
+      snapshots.push([...mutation.session.transcript]);
+      return true;
+    },
+    saveTurn: () => {},
+    getTurn: () => undefined,
+    listTurns: () => [],
+    appendEvent: () => {},
+    listEvents: () => [],
+    latestSequence: () => 0,
+  };
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
+    }),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Hi" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+  const afterFirstTurn = snapshots[snapshots.length - 1];
+
+  failCompletion = true;
+  await service.startTurn("req-3", {
+    sessionId: "session-1",
+    turnId: "turn-2",
+    input: { text: "Again" },
+  });
+  await service.waitForTurn("session-1", "turn-2");
+
+  // The completion never committed, so the turn is failed and the durable
+  // checkpoint is still the one the first turn left behind.
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns[1].turn.status,
+    "failed",
+  );
+  assertEquals(snapshots[snapshots.length - 1], afterFirstTurn);
+});
+
+// The invariant the whole change exists to hold: whatever a turn does, nothing
+// a provider would reject ever reaches durable storage, and a turn that does
+// not complete leaves the checkpoint before it untouched. Enumerating the fault
+// points beats picking two of them, and asserting over every persisted snapshot
+// beats asserting over the last.
+for (const resultsBeforeFault of FAULT_POINTS) {
+  for (const fault of FAULT_KINDS) {
+    Deno.test(`a turn that hits ${fault} after ${resultsBeforeFault} of two tool results keeps the checkpoint provider-safe`, async () => {
+      let release: (() => void) | undefined;
+      const held = new Promise<void>((resolve) => {
+        release = () => resolve();
+      });
+      const { store, snapshots } = recordingStore();
+      const nextTurnTranscripts: (readonly HarnessTranscriptMessage[])[] = [];
+      let turn = 0;
+      const service = new HarnessInteractiveChatService({
+        createPromptLoop: (options) => {
+          turn += 1;
+          return turn === 1
+            ? faultingToolLoop(resultsBeforeFault, fault, { release: held })(
+              options,
+            )
+            : {
+              runTranscript: (runOptions) => {
+                nextTurnTranscripts.push([...runOptions.transcript]);
+                return Promise.resolve(makeResult(runOptions, "Done."));
+              },
+            };
+        },
+        now: nextIsoNow(),
+        sessionStore: store,
+      });
+      await service.startSession("req-1", {
+        sessionId: "session-1",
+        workspace: { hostPath: "/workspace" },
+      });
+      await service.startTurn("req-2", {
+        sessionId: "session-1",
+        turnId: "turn-1",
+        input: { text: "Read both files" },
+      });
+      if (fault === "cancel") {
+        await service.cancelTurn(
+          "req-3",
+          "session-1",
+          "turn-1",
+          "user_requested",
+        );
+      }
+      release?.();
+      await service.waitForTurn("session-1", "turn-1");
+
+      for (const snapshot of snapshots) {
+        assertEquals(
+          inspectHarnessTranscriptPairing(snapshot).valid,
+          true,
+          `persisted history a provider would reject: ${
+            JSON.stringify(snapshot)
+          }`,
+        );
+      }
+      // The turn rolls back whole, user message included: its tools already ran
+      // and it is never replayed.
+      assertEquals(snapshots[snapshots.length - 1], []);
+      // A failed turn's own history stays on the audit trail even though its
+      // model history went back. A canceled one is not checked here: cancelling
+      // stops reporting the turn, so how much of it reached the log depends on
+      // where the cancel landed.
+      if (fault === "error") {
+        const kinds = service.events("session-1").map((event) =>
+          event.event.kind
+        );
+        assertEquals(kinds.filter((kind) => kind === "tool_started").length, 2);
+        assertEquals(
+          kinds.filter((kind) => kind === "tool_completed").length,
+          resultsBeforeFault,
+        );
+      }
+
+      // What the rollback is for: the turn after it starts from the checkpoint
+      // and carries no trace of the turn that died.
+      await service.startTurn("req-4", {
+        sessionId: "session-1",
+        turnId: "turn-2",
+        input: { text: "Try again" },
+      });
+      await service.waitForTurn("session-1", "turn-2");
+      assertEquals(nextTurnTranscripts, [[{
+        role: "user",
+        content: "Try again",
+      }]]);
+    });
+  }
+}
+
+Deno.test("a session stays reusable after a turn fails mid-tool", async () => {
+  const { store } = recordingStore();
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: faultingToolLoop(1, "error"),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Read both files" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+
+  const session = service.status("session-1").sessions[0];
+  assertEquals(session.status, "idle");
+  assertEquals(session.reusable, true);
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns[0].turn.status,
+    "failed",
+  );
+});
+
+Deno.test("a normalization whose write fails leaves the record on the stored history", async () => {
+  const corrupt: HarnessTranscriptMessage[] = [
+    { role: "user", content: "Read both files" },
+    {
+      role: "assistant",
+      content: "Reading both files.",
+      toolCalls: [toolCall("call-a"), toolCall("call-b")],
+    },
+  ];
+  const store: HarnessChatSessionStore = {
+    saveSession: () => {},
+    getSession: () => undefined,
+    listSessions: () => [{
+      session: createHarnessChatSessionStatus({
+        sessionId: "session-1",
+        createdAt: "2026-05-22T00:00:01.000Z",
+        workspace: { hostPath: "/workspace" },
+      }),
+      transcript: corrupt,
+    }],
+    saveSessionAndAppendEvent: () => {
+      throw new Error("the session store went away mid-commit");
+    },
+    saveSessionTurnAndAppendEvent: () => {
+      throw new Error("the session store went away mid-commit");
+    },
+    saveTurn: () => {},
+    getTurn: () => undefined,
+    listTurns: () => [],
+    appendEvent: () => {},
+    listEvents: () => [],
+    latestSequence: () => 0,
+  };
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
+    }),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+
+  await assertRejects(() => service.initializeFromStore());
+
+  // The normalization never committed, so the record still names the history
+  // held by the store and remains unavailable for a provider request.
+  const started = await service.startTurn("req-1", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Try again" },
+  });
+  assertEquals(started.ok, false);
+  assertEquals(
+    started.ok === false ? started.error.code : "",
+    "incomplete_transcript",
+  );
+});
+
+/**
+ * The two sidecar directories a runsc sandbox exchanges CFC invocation
+ * contexts and CFC results through. A run that mediates observations refuses
+ * to start unless both are named.
+ */
+const makeCfcTransportDirs = async (): Promise<{
+  cfcInvocationContextDir: string;
+  cfcResultDir: string;
+}> => {
+  const root = await Deno.makeTempDir();
+  const cfcInvocationContextDir = join(root, "cfc-invocation-context");
+  const cfcResultDir = join(root, "cfc-result");
+  await Deno.mkdir(cfcInvocationContextDir);
+  await Deno.mkdir(cfcResultDir);
+  return { cfcInvocationContextDir, cfcResultDir };
+};
+
+/** The console binds a person's typed prompt as the turn's direct command. */
+const directPromptSlotBinding: PromptSlotBinding = {
+  type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+  source: { type: "test.prompt-slot", subject: "interactive-chat" },
+  role: "direct-command",
+  kernelName: "cf-harness",
+  surface: "test",
+  subject: "interactive-chat",
+  eventId: "event-interactive-chat",
+};
+
+Deno.test("an interactive turn scans its configured skills root into the run and a pattern-author child inherits it", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const skillsRoot = fixture.skillsRoot;
+  const cfcTransport = await makeCfcTransportDirs();
+  const loopOptions: CreateHarnessPromptLoopOptions[] = [];
+  const requestBodies: unknown[] = [];
+  const service = new HarnessInteractiveChatService({
+    basePromptLoopOptions: {
+      apiKey: "test-key",
+      skillsRoot,
+      runId: "run-interactive-skills",
+      ...cfcTransport,
+      fetchFn: (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        requestBodies.push(body);
+        const payload = requestBodies.length === 1
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-delegate-pattern-author",
+                  type: "function",
+                  function: {
+                    name: "delegate_task",
+                    arguments: JSON.stringify({
+                      goal: "Author a counter pattern.",
+                      profile: "pattern-author",
+                    }),
+                  },
+                }],
+              },
+            }],
+          }
+          : requestBodies.length === 2
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-read-skill-resource",
+                  type: "function",
+                  function: {
+                    name: "read_skill_resource",
+                    arguments: JSON.stringify({
+                      skill: "pattern-ui",
+                      path: PATTERN_SKILL_FIXTURE_RESOURCE_PATH,
+                    }),
+                  },
+                }],
+              },
+            }],
+          }
+          : requestBodies.length === 3
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Read the component patterns reference.",
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Pattern authored.",
+              },
+            }],
+          };
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(
+              responsesBodyFromChatFixture(payload, init?.body ?? null),
+            ),
+            { status: 200 },
+          ),
+        );
+      },
+    },
+    createPromptLoop: (options) => {
+      loopOptions.push(options);
+      return new CfHarnessPromptLoop(options);
+    },
+    now: nextIsoNow(),
+    randomUUID: () => "generated-id",
+  });
+
+  const startSession = await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-1",
+    method: "start_session",
+    params: {
+      sessionId: "session-1",
+      workspace: { hostPath: "/workspace" },
+      model: "gpt-test",
+      policy: {
+        type: "cf-harness.chat-policy",
+        toolMode: "workspace-write",
+        allowedToolIds: ["delegate_task"],
+        allowedSubagentProfiles: ["pattern-author"],
+        promptSlot: directPromptSlotBinding,
+      },
+    },
+  });
+  assertEquals(startSession.ok, true);
+
+  const startTurn = await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-2",
+    method: "start_turn",
+    params: {
+      sessionId: "session-1",
+      turnId: "turn-1",
+      input: { text: "Author a counter pattern." },
+    },
+  });
+  assertEquals(startTurn.ok, true);
+  await service.waitForTurn("session-1", "turn-1");
+
+  const registry = loopOptions[0].engine?.getRunState().skillRegistry;
+  assertEquals(registry?.skillsRoot, skillsRoot);
+  for (const name of PATTERN_AUTHOR_SUBAGENT_SKILL_NAMES) {
+    assertEquals(
+      registry?.skills.some((skill) => skill.name === name),
+      true,
+      `run-start registry names ${name}`,
+    );
+  }
+
+  // The child's first request carries the profile's preloaded skills, which
+  // it can only have inherited from the parent run's registry.
+  assertStringIncludes(
+    chatViewOfRequest(requestBodies[1]).messages[1].content,
+    '<skill_context name="pattern-dev"',
+  );
+  const readMessage = chatViewOfRequest(requestBodies[2]).messages.at(-1);
+  assertEquals(readMessage?.role, "tool");
+  const readOutput = JSON.parse(readMessage?.content ?? "") as {
+    status: string;
+    digestMatchesRegistry?: boolean;
+    content?: string;
+  };
+  assertEquals(readOutput.status, "read");
+  assertEquals(readOutput.digestMatchesRegistry, true);
+  assertEquals((readOutput.content ?? "").length > 0, true);
+});
+
+/** A sandbox a no-tool turn never drives; enough to build an engine. */
+class StubSandboxRuntime implements SandboxRuntime {
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: "/workspace",
+      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+    };
+  }
+  resolvePath(path: string): string {
+    return path.startsWith("/") ? path : `/workspace/${path}`;
+  }
+  isPathWithinWorkspace(path: string): boolean {
+    return path === "/workspace" || path.startsWith("/workspace/");
+  }
+  isPathWithinAllowedRoots(path: string): boolean {
+    return this.isPathWithinWorkspace(path);
+  }
+  defaultWorkingDirectory(): string {
+    return "/workspace";
+  }
+  run(): Promise<SandboxCommandResult> {
+    return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+  }
+  runShell(): Promise<SandboxCommandResult> {
+    return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+  }
+}
+
+Deno.test("an interactive turn scans a skills root carried on an injected engine's config", async () => {
+  // The console passes the skills root on the options directly; an injected
+  // engine carries it on `engine.config` instead, with no top-level
+  // `skillsRoot`. Both must scan — reading the options alone would miss this.
+  await using fixture = await createPatternSkillsFixture();
+  const engine = new CfHarnessEngine({
+    sandboxRuntime: new StubSandboxRuntime(),
+    runId: "run-interactive-injected-engine",
+    model: "gpt-test",
+    skillsRoot: fixture.skillsRoot,
+  });
+  const service = new HarnessInteractiveChatService({
+    basePromptLoopOptions: {
+      apiKey: "test-key",
+      engine,
+      fetchFn: (_input, init) =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify(
+              responsesBodyFromChatFixture(
+                {
+                  choices: [{
+                    index: 0,
+                    message: { role: "assistant", content: "Done." },
+                  }],
+                },
+                init?.body ?? null,
+              ),
+            ),
+            { status: 200 },
+          ),
+        ),
+    },
+    createPromptLoop: (options) => new CfHarnessPromptLoop(options),
+    now: nextIsoNow(),
+    randomUUID: () => "generated-id",
+  });
+
+  const startSession = await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-1",
+    method: "start_session",
+    params: {
+      sessionId: "session-1",
+      workspace: { hostPath: "/workspace" },
+      model: "gpt-test",
+      policy: {
+        type: "cf-harness.chat-policy",
+        toolMode: "workspace-write",
+        allowedToolIds: ["read_file"],
+        allowedSubagentProfiles: [],
+      },
+    },
+  });
+  assertEquals(startSession.ok, true);
+
+  const startTurn = await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-2",
+    method: "start_turn",
+    params: {
+      sessionId: "session-1",
+      turnId: "turn-1",
+      input: { text: "Say hi." },
+    },
+  });
+  assertEquals(startTurn.ok, true);
+  await service.waitForTurn("session-1", "turn-1");
+
+  // The scan ran against the injected engine even though no top-level
+  // skillsRoot was set, so its run state now carries the registry.
+  const registry = engine.getRunState().skillRegistry;
+  assertEquals(registry?.skillsRoot, fixture.skillsRoot);
+});
+
+Deno.test("a listener that throws does not turn a completed turn into a failed one", async () => {
+  const delivered: string[] = [];
+  const deliveryFailures: [number, unknown][] = [];
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
+    }),
+    now: nextIsoNow(),
+    onEvent: (envelope) => {
+      if (envelope.event.kind === "turn_completed") {
+        throw new Error("the peer stopped reading");
+      }
+      delivered.push(envelope.event.kind);
+    },
+    onEventDeliveryError: (envelope, error) => {
+      deliveryFailures.push([envelope.sequence, error]);
+    },
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Hi" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+
+  // Failing to hand an event to a listener is a delivery failure. The turn it
+  // reports on already committed and stays committed.
+  const kinds = service.events("session-1").map((event) => event.event.kind);
+  assertEquals(kinds.filter((kind) => kind === "turn_failed").length, 0);
+  assertEquals(kinds[kinds.length - 1], "turn_completed");
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns[0].turn.status,
+    "completed",
+  );
+  assertEquals(
+    service.status("session-1").sessions[0].status,
+    "idle",
+  );
+  // And it is reported rather than swallowed.
+  assertEquals(deliveryFailures.length, 1);
+  assertEquals(
+    (deliveryFailures[0][1] as Error).message,
+    "the peer stopped reading",
+  );
+
+  // A failed delivery does not stop the service delivering to that listener,
+  // and the turn that follows it is decided the same way.
+  await service.startTurn("req-3", {
+    sessionId: "session-1",
+    turnId: "turn-2",
+    input: { text: "Again" },
+  });
+  await service.waitForTurn("session-1", "turn-2");
+
+  assertEquals(delivered.includes("turn_started"), true);
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns.map((entry) =>
+      entry.turn.status
+    ),
+    ["completed", "completed"],
+  );
+  assertEquals(deliveryFailures.length, 2);
 });

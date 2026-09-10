@@ -5,6 +5,7 @@
  * the nested computed expression should still lower locally in JSX without forcing
  * the whole JSX branch through an extra lift-applied wrapper.
  */
+
 import { action, Cell, computed, pattern, UI } from "commonfabric";
 
 interface Card {

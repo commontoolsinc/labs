@@ -325,10 +325,83 @@ Memory-v2 keeps a full entity-document boundary. Low-level `tx.read()` and
 `tx.write()` operate on the whole entity document, including reserved metadata
 siblings such as `source` and `cfc`.
 
-Only the logical `value` surface is exposed to untrusted or user-authored code.
+The read and materialization paths present the logical `value` surface:
 `Cell.get()`, `Cell.sync()`, query materialization, and similar
-validate/transform paths read under `value`, not the full document. Reserved
-siblings remain system metadata, not user JSON content.
+validate/transform paths read under `value`, not the full document, so a
+reserved sibling never arrives as user JSON content.
+
+That is a property of those paths rather than a boundary around untrusted
+code. A pattern's handler holds a runtime cell in the runtime's own realm, so
+the document surface is within its reach: `getMetaRaw` reads a meta field, and
+the storage transaction the cell is bound to addresses any path of the
+document, `value` and its reserved siblings alike. Each seam on that surface
+therefore carries its own guard:
+
+- The meta seam — `patternIdentity`, `argument`, `slug`, and the rest of the
+  `MetaField` union — is the runtime's to write. `setMetaRaw` marks the write
+  it makes, and the write chokepoint refuses a meta write that arrives
+  unmarked, whatever the enforcement mode, because a write there names the
+  program a piece runs rather than editing its data. Three shapes reach a
+  meta field and all three are refused: an address naming the field, a
+  document-root envelope carrying it as a key, and a document-root write that
+  leaves it out, which drops it, since a root write replaces the envelope.
+  The third is decided by one read of the envelope the write replaces, at the
+  document root. What the guard looks at there is which meta keys that envelope
+  has rather than what any of them holds, so the read is `nonRecursive`, and the
+  flow join keys on that: a recursive read consumes every label-map entry at or
+  below the path it names, a `nonRecursive` one consumes only the entry at that
+  path, so this read consumes the document's root entry and nothing else.
+  Reading a meta member instead would consume the user data an entry of the same
+  name covers, because canonicalization strips a leading `value` and a document
+  with a user field named `slug` labels it at the logical path the raw
+  `["slug"]` member reads. The read carries no commit precondition, because a
+  precondition would turn a whole-document write into a read-modify-write, and
+  the blind root writes the runtime makes would lose the race against any
+  advance of the document they replace. What that leaves open is an erasure
+  racing the guard, never a forgery: the two shapes that name a field are
+  refused from the write itself, with no read at all. The refusal is also the
+  first of these guards to run, ahead of the ones keyed by target id, so which
+  document a write names cannot decide whether it is asked for an authorization.
+  Meta fields stay readable.
+- A write addressed at a document's `["cfc"]` label map from outside the
+  runtime's privileged persistence scope is recorded, and the commit boundary
+  turns each record into a fail-closed reason (audit S18).
+- A document-root (`path: []`) write replaces the envelope rather than merging
+  into it, so an envelope that leaves the document without a label map erases
+  the stored one and leaves a labeled document reading as an unlabeled one.
+  Made outside the privileged persistence scope on a document that stores a
+  map, such a write is recorded like one that names the `["cfc"]` path, and
+  yields the same fail-closed reason. Dropping the member erases the map, and
+  so does carrying a value a reader reports as absent — `cfc: null`, a record
+  with no `version`. Creating a document, replacing one that stores no map, and
+  an envelope that carries the stored map forward all pass through.
+- That guard reads the stored member through the writing transaction, which
+  bounds it: a transaction whose view does not hold the document gets the same
+  "no map here" a document with no map gives, so a writer that has not synced
+  the document erases its label map and commits. No race is involved — the map
+  is present throughout, and the writer never looked. What the guard
+  establishes is that a root envelope write cannot erase a label map the
+  writing transaction has loaded. Closing the rest means forcing the document
+  into view before deciding, which turns every blind root write into a
+  read-modify-write, or making the commit boundary establish what the space
+  holds; both are open.
+- A document-root write that leaves SOME label map behind reaches the stored
+  one with no record made, whether it mints a map where the document stored
+  none or substitutes one for another. The `["cfc"]` guard keys on the
+  address, and this write's address is the document. That is what stands open
+  on this seam: label-map forgery through the document root. The CFC test
+  suite seeds stored label state through exactly these shapes —
+  `seedPrivilegedCfc`, and the metadata re-pointing in the speculation-overlay
+  fixtures — so closing the seam means giving those fixtures a sanctioned way
+  to seed first.
+- A guard on a seam governs writes to it, not the runtime entry points that
+  write it while doing their own work. The same reach that hands a handler
+  the storage transaction hands it the runtime: `runtime.run` instantiates a
+  pattern of the caller's choosing onto a cell the caller names, and stamps
+  that cell's `patternIdentity` through the authorized entry point on the
+  caller's behalf. What that costs is a question about the object graph a
+  cell hands pattern code, and it is where a boundary around untrusted code
+  would have to be drawn.
 
 Storage rules:
 
@@ -338,6 +411,9 @@ Storage rules:
   the same document as `value` and `source`
 - untrusted value-surface reads and materialized values must not expose the
   reserved `cfc` sibling
+- code that replaces a document wholesale carries the stored envelope forward
+  — read it and spread it, the way `ACLManager` does — rather than building
+  a fresh `{ value }`, which drops every reserved sibling the document held
 - no `application/label+json` bridge or coarse-summary compatibility path is
   carried forward
 
@@ -363,6 +439,18 @@ its argument and will freeze it directly.
 `schemaHash` is the persisted `SchemaAndHash.hashString` for the canonical
 merged schema envelope for the entity, not the hash of any one effective
 selector schema seen during prepare.
+
+The root document `schemaHash` names may be self-contained or carry
+`$ref: cid:` members — a decomposed write
+(`RuntimeOptions.cfcDecomposedEnvelopes`), or the root a reference-form
+declared schema leaves behind. One read policy covers both: every external
+reference a stored root carries resolves (space-first with content
+verification, the hash-verified realm registry supplying what the space
+does not hold) or the envelope is unreadable (fail closed), and the
+storage commit boundary validates the whole closure at write time. A
+`version` outside the declared union is an envelope the build cannot
+interpret, and every reader fails closed on it rather than treating the
+document as unlabeled.
 
 The corresponding deep-frozen canonical schema object is also persisted as a
 regular memory-v2 entity whose id is `cid:<hash>`. The canonical schema payload
@@ -391,8 +479,10 @@ Phase-1 merge rules:
   divergent branches; we do not support different label sets per branch
 - the merged schema must not invalidate data that was previously structurally
   valid
-- a merge may add a required field only when the merged schema also provides a
-  default that preserves validity/materialization for existing documents
+- a merge may add a required field when the merged schema provides a default
+  that preserves validity/materialization for existing documents, or when the
+  write-policy input identifies that path as a generated output materialized by
+  the running module
 - every merged result is canonicalized with `internSchema(..., true)` before
   persistence to its `cid:<hash>` schema document
 
@@ -496,7 +586,6 @@ Primary files:
 
 - `packages/runner/src/storage/interface.ts`
 - `packages/runner/src/storage/extended-storage-transaction.ts`
-- `packages/runner/src/storage/transaction.ts`
 - `packages/runner/src/storage/v2-transaction.ts`
 
 Tasks:
@@ -663,7 +752,8 @@ Tasks:
 - [x] Ensure IFC keys never weaken under merge and never appear only inside a
       divergent `anyOf`/`oneOf`/`allOf` branch
 - [x] Ensure structural merge does not invalidate previously valid data; adding
-      a required field requires a default
+      a required input or unclassified document field requires a default, while
+      a generated output path may be required without one
 - [x] Resolve input labels from stored CFC metadata and persisted
       `cid:<hash>`-backed schema documents; no coarse-label fallback
 - [x] Implement `confidentiality`, `integrity`, `addIntegrity`,
@@ -742,7 +832,7 @@ Primary files:
 
 - `packages/runner/src/runner.ts`
 - `packages/runner/src/builder/module.ts`
-- `packages/runner/src/builder/json-utils.ts`
+- `packages/runner/src/builder/to-encodable-form.ts`
 - `packages/runner/src/harness/executable-registry.ts`
 - `packages/runner/src/storage/interface.ts`
 - `packages/memory/v2.ts`

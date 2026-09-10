@@ -1,19 +1,26 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  getEntityId,
   getPatternIdentityRef,
   getPatternSource,
+  resolveSystemPatternSource,
   Runtime,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
-import { PieceManager } from "../src/manager.ts";
 import {
-  DEFAULT_APP_PATTERN_URL,
-  deriveSystemPatternUrl,
-  HOME_PATTERN_URL,
+  DEFAULT_APP_PATTERN_SOURCE,
+  deriveSystemPatternSource,
+  HOME_PATTERN_SOURCE,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
+
+// The route the ref expands to: still what the module is NAMED, because the
+// worker compiles this pattern over HTTP.
+const DEFAULT_APP_PATTERN_PATH = resolveSystemPatternSource(
+  DEFAULT_APP_PATTERN_SOURCE,
+)!;
 
 const signer = await Identity.fromPassphrase("pattern source provenance");
 
@@ -56,16 +63,16 @@ function installFetchStub(
   };
 }
 
-describe("deriveSystemPatternUrl", () => {
+describe("deriveSystemPatternSource", () => {
   it("returns home.tsx for the home space, default-app.tsx otherwise", () => {
     const runtime = {
       userIdentityDID: "did:key:home",
     } as unknown as Runtime;
-    expect(deriveSystemPatternUrl("did:key:home" as never, runtime)).toBe(
-      HOME_PATTERN_URL,
+    expect(deriveSystemPatternSource("did:key:home" as never, runtime)).toBe(
+      HOME_PATTERN_SOURCE,
     );
-    expect(deriveSystemPatternUrl("did:key:other" as never, runtime)).toBe(
-      DEFAULT_APP_PATTERN_URL,
+    expect(deriveSystemPatternSource("did:key:other" as never, runtime)).toBe(
+      DEFAULT_APP_PATTERN_SOURCE,
     );
   });
 });
@@ -73,7 +80,6 @@ describe("deriveSystemPatternUrl", () => {
 describe("ensureDefaultPattern stamps patternSource", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
   let controller: PiecesController;
   let restoreFetch: () => void;
 
@@ -90,9 +96,8 @@ describe("ensureDefaultPattern stamps patternSource", () => {
       identity: signer,
       spaceName: "provenance-space-" + crypto.randomUUID(),
     });
-    manager = new PieceManager(session, runtime);
-    await manager.synced();
-    controller = new PiecesController(manager);
+    controller = new PiecesController(session, runtime);
+    await controller.synced();
   });
 
   afterEach(async () => {
@@ -103,17 +108,34 @@ describe("ensureDefaultPattern stamps patternSource", () => {
     restoreFetch();
   });
 
-  it("stamps the default-app source path on a non-home root", async () => {
+  it("OFF-arm witness (OW45 arm-B stage 1): the creation arm still runs on a plain client — root created, linked, and re-ensured", async () => {
+    // No serverExecution flag anywhere in this fixture: this is the OFF
+    // client, and its creation editWithRetry must still run — now
+    // through the runner's shared ensure core (createSpaceRootIfAbsent),
+    // which the stage-1 delegation must not have forked or gated. The
+    // server half does not exist OFF (the toolshed OFF pin severs the
+    // bootstrap), so a root appearing HERE is the client arm working.
+    const piece = await controller.ensureDefaultPattern();
+    expect(getPatternSource(piece.getCell())).toBe(DEFAULT_APP_PATTERN_SOURCE);
+    const linked = await controller.getDefaultPattern(false);
+    expect(getEntityId(linked!)).toEqual(getEntityId(piece.getCell()));
+    // Idempotent: a second ensure resolves the SAME root (no second
+    // creation, no re-link churn).
+    const again = await controller.ensureDefaultPattern();
+    expect(getEntityId(again.getCell())).toEqual(getEntityId(piece.getCell()));
+  });
+
+  it("stamps the default-app source ref on a non-home root", async () => {
     const piece = await controller.ensureDefaultPattern();
     const source = getPatternSource(piece.getCell());
-    expect(source).toBe(DEFAULT_APP_PATTERN_URL);
+    expect(source).toBe(DEFAULT_APP_PATTERN_SOURCE);
     const identityRef = getPatternIdentityRef(piece.getCell())!;
     expect(await piece.getPatternRef()).toEqual({
       ...identityRef,
       source: {
         ref: `cf:pattern:${identityRef.identity}`,
-        entry: DEFAULT_APP_PATTERN_URL,
-        origin: DEFAULT_APP_PATTERN_URL,
+        entry: DEFAULT_APP_PATTERN_PATH,
+        origin: DEFAULT_APP_PATTERN_SOURCE,
       },
     });
   });

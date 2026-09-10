@@ -11,7 +11,6 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("action result FabricValues");
@@ -97,27 +96,7 @@ const REEMIT_PROGRAM: RuntimeProgram = {
   }],
 };
 
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
-function newRuntime(storageManager: SharedServerStorageManager): Runtime {
+function newRuntime(storageManager: EmulatedStorageManager): Runtime {
   return new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
@@ -173,17 +152,17 @@ function expectActionValues(value: ActionValues, expectError = true): void {
 
 describe("action results use FabricValue legality", () => {
   let server: MemoryV2Server.Server;
-  let writerStorage: SharedServerStorageManager;
-  let coldStorage: SharedServerStorageManager;
+  let writerStorage: EmulatedStorageManager;
+  let coldStorage: EmulatedStorageManager;
   let writer: Runtime;
   let coldReader: Runtime;
 
   beforeEach(() => {
     server = new MemoryV2Server.Server(TEST_MEMORY_SERVER_AUTH);
-    writerStorage = SharedServerStorageManager.connectTo(server, {
+    writerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
-    coldStorage = SharedServerStorageManager.connectTo(server, { as: signer });
+    coldStorage = EmulatedStorageManager.connectTo(server, { as: signer });
     writer = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: writerStorage,

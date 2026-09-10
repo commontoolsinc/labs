@@ -1,3 +1,15 @@
+/**
+ * What `assertJsonTransportSafe` puts in the error, which is the whole reason
+ * it exists as a separate assertion rather than a bare boolean check.
+ *
+ * The value it rejects is about to cross into an external LLM provider, where
+ * the loss would surface as altered output rather than as a failure, so the
+ * throw has to be actionable on its own: it names the label it was given, the
+ * JSON pointer to each offending value, and why that value cannot survive
+ * ordinary JSON serialization. It reports every offender rather than stopping
+ * at the first, so one round of fixes can address the whole value.
+ */
+
 import { assertEquals, assertThrows } from "@std/assert";
 
 import { assertJsonTransportSafe } from "./schema-transport.ts";

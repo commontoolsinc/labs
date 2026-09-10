@@ -1,3 +1,5 @@
+// PATTERN TIER: legacy — superseded or non-idiomatic; kept for what
+// depends on it. Do not copy from this file. Tiers: packages/patterns/index.md
 import {
   Cell,
   computed,
@@ -8,6 +10,7 @@ import {
   navigateTo,
   pattern,
   UI,
+  type VNode,
 } from "commonfabric";
 
 // Import Google Auth utility
@@ -68,6 +71,8 @@ interface Input {
 
 /** Google Docs Markdown Importer. Import Google Docs as Markdown with comments. #googleDocsImporter */
 export interface Output {
+  [NAME]: string;
+  [UI]: VNode;
   docUrl: string;
   markdown: string;
   docTitle: string;

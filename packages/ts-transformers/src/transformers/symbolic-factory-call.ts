@@ -1,10 +1,10 @@
 import ts from "typescript";
 import type { JSONSchema } from "@commonfabric/api";
-import { factorySchemasEqual } from "@commonfabric/data-model/schema-utils";
+import { factorySchemasEqual } from "@commonfabric/data-model-schema";
 import {
-  createSchemaTransformerV2,
   type FactoryTypeInfo,
   type FactoryTypeKind,
+  SchemaGenerator,
 } from "@commonfabric/schema-generator";
 import { findFrameworkProvidedPaths } from "../policy/framework-provided.ts";
 
@@ -32,7 +32,7 @@ interface EmittedFactoryContract {
 /** Lower eager symbolic factory proxy calls before closure conversion. */
 export class SymbolicFactoryCallTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
-    const schemaGenerator = createSchemaTransformerV2();
+    const schemaGenerator = new SchemaGenerator();
 
     const visit: ts.Visitor = (node) => {
       if (!ts.isCallExpression(node)) {
@@ -143,7 +143,7 @@ function buildCompatibleContract(
   classification: FactoryCalleeClassification,
   expression: ts.Expression,
   context: TransformationContext,
-  schemaGenerator: ReturnType<typeof createSchemaTransformerV2>,
+  schemaGenerator: SchemaGenerator,
   diagnosticNode: ts.Node,
 ): EmittedFactoryContract | undefined {
   const { members } = classification;
@@ -332,7 +332,7 @@ function factoryValueDeclaration(
 function generateMemberSchemas(
   member: FactoryTypeInfo,
   context: TransformationContext,
-  schemaGenerator: ReturnType<typeof createSchemaTransformerV2>,
+  schemaGenerator: SchemaGenerator,
 ): { inputSchema: JSONSchema; outputSchema: JSONSchema } {
   return {
     inputSchema: schemaGenerator.generateSchema(
@@ -364,7 +364,7 @@ function generateProvenanceSchema(
   type: ts.Type | undefined,
   typeNode: ts.TypeNode,
   context: TransformationContext,
-  schemaGenerator: ReturnType<typeof createSchemaTransformerV2>,
+  schemaGenerator: SchemaGenerator,
 ): JSONSchema {
   if (type) {
     return schemaGenerator.generateSchema(

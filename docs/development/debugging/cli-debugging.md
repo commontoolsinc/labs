@@ -8,8 +8,11 @@ When patterns misbehave, the CLI often provides faster diagnosis than browser De
 # Check syntax only (fast)
 deno task cf check pattern.tsx --no-run
 
-# Run locally
+# Check graph construction
 deno task cf check pattern.tsx
+
+# Run every authored automated pattern test
+deno task cf test pattern.test.tsx
 
 # View transformer output (debug compile issues — see below)
 deno task cf check pattern.tsx --show-transformed
@@ -35,13 +38,18 @@ operator key, reserved for operator actions.
 ## Deploying a Test Piece
 
 ```bash
-# Deploy — returns a piece-id used by all commands below
-deno task cf piece new -i "$CF_IDENTITY" --api-url URL --space SPACE pattern.tsx
+# Deploy with every test entry attached — returns the piece id used below
+deno task cf piece new -i "$CF_IDENTITY" --api-url URL --space SPACE \
+  --test pattern.test.tsx pattern.tsx
 
 # Set test data
 echo '{"title": "Test", "done": false}' | \
-  deno task cf piece set -i "$CF_IDENTITY" --api-url URL --space SPACE --piece ID testItem
+  deno task cf cell set -i "$CF_IDENTITY" --api-url URL --space SPACE --cell ID testItem
 ```
+
+Write automated tests for new or changed pattern behavior and run every entry
+before deployment. Repeat `--test` for multiple entries. The deployment command
+packages and type-checks attached tests but does not run them.
 
 ## When to Use CLI vs Browser
 
@@ -59,20 +67,29 @@ echo '{"title": "Test", "done": false}' | \
 - Visual/styling problems
 - Event handling doesn't trigger (click handlers, etc.)
 
-## Stale Computed Values After `piece set`
+## Stale Computed Values After `cf cell set`
 
-**Gotcha:** `piece set` updates data but does NOT trigger computed re-evaluation. You must run `piece step` after `set` to get fresh computed values.
+**Gotcha:** `cf cell set` updates data but does NOT trigger computed re-evaluation. You must run `piece step` after `set` to get fresh computed values.
 
 ```bash
 # WRONG: Returns stale computed values
-echo '[...]' | deno task cf piece set --piece ID expenses ...
-deno task cf piece get --piece ID totalSpent ...  # May return old value!
+echo '[...]' | deno task cf cell set --cell ID expenses ...
+deno task cf cell get --cell ID totalSpent ...  # May return old value!
 
 # CORRECT: Run piece step to trigger recompute
-echo '[...]' | deno task cf piece set --piece ID expenses ...
-deno task cf piece step --piece ID ...  # Runs scheduling step, triggers recompute
-deno task cf piece get --piece ID totalSpent ...  # Now correct
+echo '[...]' | deno task cf cell set --cell ID expenses ...
+deno task cf piece step --cell ID ...  # Runs scheduling step, triggers recompute
+deno task cf cell get --cell ID totalSpent ...  # Now correct
 ```
+
+`piece inspect` says which values those are. Its `--- Cached Result Fields ---`
+section names every result field whose resolution crosses a computed cell. It
+prints each computed cell's last-derived commit beside the commit the argument
+document stands at. A computed cell which points on to live state still counts,
+because the cached choice of which live state to follow can itself be stale.
+Commit numbers only order within one space; the output names both spaces and
+refuses the comparison when they differ. Result fields the section does not
+name resolve entirely through live state.
 
 ## Inspect Transformed Output
 
@@ -103,19 +120,21 @@ deno task cf check \
 
 ```bash
 # 1. What's the full state?
-deno task cf piece inspect --piece <piece-id> -i "$CF_IDENTITY" -a URL -s space
+deno task cf piece inspect --cell <piece-id> -i "$CF_IDENTITY" -a URL -s space
 
-# 2. What are the inputs?
-deno task cf piece get --piece <piece-id> /input -i "$CF_IDENTITY" -a URL -s space
+# 2. What are the inputs? (--input selects the arguments cell; a positional
+# /input would read a result field of that name)
+deno task cf cell get --cell <piece-id> --input -i "$CF_IDENTITY" -a URL -s space
 
 # 3. What's a specific computed value?
-deno task cf piece get --piece <piece-id> myComputedField -i "$CF_IDENTITY" -a URL -s space
+deno task cf cell get --cell <piece-id> myComputedField -i "$CF_IDENTITY" -a URL -s space
 
-# 4. Set known input, trigger recompute, verify output
+# 4. Set known input, trigger recompute, verify output ("" writes the whole
+# input cell; --input selects it)
 echo '{"items":[{"title":"test","done":false}]}' | \
-  deno task cf piece set --piece <piece-id> /input -i "$CF_IDENTITY" -a URL -s space
-deno task cf piece step --piece <piece-id> -i "$CF_IDENTITY" -a URL -s space
-deno task cf piece get --piece <piece-id> itemCount -i "$CF_IDENTITY" -a URL -s space
+  deno task cf cell set --cell <piece-id> "" --input -i "$CF_IDENTITY" -a URL -s space
+deno task cf piece step --cell <piece-id> -i "$CF_IDENTITY" -a URL -s space
+deno task cf cell get --cell <piece-id> itemCount -i "$CF_IDENTITY" -a URL -s space
 ```
 
 ## Common CLI Debugging Patterns
@@ -148,14 +167,18 @@ deno task cf piece get --piece <piece-id> itemCount -i "$CF_IDENTITY" -a URL -s 
 When iterating on fixes, always use `setsrc` instead of `new`:
 
 ```bash
-# Make a fix to your pattern, then:
-deno task cf piece setsrc --piece <piece-id> pattern.tsx -i "$CF_IDENTITY" -a URL -s space
+# Make a fix, rerun every test, then retain the complete attached test package:
+deno task cf test pattern.test.tsx
+deno task cf piece setsrc --cell <piece-id> pattern.tsx \
+  --test pattern.test.tsx -i "$CF_IDENTITY" -a URL -s space
 
 # Test again
-deno task cf piece get --piece <piece-id> brokenField -i "$CF_IDENTITY" -a URL -s space
+deno task cf cell get --cell <piece-id> brokenField -i "$CF_IDENTITY" -a URL -s space
 ```
 
 This keeps you working with the same piece instance, preserving any test data you've set up.
+Repeat the complete set of `--test` flags on every update. Omitted test roots are
+not retained in the new source revision.
 
 ## See Also
 

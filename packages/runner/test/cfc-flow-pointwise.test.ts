@@ -1,7 +1,11 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/interface";
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
@@ -20,13 +24,14 @@ type StoredEntry = {
   observes?: string;
 };
 
-// S16 phase B: pointwise label precision is a structural fact of the
-// per-element transaction decomposition (design D4), not a trusted claim.
-// These tests pin the split: element results carry only their element's
-// taint; the result container carries only structure-level taint — and for
-// filter, the membership decision's taint (§8.5.6.1) arrives via the
-// predicate outputs the coordinator consumes.
 describe("CFC flow labels: pointwise structure (phase B)", () => {
+  // S16 phase B: pointwise label precision is a structural fact of the
+  // per-element transaction decomposition (design D4), not a trusted claim.
+  // These tests pin the split: element results carry only their element's
+  // taint; the result container carries only structure-level taint — and for
+  // filter, the membership decision's taint (§8.5.6.1) arrives via the
+  // predicate outputs the coordinator consumes.
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -46,6 +51,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     const seed = rt.edit();
     const cell = rt.getCell(space, cause, undefined, seed);
     const id = cell.getAsNormalizedFullLink().id;
+    writeSeedEnvelopeDoc(seed, space);
     seed.writeOrThrow({
       space,
       scope: "space",
@@ -55,7 +61,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       value,
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{ path: [], label: { confidentiality: [atom] } }],
@@ -87,20 +93,27 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       .filter((e) => e.origin === "structure" && e.path.length === 0)
       .flatMap((e) => e.label.confidentiality ?? []);
 
-  // Element ops run in their own transactions reading only their element,
-  // so per-element precision is structural — for elements that arrive in
-  // separate reconciles. A batch first-instantiation evaluates all new
-  // element ops inline in ONE pattern-run transaction, whose J is then the
-  // join of every new element (coarse but sound; it refines as elements
-  // are touched individually). This test exercises the incremental path:
-  // el0 instantiates first, el1 arrives later, and each element's result
-  // carries exactly its own taint.
   it("map: incrementally added elements get pointwise derived labels", async () => {
+    // Element ops run in their own transactions reading only their element,
+    // so per-element precision is structural — for elements that arrive in
+    // separate reconciles. A batch first-instantiation evaluates all new
+    // element ops inline in ONE pattern-run transaction, whose J is then the
+    // join of every new element (coarse but sound; it refines as elements
+    // are touched individually). This test exercises the incremental path:
+    // el0 instantiates first, el1 arrives later, and each element's result
+    // carries exactly its own taint.
+
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. Each `probe` call
+      // writes into a fresh document that declares none, and `conf0` and
+      // `conf1` read back what those writes persisted.
+      cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts those entries in the probe
+      // documents.
       cfcFlowLabels: "persist",
     });
 
@@ -127,6 +140,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([el0]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -153,7 +167,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -167,6 +182,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       type: "array",
       items: { asCell: ["cell"] },
     }, grow).set([el0Again, el1]);
+    grow.prepareCfc();
     expect((await grow.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
@@ -207,17 +223,28 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect(conf1).not.toContainEqual("alice-secret");
   });
 
-  // §8.5.6.1 membership taint: which elements survive a filter is decided
-  // by the predicate outputs, and those are values the coordinator reads —
-  // so the filtered container's derived component must join the predicate
-  // taint of every element it considered. (No flow-precision claims
-  // needed: the membership channel rides ordinary value reads.)
+  //
+  // Membership taint (§8.5.6.1)
+  //
+  // §8.5.6.1 membership taint: which elements survive a filter is decided by
+  // the predicate outputs, and those are values the coordinator reads — so the
+  // filtered container's derived component must join the predicate taint of
+  // every element it considered. (No flow-precision claims needed: the
+  // membership channel rides ordinary value reads.)
+  //
+
   it("filter: membership structure carries the predicate outputs' taint", async () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The probe writes
+      // into a document that declares none, and `probeConf` reads back what
+      // that write persisted.
+      cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts that entry in the probe
+      // document.
       cfcFlowLabels: "persist",
     });
 
@@ -245,6 +272,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([el0, el1]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -271,7 +299,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -295,19 +324,26 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect(probeConf).toContainEqual("bob-secret");
   });
 
-  // The membership channel must not require dereferencing (codex review on
-  // #4022): a reader that observes only the container's shape — length via
-  // an items-as-cell schema, never reading any element's content — still
-  // learns which elements survived the predicate. The container write is
-  // pure link structure, but its shape is secret-dependent, so the
-  // membership taint has to ride the container itself, not just the
-  // element contents.
   it("filter: shape-only reader (no dereference) picks up membership taint", async () => {
+    // The membership channel must not require dereferencing (codex review on
+    // #4022): a reader that observes only the container's shape — length via
+    // an items-as-cell schema, never reading any element's content — still
+    // learns which elements survived the predicate. The container write is
+    // pure link structure, but its shape is secret-dependent, so the
+    // membership taint has to ride the container itself, not just the
+    // element contents.
+
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The probe writes
+      // into a document that declares none, and `probeConf` reads back what
+      // that write persisted.
+      cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts that entry in the probe
+      // document.
       cfcFlowLabels: "persist",
     });
 
@@ -335,6 +371,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([el0, el1]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -361,7 +398,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -383,17 +421,24 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect(probeConf).toContainEqual("bob-secret");
   });
 
-  // The empty-container limit of the membership channel: when the
-  // predicate drops EVERY element the write is `[]` — no slot link
-  // entries exist at all, so the structure stamp is the only possible
-  // carrier and "nothing survived" must still be as confidential as the
-  // values that decided it.
   it("filter: empty result still carries membership taint on its shape", async () => {
+    // The empty-container limit of the membership channel: when the
+    // predicate drops EVERY element the write is `[]` — no slot link
+    // entries exist at all, so the structure stamp is the only possible
+    // carrier and "nothing survived" must still be as confidential as the
+    // values that decided it.
+
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The probe writes
+      // into a document that declares none, and `probeConf` reads back what
+      // that write persisted.
+      cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts that entry in the probe
+      // document.
       cfcFlowLabels: "persist",
     });
 
@@ -421,6 +466,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([el0, el1]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -447,7 +493,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -472,22 +519,26 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     const rtx = runtime!.edit();
     const id =
       keptCell.withTx(rtx).resolveAsCell().getAsNormalizedFullLink().id;
+    rtx.prepareCfc();
     rtx.commit();
     return id;
   };
 
-  // The dual of membership taint: when the predicate decides membership WITHOUT
-  // reading element content (here: by index), the result container's structure
-  // must carry NO member content. This is the over-taint the input-read
-  // identity-only materialization removes — the old asCell `.get()` on the input
-  // list dereferenced every element into the coordinator's J (§8.5.6.1 keeps
-  // member confidentiality separate from structural).
   it("filter: index-only predicate keeps member content out of the structure label", async () => {
+    // The dual of membership taint: when the predicate decides membership
+    // WITHOUT reading element content (here: by index), the result container's
+    // structure must carry NO member content. This is the over-taint the
+    // input-read identity-only materialization removes — the old asCell
+    // `.get()` on the input list dereferenced every element into the
+    // coordinator's J (§8.5.6.1 keeps member confidentiality separate from
+    // structural).
+
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // Persisting the derived join is what puts the container's structure
+      // entry in the document, and `sc` reads that entry back.
       cfcFlowLabels: "persist",
     });
 
@@ -512,6 +563,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([el0, el1]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -539,7 +591,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -550,17 +603,20 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect(sc).not.toContainEqual("bob-secret");
   });
 
-  // The membership taint must RE-STAMP (replace, not duplicate or go stale) when
-  // the list changes across reconciles: the structure label is re-derived from
-  // each reconcile's J, even though the container's root value is not rewritten
-  // (only a slot is appended). Without the re-stamp the late-arriving member's
-  // taint would never reach the container shape.
   it("filter: structure label re-stamps from J when the list grows", async () => {
+    // The membership taint must RE-STAMP (replace, not duplicate or go stale)
+    // when the list changes across reconciles: the structure label is
+    // re-derived from each reconcile's J, even though the container's root
+    // value is not rewritten (only a slot is appended). Without the re-stamp
+    // the late-arriving member's taint would never reach the container shape.
+
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // Persisting the derived join is what puts the container's structure
+      // entry in the document. `before`, `after` and `membershipEntries`
+      // read that entry back.
       cfcFlowLabels: "persist",
     });
 
@@ -587,6 +643,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([el0, el1]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -608,7 +665,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -628,6 +686,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       gtx,
     );
     lc.set([el0, el1, el2]);
+    gtx.prepareCfc();
     expect((await gtx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
@@ -647,15 +706,18 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect(membershipEntries.length).toBe(1);
   });
 
-  // flatMap gets the same structural-taint treatment as filter: the result
-  // container's structure carries the op outputs' taint (membership/multiplicity
-  // depend on every element the op considered), not via the input deref.
   it("flatMap: result structure carries the op outputs' taint", async () => {
+    // flatMap gets the same structural-taint treatment as filter: the result
+    // container's structure carries the op outputs' taint
+    // (membership/multiplicity depend on every element the op considered), not
+    // via the input deref.
+
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // Persisting the derived join is what puts the container's structure
+      // entry in the document, and `sc` reads that entry back.
       cfcFlowLabels: "persist",
     });
 
@@ -681,6 +743,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([el0, el1]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -702,7 +765,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -713,19 +777,22 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect(sc).toContainEqual("bob-secret");
   });
 
-  // Replace-from-criteria, the narrowing direction (§8.12.8-normative per
-  // #4546): when the selection criteria change on a reconcile with NO value
-  // write (result stays []), the membership (enumerate) entry is re-derived
-  // from the new criteria alone — the departed candidate's atom leaves. The
-  // frozen existence entry (observes "shape") keeps the creation join,
-  // untouched by the re-stamp. This is the coordinator-level pin of the
-  // no-write path; #4546's A3 test covers the persist layer.
   it("filter: membership replaces from criteria on a no-write re-stamp; frozen existence keeps the creation join", async () => {
+    // Replace-from-criteria, the narrowing direction (§8.12.8-normative per
+    // #4546): when the selection criteria change on a reconcile with NO value
+    // write (result stays []), the membership (enumerate) entry is re-derived
+    // from the new criteria alone — the departed candidate's atom leaves. The
+    // frozen existence entry (observes "shape") keeps the creation join,
+    // untouched by the re-stamp. This is the coordinator-level pin of the
+    // no-write path; #4546's A3 test covers the persist layer.
+
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // Persisting the derived join is what puts the container's membership
+      // and existence entries in the document. The assertions below read
+      // both back.
       cfcFlowLabels: "persist",
     });
 
@@ -754,6 +821,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([d0]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -777,7 +845,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -808,6 +877,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       stx,
     );
     lc.set([d1]);
+    stx.prepareCfc();
     expect((await stx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();

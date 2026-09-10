@@ -9,18 +9,40 @@ import type {
 } from "./policy-trace.ts";
 import { countHarnessPolicyDecisions } from "./policy-trace.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
+import type { HarnessFabricSessionCfcPosture } from "../run-state.ts";
 import type { HarnessSubagentRunRef } from "./subagent.ts";
 import type { HarnessToolEffectClass } from "./tool-descriptor.ts";
 import type { HarnessTranscriptMessage } from "./transcript.ts";
 import type { ToolResultRef } from "./tool-result.ts";
-import type { OpenAIChatCompletionAttemptDiagnostic } from "../gateway/openai-client.ts";
-import type { HarnessModelAttemptDiagnostic } from "../model/client.ts";
+import type {
+  HarnessModelAttemptDiagnostic,
+  HarnessModelUsage,
+} from "../model/client.ts";
 import type {
   HarnessModelAuthSource,
   HarnessModelProviderId,
 } from "../config.ts";
+import type { HarnessCredentialOwnerRef } from "./run-manifest.ts";
 
-export type HarnessToolPolicyDecision = "allowed" | "warned" | "denied";
+/**
+ * How policy answered one tool call. `invalid` is not one of policy's answers
+ * about authority: it records a call whose arguments the loop could not read,
+ * which never reached a policy question at all. It is kept in this union so
+ * every tool activity carries an outcome, and told apart from `denied` so a
+ * malformed call is not counted as a mediated refusal.
+ *
+ * `withheld` is a confidentiality boundary's answer about a call's own
+ * result: the call ran, it answered with the reference to the result, and
+ * only the values were held back. `denied` is reserved for a call that did
+ * not run.
+ */
+export type HarnessToolPolicyDecision =
+  | "allowed"
+  | "warned"
+  | "denied"
+  | "invalid"
+  | "withheld";
+
 export type HarnessToolExecutionStatus = "completed" | "failed" | "not-run";
 export type HarnessRunTimelineKind =
   | "run_started"
@@ -39,7 +61,10 @@ export interface HarnessToolActivity {
   endedAt: string;
   toolCallId: string;
   toolId: string;
-  effectClass: HarnessToolEffectClass;
+
+  /** Absent when the call named a tool the run offers no descriptor for. */
+  effectClass?: HarnessToolEffectClass;
+
   cfcEnforcementMode: CfcEnforcementMode;
   policyDecision: HarnessToolPolicyDecision;
   executionStatus: HarnessToolExecutionStatus;
@@ -50,17 +75,15 @@ export interface HarnessToolActivity {
   errorDetail?: string;
 }
 
-export interface HarnessGatewayAttempt
-  extends OpenAIChatCompletionAttemptDiagnostic {
+export interface HarnessModelAttempt extends HarnessModelAttemptDiagnostic {
   runId: string;
   sequence: number;
   modelTurn: number;
 }
 
-export interface HarnessModelAttempt extends HarnessModelAttemptDiagnostic {
-  runId: string;
-  sequence: number;
+export interface HarnessModelTurnUsage {
   modelTurn: number;
+  usage: HarnessModelUsage;
 }
 
 export interface HarnessRunTimelineEntry {
@@ -100,10 +123,30 @@ export interface HarnessRunReport {
   generatedAt: string;
   status: string;
   model: string;
+
+  /** Requested effort; provider clients reject routes that cannot apply it. */
+  reasoningEffort?: string;
+
+  promptCacheMode?: "implicit" | "explicit";
+  cacheAffinity?: "run" | "custom";
   modelProvider?: HarnessModelProviderId;
   modelAuthSource?: HarnessModelAuthSource;
+  credentialOwner?: HarnessCredentialOwnerRef;
+  harnessHomeIdentity?: string;
   modelTurns: number;
+
+  /** Usage from model turns executed directly by this run. */
+  usage?: HarnessModelUsage;
+
+  /** Direct usage plus usage reported by completed descendant runs. */
+  totalUsage?: HarnessModelUsage;
+
+  modelUsage?: HarnessModelTurnUsage[];
   cfcEnforcementMode: CfcEnforcementMode;
+
+  /** The fabric session's resolved CFC posture, when the run had a session. */
+  fabricSessionCfc?: HarnessFabricSessionCfcPosture;
+
   createdAt?: string;
   updatedAt?: string;
   endedAt?: string;
@@ -127,7 +170,6 @@ export interface HarnessRunReport {
   policyDecisions: HarnessPolicyDecisionRecord[];
   timeline: HarnessRunTimelineEntry[];
   toolActivity: HarnessToolActivity[];
-  gatewayAttempts?: HarnessGatewayAttempt[];
   modelAttempts?: HarnessModelAttempt[];
   toolOutputs: ToolResultRef[];
   subagentRuns?: HarnessSubagentRunRef[];
@@ -142,6 +184,7 @@ export interface CreateHarnessRunReportOptions {
     endedAt?: string;
     terminalReason?: string;
     cfcEnforcementMode: CfcEnforcementMode;
+    fabricSessionCfc?: HarnessFabricSessionCfcPosture;
     artifactRoot?: string;
     transcriptPath?: string;
     promptSlotBinding?: PromptSlotBinding;
@@ -155,15 +198,22 @@ export interface CreateHarnessRunReportOptions {
     toolOutputs: ToolResultRef[];
     modelProvider?: HarnessModelProviderId;
     modelAuthSource?: HarnessModelAuthSource;
+    credentialOwner?: HarnessCredentialOwnerRef;
+    harnessHomeIdentity?: string;
     subagentRuns?: HarnessSubagentRunRef[];
   };
   model: string;
+  reasoningEffort?: string;
+  promptCacheMode?: "implicit" | "explicit";
+  cacheAffinity?: "run" | "custom";
   modelTurns: number;
   finalAssistantText?: string;
   timeline?: readonly HarnessRunTimelineEntryInput[];
   toolActivity: readonly HarnessToolActivity[];
-  gatewayAttempts?: readonly HarnessGatewayAttempt[];
   modelAttempts?: readonly HarnessModelAttempt[];
+  usage?: HarnessModelUsage;
+  totalUsage?: HarnessModelUsage;
+  modelUsage?: readonly HarnessModelTurnUsage[];
 }
 
 export const createHarnessRunTimeline = (
@@ -282,6 +332,13 @@ export const createHarnessRunReport = (
     generatedAt: options.runState.updatedAt,
     status: options.runState.status,
     model: options.model,
+    ...(options.reasoningEffort !== undefined
+      ? { reasoningEffort: options.reasoningEffort }
+      : {}),
+    ...(options.promptCacheMode !== undefined
+      ? { promptCacheMode: options.promptCacheMode }
+      : {}),
+    cacheAffinity: options.cacheAffinity ?? "run",
     ...(options.runState.modelProvider !== undefined
       ? { modelProvider: options.runState.modelProvider }
       : {}),
@@ -290,8 +347,24 @@ export const createHarnessRunReport = (
       : options.runState.modelProvider === "openai-codex"
       ? { modelAuthSource: "owner-bound-oauth" as const }
       : {}),
+    ...(options.runState.credentialOwner !== undefined
+      ? { credentialOwner: structuredClone(options.runState.credentialOwner) }
+      : {}),
+    ...(options.runState.harnessHomeIdentity !== undefined
+      ? { harnessHomeIdentity: options.runState.harnessHomeIdentity }
+      : {}),
     modelTurns: options.modelTurns,
+    ...(options.usage !== undefined ? { usage: options.usage } : {}),
+    ...(options.totalUsage !== undefined
+      ? { totalUsage: options.totalUsage }
+      : {}),
+    ...((options.modelUsage?.length ?? 0) > 0
+      ? { modelUsage: [...(options.modelUsage ?? [])] }
+      : {}),
     cfcEnforcementMode: options.runState.cfcEnforcementMode,
+    ...(options.runState.fabricSessionCfc !== undefined
+      ? { fabricSessionCfc: options.runState.fabricSessionCfc }
+      : {}),
     ...(options.runState.createdAt !== undefined
       ? { createdAt: options.runState.createdAt }
       : {}),
@@ -343,9 +416,6 @@ export const createHarnessRunReport = (
       toolActivity: options.toolActivity,
     }),
     toolActivity: [...options.toolActivity],
-    ...((options.gatewayAttempts?.length ?? 0) > 0
-      ? { gatewayAttempts: [...(options.gatewayAttempts ?? [])] }
-      : {}),
     ...((options.modelAttempts?.length ?? 0) > 0
       ? { modelAttempts: [...(options.modelAttempts ?? [])] }
       : {}),

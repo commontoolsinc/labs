@@ -1,9 +1,9 @@
 import type { JSONSchema, JSONValue } from "@commonfabric/api";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isRecord } from "@commonfabric/utils/types";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { deepEqual, deepEqualKey } from "@commonfabric/utils/deep-equal";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+import { hashStringOf } from "@commonfabric/data-model";
 import {
   cfcLabelPathPrefixMatches,
   type CfcLabelView,
@@ -47,7 +47,7 @@ export const CFC_LABEL_READ_FAILED_ATOM = "cfc:label-read-failed";
 // `{digestOf: H(marker)}` spelling can only be crafted — and with atom
 // equality now commitment-aware, a marker-naming ceiling would otherwise
 // subsume that spelling. Recognize it here so BOTH forms stay ungrantable.
-const clauseBearsReadFailedMarker = (clause: unknown): boolean =>
+export const clauseBearsReadFailedMarker = (clause: unknown): boolean =>
   clauseAlternatives(clause as CfcConfClause).some((alternative) =>
     deepEqual(alternative, CFC_LABEL_READ_FAILED_ATOM) ||
     commitmentAwareEquals(alternative, CFC_LABEL_READ_FAILED_ATOM)
@@ -62,14 +62,73 @@ export interface CfcObservationResult<T = unknown> {
   observedConfidentiality: CfcObservedConfidentiality;
 }
 
+// How many kept atoms a candidate is compared against before the kept set is
+// grouped instead. Keying an atom walks the whole of it, while a comparison
+// against a different atom stops at the first property where they differ, so
+// which of the two is cheaper depends on the atoms as well as on how many
+// there are, and no single value is right everywhere. Measured over lists of
+// distinct atoms at sizes from 9 to 128, in the two shapes that bound the
+// ratio — atoms agreeing until their last property, and atoms differing at
+// their first — a limit of 16 leaves a band just above itself where grouping
+// costs at most about twice the scan, and is within a fifth of the best
+// available cost by 128 atoms. A lower limit deepens that band; a higher one
+// gives up the win where the growth is steepest.
+const ATOM_SCAN_LIMIT = 16;
+
+const atomGroupFor = (
+  groups: Map<string, CfcAtom[]>,
+  key: string,
+): CfcAtom[] => {
+  const group = groups.get(key);
+  if (group !== undefined) {
+    return group;
+  }
+  const created: CfcAtom[] = [];
+  groups.set(key, created);
+  return created;
+};
+
+const groupAtomsByKey = (
+  atoms: readonly CfcAtom[],
+): Map<string, CfcAtom[]> => {
+  const groups = new Map<string, CfcAtom[]>();
+  for (const atom of atoms) {
+    atomGroupFor(groups, deepEqualKey(atom)).push(atom);
+  }
+  return groups;
+};
+
+// Structural deduplication, keeping the first spelling of each atom. The
+// identity is `deepEqual` rather than reference equality, because a fabric
+// conversion clones an atom rather than sharing it, so two atoms saying the
+// same thing routinely have different references.
+//
+// Past `ATOM_SCAN_LIMIT` kept atoms, the kept set is grouped by `deepEqualKey`
+// and a candidate is compared against its own group. Atoms that differ can
+// share a key, so `deepEqual` still decides within a group. The grouping is
+// built when a candidate arrives that would use it, so a list that ends at the
+// limit pays for none of it.
 export const uniqueCfcAtoms = (
   atoms: Iterable<unknown>,
 ): CfcAtom[] => {
   const unique: CfcAtom[] = [];
+  let groups: Map<string, CfcAtom[]> | undefined;
   for (const atom of atoms) {
-    if (!unique.some((existing) => deepEqual(existing, atom))) {
-      unique.push(atom as JSONValue);
+    if (groups === undefined && unique.length > ATOM_SCAN_LIMIT) {
+      groups = groupAtomsByKey(unique);
     }
+    if (groups === undefined) {
+      if (!unique.some((kept) => deepEqual(kept, atom))) {
+        unique.push(atom as JSONValue);
+      }
+      continue;
+    }
+    const group = atomGroupFor(groups, deepEqualKey(atom));
+    if (group.some((kept) => deepEqual(kept, atom))) {
+      continue;
+    }
+    group.push(atom as JSONValue);
+    unique.push(atom as JSONValue);
   }
   return unique;
 };
@@ -116,8 +175,8 @@ export const cfcConfidentialityForObservationNode = (
   const observes = options.observes ?? "value";
 
   if (
-    observes === "value" && isRecord(options.schema) &&
-    isRecord(options.schema.ifc)
+    observes === "value" && isObjectOrArray(options.schema) &&
+    isObjectOrArray(options.schema.ifc)
   ) {
     joined.push(...(options.schema.ifc.confidentiality ?? []));
   }
@@ -218,10 +277,10 @@ const integrityAtomSatisfies = (
     // Concept-typed `actual` locally, BEFORE the resolver, so a misconfigured
     // trust statement whose `concrete` is itself Concept-shaped cannot let a
     // smuggled `Concept` atom pool-match its way through — fail closed here
-    // rather than lean on the upstream mint gate. `isRecord` admits arrays, so
+    // rather than lean on the upstream mint gate. `isObjectOrArray` admits arrays, so
     // this catches a Concept-typed array shape too.
     return concept.uri !== undefined &&
-      !(isRecord(actual) &&
+      !(isObjectOrArray(actual) &&
         (actual as { type?: unknown }).type === CFC_ATOM_TYPE.Concept) &&
       trust?.trustResolver !== undefined &&
       trust.trustResolver.conceptSatisfied(
@@ -279,7 +338,8 @@ export const cfcIntegrityWitnessKey = (
 ): string | null => {
   if (!integrityAtomSatisfies(required, actual, trust)) return null;
   if (
-    isRecord(actual) && isRecord((actual as { scope?: unknown }).scope) &&
+    isObjectOrArray(actual) &&
+    isObjectOrArray((actual as { scope?: unknown }).scope) &&
     (actual as { scope: { valueRef?: unknown } }).scope.valueRef !== undefined
   ) {
     const scope = { ...(actual as { scope: Record<string, unknown> }).scope };
@@ -333,10 +393,14 @@ export const cfcIntegritySatisfiesFloorCoherently = (
  * iff SOME ceiling clause `c` subsumes it — `alts(c) ⊆ alts(l)` — so a reader
  * the ceiling admits (satisfying `c`) is entitled to data guarded by `l`.
  *
- * On flat labels (every clause a singleton) this is byte-for-byte the previous
- * membership check: `clauseSubsumes(a, l)` reduces to `deepEqual(a, l)`, so
- * `∃ c ∈ ceiling: deepEqual(c, l)` ≡ "the atom is in the allowlist". The
- * clause form additionally makes a **reader-enumeration** ceiling clause
+ * On flat labels (every clause a singleton) this is the previous membership
+ * check on every atom but one: `clauseSubsumes(a, l)` reduces to
+ * `deepEqual(a, l)`, so `∃ c ∈ ceiling: deepEqual(c, l)` ≡ "the atom is in
+ * the allowlist". The exception is a `PersonalSpace(owner)` LABEL, which also
+ * meets a ceiling naming that owner — the owner is one of the space's
+ * readers (`clause.ts`).
+ *
+ * The clause form additionally makes a **reader-enumeration** ceiling clause
  * `{anyOf:[r₁,…,rₖ]}` require EVERY listed reader to satisfy each label clause
  * (`∀reader ∀clause`) — closing the quantifier hole where a multi-party label
  * `[User(A),User(B)]` (nobody alone may read) wrongly fit a flat `[A,B]`

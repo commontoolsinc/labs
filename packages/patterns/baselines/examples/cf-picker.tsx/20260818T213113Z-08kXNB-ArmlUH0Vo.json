@@ -1,0 +1,35 @@
+{
+  "argumentSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+  },
+  "pattern": "examples/cf-picker.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "counterAValue": {
+        "type": "number"
+      },
+      "counterBValue": {
+        "type": "number"
+      },
+      "counterCValue": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "counterAValue",
+      "counterBValue",
+      "counterCValue",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

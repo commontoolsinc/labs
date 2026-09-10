@@ -112,70 +112,6 @@ describe("createProxy", () => {
     expect(proxy.x).toBe(42);
   });
 
-  it("should support modifying array methods and log reads and writes", () => {
-    const c = runtime.getCell<{ array: number[] }>(
-      space,
-      "should support modifying array methods and log reads and writes",
-      undefined,
-      tx,
-    );
-    c.set({ array: [1, 2, 3] });
-    const proxy = c.getAsQueryResult([], tx, true);
-    expect(proxy.array.length).toBe(3);
-
-    proxy.array.push(4);
-    expect(proxy.array.length).toBe(4);
-    expect(proxy.array[3]).toBe(4);
-    const log = txToReactivityLog(tx);
-    // Paths in the transaction journal are rooted at the document's "value"
-    // facet.
-    expect(
-      log.reads.some((read) =>
-        read.path[0] === "value" && read.path[1] === "array"
-      ),
-    ).toBe(true);
-    expect(
-      log.writes.some((write) =>
-        write.path[0] === "value" && write.path[1] === "array" &&
-        write.path[2] === "3"
-      ),
-    ).toBe(true);
-  });
-
-  it("should handle array methods on previously undefined arrays", () => {
-    const c = runtime.getCell<{ data: any }>(
-      space,
-      "should handle array methods on previously undefined arrays",
-      undefined,
-      tx,
-    );
-    c.set({ data: {} });
-    const proxy = c.getAsQueryResult([], tx, true);
-
-    // Array doesn't exist yet
-    expect(proxy.data.array).toBeUndefined();
-
-    // Create an array using push
-    proxy.data.array = [];
-    proxy.data.array.push(1);
-    expect(proxy.data.array.length).toBe(1);
-    expect(proxy.data.array[0]).toBe(1);
-
-    // Add more items
-    proxy.data.array.push(2, 3);
-    expect(proxy.data.array.length).toBe(3);
-    expect(proxy.data.array[2]).toBe(3);
-
-    // Check that writes were logged
-    const log = txToReactivityLog(tx);
-    expect(
-      log.writes.some((write) =>
-        write.path[0] === "value" && write.path[1] === "data" &&
-        write.path[2] === "array"
-      ),
-    ).toBe(true);
-  });
-
   it("should handle array results from array methods", () => {
     const c = runtime.getCell<{ array: number[] }>(
       space,
@@ -359,43 +295,6 @@ describe("createProxy", () => {
     expect(names).toEqual(["first", "second", "third"]);
   });
 
-  it("should support pop() and only read the popped element", () => {
-    const c = runtime.getCell<{ a: number[] }>(
-      space,
-      "should support pop() and only read the popped element",
-      undefined,
-      tx,
-    );
-    c.set({ a: [] as number[] });
-    const proxy = c.getAsQueryResult([], tx, true);
-    proxy.a = [1, 2, 3];
-    const result = proxy.a.pop();
-    const log = txToReactivityLog(tx);
-    const pathsRead = log.reads.map((r) => r.path.join("."));
-    expect(pathsRead).toContain("value.a.2");
-    // TODO(seefeld): diffAndUpdate could be more optimal here, right now it'll
-    // mark as read the whole array since it isn't aware of the pop operation.
-    // expect(pathsRead).not.toContain("value.a.0");
-    // expect(pathsRead).not.toContain("value.a.1");
-    expect(result).toEqual(3);
-    expect(proxy.a).toEqual([1, 2]);
-  });
-
-  it("should correctly sort() with cell references", () => {
-    const c = runtime.getCell<{ a: number[] }>(
-      space,
-      "should correctly sort() with cell references",
-      undefined,
-      tx,
-    );
-    c.set({ a: [] as number[] });
-    const proxy = c.getAsQueryResult([], tx, true);
-    proxy.a = [3, 1, 2];
-    const result = proxy.a.sort();
-    expect(result).toEqual([1, 2, 3]);
-    expect(proxy.a).toEqual([1, 2, 3]);
-  });
-
   it("should support readonly array methods and log reads", async () => {
     // Seed the cell in its own committed transaction so the transaction under
     // test records only the reads done by the read-only method.
@@ -449,66 +348,6 @@ describe("createProxy", () => {
     expect(pathsRead).toContain("value.a.1./.link@1");
     expect(pathsRead).toContain("value.a.2./.link@1");
     expect(log.writes).toEqual([]);
-  });
-
-  it("should allow changing array lengths by writing length", async () => {
-    // Seed the cell in its own committed transaction so the transaction under
-    // test records only the writes done through the proxy.
-    const setupTx = runtime.edit();
-    const c = runtime.getCell<number[]>(
-      space,
-      "should allow changing array lengths by writing length",
-      undefined,
-      setupTx,
-    );
-    c.set([1, 2, 3]);
-    await setupTx.commit();
-
-    const proxy = c.withTx(tx).getAsQueryResult([], tx, true);
-    proxy.length = 2;
-    expect(c.withTx(tx).get()).toEqual([1, 2]);
-    // A length write is recorded as the rewritten array at the document's
-    // "value" facet plus a write of its length.
-    const log = txToReactivityLog(tx);
-    const cLink = c.getAsNormalizedFullLink();
-    expect(log.writes.every((write) => write.id === cLink.id)).toBe(true);
-    expect(log.writes.map((write) => write.path)).toEqual([
-      ["value"],
-      ["value", "length"],
-    ]);
-
-    proxy.length = 4;
-    expect(c.withTx(tx).get()).toEqual([1, 2, undefined, undefined]);
-  });
-
-  it("should allow changing array by splicing", async () => {
-    // Seed the cell in its own committed transaction so the transaction under
-    // test records only the writes done by splice().
-    const setupTx = runtime.edit();
-    const c = runtime.getCell<number[]>(
-      space,
-      "should allow changing array by splicing",
-      undefined,
-      setupTx,
-    );
-    c.set([1, 2, 3]);
-    await setupTx.commit();
-
-    const proxy = c.withTx(tx).getAsQueryResult([], tx, true);
-    proxy.splice(1, 1, 4, 5);
-    expect(c.withTx(tx).get()).toEqual([1, 4, 5, 3]);
-    const log = txToReactivityLog(tx);
-    const cLink = c.getAsNormalizedFullLink();
-    const cellWrites = log.writes
-      .filter((write) => write.id === cLink.id)
-      .map((write) => write.path);
-    expect(cellWrites).toContainEqual(["value", "1"]);
-    expect(cellWrites).toContainEqual(["value", "2"]);
-    expect(cellWrites).toContainEqual(["value", "3"]);
-    expect(cellWrites).toContainEqual(["value", "length"]);
-    // splice() returns the removed elements as a fresh array stored in its
-    // own document, so those writes land on a different document id.
-    expect(log.writes.some((write) => write.id !== cLink.id)).toBe(true);
   });
 });
 

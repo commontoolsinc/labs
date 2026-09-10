@@ -1,0 +1,1 @@
+{"demandedRows": 2303, "demandedInstances": 950, "demandedInstancesMax": 950, "demandedPairs": 2303, "demandedWriters": 223, "demandedWritersMax": 223, "demandRootEnters": 223, "demandRootLeaves": 0, "notCurrentRearms": 51, "demandPasses": 384, "demandPassMs": 3442.10187299996, "pushGrowthWakes": 161, "watchWakes": 247, "warmWakes": 0, "demandArrivals": 44, "warmRequests": 0}

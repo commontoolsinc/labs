@@ -1,7 +1,7 @@
 import { env, Page } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import {
@@ -33,11 +33,11 @@ describe("shared profile integration test", () => {
     identity = await Identity.generate({ implementation: "noble" });
     secondIdentity = await Identity.generate({ implementation: "noble" });
     cc = await initializePiecesController({
-      spaceName: SPACE_NAME,
+      space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity,
     });
-    sharedSpaceDid = cc.manager().getSpace();
+    sharedSpaceDid = cc.getSpace();
 
     // Pre-create the space-root (default) pattern so each browser boot's
     // `pattern:getSpaceRoot` storage-RESUMEs it instead of taking the create
@@ -57,12 +57,13 @@ describe("shared profile integration test", () => {
       "main.tsx",
     );
     const rootPath = join(import.meta.dirname!, "..");
-    const program = await cc.manager().runtime.harness.resolve(
-      new FileSystemProgramResolver(sourcePath, rootPath),
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: sourcePath, root: rootPath },
     );
     const piece = await cc.create(program, { start: true });
     pieceId = piece.id;
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink(() => {});
   });
 

@@ -5,6 +5,7 @@
  * This bare statement call consumes reactive callback fields and should cross an explicit
  * compute boundary instead of operating directly on `file.key(...)` refs in plain code.
  */
+
 import {
   Default,
   pattern,

@@ -1,6 +1,7 @@
 import ts from "typescript";
 import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { detectCallKind } from "./call-kind.ts";
+import { isSyntheticNode } from "./utils.ts";
 
 /**
  * Check if a declaration is at module scope (top-level of source file).
@@ -109,8 +110,8 @@ export function isDeclaredWithinFunction(
     //    transformed AST. If both are source nodes, they'll have matching positions.
     //    Skip synthetic nodes (pos=-1) as they won't match source positions.
     if (
-      current.pos !== -1 &&
-      func.pos !== -1 &&
+      !isSyntheticNode(current) &&
+      !isSyntheticNode(func) &&
       current.pos === func.pos &&
       current.end === func.end &&
       current.kind === func.kind

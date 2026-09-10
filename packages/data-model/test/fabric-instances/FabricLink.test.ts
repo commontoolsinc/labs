@@ -1,3 +1,19 @@
+/**
+ * A link as a `FabricInstance`: a payload object wrapped so that it can carry
+ * arbitrary nested values, a stored schema among them.
+ *
+ * Being an instance rather than a primitive is the first consequence -- a link
+ * is mutable until frozen rather than born immutable. The payload is validated
+ * on the way in, and the keys it refuses are the prototype-bearing ones: a
+ * payload is a plain record, and a key that would reach the prototype chain is
+ * not data.
+ *
+ * Cloning carries the interesting promises. A frozen deep clone shares an
+ * already-deep-frozen subtree rather than copying it, a mutable deep clone
+ * shares nothing, and a mutable shallow clone shares the payload reference
+ * outright.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -9,22 +25,23 @@ import {
 import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
-} from "@/fabric-instances/BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
-import { CODEC } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { jsonFromValue, valueFromJson } from "@/codec-json/index.ts";
+import { CODEC } from "@/codec-interface/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
+import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricLink", () => {
-  // Pure type-identity / supertype check: cross-cutting carve-out per the
-  // rule (doesn't fit a single member, isn't construction mechanics).
   it("extends `FabricInstance` (not `FabricPrimitive`)", () => {
+    // Pure type-identity / supertype check: cross-cutting carve-out per the
+    // rule (doesn't fit a single member, isn't construction mechanics).
+
     const link = new FabricLink({ id: "fid1:abc" });
     expect(link instanceof FabricInstance).toBe(true);
     expect(link instanceof FabricPrimitive).toBe(false);
@@ -45,7 +62,7 @@ describe("FabricLink", () => {
       expect(Object.isFrozen(new FabricLink({ id: "fid1:abc" }))).toBe(false);
     });
 
-    it("accepts a payload with a non-string (schema) value — an outgoing ref", () => {
+    it("keeps a non-string payload value, such as an outgoing ref's schema", () => {
       const link = new FabricLink({
         id: "fid1:abc",
         schema: { type: "object", properties: { x: { type: "string" } } },
@@ -56,27 +73,27 @@ describe("FabricLink", () => {
       });
     });
 
-    it("accepts an empty payload", () => {
+    it("keeps an empty payload empty", () => {
       expect(new FabricLink({}).payload).toEqual({});
     });
 
     describe("validation", () => {
-      it("rejects a non-plain-object payload", () => {
+      it("throws given a non-plain-object payload", () => {
         expect(() => new FabricLink([] as unknown as Record<string, never>))
           .toThrow("must be a plain object");
       });
 
-      it("rejects `null`", () => {
+      it("throws given `null`", () => {
         expect(() => new FabricLink(null as unknown as Record<string, never>))
           .toThrow("must be a plain object");
       });
 
-      it("rejects a `__proto__` key", () => {
+      it("throws given a `__proto__` key", () => {
         const evil = JSON.parse('{ "__proto__": "x" }');
         expect(() => new FabricLink(evil)).toThrow("forbidden key");
       });
 
-      it("rejects a `constructor` key", () => {
+      it("throws given a `constructor` key", () => {
         const evil = JSON.parse('{ "constructor": "x" }');
         expect(() => new FabricLink(evil)).toThrow("forbidden key");
       });
@@ -84,80 +101,88 @@ describe("FabricLink", () => {
   });
 
   describe("deep-freeze protocol", () => {
-    it("`deepFreeze()` freezes the instance, its payload, and nested values", () => {
-      const link = new FabricLink({
-        id: "fid1:abc",
-        schema: { type: "object" },
+    describe("deepFreeze()", () => {
+      it("freezes the instance, its payload, and nested values", () => {
+        const link = new FabricLink({
+          id: "fid1:abc",
+          schema: { type: "object" },
+        });
+        const frozen = deepFreeze(link);
+        expect(frozen).toBe(link); // frozen in place
+        expect(isDeepFrozen(frozen)).toBe(true);
+        expect(Object.isFrozen(frozen.payload)).toBe(true);
+        expect(Object.isFrozen(frozen.payload.schema)).toBe(true);
       });
-      const frozen = deepFreeze(link);
-      expect(frozen).toBe(link); // frozen in place
-      expect(isDeepFrozen(frozen)).toBe(true);
-      expect(Object.isFrozen(frozen.payload)).toBe(true);
-      expect(Object.isFrozen(frozen.payload.schema)).toBe(true);
     });
 
-    it("`isDeepFrozen()` is false for a mutable instance", () => {
-      expect(isDeepFrozen(new FabricLink({ id: "fid1:abc" }))).toBe(false);
+    describe("isDeepFrozen()", () => {
+      it("is `false` for a mutable instance", () => {
+        expect(isDeepFrozen(new FabricLink({ id: "fid1:abc" }))).toBe(false);
+      });
     });
 
-    it("`[IS_DEEP_FROZEN]` (direct) is false before, true after `[DEEP_FREEZE]`", () => {
-      // Direct member invocation: `isDeepFrozen()` short-circuits via
-      // `deepFreeze()`'s cache, so the protocol method only runs when called
-      // straight, as here.
-      const link = new FabricLink({ id: "fid1:abc", path: ["a"] });
-      expect(link[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
-      link[DEEP_FREEZE](subFreeze);
-      expect(link[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
-    });
-  });
-
-  describe("deepClone()", () => {
-    it("frozen clone is deep-frozen with an equal payload", () => {
-      const link = new FabricLink({ id: "fid1:abc", path: ["a"] });
-      const clone = link.deepClone(true) as FabricLink;
-      expect(isDeepFrozen(clone)).toBe(true);
-      expect(clone.payload).toEqual(link.payload);
-    });
-
-    it("identity-returns an already-deep-frozen instance", () => {
-      const link = deepFreeze(new FabricLink({ id: "fid1:abc" }));
-      expect(link.deepClone(true)).toBe(link);
-    });
-
-    it("mutable clone is independent (no shared payload structure)", () => {
-      const link = new FabricLink({ id: "fid1:abc" });
-      const clone = link.deepClone(false) as FabricLink;
-      expect(Object.isFrozen(clone)).toBe(false);
-      expect(clone.payload).not.toBe(link.payload);
-      (clone.payload as MutableFabricPlainObjectLayer).id = "fid1:xyz";
-      expect(link.payload.id).toBe("fid1:abc");
-    });
-
-    it("frozen clone identity-shares an already-deep-frozen payload subtree", () => {
-      // The `[DEEP_CLONE_CORE](frozen)` core clones the payload to the
-      // requested frozenness, so the "maximal structural sharing" the
-      // `deepClone()` contract promises holds: a nested subtree that is
-      // already deep-frozen rides into the frozen clone by identity.
-      const schema = deepFreeze({ type: "object" });
-      const link = new FabricLink({ id: "fid1:abc", schema });
-      const clone = link.deepClone(true) as FabricLink;
-      expect(clone).not.toBe(link);
-      expect(isDeepFrozen(clone)).toBe(true);
-      expect(clone.payload.schema).toBe(schema);
+    describe("`[IS_DEEP_FROZEN]` (direct)", () => {
+      it("is `false` before and `true` after `[DEEP_FREEZE]`", () => {
+        // Direct member invocation: `isDeepFrozen()` short-circuits via
+        // `deepFreeze()`'s cache, so the protocol method only runs when called
+        // straight, as here.
+        const link = new FabricLink({ id: "fid1:abc", path: ["a"] });
+        expect(link[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
+        link[DEEP_FREEZE](subFreeze);
+        expect(link[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
+      });
     });
   });
 
-  describe("shallowClone()", () => {
-    it("mutable shallow clone shares the payload reference", () => {
-      const link = new FabricLink({ id: "fid1:abc" });
-      const clone = link.shallowClone(false) as FabricLink;
-      expect(clone).not.toBe(link);
-      expect(clone.payload).toBe(link.payload);
+  describe("instance members", () => {
+    describe("deepClone()", () => {
+      it("returns a deep-frozen clone with an equal payload", () => {
+        const link = new FabricLink({ id: "fid1:abc", path: ["a"] });
+        const clone = link.deepClone(true) as FabricLink;
+        expect(isDeepFrozen(clone)).toBe(true);
+        expect(clone.payload).toEqual(link.payload);
+      });
+
+      it("identity-returns an already-deep-frozen instance", () => {
+        const link = deepFreeze(new FabricLink({ id: "fid1:abc" }));
+        expect(link.deepClone(true)).toBe(link);
+      });
+
+      it("returns an independent mutable clone (no shared payload structure)", () => {
+        const link = new FabricLink({ id: "fid1:abc" });
+        const clone = link.deepClone(false) as FabricLink;
+        expect(Object.isFrozen(clone)).toBe(false);
+        expect(clone.payload).not.toBe(link.payload);
+        (clone.payload as MutableFabricPlainObjectLayer).id = "fid1:xyz";
+        expect(link.payload.id).toBe("fid1:abc");
+      });
+
+      it("returns a frozen clone that identity-shares an already-deep-frozen payload subtree", () => {
+        // The `[DEEP_CLONE_CORE](frozen)` core clones the payload to the
+        // requested frozenness, so the "maximal structural sharing" the
+        // `deepClone()` contract promises holds: a nested subtree that is
+        // already deep-frozen rides into the frozen clone by identity.
+        const schema = deepFreeze({ type: "object" });
+        const link = new FabricLink({ id: "fid1:abc", schema });
+        const clone = link.deepClone(true) as FabricLink;
+        expect(clone).not.toBe(link);
+        expect(isDeepFrozen(clone)).toBe(true);
+        expect(clone.payload.schema).toBe(schema);
+      });
     });
 
-    it("identity-returns an already-frozen instance when asked for frozen", () => {
-      const link = deepFreeze(new FabricLink({ id: "fid1:abc" }));
-      expect(link.shallowClone(true)).toBe(link);
+    describe("shallowClone()", () => {
+      it("returns a mutable shallow clone that shares the payload reference", () => {
+        const link = new FabricLink({ id: "fid1:abc" });
+        const clone = link.shallowClone(false) as FabricLink;
+        expect(clone).not.toBe(link);
+        expect(clone.payload).toBe(link.payload);
+      });
+
+      it("identity-returns an already-frozen instance when asked for frozen", () => {
+        const link = deepFreeze(new FabricLink({ id: "fid1:abc" }));
+        expect(link.shallowClone(true)).toBe(link);
+      });
     });
   });
 
@@ -165,7 +190,7 @@ describe("FabricLink", () => {
     describe("[CODEC]", () => {
       const codec = FabricLink[CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Link;
-      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Link` wire type tag", () => {
@@ -185,17 +210,35 @@ describe("FabricLink", () => {
       describe("encode()", () => {
         it("encodes to the payload object", () => {
           const link = new FabricLink({ id: "fid1:abc", path: ["a", "b"] });
-          expect(codec.encode(link)).toEqual({
+          expect(codec.encode(link, env)).toEqual({
             id: "fid1:abc",
             path: ["a", "b"],
           });
         });
       });
 
+      describe("canDecode()", () => {
+        it("returns `true` for a record", () => {
+          expect(codec.canDecode({ id: "fid1:abc" })).toBe(true);
+        });
+
+        it("returns `false` for state that is not a record", () => {
+          expect(codec.canDecode("nope")).toBe(false);
+        });
+      });
+
       describe("decode()", () => {
-        it("decodes non-object state to `ProblematicValue`", () => {
-          expect(codec.decode(expectedTag, "nope", context))
-            .toBeInstanceOf(ProblematicValue);
+        it("returns a `ProblematicValue` for a payload the constructor rejects", () => {
+          // `canDecode()` accepts any record, so what reaches the `catch` is a
+          // record the constructor will not take. A reserved key is one such
+          // payload, and the wire is where it plausibly arrives: `JSON.parse`
+          // is what creates that name as an own property.
+          const evil = JSON.parse('{ "id": "fid1:abc", "__proto__": "x" }');
+          const result = codec.decode(expectedTag, evil, env);
+
+          expect(result).toBeInstanceOf(ProblematicValue);
+          expect((result as ProblematicValue).wireTypeTag).toBe(expectedTag);
+          expect((result as ProblematicValue).error).toMatch(/forbidden key/);
         });
 
         it("round-trips a payload with a nested schema value", () => {
@@ -205,8 +248,8 @@ describe("FabricLink", () => {
           });
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(link),
-            context,
+            codec.encode(link, env),
+            env,
           ) as FabricLink;
           expect(decoded).toBeInstanceOf(FabricLink);
           expect(decoded.payload).toEqual(link.payload);
@@ -215,16 +258,19 @@ describe("FabricLink", () => {
     });
   });
 
-  // Free functions exercising `FabricLink` rather than members of the class
-  // itself, so they live directly under the class `describe()`.
-  describe("round-trip via `jsonFromValue()` / `valueFromJson()`", () => {
+  describe("round-trip via `jsonFromFabricValue()` / `fabricFromJsonValue()`", () => {
+    // Free functions exercising `FabricLink` rather than members of the class
+    // itself, so they live directly under the class `describe()`.
+
     it("round-trips a `FabricLink`, including a nested schema", () => {
       const original = new FabricLink({
         id: "fid1:abc",
         path: ["a", "b"],
         schema: { type: "object", properties: { x: { type: "number" } } },
       });
-      const restored = valueFromJson(jsonFromValue(original)) as FabricLink;
+      const restored = fabricFromJsonValue(
+        jsonFromFabricValue(original),
+      ) as FabricLink;
       expect(restored).toBeInstanceOf(FabricLink);
       expect(restored.payload).toEqual(original.payload);
     });
@@ -250,9 +296,10 @@ describe("FabricLink", () => {
     });
   });
 
-  // A `FabricLink` nested in a container must clone through the generic
-  // `FabricInstance` clone path (no dedicated dispatch case anymore).
   describe("generic clone dispatch (nested in a container)", () => {
+    // A `FabricLink` nested in a container must clone through the generic
+    // `FabricInstance` clone path (no dedicated dispatch case anymore).
+
     it("deep-clones a container holding one without throwing", () => {
       const link = new FabricLink({ id: "fid1:abc" });
       const cloned = cloneIfNecessary({ link }, { frozen: true });

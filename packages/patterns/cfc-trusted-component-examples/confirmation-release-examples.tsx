@@ -5,6 +5,7 @@ import {
   pattern,
   Stream,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import {
@@ -14,7 +15,7 @@ import {
 
 export type ConfirmationReleaseExampleOutput = {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   decoyStatus: string;
   recipientLabel?: string;
   payloadPreview?: string;
@@ -271,10 +272,10 @@ export default pattern<Record<PropertyKey, never>>(() => ({
             ))}
           </cf-vstack>
         </cf-card>
-        <div>{FinanceRecipientConfirmExample}</div>
-        <div>{CustomerSupportRecipientConfirmExample}</div>
-        <div>{PatientCaseRedactedReleaseExample}</div>
-        <div>{SecurityIncidentRedactedReleaseExample}</div>
+        <div>{FinanceRecipientConfirmExample({})}</div>
+        <div>{CustomerSupportRecipientConfirmExample({})}</div>
+        <div>{PatientCaseRedactedReleaseExample({})}</div>
+        <div>{SecurityIncidentRedactedReleaseExample({})}</div>
       </cf-vstack>
     </cf-screen>
   ),

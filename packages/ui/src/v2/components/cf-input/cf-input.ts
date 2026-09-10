@@ -1,8 +1,14 @@
-import { css, html } from "lit";
-import { ifDefined } from "lit/directives/if-defined.js";
-import { property } from "lit/decorators.js";
-import { BaseElement } from "../../core/base-element.ts";
+import { stringSchema } from "@commonfabric/runner/schemas";
+import { type CellHandle } from "@commonfabric/runtime-client";
 import { consume } from "@lit/context";
+import { css, html } from "lit";
+import { property } from "lit/decorators.js";
+import { ifDefined } from "lit/directives/if-defined.js";
+
+import { BaseElement } from "../../core/base-element.ts";
+import { createStringCellController } from "../../core/cell-controller.ts";
+import { createFormFieldController } from "../../core/form-field-controller.ts";
+import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import {
   applyThemeToElement,
   type CFTheme,
@@ -10,11 +16,6 @@ import {
   type ComponentSize,
   defaultTheme,
 } from "../theme-context.ts";
-import { type CellHandle } from "@commonfabric/runtime-client";
-import { stringSchema } from "@commonfabric/runner/schemas";
-import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
-import { createStringCellController } from "../../core/cell-controller.ts";
-import { createFormFieldController } from "../../core/form-field-controller.ts";
 
 /**
  * CFInput - Enhanced input field with support for various types, validation patterns, and reactive data binding
@@ -440,7 +441,10 @@ export class CFInput extends BaseElement {
     },
   });
 
-  // Form field controller handles buffering when in cf-form context
+  /**
+   * Form field controller, which handles buffering when in a `cf-form`
+   * context.
+   */
   private _formField = createFormFieldController<string>(this, {
     cellController: this._cellController,
     validate: () => ({
@@ -482,7 +486,7 @@ export class CFInput extends BaseElement {
     this.addEventListener("focus", this._forwardFocusToInput);
   }
 
-  // Theme consumption
+  /** The theme, consumed from the provider. */
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   // deno-lint-ignore no-explicit-any
@@ -504,11 +508,10 @@ export class CFInput extends BaseElement {
   }
 
   /**
-   * Flush any pending edit and await its commit to the bound cell, so callers
-   * can rely on the typed value having been applied and the set() round-trip
-   * completed before continuing. Does not surface a remote-commit rejection (the
-   * underlying set() logs and swallows that). When the field is not bound to a
-   * Cell, it falls back to the cell controller's setValue.
+   * Flushes any pending edit and awaits its confirmed commit to the bound cell.
+   * Resolves once the runtime commits the typed value, and rejects when the
+   * write fails. When the field is not bound to a cell, falls back to the cell
+   * controller's `setValue()`.
    *
    * This is for standalone inputs. Inside a cf-form the form owns durable writes
    * and flushes every field atomically on submit, so commit() resolves without

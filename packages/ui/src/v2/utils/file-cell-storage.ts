@@ -20,8 +20,10 @@ export interface StoredFile {
 export interface StoreFileOptions {
   file: File;
   runtime: RuntimeClient;
+
   /** The space the file's blob belongs to — part of its address. */
   space: DID;
+
   width?: number;
   height?: number;
   metadata?: Record<string, unknown>;
@@ -39,7 +41,7 @@ export async function uploadFile(
   const upload = await runtime.uploadBlob({
     space,
     contentType: mediaType,
-    body: new Uint8Array(buffer),
+    body: buffer,
     suffix: fileSuffix(file.name, mediaType),
   });
 

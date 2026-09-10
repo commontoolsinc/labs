@@ -1,5 +1,7 @@
-import ts from "typescript";
 import { assert, assertEquals } from "@std/assert";
+
+import ts from "typescript";
+
 import { analyzeFunctionCapabilities } from "../../src/policy/mod.ts";
 
 // These tests drive `analyzeFunctionCapabilities` through parameter-summary
@@ -605,7 +607,9 @@ Deno.test(
   },
 );
 
-// --- Batch 2: checker-gated and shape-specific branches ---------------------
+//
+// Batch 2: checker-gated and shape-specific branches
+//
 
 Deno.test(
   "numeric destructure key records a numeric path segment",
@@ -937,7 +941,9 @@ Deno.test(
   },
 );
 
-// --- Batch 3: assignment patterns, opaque roots, method dispatch edges ------
+//
+// Batch 3: assignment patterns, opaque roots, method dispatch edges
+//
 
 Deno.test(
   "parenthesized assignment destructure target treats the source as passthrough",
@@ -1127,7 +1133,9 @@ Deno.test(
   },
 );
 
-// --- Batch 4: aliased identity-writer args, nested patterns, dynamic calls --
+//
+// Batch 4: aliased identity-writer args, nested patterns, dynamic calls
+//
 
 Deno.test(
   "aliased local pushed into a cell writer is read at its aliased path",
@@ -1228,7 +1236,9 @@ Deno.test(
   },
 );
 
-// --- Batch 5: shape equality, dynamic markers, identity array items ---------
+//
+// Batch 5: shape equality, dynamic markers, identity array items
+//
 
 Deno.test(
   "?? fallback between differently-shaped aliases keeps both source reads",
@@ -1313,7 +1323,9 @@ Deno.test(
   },
 );
 
-// --- Batch 6: whole-root identity, array-item identity, param array binding --
+//
+// Batch 6: whole-root identity, array-item identity, param array binding
+//
 
 Deno.test(
   "equals() over the whole tracked root records a root comparable passthrough",
@@ -1382,7 +1394,9 @@ Deno.test(
   },
 );
 
-// --- Batch 7: key() wrapper unwrapping, identity-only aliased arguments ------
+//
+// Batch 7: key() wrapper unwrapping, identity-only aliased arguments
+//
 
 Deno.test(
   "key() call wrapped in parentheses then chained still defers to member access",
@@ -1417,7 +1431,9 @@ Deno.test(
   },
 );
 
-// --- Batch 8: get()-chain specific paths restored across a for-of loop ------
+//
+// Batch 8: get()-chain specific paths restored across a for-of loop
+//
 
 Deno.test(
   "get()-chain specific-path aliases survive a for-of scope and stay narrowed",

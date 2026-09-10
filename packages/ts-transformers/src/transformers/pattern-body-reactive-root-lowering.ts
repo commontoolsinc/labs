@@ -4,8 +4,10 @@ import {
   getLiftAppliedInnerCall,
   getLiftAppliedInputAndCallback,
   getTypeAtLocationWithFallback,
+  isSyntheticNode,
   isWildcardTraversalCall,
   type NormalizedDataFlow,
+  preserveSourceMapRange,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { TransformationContext } from "../core/mod.ts";
@@ -36,8 +38,8 @@ import {
   isTopmostMemberAccess,
 } from "./opaque-roots.ts";
 import {
-  assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,
+  resolveComputeWrapCandidate,
 } from "./expression-rewrite/emitters/compute-wrap-invariants.ts";
 import {
   classifyUnsupportedExpressionSiteCallRoot,
@@ -121,14 +123,14 @@ function isSelfPathSegment(
     isCommonFabricKeyExpression(segment, context, "SELF");
 }
 
-function registerReplacementType(
+/** Carries the source-map range and inferred type to a semantic replacement. */
+function registerReplacement(
   replacement: ts.Node,
   original: ts.Node,
   context: TransformationContext,
 ): void {
-  const typeRegistry = context.options.state?.typeRegistry;
-  if (!typeRegistry) return;
-
+  preserveSourceMapRange(replacement, original);
+  const typeRegistry = context.state.typeRegistry;
   const originalType = getTypeAtLocationWithFallback(
     original,
     context.checker,
@@ -362,7 +364,7 @@ function rewriteTrackedOpaquePatternBody(
       info.path,
       context.factory,
     );
-    registerReplacementType(expression, dataFlow.expression, context);
+    registerReplacement(expression, dataFlow.expression, context);
     return { ...dataFlow, expression };
   };
 
@@ -481,12 +483,15 @@ function rewriteTrackedOpaquePatternBody(
     }
 
     if (context.getReactiveContext(pendingWrap).kind !== "compute") {
-      assertValidComputeWrapCandidate(
+      const decision = resolveComputeWrapCandidate(
         pendingWrap,
         initializer,
         "pattern callback initializer",
         context,
       );
+      if (decision.kind === "skip-reported") {
+        return undefined;
+      }
     }
 
     return createReactiveWrapperForExpression(
@@ -644,10 +649,13 @@ function rewriteTrackedOpaquePatternBody(
         rootIsFreshOpaqueOrigin = ts.isCallExpression(initializer) &&
           isOpaqueOriginCall(initializer, context);
         rewrittenDeclarations.push(
-          context.factory.createVariableDeclaration(
-            rootIdentifier,
-            undefined,
-            undefined,
+          preserveSourceMapRange(
+            context.factory.createVariableDeclaration(
+              rootIdentifier,
+              undefined,
+              undefined,
+              declaration.initializer,
+            ),
             declaration.initializer,
           ),
         );
@@ -679,11 +687,14 @@ function rewriteTrackedOpaquePatternBody(
         }
 
         rewrittenDeclarations.push(
-          context.factory.createVariableDeclaration(
-            context.factory.createIdentifier(binding.localName),
-            undefined,
-            undefined,
-            loweredInitializer,
+          preserveSourceMapRange(
+            context.factory.createVariableDeclaration(
+              context.factory.createIdentifier(binding.localName),
+              undefined,
+              undefined,
+              loweredInitializer,
+            ),
+            binding.bindingNode,
           ),
         );
       }
@@ -725,7 +736,7 @@ function rewriteTrackedOpaquePatternBody(
     if (ts.isCallExpression(node)) {
       const wrappedCellGet = maybeWrapCellGetJsxCall(node);
       if (wrappedCellGet) {
-        registerReplacementType(wrappedCellGet, node, context);
+        registerReplacement(wrappedCellGet, node, context);
         return wrappedCellGet;
       }
 
@@ -750,7 +761,7 @@ function rewriteTrackedOpaquePatternBody(
       if (isDynamicElementAccess(node)) {
         const wrappedDynamicAccess = maybeWrapDynamicJsxAccess(node);
         if (wrappedDynamicAccess) {
-          registerReplacementType(wrappedDynamicAccess, node, context);
+          registerReplacement(wrappedDynamicAccess, node, context);
           return wrappedDynamicAccess;
         }
       }
@@ -804,7 +815,7 @@ function rewriteTrackedOpaquePatternBody(
       if (!hasTrackedStaticAccess && isDynamicElementAccess(visited)) {
         const wrappedDynamicAccess = maybeWrapDynamicJsxAccess(visited);
         if (wrappedDynamicAccess) {
-          registerReplacementType(wrappedDynamicAccess, visited, context);
+          registerReplacement(wrappedDynamicAccess, visited, context);
           return wrappedDynamicAccess;
         }
       }
@@ -816,7 +827,7 @@ function rewriteTrackedOpaquePatternBody(
       if (info.dynamic) {
         const wrappedDynamicAccess = maybeWrapDynamicJsxAccess(visited);
         if (wrappedDynamicAccess) {
-          registerReplacementType(wrappedDynamicAccess, visited, context);
+          registerReplacement(wrappedDynamicAccess, visited, context);
           return wrappedDynamicAccess;
         }
 
@@ -856,7 +867,7 @@ function rewriteTrackedOpaquePatternBody(
               rewrittenReceiver,
               visited.name.text,
             );
-          registerReplacementType(rewrittenMethod, visited, context);
+          registerReplacement(rewrittenMethod, visited, context);
           return rewrittenMethod;
         }
 
@@ -892,7 +903,7 @@ function rewriteTrackedOpaquePatternBody(
           info.path,
           context.factory,
         );
-        registerReplacementType(rewritten, visited, context);
+        registerReplacement(rewritten, visited, context);
         return rewritten;
       }
     }
@@ -1149,7 +1160,7 @@ function rewriteLiftAppliedCallbackComputedKeyAccesses(
       context.factory.createIdentifier(visited.expression.text),
       context.cfHelpers.getHelperExpr(keyName),
     );
-    registerReplacementType(rewritten, visited, context);
+    registerReplacement(rewritten, visited, context);
     return rewritten;
   };
 
@@ -1435,7 +1446,7 @@ function reportInlineReactiveRootAccesses(
       // `(items ?? []).map(...)` or similar into a synthesized
       // `.method-on-call` shape that LOOKS like the bug but isn't
       // user-authored. This is a build-time guard for user-authored shapes.
-      node.pos >= 0 &&
+      !isSyntheticNode(node) &&
       // Skip when this access is the callee of a method call AND its
       // immediate receiver is a reactive-origin call itself
       // (`Writable.of(...).for(...)`, `wish(...).key(...)`, etc.). Those

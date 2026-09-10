@@ -8,15 +8,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import type { FabricValue } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { claim } from "../src/storage/transaction/attestation.ts";
 import type {
   IAttestation,
   ISpaceReplica,
   State,
 } from "../src/storage/interface.ts";
-import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 
 // A replica whose stored state carries `storedValue`. `getDocument` is
 // deliberately absent so `claim()` takes its `read`-based `actual` path (the
@@ -27,9 +26,7 @@ const replicaHolding = (storedValue: FabricValue): ISpaceReplica => {
     the: "application/json",
     of: "of:attest-claim-fabric",
     is: storedValue,
-    // A real cause hash is irrelevant to the value comparison under test.
-    cause: undefined as unknown as FabricHash,
-  } as State;
+  };
   return {
     did: () => "did:test:attest" as ReturnType<ISpaceReplica["did"]>,
     get: () => state,
@@ -57,7 +54,7 @@ describe("attestation claim(): Fabric-aware consistency check", () => {
     expect(result.error).toBeUndefined();
   });
 
-  it("reports StateInconsistency when the Fabric value actually changed (CT-1770)", () => {
+  it("reports StateInconsistency when the `FabricValue` actually changed (CT-1770)", () => {
     // The attested value and the stored value are distinct `FabricBytes` that
     // differ only in their (private `#fields`) byte content: a genuine change,
     // which must surface as the `StorageTransactionInconsistent` error the

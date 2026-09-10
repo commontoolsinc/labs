@@ -9,6 +9,7 @@
  * `mapWithPattern` because `item` comes from a mapWithPattern element,
  * NOT from the lift-applied computation's captures.
  */
+
 import { Cell, computed, Default, pattern, UI } from "commonfabric";
 
 interface Tag {

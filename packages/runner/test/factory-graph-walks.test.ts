@@ -10,18 +10,19 @@ import {
 import {
   FabricMap,
   FabricSet,
+} from "@commonfabric/data-model/fabric-instances";
+import {
   ProblematicValue,
   UnknownValue,
-} from "@commonfabric/data-model/fabric-instances";
+} from "@commonfabric/data-model/codec-common";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 import {
   convertCellsToLinks,
   prepareFactoryStatesForWrite,
-  recursivelyAddIDIfNeeded,
 } from "../src/cell.ts";
 import { applyInputIfcToOutput } from "../src/builder/node-utils.ts";
-import { toJSONWithAliasBindings } from "../src/builder/json-utils.ts";
+import { withAliasBindings } from "../src/builder/to-encodable-form.ts";
 import { traverseValue } from "../src/builder/traverse-utils.ts";
 import {
   deriveFactoryStateCopy,
@@ -31,7 +32,6 @@ import {
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { reactive } from "../src/builder/reactive.ts";
 import type { Frame, PatternFactory } from "../src/builder/types.ts";
-import { ID } from "../src/builder/types.ts";
 import {
   ExecutableRegistry,
   verifiedWalkChildValues,
@@ -39,8 +39,6 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { StorageManager as V2StorageManager } from "../src/storage/v2.ts";
-import { ContextualFlowControl } from "../src/cfc.ts";
 import type { NormalizedLink } from "../src/link-types.ts";
 import {
   normalizeSandboxResult,
@@ -242,7 +240,7 @@ describe("factory-aware graph and static walks", () => {
     const factory = bindPattern({ bytes });
 
     const traversed = traverseValue(factory, () => undefined);
-    const serialized = toJSONWithAliasBindings({ factory }) as unknown as {
+    const serialized = withAliasBindings({ factory }) as unknown as {
       factory: typeof factory;
     };
 
@@ -255,41 +253,6 @@ describe("factory-aware graph and static walks", () => {
       ((factoryStateOf(serialized.factory) as LivePatternFactoryState)
         .params as { bytes: unknown }).bytes,
     ).toBe(bytes);
-  });
-
-  it("adds array IDs through hidden state and rejects a real factory cycle", () => {
-    const bytes = new FabricBytes(new Uint8Array([7, 8, 9]));
-    const factory = bindPattern({ rows: [{ name: "Ada" }], bytes });
-    const mapped = recursivelyAddIDIfNeeded(factory, frame);
-    const params = (factoryStateOf(mapped) as LivePatternFactoryState)
-      .params as {
-        rows: Array<Record<PropertyKey, unknown>>;
-        bytes: unknown;
-      };
-
-    expect(mapped).not.toBe(factory);
-    expect(params.rows[0][ID]).toBe(0);
-    expect(params.bytes).toBe(bytes);
-
-    // A decoded/canonical factory is already one atomic deep-frozen Fabric
-    // value. The mutable-array anchoring walk must not inject runner-only ID
-    // symbols into its validated codec state.
-    const shell = createFactoryShell({
-      kind: "pattern",
-      ref: REF,
-      argumentSchema: true,
-      resultSchema: true,
-      paramsSchema: true,
-      params: { rows: [{ name: "Grace" }] },
-    });
-    expect(recursivelyAddIDIfNeeded(shell, frame)).toBe(shell);
-
-    const cyclicParams: { self?: unknown } = {};
-    const cyclic = bindPattern(cyclicParams);
-    cyclicParams.self = cyclic;
-    expect(() => recursivelyAddIDIfNeeded(cyclic, frame)).toThrow(
-      "Circular reference detected in factory state",
-    );
   });
 
   it("rejects Cells hidden inside a factory passed to Cell.of", () => {
@@ -366,7 +329,7 @@ describe("factory-aware graph and static walks", () => {
     expect(getArtifactEntryRef(outer)).toBeUndefined();
   });
 
-  it("collects links from factory params and space selectors", () => {
+  it("collects links from factory params and space selectors", async () => {
     const paramsLink = {
       "/": {
         "link@1": {
@@ -400,33 +363,32 @@ describe("factory-aware graph and static walks", () => {
       path: [],
     };
     const synced: string[] = [];
-    const collectLinkedCellSyncs = (V2StorageManager.prototype as unknown as {
-      collectLinkedCellSyncs: (...args: unknown[]) => void;
-    }).collectLinkedCellSyncs;
-    const fakeStorage = {
-      collectLinkedCellSyncs,
-      trackPendingProviderSync: (
-        _address: unknown,
-        sync: () => Promise<unknown>,
-      ) => sync(),
-      open: () => ({
-        sync: (id: string) => {
-          synced.push(id);
-          return Promise.resolve();
+    const originalOpen = storageManager.open.bind(storageManager);
+    storageManager.open = ((openSpace) => {
+      const provider = originalOpen(openSpace);
+      return new Proxy(provider, {
+        get(target, property, receiver) {
+          if (property === "sync") {
+            return (id: string) => {
+              synced.push(id);
+              return Promise.resolve({ ok: {} });
+            };
+          }
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
         },
-      }),
-    };
+      });
+    }) as typeof storageManager.open;
+    const promises: Promise<unknown>[] = [];
 
-    collectLinkedCellSyncs.call(
-      fakeStorage,
+    storageManager.accessForTestingOnly.collectLinkedCellSyncs(
       factory,
       base,
       undefined,
-      new ContextualFlowControl(),
-      [],
+      promises,
       new Set(),
     );
-
+    await Promise.all(promises);
     expect(synced.sort()).toEqual([
       "of:factory-params-link",
       "of:factory-selector-link",

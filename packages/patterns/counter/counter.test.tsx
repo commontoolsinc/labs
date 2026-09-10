@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/counter/counter.test.tsx --verbose
  */
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import Counter from "./counter.tsx";
 
 export default pattern(() => {
@@ -55,7 +55,7 @@ export default pattern(() => {
   });
 
   // ==========================================================================
-  // Assertions - computed booleans
+  // Assertions - assert() over pattern state
   // ==========================================================================
 
   // Initial state assertions
@@ -92,7 +92,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Test 1: Initial state ===
       { assertion: assert_initial_value_is_0 },
       { assertion: assert_initial_value_is_5 },

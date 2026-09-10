@@ -1,5 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 /** Remove runner-owned inputs from the schema exposed to an external caller. */
 export function stripFrameworkProvidedPaths(
@@ -17,9 +17,9 @@ function stripFrameworkProvidedPath(
   schema: JSONSchema,
   path: readonly string[],
 ): JSONSchema {
-  if (!isRecord(schema) || path.length === 0) return schema;
+  if (!isObjectNotArray(schema) || path.length === 0) return schema;
   const [head, ...tail] = path;
-  if (!head || !isRecord(schema.properties)) return schema;
+  if (!head || !isObjectNotArray(schema.properties)) return schema;
   const existing = schema.properties[head] as JSONSchema | undefined;
   if (existing === undefined) return schema;
 
@@ -51,9 +51,10 @@ function stripFrameworkProvidedPath(
 }
 
 function isSystemOnlyObjectSchema(schema: JSONSchema): boolean {
-  if (!isRecord(schema) || schema.type !== "object") return false;
+  if (!isObjectNotArray(schema) || schema.type !== "object") return false;
   if (
-    !isRecord(schema.properties) || Object.keys(schema.properties).length > 0
+    !isObjectNotArray(schema.properties) ||
+    Object.keys(schema.properties).length > 0
   ) {
     return false;
   }
@@ -63,7 +64,7 @@ function isSystemOnlyObjectSchema(schema: JSONSchema): boolean {
 }
 
 function hasRequiredAuthoredProperty(schema: JSONSchema): boolean {
-  return isRecord(schema) && Array.isArray(schema.required) &&
+  return isObjectNotArray(schema) && Array.isArray(schema.required) &&
     schema.required.length > 0;
 }
 
@@ -96,7 +97,7 @@ function setFrameworkProvidedPath(
   if (!head) return input;
   if (tail.length === 0) return { ...input, [head]: value };
   const existing = input[head];
-  const child = isRecord(existing) && !Array.isArray(existing) ? existing : {};
+  const child = isObjectNotArray(existing) ? { ...existing } : {};
   return {
     ...input,
     [head]: setFrameworkProvidedPath(child, tail, value),

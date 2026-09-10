@@ -1,35 +1,30 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env
+
 /**
  * .claude/scripts/ask-before-delete-spaces.ts
  *
  * Claude Code Pre-Tool hook.
- * - Forces user confirmation when `--dangerously-clear-all-spaces` is detected
- * - Allows all other commands through
+ * - Asks the user before a command carrying
+ *   `--dangerously-clear-all-spaces` runs.
  */
 
-import { guardProjectDir } from "./common/guard.ts";
+import { guardProjectDir, parseCommand } from "./common/guard.ts";
 guardProjectDir();
 
-const rawInput = await new Response(Deno.stdin.readable).text();
-
-let cmd = "";
-try {
-  const payload = JSON.parse(rawInput);
-  cmd = payload?.tool_input?.command ?? "";
-} catch {
-  Deno.exit(0);
-}
+const cmd = await parseCommand();
 
 if (/--dangerously-clear-all-spaces/.test(cmd)) {
-  const output = {
+  console.log(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "ask",
       permissionDecisionReason:
-        "WARNING: This will permanently delete all spaces/databases in packages/toolshed/cache/memory. Are you sure?",
+        "This permanently deletes every local space database, which is " +
+        "the `cache/memory` directory under `packages/toolshed`. Nothing " +
+        "restores them afterwards. To clear the disposable caches and " +
+        "leave the databases alone, use `--clear-cache` instead.",
     },
-  };
-  console.log(JSON.stringify(output));
+  }));
 }
 
 Deno.exit(0);

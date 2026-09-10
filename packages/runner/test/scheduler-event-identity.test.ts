@@ -1,3 +1,22 @@
+import type { MemorySpace } from "@commonfabric/memory/interface";
+
+import type { EnsurePieceVerdict } from "../src/ensure-piece-running.ts";
+import type { NormalizedFullLink } from "../src/link-utils.ts";
+import type { Runtime } from "../src/runtime.ts";
+import {
+  mintEventId,
+  scopeCallerEventId,
+} from "../src/scheduler/event-identity.ts";
+import {
+  dropQueuedEvent,
+  queueSchedulerEvent,
+} from "../src/scheduler/events.ts";
+import type {
+  EventHandler,
+  EventHandlerRegistration,
+  QueuedEvent,
+} from "../src/scheduler/types.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
   createSchedulerTestRuntime,
   describe,
@@ -6,23 +25,6 @@ import {
   it,
   space,
 } from "./scheduler-test-utils.ts";
-import {
-  mintEventId,
-  scopeCallerEventId,
-} from "../src/scheduler/event-identity.ts";
-import {
-  addSchedulerEventHandler,
-  dropQueuedEvent,
-  queueSchedulerEvent,
-} from "../src/scheduler/events.ts";
-import type { NormalizedFullLink } from "../src/link-utils.ts";
-import type { Runtime } from "../src/runtime.ts";
-import type {
-  EventHandlerRegistration,
-  QueuedEvent,
-} from "../src/scheduler/types.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import type { MemorySpace } from "@commonfabric/memory/interface";
 
 const eventLink: NormalizedFullLink = {
   id: "of:event-stream",
@@ -33,6 +35,25 @@ const eventLink: NormalizedFullLink = {
 
 function eventKey(id: string): string {
   return id.split(":")[1];
+}
+
+// A piece-start outcome for the `loadPieceForEvent` seam, carrying only what
+// these cases turn on: a started piece has its pattern graph installed.
+function pieceLoadVerdict(started: boolean): EnsurePieceVerdict {
+  return { started, graphIsInstalled: () => started, observedDocIds: [] };
+}
+
+function eventHandlerRegistration(
+  ref: NormalizedFullLink,
+  handler: EventHandler,
+): EventHandlerRegistration {
+  return {
+    ref,
+    handler,
+    generation: 1,
+    readinessCancels: new Set(),
+    active: true,
+  };
 }
 
 describe("scheduler event identity", () => {
@@ -66,12 +87,42 @@ describe("scheduler event identity", () => {
   it("scopes a caller id deterministically, so a retry re-derives it", () => {
     // A retry may come from a fresh CLI process; same inputs must give the
     // same durable id or the receipt collision never happens.
-    expect(scopeCallerEventId("inv-1", eventLink)).toBe(
-      scopeCallerEventId("inv-1", eventLink),
+    expect(scopeCallerEventId("inv-1", "ses-a", eventLink)).toBe(
+      scopeCallerEventId("inv-1", "ses-a", eventLink),
     );
-    expect(scopeCallerEventId("inv-1", eventLink)).not.toBe(
-      scopeCallerEventId("inv-2", eventLink),
+    expect(scopeCallerEventId("inv-1", "ses-a", eventLink)).not.toBe(
+      scopeCallerEventId("inv-2", "ses-a", eventLink),
     );
+  });
+
+  it("separates one caller id chosen in two different sessions", () => {
+    // An invocation id is the caller's own word, and `add-comment-1` is the
+    // word two agents both reach for. Sharing an address, the second would
+    // read the first's receipt and be told its call had settled.
+    expect(scopeCallerEventId("add-comment-1", "ses-a", eventLink)).not.toBe(
+      scopeCallerEventId("add-comment-1", "ses-b", eventLink),
+    );
+  });
+
+  it("separates one caller id sent to streams differing only by scope", () => {
+    // A per-user, a per-session, and a per-space stream at one id and path
+    // are three streams. Sharing an address, a retry against one would be
+    // told it had settled by the outcome of a call made against another.
+    const perSpace = scopeCallerEventId("inv-1", "ses-a", {
+      ...eventLink,
+      scope: "space",
+    });
+    const perUser = scopeCallerEventId("inv-1", "ses-a", {
+      ...eventLink,
+      scope: "user",
+    });
+    const perSession = scopeCallerEventId("inv-1", "ses-a", {
+      ...eventLink,
+      scope: "session",
+    });
+    expect(perSpace).not.toBe(perUser);
+    expect(perSpace).not.toBe(perSession);
+    expect(perUser).not.toBe(perSession);
   });
 
   it("separates one caller id sent to different streams", () => {
@@ -79,8 +130,8 @@ describe("scheduler event identity", () => {
     // verbs of a piece must not make the second collide on the first's
     // receipt and report as an already-settled success.
     const other: NormalizedFullLink = { ...eventLink, id: "of:other-stream" };
-    expect(scopeCallerEventId("inv-1", eventLink)).not.toBe(
-      scopeCallerEventId("inv-1", other),
+    expect(scopeCallerEventId("inv-1", "ses-a", eventLink)).not.toBe(
+      scopeCallerEventId("inv-1", "ses-a", other),
     );
   });
 
@@ -89,27 +140,32 @@ describe("scheduler event identity", () => {
     // path and space keeps the helper from depending on that quietly.
     const atA: NormalizedFullLink = { ...eventLink, path: ["a"] };
     const atB: NormalizedFullLink = { ...eventLink, path: ["b"] };
-    expect(scopeCallerEventId("inv-1", atA)).not.toBe(
-      scopeCallerEventId("inv-1", atB),
+    expect(scopeCallerEventId("inv-1", "ses-a", atA)).not.toBe(
+      scopeCallerEventId("inv-1", "ses-a", atB),
     );
     const elsewhere: NormalizedFullLink = {
       ...eventLink,
       space: "did:key:z6MkOtherEventIdentity" as MemorySpace,
     };
-    expect(scopeCallerEventId("inv-1", eventLink)).not.toBe(
-      scopeCallerEventId("inv-1", elsewhere),
+    expect(scopeCallerEventId("inv-1", "ses-a", eventLink)).not.toBe(
+      scopeCallerEventId("inv-1", "ses-a", elsewhere),
     );
   });
 
   it("cannot be confused by a caller id that mimics a delimiter", () => {
-    // The caller's half is opaque and caller-chosen. Under delimited
+    // The caller's halves are opaque and caller-chosen. Under delimited
     // concatenation these pairs render identically; hashing keeps them apart.
     // A link id is a URI, so it always carries a colon of its own — the
     // separator is not distinguishable from the payload by inspection.
     const ofYZ: NormalizedFullLink = { ...eventLink, id: "of:y:z" };
     const yZ: NormalizedFullLink = { ...eventLink, id: "y:z" };
-    expect(scopeCallerEventId("x", ofYZ)).not.toBe(
-      scopeCallerEventId("x:of", yZ),
+    expect(scopeCallerEventId("x", "s", ofYZ)).not.toBe(
+      scopeCallerEventId("x:of", "s", yZ),
+    );
+    // The same ambiguity across the id/session boundary: a caller chooses
+    // both halves, and can choose where a delimiter would appear to sit.
+    expect(scopeCallerEventId("inv", "1:ses", eventLink)).not.toBe(
+      scopeCallerEventId("inv:1", "ses", eventLink),
     );
   });
 
@@ -120,16 +176,9 @@ describe("scheduler event identity", () => {
 
     queueSchedulerEvent({
       runtime: {} as Runtime,
-      eventHandlers: [{
-        ref: eventLink,
-        handler,
-        generation: 1,
-        active: true,
-        readinessCancels: new Set(),
-      }],
+      eventHandlers: [eventHandlerRegistration(eventLink, handler)],
       eventQueue,
       backgroundTasks: new Set(),
-      nextEventSequence: () => 1,
       queueExecution: () => {},
       recordLineageEvent: () => {},
       releaseLineageEvent: () => {},
@@ -160,19 +209,18 @@ describe("scheduler event identity", () => {
     };
     const env = createSchedulerTestRuntime(import.meta.url);
     const handled: string[] = [];
-    let finishPieceLoad!: (started: boolean) => void;
-    const pieceLoad = new Promise<boolean>((resolve) => {
+    let finishPieceLoad!: (verdict: EnsurePieceVerdict) => void;
+    const pieceLoad = new Promise<EnsurePieceVerdict>((resolve) => {
       finishPieceLoad = resolve;
     });
     try {
       // Inject only the asynchronous piece-start seam; queueing, head parking,
       // dispatch, commits, and continuation all run through the real Scheduler.
-      const schedulerInternals = env.runtime.scheduler as unknown as {
-        eventQueueState: {
-          loadPieceForEvent?: () => Promise<boolean>;
-        };
-      };
-      schedulerInternals.eventQueueState.loadPieceForEvent = () => pieceLoad;
+      // The seam is a `readonly` optional on the state, so the write narrows
+      // the state object rather than the scheduler.
+      (env.runtime.scheduler.accessForTestingOnly.eventQueueState as {
+        loadPieceForEvent?: () => Promise<EnsurePieceVerdict>;
+      }).loadPieceForEvent = () => pieceLoad;
 
       env.runtime.scheduler.queueEvent(loadingLink, "first");
       env.runtime.scheduler.addEventHandler((_tx, value) => {
@@ -188,158 +236,12 @@ describe("scheduler event identity", () => {
       env.runtime.scheduler.addEventHandler((_tx, value) => {
         handled.push(String(value));
       }, loadingLink);
-      finishPieceLoad(true);
       await env.runtime.idle();
 
       expect(handled).toEqual(["first", "second"]);
     } finally {
-      finishPieceLoad(true);
+      finishPieceLoad(pieceLoadVerdict(true));
       await disposeSchedulerTestRuntime(env);
-    }
-  });
-
-  it("hydrates a load-pending event as soon as its exact handler registers", async () => {
-    const loadingLink: NormalizedFullLink = {
-      ...eventLink,
-      id: "of:register-during-load-stream",
-      space,
-    };
-    const env = createSchedulerTestRuntime(import.meta.url);
-    const pieceLoad = Promise.withResolvers<boolean>();
-    const handled = Promise.withResolvers<string>();
-    try {
-      const schedulerInternals = env.runtime.scheduler as unknown as {
-        eventQueueState: {
-          loadPieceForEvent?: () => Promise<boolean>;
-        };
-      };
-      schedulerInternals.eventQueueState.loadPieceForEvent = () =>
-        pieceLoad.promise;
-
-      env.runtime.scheduler.queueEvent(loadingLink, "payload");
-      env.runtime.scheduler.addEventHandler((_tx, value) => {
-        handled.resolve(String(value));
-      }, loadingLink);
-
-      const outcome = await Promise.race([
-        handled.promise,
-        new Promise<string>((resolve) =>
-          setTimeout(() => resolve("piece-load-deadlock"), 250)
-        ),
-      ]);
-      expect(outcome).toBe("payload");
-
-      const idleOutcome = await Promise.race([
-        env.runtime.idle().then(() => "idle"),
-        new Promise<string>((resolve) =>
-          setTimeout(() => resolve("piece-load-still-blocks-idle"), 250)
-        ),
-      ]);
-      expect(idleOutcome).toBe("idle");
-    } finally {
-      pieceLoad.resolve(true);
-      await disposeSchedulerTestRuntime(env);
-    }
-  });
-
-  it("keeps a started piece's event parked until its nested handler registers", async () => {
-    const eventQueue: QueuedEvent[] = [];
-    const eventHandlers: EventHandlerRegistration[] = [];
-    const backgroundTasks = new Set<Promise<unknown>>();
-    let executionWakes = 0;
-    const state = {
-      runtime: {} as Runtime,
-      eventHandlers,
-      eventQueue,
-      backgroundTasks,
-      nextEventSequence: () => 1,
-      loadPieceForEvent: () => Promise.resolve(true),
-      queueExecution: () => executionWakes++,
-      recordLineageEvent: () => {},
-      releaseLineageEvent: () => {},
-    };
-
-    queueSchedulerEvent(state, {
-      eventLink,
-      event: "payload",
-      retries: true,
-      doNotLoadPieceIfNotRunning: false,
-    });
-    await Promise.all([...backgroundTasks]);
-
-    expect(eventQueue.length).toBe(1);
-    expect(eventQueue[0].handlerLoadPending).toBe(true);
-
-    executionWakes = 0;
-    const handler = () => {};
-    addSchedulerEventHandler({
-      eventHandlers,
-      nextEventHandlerGeneration: () => 1,
-      eventQueue,
-      queueExecution: () => executionWakes++,
-    }, { handler, ref: eventLink });
-
-    expect(eventQueue[0].handlerLoadPending).toBeUndefined();
-    expect(eventQueue[0].handler).toBe(handler);
-    expect(executionWakes).toBe(1);
-  });
-
-  it("settles a handler-load-pending event during runtime disposal", async () => {
-    const loadingLink: NormalizedFullLink = {
-      ...eventLink,
-      id: "of:dispose-pending-stream",
-      space,
-    };
-    const env = createSchedulerTestRuntime(import.meta.url);
-    const commitStatus = Promise.withResolvers<string>();
-    const pieceLoad = Promise.withResolvers<boolean>();
-    let loadSignal: AbortSignal | undefined;
-    let disposed = false;
-    try {
-      const schedulerInternals = env.runtime.scheduler as unknown as {
-        eventQueueState: {
-          loadPieceForEvent?: (
-            runtime: Runtime,
-            link: NormalizedFullLink,
-            signal: AbortSignal,
-          ) => Promise<boolean>;
-        };
-        backgroundTasks: Set<Promise<unknown>>;
-      };
-      schedulerInternals.eventQueueState.loadPieceForEvent = (
-        _runtime,
-        _link,
-        signal,
-      ) => {
-        loadSignal = signal;
-        return pieceLoad.promise;
-      };
-
-      env.runtime.scheduler.queueEvent(
-        loadingLink,
-        "payload",
-        undefined,
-        (tx) => commitStatus.resolve(tx.status().status),
-      );
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(schedulerInternals.backgroundTasks.size).toBe(1);
-
-      const outcome = await Promise.race([
-        disposeSchedulerTestRuntime(env).then(() => "disposed"),
-        new Promise<string>((resolve) =>
-          setTimeout(() => resolve("dispose-deadlock"), 250)
-        ),
-      ]);
-      expect(outcome).toBe("disposed");
-      expect(await commitStatus.promise).toBe("error");
-      expect(loadSignal?.aborted).toBe(true);
-      disposed = outcome === "disposed";
-    } finally {
-      pieceLoad.resolve(true);
-      if (!disposed) {
-        env.runtime.scheduler.addEventHandler(() => {}, loadingLink);
-        await disposeSchedulerTestRuntime(env);
-      }
     }
   });
 
@@ -358,7 +260,6 @@ describe("scheduler event identity", () => {
       eventHandlers: [],
       eventQueue,
       backgroundTasks,
-      nextEventSequence: () => 1,
       loadPieceForEvent: () => Promise.reject(new Error("start failed")),
       queueExecution: () => {},
       recordLineageEvent: () => {},
@@ -383,7 +284,7 @@ describe("scheduler event identity", () => {
   it("does not resurrect an event dropped while its handler is loading", async () => {
     const eventQueue: QueuedEvent[] = [];
     const backgroundTasks = new Set<Promise<unknown>>();
-    const pieceLoad = Promise.withResolvers<boolean>();
+    const pieceLoad = Promise.withResolvers<EnsurePieceVerdict>();
     let callbackCount = 0;
     const droppedTx = {
       abort: () => {},
@@ -394,7 +295,6 @@ describe("scheduler event identity", () => {
       eventHandlers: [],
       eventQueue,
       backgroundTasks,
-      nextEventSequence: () => 1,
       loadPieceForEvent: () => pieceLoad.promise,
       queueExecution: () => {},
       recordLineageEvent: () => {},
@@ -413,11 +313,178 @@ describe("scheduler event identity", () => {
 
     dropQueuedEvent(state, queued, "lineage failed while loading");
     dropQueuedEvent(state, queued, "duplicate terminal notification");
-    pieceLoad.resolve(true);
+    pieceLoad.resolve(pieceLoadVerdict(true));
     await Promise.all([...backgroundTasks]);
 
     expect(eventQueue).toEqual([]);
     expect(callbackCount).toBe(1);
     expect(queued.handlerLoadPending).toBe(true);
+  });
+
+  it("aborts a pending piece load and settles its event during runtime disposal", async () => {
+    const loadingLink: NormalizedFullLink = {
+      ...eventLink,
+      id: "of:dispose-loading-stream",
+      space,
+    };
+    const env = createSchedulerTestRuntime(import.meta.url);
+    const pieceLoad = Promise.withResolvers<EnsurePieceVerdict>();
+    const commitStatus = Promise.withResolvers<string>();
+    let loadSignal: AbortSignal | undefined;
+    let disposed = false;
+    try {
+      (env.runtime.scheduler.accessForTestingOnly.eventQueueState as {
+        loadPieceForEvent?: (
+          runtime: Runtime,
+          link: NormalizedFullLink,
+          options?: { signal?: AbortSignal },
+        ) => Promise<EnsurePieceVerdict>;
+      }).loadPieceForEvent = (_runtime, _link, options) => {
+        loadSignal = options?.signal;
+        return pieceLoad.promise;
+      };
+
+      env.runtime.scheduler.queueEvent(
+        loadingLink,
+        "payload",
+        true,
+        (commitTx) => commitStatus.resolve(commitTx.status().status),
+      );
+      expect(loadSignal?.aborted).toBe(false);
+
+      await disposeSchedulerTestRuntime(env);
+      disposed = true;
+
+      expect(await commitStatus.promise).toBe("error");
+      expect(loadSignal?.aborted).toBe(true);
+    } finally {
+      pieceLoad.resolve(pieceLoadVerdict(true));
+      if (!disposed) await disposeSchedulerTestRuntime(env);
+    }
+  });
+
+  it("a served piece-start deferral carries the arrival-order barrier (events.md §2; review-6459 F1's sibling arm): later-arrived same-space durable served entries defer behind the failed head instead of staying queued to overtake it — cross-space entries and LT1 in-process copies stay queued", async () => {
+    // Both piece-load failure modes take the same deferral disposition
+    // (`started === false`, and the start THROWING); the barrier must
+    // ride both.
+    for (
+      const loadFailure of [
+        () => Promise.reject(new Error("start failed")),
+        () => Promise.resolve(pieceLoadVerdict(false)),
+      ]
+    ) {
+      const eventQueue: QueuedEvent[] = [];
+      const backgroundTasks = new Set<Promise<unknown>>();
+      const headOutcomes: unknown[] = [];
+      const followerOutcomes: unknown[] = [];
+      const crossSpaceOutcomes: unknown[] = [];
+      const lt1Outcomes: unknown[] = [];
+      const droppedTx = {
+        abort: () => {},
+        status: () => ({ status: "error" }),
+      } as unknown as IExtendedStorageTransaction;
+      const followerLink: NormalizedFullLink = {
+        ...eventLink,
+        id: "of:follower-stream",
+      };
+      const crossSpaceLink: NormalizedFullLink = {
+        ...eventLink,
+        id: "of:cross-space-stream",
+        space: "did:key:z6MkOtherEventIdentity" as MemorySpace,
+      };
+      const lt1Link: NormalizedFullLink = { ...eventLink, id: "of:lt1-stream" };
+      const handler = () => {};
+      const state = {
+        runtime: { edit: () => droppedTx } as unknown as Runtime,
+        // No handler for the HEAD's link — it takes the piece-load path;
+        // the three later arrivals are all ready-queued.
+        eventHandlers: [
+          eventHandlerRegistration(followerLink, handler),
+          eventHandlerRegistration(crossSpaceLink, handler),
+          eventHandlerRegistration(lt1Link, handler),
+        ],
+        eventQueue,
+        backgroundTasks,
+        loadPieceForEvent: loadFailure,
+        queueExecution: () => {},
+        recordLineageEvent: () => {},
+        releaseLineageEvent: () => {},
+      };
+      queueSchedulerEvent(state, {
+        eventLink,
+        event: "head",
+        retries: true,
+        doNotLoadPieceIfNotRunning: false,
+        eventId: "evt:barrier-head",
+        served: {
+          streamEntry: { sidecarId: "of:stream-events:head", index: 0, seq: 1 },
+          onFailure: (outcome) => headOutcomes.push(outcome),
+        },
+      });
+      queueSchedulerEvent(state, {
+        eventLink: followerLink,
+        event: "follower",
+        retries: true,
+        doNotLoadPieceIfNotRunning: false,
+        eventId: "evt:barrier-follower",
+        served: {
+          streamEntry: {
+            sidecarId: "of:stream-events:follower",
+            index: 0,
+            seq: 2,
+          },
+          onFailure: (outcome) => followerOutcomes.push(outcome),
+        },
+      });
+      queueSchedulerEvent(state, {
+        eventLink: crossSpaceLink,
+        event: "cross-space",
+        retries: true,
+        doNotLoadPieceIfNotRunning: false,
+        eventId: "evt:barrier-cross-space",
+        served: {
+          streamEntry: {
+            sidecarId: "of:stream-events:cross-space",
+            index: 0,
+            seq: 3,
+          },
+          onFailure: (outcome) => crossSpaceOutcomes.push(outcome),
+        },
+      });
+      queueSchedulerEvent(state, {
+        eventLink: lt1Link,
+        event: "lt1-copy",
+        retries: true,
+        doNotLoadPieceIfNotRunning: false,
+        eventId: "evt:barrier-lt1",
+        // An LT1 in-process copy: served, but NO durable streamEntry —
+        // a same-wave cascade child, not a later arrival; never swept.
+        served: {
+          onFailure: (outcome) => lt1Outcomes.push(outcome),
+        },
+      });
+
+      await Promise.all([...backgroundTasks]);
+
+      // The head deferred (no consequence; a later drain re-delivers)…
+      expect(headOutcomes.length).toBe(1);
+      expect((headOutcomes[0] as { kind: string }).kind).toBe("deferred");
+      // THE PIN: …and the later-arrived same-space durable entry
+      // deferred BEHIND it, instead of staying queued to dispatch — and
+      // seal — ahead of the head's re-drain.
+      expect(followerOutcomes).toEqual([{
+        kind: "deferred",
+        cause: "arrival-barrier",
+        blockedBy: "evt:barrier-head",
+      }]);
+      // The exclusions hold: cross-space neighbours (§2's order is
+      // per-space) and LT1 copies stay queued, untouched.
+      expect(crossSpaceOutcomes).toEqual([]);
+      expect(lt1Outcomes).toEqual([]);
+      expect(eventQueue.map((queued) => queued.id)).toEqual([
+        "evt:barrier-cross-space",
+        "evt:barrier-lt1",
+      ]);
+    }
   });
 });

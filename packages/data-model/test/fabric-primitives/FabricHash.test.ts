@@ -1,21 +1,85 @@
-import { describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
+/**
+ * A hash as a `FabricPrimitive`: bytes, plus the tag naming the algorithm
+ * that produced them.
+ *
+ * The tag is part of the value rather than decoration on it, which is why the
+ * string form carries it, why parsing rejects a string with no tag or with
+ * more than one separator, and why a tag other than the usual one has to
+ * survive a round trip rather than being normalized away.
+ *
+ * It hands out copies rather than views, and takes ownership of its input only
+ * when a caller explicitly transfers it.
+ */
 
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
-import { CODEC } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */
 const SAMPLE_HASH = new Uint8Array(32);
+
 for (let i = 0; i < 32; i++) SAMPLE_HASH[i] = i;
 
 /** A fixed 17-byte hash for deterministic tests. */
 const SAMPLE_HASH_17 = new Uint8Array(17);
+
 for (let i = 0; i < 17; i++) SAMPLE_HASH_17[i] = ((i * 17) + 177) & 0xff;
 
 describe("FabricHash", () => {
+  describe("constructor()", () => {
+    it("leaves the source array readable, by default", () => {
+      const source = new Uint8Array([1, 2, 3]);
+      const cid = new FabricHash(source, "fid1");
+
+      expect(source.length).toBe(3);
+      source[0] = 99;
+      expect(cid.bytes[0]).toBe(1);
+    });
+
+    it("consumes the source array, given `transfer` as `true`", () => {
+      const source = new Uint8Array([1, 2, 3]);
+      const cid = new FabricHash(source, "fid1", true);
+
+      expect(source.length).toBe(0); // Its buffer was detached.
+      expect(cid.bytes).toEqual(new Uint8Array([1, 2, 3]));
+      expect(cid.length).toBe(3);
+    });
+
+    it("accepts a bare `ArrayBuffer` as the source", () => {
+      const source = Uint8Array.from([1, 2, 3]).buffer;
+      const cid = new FabricHash(source, "fid1");
+
+      expect(cid.length).toBe(3);
+      new Uint8Array(source)[0] = 99;
+      expect(cid.bytes[0]).toBe(1);
+    });
+
+    it("consumes a bare `ArrayBuffer` source, given `transfer` as `true`", () => {
+      const source = Uint8Array.from([1, 2, 3]).buffer;
+      const cid = new FabricHash(source, "fid1", true);
+
+      expect(source.detached).toBe(true);
+      expect(cid.bytes).toEqual(new Uint8Array([1, 2, 3]));
+    });
+
+    it("caches a string form agreeing with `.bytes`, given `transfer` as `true`", () => {
+      const transferred = new FabricHash(
+        new Uint8Array([1, 2, 3]),
+        "fid1",
+        true,
+      );
+      const copied = new FabricHash(new Uint8Array([1, 2, 3]), "fid1");
+
+      expect(transferred.hashString).toBe(copied.hashString);
+      expect(transferred.taggedHashString).toBe(copied.taggedHashString);
+    });
+  });
+
   describe("instance members", () => {
     describe("toString()", () => {
       it("produces `fid1:<base64>` format", () => {
@@ -99,7 +163,7 @@ describe("FabricHash", () => {
 
   describe("static members", () => {
     describe("fromString()", () => {
-      it("works on the result of the instance method `toString()`", () => {
+      it("round-trips through the instance method `toString()`", () => {
         // Use a non-fid1 tag to verify the parser doesn't hardcode it.
         const original = new FabricHash(SAMPLE_HASH, "sha3");
         const str = original.toString();
@@ -136,10 +200,10 @@ describe("FabricHash", () => {
       });
     });
 
-    describe("[CODEC]", () => {
-      const codec = FabricHash[CODEC];
+    describe("[JSON_CODEC]", () => {
+      const codec = FabricHash[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Hash;
-      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Hash` wire type tag", () => {
@@ -159,10 +223,28 @@ describe("FabricHash", () => {
       describe("encode()", () => {
         it("encodes to a `{ tag, hash }` object", () => {
           const cid = new FabricHash(SAMPLE_HASH, "fid1");
-          expect(codec.encode(cid)).toEqual({
+          expect(codec.encode(cid, env)).toEqual({
             tag: "fid1",
             hash: cid.hashString,
           });
+        });
+      });
+
+      describe("canDecode()", () => {
+        it("returns `true` for a record with string `tag` and `hash`", () => {
+          expect(codec.canDecode({ tag: "fid1", hash: "AQID" })).toBe(true);
+        });
+
+        it("returns `false` for state that is not a record", () => {
+          expect(codec.canDecode(123)).toBe(false);
+        });
+
+        it("returns `false` for a record missing a field", () => {
+          expect(codec.canDecode({ tag: "fid1" })).toBe(false);
+        });
+
+        it("returns `false` for a record with a non-string field", () => {
+          expect(codec.canDecode({ tag: "fid1", hash: 7 })).toBe(false);
         });
       });
 
@@ -172,7 +254,7 @@ describe("FabricHash", () => {
           const decoded = codec.decode(
             expectedTag,
             { tag: "fid1", hash: cid.hashString },
-            context,
+            env,
           );
           expect(decoded).toBeInstanceOf(FabricHash);
           expect((decoded as FabricHash).taggedHashString).toBe(
@@ -180,25 +262,11 @@ describe("FabricHash", () => {
           );
         });
 
-        it("decodes non-object state to a `ProblematicValue`", () => {
-          const decoded = codec.decode(expectedTag, 123, context);
-          expect(decoded).toBeInstanceOf(ProblematicValue);
-        });
-
-        it("decodes missing/non-string fields to a `ProblematicValue`", () => {
-          const decoded = codec.decode(
-            expectedTag,
-            { tag: "fid1" },
-            context,
-          );
-          expect(decoded).toBeInstanceOf(ProblematicValue);
-        });
-
         it("decodes a malformed base64 `hash` to a `ProblematicValue`", () => {
           const decoded = codec.decode(
             expectedTag,
             { tag: "fid1", hash: "not valid base64!!" },
-            context,
+            env,
           );
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
@@ -209,8 +277,8 @@ describe("FabricHash", () => {
           const cid = new FabricHash(SAMPLE_HASH_17, "sha3");
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(cid),
-            context,
+            codec.encode(cid, env),
+            env,
           );
           expect(decoded).toBeInstanceOf(FabricHash);
           expect((decoded as FabricHash).tag).toBe("sha3");

@@ -112,8 +112,8 @@ describe("dynamic Factory@1 supervisor", () => {
     tx = runtime.edit();
     commonfabric = createTrustedBuilder(runtime).commonfabric;
     invokeFactory = (commonfabric as unknown as {
-      invokeFactory: InvokeFactory;
-    }).invokeFactory;
+      __cfHelpers: { invokeFactory: InvokeFactory };
+    }).__cfHelpers.invokeFactory;
     warmArtifacts = new Map();
     runtime.patternManager.artifactFromIdentitySync = (identity, symbol) =>
       warmArtifacts.get(refKey(identity, symbol));

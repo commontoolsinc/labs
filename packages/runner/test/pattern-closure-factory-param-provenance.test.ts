@@ -132,8 +132,8 @@ describe("factory-valued pattern closure params provenance", () => {
     tx = runtime.edit();
     commonfabric = createTrustedBuilder(runtime).commonfabric;
     invokeFactory = (commonfabric as unknown as {
-      invokeFactory: InvokeFactory;
-    }).invokeFactory;
+      __cfHelpers: { invokeFactory: InvokeFactory };
+    }).__cfHelpers.invokeFactory;
   });
 
   afterEach(async () => {

@@ -1,22 +1,17 @@
+import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
+
+import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
+import { Identity } from "@commonfabric/identity";
 import {
-  App,
-  AppElement,
-  applyCommand,
   AppState,
-  AppStateSerialized,
-  appViewToUrlPath,
-  Command,
-  deserialize,
-  isAppView,
-  isEmbeddedView,
-  isViewingDefaultPatternView,
-  preserveAppViewMode,
+  assertIdentityChangeAllowed,
+  clone,
+  createAppState,
+  isAppStateConfigKey,
+  resolveIdentity,
   serialize,
-  urlToAppView,
-} from "@commonfabric/shell/shared";
-import { Identity, serializeKeyPairRaw } from "@commonfabric/identity";
-import { assert, assertRejects } from "@std/assert";
+} from "@commonfabric/shell/app-state";
 
 const API_URL = "http://common.test/";
 const SPACE_NAME = "common-knowledge";
@@ -25,24 +20,81 @@ describe("AppState", () => {
   it("requires logout before switching identities", async () => {
     const first = await Identity.generate({ implementation: "noble" });
     const second = await Identity.generate({ implementation: "noble" });
-    const element = new TestAppElement({
-      apiUrl: new URL(API_URL),
-      view: { spaceName: SPACE_NAME },
-      config: {},
-      identity: first,
-    });
-    const app = new App(element);
 
-    await assertRejects(
-      () => app.setIdentity(second),
+    assertThrows(
+      () => assertIdentityChangeAllowed(first, second),
       Error,
       "Cannot change identity while logged in",
     );
 
-    await app.apply({ type: "set-identity", identity: undefined });
-    await app.setIdentity(second);
+    // Clearing an identity, and re-establishing one from nothing, are both
+    // allowed; so is re-establishing the identity already in place.
+    assertIdentityChangeAllowed(first, undefined);
+    assertIdentityChangeAllowed(undefined, second);
+    assertIdentityChangeAllowed(first, first);
+  });
 
-    assert(app.state().identity?.did() === second.did());
+  it("accepts only the three display toggles as config keys", () => {
+    assert(isAppStateConfigKey("showShellPieceListView"));
+    assert(isAppStateConfigKey("showDebuggerView"));
+    assert(isAppStateConfigKey("showSidebar"));
+    assert(!isAppStateConfigKey("showQuickJumpView"));
+    assert(!isAppStateConfigKey("identity"));
+    assert(!isAppStateConfigKey("__proto__"));
+    assert(!isAppStateConfigKey(""));
+    assert(!isAppStateConfigKey(undefined));
+    assert(!isAppStateConfigKey(0));
+  });
+
+  it("clones the config and the view rather than sharing them", () => {
+    const original: AppState = {
+      apiUrl: new URL(API_URL),
+      view: { spaceName: SPACE_NAME, pieceSlug: "demo" },
+      config: { showSidebar: true },
+    };
+
+    const copy = clone(original);
+    assertEquals(copy.view, original.view);
+    assertEquals(copy.config, original.config);
+    assert(copy.config !== original.config, "the config is a fresh record.");
+    assert(copy.view !== original.view, "the view is a fresh record.");
+
+    copy.config.showSidebar = false;
+    (copy.view as { spaceName: string }).spaceName = "elsewhere";
+    assertEquals(original.config.showSidebar, true);
+    assertEquals(
+      (original.view as { spaceName: string }).spaceName,
+      SPACE_NAME,
+    );
+  });
+
+  it("carries a built-in view through a clone", () => {
+    const original = createAppState({
+      apiUrl: new URL(API_URL),
+      view: { builtin: "home" },
+      identity: undefined,
+    });
+    assertEquals(original.config, {});
+    assertEquals(clone(original).view, { builtin: "home" });
+  });
+
+  it("resolves an identity from either an Identity or an encoded key pair", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const encoded = jsonFromFabricValue(identity.keyPair);
+
+    assertEquals(await resolveIdentity(undefined), undefined);
+    assert(await resolveIdentity(identity) === identity);
+    assertEquals((await resolveIdentity(encoded))?.did(), identity.did());
+  });
+
+  it("refuses an encoding that is not a key pair", async () => {
+    // Well-formed in the format and wrong as a payload, which is the case a
+    // string arriving over the page boundary can actually be in.
+    await assertRejects(
+      () => resolveIdentity(jsonFromFabricValue("not a key pair")),
+      Error,
+      "not a key pair",
+    );
   });
 
   it("serialize", async () => {
@@ -57,227 +109,24 @@ describe("AppState", () => {
     let serialized = serialize(state);
     assert(serialized.apiUrl === API_URL);
     assert((serialized.view as { spaceName: string }).spaceName === SPACE_NAME);
-    assert(
-      serialized.identity === undefined,
+    assertEquals(
+      serialized.identityDid,
+      undefined,
       "Identity not provided (undefined).",
     );
 
-    state.identity = await Identity.generate({ implementation: "webcrypto" }),
+    // Both implementations, because a DID is the one thing either state of a
+    // key pair can produce: the "webcrypto" arm holds `CryptoKey` handles,
+    // whose material is unreachable, and a serialized state carries none.
+    for (const implementation of ["webcrypto", "noble"] as const) {
+      state.identity = await Identity.generate({ implementation });
       serialized = serialize(state);
-    assert(serialized.apiUrl === API_URL);
-    assert((serialized.view as { spaceName: string }).spaceName === SPACE_NAME);
-    assert(
-      serialized.identity === null,
-      "WebCrypto keys cannot be serialized (null).",
-    );
-
-    state.identity = await Identity.generate({ implementation: "noble" });
-    serialized = serialize(state);
-    assert(serialized.apiUrl === API_URL);
-    assert((serialized.view as { spaceName: string }).spaceName === SPACE_NAME);
-    assert(serialized.identity);
-    assert(
-      (await Identity.fromRaw(Uint8Array.from(serialized.identity.privateKey)))
-        .did() ===
+      assert(serialized.apiUrl === API_URL);
+      assertEquals(
+        serialized.identityDid,
         state.identity.did(),
-      "Insecure keys are serializable.",
-    );
-  });
-
-  it("deserialize", async () => {
-    const identity = await Identity.generate({ implementation: "noble" });
-    const identityRaw = serializeKeyPairRaw(identity.serialize());
-    assert(identityRaw, "Deserialized, transferrable identity.");
-
-    const serialized: AppStateSerialized = {
-      apiUrl: API_URL,
-      view: { spaceName: SPACE_NAME },
-      config: {},
-    };
-
-    let state = await deserialize(serialized);
-    assert(state.apiUrl.toString() === API_URL.toString());
-    assert((state.view as { spaceName: string }).spaceName === SPACE_NAME);
-    assert(state.identity === undefined);
-
-    serialized.identity = identityRaw;
-    state = await deserialize(serialized);
-    assert(state.apiUrl.toString() === API_URL.toString());
-    assert((state.view as { spaceName: string }).spaceName === SPACE_NAME);
-    assert(state.identity?.did() === identity.did(), "deserializes identity.");
-  });
-
-  it("clears piece list view when activating a piece", () => {
-    const initial: AppState = {
-      apiUrl: new URL(API_URL),
-      view: { builtin: "home" },
-      config: {
-        showShellPieceListView: true,
-      },
-    };
-
-    const next = applyCommand(initial, {
-      type: "set-view",
-      view: {
-        spaceName: SPACE_NAME,
-        pieceId: "example",
-      },
-    });
-
-    assert(next.config.showShellPieceListView === false);
-  });
-
-  it("parses and serializes slug piece routes", () => {
-    assert(
-      JSON.stringify(urlToAppView(new URL("http://common.test/space/demo"))) ===
-        JSON.stringify({ spaceName: "space", pieceSlug: "demo" }),
-    );
-    assert(
-      JSON.stringify(
-        urlToAppView(new URL("http://common.test/space/fid1:abc")),
-      ) === JSON.stringify({ spaceName: "space", pieceId: "fid1:abc" }),
-    );
-    assert(
-      JSON.stringify(
-        urlToAppView(new URL("http://common.test/space/of:fid1:abc")),
-      ) === JSON.stringify({ spaceName: "space", pieceId: "of:fid1:abc" }),
-    );
-    assert(
-      appViewToUrlPath({ spaceName: "space", pieceSlug: "demo" }) ===
-        "/space/demo",
-    );
-  });
-
-  it("parses and serializes embedded routes", () => {
-    const spaceDid = "did:key:z6MkjosLwWEobyT9T6RqLTdaEhFrXAZUNkRZJuUae2ukgfEa";
-
-    assert(
-      JSON.stringify(
-        urlToAppView(new URL("http://common.test/.embed/space/demo")),
-      ) ===
-        JSON.stringify({
-          spaceName: "space",
-          pieceSlug: "demo",
-          mode: "embed",
-        }),
-    );
-    assert(
-      JSON.stringify(
-        urlToAppView(new URL("http://common.test/.embed/space/fid1:abc")),
-      ) ===
-        JSON.stringify({
-          spaceName: "space",
-          pieceId: "fid1:abc",
-          mode: "embed",
-        }),
-    );
-    assert(
-      JSON.stringify(
-        urlToAppView(new URL(`http://common.test/.embed/${spaceDid}/demo`)),
-      ) ===
-        JSON.stringify({
-          spaceDid,
-          pieceSlug: "demo",
-          mode: "embed",
-        }),
-    );
-    assert(
-      appViewToUrlPath({
-        spaceName: "space",
-        pieceSlug: "demo",
-        mode: "embed",
-      }) === "/.embed/space/demo",
-    );
-    assert(
-      appViewToUrlPath({
-        spaceDid,
-        pieceId: "fid1:abc",
-        mode: "embed",
-      }) === `/.embed/${spaceDid}/fid1:abc`,
-    );
-    assert(
-      appViewToUrlPath({
-        spaceName: "space",
-        pieceSlug: undefined,
-        mode: "embed",
-      }) === "/.embed/space",
-    );
-  });
-
-  it("validates and preserves embedded view mode", () => {
-    const current = {
-      spaceName: "space",
-      pieceSlug: "demo",
-      mode: "embed",
-    } as const;
-
-    assert(isAppView(current));
-    assert(isEmbeddedView(current));
-    assert(
-      JSON.stringify(
-        preserveAppViewMode(current, {
-          spaceName: "space",
-          pieceId: "fid1:abc",
-        }),
-      ) ===
-        JSON.stringify({
-          spaceName: "space",
-          pieceId: "fid1:abc",
-          mode: "embed",
-        }),
-    );
-    assert(
-      JSON.stringify(
-        preserveAppViewMode(current, {
-          spaceName: "space",
-          pieceId: "fid1:abc",
-          mode: undefined,
-        }),
-      ) ===
-        JSON.stringify({
-          spaceName: "space",
-          pieceId: "fid1:abc",
-        }),
-    );
-    assert(!isAppView({ builtin: "home", mode: "embed" }));
-    assert(!isAppView({ spaceName: "space", mode: "fullscreen" }));
-  });
-
-  it("treats slug piece routes as non-default pattern views", () => {
-    assert(isViewingDefaultPatternView({ spaceName: "space" }) === true);
-    assert(
-      isViewingDefaultPatternView({
-        spaceName: "space",
-        pieceId: "fid1:abc",
-      }) ===
-        false,
-    );
-    assert(
-      isViewingDefaultPatternView({ spaceName: "space", pieceSlug: "demo" }) ===
-        false,
-    );
+        implementation,
+      );
+    }
   });
 });
-
-class TestAppElement extends EventTarget implements AppElement {
-  keyStore = undefined as never;
-
-  constructor(private appState: AppState) {
-    super();
-  }
-
-  state(): AppState {
-    return this.appState;
-  }
-
-  apply(command: Command): Promise<void> {
-    this.appState = applyCommand(this.appState, command);
-    return Promise.resolve();
-  }
-
-  requestUpdate(): void {}
-
-  getRuntimeSpaceDID(): undefined {
-    return undefined;
-  }
-}

@@ -1,11 +1,12 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
 import { fromFileUrl } from "@std/path";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commonfabric/identity";
+
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 
 // CT-1648: profiles carry an owner-authored free-text `bio`. It starts empty,
 // is written ONLY through the authorized `setBio` handler (owner-protected like
@@ -75,6 +76,10 @@ describe("profile-home bio (owner-protected free-text field)", () => {
       result.withTx(tx2).key("setBio").send({
         bio: "Mathematician & first programmer.",
       });
+      // A manual test tx prepares the way the runtime's own commit paths do:
+      // an enforcing rung refuses a relevant transaction that arrives
+      // unprepared.
+      rt.prepareTxForCommit(tx2);
       const commit2 = await tx2.commit();
       expect(commit2.error).toBeUndefined();
       await result.pull();
@@ -87,6 +92,7 @@ describe("profile-home bio (owner-protected free-text field)", () => {
       result.withTx(tx3).key("setBio").send({
         bio: "  Countess of Lovelace.  ",
       });
+      rt.prepareTxForCommit(tx3);
       const commit3 = await tx3.commit();
       expect(commit3.error).toBeUndefined();
       await result.pull();

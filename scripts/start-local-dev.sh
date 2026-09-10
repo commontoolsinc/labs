@@ -29,6 +29,14 @@ INSPECT_BRK=false
 INSPECT_PORT=${INSPECT_PORT:-}
 LOCAL_DEV_STARTUP_TIMEOUT=${LOCAL_DEV_STARTUP_TIMEOUT:-120}
 
+# Source-run build metadata: default COMMIT_SHA to this checkout's HEAD so
+# toolshed's /api/meta reports the commit it is running — cf compares its own
+# commit against it to detect version skew. An explicit COMMIT_SHA wins.
+if [[ -z "${COMMIT_SHA:-}" ]]; then
+    COMMIT_SHA="$(git -C "$SCRIPT_DIR/.." rev-parse HEAD 2>/dev/null || true)"
+fi
+export COMMIT_SHA
+
 # Exit code emitted when a server cannot bind because its port is already in
 # use. Callers can retry on a different port.
 PORT_IN_USE_EXIT=3
@@ -104,6 +112,12 @@ done
 SHELL_PORT=${SHELL_PORT:-$((BASE_SHELL_PORT + PORT_OFFSET))}
 TOOLSHED_PORT=${TOOLSHED_PORT:-$((BASE_TOOLSHED_PORT + PORT_OFFSET))}
 INSPECT_PORT=${INSPECT_PORT:-$((BASE_INSPECTOR_PORT + PORT_OFFSET))}
+
+require_reachable_port "shell" "$SHELL_PORT"
+require_reachable_port "toolshed" "$TOOLSHED_PORT"
+if [[ "$INSPECT" == "true" ]]; then
+    require_reachable_port "inspector" "$INSPECT_PORT"
+fi
 
 # Export for child processes
 export SHELL_PORT
@@ -326,6 +340,13 @@ wait_for_http "shell" "http://localhost:$SHELL_PORT" "$SHELL_PID" "$SHELL_LOG"
 wait_for_listen "toolshed" "Server running on" "$TOOLSHED_PID" "$TOOLSHED_LOG"
 wait_for_http \
     "toolshed" "http://localhost:$TOOLSHED_PORT/_health" \
+    "$TOOLSHED_PID" "$TOOLSHED_LOG"
+
+# The page a browser loads: the toolshed serving the shell it proxies. The two
+# checks above cover each server on its own port, and this one covers the hop
+# between them, which the toolshed makes with fetch() rather than with curl.
+wait_for_http \
+    "shell through toolshed" "http://localhost:$TOOLSHED_PORT/" \
     "$TOOLSHED_PID" "$TOOLSHED_LOG"
 
 # Print the toolshed URL on success (when not using --bg-updater, which prints after health check)

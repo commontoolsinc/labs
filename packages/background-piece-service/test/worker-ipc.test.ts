@@ -1,7 +1,9 @@
-import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
+import { describe, it } from "@std/testing/bdd";
+
+import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
+
 import { isWorkerIPCRequest } from "../src/worker-ipc.ts";
-import { Identity } from "@commonfabric/identity";
 
 describe("isWorkerIPCRequest", () => {
   it("validates cleanup messages", () => {
@@ -12,20 +14,21 @@ describe("isWorkerIPCRequest", () => {
   it("validates initialize messages", async () => {
     const did = "did:key:abc";
     const toolshedUrl = "http://localhost:8000";
-    const rawIdentity = (await Identity.generate({ implementation: "noble" }))
-      .serialize();
+    const encodedIdentity = realmValueFromKeyPair(
+      (await Identity.generate({ implementation: "noble" })).keyPair,
+    );
     assert(
       isWorkerIPCRequest({
         msgId: 1,
         type: "initialize",
-        data: { did, toolshedUrl, rawIdentity },
+        data: { did, toolshedUrl, encodedIdentity },
       }),
     );
     assert(!isWorkerIPCRequest({ msgId: 1, type: "initialize" }));
     assert(
       !isWorkerIPCRequest({
         type: "initialize",
-        data: { did, toolshedUrl, rawIdentity },
+        data: { did, toolshedUrl, encodedIdentity },
       }),
     );
     assert(
@@ -39,14 +42,23 @@ describe("isWorkerIPCRequest", () => {
       !isWorkerIPCRequest({
         msgId: 1,
         type: "initialize",
-        data: { toolshedUrl, rawIdentity },
+        data: { toolshedUrl, encodedIdentity },
+      }),
+    );
+    // An encoding is a two-slot envelope, which the guard checks for and
+    // nothing else does until the decode.
+    assert(
+      !isWorkerIPCRequest({
+        msgId: 1,
+        type: "initialize",
+        data: { did, toolshedUrl, encodedIdentity: { privateKey: "secret" } },
       }),
     );
     assert(
       !isWorkerIPCRequest({
         msgId: 1,
         type: "initialize",
-        data: { rawIdentity, did },
+        data: { encodedIdentity, did },
       }),
     );
   });

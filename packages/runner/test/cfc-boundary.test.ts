@@ -1,26 +1,23 @@
-import { describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { describe, it } from "@std/testing/bdd";
+
+import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import * as V2Storage from "../src/storage/v2.ts";
-import { raw } from "../src/module.ts";
+
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
+import type { JSONSchema, Pattern } from "../src/builder/types.ts";
+import { createCell } from "../src/cell.ts";
 import {
   readStoredCfcMetadata,
   storedCfcMetadataAppliesToPath,
 } from "../src/cfc/metadata.ts";
-import { Runtime } from "../src/runtime.ts";
-import { createCell } from "../src/cell.ts";
-import {
-  getDerivedInternalCellLink,
-  getMetaLink,
-  parseLink,
-  toMemorySpaceAddress,
-} from "../src/link-utils.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import {
   canonicalizeCfcMetadata,
   canonicalizePreparedDigestInput,
@@ -29,18 +26,34 @@ import {
   preparedDigestFor,
 } from "../src/cfc/mod.ts";
 import {
+  CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcEnforcementMode,
+  runtimeWritePolicyAuthorization,
 } from "../src/cfc/types.ts";
-import type { JSONSchema, Pattern } from "../src/builder/types.ts";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { ignoreReadForScheduling } from "../src/scheduler.ts";
-import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
+import { diffAndUpdate } from "../src/data-updating.ts";
+import {
+  getDerivedInternalCellLink,
+  getMetaLink,
+  parseLink,
+  toMemorySpaceAddress,
+} from "../src/link-utils.ts";
+import { raw } from "../src/module.ts";
 import { setResultCell } from "../src/result-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { ignoreReadForScheduling } from "../src/scheduler.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
+import type { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import * as V2Storage from "../src/storage/v2.ts";
 import {
   TEST_MEMORY_SERVER_AUTH,
   testSessionOpenAuthFactory,
 } from "./memory-v2-test-utils.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
+import { refuseAtCommitBoundary } from "./refused-commit.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
 
@@ -70,11 +83,15 @@ const seedPrivilegedCfc = (
 };
 
 class SharedV2SessionFactory implements V2Storage.SessionFactory {
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
 
   async create(space: MemorySpace) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(space, {}, testSessionOpenAuthFactory);
     return { client, session };
@@ -292,6 +309,22 @@ describe("CFC canonicalization helpers", () => {
 });
 
 describe("ExtendedStorageTransaction CFC gate", () => {
+  // Characterization posture: the cases below describe what the gate does at
+  // the explicit rung with every other dial down, so the suite states that
+  // whole row rather than reaching it by inheritance. Every dial in
+  // RUNTIME_CFC_DIAL_DEFAULTS appears here; a mode passed by a test overrides
+  // the enforcement mode.
+  const characterizationCfcPosture = {
+    cfcEnforcementMode: "enforce-explicit",
+    cfcFlowLabels: "off",
+    cfcWriteFloor: "off",
+    cfcTriggerReadGating: false,
+    cfcDecomposedEnvelopes: false,
+    cfcPolicyEvaluation: "off",
+    cfcLabelMetadataProtection: "off",
+    cfcDeclaredMonotonicity: "off",
+  } as const;
+
   const createRuntime = (cfcEnforcementMode?: CfcEnforcementMode) => {
     const storageManager = StorageManager.emulate({
       as: signer,
@@ -299,6 +332,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      ...characterizationCfcPosture,
       ...(cfcEnforcementMode ? { cfcEnforcementMode } : {}),
     });
     return { runtime, storageManager };
@@ -311,7 +345,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      ...characterizationCfcPosture,
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-setup",
         actingPrincipal: signer.did(),
@@ -355,8 +389,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       await runtime.setup(undefined, pattern, {}, resultCell);
 
+      // A hand-built pattern is KEYLESS: setup stamps no durable pattern
+      // pointer for it (the never-durable contract; L3(a), RULED 2026-08-27).
+      // The staged argument link is the setup-completed evidence instead.
       expect(resultCell.getMetaRaw("patternIdentity"))
-        .toBeDefined();
+        .toBeUndefined();
       expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
         .toBeDefined();
       const savedTitleLink = parseLink(resultCell.key("savedTitle").getRaw());
@@ -399,7 +436,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      ...characterizationCfcPosture,
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-setup-untyped",
         actingPrincipal: signer.did(),
@@ -444,8 +481,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       await runtime.setup(undefined, pattern, {}, resultCell);
 
       expect(getMetaLink(resultCell, "result")).toBeUndefined();
+      // A hand-built pattern is KEYLESS: setup stamps no durable pattern
+      // pointer for it (the never-durable contract; L3(a), RULED 2026-08-27).
+      // The staged argument link is the setup-completed evidence instead.
       expect(resultCell.getMetaRaw("patternIdentity"))
-        .toBeDefined();
+        .toBeUndefined();
       expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
         .toBeDefined();
       const savedTitleLink = parseLink(resultCell.key("savedTitle").getRaw());
@@ -486,7 +526,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      ...characterizationCfcPosture,
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-setup",
         actingPrincipal: signer.did(),
@@ -527,6 +567,18 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       await expect(runtime.setup(undefined, pattern, {}, resultCell)).rejects
         .toThrow("CFC enforcement rejected commit");
       expect(getMetaLink(resultCell, "result")).toBeUndefined();
+
+      // The setup boundary re-wraps the rejection as a plain Error, so the
+      // refusal reasons survive only if they are carried onto the cause.
+      // The boundary refusal carries every reason as `reasons`; reading the
+      // digest-drift `reason` instead would drop them silently.
+      const rejection = await runtime.setup(undefined, pattern, {}, resultCell)
+        .then(() => undefined, (error: unknown) => error as Error);
+      expect(rejection?.cause).toBeDefined();
+      expect(Array.isArray(rejection?.cause)).toBe(true);
+      expect((rejection?.cause as string[]).join(" ")).toContain(
+        "writeAuthorizedBy requires a trusted verified binding identity",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -540,7 +592,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      ...characterizationCfcPosture,
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-setup-forged-projection",
         actingPrincipal: signer.did(),
@@ -608,7 +660,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      ...characterizationCfcPosture,
     });
     try {
       const tx = runtime.edit();
@@ -664,7 +716,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      ...characterizationCfcPosture,
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-argument-setup",
         actingPrincipal: signer.did(),
@@ -837,12 +889,13 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     // case above.
     const { runtime, storageManager } = createRuntime();
     try {
-      // A schema whose `savedBytes` default is a `Uint8Array` cannot be authored
-      // as a plain literal (schema interning deep-freezes it and a raw
-      // `Uint8Array` cannot be frozen). Instead, round-trip the schema through a
-      // cell read as a query result, which interns the native `Uint8Array`
-      // default into a `FabricBytes` -- the realistic way a Fabric value reaches
-      // `schema.default` (see query-result-proxy-fabric-primitive.test.ts).
+      // A schema whose `savedBytes` default is a `Uint8Array` cannot be
+      // authored as a plain literal (schema interning deep-freezes it and a raw
+      // `Uint8Array` cannot be frozen). Instead, round-trip the schema through
+      // a cell read as a query result, which interns the native `Uint8Array`
+      // default into a `FabricBytes` -- the realistic way a `FabricValue`
+      // reaches `schema.default` (see
+      // query-result-proxy-fabric-primitive.test.ts).
       const schemaSource = {
         type: "object",
         properties: {
@@ -897,7 +950,33 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("rejects relevant unprepared commits in enforcing modes", async () => {
+  it("rejects a refused commit in enforce-explicit mode", async () => {
+    // A reserved CFC grant document is policy state that only `writeCfcGrant`
+    // may write, so prepare records a verdict over this write and the ladder
+    // rejects it.
+
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      refuseAtCommitBoundary(tx, signer.did(), "the ladder rejects it");
+
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "unprivileged write to protected cfc path",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("prepares a relevant commit nothing prepared, in enforce-explicit mode", async () => {
+    // Relevance is computed from what the transaction did, so a caller cannot
+    // be the thing that decides whether the ladder sees a prepared
+    // transaction. `commit()` runs the prepare (see
+    // `docs/specs/cfc-commit-preparation.md`).
+
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
@@ -910,10 +989,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         path: [],
       }, { ok: true });
 
-      const result = await tx.commit();
-      expect(result.error?.message).toContain(
-        "relevant transaction was not prepared",
-      );
+      expect((await tx.commit()).error).toBeUndefined();
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -1012,22 +1089,16 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("rejects relevant unprepared commits in enforce-strict mode", async () => {
+  it("rejects a refused commit in enforce-strict mode", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
       tx.setCfcEnforcementMode("enforce-strict");
-      tx.markCfcRelevant("test");
-      tx.writeValueOrThrow({
-        space: signer.did(),
-        scope: "space",
-        id: "of:cfc-enforce-strict",
-        path: [],
-      }, { ok: true });
+      refuseAtCommitBoundary(tx, signer.did(), "the ladder rejects it");
 
       const result = await tx.commit();
       expect(result.error?.message).toContain(
-        "relevant transaction was not prepared",
+        "unprivileged write to protected cfc path",
       );
     } finally {
       await runtime.dispose();
@@ -1053,6 +1124,146 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         kind: "custom",
         name: "schema",
         value: "x",
+      });
+
+      expect(tx.getCfcState().prepare.status).toBe("invalidated");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("invalidates prepared state on a dereference the transaction had not performed", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.markCfcRelevant("test");
+      tx.writeValueOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: "of:cfc-new-dereference",
+        path: [],
+      }, { count: 1 });
+
+      tx.prepareCfc();
+      tx.recordCfcDereferenceTrace({
+        source: {
+          space: signer.did(),
+          id: "of:cfc-new-dereference",
+          scope: "space",
+          path: ["slot"],
+        },
+        target: {
+          space: signer.did(),
+          id: "of:cfc-new-target",
+          scope: "space",
+          path: [],
+        },
+        kind: "value",
+      });
+
+      expect(tx.getCfcState().prepare.status).toBe("invalidated");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("holds prepared state when a recorded dereference repeats", async () => {
+    // The digest binds the dereference SET, so a repeat leaves it untouched
+    // and the commit recheck would accept. Invalidating here would reject a
+    // transaction on the strength of a re-read alone.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.markCfcRelevant("test");
+      tx.writeValueOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: "of:cfc-repeat-dereference",
+        path: [],
+      }, { count: 1 });
+
+      const hop = {
+        source: {
+          space: signer.did(),
+          id: "of:cfc-repeat-dereference",
+          scope: "space" as const,
+          // Recorded raw; the repeat below arrives already canonicalized, and
+          // the two are the same dereference.
+          path: ["value", "slot"],
+        },
+        target: {
+          space: signer.did(),
+          id: "of:cfc-repeat-target",
+          scope: "space" as const,
+          path: [],
+        },
+        kind: "value" as const,
+      };
+      tx.recordCfcDereferenceTrace(hop);
+      tx.prepareCfc();
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+
+      tx.recordCfcDereferenceTrace({
+        ...hop,
+        source: { ...hop.source, path: ["slot"] },
+      });
+
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("invalidates prepared state on a dereference under a payload field named `value`", async () => {
+    // `["value","value","slot"]` is the payload path `value.slot`, a
+    // different dereference from `["value","slot"]`'s payload `slot`. Reading
+    // the second must still invalidate, or the guard would mistake it for a
+    // repeat of the first and hold a decision the digest no longer covers.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.markCfcRelevant("test");
+      tx.writeValueOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: "of:cfc-payload-value-field",
+        path: [],
+      }, { count: 1 });
+
+      const target = {
+        space: signer.did(),
+        id: "of:cfc-payload-value-target",
+        scope: "space" as const,
+        path: [],
+      };
+      tx.recordCfcDereferenceTrace({
+        source: {
+          space: signer.did(),
+          id: "of:cfc-payload-value-field",
+          scope: "space",
+          path: ["value", "slot"],
+        },
+        target,
+        kind: "value",
+      });
+      tx.prepareCfc();
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+
+      tx.recordCfcDereferenceTrace({
+        source: {
+          space: signer.did(),
+          id: "of:cfc-payload-value-field",
+          scope: "space",
+          path: ["value", "value", "slot"],
+        },
+        target,
+        kind: "value",
       });
 
       expect(tx.getCfcState().prepare.status).toBe("invalidated");
@@ -1247,8 +1458,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(flushed).toEqual(["effect-1"]);
 
       const rejected = runtime.edit();
-      rejected.setCfcEnforcementMode("enforce-explicit");
-      rejected.markCfcRelevant("test");
+      refuseAtCommitBoundary(
+        rejected,
+        signer.did(),
+        "an effect must not flush",
+      );
       rejected.enqueuePostCommitEffect({
         id: "effect-2",
         kind: "test",
@@ -1256,15 +1470,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           flushed.push("effect-2");
         },
       });
-      rejected.writeValueOrThrow({
-        space: signer.did(),
-        scope: "space",
-        id: "of:cfc-outbox-reject",
-        path: [],
-      }, { ok: false });
-
       const rejectedResult = await rejected.commit();
-      expect(rejectedResult.error).toBeDefined();
+      expect(isCfcEnforcementRejection(rejectedResult.error)).toBe(true);
       expect(flushed).toEqual(["effect-1"]);
 
       const throwing = runtime.edit();
@@ -1373,6 +1580,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -1382,7 +1590,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1448,6 +1656,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       ).id!;
 
       const seed = runtime.edit();
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -1457,7 +1666,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1495,6 +1704,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     try {
       const seed = runtime.edit();
       const targetId = "of:cfc-internal-source-traversal-target";
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow(
         {
           space: signer.did(),
@@ -1516,7 +1726,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         },
         {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1555,11 +1765,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         }),
       );
 
-      const digestInput = (
-        metadataTx as unknown as {
-          buildPreparedDigestInput(): { consumedReads: unknown[] };
-        }
-      ).buildPreparedDigestInput();
+      const digestInput = (metadataTx as ExtendedStorageTransaction)
+        .accessForTestingOnly.buildPreparedDigestInput();
       expect(digestInput.consumedReads).toEqual([]);
       expect(metadataTx.getCfcState().relevant).toBe(false);
 
@@ -1603,6 +1810,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         },
         { auditedField: "seed" },
       );
+      writeSeedEnvelopeDoc(seed, signer.did());
       seedPrivilegedCfc(
         seed,
         {
@@ -1613,7 +1821,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         },
         {
           version: 1,
-          schemaHash: "claim-only-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1682,6 +1890,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       ).id!;
 
       const seed = runtime.edit();
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -1691,7 +1900,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1743,6 +1952,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       const seed = runtime.edit();
       seed.setCfcEnforcementMode("enforce-explicit");
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -1752,7 +1962,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed", pending: false },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1836,20 +2046,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       cell.key("secret").set("same");
       expect(tx.getCfcState().relevant).toBe(true);
 
-      const digestInput = (
-        tx as unknown as {
-          buildPreparedDigestInput(): {
-            attemptedWrites: Array<{
-              space: string;
-              scope: "space";
-              id: string;
-              type: string;
-              path: string[];
-            }>;
-            writes: Array<unknown>;
-          };
-        }
-      ).buildPreparedDigestInput();
+      const digestInput = (tx as ExtendedStorageTransaction)
+        .accessForTestingOnly.buildPreparedDigestInput();
       expect(digestInput.attemptedWrites).toContainEqual({
         space: signer.did(),
         scope: "space",
@@ -2097,10 +2295,12 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtimeA = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManagerA,
+      ...characterizationCfcPosture,
     });
     const runtimeB = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManagerB,
+      ...characterizationCfcPosture,
     });
     const schema = {
       type: "object",
@@ -2636,7 +2836,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const seed = runtime.edit();
-      seed.setCfcEnforcementMode("enforce-explicit");
       const target = runtime.getCell(
         signer.did(),
         "cfc-link-same-tx-source-target",
@@ -2651,7 +2850,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect((await seed.commit()).ok).toBeDefined();
 
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       const sameTxSource = runtime.getCell(
         signer.did(),
         "cfc-link-same-tx-source",
@@ -2666,6 +2864,27 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         tx,
       );
       linkedTarget.set(sameTxSource);
+      // The marker `data-updating` records for the child document it splits an
+      // entry into: the child is the runtime's store, filled out of what this
+      // transaction read.
+      const sourceLink = sameTxSource.getAsNormalizedFullLink();
+      const targetLink = linkedTarget.getAsNormalizedFullLink();
+      tx.recordCfcWritePolicyInput({
+        kind: "structural-provenance",
+        target: {
+          space: sourceLink.space,
+          id: sourceLink.id,
+          scope: sourceLink.scope,
+          path: [],
+        },
+        claim: CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
+        sources: [{
+          space: targetLink.space,
+          id: targetLink.id,
+          scope: targetLink.scope,
+          path: [],
+        }],
+      }, runtimeWritePolicyAuthorization);
       tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error).toBeUndefined();
@@ -2730,7 +2949,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         type: "object",
         ifc: { confidentiality: ["card-space"] },
         properties: { title: { type: "string" } },
-      });
+      }, rawMetaWriteAuthorization);
       const linkedTarget = runtime.getCell(
         signer.did(),
         "cfc-link-setup-schema-target",
@@ -3342,7 +3561,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("persists cfc metadata for nested entity documents created from labelled collection items", async () => {
+  it("persists cfc metadata for nested entity documents created from labeled collection items", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
@@ -3424,6 +3643,93 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         },
         origin: "declared",
       });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("uses generated-output provenance when migrating extracted collection entities", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const entitySchema = (withGeneratedField: boolean): JSONSchema => ({
+        type: "object",
+        properties: {
+          messages: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                body: {
+                  type: "string",
+                  ifc: { confidentiality: ["secret"] },
+                },
+                ...(withGeneratedField
+                  ? { generated: { type: "string" } }
+                  : {}),
+              },
+              required: [
+                "body",
+                ...(withGeneratedField ? ["generated"] : []),
+              ],
+            },
+          },
+        },
+        required: ["messages"],
+      });
+      const write = (
+        rootId: string,
+        withGeneratedField: boolean,
+        schemaRole?: "output",
+      ) => {
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-explicit");
+        const cell = runtime.getCell(
+          signer.did(),
+          rootId,
+          entitySchema(withGeneratedField),
+          tx,
+        );
+        diffAndUpdate(
+          runtime,
+          tx,
+          cell.getAsNormalizedFullLink(),
+          {
+            messages: [{
+              // Once the array container exists, reusing this anchor id
+              // targets the same extracted document during migration.
+              body: "hello",
+              ...(withGeneratedField ? { generated: "new" } : {}),
+            }],
+          },
+          undefined,
+          schemaRole === undefined ? undefined : { schemaRole },
+          () => "message-1",
+        );
+        return tx;
+      };
+
+      // The first write establishes the array container; the second targets
+      // the stable entity id derived once that container is present. The
+      // migration then revisits that same long-lived entity document.
+      for (let round = 0; round < 2; round++) {
+        for (const rootId of ["generated-output-control", "generated-output"]) {
+          const seed = write(rootId, false);
+          seed.prepareCfc();
+          expect((await seed.commit()).ok).toBeDefined();
+        }
+      }
+
+      const strictUpdate = write("generated-output-control", true);
+      strictUpdate.prepareCfc();
+      const strictResult = await strictUpdate.commit();
+      expect(strictResult.error?.message).toContain(
+        "required field generated needs a default",
+      );
+
+      const outputUpdate = write("generated-output", true, "output");
+      outputUpdate.prepareCfc();
+      expect((await outputUpdate.commit()).ok).toBeDefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -3698,6 +4004,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const seed = runtime.edit();
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -3707,7 +4014,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -4037,6 +4344,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime1 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      ...characterizationCfcPosture,
     });
     try {
       const firstTx = runtime1.edit();
@@ -4067,6 +4375,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const runtime2 = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
+        ...characterizationCfcPosture,
       });
       try {
         const secondTx = runtime2.edit();
@@ -4129,6 +4438,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime1 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManager1,
+      ...characterizationCfcPosture,
     });
     const cellSchema = {
       type: "object",
@@ -4163,6 +4473,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime2 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManager2,
+      ...characterizationCfcPosture,
     });
     try {
       const secondSchema = {
@@ -4211,6 +4522,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime1 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManager1,
+      ...characterizationCfcPosture,
     });
     const cellSchema = {
       type: "object",
@@ -4251,6 +4563,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime2 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManager2,
+      ...characterizationCfcPosture,
     });
     try {
       const secondSchema = {
@@ -4292,7 +4605,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("rejects later writes when stored schemaHash documents are missing", async () => {
+  it("refuses the seeding commit when its schemaHash names no backing document", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const seed = runtime.edit();
@@ -4327,31 +4640,15 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         },
       });
+      // The commit boundary polices backing: metadata naming a schema
+      // document that is neither in the commit nor stored refuses at seed
+      // time, so the bad state a later write would trip over cannot land.
+      // (The runner-side load guard keeps its own coverage in
+      // cfc-cid-schema-verify.test.ts.)
       const seedResult = await seed.commit();
-      expect(seedResult.ok).toBeDefined();
-
-      const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
-      const cell = runtime.getCell(
-        signer.did(),
-        "cfc-missing-schema-doc",
-        {
-          type: "object",
-          properties: {
-            secret: {
-              type: "string",
-              ifc: { confidentiality: ["secret"] },
-            },
-          },
-          required: ["secret"],
-        },
-        tx,
+      expect(seedResult.error?.message).toContain(
+        "neither included in the commit nor stored in the space",
       );
-      cell.set({ secret: "updated" });
-
-      tx.prepareCfc();
-      const result = await tx.commit();
-      expect(result.error?.message).toContain("missing or unreadable");
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -4374,6 +4671,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -4383,7 +4681,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -4495,6 +4793,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -4504,7 +4803,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "untrusted" },
         cfc: {
           version: 1,
-          schemaHash: "optional-removal-source-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -4590,6 +4889,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -4599,7 +4899,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "untrusted" },
         cfc: {
           version: 1,
-          schemaHash: "null-write-source-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -4675,6 +4975,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -4684,7 +4985,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "trusted" },
         cfc: {
           version: 1,
-          schemaHash: "trusted-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -4706,6 +5007,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -4715,7 +5017,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "untrusted" },
         cfc: {
           version: 1,
-          schemaHash: "untrusted-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -4796,6 +5098,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -4805,7 +5108,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -4875,6 +5178,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -4884,7 +5188,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -5019,7 +5323,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       );
       expect(getMetaLink(plainTarget2, "result", {
         meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
-        frozen: false,
       })).toBeDefined();
       plainTarget2.set({ bar: "updated" });
       tx2.prepareCfc();
@@ -5053,6 +5356,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -5062,7 +5366,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { secret: "seed" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
