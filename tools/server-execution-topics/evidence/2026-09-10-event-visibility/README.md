@@ -154,6 +154,12 @@ paths under an ASCII locale, checkout ancestors named `tasks` or `packages`, and
 unrelated source paths. Each control reproduces the earlier helper's failure and
 passes with the recorded fix. These are helper controls, not latency trials.
 
+`path-boundary-controls.json` records a further relocation guard. A captured
+suffix containing `..` or beginning with `/` fails explicitly before either
+report is written. Ordinary relative paths and redundant separators within a
+relative path remain valid. The record names the earlier helper at f198bc7 and
+both tested source hashes; the earlier helper controls retain their own hashes.
+
 The LCOV inputs remain in the durable archive named in
 `coverage-discovery.json`, with its SHA-256 and retrieval/normalization/scoring
 commands. `coverage-inputs.sha256` lists every extracted input. The archive
@@ -163,7 +169,8 @@ and relocates only paths under explicitly supplied capture roots. Pass both
 `/home/runner/work/labs/labs` and
 `/Users/berni/.codex/worktrees/topics-campaign-events/labs` after the
 destination checkout argument, as shown in the manifest. Unrelated paths remain
-unchanged. The helper produces both joined reports. The scorer is the
-repository's `collectCoverageDebtMetricsFromLcov`, invoked by the exact
-JavaScript recorded in the manifest. Report byte hashes depend on the checkout
-path; the expected metric values do not.
+unchanged; a matched source escaping its capture root is an error. The helper
+produces both joined reports. The scorer is the repository's
+`collectCoverageDebtMetricsFromLcov`, invoked by the exact JavaScript recorded
+in the manifest. Report byte hashes depend on the checkout path; the expected
+metric values do not.

@@ -28,7 +28,10 @@ def normalize(text):
             for root in source_roots:
                 prefix = root + "/"
                 if source.startswith(prefix):
-                    line = "SF:" + str(checkout / source[len(prefix):])
+                    relative = PurePosixPath(source[len(prefix):])
+                    if relative.is_absolute() or ".." in relative.parts:
+                        raise ValueError(f"Source path escapes its capture root: {source}")
+                    line = "SF:" + str(checkout / Path(*relative.parts))
                     break
         lines.append(line)
     return "\n".join(lines) + "\n"
