@@ -458,23 +458,29 @@ replica has examined the document and also once a local write for it is
 pending, so a case turning on the first of those says in a comment that
 nothing has written the document yet.
 
-**A persisted label map reads as empty for four different states.** A test
+**A label-map absence assertion passes in four different states.** A test
 reaches the CFC label map through a chain like
 `replica.getDocument(id)?.cfc?.labelMap?.entries ?? []`. The `getDocument()`
-collapse above accounts for the first of the four. The rest of the chain adds
-three more: the document carries no `cfc` metadata, that metadata carries no
-`labelMap`, and the label map holds no matching entry. All four read as the
-same empty list. An assertion over that list saying some entry is absent
-therefore also passes when the label-map machinery persisted nothing
-whatsoever, and where no passing run stamps that document, the case cannot
-fail at all. Say which state is meant. A positive companion the same helper
-reads back from that same document closes all four at once: the entry is
-there, so the label map, the metadata and the document are there too. Where
-the run labels nothing on that document, the companion has to come from
-another one the run labels, and that closes only the last three — pair it with
-the value the document stores, which is what says the document is there at
-all. A run that labels nothing anywhere has only that second assertion to
-make.
+collapse above accounts for the first of the four. Two more come from the rest
+of the chain: the document carries no `cfc` metadata, and that metadata
+carries no `labelMap`. Each of the three yields the empty list the `??` hands
+back. The fourth is the one an absence assertion means — the label map is
+there and holds no matching entry — where `entries` may well be non-empty and
+it is the `find()` or `filter()` over it that comes back empty. All four look
+alike by the time the matcher runs, and where no passing run stamps that
+document, the case cannot fail at all.
+
+Say which state is meant. A positive companion the same helper reads back from
+that same document closes the first three: the entry is there, so the label
+map, the metadata and the document are there too, and the fourth is left as
+the claim. Where the run labels nothing on that document, no such companion
+exists, and naming the value the document stores is what there is. It rules
+out a missing document and nothing else, which leaves the two middle states
+standing — and those are what such a case asserts, since a document the run
+stamps nothing on is one carrying no metadata. A companion read from another
+document closes none of the three. It says the run stamped something
+somewhere, which is worth asserting where the case turns on a label that must
+not travel, and is not a substitute for pinning the document under assertion.
 
 ```ts
 // Shown at module scope.
