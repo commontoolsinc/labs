@@ -1,47 +1,22 @@
 {
-  "updated": "2026-09-10T20:57:09.639581+00:00",
+  "updated": "2026-09-10T21:32:31.901383+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7241",
-  "activity": "Worker control #7256 is merged. #7241 passes the full runner suite: 1,410 tests / 8,750 steps. A3 also passes its full runner suite: 1,410 tests / 8,761 steps, including lifecycle fixes. The first browser benchmark is being debugged.",
-  "review": "Cubic identified ambiguous revision labeling in this dashboard; the pointer now names validated implementation code, not the moving PR head. Its earlier fan-out finding is fixed and regression-tested but still awaits acknowledgement. CI gates remain required.",
+  "activity": "Merged #7241 after all 69 gates, a latest Cubic review reporting zero issues, and antagonistic review. Browser benchmark PR #7261 is under CI. Read-budget PR #7257 has six Cubic findings being fixed and revalidated.",
+  "review": "Landed: #7241 and #7256. #7257: settlement, contributor attribution, event completion, skipped-limit documentation, and acceptance evidence fixes are under local validation. #7261: antagonistic review clean; CI/Cubic pending.",
   "checks": [
-    "Current fixes: runner accounting regression 20 steps passed",
-    "Current fixes: CLI render-demand regression 13 steps passed",
-    "Current CLI suite: 1,817 passed; same two pre-existing color failures",
-    "Current repository type checks, formatting, and lint passed",
-    "Current full runner suite: 1,405 passed / 8,643 steps / zero failures",
-    "Dashboard: browser rendering, interval switching, stage filter, and live updates verified",
-    "Published baseline: patterns package and all 412 authoritative pattern checks passed",
-    "After main integration: 15 focused suites / 230 steps passed",
-    "After main integration: type checks, formatting, lint, history index, and conflict-marker checks passed",
-    "A3 worktree: budget parser/evaluator test passed all seven steps (not yet harness enforcement)",
-    "A3 worktree: three real harness budget regressions and 24 accounting steps pass; recorded CLI pass/fail outcomes verified",
-    "#7241 coverage repair: initialization/action/assertion/settle report test passes; missing line verified executed twice",
-    "A3 API package: 27 tests / five steps pass",
-    "A3 full CLI package: 1,819 pass; the same two pre-existing color-mode failures",
-    "A3 runtime: 26 focused accounting steps pass; CLI budget harness: eight cases pass",
-    "A3 repository type check passed all 46 groups before the latest CLI review fixes; focused checks cover those fixes",
-    "A3 generated public types are current; static package tests pass, including browser tests",
-    "A3 CLI review: uncapped settlement, multi-user override rejection, and functional error preservation fixed; ten harness cases pass",
-    "Final A3 runner suite: 1,403 passed / 8,678 steps / zero failures",
-    "Final A3 CLI suite: 1,819 passed / 2,899 steps; same two baseline color-mode failures",
-    "Final A3 repository type checks, formatting, lint, 597 documentation blocks, package-cycle and conflict checks pass",
-    "Final A3 antagonistic review: no outstanding blockers after five substantive findings were fixed",
-    "A4 worker diagnostic control: enable/disable verified through client request routing against a real runtime",
-    "A4 runtime-client full suite: 30 tests / 650 steps passed, zero failures",
-    "#7241 reconciliation: repository type checks and 598 documentation blocks passed",
-    "#7241 refreshed controlled lunch-poll: five assertions passed; demo uses shipped #7246 counters",
-    "A3 migration: accounting suites passed 64 steps",
-    "Worker control #7256: full runtime-client suite passed 30 tests / 650 steps; antagonistic review clean",
-    "#7256 merged: all 69 checks complete without failure; actual Cubic review found no issues in five files; antagonistic review clean"
+    "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
+    "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
+    "#7257: full runner before latest review fixes passed 1,410 tests / 8,761 steps. Latest focused fixes pass 22 CLI and 19 lifecycle steps; broader revalidation is running.",
+    "#7261: all three browser sizes passed; fixture assertions, patterns package tests, all repository type-check groups, formatting/lint passed. CI and Cubic pending."
   ],
   "stages": [
     {
       "id": "A0",
       "title": "Controlled workload and baseline",
-      "status": "review",
-      "detail": "14 options, eight voters, 74 keyed votes; normal and continuous-UI tests pass."
+      "status": "done",
+      "detail": "Controlled workload and attributed baseline landed in #7241 with all review and CI gates passing."
     },
     {
       "id": "A1",
@@ -58,14 +33,14 @@
     {
       "id": "A3",
       "title": "Read budgets and whole-step coverage",
-      "status": "active",
-      "detail": "Local implementation f37d25f6d6 passed validation and antagonistic review. Adapting to the accounting API shipped by #7246 is required before publication."
+      "status": "review",
+      "detail": "PR #7257: six Cubic findings are addressed locally; strengthened settlement, attribution, and event-completion regressions pass. Full revalidation and review remain before landing."
     },
     {
       "id": "A4",
       "title": "Read-side benchmark",
-      "status": "active",
-      "detail": "Worker read-statistics control shipped in #7256 (8d3c7dbc3c). The on-screen workload fixture is being tested; scaling benchmark remains in progress."
+      "status": "review",
+      "detail": "Browser benchmark PR #7261 records all three sizes, worker reads and event commits; screenshots below. CI/Cubic pending. Regression ceilings follow read-budget landing."
     },
     {
       "id": "A5",
@@ -236,5 +211,5 @@
       "detail": "Compare the same interaction before and after migration, with read work and measured time."
     }
   ],
-  "validatedRevision": "f12c01fddc"
+  "validatedRevision": "7aaac0b7fe"
 }
