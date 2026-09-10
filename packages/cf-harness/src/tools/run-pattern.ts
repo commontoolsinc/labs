@@ -45,6 +45,10 @@ import {
 } from "../fabric-observations.ts";
 import { defineOwnEntry } from "../handle-table.ts";
 import {
+  unboundedSchemaPosition,
+  unboundedSchemaPositionMessage,
+} from "../schema-read-bound.ts";
+import {
   addressSealedPositions,
   isSealedOpaqueLinkObject,
   parseStructuredResultSchema,
@@ -341,7 +345,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
   toolId: "run_pattern",
   title: "Run Pattern",
   description:
-    `Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. Give it either your own sourceText or the patternId of a pattern search_patterns found. Source you write imports the runtime from "${RUNTIME_MODULE_SPECIFIER}" and from no other module — every pattern opens with a line of the form ${RUNTIME_MODULE_IMPORT_LINE} — and no package named after the product resolves. When the run's session reads under a confidentiality ceiling, every db.query result must be declared per session (PerSession<> on the result type, or the query's { scope: "session" } option); a query left space-scoped is refused under a ceiling rather than read. Bound every query's rows with a LIMIT — a few hundred is a sensible ceiling for a view — because an ordinary result row is materialized as its own document in the space, so an unbounded query over a large store writes a document per row it returns; an aggregate returning one row per group — count(*), sum(), a GROUP BY — is bounded by its own shape and needs no LIMIT. The piece stays out of the space's piece list; assign_slug names and lists it when it deserves a public address.`,
+    `Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. Give it either your own sourceText or the patternId of a pattern search_patterns found. Source you write imports the runtime from "${RUNTIME_MODULE_SPECIFIER}" and from no other module — every pattern opens with a line of the form ${RUNTIME_MODULE_IMPORT_LINE} — and no package named after the product resolves. When the run's session reads under a confidentiality ceiling, every db.query result must be declared per session (PerSession<> on the result type, or the query's { scope: "session" } option); a query left space-scoped is refused under a ceiling rather than read. Bound every query's rows with a LIMIT — a few hundred is a sensible ceiling for a view — because an ordinary result row is materialized as its own document in the space, so an unbounded query over a large store writes a document per row it returns; an aggregate returning one row per group — count(*), sum(), a GROUP BY — is bounded by its own shape and needs no LIMIT. Declare every position your pattern reads at: an object type with no named fields — TypeScript \`object\` or \`any\` — asks the runtime to descend every key the value carries and follow every link it reaches, so a pattern declaring one in its result type, or in the type of an input you wire by reference, is refused before it runs, naming the position. Name the fields you need, and declare a nested shape rather than referring back to the enclosing one. The piece stays out of the space's piece list; assign_slug names and lists it when it deserves a public address.`,
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
@@ -379,7 +383,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           { type: "object", additionalProperties: true },
         ],
         description:
-          'JSON Schema for the result value. Without it you get resultRef only and no value at all, so pass it whenever you need to read what the pattern computed. A value is returned only for the fields the schema models: an inert one (a number, a boolean, an enum or const string) comes back as itself; anything else is withheld as text and comes back as a reference token addressing that position, which describe_handle can inspect and a later run_pattern can wire by reference. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. The framework\'s own result keys ($NAME, $UI and the other rendering variants) need not be declared. When the space\'s policy does not admit releasing the values to you, value is withheld, valueError says why and which input carried the refused label, and resultRef still names the result: pass it on by reference.',
+          'JSON Schema for the result value. Without it you get resultRef only and no value at all, so pass it whenever you need to read what the pattern computed. A value is returned only for the fields the schema models: an inert one (a number, a boolean, an enum or const string) comes back as itself; anything else is withheld as text and comes back as a reference token addressing that position, which describe_handle can inspect and a later run_pattern can wire by reference. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. The framework\'s own result keys ($NAME, $UI and the other rendering variants) need not be declared. When the space\'s policy does not admit releasing the values to you, value is withheld, valueError says why and which input carried the refused label, and resultRef still names the result: pass it on by reference. Every object position here names its properties or the call is refused: {"type":"object"} with no properties, or additionalProperties: true, asks for the whole graph the result reaches.',
       },
     },
     // Exactly one of `sourceText` and `patternId` is required, which is a
@@ -1041,6 +1045,16 @@ export const runPatternTool: HarnessToolDefinition<
         );
       }
     }
+    const callerResultPosition = unboundedSchemaPosition(input.resultSchema);
+    if (callerResultPosition !== undefined) {
+      return errorOutput(
+        "error",
+        unboundedSchemaPositionMessage(
+          "run_pattern resultSchema",
+          callerResultPosition,
+        ),
+      );
+    }
     let parsedResultSchema;
     try {
       parsedResultSchema = parseStructuredResultSchema(input.resultSchema, {
@@ -1228,6 +1242,20 @@ export const runPatternTool: HarnessToolDefinition<
           rawCauseMessage: errorMessage(error),
         };
     }
+    // The result is read at the compiled pattern's own result schema, on every
+    // run and whether or not the caller asked for values, so a position that
+    // schema leaves unbounded is unbounded work on this thread. Refused here:
+    // after the compile that produced the schema, and before the read at it.
+    const resultPosition = unboundedSchemaPosition(pattern.resultSchema);
+    if (resultPosition !== undefined) {
+      return errorOutput(
+        "error",
+        unboundedSchemaPositionMessage(
+          "the pattern's result schema",
+          resultPosition,
+        ),
+      );
+    }
     // An input's value must match the compiled pattern's argument schema for
     // its key before any piece exists, so a mismatch is a model-correctable
     // error rather than a persisted broken piece. What supplies the value
@@ -1340,6 +1368,21 @@ export const runPatternTool: HarnessToolDefinition<
       const readSchema = readSchemaForKey(key);
       if (readSchema === undefined) {
         continue;
+      }
+      // What this input is read at decides how much of the space the read
+      // touches, and an input naming a reference reaches whatever that
+      // reference reaches. An unbounded position here is refused rather than
+      // read: a handle on a large piece graph read at an open object is work
+      // with no ceiling, and the pattern has not run yet.
+      const inputPosition = unboundedSchemaPosition(readSchema);
+      if (inputPosition !== undefined) {
+        return errorOutput(
+          "error",
+          unboundedSchemaPositionMessage(
+            `the pattern's argument schema for input "${key}"`,
+            inputPosition,
+          ),
+        );
       }
       // The read goes through the argument schema: a schema-less sync can
       // complete without data for a referent that needs schema-driven

@@ -2702,6 +2702,150 @@ describe("run-pattern", () => {
     });
   });
 
+  describe("unbounded read schemas", () => {
+    // A schema open at any position is the instruction to descend every key a
+    // value carries and follow every link it reaches, which against a space
+    // holding a large piece graph is work with no ceiling on the thread that
+    // asked for it. Each case here asserts the refusal lands before the work
+    // it would have started.
+
+    it("returns an error naming the open position in a caller's `resultSchema`", async () => {
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        resultSchema: {
+          type: "object",
+          properties: { entries: { type: "object" } },
+        },
+        inputs: { n: 21 },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("run_pattern resultSchema");
+      expect(output.message).toContain("`/properties/entries`");
+      expect(output.message).toContain("Declare the properties you need");
+      expect(spy.calls).toBe(0);
+    });
+
+    it("refuses a caller's `resultSchema` before compiling the source", async () => {
+      // Source that cannot compile, with an open `resultSchema`. A compile
+      // error in the message would mean the compile ran first; naming the
+      // schema is what says the gate is ahead of it.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: "this is not a pattern and will not compile(((",
+        resultSchema: { type: "object" },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("run_pattern resultSchema");
+    });
+
+    it("returns an error naming the open position in the pattern's result schema", async () => {
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: [
+          "import { computed, pattern } from 'commonfabric';",
+          "interface Input { n: number; }",
+          "// deno-lint-ignore no-explicit-any",
+          "interface Output { value: any; }",
+          "export default pattern<Input, Output>(({ n }) => ({",
+          "  value: computed(() => ({ n })),",
+          "}));",
+          "",
+        ].join("\n"),
+        inputs: { n: 21 },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("the pattern's result schema");
+      expect(output.message).toContain("leaves an object open");
+      expect(spy.calls).toBe(0);
+    });
+
+    it("returns an error naming the input whose read position is open", async () => {
+      const space = pieces.getSpace();
+      const seed = runtime.getCell(
+        space,
+        "run-pattern-open-input-seed",
+        { type: "object", properties: { n: { type: "number" } } } as const,
+      );
+      const { error } = await runtime.editWithRetry((tx) => {
+        seed.withTx(tx).set({ n: 21 });
+      });
+      expect(error).toBeUndefined();
+      await runtime.idle();
+      const seedRef = createLLMFriendlyLink(
+        seed.getAsNormalizedFullLink(),
+        space,
+      );
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: [
+          "import { computed, pattern } from 'commonfabric';",
+          "// deno-lint-ignore no-explicit-any",
+          "interface Input { registry: any; }",
+          "interface Output { found: boolean; }",
+          "export default pattern<Input, Output>(({ registry }) => ({",
+          "  found: computed(() => registry !== undefined),",
+          "}));",
+          "",
+        ].join("\n"),
+        inputs: { registry: seedRef },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain('input "registry"');
+      expect(output.message).toContain("leaves an object open");
+      expect(spy.calls).toBe(0);
+    });
+
+    it("runs a pattern whose every read position is closed", async () => {
+      // The gate is on the positions that have no ceiling, not on reading
+      // through a reference: this input is read at a declared shape and runs.
+      const space = pieces.getSpace();
+      const seed = runtime.getCell(
+        space,
+        "run-pattern-closed-input-seed",
+        { type: "object", properties: { n: { type: "number" } } } as const,
+      );
+      const { error } = await runtime.editWithRetry((tx) => {
+        seed.withTx(tx).set({ n: 21 });
+      });
+      expect(error).toBeUndefined();
+      await runtime.idle();
+      const seedRef = createLLMFriendlyLink(
+        seed.getAsNormalizedFullLink(),
+        space,
+      );
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: [
+          "import { computed, pattern } from 'commonfabric';",
+          "interface Seed { n: number; }",
+          "interface Input { seed: Seed; }",
+          "interface Output { doubled: number; }",
+          "export default pattern<Input, Output>(({ seed }) => ({",
+          "  doubled: computed(() => seed.n * 2),",
+          "}));",
+          "",
+        ].join("\n"),
+        inputs: { seed: seedRef },
+        resultSchema: {
+          type: "object",
+          properties: { doubled: { type: "number" } },
+          required: ["doubled"],
+        },
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toEqual({ doubled: 42 });
+    });
+  });
+
   describe("live-cell input validation from a cold session", () => {
     // Two replicas on one loopback server: the writer seeds and pushes, the
     // reader session starts cold, never having pulled what the input's

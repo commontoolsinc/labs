@@ -408,15 +408,46 @@ const declaredSchema = async (
 };
 
 /**
+ * The shape this tool reads an arbitrary referent at to decide whether it is a
+ * database. `id` is the whole of the test `isSqliteDbRef` applies, and naming
+ * it as the only property is what bounds the read: a schema carrying
+ * `properties` and no `additionalProperties` descends the properties it names
+ * and leaves the rest of the value alone, so the read reaches one string
+ * however large a graph the referent opens onto.
+ *
+ * Exported because that bound is the contract, not an implementation detail —
+ * this tool is asked about every reference a model holds, so widening this
+ * schema makes an unbounded read of an arbitrary referent reachable from a
+ * tool whose answer is a shape.
+ */
+export const DESCRIBE_HANDLE_DATABASE_MARKER_SCHEMA: JSONSchema = {
+  type: "object",
+  properties: { id: { type: "string" } },
+};
+
+/**
  * The referent's table contract as a fragment to spread, empty where it has
- * none. The read is permissive-schema and resolving because a handle written
- * before the sqlite builtin stored it inline can hold links where its table
- * schemas belong, and the SqliteDb shape declares no properties, so a shaped
- * read would reduce the handle to `{}`.
+ * none.
+ *
+ * This tool is asked about any reference a model holds, and most of them are
+ * not databases, so the marker is read first and the tables only after it has
+ * answered. The table read is permissive-schema and resolving because a handle
+ * written before the sqlite builtin stored it inline can hold links where its
+ * table schemas belong, and the SqliteDb shape declares no properties, so a
+ * shaped read would reduce the handle to `{}`. That read is open, and what
+ * bounds it is what it runs on: a value already carrying the marker, whose
+ * tables are the column declarations the sqlite builtin wrote.
  */
 const databaseOf = (
   referent: Cell<unknown>,
 ): Pick<DescribedReferent, "database"> => {
+  if (
+    !isSqliteDbRef(
+      referent.asSchema(DESCRIBE_HANDLE_DATABASE_MARKER_SCHEMA).get(),
+    )
+  ) {
+    return {};
+  }
   const database = describedDatabase(
     referent.asSchema({ type: "object", additionalProperties: true }).get(),
   );

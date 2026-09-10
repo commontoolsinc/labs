@@ -44,4 +44,32 @@ describe("run-pattern description", () => {
       "bounded by its own shape and needs no LIMIT",
     );
   });
+
+  it("tells the model that an unnamed object position is refused before the run", () => {
+    expect(runPatternToolDescriptor.description).toContain(
+      "Declare every position your pattern reads at",
+    );
+    expect(runPatternToolDescriptor.description).toContain(
+      "refused before it runs, naming the position",
+    );
+  });
+
+  it("states the same bound on a caller's `resultSchema`", () => {
+    const schema = runPatternToolDescriptor.inputSchema;
+    if (
+      typeof schema !== "object" || schema === null ||
+      schema.type !== "object" || schema.properties === undefined
+    ) {
+      throw new Error("expected `run_pattern` object input schema");
+    }
+    const resultSchema = schema.properties.resultSchema as JSONSchema;
+    const description = typeof resultSchema === "object" &&
+        resultSchema !== null
+      ? resultSchema.description
+      : undefined;
+
+    expect(description).toContain(
+      "Every object position here names its properties",
+    );
+  });
 });
