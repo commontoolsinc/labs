@@ -1,6 +1,6 @@
 {
   "base": "27f10d2d4f02f125c0492e5d6288acb3f0da148b",
-  "checkout": "/Users/berni/.codex/worktrees/topics-campaign-watch-controls/labs",
+  "checkout": ".",
   "candidatePatchSha256": "a2e2aef9db9356da04b24aaa078b5e16417062581685b1c5f853e81836bf76e7",
   "runs": [
     {
@@ -48,5 +48,10 @@
       "log": "resume-red.log",
       "sha256": "aeba12ac898ab0d96845658d0f31705c561a9b48af01ca632301e9998298c159"
     }
-  ]
+  ],
+  "captureProvenance": {
+    "file": "external-captures.json",
+    "entry": "replay/manifest.json",
+    "note": "Original capture paths and commands; not replay inputs."
+  }
 }

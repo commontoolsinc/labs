@@ -422,6 +422,51 @@ describe("Server", () => {
         }
       });
 
+      it("retains the last duplicate addition when graph and operation watches share an ID", async () => {
+        const fixture = await openFixture(2);
+        try {
+          const added = await fixture.reader.watchAddSync([
+            {
+              id: "duplicate",
+              kind: "operation",
+              query: { id: fixture.ids[0], path: toValuePath([]) },
+            },
+            { ...watch(fixture.ids[1]), id: "duplicate" },
+          ]);
+          expect(added.sync.operationFields?.[0].watchId).toBe("duplicate");
+          await fixture.reader.watchRemoveSync([fixture.ids[0]]);
+          expect(fixture.state.watches).toEqual([
+            watch(fixture.ids[1]),
+            { ...watch(fixture.ids[1]), id: "duplicate" },
+          ]);
+          expect(fixture.state.operationWatches).toEqual([]);
+          expect(fixture.state.trackedIds.has(toDirtyKey(fixture.ids[0])))
+            .toBe(false);
+          expect(fixture.state.trackedIds.has(toDirtyKey(fixture.ids[1])))
+            .toBe(true);
+        } finally {
+          await fixture.close();
+        }
+      });
+
+      it("keeps unsupported content types absent without hiding the stored JSON document", async () => {
+        const fixture = await openFixture(1);
+        try {
+          const manager = [...fixture.state.graphs.values()][0].manager;
+          const address = { id: fixture.ids[0], type: "text/plain" };
+          expect(manager.load(address)).toBeNull();
+          expect(manager.load(address)).toBeNull();
+          expect(manager.load({ id: fixture.ids[0] })).not.toBeNull();
+          expect(
+            manager.loadedAddresses().every((entry) =>
+              entry.type === "application/json"
+            ),
+          ).toBe(true);
+        } finally {
+          await fixture.close();
+        }
+      });
+
       it("retains accepted duplicate-id roots when removing an unrelated watch", async () => {
         const fixture = await openFixture(2);
         try {

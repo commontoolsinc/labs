@@ -17,82 +17,6 @@
   ],
   "artifactRoot": ".",
   "store": "store",
-  "provenance": {
-    "checkout": "/Users/berni/.codex/worktrees/topics-campaign-watch/labs",
-    "captureDirectory": "/Users/berni/.codex/artifacts/server-execution-topics-2026-09-09/runs/watch-integration-opposite-04",
-    "commands": [
-      {
-        "command": "git",
-        "args": [
-          "rev-parse",
-          "HEAD"
-        ],
-        "cwd": "/Users/berni/.codex/worktrees/topics-campaign-watch/labs"
-      },
-      {
-        "command": "git",
-        "args": [
-          "diff",
-          "HEAD",
-          "--binary"
-        ],
-        "cwd": "/Users/berni/.codex/worktrees/topics-campaign-watch/labs"
-      },
-      {
-        "command": "/usr/sbin/sysctl",
-        "args": [
-          "-n",
-          "machdep.cpu.brand_string"
-        ],
-        "cwd": "/Users/berni/.codex/worktrees/topics-campaign-watch/labs"
-      },
-      {
-        "command": "/Users/berni/.codex/worktrees/topics-campaign-watch/labs/.ci-cache/binaries/toolshed-baked-opposite",
-        "args": [
-          "--port=57442",
-          "--background",
-          "--log-file=/Users/berni/.codex/artifacts/server-execution-topics-2026-09-09/runs/watch-integration-opposite-04/toolshed-57442.log"
-        ],
-        "cwd": "/Users/berni/.codex/artifacts/server-execution-topics-2026-09-09/runs/watch-integration-opposite-04/store"
-      },
-      {
-        "command": "shasum",
-        "args": [
-          "-a",
-          "256",
-          "/Users/berni/.codex/worktrees/topics-campaign-watch/labs/.ci-cache/binaries/toolshed-baked-opposite"
-        ],
-        "cwd": "/Users/berni/.codex/worktrees/topics-campaign-watch/labs"
-      },
-      {
-        "command": "/Users/berni/.local/bin/deno",
-        "args": [
-          "test",
-          "--no-check",
-          "-A",
-          "packages/patterns/integration/topic-board-fixture.test.ts",
-          "packages/patterns/integration/topic-board-child-contract.test.ts",
-          "packages/patterns/integration/topic-create-onscreen.test.ts",
-          "packages/patterns/integration/sx2-events.test.ts",
-          "packages/patterns/integration/lunch-poll-vote.test.ts",
-          "packages/patterns/integration/cfc-group-chat-chained-event-gate-multi-runtime.test.ts"
-        ],
-        "cwd": "/Users/berni/.codex/worktrees/topics-campaign-watch/labs"
-      }
-    ],
-    "workloadEnvironment": {
-      "API_URL": "http://localhost:57442",
-      "MEMORY_URL": "http://localhost:57442",
-      "TOOLSHED_URL": "http://localhost:57442",
-      "TOOLSHED_PORT": "57442",
-      "EXPERIMENTAL_SERVER_EXECUTION": "true",
-      "FRONTEND_URL": "http://localhost:57442",
-      "SPACE_NAME": "topics-campaign-faca4c6d-c594-4aee-b52b-0455f8161d4d",
-      "HEADLESS": "1",
-      "CF_LOG_LEVEL": "silent",
-      "CF_CAMPAIGN_RUN_DIR": "/Users/berni/.codex/artifacts/server-execution-topics-2026-09-09/runs/watch-integration-opposite-04"
-    }
-  },
   "cache": "fresh store and server; existing Deno dependency cache",
   "machine": {
     "cpu": "Apple M3 Max",
@@ -1943,22 +1867,22 @@
         {
           "what": "sink `llm` releases with no confidentiality ceiling, so no policy evaluation runs for it: ceiling membership is exact clause subsumption, so a public-only ceiling would refuse the risk-caveated ingested content an llm sink exists to process",
           "owner": "CFC runtime (Epic B, sink governance)",
-          "retirement": "a boundary-scoped admission mechanism exists — a public-only ceiling paired with an exchange rule admitting the material-risk family at llm-class boundaries"
+          "retirement": "a boundary-scoped admission mechanism exists \u2014 a public-only ceiling paired with an exchange rule admitting the material-risk family at llm-class boundaries"
         },
         {
           "what": "sink `llmDialog` releases with no confidentiality ceiling, so no policy evaluation runs for it: ceiling membership is exact clause subsumption, so a public-only ceiling would refuse the risk-caveated ingested content an llm sink exists to process",
           "owner": "CFC runtime (Epic B, sink governance)",
-          "retirement": "a boundary-scoped admission mechanism exists — a public-only ceiling paired with an exchange rule admitting the material-risk family at llm-class boundaries"
+          "retirement": "a boundary-scoped admission mechanism exists \u2014 a public-only ceiling paired with an exchange rule admitting the material-risk family at llm-class boundaries"
         },
         {
           "what": "sink `generateText` releases with no confidentiality ceiling, so no policy evaluation runs for it: ceiling membership is exact clause subsumption, so a public-only ceiling would refuse the risk-caveated ingested content an llm sink exists to process",
           "owner": "CFC runtime (Epic B, sink governance)",
-          "retirement": "a boundary-scoped admission mechanism exists — a public-only ceiling paired with an exchange rule admitting the material-risk family at llm-class boundaries"
+          "retirement": "a boundary-scoped admission mechanism exists \u2014 a public-only ceiling paired with an exchange rule admitting the material-risk family at llm-class boundaries"
         },
         {
           "what": "sink `generateObject` releases with no confidentiality ceiling, so no policy evaluation runs for it: ceiling membership is exact clause subsumption, so a public-only ceiling would refuse the risk-caveated ingested content an llm sink exists to process",
           "owner": "CFC runtime (Epic B, sink governance)",
-          "retirement": "a boundary-scoped admission mechanism exists — a public-only ceiling paired with an exchange rule admitting the material-risk family at llm-class boundaries"
+          "retirement": "a boundary-scoped admission mechanism exists \u2014 a public-only ceiling paired with an exchange rule admitting the material-risk family at llm-class boundaries"
         }
       ]
     }
@@ -1966,5 +1890,10 @@
   "serverBuildHead": "27f10d2d4f02f125c0492e5d6288acb3f0da148b",
   "binarySha256": "3a2a461e5812fae862ee8072ae942e9e392aaa8b2501b4255d76ac084726bada",
   "exitCode": 0,
-  "latencyEligible": false
+  "latencyEligible": false,
+  "captureProvenance": {
+    "file": "external-captures.json",
+    "entry": "integration-opposite/manifest.json",
+    "note": "Original capture paths and commands; not replay inputs."
+  }
 }

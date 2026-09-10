@@ -25,6 +25,8 @@ describe("MapSetStringToPathSelectors", () => {
           published.value.add("root", narrow);
           expect([...published.value.values("root")][0]).toBe(broad);
           expect([...original.values("root")]).toEqual([broad]);
+          const { changedKeys } = published;
+          expect([...changedKeys()]).toEqual(["root"]);
           published.commit();
           expect([...original.values("root")]).toEqual([broad, narrow]);
           expect([...original.trueSchemaSelectors("root")]).toEqual([broad]);

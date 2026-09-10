@@ -134,8 +134,10 @@ export class StagedMap<K, V> extends Map<K, V> {
 
   /** Yields keys whose values or membership may differ from the base. */
   *changedKeys(): IterableIterator<K> {
-    if (this.#cleared) yield* this.#base.keys();
-    else yield* this.#removed;
+    const removed = this.#cleared ? this.#base.keys() : this.#removed;
+    for (const key of removed) {
+      if (!this.#changes.has(key)) yield key;
+    }
     yield* this.#changes.keys();
   }
 

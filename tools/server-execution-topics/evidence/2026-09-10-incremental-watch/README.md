@@ -10,9 +10,11 @@ separate integration captures validate those surfaces.
 `profile/manifest.json` records exact commands, source hashes, posture, cache,
 load, order, and completion. Each arm seeds 100, 1,000, and 10,000 independent
 `schema:false` roots, with two sessions. It then adds an already-covered root,
-adds one new root, updates one watched document and flushes, and removes one
-watch through full replacement. Both postures use identical fixture shape and
-completion conditions. No topic-size comparison is inferred from this fixture.
+adds one new root, updates one watched document and flushes, and removes two
+watch declarations through full replacement (the extra covered-root watch and
+the new-root watch), reducing delivered entities by one. Both postures use
+identical fixture shape and completion conditions. No topic-size comparison is
+inferred from this fixture.
 
 The capture instruments yielded Map/Set/Array entries, actual array callback
 invocations, slice results, and loaded manager addresses. `analysis.json`
@@ -65,12 +67,12 @@ with promises, not elapsed time. Restore that ablation before using the worktree
 for anything else. Archived red and green logs record the original run; the
 green command also covered operation client and refresh-timing suites.
 
-The campaign's external durable archive is
-`/Users/berni/.codex/artifacts/server-execution-topics-2026-09-09/`. It retains
-exploratory profiles, rejected posture captures, full package logs, build
-manifests, and local integration stores. The portable files in this folder
-contain synthetic fixtures and compact results; no generated binary or store is
-committed. `SHA256SUMS` identifies the portable bytes.
+The campaign's external durable archive is identified by `archiveRoot` in
+`external-captures.json`. It retains exploratory profiles, rejected posture
+captures, full package logs, build manifests, and local integration stores. The
+portable files in this folder contain synthetic fixtures and compact results; no
+generated binary or store is committed. `SHA256SUMS` identifies the portable
+bytes.
 
 `controls/allow-stale-session.patch` removes the final current-session guard.
 With that ablation, a pending old addition mutates the resumed session's watch
@@ -102,3 +104,45 @@ The complete end-statistics payloads are retained at the absolute paths in
 from the durable campaign directory and verify the hashes to retrieve the full
 settle/timing series. The checked-in `stats-summary.json` files keep aggregate
 counters; they omit those large series without turning them into latency claims.
+
+The raw profile label `remove-one` refers to one delivered entity removed; it
+removes two watch declarations. Preserve that label in the captured raw results
+and probe when reproducing the original run. This is full replacement, not an
+incremental single-watch removal measurement.
+
+The build controllers ending in `.py.txt` are immutable command captures, not
+retryable build tools. The captured build controller moved the prior binary
+before compiling and would need that binary restored on a failed build. Its
+recorded builds succeeded. The current `run-arm.ts` requires a clean committed
+checkout and rebuilds before every arm, publishing the replacement binary only
+after successful compilation and a second source-state check. It rejects
+untracked inputs. Commit an ablation on an isolated branch before using it.
+
+The ON capture passed the test assertions but was not error-free. Its aggregate
+logs include 40 `seal-space-commit-failed`, two `schedule-error`, two
+`scheduler-non-settling`, three `session-remount`, 40 `foreign-write-refused`,
+and two `contribution-dropped` events. These are not asserted to be benign or to
+prove successful seals. Failed-add rollback is established by the deterministic
+real-memory snapshot tests; the browser suite establishes only its asserted
+rendering, interaction, and durability conditions. See the
+[review follow-up report](../../../../docs/history/development/performance/2026-09-incremental-watch-review.md)
+for the diagnostic characterization and remaining limits.
+
+`profile/manifest.json`, `replay/manifest.json`, and `builds.json` resolve `.`
+against the appropriate disposable checkout, as specified above. Original
+absolute paths and exact commands are retained under `originalManifests` in
+`external-captures.json`, separate from replay inputs. `build-source.patch` is
+the exact patch applied at the recorded base when compiling the two binaries.
+
+Run the isolated source/build controls with Python 3 and Deno 2.9.4:
+
+```sh
+python3 tools/server-execution-topics/evidence/2026-09-10-incremental-watch/review/verify-runner.py "$PWD" /absolute/new/control-results
+```
+
+The script creates and removes disposable Git fixtures; its stub capability
+stops after the build boundary, so it launches no server. The separate baked
+integration captures establish the real server boundary.
+`review/source-controls.json` records the ten passing cases. The seed-posture
+expression control is retained as `.ts.txt` capture source and requires the
+repository Deno configuration when run from outside the checkout.

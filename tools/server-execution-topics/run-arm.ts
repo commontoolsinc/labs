@@ -1,5 +1,5 @@
 /**
- * Runs a Deno workload against CI's matching baked toolshed in a fresh store.
+ * Builds CI's matching baked toolshed and runs a Deno workload in a fresh store.
  * Saves exact commands, posture, load samples, raw output, and server statistics.
  * Usage: `deno run -A tools/server-execution-topics/run-arm.ts default DIR
  * correctness test -A packages/patterns/integration/EXAMPLE.test.ts`.
@@ -91,6 +91,12 @@ const sampleLoad = () =>
   });
 sampleLoad();
 const head = (await exec("git", ["rev-parse", "HEAD"])).trim();
+const sourceStatus = await exec("git", [
+  "status",
+  "--porcelain=v1",
+  "--untracked-files=all",
+  "--ignore-submodules=none",
+]);
 const patch = await exec("git", ["diff", "HEAD", "--binary"]);
 await Deno.writeTextFile(join(runDir, "worktree.patch"), patch);
 const sourcePaths = [
@@ -130,6 +136,7 @@ const manifest: Record<string, unknown> = {
   role,
   expectedPosture: lane,
   workloadHead: head,
+  sourceStatus,
   sourcePaths,
   artifactRoot: ".",
   store: "store",
@@ -153,6 +160,15 @@ const save = () =>
     JSON.stringify(manifest, null, 2) + "\n",
   );
 await save();
+if (sourceStatus.trim() !== "") {
+  manifest.status = "blocked-source";
+  await save();
+  await Deno.writeTextFile(join(runDir, "source-status.txt"), sourceStatus);
+  throw new Error(
+    "Campaign runs require a clean tracked checkout with no untracked inputs. " +
+      "Commit the workload and implementation in an isolated branch first.",
+  );
+}
 if (
   mode === "latency" &&
   ["CF_TIMING_MEASURES", "CF_MEMORY_FRAME_LOG", "CF_PROF_CPU"].some((key) =>
@@ -174,6 +190,39 @@ if (mode === "latency" && samples[0].load[0] > 5) {
 let opened: Awaited<ReturnType<typeof openCapabilities>> | undefined;
 let sampling: ReturnType<typeof setInterval> | undefined;
 try {
+  // Build before starting the server: a cached binary's embedded commit alone
+  // cannot prove it was compiled from the checkout's current source.
+  await exec(Deno.execPath(), ["task", "build-binaries", "toolshed"], {
+    env: { COMMIT_SHA: head },
+  });
+  const afterBuildHead = (await exec("git", ["rev-parse", "HEAD"])).trim();
+  const afterBuildStatus = await exec("git", [
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+    "--ignore-submodules=none",
+  ]);
+  if (afterBuildHead !== head || afterBuildStatus.trim() !== "") {
+    throw new Error("The source checkout changed during the toolshed build.");
+  }
+  const binaryDirectory = join(root, ".ci-cache/binaries");
+  await Deno.mkdir(binaryDirectory, { recursive: true });
+  const temporaryBinary = join(
+    binaryDirectory,
+    `campaign-${crypto.randomUUID()}`,
+  );
+  try {
+    await Deno.copyFile(join(root, "dist/toolshed"), temporaryBinary);
+    await Deno.rename(
+      temporaryBinary,
+      join(binaryDirectory, `toolshed-baked-${role}`),
+    );
+  } finally {
+    await Deno.remove(temporaryBinary).catch((error) => {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+    });
+  }
+  manifest.build = "fresh build from the clean workload head before this run";
   opened = await openCapabilities([capability], {
     root,
     dryRun: false,
@@ -211,6 +260,13 @@ try {
   provenance.workloadEnvironment = env;
   commands.push({ command: Deno.execPath(), args, cwd: root });
   sampleLoad();
+  if (mode === "latency" && samples.at(-1)!.load[0] > 5) {
+    manifest.status = "blocked-load-after-build";
+    await save();
+    throw new Error(
+      "Machine load exceeds the latency threshold after building.",
+    );
+  }
   // Periodic samples observe contention during the workload; they do not
   // delay it or determine when its completion conditions have been reached.
   sampling = setInterval(sampleLoad, 1000);

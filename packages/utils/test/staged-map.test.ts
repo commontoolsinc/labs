@@ -5,6 +5,37 @@ import { StagedMap } from "../src/staged-map.ts";
 
 describe("StagedMap", () => {
   describe("instance members", () => {
+    describe("changedKeys()", () => {
+      it("yields each changed key once after deletion or clearing and reinsertion", () => {
+        for (const clear of [false, true]) {
+          const stage = new StagedMap(new Map([["a", 1], ["b", 2]]));
+          if (clear) stage.clear();
+          else {
+            stage.delete("a");
+            stage.delete("b");
+          }
+          stage.set("a", 3);
+          stage.set("c", 4);
+          expect([...stage.changedKeys()]).toEqual(["b", "a", "c"]);
+        }
+      });
+
+      it("reads only changed keys when the base is not cleared", () => {
+        const base = new Map([["a", 1], ["b", 2]]);
+        base.keys = () => {
+          throw new Error("The unchanged base must not be enumerated");
+        };
+        const stage = new StagedMap(base);
+        expect([...stage.changedKeys()]).toEqual([]);
+        stage.set("a", 3);
+        stage.delete("b");
+        stage.set("c", 4);
+        expect([...stage.changedKeys()]).toEqual(["b", "a", "c"]);
+        expect(base.get("a")).toBe(1);
+        expect(base.has("b")).toBe(true);
+      });
+    });
+
     describe("getOrInsertComputed()", () => {
       it("rejects non-callable callbacks before checking membership", () => {
         const stage = new StagedMap(new Map([["present", 1]]));

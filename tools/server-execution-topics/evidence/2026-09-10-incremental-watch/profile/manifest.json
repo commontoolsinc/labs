@@ -18,7 +18,7 @@
   "runs": [
     {
       "name": "baseline-off",
-      "cwd": "/Users/berni/.codex/worktrees/topics-campaign-watch-baseline/labs",
+      "cwd": ".",
       "command": [
         "deno",
         "run",
@@ -42,7 +42,7 @@
     },
     {
       "name": "candidate-off",
-      "cwd": "/Users/berni/.codex/worktrees/topics-campaign-watch/labs",
+      "cwd": ".",
       "command": [
         "deno",
         "run",
@@ -66,7 +66,7 @@
     },
     {
       "name": "candidate-on",
-      "cwd": "/Users/berni/.codex/worktrees/topics-campaign-watch/labs",
+      "cwd": ".",
       "command": [
         "deno",
         "run",
@@ -92,7 +92,7 @@
     },
     {
       "name": "baseline-on",
-      "cwd": "/Users/berni/.codex/worktrees/topics-campaign-watch-baseline/labs",
+      "cwd": ".",
       "command": [
         "deno",
         "run",
@@ -116,5 +116,10 @@
       ],
       "endedAt": "2026-09-10T19:02:09.590449+00:00"
     }
-  ]
+  ],
+  "captureProvenance": {
+    "file": "external-captures.json",
+    "entry": "profile/manifest.json",
+    "note": "Original capture paths and commands; not replay inputs."
+  }
 }
