@@ -763,40 +763,29 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       ReplaceForm<DomainExtra>
     > {
     const vis = this.#visitor;
-    let resultValue = value;
+    const origValue = value;
 
     for (;;) {
-      const cycleAt = this.#stack.indexOf(resultValue);
+      const cycleAt = this.#stack.indexOf(value);
       const result = (cycleAt === -1)
-        ? vis.visitValue(resultValue)
-        : vis.visitCycle(resultValue, cycleAt, this.#stack.depth);
+        ? vis.visitValue(value)
+        : vis.visitCycle(value, cycleAt, this.#stack.depth);
 
       switch (result?.type) {
-        case "iterateArray": {
-          return (value === resultValue) ? result : {
-            type: "iterateArrayOf",
-            value: resultValue,
-            elements: result.elements,
-          };
-        }
-
+        case "iterateArray":
         case "iterateMap": {
-          return (value === resultValue) ? result : {
-            type: "iterateMapOf",
-            value: resultValue,
-            mappings: result.mappings,
-          };
+          return this.#adjustIterateForm(origValue, value, result);
         }
 
         case "replace": {
-          resultValue = result.value;
+          value = result.value;
           break;
         }
 
         case "visitSubtype": {
-          return (value === resultValue)
+          return (origValue === value)
             ? result
-            : { type: "visitSubtypeOf", value: resultValue };
+            : { type: "visitSubtypeOf", value: value };
         }
 
         default: {
@@ -821,6 +810,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       ReplaceForm<DomainExtra>
     > {
     const vis = this.#visitor;
+    const origValue = value;
 
     for (;;) {
       const resolvedResult = this.#visitResolvingCyclesAndReplacement(value);
@@ -893,11 +883,21 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         }
       }
 
-      if (result?.type !== "replace") {
-        return result;
-      }
+      switch (result?.type) {
+        case "iterateArray":
+        case "iterateMap": {
+          return this.#adjustIterateForm(origValue, value, result);
+        }
 
-      value = result.value;
+        case "replace": {
+          value = result.value;
+          break; // ...and continue to iterate.
+        }
+
+        default: {
+          return result;
+        }
+      }
     }
   }
 
@@ -920,6 +920,44 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       return isValidFabricValueLayer(value)
         ? tagFromFabricValue(value as FabricValue)
         : null;
+    }
+  }
+
+  /**
+   * Adjusts an `iterateArray` or `iterateMap` form if necessary, if it is meant
+   * to represent iteration over a replacement value.
+   */
+  #adjustIterateForm(
+    origValue: DomainFor<DomainExtra>,
+    finalValue: DomainFor<DomainExtra>,
+    result:
+      | IterateArrayForm<DomainExtra>
+      | IterateMapForm<DomainExtra>,
+  ):
+    | IterateArrayForm<DomainExtra>
+    | IterateArrayOfForm<DomainExtra>
+    | IterateMapForm<DomainExtra>
+    | IterateMapOfForm<DomainExtra> {
+    if (origValue === finalValue) {
+      return result;
+    }
+
+    switch (result.type) {
+      case "iterateArray": {
+        return {
+          type: "iterateArrayOf",
+          value: finalValue,
+          elements: result.elements,
+        };
+      }
+
+      case "iterateMap": {
+        return {
+          type: "iterateMapOf",
+          value: finalValue,
+          mappings: result.mappings,
+        };
+      }
     }
   }
 }
