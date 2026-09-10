@@ -146,6 +146,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Investigations, journals, and working notes
 
+- [2026-09-10-demand-grace-decision.md](development/performance/2026-09-10-demand-grace-decision.md) — recommendation 6 keeps the flush deadline and demand grace, with controlled callback, pass, closure, serving-session and input-bypass evidence and explicit limits on latency attribution.
+
 - [Pattern read accounting: first-batch baseline](development/performance/2026-09-pattern-read-accounting.md) — 2026-09-10: transaction-scoped read counters, generic reduction update costs, headless lunch-poll attribution, and instrumentation overhead measurements.
 - [Incremental aggregate comparison](development/performance/2026-09-incremental-aggregates.md) — 2026-09-10: compiled aggregate initialization costs, paired update timings, read-work scaling, and coordinator rescan findings.
 

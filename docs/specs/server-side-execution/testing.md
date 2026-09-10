@@ -14,9 +14,23 @@ implemented as the gates below. Method inherited from the v1 learning run
 - **Workloads are uninstrumented and byte-identical across arms.** v1's
   own measurement probes warmed the measured path and understated its
   cost. Measurement reads counters and JUnit timings from outside.
-- Arms run adjacent (same load window), ≥3 reps for any latency claim,
-  no latency quoted above load ~5. Counters and set relations are
-  load-insensitive and always quotable.
+- Arms run adjacent in alternating order (same load window), ≥3 paired
+  repetitions for any latency claim, with one-minute machine load ≤5
+  throughout every eligible run. Record the workload and server heads,
+  runtime version, server/client/baked-shell posture, fixture shape, cache
+  state, load samples, commands, and identical completion conditions.
+- Counters require a stated boundary. Fixed-work counts and set relations
+  can establish a mechanism under a controlled schedule. Counts affected by
+  deadlines, scheduling, coalescing, or stopping conditions are load-sensitive
+  observations unless a control proves otherwise. In particular,
+  `wavesBudgetExhausted / waves` is not the fraction of committed waves that
+  exhausted: the numerator includes zero-delta cycles, while the denominator
+  counts wave closures, including vacuous or aborted outcomes.
+- Keep uninstrumented end-to-end runs separate from profiling. Name nested
+  and overlapping intervals: demand-pass wall time includes awaited structure
+  loading, so it cannot isolate terminal confirmation or be added to that
+  nested duration. Measure serving-session tracked entities separately from
+  demand counters that exclude the serving principal.
 - Causation by ablation: a slowdown is "explained" when toggling the
   suspected mechanism moves the number, not when a narrative fits.
 - Fresh store per measured run (`rm -rf packages/toolshed/cache` between

@@ -372,10 +372,10 @@ const demanderPairKey = (identity: ScopeKeyIdentity): string =>
     identity.sessionId === undefined ? "" : String(identity.sessionId)
   }`;
 
-/** The demand wake's coalescing grace (stage B): a watch-set change waits
- * this long before it runs a demand pass, so a burst of watches (a shell's
- * boot, a creator syncing its new piece) costs one pass and lands after
- * the creator's own setup commits. Well under the flush deadline. */
+/** Coalesces demand notifications into one pending wake callback. Input
+ * cycles can reconcile demand before it fires, and notifications racing a
+ * pass can require another pass. The grace is separate from the active
+ * wave's consequence-flush deadline. */
 const DEMAND_WAKE_GRACE_MS = 300;
 
 const neverAPieceRootId = (id: string): boolean =>
@@ -1475,20 +1475,13 @@ export class SpaceServer implements TransactionSealDestination {
     }
   }
 
-  /** A session opened or its demand may have changed: reconsider the
-   * demanded roots on a cycle SOON. LEVEL-converted with a GRACE
-   * (fan-out stage B, the arrival re-arm's trigger): the note arms a
-   * short timer (DEMAND_WAKE_GRACE_MS) and, when it fires, latches a
-   * cycle — so a note landing MID-CYCLE (no input waiter installed, or a
-   * demand pass that already read the roots in flight) is not lost (the
-   * same latch shape as the shadow-flip and structure-retry wakes), and
-   * a BURST of watch changes (a shell opening dozens of watches at boot;
-   * a piece's creator syncing what it just created) coalesces into ONE
-   * demand pass that runs after the burst — the creator's own setup
-   * commits get a head start over the loop's first structure load and
-   * derivations of that piece (protocol.md §4: a fresh subscription's
-   * recompute lands in a LATER derived commit; arrival is later demand).
-   * Input-driven cycles are unaffected (they run their pass regardless). */
+  /** Reconsiders demanded roots after a session's demand changes.
+   * Notifications share one pending grace callback, which latches a cycle.
+   * Each notification also advances the demand generation, so a pass that
+   * already captured its rows re-arms on completion. One callback can
+   * therefore lead to multiple passes. Input-driven cycles reconcile demand
+   * independently of the timer; the grace is a coalescing interval, not a
+   * minimum wait for every new demand. */
   noteDemandChanged(reason: "watch" | "push-growth" | "warm" = "watch"): void {
     // MINOR-1: a fresh demand note — bump the generation so a pass that
     // already snapshotted its rows re-latches on completion.
