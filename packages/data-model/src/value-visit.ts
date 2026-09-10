@@ -18,6 +18,7 @@ import {
 } from "./interface.ts";
 import { isValidFabricValue } from "./validity-check.ts";
 import { tagFromFabricValue, VALUE_TAGS, type ValueTag } from "./value-tags.ts";
+import { toCompactDebugString } from "./value-debug.ts";
 
 //
 // Individual result forms
@@ -244,11 +245,88 @@ export interface ValueVisitor<Domain = FabricValue, ResultType = FabricValue> {
 //
 
 /**
+ * Base implementation of `ValueVisitor`, which leaves all visitor methods
+ * `abstract` and includes `protected` helper methods.
+ */
+export abstract class BaseValueVisitor<Domain, ResultType>
+  implements ValueVisitor<Domain, ResultType> {
+  //
+  // Subclass contract
+  //
+
+  /** @inheritDoc */
+  abstract visitArrayContentsItem(
+    index: number,
+    value: Domain,
+  ): ContainerIterationResult<ResultType>;
+
+  /** @inheritDoc */
+  abstract visitCycle(
+    value: Domain,
+    originalDepth: number,
+    thisDepth: number,
+  ): LeafVisitorResult<Domain, ResultType>;
+
+  /** @inheritDoc */
+  abstract visitFabricArray(
+    value: Domain & FabricArray,
+  ): LeafVisitorResult<Domain, ResultType>;
+
+  /** @inheritDoc */
+  abstract visitFabricInstance(
+    value: Domain & FabricInstance,
+  ): LeafVisitorResult<Domain, ResultType>;
+
+  /** @inheritDoc */
+  abstract visitFabricPlainObject(
+    value: Domain & FabricPlainObject,
+  ): LeafVisitorResult<Domain, ResultType>;
+
+  /** @inheritDoc */
+  abstract visitFabricContainer(
+    value: Domain & FabricContainerValue,
+  ): DispatchingVisitorResult<Domain, ResultType>;
+
+  /** @inheritDoc */
+  abstract visitMapContentsItem(
+    key: Domain,
+    value: Domain,
+  ): ContainerIterationResult<ResultType>;
+
+  /** @inheritDoc */
+  abstract visitNonFabricValue(
+    value: Domain,
+  ): LeafVisitorResult<Domain, ResultType>;
+
+  /** @inheritDoc */
+  abstract visitPrimitive(
+    value: Domain & (Primitive | FabricPrimitive),
+    type: ValueTag,
+  ): LeafVisitorResult<Domain, ResultType>;
+
+  /** @inheritDoc */
+  abstract visitValue(value: Domain): DispatchingVisitorResult<Domain, ResultType>;
+
+  //
+  // Instance members
+  //
+
+  /**
+   * Throws an error indicating that this visitor does not handle cycles.
+   */
+  protected throwNoCycles(value: Domain): never {
+    const desc = toCompactDebugString(value, { backtickQuote: true });
+    throw new Error(`Cannot visit cyclic value: ${desc}`);
+  }
+}
+
+/**
  * Empty implementation of `ValueVisitor`: Every method is implemented and just
- * returns `undefined`.
+ * returns `undefined`. This is meant to be a reasonable base class for more
+ * useful visitors, not to be particularly useful by itself.
  */
 export class EmptyValueVisitor<Domain, ResultType>
-  implements ValueVisitor<Domain, ResultType> {
+  extends BaseValueVisitor<Domain, ResultType> {
   /** @inheritDoc */
   visitArrayContentsItem(
     index: number,
