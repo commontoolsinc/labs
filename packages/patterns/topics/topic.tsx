@@ -6,8 +6,13 @@ import {
   Default,
   equals,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   lift,
   NAME,
+  observeAvailability,
   pattern,
   type PerSession,
   type ReadonlyCell,
@@ -1379,14 +1384,41 @@ export default pattern<TopicInput, TopicOutput>(
     const profileWish = wish<{ name: string; avatar: string }>({
       query: "#profile",
     });
-    const profile = resultOf(profileWish.result);
+    const observedProfileSetupUI = observeAvailability(profileWish[UI]);
+    const profileSetupUI = computed(() => {
+      if (
+        hasError(observedProfileSetupUI) ||
+        isPending(observedProfileSetupUI) ||
+        isSyncing(observedProfileSetupUI) ||
+        hasSchemaMismatch(observedProfileSetupUI)
+      ) return <></>;
+      return observedProfileSetupUI;
+    });
     // A wish resolves after setup, so each of these stays a derivation. Reading
     // the fields once here would pin the page to the empty profile the topic
     // opened with: the composer's controls never enable, and a comment or edit
     // made through them carries blank attribution.
-    const profileName = profile.name ?? "";
-    const profileAvatar = profile.avatar ?? "";
-    const hasProfile = profileName.trim().length > 0;
+    const profileName = computed(() => {
+      if (
+        hasError(profileWish.result) || isPending(profileWish.result) ||
+        isSyncing(profileWish.result) ||
+        hasSchemaMismatch(profileWish.result)
+      ) return "";
+      return resultOf(profileWish.result).name ?? "";
+    });
+    const profileAvatar = computed(() => {
+      if (
+        hasError(profileWish.result) || isPending(profileWish.result) ||
+        isSyncing(profileWish.result) ||
+        hasSchemaMismatch(profileWish.result)
+      ) return "";
+      return resultOf(profileWish.result).avatar ?? "";
+    });
+    const hasProfile = computed(() => profileName.trim().length > 0);
+    const profileView = computed(() => ({
+      name: profileName,
+      avatar: profileAvatar,
+    }));
     const createdByView = createdByOf({ createdBy });
     // The board has already derived the table; this is a lookup by identity,
     // and it is written as one.
@@ -1790,12 +1822,12 @@ export default pattern<TopicInput, TopicOutput>(
                 {hasProfile
                   ? (
                     <cf-profile-badge
-                      $profile={profile}
+                      $profile={profileView}
                       size="sm"
                       noNavigate
                     />
                   )
-                  : <div>{profileWish[UI]}</div>}
+                  : <div>{profileSetupUI}</div>}
               </cf-hstack>
             </cf-hstack>
           </cf-vstack>

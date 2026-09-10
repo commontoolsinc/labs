@@ -2,8 +2,12 @@ import {
   computed,
   handler,
   hasError,
+  hasSchemaMismatch,
   ifElse,
+  isPending,
+  isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   resultOf,
   Stream,
@@ -38,8 +42,8 @@ import type {
  * someone else's profile — there is no profile input to point elsewhere.
  *
  * Presentation is deliberately minimal and theme-token compliant: a
- * `<cf-profile-badge variant="hero">` bound to the REAL live profile cell (the
- * blessed identity idiom — bind the cell, not a snapshot) plus a bio paragraph.
+ * `<cf-profile-badge variant="hero">` bound to a reactive view of the live
+ * profile plus a bio paragraph.
  * Pinned elements / "Pin a piece" developer chrome are HIDDEN in this v1 (it is
  * a presentation of upstream-owned data, not a second source of truth).
  *
@@ -139,7 +143,37 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
   // a completed missing-profile error; pending rendering is handled by the
   // renderer's normal continuity behavior.
   const profileWish = wish<ProfileResult>({ query: "#profile" });
-  const profile = resultOf(profileWish.result);
+  const observedProfileSetupUI = observeAvailability(profileWish[UI]);
+  const profileSetupUI = computed(() => {
+    if (
+      hasError(observedProfileSetupUI) ||
+      isPending(observedProfileSetupUI) ||
+      isSyncing(observedProfileSetupUI) ||
+      hasSchemaMismatch(observedProfileSetupUI)
+    ) return <></>;
+    return observedProfileSetupUI;
+  });
+  const profileState = computed(() => {
+    const state = profileWish.result;
+    if (
+      hasError(state) || isPending(state) || isSyncing(state) ||
+      hasSchemaMismatch(state)
+    ) {
+      return {
+        available: false,
+        profile: {
+          name: "",
+          avatar: "",
+          bio: "",
+          setName: undefined,
+          setAvatar: undefined,
+          setBio: undefined,
+        },
+      };
+    }
+    return { available: true, profile: resultOf(state) };
+  });
+  const profile = profileState.profile;
 
   // Transient local drafts backing the amend inputs. Not a second source of
   // truth — seeded from the live values on entering edit mode, cleared/written
@@ -150,13 +184,11 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
   // View toggle: presentation by default, amend form when the owner opts in.
   const editing = new Writable<boolean>(false).for("editing");
 
-  const hasProfile = computed(() => !hasError(profileWish.result));
+  const hasProfile = computed(() => profileState.available);
   const isEditing = computed(() => editing.get() === true);
-  const showEditForm = computed(() =>
-    !hasError(profileWish.result) && editing.get() === true
-  );
+  const showEditForm = computed(() => profileState.available && editing.get());
   const showPresentation = computed(() =>
-    !hasError(profileWish.result) && editing.get() !== true
+    profileState.available && !editing.get()
   );
 
   const bio = computed(() => trimmed(profile.bio as string));
@@ -175,20 +207,21 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
       <cf-screen data-ui-pattern="ProfileEmbed">
         <cf-vstack gap="4" style={{ padding: "16px", maxWidth: "560px" }}>
           {
-            /* No profile yet (or pending): render the wish fallback — the
-              trusted create surface at zero profiles. `result ?? fallback`. */
+            /* No profile yet: render the wish fallback — the trusted create
+              surface at zero profiles. Pending keeps the renderer's previous
+              complete output. */
           }
           {ifElse(
             hasProfile,
             null,
             <div data-ui-region="profile-embed-fallback">
-              {profileWish[UI]}
+              {profileSetupUI}
             </div>,
           )}
 
           {
-            /* Clean presentation: hero badge bound to the REAL live profile cell
-              (the wish result) + bio. Elements / "Pin a piece" chrome hidden. */
+            /* Clean presentation: hero badge bound to the reactive profile view
+              plus bio. Elements / "Pin a piece" chrome hidden. */
           }
           {ifElse(
             showPresentation,

@@ -88,7 +88,10 @@ describe("CFCodeEditor", () => {
     const fakeThis = {
       mentionable,
       _resolvedPieceIds: new Map<number, string>(),
+      _resolveGeneration: 0,
+      _deferredMentionedContent: null,
       _updateMentionedFromContent: () => mentionedUpdates++,
+      _refreshCompletion: () => {},
     };
     const resolvePieceIds = (CFCodeEditor.prototype as unknown as {
       _resolvePieceIds(this: unknown): Promise<void>;

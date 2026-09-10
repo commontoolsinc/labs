@@ -48,11 +48,10 @@ interface RootRegistrarOutput {
 }
 
 export default pattern<Record<string, never>, RootRegistrarOutput>(() => {
-  const { addPiece } = resultOf(
-    wish<{
-      addPiece: Stream<{ piece: EntryOutput }>;
-    }>({ query: "#default" }).result,
-  );
+  const rootWish = wish<{
+    addPiece: Stream<{ piece: EntryOutput }>;
+  }>({ query: "#default" });
+  const { addPiece } = resultOf(rootWish.result);
 
   return {
     [NAME]: "Root registrar",

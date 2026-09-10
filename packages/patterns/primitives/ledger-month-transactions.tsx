@@ -22,7 +22,9 @@ import {
   isPending,
   isSyncing,
   NAME,
+  observeAvailability,
   pattern,
+  resultOf,
   type SqliteDb,
   UI,
   type VNode,
@@ -125,23 +127,25 @@ export const LedgerMonthTransactions = pattern<
     params: [month],
     scope: "session",
   });
+  const observedMonthRead = observeAvailability(monthRead);
+  const observedRowsRead = observeAvailability(rowsRead);
 
   const resolvedMonth = computed(() =>
-    isPending(monthRead) || hasError(monthRead) || isSyncing(monthRead) ||
-      hasSchemaMismatch(monthRead)
+    isPending(observedMonthRead) || hasError(observedMonthRead) ||
+      isSyncing(observedMonthRead) || hasSchemaMismatch(observedMonthRead)
       ? ""
-      : monthRead.rows[0]?.month ?? ""
+      : resultOf(observedMonthRead).rows[0]?.month ?? ""
   );
   const rows = computed(() =>
-    isPending(rowsRead) || hasError(rowsRead) || isSyncing(rowsRead) ||
-      hasSchemaMismatch(rowsRead)
+    isPending(observedRowsRead) || hasError(observedRowsRead) ||
+      isSyncing(observedRowsRead) || hasSchemaMismatch(observedRowsRead)
       ? []
-      : rowsRead.rows
+      : resultOf(observedRowsRead).rows
   );
   const rowCount = computed(() => rows.length);
-  const pending = computed(() => isPending(rowsRead));
+  const pending = computed(() => isPending(observedRowsRead));
   const errorMessage = computed(() =>
-    hasError(rowsRead) ? errorText(rowsRead.error) : ""
+    hasError(observedRowsRead) ? errorText(observedRowsRead.error) : ""
   );
   const hasQueryError = computed(() => errorMessage !== "");
   const isEmpty = computed(() =>
@@ -174,7 +178,7 @@ export const LedgerMonthTransactions = pattern<
         </cf-hstack>
 
         {ifElse(
-          hasError,
+          hasQueryError,
           <cf-alert status="error">{errorMessage}</cf-alert>,
           null,
         )}

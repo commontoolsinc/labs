@@ -2,6 +2,7 @@ import {
   action,
   assert,
   pattern,
+  resultOf,
   TESTS,
   UI,
   wish,

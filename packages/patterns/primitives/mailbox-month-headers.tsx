@@ -22,7 +22,9 @@ import {
   isPending,
   isSyncing,
   NAME,
+  observeAvailability,
   pattern,
+  resultOf,
   type SqliteDb,
   UI,
   type VNode,
@@ -140,23 +142,26 @@ export const MailboxMonthHeaders = pattern<
     params: [month, limit],
     scope: "session",
   });
+  const observedMonthRead = observeAvailability(monthRead);
+  const observedHeadersRead = observeAvailability(headersRead);
 
   const resolvedMonth = computed(() =>
-    isPending(monthRead) || hasError(monthRead) || isSyncing(monthRead) ||
-      hasSchemaMismatch(monthRead)
+    isPending(observedMonthRead) || hasError(observedMonthRead) ||
+      isSyncing(observedMonthRead) || hasSchemaMismatch(observedMonthRead)
       ? ""
-      : monthRead.rows[0]?.month ?? ""
+      : resultOf(observedMonthRead).rows[0]?.month ?? ""
   );
   const headers = computed(() =>
-    isPending(headersRead) || hasError(headersRead) || isSyncing(headersRead) ||
-      hasSchemaMismatch(headersRead)
+    isPending(observedHeadersRead) || hasError(observedHeadersRead) ||
+      isSyncing(observedHeadersRead) ||
+      hasSchemaMismatch(observedHeadersRead)
       ? []
-      : headersRead.rows
+      : resultOf(observedHeadersRead).rows
   );
   const headerCount = computed(() => headers.length);
-  const pending = computed(() => isPending(headersRead));
+  const pending = computed(() => isPending(observedHeadersRead));
   const errorMessage = computed(() =>
-    hasError(headersRead) ? errorText(headersRead.error) : ""
+    hasError(observedHeadersRead) ? errorText(observedHeadersRead.error) : ""
   );
   const hasQueryError = computed(() => errorMessage !== "");
   const isEmpty = computed(() =>
@@ -185,7 +190,7 @@ export const MailboxMonthHeaders = pattern<
         </cf-hstack>
 
         {ifElse(
-          hasError,
+          hasQueryError,
           <cf-alert status="error">{errorMessage}</cf-alert>,
           null,
         )}

@@ -36,37 +36,37 @@ runtime binds a database to.
 ## db.query
 
 `db.query<Row>(sql, options?)` is a reactive read, not a promise. Never `await`
-it. Call it in the pattern body and read `pending` / `error` / `result`
-reactively; it re-runs when its inputs change, and results are memoized per
-request.
+it. Call it in the pattern body, keep the request when the UI needs to inspect
+availability, and project its usable value with `resultOf()`. It re-runs when
+its inputs change, and results are memoized per request.
 
 ```tsx
 // Shown at module scope.
+import { resultOf } from "commonfabric";
+
 export default pattern<{ orders: SqliteDb }>(({ orders }) => {
-  const pending = orders.query<{ id: number; glaze: string; boxes: number }>(
+  const request = orders.query<{ id: number; glaze: string; boxes: number }>(
     "SELECT id, glaze, boxes FROM orders WHERE shipped = 0 ORDER BY id LIMIT 200",
   );
+  const result = resultOf(request);
 
-  return lift((rows?: Array<{ glaze: string; boxes: number }>) =>
-    (rows ?? []).map((row) => `${row.boxes} × ${row.glaze}`).join(", ")
-  )(pending.result);
+  return lift((rows: Array<{ glaze: string; boxes: number }>) =>
+    rows.map((row) => `${row.boxes} × ${row.glaze}`).join(", ")
+  )(result.rows);
 });
 ```
 
-The call returns an envelope, not the rows:
-`{ pending, result?, error?, withheld? }`. `result` holds the rows once there
-are any, so a field typed as the rows themselves — `PerSession<Row[]>` — cannot
-take the call's value, and reading `.result` is what gets from one to the
-other. `withheld` counts the rows a read-time clearance kept from this reader,
-and is absent unless the query asked for one.
+The call returns an `AsyncResult<SqliteQueryResult<Row>>`, not the rows alone.
+On success, `resultOf(request)` exposes `{ rows, withheld? }`. `withheld` counts
+the rows a read-time clearance kept from this reader and is absent unless the
+query asked for one. Keep `request` itself for `isPending()` or `hasError()`
+guards; computations which only consume the projected result wait while the
+request is unavailable.
 
-Render the failure, not just the wait. A pattern that branches only on
-`pending` shows a loading view for as long as the query stays broken, because a
-query that failed is settled — `pending` is `false` and `error` holds the
-reason — and nothing further arrives to move it on. `error` reaches the pattern
-for a statement the database refuses and for a handle that does not read back
-as one, so a view that shows it is the difference between a page that says what
-went wrong and a page that spins.
+Render the failure when the UI needs to explain it. Guard the original request
+with `hasError(request)` and read `request.error`; otherwise the unavailable
+error propagates and downstream computations do not run. Query errors include
+a statement the database refuses and a handle that does not read back as one.
 
 The `<Row>` type argument names the columns the statement projects, and is what
 turns a result into something typed. Without it the rows come back as
@@ -231,14 +231,13 @@ the result may not exceed, and `onExceed` to choose between failing the query
 and dropping the rows that exceed it.
 
 Where the label lands decides where to look for it. Each result row splits into
-its own entity doc and the column's label sits on that doc, at the column's own
-path; the query's own document holds `pending`, `result` and `requestHash` and
-carries no label at any path. So a probe of the query document reports a fully
-labeled result as unlabeled, and the read that answers is one that follows the
-links the path crosses — `cf cell get-label <cell> <path>/result/<i>/<col>`
-does, and reports the column's label from the row's own doc. Inside a pattern
-nothing has to be asked for: a consumer inherits the label from the
-dereferences its read traverses.
+its own entity doc and the column's confidentiality sits on that doc, at the
+column's own path. The query document carries integrity labels for its stored
+links, not the column's confidentiality. The read that answers follows the
+links the path crosses — `cf cell get-label <cell> <path>/rows/<i>/<col>` does,
+and reports the column's label from the row's own doc. Inside a pattern nothing
+has to be asked for: a consumer inherits the label from the dereferences its
+read traverses.
 
 ## The rest of the API
 

@@ -212,7 +212,7 @@ async function runTest(base: URL) {
       }
 
       // Declared ceiling + onExceed:"skip": exactly row 1 survives.
-      const skim = result.key("qSkim").key("result").get() as
+      const skim = result.key("qSkim").resolveAsCell().key("rows").get() as
         | { id: number }[]
         | undefined;
       if (!Array.isArray(skim) || skim.length !== 1 || skim[0].id !== 1) {
@@ -226,10 +226,11 @@ async function runTest(base: URL) {
       // Read-time clearance (Phase 3.b): the owner satisfies no row's
       // conjunctive rule (the did:mailto participants are required too), so a
       // cleared query returns zero rows and reports withheld: 2.
-      const cleared = result.key("qClear").key("result").get() as
+      const cleared = result.key("qClear").resolveAsCell().key("rows").get() as
         | unknown[]
         | undefined;
-      const withheld = result.key("qClear").key("withheld").get() as unknown;
+      const withheld = result.key("qClear").resolveAsCell().key("withheld")
+        .get() as unknown;
       if (!Array.isArray(cleared) || cleared.length !== 0) {
         throw new Error(
           `qClear should withhold every row for the owner; got ${

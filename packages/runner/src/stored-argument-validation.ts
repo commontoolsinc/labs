@@ -1,6 +1,7 @@
 /** Validates stored arguments without treating unreadable links as invalid values. */
 
 import type { FabricValue } from "@commonfabric/data-model";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema } from "./builder/types.ts";
@@ -29,10 +30,11 @@ const UNRESOLVED_LINK_PLACEHOLDER = Object.freeze({
   "unresolved cell link": true,
 });
 
-const acceptsOpaqueCellOrUnresolvedLink = (
+const acceptsUnavailableOrOpaqueCellOrUnresolvedLink = (
   value: unknown,
   schema: JSONSchema,
 ): boolean =>
+  isDataUnavailable(value) ||
   value === UNRESOLVED_LINK_PLACEHOLDER ||
   schemaAcceptsOpaqueCellValue(value, schema);
 
@@ -316,7 +318,13 @@ export function storedArgumentValidationIssue(
     { mergeMaterializedLinks: true },
   );
   const validationOptions = {
-    acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink,
+    // Availability is a transient control state, not the stored argument's
+    // business value. A candidate must be able to replace the producer while
+    // one of its linked arguments is pending, disconnected, or invalid; the
+    // ordinary runtime preflight parks consumers until that value is usable.
+    // Authenticate the concrete FabricInstance here rather than teaching an
+    // object schema to accept arbitrary branded values.
+    acceptOpaqueValue: acceptsUnavailableOrOpaqueCellOrUnresolvedLink,
     // An OPTIONAL key holding `undefined` carries no data, and a handler
     // mints one without meaning to: `comments.push({ author, ... })` with
     // no author in hand writes the key, and the codec stores that presence.

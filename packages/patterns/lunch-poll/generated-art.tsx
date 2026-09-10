@@ -7,6 +7,7 @@ import {
   isPending,
   isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   resultOf,
   UI,
@@ -169,16 +170,22 @@ export default pattern<GeneratedArtInput, GeneratedArtOutput>(
         mutexTimeoutMs: 30_000,
       },
     });
+    const observedGeneratedArt = observeAvailability(generatedArt);
     const imageState = computed(() => {
-      if (isPending(generatedArt) || isSyncing(generatedArt)) {
+      if (
+        isPending(observedGeneratedArt) || isSyncing(observedGeneratedArt)
+      ) {
         return { kind: "pending" as const };
       }
-      if (hasError(generatedArt) || hasSchemaMismatch(generatedArt)) {
+      if (
+        hasError(observedGeneratedArt) ||
+        hasSchemaMismatch(observedGeneratedArt)
+      ) {
         return { kind: "error" as const };
       }
       return {
         kind: "available" as const,
-        image: resultOf(generatedArt),
+        image: resultOf(observedGeneratedArt),
       };
     });
 

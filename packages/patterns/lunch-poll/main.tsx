@@ -75,7 +75,12 @@ import {
   equals,
   getEntityId,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   type PerSpace,
   type PerUser,
@@ -92,13 +97,8 @@ import { safeImageUrl } from "./generated-art.tsx";
 import { memoBy } from "./voter-memo.ts";
 
 /**
- * The minimal profile shape this pattern reads: the stable identity cell for
- * `<cf-profile-badge>` binding and `equals()` comparison. Deliberately just
- * `{ name?, avatar? }` — a richer wish schema (bio / externalLinks /
- * verifiedIdentities Cell[]) makes the cross-space `#profile` result fail to
- * resolve, so the badge falls back to "Unknown profile". The display NAME is
- * never read off this cell; it comes from the `#profileName` string wish and
- * is snapshotted at join.
+ * The minimal profile shape requested from `#profile`. The display name and
+ * avatar are requested separately and snapshotted at join.
  */
 export interface LunchProfile {
   readonly name?: string;
@@ -1317,9 +1317,22 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const profileWish = wish<LunchProfile>({ query: "#profile" });
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
-    const profile = resultOf(profileWish.result);
-    const profileName = resultOf(profileNameWish.result);
-    const profileAvatar = resultOf(profileAvatarWish.result);
+    const observedProfile = observeAvailability(profileWish.result);
+    const observedProfileName = observeAvailability(profileNameWish.result);
+    const observedProfileAvatar = observeAvailability(
+      profileAvatarWish.result,
+    );
+    const observedViewerOverrideProfile = observeAvailability(viewer.profile);
+    const observedProfileSetupUI = observeAvailability(profileWish[UI]);
+    const viewerProfileSetupUI = computed(() => {
+      if (
+        hasError(observedProfileSetupUI) ||
+        isPending(observedProfileSetupUI) ||
+        isSyncing(observedProfileSetupUI) ||
+        hasSchemaMismatch(observedProfileSetupUI)
+      ) return <></>;
+      return observedProfileSetupUI;
+    });
     // The override cell when a test has claimed an identity, else the resolved
     // wish. The predicate gates on the claim's NAME STRING, never on the
     // profile cell: a presence test on a cell-typed field lowers to an
@@ -1328,22 +1341,51 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // on an empty slot, parking every browser viewer on the empty override
     // path instead of the wish (stored floating aliases; badges stuck on
     // "Unknown profile"). Strings lower as values and are honestly "" when
-    // unset; the seam's contract is that a claim always carries a name. The
-    // ternary lowers to a reactive ifElse, so production (which never sends
-    // the override) stays on the wish, and a test's claim takes effect when
-    // written. Profile-backed rendering is verified at the browser tier (the
-    // scrabble/battleship precedent).
+    // unset; the seam's contract is that a claim always carries a name.
+    // Availability is handled inside each computation so a missing production
+    // profile cannot block a test override. Profile-backed rendering is
+    // verified at the browser tier (the scrabble/battleship precedent).
     const hasViewerOverride = computed(() =>
       trimmedName(viewer.name ?? "") !== ""
     );
-    const viewerProfileCell = hasViewerOverride ? viewer.profile : profile;
-    // Strings, unlike cells, are honestly absent when unset, so `??` is safe.
-    const viewerProfileName = computed(() =>
-      trimmedName(viewer.name ?? profileName)
+    const viewerProfileState = computed(() => {
+      if (hasViewerOverride) {
+        return {
+          available: true,
+          profile: resultOf(observedViewerOverrideProfile),
+        };
+      }
+      if (
+        hasError(observedProfile) || isPending(observedProfile) ||
+        isSyncing(observedProfile) || hasSchemaMismatch(observedProfile)
+      ) {
+        return { available: false, profile: {} as LunchProfile };
+      }
+      return { available: true, profile: resultOf(observedProfile) };
+    });
+    const viewerProfileCell = computed(() =>
+      hasViewerOverride ? viewer.profile : viewerProfileState.profile
     );
-    const viewerProfileAvatar = computed(() =>
-      (viewer.avatar ?? profileAvatar).trim()
-    );
+    const viewerProfileName = computed(() => {
+      if (hasViewerOverride) return trimmedName(viewer.name ?? "");
+      if (!viewerProfileState.available) return "";
+      if (
+        hasError(observedProfileName) || isPending(observedProfileName) ||
+        isSyncing(observedProfileName) ||
+        hasSchemaMismatch(observedProfileName)
+      ) return "";
+      return trimmedName(resultOf(observedProfileName));
+    });
+    const viewerProfileAvatar = computed(() => {
+      if (hasViewerOverride) return (viewer.avatar ?? "").trim();
+      if (!viewerProfileState.available) return "";
+      if (
+        hasError(observedProfileAvatar) || isPending(observedProfileAvatar) ||
+        isSyncing(observedProfileAvatar) ||
+        hasSchemaMismatch(observedProfileAvatar)
+      ) return "";
+      return resultOf(observedProfileAvatar).trim();
+    });
     // Who this viewer is in THIS poll: their roster entry, found by comparing
     // profile cells. Derived, never stored per-user — so a viewer is recognised
     // on any device the moment their profile resolves, and no per-user state
@@ -1374,7 +1416,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       profile: viewerProfileCell,
       profileName: viewerProfileName,
       profileAvatar: viewerProfileAvatar,
-      profileSetupUI: profileWish[UI],
+      profileSetupUI: viewerProfileSetupUI,
     });
     const boundOverrideViewer = overrideViewer({ viewer });
     const boundAddOption = addOption({

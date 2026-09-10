@@ -80,6 +80,7 @@ function isCommonFabricDeclaration(declaration: ts.Declaration): boolean {
     normalized === "commonfabric.d.ts" ||
     normalized.endsWith("/commonfabric.d.ts") ||
     normalized.endsWith("/packages/api/index.ts") ||
+    normalized.endsWith("/packages/data-model/src/api.ts") ||
     normalized.includes("/@commonfabric/api/")
   ) {
     return true;
@@ -118,11 +119,22 @@ export function isCommonFabricAvailabilityType(
   type: ts.Type,
   typeNode: ts.TypeNode | undefined,
 ): boolean {
-  return isSyntheticAvailabilityTypeReference(typeNode) ||
+  if (
+    isSyntheticAvailabilityTypeReference(typeNode) ||
     isCommonFabricAvailabilitySymbol(
       (type as TypeWithInternals).aliasSymbol,
-    ) ||
-    isCommonFabricAvailabilitySymbol(type.getSymbol());
+    ) || isCommonFabricAvailabilitySymbol(type.getSymbol())
+  ) {
+    return true;
+  }
+
+  if ((type.flags & ts.TypeFlags.Intersection) === 0) {
+    return false;
+  }
+
+  return ((type as ts.IntersectionType).types ?? []).some((part) =>
+    isCommonFabricAvailabilityType(part, undefined)
+  );
 }
 
 function isCommonFabricFabricErrorType(type: ts.Type): boolean {

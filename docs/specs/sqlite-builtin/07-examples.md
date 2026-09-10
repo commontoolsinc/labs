@@ -51,6 +51,7 @@ export default pattern<{ me: Cell<User> }>(({ me }) => {
     "SELECT id, body, ts, author_cf_link FROM messages ORDER BY ts DESC LIMIT 20",
     { reactOn: db }, // re-run after any committed write to this db
   );
+  const recentResult = resultOf(recent);
 
   const send = handler<{ body: string }, { author: Cell<User> }>(
     ({ body }, { author }) => {
@@ -65,9 +66,9 @@ export default pattern<{ me: Cell<User> }>(({ me }) => {
   );
 
   return {
-    [UI]: lift((rows: typeof recent.result) => (
+    [UI]: lift((rows: typeof recentResult.rows) => (
       <cf-vstack>
-        {(rows ?? []).map((m) => (
+        {rows.map((m) => (
           // m.author_cf_link is a live Cell<User>; reading it is independently reactive
           <div>
             <b>{lift((u: User | undefined) => u?.name)(m.author_cf_link)}</b>:{" "}
@@ -75,7 +76,7 @@ export default pattern<{ me: Cell<User> }>(({ me }) => {
           </div>
         ))}
       </cf-vstack>
-    ))(recent.result),
+    ))(recentResult.rows),
     send: send.with({ author: me }),
   };
 });

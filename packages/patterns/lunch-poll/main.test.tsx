@@ -17,6 +17,7 @@ import {
   computed,
   equals,
   pattern,
+  resultOf,
   TESTS,
   UI,
   wish,
@@ -127,13 +128,11 @@ export default pattern(() => {
   // shared ticking clock the pattern under test runs on (the pattern body
   // cannot read the ambient clock, and the bare one-shot `#now` would freeze
   // at first capture, which is exactly what the poll must not do). It reads
-  // as unresolved (undefined / "") until the wish lands; the dependent
-  // assertions guard that window and the harness re-evaluates them once it
-  // does.
+  // as unavailable until the wish lands; dependent computations wait and the
+  // harness re-evaluates them once it does.
   const nowCell = wish<number>({ query: "#now/300" });
-  const todayKey = computed(() =>
-    nowCell.result == null ? "" : dayKeyOf(nowCell.result)
-  );
+  const now = resultOf(nowCell.result);
+  const todayKey = computed(() => dayKeyOf(now));
 
   // Seed cells for the two polls whose scenarios start with data in them.
   // Plain cells, filled once by `action_seed_fixtures` below, never a
@@ -199,8 +198,6 @@ export default pattern(() => {
   // unresolved clock writes nothing, and `assert_stale_vote_hidden` reads the
   // seeded vote back, so a seed that never landed fails there.
   const action_seed_fixtures = action(() => {
-    const now = nowCell.result;
-    if (now === undefined) return;
     staleVotes.set([{
       voter: stan,
       optionId: SEEDED_OPTION.id,

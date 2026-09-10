@@ -16,6 +16,8 @@ import {
   type NormalizedFullLink,
   parseLink,
   type Pattern,
+  popFrame,
+  pushFrame,
   type Runtime,
   sanitizeSchemaForLinks,
 } from "@commonfabric/runner";
@@ -3224,144 +3226,151 @@ export async function deriveSelectedValue(
     sourceMask = projectionMaskSchema;
   }
   const sourceReadSchema = selectSourceSchema(sourceSchema, sourceMask);
-
-  const { commonfabric } = createBuilder({
-    unsafeHostTrust: runtime.createUnsafeHostTrust({
-      reason: "cf cell get filter/schema computed projection",
-    }),
-  });
-  const { lift, pattern } = commonfabric;
-  const paramsSchema: JSONSchema = {
-    type: "object",
-    additionalProperties: true,
-  };
-
-  let predicatePattern: ReturnType<typeof pattern> | undefined;
-  if (selection.filter !== undefined) {
-    const elementSchema = selectSourceSchema(
-      sourceItemSchema,
-      predicateItemMask!,
-    );
-    const argumentSchema: JSONSchema = {
-      type: "object",
-      properties: {
-        element: sanitizeSchemaForLinks(
-          dereferencedElementSchema(elementSchema),
-          KeepAsCell.OnlyStream,
-        ),
-        params: paramsSchema,
-      },
-      required: ["element", "params"],
-      additionalProperties: false,
-    };
-    const predicateModule = lift(
-      ({ element, params }: {
-        element: unknown;
-        params: { predicate: SelectionPredicate };
-      }) => evaluateSelectionPredicate(params.predicate, element),
-      argumentSchema,
-      { type: "boolean" },
-    );
-    predicatePattern = pattern(
-      ({ element, params }: any) => predicateModule({ element, params }),
-      argumentSchema,
-      { type: "boolean" },
-    );
-  }
-
-  let itemProjectionPattern: ReturnType<typeof pattern> | undefined;
-  if (projection?.projectsArrayItems) {
-    const itemOutputSchema = projection.itemOutputSchema!;
-    const itemProjectionSchema = projection.itemProjectionSchema!;
-    const elementSchema = selectSourceSchema(
-      sourceItemSchema,
-      projectionItemMask!,
-    );
-    const argumentSchema: JSONSchema = {
-      type: "object",
-      properties: {
-        element: sanitizeSchemaForLinks(
-          dereferencedElementSchema(elementSchema),
-          KeepAsCell.OnlyStream,
-        ),
-      },
-      required: ["element"],
-      additionalProperties: false,
-    };
-    const projectionModule = lift(
-      ({ element }: { element: unknown }) =>
-        projectValue(
-          element,
-          itemProjectionSchema,
-          projection.implicitArrayTraversal,
-        ),
-      argumentSchema,
-      itemOutputSchema,
-    );
-    itemProjectionPattern = pattern(
-      ({ element }: any) => projectionModule({ element }),
-      argumentSchema,
-      itemOutputSchema,
-    );
-  }
-
-  const directProjectionArgumentSchema: JSONSchema = {
-    type: "object",
-    properties: {
-      value: sanitizeSchemaForLinks(
-        sourceReadSchema,
-        KeepAsCell.OnlyStream,
-      ),
-    },
-    required: ["value"],
-    additionalProperties: false,
-  };
-  const directProjectionModule = projection !== undefined &&
-      !projection.projectsArrayItems
-    ? lift(
-      ({ value }: { value: unknown }) =>
-        projectValue(
-          value,
-          projection.projectionSchema,
-          projection.implicitArrayTraversal,
-        ),
-      directProjectionArgumentSchema,
-      projection.outputSchema,
-    )
-    : undefined;
-
   const outputSchema: JSONSchema = projection?.outputSchema ??
     filteredOutputSchema(sourceSchema, sourceItemSchema);
-  const mainArgumentSchema: JSONSchema = {
-    type: "object",
-    properties: { value: sourceReadSchema },
-    required: ["value"],
-    additionalProperties: false,
-  };
   const mainResultSchema: JSONSchema = {
     type: "object",
     properties: { value: outputSchema },
     required: ["value"],
     additionalProperties: false,
   };
-  const mainPattern = pattern(
-    ({ value }: any) => {
-      let result: any = value;
-      if (predicatePattern !== undefined) {
-        result = result.filterWithPattern(predicatePattern as any, {
-          predicate: selection.filter!.predicate,
-        });
+
+  const mainPattern = (() => {
+    const frame = pushFrame({ runtime });
+    try {
+      const { commonfabric } = createBuilder({
+        unsafeHostTrust: runtime.createUnsafeHostTrust({
+          reason: "cf cell get filter/schema computed projection",
+        }),
+      });
+      const { lift, pattern } = commonfabric;
+      const paramsSchema: JSONSchema = {
+        type: "object",
+        additionalProperties: true,
+      };
+
+      let predicatePattern: ReturnType<typeof pattern> | undefined;
+      if (selection.filter !== undefined) {
+        const elementSchema = selectSourceSchema(
+          sourceItemSchema,
+          predicateItemMask!,
+        );
+        const argumentSchema: JSONSchema = {
+          type: "object",
+          properties: {
+            element: sanitizeSchemaForLinks(
+              dereferencedElementSchema(elementSchema),
+              KeepAsCell.OnlyStream,
+            ),
+            params: paramsSchema,
+          },
+          required: ["element", "params"],
+          additionalProperties: false,
+        };
+        const predicateModule = lift(
+          ({ element, params }: {
+            element: unknown;
+            params: { predicate: SelectionPredicate };
+          }) => evaluateSelectionPredicate(params.predicate, element),
+          argumentSchema,
+          { type: "boolean" },
+        );
+        predicatePattern = pattern(
+          ({ element, params }: any) => predicateModule({ element, params }),
+          argumentSchema,
+          { type: "boolean" },
+        );
       }
-      if (itemProjectionPattern !== undefined) {
-        result = result.mapWithPattern(itemProjectionPattern as any, {});
-      } else if (directProjectionModule !== undefined) {
-        result = directProjectionModule({ value: result });
+
+      let itemProjectionPattern: ReturnType<typeof pattern> | undefined;
+      if (projection?.projectsArrayItems) {
+        const itemOutputSchema = projection.itemOutputSchema!;
+        const itemProjectionSchema = projection.itemProjectionSchema!;
+        const elementSchema = selectSourceSchema(
+          sourceItemSchema,
+          projectionItemMask!,
+        );
+        const argumentSchema: JSONSchema = {
+          type: "object",
+          properties: {
+            element: sanitizeSchemaForLinks(
+              dereferencedElementSchema(elementSchema),
+              KeepAsCell.OnlyStream,
+            ),
+          },
+          required: ["element"],
+          additionalProperties: false,
+        };
+        const projectionModule = lift(
+          ({ element }: { element: unknown }) =>
+            projectValue(
+              element,
+              itemProjectionSchema,
+              projection.implicitArrayTraversal,
+            ),
+          argumentSchema,
+          itemOutputSchema,
+        );
+        itemProjectionPattern = pattern(
+          ({ element }: any) => projectionModule({ element }),
+          argumentSchema,
+          itemOutputSchema,
+        );
       }
-      return { value: result };
-    },
-    mainArgumentSchema,
-    mainResultSchema,
-  );
+
+      const directProjectionArgumentSchema: JSONSchema = {
+        type: "object",
+        properties: {
+          value: sanitizeSchemaForLinks(
+            sourceReadSchema,
+            KeepAsCell.OnlyStream,
+          ),
+        },
+        required: ["value"],
+        additionalProperties: false,
+      };
+      const directProjectionModule = projection !== undefined &&
+          !projection.projectsArrayItems
+        ? lift(
+          ({ value }: { value: unknown }) =>
+            projectValue(
+              value,
+              projection.projectionSchema,
+              projection.implicitArrayTraversal,
+            ),
+          directProjectionArgumentSchema,
+          projection.outputSchema,
+        )
+        : undefined;
+
+      const mainArgumentSchema: JSONSchema = {
+        type: "object",
+        properties: { value: sourceReadSchema },
+        required: ["value"],
+        additionalProperties: false,
+      };
+      return pattern(
+        ({ value }: any) => {
+          let result: any = value;
+          if (predicatePattern !== undefined) {
+            result = result.filterWithPattern(predicatePattern as any, {
+              predicate: selection.filter!.predicate,
+            });
+          }
+          if (itemProjectionPattern !== undefined) {
+            result = result.mapWithPattern(itemProjectionPattern as any, {});
+          } else if (directProjectionModule !== undefined) {
+            result = directProjectionModule({ value: result });
+          }
+          return { value: result };
+        },
+        mainArgumentSchema,
+        mainResultSchema,
+      );
+    } finally {
+      popFrame(frame);
+    }
+  })();
 
   const tx = runtime.edit();
   const reads = transformReadsFor(runtime);

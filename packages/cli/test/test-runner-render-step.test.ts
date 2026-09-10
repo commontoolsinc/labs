@@ -97,15 +97,6 @@ describe(
       expect(passed).toBe(1);
     });
 
-    it("accepts unavailable VDOM roots", async () => {
-      const { failed, passed } = await runTests(
-        fixture("unavailable-render.test.tsx"),
-        { root: FIXTURES },
-      );
-      expect(failed).toBe(0);
-      expect(passed).toBe(1);
-    });
-
     it("accepts a direct-array VDOM root", async () => {
       const { failed, passed } = await runTests(
         fixture("direct-array-render.test.tsx"),

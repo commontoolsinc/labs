@@ -1,10 +1,16 @@
 import {
   action,
+  computed,
   Default,
   equals,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   lift,
   NAME,
+  observeAvailability,
   pattern,
   type PerSession,
   type ReadonlyCell,
@@ -241,10 +247,13 @@ export interface TopicIndexRow {
  * question about the cell contract rather than about this pattern, and it is
  * not answered here.
  */
-export function mentionListsOf<M>(
+export function mentionListsOf<M extends readonly unknown[]>(
   sources: readonly ({ get(): { mentions: M } | undefined } | undefined)[],
 ): (M | undefined)[] {
-  return Array.from(sources, (source) => source?.get()?.mentions);
+  return Array.from(sources, (source) => {
+    const mentions = source?.get()?.mentions;
+    return Array.isArray(mentions) ? mentions : undefined;
+  });
 }
 
 /**
@@ -560,14 +569,41 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, names }) => {
   const profileWish = wish<{ name: string; avatar: string }>({
     query: "#profile",
   });
-  const profile = resultOf(profileWish.result);
+  const observedProfileSetupUI = observeAvailability(profileWish[UI]);
+  const profileSetupUI = computed(() => {
+    if (
+      hasError(observedProfileSetupUI) ||
+      isPending(observedProfileSetupUI) ||
+      isSyncing(observedProfileSetupUI) ||
+      hasSchemaMismatch(observedProfileSetupUI)
+    ) return <></>;
+    return observedProfileSetupUI;
+  });
   // A wish resolves after setup, so each of these stays a derivation. Reading
   // the fields once here would pin the composer to the empty profile the board
   // started with: the Start button never enables, and a topic filed through it
   // carries blank attribution.
-  const profileName = profile.name ?? "";
-  const profileAvatar = profile.avatar ?? "";
+  const profileName = computed(() => {
+    if (
+      hasError(profileWish.result) || isPending(profileWish.result) ||
+      isSyncing(profileWish.result) ||
+      hasSchemaMismatch(profileWish.result)
+    ) return "";
+    return resultOf(profileWish.result).name ?? "";
+  });
+  const profileAvatar = computed(() => {
+    if (
+      hasError(profileWish.result) || isPending(profileWish.result) ||
+      isSyncing(profileWish.result) ||
+      hasSchemaMismatch(profileWish.result)
+    ) return "";
+    return resultOf(profileWish.result).avatar ?? "";
+  });
   const hasProfile = profileName.trim().length > 0;
+  const profileView = computed(() => ({
+    name: profileName,
+    avatar: profileAvatar,
+  }));
 
   const addTopic = action<AddTopicEvent, AddTopicResult>((
     { title, body, agentName },
@@ -645,12 +681,12 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, names }) => {
                 {hasProfile
                   ? (
                     <cf-profile-badge
-                      $profile={profile}
+                      $profile={profileView}
                       size="sm"
                       noNavigate
                     />
                   )
-                  : <div>{profileWish[UI]}</div>}
+                  : <div>{profileSetupUI}</div>}
               </cf-hstack>
             </cf-hstack>
           </cf-vstack>

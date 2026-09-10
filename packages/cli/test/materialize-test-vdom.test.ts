@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
 import { type Cell, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -48,6 +49,13 @@ Deno.test("materializeTestVDOM reports reconciliation errors after mounting", as
 
   const root = new MockCell(["ready"]);
   try {
+    root.set(DataUnavailable.pending());
+    await materializeTestVDOM(
+      root as unknown as Cell<unknown>,
+      () => Promise.resolve(),
+    );
+
+    root.set(["ready"]);
     const error = await assertRejects(
       () =>
         materializeTestVDOM(root as unknown as Cell<unknown>, () => {
