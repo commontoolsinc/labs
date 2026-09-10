@@ -123,7 +123,13 @@ export const SYNTHETIC_HANDLER_HOIST_PREFIX = "__cfHandler";
  */
 export const SYNTHETIC_PATTERN_HOIST_PREFIX = "__cfPattern";
 
-export type ArrayMethodFamilyName = "map" | "filter" | "flatMap";
+export type ArrayMethodFamilyName =
+  | "map"
+  | "filter"
+  | "flatMap"
+  | "count"
+  | "minBy"
+  | "maxBy";
 
 export interface ArrayMethodAccessKind {
   readonly family: ArrayMethodFamilyName;
@@ -137,6 +143,12 @@ const ARRAY_METHOD_ACCESS_BY_NAME = new Map<string, ArrayMethodAccessKind>([
   ["filterWithPattern", { family: "filter", lowered: true }],
   ["flatMap", { family: "flatMap", lowered: false }],
   ["flatMapWithPattern", { family: "flatMap", lowered: true }],
+  ["count", { family: "count", lowered: false }],
+  ["countWithPattern", { family: "count", lowered: true }],
+  ["minBy", { family: "minBy", lowered: false }],
+  ["minByWithPattern", { family: "minBy", lowered: true }],
+  ["maxBy", { family: "maxBy", lowered: false }],
+  ["maxByWithPattern", { family: "maxBy", lowered: true }],
 ]);
 
 function getArrayMethodAccessKindByName(
@@ -613,7 +625,7 @@ export function getWithPatternHoistablePatternCall(
   checker: ts.TypeChecker,
 ): ts.CallExpression | undefined {
   const callee = stripWrappers(call.expression);
-  if (!ts.isPropertyAccessExpression(callee)) {
+  if (!ts.isPropertyAccessExpression(callee) || !isSyntheticNode(callee)) {
     return undefined;
   }
   const accessKind = getArrayMethodAccessKindByName(callee.name.text);

@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { CFHelpers } from "../../core/mod.ts";
+import { unwrapParentheses } from "../../utils/expression.ts";
 
 export interface IfElseParams {
   expression: ts.ConditionalExpression;
@@ -18,16 +19,15 @@ export interface IfElseOverrides {
 export function createIfElseCall(params: IfElseParams): ts.CallExpression {
   const { cfHelpers, overrides, expression } = params;
 
-  let predicate = overrides?.predicate ?? expression.condition;
-  let whenTrue = overrides?.whenTrue ?? expression.whenTrue;
-  let whenFalse = overrides?.whenFalse ?? expression.whenFalse;
-  while (ts.isParenthesizedExpression(predicate)) {
-    predicate = predicate.expression;
-  }
-  while (ts.isParenthesizedExpression(whenTrue)) whenTrue = whenTrue.expression;
-  while (ts.isParenthesizedExpression(whenFalse)) {
-    whenFalse = whenFalse.expression;
-  }
+  const predicate = unwrapParentheses(
+    overrides?.predicate ?? expression.condition,
+  );
+  const whenTrue = unwrapParentheses(
+    overrides?.whenTrue ?? expression.whenTrue,
+  );
+  const whenFalse = unwrapParentheses(
+    overrides?.whenFalse ?? expression.whenFalse,
+  );
 
   return cfHelpers.createHelperCall(
     "ifElse",
@@ -51,14 +51,8 @@ export interface WhenParams {
 export function createWhenCall(params: WhenParams): ts.CallExpression {
   const { cfHelpers, condition, value } = params;
 
-  let cond = condition;
-  let val = value;
-  while (ts.isParenthesizedExpression(cond)) {
-    cond = cond.expression;
-  }
-  while (ts.isParenthesizedExpression(val)) {
-    val = val.expression;
-  }
+  const cond = unwrapParentheses(condition);
+  const val = unwrapParentheses(value);
 
   return cfHelpers.createHelperCall(
     "when",
@@ -75,14 +69,8 @@ export function createWhenCall(params: WhenParams): ts.CallExpression {
 export function createUnlessCall(params: WhenParams): ts.CallExpression {
   const { cfHelpers, condition, value } = params;
 
-  let cond = condition;
-  let val = value;
-  while (ts.isParenthesizedExpression(cond)) {
-    cond = cond.expression;
-  }
-  while (ts.isParenthesizedExpression(val)) {
-    val = val.expression;
-  }
+  const cond = unwrapParentheses(condition);
+  const val = unwrapParentheses(value);
 
   return cfHelpers.createHelperCall(
     "unless",

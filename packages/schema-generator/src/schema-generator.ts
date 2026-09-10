@@ -219,6 +219,7 @@ export class SchemaGenerator {
       ...(options?.writerIdentityForSourceFile && {
         writerIdentityForSourceFile: options.writerIdentityForSourceFile,
       }),
+      ...(options?.onDiagnostic && { onDiagnostic: options.onDiagnostic }),
       ...(schemaHints && { schemaHints }),
     };
 

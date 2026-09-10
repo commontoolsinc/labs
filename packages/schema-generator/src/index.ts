@@ -16,6 +16,7 @@ export {
 
 // Public types for API consumers
 export type {
+  SchemaGenerationDiagnostic,
   SchemaGenerationOptions,
   WriterSourceIdentity,
 } from "./interface.ts";

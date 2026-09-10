@@ -8,6 +8,7 @@ import ts from "typescript";
 import {
   getNodeText,
   getTypeFromTypeNodeWithFallback,
+  recoverAuthoredPosition,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import {
@@ -158,6 +159,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
       };
     };
 
+    let schemaUse: ts.Node = sourceFile;
     const visit: ts.Visitor = (node) => {
       if (isToSchemaNode(node)) {
         const typeArg = node.typeArguments[0]!;
@@ -219,6 +221,23 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         // Build options for schema generation
         const generationOptions: SchemaGenerationOptions = {
           ...(widenLiterals !== undefined ? { widenLiterals } : {}),
+          onDiagnostic: (diagnostic) => {
+            const original = diagnostic.node &&
+              ts.getOriginalNode(diagnostic.node);
+            const useRange = recoverAuthoredPosition(node) ??
+              recoverAuthoredPosition(schemaUse);
+            context.reportDiagnosticOnce({
+              ...diagnostic,
+              node: original?.getSourceFile()?.fileName === sourceFile.fileName
+                ? original
+                : useRange
+                ? ts.setTextRange(
+                  context.factory.createIdentifier(""),
+                  useRange,
+                )
+                : schemaUse,
+            });
+          },
           // The schema-generator owns the general/nested CFC alias path. Give
           // it the same spelling and stamp source used by the direct
           // WriteAuthorizedBy special case below, including for bindings
@@ -314,7 +333,16 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         return satisfiesExpression;
       }
 
-      return visitEachChildWithJsx(node, visit, transformation);
+      // Injected toSchema calls have no position or parent links. Their nearest
+      // enclosing authored range locates diagnostics about imported types.
+      const enclosingUse = schemaUse;
+      const range = recoverAuthoredPosition(node);
+      if (range) {
+        schemaUse = node;
+      }
+      const visited = visitEachChildWithJsx(node, visit, transformation);
+      schemaUse = enclosingUse;
+      return visited;
     };
 
     return ts.visitNode(sourceFile, visit) as ts.SourceFile;

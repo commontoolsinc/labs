@@ -226,6 +226,16 @@ const READER_METHODS = new Set(["get"]);
 const OPAQUE_DERIVATION_METHODS = new Set([
   "map",
   "mapWithPattern",
+  "count",
+  "countWithPattern",
+  "sum",
+  "min",
+  "max",
+  "minBy",
+  "minByWithPattern",
+  "maxBy",
+  "maxByWithPattern",
+
   "flatMap",
   "flatMapWithPattern",
   "filter",
@@ -238,6 +248,16 @@ const FALLBACK_OPERATORS = new Set<ts.SyntaxKind>([
 const PRECISE_CHAIN_METHODS = new Set([
   "map",
   "mapWithPattern",
+  "count",
+  "countWithPattern",
+  "sum",
+  "min",
+  "max",
+  "minBy",
+  "minByWithPattern",
+  "maxBy",
+  "maxByWithPattern",
+
   "filter",
   "filterWithPattern",
   "flatMap",

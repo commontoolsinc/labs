@@ -15,6 +15,15 @@ behavior and open follow-up work.
 
 ## Delta Backlog
 
+### Named collection aggregates
+
+Explicit array-valued cells expose `count`, `sum`, `min`, `max`, `minBy`, and
+`maxBy`. Predicate and score callbacks use the collection callback pipeline,
+including cell receivers inside computations. Extending the methods to ordinary
+array-typed inputs and mapped-array results remains separate work: the public
+`Reactive<T>` alias is still `T`. See the
+[aggregate contracts](../../features/collection-aggregates.md).
+
 ## Implementation Snapshot (March 17, 2026)
 
 - Landed:
