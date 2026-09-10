@@ -178,6 +178,52 @@ describe("scoped-input-initialization", () => {
       .toBe("user");
   });
 
+  it("preserves a whole-object reference blocked by its follow cap", async () => {
+    const raw = runtime.getCell(space, "capped-argument");
+    const target = runtime.getCell<Record<string, unknown>>(
+      space,
+      "capped-target",
+      undefined,
+      undefined,
+      "user",
+    );
+    await Promise.all([raw.sync(), target.sync()]);
+    const seed = runtime.edit();
+    target.withTx(seed).set({});
+    raw.withTx(seed).set(target);
+    expect((await seed.commit()).error).toBeUndefined();
+    const authoredLink = raw.getRaw({ lastNode: "top" });
+
+    const blocked = runtime.edit();
+    initializeScopedArgumentSlots(
+      runtime,
+      blocked,
+      raw.asSchema({ type: "object", scope: "space" })
+        .getAsNormalizedFullLink(),
+      argumentSchema("session"),
+    );
+    expect((await blocked.commit()).error).toBeUndefined();
+    expect(raw.getRaw({ lastNode: "top" })).toEqual(authoredLink);
+    expect(target.getRaw()).toEqual({});
+
+    const allowed = runtime.edit();
+    initializeScopedArgumentSlots(
+      runtime,
+      allowed,
+      raw.asSchema({ type: "object", scope: "user" })
+        .getAsNormalizedFullLink(),
+      argumentSchema("session"),
+    );
+    expect((await allowed.commit()).error).toBeUndefined();
+    expect(raw.getRaw({ lastNode: "top" })).toEqual(authoredLink);
+    expect(parseLink(target.key("count").getRaw({ lastNode: "top" }), target))
+      .toMatchObject({
+        id: target.getAsNormalizedFullLink().id,
+        path: ["count"],
+        scope: "session",
+      });
+  });
+
   it("rejects initialization that raced with an explicit input write", async () => {
     const raw = runtime.getCell<Record<string, unknown>>(space, "racing");
     await raw.sync();
