@@ -6,6 +6,10 @@ import type {
 import { type FabricValue, valueEqual } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { internSchema } from "@commonfabric/data-model-schema";
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { getPatternEnvironment } from "../builder/env.ts";
@@ -14,11 +18,11 @@ import { type Cell } from "../cell.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { validateAgainstSchema } from "../cfc/schema-sanitization.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
-import { settleAbandonedRequest } from "./abandoned-request.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
 import { mapSubschemas } from "../schema-walk.ts";
+import { waveRunContextOf } from "../executor/wave.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import {
   isProtectedToolshedFirstPartyRoute,
@@ -32,6 +36,7 @@ import {
   tryWriteResult,
 } from "./fetch-utils.ts";
 import { ownedCell } from "./runtime-owned-store.ts";
+import { settleAbandonedRequest } from "./abandoned-request.ts";
 import {
   effectTargetKey,
   markEffectCompletion,
@@ -309,394 +314,430 @@ function fetchBuiltin(kind: FetchKind) {
     parentCell: Cell<any>,
     runtime: Runtime, // Runtime will be injected by the registration function
   ): Action {
-    let cellsInitialized = false;
-    let pending: Cell<boolean>;
-    let result: Cell<any | undefined>;
-    let error: Cell<any | undefined>;
-    let internal: Cell<Schema<typeof internalSchema>>;
-    let cellScope: CellScope | undefined;
-    let myRequestId: string | undefined = undefined;
+    const instances = new Map<string, ReturnType<typeof createInstance>>();
 
-    /**
-     * The request this node staged on its most recent run, if that run staged
-     * one. A token rather than the request's hash: two stagings of the same
-     * inputs are still two requests, and the ending of the first must not be
-     * read as the ending of the second.
-     */
-    let currentStaging: symbol | undefined = undefined;
+    /** Owns the request lifecycle for one selected result instance. */
+    function createInstance(identity?: ScopeKeyIdentity) {
+      let cellsInitialized = false;
+      let pending: Cell<boolean>;
+      let result: Cell<any | undefined>;
+      let error: Cell<any | undefined>;
+      let internal: Cell<Schema<typeof internalSchema>>;
+      let cellScope: CellScope | undefined;
+      let myRequestId: string | undefined = undefined;
 
-    let abortController: AbortController | undefined = undefined;
+      /**
+       * The request this node staged on its most recent run, if that run staged
+       * one. A token rather than the request's hash: two stagings of the same
+       * inputs are still two requests, and the ending of the first must not be
+       * read as the ending of the second.
+       */
+      let currentStaging: symbol | undefined = undefined;
 
-    // This is called when the pattern containing this node is being stopped.
-    addCancel(() => {
-      // Abort the request if it's still pending.
-      abortController?.abort("Pattern stopped");
+      let abortController: AbortController | undefined = undefined;
 
-      // Only try to update state if cells were initialized
-      if (!cellsInitialized) return;
+      // This is called when the pattern containing this node is being stopped.
+      addCancel(() => {
+        // Abort the request if it's still pending.
+        abortController?.abort("Pattern stopped");
 
-      const tx = runtime.edit();
+        // Only try to update state if cells were initialized
+        if (!cellsInitialized) return;
 
-      try {
-        // Teardown tx on piece stop — no scheduler run stamps it;
-        // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
-        // serving runtime releases the claim instead of refusing the
-        // unstamped seal. No-op off the serving posture. INSIDE the
-        // try (r3756175831's shape, applied to the sibling site): a
-        // throwing stamper routes through the abort below instead of
-        // leaking the manually-opened tx.
-        runtime.stampServerRun(tx, {
-          actionId: `${kind.name}/teardown/${parentCell.sourceURI}`,
-          kind: "bookkeeping",
-        });
+        const tx = runtime.edit();
 
-        // If the pending request is ours, set pending to false and clear the
-        // requestId. A claim another replica has taken over carries its id,
-        // not ours, and releasing it would strand the request it is running.
-        const currentRequestId = internal.withTx(tx).key("requestId").get();
-        if (myRequestId !== undefined && currentRequestId === myRequestId) {
-          pending.withTx(tx).set(false);
-          internal.withTx(tx).key("requestId").set("");
+        try {
+          // Teardown tx on piece stop — no scheduler run stamps it;
+          // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
+          // serving runtime releases the claim instead of refusing the
+          // unstamped seal. No-op off the serving posture. INSIDE the
+          // try (r3756175831's shape, applied to the sibling site): a
+          // throwing stamper routes through the abort below instead of
+          // leaking the manually-opened tx.
+          runtime.stampServerRun(tx, {
+            actionId: `${kind.name}/teardown/${parentCell.sourceURI}`,
+            kind: "bookkeeping",
+            ...(identity !== undefined ? { scopeKeyIdentity: identity } : {}),
+          });
+
+          // If the pending request is ours, set pending to false and clear the
+          // requestId. A claim another replica has taken over carries its id,
+          // not ours, and releasing it would strand the request it is running.
+          const currentRequestId = internal.withTx(tx).key("requestId").get();
+          if (myRequestId !== undefined && currentRequestId === myRequestId) {
+            pending.withTx(tx).set(false);
+            internal.withTx(tx).key("requestId").set("");
+          }
+
+          // Since we're aborting, don't retry. If the above fails, it's because the
+          // requestId was already changing under us.
+          runtime.prepareTxForCommit(tx);
+          tx.commit();
+        } catch (_) {
+          // Ignore errors during cleanup - the runtime might be shutting down
+          tx.abort();
+        }
+      });
+
+      return (
+        tx: IExtendedStorageTransaction,
+        inputsSnapshot: FetchInputs,
+        mutexTimeoutMs: number | undefined,
+        outputScope: CellScope,
+      ) => {
+        // Cleared for the whole run and set again only by the arm that stages a
+        // request, so every way this run can end without staging one — an empty
+        // url, a result already stored, a request already in flight — leaves the
+        // ending of an earlier request with nothing of this node's to write to.
+        currentStaging = undefined;
+
+        if (!cellsInitialized || cellScope !== outputScope) {
+          pending = ownedCell<boolean>(
+            runtime,
+            tx,
+            parentCell,
+            { [kind.name]: { pending: cause } },
+            undefined,
+            outputScope,
+          );
+
+          result = ownedCell<any | undefined>(
+            runtime,
+            tx,
+            parentCell,
+            {
+              [kind.name]: { result: cause },
+            },
+            undefined,
+            outputScope,
+          );
+
+          error = ownedCell<any | undefined>(
+            runtime,
+            tx,
+            parentCell,
+            {
+              [kind.name]: { error: cause },
+            },
+            undefined,
+            outputScope,
+          );
+
+          internal = ownedCell(
+            runtime,
+            tx,
+            parentCell,
+            { [kind.name]: { internal: cause } },
+            internalSchema,
+            outputScope,
+          );
+
+          // Link the new result cells to the parent result cell
+          setResultCell(pending, parentCell);
+          setResultCell(result, parentCell);
+          setResultCell(error, parentCell);
+          setResultCell(internal, parentCell);
+          // Link the new result cells to the pattern cell too
+          const patternCellPtr = parentCell.key("pattern");
+          setPatternCell(pending, patternCellPtr);
+          setPatternCell(result, patternCellPtr);
+          setPatternCell(error, patternCellPtr);
+          setPatternCell(internal, patternCellPtr);
+
+          // Kick off sync in the background
+          pending.sync();
+          result.sync();
+          error.sync();
+          internal.sync();
+
+          cellsInitialized = true;
+          cellScope = outputScope;
         }
 
-        // Since we're aborting, don't retry. If the above fails, it's because the
-        // requestId was already changing under us.
-        runtime.prepareTxForCommit(tx);
-        tx.commit();
-      } catch (_) {
-        // Ignore errors during cleanup - the runtime might be shutting down
-        tx.abort();
-      }
-    });
+        // Set results to links to our cells. We have to do this outside of
+        // isInitialized since the write could conflict, and then this code will run
+        // again, but isInitialized will be true already. The framework will notice
+        // that this write is a no-op after the first successful write, so this
+        // should be fine.
+        sendResult(tx, { pending, result, error });
 
-    return (tx: IExtendedStorageTransaction) => {
-      tx.resetNarrowestReadScope();
-      // Cleared for the whole run and set again only by the arm that stages a
-      // request, so every way this run can end without staging one — an empty
-      // url, a result already stored, a request already in flight — leaves the
-      // ending of an earlier request with nothing of this node's to write to.
-      currentStaging = undefined;
-      const inputsSnapshot = snapshotInputs(inputsCell.withTx(tx));
-      const mutexTimeoutMs = mutexTimeoutForCell(kind, inputsCell.withTx(tx));
-      const outputScope = tx.getNarrowestReadScope();
+        const url = inputsSnapshot?.url;
+        if (!url) {
+          // Only update if values actually need to change to reduce transaction conflicts
+          const currentPending = pending.withTx(tx).get();
+          const currentResult = result.withTx(tx).get();
+          const currentError = error.withTx(tx).get();
+          const currentInternal = internal.withTx(tx).get();
 
-      if (!cellsInitialized || cellScope !== outputScope) {
-        pending = ownedCell<boolean>(
-          runtime,
-          tx,
-          parentCell,
-          { [kind.name]: { pending: cause } },
-          undefined,
-          outputScope,
-        );
+          if (currentPending !== false) pending.withTx(tx).set(false);
+          if (currentResult !== undefined) result.withTx(tx).set(undefined);
+          if (currentError !== undefined) error.withTx(tx).set(undefined);
+          // Clear internal state when URL is empty so we don't think we have cached results
+          if (currentInternal.inputHash !== "") {
+            internal.withTx(tx).set({
+              requestId: "",
+              lastActivity: 0,
+              inputHash: "",
+            });
+          }
+          return;
+        }
 
-        result = ownedCell<any | undefined>(
-          runtime,
-          tx,
-          parentCell,
-          {
-            [kind.name]: { result: cause },
-          },
-          undefined,
-          outputScope,
-        );
-
-        error = ownedCell<any | undefined>(
-          runtime,
-          tx,
-          parentCell,
-          {
-            [kind.name]: { error: cause },
-          },
-          undefined,
-          outputScope,
-        );
-
-        internal = ownedCell(
-          runtime,
-          tx,
-          parentCell,
-          { [kind.name]: { internal: cause } },
-          internalSchema,
-          outputScope,
-        );
-
-        // Link the new result cells to the parent result cell
-        setResultCell(pending, parentCell);
-        setResultCell(result, parentCell);
-        setResultCell(error, parentCell);
-        setResultCell(internal, parentCell);
-        // Link the new result cells to the pattern cell too
-        const patternCellPtr = parentCell.key("pattern");
-        setPatternCell(pending, patternCellPtr);
-        setPatternCell(result, patternCellPtr);
-        setPatternCell(error, patternCellPtr);
-        setPatternCell(internal, patternCellPtr);
-
-        // Kick off sync in the background
-        pending.sync();
-        result.sync();
-        error.sync();
-        internal.sync();
-
-        cellsInitialized = true;
-        cellScope = outputScope;
-      }
-
-      // Set results to links to our cells. We have to do this outside of
-      // isInitialized since the write could conflict, and then this code will run
-      // again, but isInitialized will be true already. The framework will notice
-      // that this write is a no-op after the first successful write, so this
-      // should be fine.
-      sendResult(tx, { pending, result, error });
-
-      const url = inputsSnapshot?.url;
-      if (!url) {
-        // Only update if values actually need to change to reduce transaction conflicts
+        const inputHash = computeInputHashFromValue(inputsSnapshot);
+        // Check if we're already working on or have the result for these inputs
+        const currentInternal = internal.withTx(tx).get();
         const currentPending = pending.withTx(tx).get();
         const currentResult = result.withTx(tx).get();
         const currentError = error.withTx(tx).get();
-        const currentInternal = internal.withTx(tx).get();
 
-        if (currentPending !== false) pending.withTx(tx).set(false);
-        if (currentResult !== undefined) result.withTx(tx).set(undefined);
-        if (currentError !== undefined) error.withTx(tx).set(undefined);
-        // Clear internal state when URL is empty so we don't think we have cached results
-        if (currentInternal.inputHash !== "") {
-          internal.withTx(tx).set({
+        const inputsMatch = currentInternal?.inputHash === inputHash;
+
+        // If inputs changed, clear everything and abort any in-flight request
+        if (!inputsMatch) {
+          if (myRequestId) {
+            abortController?.abort("Inputs changed");
+            myRequestId = undefined;
+          }
+
+          pending.withTx(tx).set(false);
+          result.withTx(tx).set(undefined);
+          error.withTx(tx).set(undefined);
+          internal.withTx(tx).update({
+            inputHash,
             requestId: "",
             lastActivity: 0,
-            inputHash: "",
           });
         }
-        return;
-      }
 
-      const inputHash = computeInputHashFromValue(inputsSnapshot);
-      // Check if we're already working on or have the result for these inputs
-      const currentInternal = internal.withTx(tx).get();
-      const currentPending = pending.withTx(tx).get();
-      const currentResult = result.withTx(tx).get();
-      const currentError = error.withTx(tx).get();
-
-      const inputsMatch = currentInternal?.inputHash === inputHash;
-
-      // If inputs changed, clear everything and abort any in-flight request
-      if (!inputsMatch) {
-        if (myRequestId) {
-          abortController?.abort("Inputs changed");
-          myRequestId = undefined;
+        // If we have a result OR error for these inputs, we're done
+        const hasValidResult = inputsMatch && currentResult !== undefined;
+        const hasError = inputsMatch && currentError !== undefined;
+        if (hasValidResult || hasError) {
+          // The §4 memo hit (server-execution v2): the stored request hash
+          // matches, so the committed result (or error-shaped result) IS
+          // the node's value — no effect fires, which is what makes
+          // restart-recovery safe (serving-loop.md §4, §6 step 3).
+          runtime.effectMemoObserver?.({
+            kind: "hit",
+            id: `${kind.name}:${inputHash}`,
+          });
         }
 
-        pending.withTx(tx).set(false);
-        result.withTx(tx).set(undefined);
-        error.withTx(tx).set(undefined);
-        internal.withTx(tx).update({
-          inputHash,
-          requestId: "",
-          lastActivity: 0,
-        });
-      }
+        // If we're already fetching these inputs, wait
+        const alreadyFetching = inputsMatch && currentPending &&
+          myRequestId !== undefined;
 
-      // If we have a result OR error for these inputs, we're done
-      const hasValidResult = inputsMatch && currentResult !== undefined;
-      const hasError = inputsMatch && currentError !== undefined;
-      if (hasValidResult || hasError) {
-        // The §4 memo hit (server-execution v2): the stored request hash
-        // matches, so the committed result (or error-shaped result) IS
-        // the node's value — no effect fires, which is what makes
-        // restart-recovery safe (serving-loop.md §4, §6 step 3).
-        runtime.effectMemoObserver?.({
-          kind: "hit",
-          id: `${kind.name}:${inputHash}`,
-        });
-      }
+        // Start a new fetch if we don't have a result/error and aren't already fetching
+        if (!hasValidResult && !hasError && !alreadyFetching) {
+          // The claim id names this replica, so teardown can tell a claim it
+          // still holds from one another replica has taken over. `runtime.id` is
+          // unique per storage manager and so per replica. The outbox/dedupe
+          // key is the input hash WIDENED BY THIS NODE's result-cell identity
+          // (effectTargetKey): dedupe collapses re-issues of the SAME node's
+          // request from anywhere, while a DISTINCT node with identical
+          // inputs keeps its own effect — its closure writes its own cells,
+          // which a shared key would have dropped (round-2 headline).
+          const newRequestId = `${runtime.id}:${inputHash}`;
+          const staging = Symbol(inputHash);
+          currentStaging = staging;
+          // These cells as this request found them. Whether anything has been
+          // committed to them since is one question about all four together, not
+          // four questions: a request that answers writes its result without
+          // moving the claim id, and one that takes over moves the claim id
+          // without writing a result.
+          const cellsBeforeStage = {
+            pending: currentPending,
+            result: currentResult,
+            error: currentError,
+            internal: currentInternal,
+          };
+          const effectKey = effectTargetKey(
+            `${kind.name}:${inputHash}`,
+            result,
+            identity,
+          );
+          enqueueSinkRequestPostCommitEffect(
+            tx,
+            kind.name,
+            `${kind.name}:${inputHash}`,
+            inputsSnapshot,
+            `${kind.name}-start`,
+            () => {
+              // Try to claim mutex - returns immediately if another tab is
+              // processing. Tracked as async builtin work owned by this run, so
+              // runtime.settled() and runtime.settledFor(parentCell) both wait
+              // for the fetch and its writeback; idle() does not, so the
+              // post-commit handler never blocks on network I/O.
+              const work = tryClaimMutex(
+                runtime,
+                inputsCell,
+                pending,
+                result,
+                error,
+                internal,
+                newRequestId,
+                // Materialize inputs via the schema system and preprocess body.
+                // asSchema().get() returns a frozen plain snapshot with nested
+                // properties (like options.headers) fully resolved, safe to use
+                // after commit.
+                snapshotInputs,
+                inputHash,
+                mutexTimeoutMs,
+                effectKey,
+                identity,
+              ).then(
+                async ({ claimed }) => {
+                  if (!claimed) {
+                    // Another tab is handling this, we're done
+                    return;
+                  }
 
-      // If we're already fetching these inputs, wait
-      const alreadyFetching = inputsMatch && currentPending &&
-        myRequestId !== undefined;
-
-      // Start a new fetch if we don't have a result/error and aren't already fetching
-      if (!hasValidResult && !hasError && !alreadyFetching) {
-        // The claim id names this replica, so teardown can tell a claim it
-        // still holds from one another replica has taken over. `runtime.id` is
-        // unique per storage manager and so per replica. The outbox/dedupe
-        // key is the input hash WIDENED BY THIS NODE's result-cell identity
-        // (effectTargetKey): dedupe collapses re-issues of the SAME node's
-        // request from anywhere, while a DISTINCT node with identical
-        // inputs keeps its own effect — its closure writes its own cells,
-        // which a shared key would have dropped (round-2 headline).
-        const newRequestId = `${runtime.id}:${inputHash}`;
-        const staging = Symbol(inputHash);
-        currentStaging = staging;
-        // These cells as this request found them. Whether anything has been
-        // committed to them since is one question about all four together, not
-        // four questions: a request that answers writes its result without
-        // moving the claim id, and one that takes over moves the claim id
-        // without writing a result.
-        const cellsBeforeStage = {
-          pending: currentPending,
-          result: currentResult,
-          error: currentError,
-          internal: currentInternal,
-        };
-        const effectKey = effectTargetKey(
-          `${kind.name}:${inputHash}`,
-          result,
-        );
-        enqueueSinkRequestPostCommitEffect(
-          tx,
-          kind.name,
-          `${kind.name}:${inputHash}`,
-          inputsSnapshot,
-          `${kind.name}-start`,
-          () => {
-            // Try to claim mutex - returns immediately if another tab is
-            // processing. Tracked as async builtin work owned by this run, so
-            // runtime.settled() and runtime.settledFor(parentCell) both wait
-            // for the fetch and its writeback; idle() does not, so the
-            // post-commit handler never blocks on network I/O.
-            const work = tryClaimMutex(
-              runtime,
-              inputsCell,
-              pending,
-              result,
-              error,
-              internal,
-              newRequestId,
-              // Materialize inputs via the schema system and preprocess body.
-              // asSchema().get() returns a frozen plain snapshot with nested
-              // properties (like options.headers) fully resolved, safe to use
-              // after commit.
-              snapshotInputs,
-              inputHash,
-              mutexTimeoutMs,
-              effectKey,
-            ).then(
-              async ({ claimed }) => {
-                if (!claimed) {
-                  // Another tab is handling this, we're done
-                  return;
-                }
-
-                // Clear any previous result/error when starting a new fetch
-                // This ensures observers see a clean pending state
-                runtime.editWithRetry((tx) => {
-                  markEffectCompletion(tx, effectKey);
-                  result.withTx(tx).set(undefined);
-                  error.withTx(tx).set(undefined);
-                });
-
-                // Check if URL became empty while waiting for mutex
-                if (!inputsSnapshot.url) {
-                  // Release the lock and clear state
-                  myRequestId = undefined;
+                  // Clear any previous result/error when starting a new fetch
+                  // This ensures observers see a clean pending state
                   runtime.editWithRetry((tx) => {
+                    if (identity !== undefined) {
+                      tx.tx.scopeKeyIdentity = identity;
+                    }
                     markEffectCompletion(tx, effectKey);
-                    pending.withTx(tx).set(false);
                     result.withTx(tx).set(undefined);
                     error.withTx(tx).set(undefined);
-                    internal.withTx(tx).set({
-                      requestId: "",
-                      lastActivity: 0,
-                      inputHash: "",
-                    });
                   });
-                  return;
-                }
 
-                abortController = new AbortController();
+                  // Check if URL became empty while waiting for mutex
+                  if (!inputsSnapshot.url) {
+                    // Release the lock and clear state
+                    myRequestId = undefined;
+                    runtime.editWithRetry((tx) => {
+                      if (identity !== undefined) {
+                        tx.tx.scopeKeyIdentity = identity;
+                      }
+                      markEffectCompletion(tx, effectKey);
+                      pending.withTx(tx).set(false);
+                      result.withTx(tx).set(undefined);
+                      error.withTx(tx).set(undefined);
+                      internal.withTx(tx).set({
+                        requestId: "",
+                        lastActivity: 0,
+                        inputHash: "",
+                      });
+                    });
+                    return;
+                  }
 
-                // We claimed the mutex, start the fetch. `startFetch` compares
-                // against the input hash, not the claim id: any request for
-                // these inputs may write the result.
-                myRequestId = newRequestId;
-                await startFetch(
-                  runtime,
-                  kind,
-                  snapshotInputs,
-                  inputsCell,
-                  inputsSnapshot,
-                  inputHash,
-                  pending,
-                  result,
-                  error,
-                  internal,
-                  abortController.signal,
-                  effectKey,
+                  abortController = new AbortController();
+
+                  // We claimed the mutex, start the fetch. `startFetch` compares
+                  // against the input hash, not the claim id: any request for
+                  // these inputs may write the result.
+                  myRequestId = newRequestId;
+                  await startFetch(
+                    runtime,
+                    kind,
+                    snapshotInputs,
+                    inputsCell,
+                    inputsSnapshot,
+                    inputHash,
+                    pending,
+                    result,
+                    error,
+                    internal,
+                    abortController.signal,
+                    effectKey,
+                    identity,
+                  );
+                },
+              );
+              runtime.trackAsyncWork(work, parentCell);
+            },
+            {
+              idempotencyKey: effectKey,
+              onRejected: (rejection) => {
+                runtime.trackAsyncWork(
+                  settleAbandonedRequest(
+                    runtime,
+                    kind.name,
+                    effectKey,
+                    (settleTx) => {
+                      if (identity !== undefined) {
+                        settleTx.tx.scopeKeyIdentity = identity;
+                      }
+                      // The announcement rode the abandoned transaction, so it
+                      // is made again whoever owns the answer now.
+                      sendResult(settleTx, { pending, result, error });
+                      // Decided here rather than when this callback ran.
+                      // Another request holds these cells in either of two ways,
+                      // and the ending steps around both. One is in flight: the
+                      // pending flag is up under a claim id that is not this
+                      // request's. Or one has claimed here since this request was
+                      // staged, whatever state it left — a later request that
+                      // already answered leaves its own claim id with the flag
+                      // down, and that answer is its own to keep.
+                      //
+                      // What was left over from before this request was staged is
+                      // neither. A request that finished leaves its claim id
+                      // standing with the flag down, so every request after the
+                      // first one finds an id here that belongs to nobody, and
+                      // reading that as a takeover would leave the pattern
+                      // holding the finished request's answer under inputs it no
+                      // longer describes.
+                      // This node has moved on if its latest run staged
+                      // something else, or staged nothing at all. The store can
+                      // say nothing about that: a run whose inputs return to ones
+                      // already answered keeps that answer and writes nothing, so
+                      // the two durable tests below both see exactly what this
+                      // request left behind.
+                      if (currentStaging !== staging) return;
+                      const cellsNow = {
+                        pending: pending.withTx(settleTx).get(),
+                        result: result.withTx(settleTx).get(),
+                        error: error.withTx(settleTx).get(),
+                        internal: internal.withTx(settleTx).get(),
+                      };
+                      const claim = cellsNow.internal?.requestId;
+                      const inFlight = cellsNow.pending === true &&
+                        claim !== undefined && claim !== "" &&
+                        claim !== newRequestId;
+                      // `valueEqual` rather than a structural walk: a fetched
+                      // body is a `FabricValue`, and `fetchBinary` answers with
+                      // `FabricBytes`, whose contents live in private fields that
+                      // a structural walk cannot see — every distinct instance of
+                      // one compares equal to every other.
+                      const writtenSinceStaged = !valueEqual(
+                        cellsBeforeStage as FabricValue,
+                        cellsNow as FabricValue,
+                      );
+                      if (inFlight || writtenSinceStaged) {
+                        return;
+                      }
+                      pending.withTx(settleTx).set(false);
+                      result.withTx(settleTx).set(undefined);
+                      error.withTx(settleTx).set(rejection.message);
+                    },
+                  ),
+                  parentCell,
                 );
               },
-            );
-            runtime.trackAsyncWork(work, parentCell);
-          },
-          {
-            idempotencyKey: effectKey,
-            onRejected: (rejection) => {
-              runtime.trackAsyncWork(
-                settleAbandonedRequest(
-                  runtime,
-                  kind.name,
-                  effectKey,
-                  (settleTx) => {
-                    // The announcement rode the abandoned transaction, so it
-                    // is made again whoever owns the answer now.
-                    sendResult(settleTx, { pending, result, error });
-                    // Decided here rather than when this callback ran.
-                    // Another request holds these cells in either of two ways,
-                    // and the ending steps around both. One is in flight: the
-                    // pending flag is up under a claim id that is not this
-                    // request's. Or one has claimed here since this request was
-                    // staged, whatever state it left — a later request that
-                    // already answered leaves its own claim id with the flag
-                    // down, and that answer is its own to keep.
-                    //
-                    // What was left over from before this request was staged is
-                    // neither. A request that finished leaves its claim id
-                    // standing with the flag down, so every request after the
-                    // first one finds an id here that belongs to nobody, and
-                    // reading that as a takeover would leave the pattern
-                    // holding the finished request's answer under inputs it no
-                    // longer describes.
-                    // This node has moved on if its latest run staged
-                    // something else, or staged nothing at all. The store can
-                    // say nothing about that: a run whose inputs return to ones
-                    // already answered keeps that answer and writes nothing, so
-                    // the two durable tests below both see exactly what this
-                    // request left behind.
-                    if (currentStaging !== staging) return;
-                    const cellsNow = {
-                      pending: pending.withTx(settleTx).get(),
-                      result: result.withTx(settleTx).get(),
-                      error: error.withTx(settleTx).get(),
-                      internal: internal.withTx(settleTx).get(),
-                    };
-                    const claim = cellsNow.internal?.requestId;
-                    const inFlight = cellsNow.pending === true &&
-                      claim !== undefined && claim !== "" &&
-                      claim !== newRequestId;
-                    // `valueEqual` rather than a structural walk: a fetched
-                    // body is a `FabricValue`, and `fetchBinary` answers with
-                    // `FabricBytes`, whose contents live in private fields that
-                    // a structural walk cannot see — every distinct instance of
-                    // one compares equal to every other.
-                    const writtenSinceStaged = !valueEqual(
-                      cellsBeforeStage as FabricValue,
-                      cellsNow as FabricValue,
-                    );
-                    if (inFlight || writtenSinceStaged) {
-                      return;
-                    }
-                    pending.withTx(settleTx).set(false);
-                    result.withTx(settleTx).set(undefined);
-                    error.withTx(settleTx).set(rejection.message);
-                  },
-                ),
-                parentCell,
-              );
             },
-          },
-        );
+          );
+        }
+      };
+    }
+
+    return (tx: IExtendedStorageTransaction) => {
+      tx.resetNarrowestReadScope();
+      const inputsSnapshot = snapshotInputs(inputsCell.withTx(tx));
+      const mutexTimeoutMs = mutexTimeoutForCell(kind, inputsCell.withTx(tx));
+      const outputScope = tx.getNarrowestReadScope();
+      const identity = waveRunContextOf(tx)?.scopeKeyIdentity;
+      const instanceKey = identity === undefined
+        ? "local"
+        : resolveScopeKey(outputScope, identity);
+      let instance = instances.get(instanceKey);
+      if (instance === undefined) {
+        instance = createInstance(identity);
+        instances.set(instanceKey, instance);
       }
+      instance(tx, inputsSnapshot, mutexTimeoutMs, outputScope);
     };
   };
 }
@@ -747,6 +788,7 @@ async function startFetch(
   internal: Cell<Schema<typeof internalSchema>>,
   abortSignal: AbortSignal,
   effectKey: string,
+  identity?: ScopeKeyIdentity,
 ) {
   const { url, options } = inputsSnapshot;
 
@@ -794,6 +836,7 @@ async function startFetch(
       },
       snapshotInputs,
       effectKey,
+      identity,
     );
     // A writeback SUPERSEDED by changed inputs is done (the new inputs'
     // own request owns the cells now). A writeback whose COMMIT failed
@@ -818,6 +861,7 @@ async function startFetch(
 
     // Write error - but only update inputHash if inputs haven't changed
     const errorWritten = await runtime.editWithRetry((tx) => {
+      if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
       markEffectCompletion(tx, effectKey);
       const currentHash = computeInputHashFromValue(
         snapshotInputs(inputsCell.withTx(tx)),

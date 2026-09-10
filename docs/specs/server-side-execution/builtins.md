@@ -60,11 +60,19 @@ reported rather than written into the conversation.
 
 | built-in | request inputs (memo key basis) | result cell | authority | notes |
 | --- | --- | --- | --- | --- |
-| `fetch` (`fetchData`) | url, method, headers (allowlisted), body, response schema | `{ result?, error?, pending, requestHash }` — today the hash lives in an internal cell `{requestId, lastActivity, inputHash}` (`fetch.ts:427-472`); the "migrate it onto the result doc" move was DEFERRED at stage G (deliberate): the internal-cell hash is functionally equivalent committed state (T10.Q1 — §4's memo rule reads it the same), and the migration is an OFF-arm cell-shape change, so it waits for an OFF-arm ruling batch that wants it (plausibly never) | capability handle bound at wiring (README §3.8) | redirects/deadlines per existing `fetch-request-deadlines` doc; today's outbox id `` `${kind.name}:${inputHash}` `` is the memo+outbox-dedupe precedent |
+| `fetch` (`fetchData`) | url, method, headers (allowlisted), body, response schema | `{ result?, error?, pending }`; the memo hash is committed in the internal cell `{requestId, lastActivity, inputHash}` (`fetch.ts`) | capability handle bound at wiring (README §3.8) | redirects/deadlines per existing `fetch-request-deadlines` doc; the memo base is `` `${kind.name}:${inputHash}` ``; the served outbox key also names the target document and its resolved user or session instance |
 | `fetch-program` | program source ref + integrity | compiled program ref | same | feeds `compile-and-run` |
 | `llm` (`generateText` / `generateObject`) | model, messages/prompt, schema, params | settled result only (protocol.md §6 — no partial commits in v2); `requestHash` already sits on the result cell today (`llm.ts:716-822`) — the precedent §4 generalizes | broker-held provider keys; grant from handle | temperature etc. are inputs, so nondeterminism is memo-stable by construction |
 | `llm-dialog` | dialog state + params | settled turns | same | multi-turn = new key per turn |
 | `sqlite*` | database link, statement, params, reader principal | one cleared result cell per (query, reader) | read served under the reader's clearance | clearance = per-reader materialization (RULED 2026-08-02) — see below |
+
+The shared `fetch.ts` builtins retain independent request lifecycles for each
+served result instance. The requesting run's identity resolves the outbox key
+and every asynchronous claim, completion, error, abandonment, and teardown
+transaction before its first cell read. A served mutex claim commits the
+validated input hash with its claim id and activity timestamp, so a subsequent
+unchanged-input run recognizes that in-flight request. Unstamped client runs
+use the runtime's own identity and keep one local lifecycle.
 
 `sqlite*` row clearance — RULED 2026-08-02: **per-reader
 materialization**, today's shape. The reader principal is part of

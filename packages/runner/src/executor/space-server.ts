@@ -2136,24 +2136,13 @@ export class SpaceServer implements TransactionSealDestination {
         const { promise, resolve } = Promise.withResolvers<
           SealedCommitVerdict
         >();
-        // Stage A (OW17): the completion's local pending layer lands on
-        // the CARRIAGE identity's instances — the same instances its
-        // engine rows are annotated with below — so the demanded run's
-        // instance sees the served result locally at verdict, not only
-        // through the wire. Residual, FLAGGED (not filled), now scoped
-        // to every non-sqlite effect kind — the fetch*/generate*
-        // families, llm, and llm-dialog (which additionally marks
-        // completions at 4 sites with bare `llmDialog:`-prefixed keys
-        // never widened by effectTargetKey, a separate pre-existing
-        // quirk): their writeback transactions
-        // are unstamped, so their hash-guard READS resolve against the
-        // service's instances and a per-instance node's effect
-        // completion is unpinned there. sqlite-query is CARVED OUT
-        // (OW53, 2026-08-22): its flush sets the requesting run's
-        // identity on every writeback transaction (the OW17 tx seam —
-        // sqlite-builtins.ts), so its guard reads and writes resolve
-        // the REQUESTING instance; pinned by the true-ON
-        // sqlite-read-clearance gate.
+        // The completion's local pending layer and engine rows use the same
+        // carriage identity. Guard reads happen before this seal, so a builtin
+        // must also attach its captured identity to the writeback transaction
+        // before reading. The shared fetch builtins and SQLite do that at their
+        // completion sites;
+        // verification-coverage.md OW28-instance-family records the remaining
+        // callers whose guard reads still use the serving identity.
         const sealed = replica.sealNative(
           native,
           source,
