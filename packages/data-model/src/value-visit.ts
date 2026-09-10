@@ -55,10 +55,6 @@ export type IterateArrayForm<DomainExtra> = {
  * the return value from `Map.entries()` or `Object.entries()`), and by
  * returning this, the engine will iterate over the contents, calling
  * `ValueVisitor.visitMapContentsItem()` on each key-value pair in the mappings.
- *
- * **Note:** The visit calls per-mapping are specifically in key-then-value
- * order, and if the result of visiting a key is a `mainResult`, then that ends
- * the iteration before the corresponding value is visited.
  */
 export type IterateMapForm<DomainExtra> = {
   type: "iterateMap";
@@ -79,11 +75,20 @@ export type MainResultForm<ResultType> = {
 /**
  * A `recurse` form. This is returned by visitor methods which are used to
  * iterate over container contents. By returning this form, a visitor indicates
- * that the value should be visited by the engine, recursively, such that it is
- * known by the engine to be an element of the container which is being iterated
- * over. The two `boolean` properties indicate which of the keys and/or values
- * is to be recursed over. `doKey` is ignored in a context where there is no
- * key.
+ * that the container elements should be visited by the engine, recursively,
+ * such that it is known by the engine to be an element of the container which
+ * is being iterated over.
+ *
+ * The two `boolean` properties indicate which of the keys and/or values is to
+ * be recursed over. `doKey` is ignored in a context where there is no key.
+ *
+ * **Note:** The visit calls per-mapping are specifically in key-then-value
+ * order, and if the result of visiting a key is a `mainResult`, then that ends
+ * the iteration before the corresponding value is visited.
+ *
+ * **Note:** It is technically possible to define a no-op instance of this type,
+ * which is the equivalent to returning `undefined`. This is pointless, but it
+ * is not prevented.
  */
 export type RecurseForm = {
   type: "recurse";
