@@ -150,7 +150,10 @@ export interface ValueVisitor<Domain = FabricValue, ResultType = FabricValue> {
   ): ContainerIterationResult<ResultType>;
 
   /**
-   * Visits a value which is already in the process of being visited.
+   * Visits a value which is already in the process of being visited. The
+   * visitor engine calls this method _before_ calling `visitValue()` when the
+   * value to be visited is already in the middle of being visited as a
+   * container.
    */
   visitCycle(
     /** Value to visit. */
@@ -222,6 +225,89 @@ export interface ValueVisitor<Domain = FabricValue, ResultType = FabricValue> {
    * `visitNonFabricValue()`, or `visitPrimitive()`.
    */
   visitValue(value: Domain): GeneralVisitorResult<Domain, ResultType>;
+}
+
+/**
+ * EmptyNo-op implementation of `ValueVisitor`: Every method is implemented and
+ * just returns `undefined`.
+ */
+export class EmptyValueVisitor<Domain, ResultType>
+  implements ValueVisitor<Domain, ResultType> {
+  /** @inheritDoc */
+  visitArrayContentsItem(
+    index: number,
+    value: Domain,
+  ): ContainerIterationResult<ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitCycle(
+    /** Value to visit. */
+    value: Domain,
+    /** Depth at which `value` was originally encountered. */
+    originalDepth: number,
+    /** Depth of the current visit. */
+    thisDepth: number,
+  ): LeafVisitorResult<Domain, ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitFabricArray(
+    value: Domain & FabricArray,
+  ): LeafVisitorResult<Domain, ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitFabricInstance(
+    value: Domain & FabricInstance,
+  ): LeafVisitorResult<Domain, ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitFabricPlainObject(
+    value: Domain & FabricPlainObject,
+  ): LeafVisitorResult<Domain, ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitFabricContainer(
+    value: Domain & FabricContainerValue,
+  ): GeneralVisitorResult<Domain, ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitMapContentsItem(
+    key: Domain,
+    value: Domain,
+  ): ContainerIterationResult<ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitNonFabricValue(
+    value: Domain,
+  ): LeafVisitorResult<Domain, ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitPrimitive(
+    value: Domain & (Primitive | FabricPrimitive),
+    type: ValueTag,
+  ): LeafVisitorResult<Domain, ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitValue(value: Domain): GeneralVisitorResult<Domain, ResultType> {
+    return undefined;
+  }
 }
 
 /**
