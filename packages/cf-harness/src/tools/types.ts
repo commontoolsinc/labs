@@ -144,9 +144,9 @@ export interface HarnessToolContext {
 
   /**
    * Where this run's writes to the pattern index go: a pattern it authored is
-   * held there until the session ends, so the ledger publishes once per
-   * capability rather than once per successful run, and a report about an
-   * indexed pattern it ran is sent from there — see
+   * held there until the session ends, so search is offered one candidate per
+   * capability while the index still records every iteration, and a report
+   * about an indexed pattern it ran is sent from there — see
    * `pattern-index/ledger.ts`. Absent when the run has no index, and absent
    * for a tool invoked outside the engine, which neither publishes nor
    * reports.

@@ -1057,10 +1057,11 @@ export class CfHarnessEngine {
 
   /**
    * Sends everything this session's ledger still holds and waits for every
-   * write it has made. Called once, when the session's prompt loop finishes;
-   * a session that never reaches it publishes nothing, which `ledger.ts`
-   * states as the cost it is, and loses whichever writes were still in
-   * flight.
+   * write it has made. Called once, when the session's prompt loop finishes.
+   * A session that never reaches it keeps whatever the ledger already sent —
+   * a displaced iteration, a dependency, a report — and loses the entries
+   * still held, which `ledger.ts` states as the cost it is, along with
+   * whichever writes were in flight.
    */
   async flushPatternIndexLedger(): Promise<void> {
     await this.#patternIndexLedger?.flush();
