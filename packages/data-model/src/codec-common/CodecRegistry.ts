@@ -23,6 +23,11 @@ import {
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
+import {
+  jsTagFromValue,
+  type JsTypeValueTag,
+  VALUE_TAGS,
+} from "@/value-tags.ts";
 import { isCodecTypeTag } from "./isCodecTypeTag.ts";
 
 /**
@@ -33,19 +38,12 @@ import { isCodecTypeTag } from "./isCodecTypeTag.ts";
 export const SELF_REP = "self-rep" as const;
 
 /**
- * The primitive `type` keys the registry accepts: the `typeof` results that are
- * encodable `FabricValue` primitives, plus `"null"` for the `null` value.
- * `"object"` and `"function"` are deliberately excluded -- object values are
- * matched by class via {@link CodecRegistry#register}.
+ * The primitive `type` keys the registry accepts: the JS type tags of the
+ * encodable `FabricValue` primitives, `null` included. A function is no
+ * `FabricValue`, and an object value is matched by class via
+ * {@link CodecRegistry#register}, so neither has a key here.
  */
-export type PrimitiveTypeName =
-  | "null"
-  | "undefined"
-  | "boolean"
-  | "number"
-  | "bigint"
-  | "string"
-  | "symbol";
+export type PrimitiveTypeName = Exclude<JsTypeValueTag, "function">;
 
 /**
  * Gets the constructor function ("class") of the given value, if any, for
@@ -287,35 +285,14 @@ export class CodecRegistry<Encoded> {
   codecFromValue(
     value: FabricValue,
   ): CodecForFormat<Encoded> | typeof SELF_REP | undefined {
-    // Primitive dispatch on the value's primitive `type` key (its `typeof`, or
-    // `"null"`). The type's codec is tried first, then self-representation.
-    let type: PrimitiveTypeName | undefined;
-    const valueType = typeof value;
-    switch (valueType) {
-      case "bigint":
-      case "boolean":
-      case "number":
-      case "string":
-      case "symbol":
-      case "undefined": {
-        type = valueType;
-        break;
-      }
+    // Primitive dispatch on the value's primitive `type` key, which is its JS
+    // type tag. The type's codec is tried first, then self-representation.
+    const type = jsTagFromValue(value);
 
-      case "object": {
-        if (value === null) {
-          type = "null";
-        }
-        break;
-      }
-
-      case "function": {
-        // Not a `FabricValue`; nothing can encode it.
-        return undefined;
-      }
-    }
-
-    if (type !== undefined) {
+    if (type === VALUE_TAGS.function) {
+      // Not a `FabricValue`; nothing can encode it.
+      return undefined;
+    } else if (type !== "object") {
       const matched = this.#primitiveCodecs.get(type);
       if (matched && matched.canEncode(value)) {
         return matched;

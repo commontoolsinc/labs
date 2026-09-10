@@ -125,12 +125,11 @@ containing a manifest array whose entries have a `partialCause` and a sigil
 uses the separate short-link form `{"/":"<short-id>"}` and resolves to
 `of:<short-id>` in the same space. CFC metadata also uses its own compact stored
 shape and is converted to a CID sigil link during traversal. When the server
-executes a subscription with graph traversal, it MUST follow these metadata
-links, and each link listed in the `internal` manifest, transitively, for every
-document the query names as a root and for every document reached through such
-a link, to include the full provenance chain. A document the traversal reaches
-only through a value link is owed none of them; the role-based contract is in
-[`05-queries.md`](05-queries.md), "Metadata / Provenance Resolution".
+executes a subscription with graph traversal, it delivers these fields as part
+of the document that carries them and follows none of them; the one metadata
+field traversal does follow is `cfc`, whose schema document every delivered
+document is owed. The contract is in [`05-queries.md`](05-queries.md),
+"Metadata / Provenance Resolution".
 
 **Document paths**: Transaction/storage reads and writes operate on full
 document paths. For example, metadata links live at top-level paths like

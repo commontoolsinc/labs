@@ -47,6 +47,7 @@
 import { join } from "@std/path";
 import {
   datePartition,
+  type FlakeEvidence,
   listObjects,
   parseReportGroups,
   readObject,
@@ -427,16 +428,16 @@ export function manifestView(
   for (const entry of seen.manifest.withheld) {
     withheld.set(testIdentityKey(entry.test), entry.reason);
   }
-  const flakeRates = new Map<string, number>();
+  const flakes = new Map<string, FlakeEvidence | undefined>();
   const catches = new Map<string, number>();
   const units = new Map<string, string>();
   for (const entry of manifest.entries) {
     const key = testIdentityKey(entry.test);
-    flakeRates.set(key, entry.flakeRate);
+    flakes.set(key, entry.flakeEvidence);
     catches.set(key, entry.inputs.catches);
     units.set(key, `${entry.suite}\t${entry.unit}`);
   }
-  return { manifest: true, selected, withheld, flakeRates, catches, units };
+  return { manifest: true, selected, withheld, flakes, catches, units };
 }
 
 /**

@@ -89,6 +89,7 @@ export {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
   JS_TYPE_VALUE_TAGS,
+  jsTagFromValue,
   type JsTypeValueTag,
   tagFromFabricPrimitive,
   tagFromFabricPrimitiveElseNull,

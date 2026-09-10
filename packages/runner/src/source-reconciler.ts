@@ -1006,6 +1006,10 @@ export class SourceReconciler {
     // opens, and still what it was when the transaction commits. A concurrent
     // argument change means the setup would stage a value nobody asked for.
     const argumentUnchanged = await runtime.syncStoredSetupArgument(resultCell);
+    // The setup also writes over the cells the stored piece owns — each one's
+    // backlink at least — and a write to a document this replica has not
+    // loaded replaces the document the store holds, so they are named too.
+    await runtime.runner.syncStoredPieceCells(resultCell, candidate);
     const committed = await this.#commit(resultCell, state, signal, (tx) => {
       if (!argumentUnchanged(resultCell.withTx(tx))) return false;
       applyPieceSourceTransition(

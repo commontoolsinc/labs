@@ -104,38 +104,37 @@ do I get" are answerable before the first call rather than by making one:
 A value-less verb carries no `outputSchema` at all, which is how a caller tells
 the two apart without calling.
 
-The listing names verbs the pattern's declared result type does not mention: a
-pattern whose result type is its argument schema reused still returns the
-streams and tools it wired, and those are as callable as any other. Candidate
-names are drawn from the piece's stored surface and from its compiled pattern,
-and each one is listed only when the piece stores a callable behind it — so a
-data field is never offered as callable, whatever the pattern hangs at that
-name.
+The listing is read from the compiled pattern the piece is pinned to: its
+declared result type, the result graph it wires, and its declared argument
+type. Nothing below the piece's own document is read, so listing a board's
+verbs costs the same whatever the board holds. That also settles what gets
+named: a pattern whose result type is its argument schema reused still returns
+the streams and tools it wired, and those are listed off the graph — a handler
+by the node that drives it, a tool by the tool value itself — so a verb the
+declared type omits is as listed as any other, while a data field is never
+offered as callable, whatever the pattern hangs at that name.
 
-Every row is real, and says where it lives: a name in the listing is a name
-`cf piece call` resolves, and the row's `on` names the cell the dispatcher
+Every row says where it lives: the row's `on` names the cell `cf piece call`
 will reach it on. Result shadows input there exactly as it does in
-`cf piece call`, so a verb stored on both cells is listed — and called — on
-the result cell, carrying that cell's schema. Build a payload from the row and
-it is the payload the verb you reach expects.
+`cf piece call`, so a name both types declare is listed — and called — on
+the result cell, carrying that cell's event. Build a payload from the row and it
+is the payload the verb you reach expects.
 
-The converse is weaker, and worth knowing before treating an empty listing as
-an answer:
+Two things the listing cannot say, worth knowing before treating an empty
+listing as an answer:
 
-- A handler whose stored schema carries no stream marker is **callable but not
-  listed**. Nothing stored distinguishes it from a data field, and the one
-  probe that finds it accepts every name it is given, so listing on that probe
-  would offer the whole piece as callable. Given such a verb's name,
-  `cf piece call` still reaches it.
-- When the compiled pattern cannot be read, a verb the declared result type
-  omits has no other source of its name and is missing. The listing says so
-  rather than passing the short list off as the surface: `incomplete` carries
-  `"pattern-unavailable"` in `--json`, and the human listing prints the same
-  note. The verbs it does name are still callable.
+- The listing describes the pinned pattern, not the piece's stored state. A
+  handler the piece stores that its pattern neither declares nor wires is not
+  listed; given its name, `cf piece call` still reaches it.
+- When the compiled pattern cannot be read, the listing has no source of names
+  at all and is empty. It says so rather than passing the emptiness off as the
+  surface: `incomplete` carries `"pattern-unavailable"` in `--json`, and the
+  human listing prints the same note. Every verb the piece stores is still
+  callable by name.
 
-So absence from a listing that reports no `incomplete` means no *listable*
-verb of that name — strong enough to enumerate against, not strong enough to
-prove a named verb does not exist.
+So absence from a listing that reports no `incomplete` means the pinned pattern
+declares and wires no verb of that name — strong enough to enumerate against,
+not strong enough to prove a named verb does not exist.
 
 One verb at a time, `--help` answers the same question from the callable
 itself:

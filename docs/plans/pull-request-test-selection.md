@@ -913,6 +913,173 @@ being imposed.
 - A repeat names an identity and invokes its file with every other
   identity in that file skipped.
 
+### What the specifier resolves to when the module goes away
+
+Sending the specifier through one module of ours turns the migration off
+a deprecated `@std/testing/bdd` into an edit of one file, as
+[two interception points](#two-interception-points-and-no-test-file-changed)
+says. What that file should become is a `describe` and `it` written
+here, which build the chain themselves and register under it, keeping
+one `Deno.test` per suite with a step for each leaf. Nothing a test file
+written in the bdd style has to change: the import map already resolves
+the specifier to our module, and this is a change behind it. What that
+buys, beyond the identity faults below, is a registrar the rest of the
+test machinery can hook into instead of replacing `Deno.test` behind
+each other's backs.
+
+#### What it fixes
+
+Every fault the re-export has produced is a recorded name disagreeing
+with a reported name. A wrapper with nothing to do stood between the
+test file and the registrar and took the class name, so almost no record
+carried a file (#7126). The leaves of a file declaring a hook outside
+every `describe` carried none, since the runner reports those beneath a
+root suite it invents while the tracked chain opened at the file's own
+outermost `describe` (#7173). A leaf whose call names its suite by
+handle was the same shape (#7184), and a leaf named after its body was
+the same again (#7195).
+
+The name map is a join, and a join fails on a wrong key whatever carries
+the key. Each of those entries was written and filed under a name no
+leaf had. A module that builds the chain and registers under it is
+handed both halves of what the runner will report, so there is no rule
+left for it to predict and no name for it to get wrong. That is the
+whole of what this changes and the whole of what has been going wrong.
+
+The clock harness gains the same thing. `installFakeClock` replaces
+`Deno.test` as well, and tells a test that wants the real clock from one
+that wants the fake one by asking whether a stack string contains any of
+twenty-four file basenames. A registrar of ours is handed the file and
+the leaf already, so that choice becomes an option on the `describe`
+making it, and the twenty-four names and the reasons recorded beside
+them move to the tests they are about. Nothing currently checks that
+such a name still matches a file, and a rename would quietly move a test
+onto the fake clock. What this does not reach is the harness's other
+reader, which classifies who armed a `setTimeout` on every timer and
+needs a stack because that caller is arbitrary source; auto-advance
+rests on it and it stays as it is.
+
+#### Why this shape and not another
+
+The deprecation notice points at `node:test`, which cannot carry this
+tree's tests: a `node:test` suite takes no `sanitizeOps`,
+`sanitizeResources` or `permissions`, and the tree passes those 109
+times.
+
+Registering each leaf as its own `Deno.test` fails on group teardown.
+Measured against Deno 2.9.4, `Deno.test.beforeAll` and its siblings take
+the module as their scope and do not nest, the scope is not positional,
+and a call inside a test body is accepted and then never runs. The
+runner brackets its own hooks around whatever a filter leaves, and
+around a file whose every test is ignored, but it never says which leaf
+runs last and `afterEach` takes no argument naming one. So a module
+holding a nested group's `afterAll` would have nothing to trigger it on.
+One `Deno.test` per suite makes that hook ordinary code in the group's
+body, owing the runner nothing.
+
+Nothing is lost by putting the leaves in steps. `t.step` takes `ignore`,
+reports an ignored step as a case carrying `<skipped/>` under its full
+joined name, which is what the skip list asks for, and takes the
+sanitizer options per step, defaulting to the enclosing test's.
+
+Letting each test file call `Deno.test` itself was measured and
+rejected. A case's class name follows the lexical call site, so a helper
+may compute `ignore` and may even build the whole `TestDefinition` while
+the report still names the test file; that would free the file
+attribution and retire the name map, the spool, the stack read and the
+container case with it. It costs a line in each of 2,241 test files, and
+a file missing that line runs no tests and reports none. Trading a
+silent green run of nothing, in the system whose whole purpose is to
+notice, against the deletion of machinery that works and has caused none
+of the faults, is the wrong way round.
+
+#### Nothing else needs to replace `Deno.test`
+
+Three things sit between a test file and the registrar, and each got
+there by replacing or shadowing `Deno.test`, because a global is the
+only thing there is to reach for. The records preload replaces it to
+apply the skip list and to capture which file a registration came from.
+The fake-clock harness replaces it to wrap each body in `freezeAround`,
+and to decide per test whether to wrap at all. The fixture runner does
+not replace it, but stands between the file and the registrar lexically,
+which costs the same class name and puts it on the same list.
+
+Five things a registrar of ours can offer are the whole of what those
+three do. A callback told of each leaf as it registers, with its file
+and its identity. A predicate consulted at registration, so that a
+listed leaf registers as ignored. Options carried from a `describe` or
+an `it` through to the test. A wrapper a suite installs once and the
+registrar runs around every leaf's body. And a way for a helper that
+builds tests to say which file it builds them for.
+
+That holds only while the registrar is the only caller of `Deno.test`,
+which it is not today: 553 test files call it directly, at 7,327 sites.
+Every one of those is the plain entry point, since `Deno.test.only`,
+`Deno.test.ignore` and `Deno.test.each` appear nowhere in the tree, so
+each site is a rename onto the registrar's own `test`. A file the rename
+misses keeps its tests and keeps its file, since nothing wraps
+`Deno.test` any more and a class name names the file that called it;
+what it loses is its skippability, which is the direction to fail in. A
+lint rule of the kind the tree already carries for self-imports holds
+the invariant afterwards.
+
+What goes with the replacements is the machinery for seeing around them,
+which is two registries of the modules in the way, kept in step by hand.
+`MACHINERY_MODULE_SUFFIXES` is an array of path tails that ingestion
+reads to refuse a class name naming machinery rather than a test file.
+`registerFrameworkModule` is a function each such module calls on
+itself, adding its URL to a set the stack walk reads to step past its
+frames. A module that stands in the way has to appear in both, and one
+registrar leaves neither anything to name.
+
+Three readers of the call stack become one with them, and that one can
+raise `Error.stackTraceLimit` around its own capture and take the
+repository root from `Deno.cwd()` or its own `import.meta.url` rather
+than climbing to a `.git` directory.
+
+The name map stays, because the file has to reach the process that
+writes the record and that is not the process that knows it. A record's
+file is what the topology places it by, and an identity the topology
+cannot place is one the publisher leaves out of the manifest, which
+makes every lane run it forever and score it never: of the 3,660
+identities one reproduction of the publisher could not claim, 3,648 had
+no file at all. The report cannot carry it, since Deno puts a bdd leaf's
+describe chain in the class name rather than a path, and a class name
+names whichever module called `Deno.test` in any case. The registrar
+knows the file and does not write the record; `ingestJUnit` writes it in
+another process after `deno test` has exited. The map is what passes
+between the two.
+
+What does get simpler is the lookup. `fileForName` walks the whole map
+for each leaf and takes the longest registered name that leaf's own name
+extends, because a bare `Deno.test` registers a container and its leaves
+extend that container's name with the separator. A registrar writes an
+entry per leaf under the whole identity, so the lookup is an exact one.
+A name two files both register stops being two files that share a
+top-level `describe` title and becomes two tests holding one identity,
+which the store cannot tell apart either, so dropping it is then the
+right answer rather than a loss.
+
+#### What it leaves standing
+
+The reconstruction goes: the root suite the runner invents, the suite a
+call names by handle, the name a body carries, and the overload sniffing
+that feeds them. Everything else stays as it is, that being the name
+map, the spool, the preload's wrapper for a bare `Deno.test`, the JUnit
+ingestion and the skip list.
+
+Two things this does not reach are worth naming so they are not mistaken
+for solved. A run killed at its bound writes no JUnit report at all, so
+every case it had already passed is lost, which the specification's
+claim that a killed run's records are worth reading does not currently
+hold for. And `Error.stackTraceLimit` is 10, which eight wrapper frames
+would exhaust; fourteen nested `describe` levels do not, because the
+innermost frame that is not machinery is the test file whatever the
+nesting, so this is a hazard rather than a live fault.
+
+Not measured: `it.only`, parallel execution, a step inside a leaf, and
+what a `beforeAll` that throws should do to the rest of its group.
+
 ### The work this adds
 
 - [x] The preload reads a skip list keyed by registering file and name,
@@ -1442,8 +1609,8 @@ too noisy to judge a change by. `main` still runs it, the dashboard still
 shows it, and it appears on a work queue. This replaces the usual
 quarantine list, and it is better than one in three ways: it is derived
 from measurement rather than from somebody's judgement at one moment, it
-needs no owner or expiry to stop it rotting, and it reverses on its own
-once the test is fixed. The exception is a change that edits the test
+needs no owner or expiry to stop it rotting, and it reverses on its own as
+the test goes back to passing. The exception is a change that edits the test
 itself, or that the test's suite maps onto its unit, which is very likely
 a fix and has to be allowed to prove itself.
 
@@ -1661,7 +1828,34 @@ expect that to bound the over-crediting, because a test flaky enough on
 `main` to matter is being run far more often on pull requests, but nothing
 here measures it.
 
-`flakeRate` is the share of a test's failures that fall under either rule.
+`flakeRate` is how often a test was seen falling under either rule, as a
+share of the runs it took part in rather than of the failures among them.
+What the rate decides is whether running the test once fails somebody's
+change for something its author cannot act on, and that is a chance per
+run: a test that failed once in ten thousand runs and passed on the rerun
+has every one of its failures a flake, and a share of failures would read
+it as wholly unreliable. Counting runs is also what lets an exclusion
+reverse, since a run that does not disagree lowers the share.
+
+Nothing is charged against the count. A disagreement is a proof rather
+than a sample, since a deterministic test cannot pass and fail at one
+commit, so shrinking the share toward zero would shrink it toward what
+the observation has already ruled out. A test seen twice that disagreed once
+reads a half; one that disagreed once in ten thousand runs reads a
+ten-thousandth. What separates them is how much each has been run.
+
+A disagreement's weight halves every `FLAKE_HALF_LIFE_RUNS` runs that
+follow it. A test that disagreed twice and then passed two hundred times
+has settled; one that passed two hundred times and then disagreed twice
+has just started. Those are the same counts and not the same test, and a
+flat sum over the window gives them the same number. Runs rather than
+days, because what shows a test has settled is running without
+disagreeing, and a test left untouched for three weeks has shown nothing.
+
+Both counts are published beside the share. A share cannot be weighed
+without them, and everything that shows a person this figure — the wall
+and the report a red `main` leaves — shows the counts with it. They are
+counted flat, so they are not what the share divides.
 
 Two things follow from knowing it.
 
@@ -2851,9 +3045,10 @@ observation about it:
   When a test was not selected, the honest statement is that this design
   traded that coverage away, and the comment says so in those words. The
   author did not miss anything; the selector did.
-- **It is accurate about flakes.** A test with a known flake rate is
-  labelled as one, so nobody is told they broke something that breaks on
-  its own.
+- **It is accurate about flakes.** A test the store has seen disagreeing
+  with itself is labelled as one, with the counts behind the label, so
+  nobody is told they broke something that breaks on its own and nobody
+  is asked to take that on trust.
 - **It is actionable and it ends.** Every comment says what to do, and it
   is edited in place rather than repeated when the same thing recurs.
 

@@ -25,6 +25,7 @@ import {
   emptyContext,
   emptySamples,
   emptyState,
+  flakeCounts,
   flakeRate,
   type FoldContext,
   foldObservations,
@@ -55,10 +56,12 @@ import {
 import { ObservationSpool } from "./observation-spool.ts";
 import {
   COST_WINDOW_DAYS,
+  FLAKE_ANCHOR_EXECUTIONS,
+  FLAKE_ANCHOR_RATE,
   FLAKE_EXCLUSION_RATE,
-  FLAKE_REPEAT_RATES,
+  FLAKE_MIN_EXECUTIONS,
   LANE_PROLOGUE_SECONDS,
-  MAX_REPEATS,
+  MAX_EXECUTIONS,
 } from "./policy.ts";
 
 /** The publisher's rolling aggregate, as one stored object. */
@@ -286,6 +289,13 @@ export function readReport(
     const day = dayOf(group.context.startedAt);
     for (const record of group.records) {
       const test = resolver.resolve(record.test, day);
+      // A lane measuring its own setup or one of its batches is not a
+      // test, so nothing here scores it: a catch, a flake observation and
+      // a churn rate are all statements about a test, and a lane is
+      // neither passing nor failing in the sense they read. It reaches
+      // the store as an ordinary record so that it travels the path every
+      // record travels, and this is where that path parts.
+      if (isLaneMeasurement(test)) continue;
       const key = testIdentityKey(test);
       // A record with no file names its own identity as the unit, which
       // is all an unmapped record can say. Where another record of the
@@ -446,14 +456,28 @@ export function locateSurfaces(
   return { placed, unplaced };
 }
 
-/** How many times a lane runs an identity, given how flaky it is. */
-export function repeatsFor(rate: number): number {
-  if (rate > FLAKE_EXCLUSION_RATE) return 1;
-  let repeats = 1;
-  for (const band of FLAKE_REPEAT_RATES) {
-    if (rate > band) repeats++;
-  }
-  return Math.min(repeats, MAX_REPEATS);
+/**
+ * How many times a lane runs an identity, given how flaky it is.
+ *
+ * A test that has never disagreed with itself runs once. Any rate at all
+ * puts it on the line through `FLAKE_MIN_EXECUTIONS` at a rate of
+ * nothing and `FLAKE_ANCHOR_EXECUTIONS` at `FLAKE_ANCHOR_RATE`, which
+ * carries on past that anchor until `MAX_EXECUTIONS` stops it.
+ *
+ * The line runs past `FLAKE_EXCLUSION_RATE` on purpose. A test that
+ * flaky is not selected, so the only way it reaches a lane is a change
+ * that edits it or that its suite maps onto its unit — which is very
+ * likely a fix, and the count is what makes it prove itself.
+ */
+export function executionsFor(rate: number): number {
+  if (rate <= 0) return 1;
+  const line = FLAKE_MIN_EXECUTIONS +
+    (FLAKE_ANCHOR_EXECUTIONS - FLAKE_MIN_EXECUTIONS) *
+      (rate / FLAKE_ANCHOR_RATE);
+  return Math.min(
+    MAX_EXECUTIONS,
+    Math.max(FLAKE_MIN_EXECUTIONS, Math.round(line)),
+  );
 }
 
 /** What a manifest is built from beyond the folded state. */
@@ -472,6 +496,9 @@ export interface BuildInput {
   runs: number;
   calibration?: Partial<Calibration>;
 }
+
+/** Decimal places a manifest records a flake share to. */
+const SHARE_PLACES = 4;
 
 /** A number with the digits past `places` dropped. */
 function round(value: number, places: number): number {
@@ -503,7 +530,18 @@ export function buildManifest(input: BuildInput): Manifest {
     if (test === undefined) continue;
     const surface = input.surfaces.get(key) ?? recordSurface(test, undefined);
     const inputs = scoreInputs(state, input.today);
-    const rate = flakeRate(state, input.today);
+    const evidence = flakeCounts(state, input.today);
+    // Rounded before anything reads it, so the figure the manifest
+    // carries is the figure every decision here was taken on, and a
+    // consumer applying the same threshold reaches the same answer. A
+    // share that is not zero is held above zero, because zero is the one
+    // point the execution count steps at: once below it, at least twice
+    // above. A rounding that reached zero would take that step on how
+    // many times the test had run.
+    const measured = flakeRate(state, input.today);
+    const rate = measured === 0
+      ? 0
+      : Math.max(round(measured, SHARE_PLACES), 10 ** -SHARE_PLACES);
     // Rounded because the digits past these are noise, and because a
     // manifest carries one entry per identity: at twenty thousand of them
     // the difference between a rounded float and a full one is megabytes.
@@ -517,8 +555,9 @@ export function buildManifest(input: BuildInput): Manifest {
       cost: round(costSeconds(state, input.today), 3),
       score: round(value(inputs, input.today), 4),
       inputs,
-      flakeRate: round(rate, 4),
-      repeats: repeatsFor(rate),
+      flakeRate: rate,
+      flakeEvidence: evidence,
+      repeats: executionsFor(rate),
       ...(ran === undefined ? {} : { lastRun: ran }),
     });
     if (rate > FLAKE_EXCLUSION_RATE) {
@@ -579,9 +618,17 @@ export class Fold {
     today: string,
   ) {
     this.#states = new Map(
-      Object.entries(aggregate.states).map((
-        [key, state],
-      ) => [key, { ...emptyState(), ...state }]),
+      Object.entries(aggregate.states)
+        // An aggregate written before lane measurements stopped being
+        // folded carries a state for each of them. Nothing new adds one,
+        // and a state nothing adds to is a state nothing removes either,
+        // so an aggregate carrying one carries it for good unless it is
+        // dropped on the way in.
+        .filter(([key]) => {
+          const test = testIdentityOfKey(key);
+          return test === undefined || !isLaneMeasurement(test);
+        })
+        .map(([key, state]) => [key, { ...emptyState(), ...state }]),
     );
     this.#context = parseContext(aggregate.context);
     this.#folded = [...aggregate.folded];

@@ -4568,7 +4568,46 @@ export class Runner {
             newRef.symbol,
           ) as Pattern | undefined;
           if (live) {
-            swapToPattern(live, newRef);
+            // A pointer moved here, by this runtime or by a transition it
+            // took part in, has what the incoming pattern reads in place
+            // and swaps at once, in the state the pointer moved in. One
+            // moved elsewhere may point at a pattern whose argument and
+            // owned cells another replica wrote: the store delivers none of
+            // them with the pointer, so they are named before the swap
+            // reads them.
+            const argumentLink = getMetaLink(resultCell, "argument");
+            if (
+              argumentLink === undefined ||
+              !this.#swapReadsAbsent(
+                this.#resolveToPattern(live),
+                argumentLink,
+                resultCell,
+              )
+            ) {
+              swapToPattern(live, newRef);
+              return;
+            }
+            const named = this.#syncCellsForRunningPattern(resultCell, live)
+              .then(() => {
+                // A pointer that moved again while the sync was in flight
+                // has its own swap on the way; this one is stale.
+                if (
+                  !active || startLifecycleEpoch !== this.#lifecycleEpoch ||
+                  currentPatternKey !== newKey
+                ) {
+                  return;
+                }
+                swapToPattern(live, newRef);
+              })
+              .catch((err) => {
+                logger.error(
+                  "pattern-swap-name-error",
+                  `Naming swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
+                  err,
+                );
+              });
+            this.#pendingWatcherPatternLoads.add(named);
+            named.finally(() => this.#pendingWatcherPatternLoads.delete(named));
             return;
           }
           // Async load for a pattern change after initial start. Errors are
@@ -4726,7 +4765,19 @@ export class Runner {
               logger.info("pattern changed", {
                 to: { ref: newRef, pattern: loaded },
               });
-              swapToPattern(loaded, newRef);
+              // Loaded from the store, so what it reads may be absent here
+              // too; named before the swap as on the live path.
+              return this.#syncCellsForRunningPattern(resultCell, loaded).then(
+                () => {
+                  if (
+                    !active || startLifecycleEpoch !== this.#lifecycleEpoch ||
+                    currentPatternKey !== newKey
+                  ) {
+                    return;
+                  }
+                  swapToPattern(loaded, newRef);
+                },
+              );
             })
             .catch((err) => {
               if (!active || startLifecycleEpoch !== this.#lifecycleEpoch) {
@@ -5497,6 +5548,81 @@ export class Runner {
     // already, however much of it the store holds; a missing entry costs a
     // probe, never a wrong verdict.
     if (this.#locallyPreparedResults.get(key) === entryKey) return undefined;
+    return this.#familyAbsent(
+        resolved.pattern,
+        entryKey,
+        argument,
+        argumentLink,
+        resultCell,
+      )
+      ? { pattern: resolved.pattern, entryKey }
+      : undefined;
+  }
+
+  /**
+   * Whether a swap of `resultCell` to `pattern` would read a document this
+   * replica lacks: the argument document `argumentLink` names, which the
+   * swap's setup reads whole, or an owned cell the stored manifest lists —
+   * one a setup somewhere has materialized — that is absent here. A cell the
+   * manifest does not list is one the swap's setup seeds itself, and a link
+   * target the argument holds is read reactively once the piece runs, so
+   * neither holds the swap.
+   */
+  #swapReadsAbsent(
+    pattern: Pattern,
+    argumentLink: NormalizedFullLink,
+    resultCell: Cell<any>,
+  ): boolean {
+    const readTx = this.#runtime.readTx();
+    const present = (link: NormalizedFullLink): boolean =>
+      readTx.readOrThrow(
+        {
+          space: link.space,
+          id: link.id,
+          path: ["value"],
+          ...(link.scope !== undefined && { scope: link.scope }),
+        },
+        { meta: ignoreReadForScheduling },
+      ) !== undefined;
+    if (!present(argumentLink)) return true;
+    const cell = resultCell.withTx(readTx);
+    const manifest = nativeFromFabricValue(
+      cell.getMetaRaw("internal", { meta: ignoreReadForScheduling }),
+    );
+    if (!Array.isArray(manifest)) return false;
+    const listed = new Set<string>();
+    for (const entry of manifest) {
+      const link = isObjectOrArray(entry)
+        ? parseLink((entry as { link?: unknown }).link, resultCell)
+        : undefined;
+      if (link !== undefined) listed.add(link.id);
+    }
+    if (listed.size === 0) return false;
+    const owned: Cell<any>[] = [];
+    this.#collectResumeOwnedCells(pattern, cell, owned, new Set(), readTx);
+    return owned.some((ownedCell) => {
+      const link = ownedCell.getAsNormalizedFullLink();
+      return listed.has(link.id) && !present(link);
+    });
+  }
+
+  /**
+   * Whether a document a run of `pattern` over `resultCell` reads is absent
+   * from this replica: the argument document `argumentLink` names, a
+   * document the caller's `argument` or the stored argument links to through
+   * the redirect chains those links form, or an owned cell of the pattern
+   * or of a sub-piece it instantiates. The store delivers none of these with
+   * the result document; a run that reads one absent commits against a
+   * document the store holds and is refused, so a caller that finds one
+   * absent names the family before it runs.
+   */
+  #familyAbsent(
+    pattern: Pattern,
+    entryKey: string,
+    argument: unknown,
+    argumentLink: NormalizedFullLink,
+    resultCell: Cell<any>,
+  ): boolean {
     // Presence probes on a read transaction of their own, so an absent
     // document enters neither the caller's dependencies nor its commit's
     // read set: the run that follows the name-sync reads these for real.
@@ -5527,12 +5653,11 @@ export class Runner {
         { meta: ignoreReadForScheduling },
       ) !== undefined;
     };
-    const held = { pattern: resolved.pattern, entryKey };
     // The hold, with what decided it: a document of `stage` read absent, or
     // the budget ran out on a probe of that stage — the case worth a log,
     // since a piece held for its width and not for an absence looks, from
     // outside, like any other named run.
-    const hold = (stage: string): { pattern: Pattern; entryKey: string } => {
+    const hold = (stage: string): boolean => {
       if (budgetSpent) {
         logger.debug("named-run-gate", () => [
           "probe budget spent; holding the run for a name-sync",
@@ -5544,7 +5669,7 @@ export class Runner {
           },
         ]);
       }
-      return held;
+      return true;
     };
     if (!present(argumentLink)) return hold("the argument document");
     // What the run reads through the argument: every document the caller's
@@ -5552,15 +5677,23 @@ export class Runner {
     // targets those links resolve into — a coordinator's element link is a
     // chain of redirects, and setup reads each hop. Bounded by depth, by a
     // document being probed once, and by the probe budget.
+    // Presence is a fact about a document, probed once; what a link reaches
+    // depends on its path, so two links into one document at different
+    // paths are each walked.
     const probed = new Set<string>();
+    const walked = new Set<string>();
     const linksAbsent = (value: unknown, depth: number): boolean => {
       const link = parseLink(value, resultCell);
       if (link !== undefined) {
         const probeKey = `${link.space}/${link.scope}/${link.id}`;
-        if (probed.has(probeKey)) return false;
-        probed.add(probeKey);
-        if (!present(link)) return true;
+        if (!probed.has(probeKey)) {
+          probed.add(probeKey);
+          if (!present(link)) return true;
+        }
         if (depth === 0) return false;
+        const walkKey = `${probeKey}/${link.path.join("/")}`;
+        if (walked.has(walkKey)) return false;
+        walked.add(walkKey);
         return linksAbsent(
           readTx.readOrThrow(
             {
@@ -5608,7 +5741,7 @@ export class Runner {
     // syncs by name.
     const owned: Cell<any>[] = [];
     this.#collectResumeOwnedCells(
-      resolved.pattern,
+      pattern,
       cell,
       owned,
       new Set(),
@@ -5619,7 +5752,7 @@ export class Runner {
         return hold("an owned cell");
       }
     }
-    return undefined;
+    return false;
   }
 
   /**
@@ -6863,6 +6996,24 @@ export class Runner {
   }
 
   /**
+   * Names what a setup or start of `pattern` over the stored piece at
+   * `resultCell` reads and writes: the result document, the argument
+   * document, what the pattern's nodes read through them, and the cells the
+   * pattern owns. The store delivers none of these with the result document,
+   * and a write to a document this replica has not loaded replaces the
+   * document the store holds, so a caller staging a setup over a stored piece
+   * names its family first. Resolves once the documents have arrived.
+   */
+  syncStoredPieceCells(
+    resultCell: Cell<any>,
+    pattern: Pattern | Module,
+  ): Promise<void> {
+    return this.#syncCellsForRunningPattern(resultCell, pattern).then(
+      () => {},
+    );
+  }
+
+  /**
    * Pre-syncs what a run of `pattern` on `resultCell` reads before it runs:
    * the cells `inputs` links to, the result cell, and the nodes' argument and
    * result documents. Resolves to whether the node walk ran, which it does
@@ -7014,8 +7165,15 @@ export class Runner {
           });
         });
       }
+      // The argument document itself, whole and under no schema: setup
+      // reads it raw to write the argument over the slots it holds, and the
+      // second wave below scans what it links to, which it can only do once
+      // the document has arrived. The node links above carry the narrower
+      // schemas the runs read through it with.
+      const argumentCell = this.#runtime.getCellFromLink(argumentMetaLink);
+      cells.push(argumentCell);
       argumentRoots.push({
-        cell: this.#runtime.getCellFromLink(argumentMetaLink),
+        cell: argumentCell,
         schema: pattern.argumentSchema,
       });
     }

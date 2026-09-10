@@ -71,7 +71,7 @@ export {
   type MetaLinkField,
 } from "./meta-seam.ts";
 export type { NormalizedFullLink, NormalizedLink } from "./link-types.ts";
-export { encodeJsonPointer } from "./link-types.ts";
+export { decodeJsonPointer, encodeJsonPointer } from "./link-types.ts";
 export type { SigilLink, URI } from "./sigil-types.ts";
 export {
   createRef,

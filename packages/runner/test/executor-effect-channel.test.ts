@@ -466,7 +466,7 @@ describe("Phase 4 client-effect channel", () => {
       aliceSigner,
     ));
     const engine = await server.engineForSpace(space);
-    const { result } = await standUp(
+    const { compiled, result } = await standUp(
       clientRuntime,
       CASCADE_NAVIGATE_PATTERN,
       { arg: "hop-arg", result: "hop-result" },
@@ -479,10 +479,13 @@ describe("Phase 4 client-effect channel", () => {
     const bob = openClient(bobSigner);
     extraManagers.push(bob.manager);
     extraRuntimes.push(bob.runtime);
+    // Bob reads the piece under its result schema, which is what reaches
+    // the handler stream he sends to; the store delivers no family on its
+    // own.
     const bobResult = bob.runtime.getCell<Record<string, unknown>>(
       space,
       "hop-result",
-      undefined,
+      compiled.resultSchema,
     );
     await bobResult.sync();
 
@@ -1341,10 +1344,14 @@ describe("Phase 4 client-effect channel", () => {
     extraRuntimes.push(s2.runtime);
 
     const engine = await server.engineForSpace(space);
-    const { result } = await standUp(clientRuntime, NAVIGATE_PATTERN, {
-      arg: "twin-arg",
-      result: "twin-result",
-    });
+    const { compiled, result } = await standUp(
+      clientRuntime,
+      NAVIGATE_PATTERN,
+      {
+        arg: "twin-arg",
+        result: "twin-result",
+      },
+    );
     const cancelDemand = result.sink(() => {});
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
@@ -1352,7 +1359,7 @@ describe("Phase 4 client-effect channel", () => {
     const s2Result = s2.runtime.getCell<Record<string, unknown>>(
       space,
       "twin-result",
-      undefined,
+      compiled.resultSchema,
     );
     await s2Result.sync();
 

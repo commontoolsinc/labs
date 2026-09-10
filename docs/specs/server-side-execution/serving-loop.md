@@ -57,22 +57,23 @@ for that principal's instance of every node that narrows beneath it
 (scopes.md §2, RULED 2026-08-16; fan-out stage B), so the demand
 registry keeps the demanding (user, session) pair on every INSTANCE a
 client session TRACKS — memory v2's schema-narrowed closure of that
-session's watches (the roots, every doc the selectors' schemas reach,
-AND the piece `source`/process wiring the tracker follows regardless of
-schema — a watched piece root pulls its whole internal graph, handler
-bindings and `ifElse` inputs included; absent targets included),
-instance-keyed, accumulated across its overlapping watches, space-scoped
-instances included. Demand is that union over the space's client
-sessions; there is no demand walk.
-*(AMENDED 2026-08-19 (descriptive; the RULED semantics — the tracked
-set — unchanged): W1's build measured what the tracker's closure
-actually is (stage-C W0 §2(b)) — it follows a piece root's
-`source`/process wiring, so a schema-narrowed root watch still demands
-the piece's whole internal graph, and the one-push-late structural-growth
-path is therefore pre-empted for a piece's own computeds and fires only
-for links OUT of a piece's wiring (a cross-piece link, an array element).
-Over-approximation, never under: the client renders nothing it is not
-delivered.)*
+session's watches (the roots, every doc the selectors' schemas reach —
+absent targets included — and the schema document a delivered document's
+`cfc` label names; the `pattern`, `argument`, `result`, and `internal`
+metadata of a document is data on it and puts nothing in the closure,
+05-queries.md "Metadata / Provenance Resolution"), instance-keyed,
+accumulated across its overlapping watches, space-scoped instances
+included. Demand is that union over the space's client sessions; there
+is no demand walk.
+*(AMENDED 2026-09-09 (descriptive; the RULED semantics — the tracked
+set — unchanged): a piece's own computeds are in a session's closure
+exactly where a watch's schema crosses to them — a result read under the
+pattern's result schema reaches the computed behind each result
+property — so a client that wants a derived value names it by reading
+under a schema that reaches it, and a schema-less root watch demands the
+root document alone. The one-push-late structural-growth path is what
+carries a piece's computeds into demand once the result document holds
+the link a schema crosses (protocol.md §4's later demand).)*
 The serving loop runs the STALE writers of demanded instances — a
 writer whose instance for a demanding pair never ran at its ratchet,
 or was dirtied since (§3b's per-instance clean bit; the basis index is

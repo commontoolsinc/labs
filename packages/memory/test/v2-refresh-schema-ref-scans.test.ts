@@ -62,9 +62,12 @@ describe("v2-refresh-schema-ref-scans", () => {
             },
           },
         });
+        // The argument is named alongside the root: the root's `argument`
+        // link is data on the root, and only a named document is delivered.
         const query = {
           roots: [
             { id: root, selector: { path: [], schema: false as const } },
+            { id: argument, selector: { path: [], schema: false as const } },
             {
               id: profile,
               scope: "user" as const,

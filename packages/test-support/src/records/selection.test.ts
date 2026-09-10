@@ -114,6 +114,36 @@ describe("selection", () => {
       }
     });
 
+    it("keeps an entry whose manifest carries no flake counts", () => {
+      // They are absent from a manifest written before they were
+      // published. Refusing it would cost every test its score, and an
+      // absent manifest makes the whole corpus mandatory, to save one
+      // column a reader can simply not show.
+      const manifest = sampleManifest();
+      delete manifest.entries[0]!.flakeEvidence;
+      const parsed = parseManifest(JSON.stringify(manifest));
+      expect(parsed?.entries[0]?.flakeEvidence).toBeUndefined();
+      expect(parsed?.entries.length).toBe(manifest.entries.length);
+    });
+
+    it("rejects flake counts that cannot both be true", () => {
+      // Counts of runs, and a test cannot disagree with itself more
+      // often than it ran. A count past its own denominator would put
+      // the share over one and read as a test that always flakes.
+      for (
+        const flakeEvidence of [
+          { flakes: 3, runs: 2 },
+          { flakes: -1, runs: 10 },
+          { flakes: 1.5, runs: 10 },
+          { flakes: 1, runs: -10 },
+        ]
+      ) {
+        const manifest = sampleManifest();
+        manifest.entries[0]!.flakeEvidence = flakeEvidence;
+        expect(parseManifest(JSON.stringify(manifest))).toBeUndefined();
+      }
+    });
+
     it("rejects a generation time that is not one", () => {
       // A reader measures a manifest's age from this, and a value that
       // does not parse compares false against every threshold, so a

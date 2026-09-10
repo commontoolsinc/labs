@@ -151,6 +151,16 @@ export function tagFromFabricPrimitiveElseNull(
 }
 
 /**
+ * Maps a value to its JS type tag, which is decided by `typeof` alone: the
+ * `typeof` name of a non-object, and the `null` tag for the value `null`.
+ * Returns `object` for any other object, which has no JS type tag; its tag is
+ * a question for `tagFromFabricValue()` or `tagFromNativeValueElseNull()`.
+ */
+export function jsTagFromValue(value: unknown): JsTypeValueTag | "object" {
+  return (value === null) ? VALUE_TAGS.null : typeof value;
+}
+
+/**
  * Maps a presumed valid `FabricValue` to its tag. This `throw`s if it
  * determines that the given value cannot possibly be valid. To be clear, this
  * function does not go out of its way to make a validity determination.
@@ -174,15 +184,13 @@ export function tagFromFabricValue(value: FabricValue): ValueTag {
 export function tagFromFabricValueElseNull(
   value: FabricValue,
 ): ValueTag | null {
-  const type = typeof value;
+  const jsType = jsTagFromValue(value);
 
-  if (type === "function") {
+  if (jsType === VALUE_TAGS.function) {
+    // A function is no `FabricValue`, so its tag is not one this returns.
     return null;
-  } else if (type !== "object") {
-    // A primitive's tag is its `typeof` name.
-    return type;
-  } else if (value === null) {
-    return VALUE_TAGS.null;
+  } else if (jsType !== "object") {
+    return jsType;
   }
 
   if (isFabricArray(value)) {
@@ -298,13 +306,10 @@ export function tagFromNativeBuiltinClassElseNull(
  * the array rule, which alone decides what an array may be.
  */
 export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
-  const type = typeof value;
+  const jsType = jsTagFromValue(value);
 
-  if (type !== "object") {
-    // The tag of a primitive or a function is its `typeof` name.
-    return type;
-  } else if (value === null) {
-    return VALUE_TAGS.null;
+  if (jsType !== "object") {
+    return jsType;
   }
 
   // Arrays first, and unconditionally: see above.
