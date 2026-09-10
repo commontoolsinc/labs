@@ -9,7 +9,8 @@
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
     "#7257: integration with main c8a64af840 passed 1,417 runner tests / 8,843 steps. Latest main ce3602b18a integration passes all 46 type-check groups and 50 focused checks. Full CLI completed with 1,821 passed and two known baseline color failures.",
-    "#7261 merged as c8a64af840: all CI gates passed; latest Cubic reported zero issues; antagonistic review clean. Browser recordings remain available below."
+    "#7261 merged as c8a64af840: all CI gates passed; latest Cubic reported zero issues; antagonistic review clean. Browser recordings remain available below.",
+    "#7259: named incremental aggregates merged as d9b45371ef. Contracts and measured comparisons are linked from the implementation tracker."
   ],
   "stages": [
     {

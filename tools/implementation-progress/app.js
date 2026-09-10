@@ -82,6 +82,9 @@ async function refresh() {
     } · Validated implementation ${status.validatedRevision}`;
     byId("design").href = status.design;
     byId("pr").href = status.pr;
+    byId("pr").textContent = `PR #${
+      new URL(status.pr).pathname.split("/").at(-1)
+    }`;
     byId("review").textContent = status.review;
     byId("checks").replaceChildren(
       ...status.checks.map((check) => node("li", check)),
