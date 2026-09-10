@@ -1496,6 +1496,7 @@ export async function runTestPattern(
       resetAllTimingBaselines();
     }
 
+    let settlementFailed = false;
     const settleRuntime = async (
       stepIndex: number,
       stepLabel: string,
@@ -1550,7 +1551,10 @@ export async function runTestPattern(
               `Action at index ${stepIndex} timed out after ${TIMEOUT}ms`,
             ),
           ]),
-      );
+      ).catch((error) => {
+        settlementFailed = true;
+        throw error;
+      });
     };
 
     // Explicit `{ settle: true }` test step: in addition to the light per-action
@@ -1569,7 +1573,10 @@ export async function runTestPattern(
               `Settle step at index ${stepIndex} timed out after ${TIMEOUT}ms`,
             ),
           ]),
-      );
+      ).catch((error) => {
+        settlementFailed = true;
+        throw error;
+      });
     };
 
     // 5. Process tests sequentially
@@ -1577,8 +1584,8 @@ export async function runTestPattern(
       ? []
       : budgetResults;
     if (readBudgets !== undefined) {
-      await runtime.settled(Infinity);
       initializationBudgetPending = false;
+      await runtime.settled(Infinity);
       for (
         const error of checkBudget("initialization", readBudgets.initialization)
       ) {
@@ -1633,6 +1640,7 @@ export async function runTestPattern(
         i + 1,
       );
       let stepFailed = false;
+      settlementFailed = false;
       try {
         // `{ settle: true }` step: wait for FULL settlement (scheduler + storage +
         // in-flight async builtin I/O — sqlite query RPC + writeback, fetch / llm)
@@ -2009,20 +2017,28 @@ export async function runTestPattern(
         throw error;
       } finally {
         if (readBudgets !== undefined) {
-          const settled = await runtime.settled(Infinity).then(
-            () => true,
-            (error) => {
-              if (!stepFailed) throw error;
-              budgetFailures.push(
-                `step ${
-                  i + 1
-                }: read budget measurement incomplete because settlement failed: ${
-                  String(error)
-                }`,
-              );
-              return false;
-            },
-          );
+          if (settlementFailed) {
+            budgetFailures.push(
+              `step ${
+                i + 1
+              }: read budget measurement incomplete after a settlement failure`,
+            );
+          }
+          const settled = !settlementFailed &&
+            await runtime.settled(Infinity).then(
+              () => true,
+              (error) => {
+                if (!stepFailed) throw error;
+                budgetFailures.push(
+                  `step ${
+                    i + 1
+                  }: read budget measurement incomplete because settlement failed: ${
+                    String(error)
+                  }`,
+                );
+                return false;
+              },
+            );
           for (
             const error of settled
               ? checkBudget(
@@ -2040,6 +2056,13 @@ export async function runTestPattern(
             });
           }
         }
+      }
+      if (readBudgets !== undefined && settlementFailed) {
+        throw new Error(
+          `step ${
+            i + 1
+          }: read budget measurement incomplete after a settlement failure`,
+        );
       }
     }
 

@@ -64,6 +64,39 @@ describe("read-budgets", () => {
       actual: 5,
     }]);
   });
+  it("groups fan-out contributors by authored source before truncating diagnostics", () => {
+    const measured = new ReadBudgetMeasurement();
+    for (let i = 0; i < 6; i++) {
+      const actionId = `row-${i}`;
+      measured.record({
+        type: "scheduler.read-attempt",
+        kind: "reactive",
+        actionId,
+        reads: { proxyAccesses: 3, linkResolutions: 0 },
+      });
+      measured.record({
+        type: "scheduler.run.complete",
+        actionId,
+        src: "poll.tsx:10:5",
+        durationMs: 0,
+        reads: {
+          proxyAccesses: 2,
+          linkResolutions: 0,
+          distinctDocuments: 1,
+          registeredDependencies: 1,
+        },
+      });
+    }
+    expect(measured.total).toBe(18);
+    expect(measured.perRun).toBe(2);
+    expect(measured.contributors("total", 1)).toEqual([
+      "18 accesses — poll.tsx:10:5",
+    ]);
+    expect(measured.contributors("perRun", 1)).toEqual([
+      "2 accesses — poll.tsx:10:5",
+    ]);
+  });
+
   it("distinguishes no opt-in from an empty declaration", () => {
     expect(parseReadBudgets(undefined)).toBeUndefined();
     expect(parseReadBudgets({})).toEqual({});

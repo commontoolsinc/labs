@@ -36,8 +36,9 @@ Initialization starts before pattern instantiation and ends after initial
 settlement and continuous UI mounting, when enabled. A budgeted step starts
 before the harness demands its descriptor or dispatches its event. It ends only
 after scheduler, storage, pending commits, and asynchronous builtin work settle.
-Assertion work belongs to its own step. Skipped steps execute no operation; any
-unrelated work observed in their interval must remain visible.
+Assertion work belongs to its own step. Skipped steps execute no operation and
+enforce no limits; their declarations are still validated, and work observed in
+their interval remains visible.
 
 Use `runtime.settled(Infinity)` at budget boundaries so a fixed round count
 cannot silently end measurement early. Do not add sleeps or polling. Unbudgeted

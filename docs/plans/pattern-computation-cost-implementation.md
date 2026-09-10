@@ -163,6 +163,21 @@ durations are used as performance evidence.
         access or environment requirements explicit if unavailable; do not
         substitute a synthetic result for deployed evidence.
 
+### Validation evidence for the A3 slice
+
+[PR #7257](https://github.com/commontoolsinc/labs/pull/7257) implements the
+checked A3 acceptance items. The full runner suite passed 1,410 tests / 8,761
+steps;
+[read-accounting.test.ts](../../packages/runner/test/read-accounting.test.ts)
+covers transaction ownership, aborted attempts, event/preflight failures,
+fan-out, and asynchronous writebacks. The
+[budget collector tests](../../packages/cli/test/read-budgets.test.ts) cover
+exact boundaries and total/per-run separation. The
+[CLI budget fixtures](../../packages/cli/test/test-runner-read-budgets.test.ts)
+exercise actual declarations, functional-failure preservation, many cheap runs,
+and one expensive run. Render, settle, and read-report integration checks pass
+alongside these fixtures. CI and clean latest reviews remain landing gates.
+
 ## 5, 10. Repair incremental correctness: C1–C4
 
 - [ ] **C1 — Reproduce both documented failures.**

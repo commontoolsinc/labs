@@ -872,6 +872,24 @@ export function preflightQueuedEventDependencies(state: {
 
   // Get the handler's dependencies (read-only, just capturing what will be read)
   const depTx = state.runtime.edit();
+  let failureReported = false;
+  const reportFailure = (error: unknown) => {
+    if (failureReported) return;
+    failureReported = true;
+    try {
+      state.handleError(
+        error instanceof Error ? error : new Error(String(error)),
+        handler,
+      );
+    } catch {
+      throw error;
+    } finally {
+      state.dropEvent(
+        queuedEvent,
+        `Event dropped: dependency preflight failed for ${queuedEvent.eventLink.id}`,
+      );
+    }
+  };
   try {
     state.runtime.scheduler.beginReadAttempt(depTx, "preflight");
     depTx.setReadOnly?.("scheduler.populateDependencies()");
@@ -900,15 +918,7 @@ export function preflightQueuedEventDependencies(state: {
     try {
       handler.populateDependencies?.(depTx, eventValue);
     } catch (error) {
-      state.handleError(error as Error, handler);
-      // Dropping the event here is its final outcome — settle the commit
-      // callback like the other drop paths instead of leaving callers that
-      // await it hanging.
-      state.dropEvent(
-        queuedEvent,
-        `Event dropped: populateDependencies threw during dependency ` +
-          `preflight for ${queuedEvent.eventLink.id}`,
-      );
+      reportFailure(error);
       shouldSkipEvent = true;
     } finally {
       logger.timeEnd(
@@ -1099,6 +1109,11 @@ export function preflightQueuedEventDependencies(state: {
     if (depTx.status().status === "ready") {
       depTx.clearReadOnly?.();
       depTx.abort(error);
+    }
+    try {
+      reportFailure(error);
+    } catch {
+      // Observer failures cannot replace the dependency failure.
     }
     throw error;
   }
@@ -1357,6 +1372,70 @@ export async function dispatchQueuedEvent(state: {
   state.eventQueue.shift();
 
   const tx = state.runtime.edit();
+  const served = queuedEvent.served;
+  let lineageReleased = false;
+  const releaseLineage = () => {
+    if (lineageReleased || queuedEvent.originTx === undefined) return;
+    lineageReleased = true;
+    state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
+  };
+  const runFinalCommitCallback = () => {
+    if (queuedEvent.finalOutcomeNotified) return;
+    queuedEvent.finalOutcomeNotified = true;
+    if (!onCommit) {
+      return;
+    }
+    try {
+      onCommit(tx);
+    } catch (callbackError) {
+      logger.error(
+        "schedule-error",
+        "Error in event commit callback:",
+        callbackError,
+      );
+    }
+  };
+
+  let failureFinalized = false;
+  // A failed setup or handler completes every owner notification once, even
+  // when one observer throws. The original failure remains the event outcome.
+  const finalizeFailure = (error: unknown) => {
+    if (failureFinalized) return;
+    failureFinalized = true;
+    const handlerError = error instanceof Error
+      ? error
+      : new Error(String(error));
+    for (
+      const complete of [
+        () => {
+          if (tx.status().status === "ready") {
+            tx.clearReadOnly?.();
+            tx.abort(handlerError);
+          }
+        },
+        releaseLineage,
+        () => state.handleError(handlerError, action),
+        () =>
+          reportServedEventFailure(served, {
+            kind: "error",
+            message: handlerError.message,
+          }),
+        runFinalCommitCallback,
+        () => tx.abandonStagedWork(eventAbandonError("event execution failed")),
+      ]
+    ) {
+      try {
+        complete();
+      } catch (notificationError) {
+        logger.error(
+          "schedule-error",
+          "Error completing failed event:",
+          notificationError,
+        );
+      }
+    }
+  };
+
   try {
     tx.dispatchedEventId = queuedEvent.id;
     state.runtime.scheduler.beginReadAttempt(tx, "event", handlerId);
@@ -1376,7 +1455,6 @@ export async function dispatchQueuedEvent(state: {
     // handlers), while the requeue paths' anonymous wrappers split rows
     // per event; scheduler_basis requires "durable ... restart-stable"
     // (serving-loop.md §3b).
-    const served = queuedEvent.served;
     //
     // Stage P2-F — the LT6 inheritance rule (events.md §2, RULED
     // 2026-08-03: "an event emitted by ANY run carries that run's acting
@@ -1477,7 +1555,7 @@ export async function dispatchQueuedEvent(state: {
           originLocalSeq,
         });
       }
-      state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
+      releaseLineage();
     }
     const actionId = state.getActionId(action);
 
@@ -1602,21 +1680,6 @@ export async function dispatchQueuedEvent(state: {
       return requeued;
     };
 
-    const runFinalCommitCallback = () => {
-      if (!onCommit) {
-        return;
-      }
-      try {
-        onCommit(tx);
-      } catch (callbackError) {
-        logger.error(
-          "schedule-error",
-          "Error in event commit callback:",
-          callbackError,
-        );
-      }
-    };
-
     const finalize = (error?: unknown): void => {
       // A RetryImmediately signal means the handler referenced an inSpace("name")
       // target that has now been resolved into the runtime cache. Abort this run's
@@ -1645,29 +1708,7 @@ export async function dispatchQueuedEvent(state: {
       }
 
       if (error) {
-        const handlerError = error instanceof Error
-          ? error
-          : new Error(String(error));
-        try {
-          state.handleError(handlerError, action);
-        } finally {
-          if (tx.status().status === "ready") {
-            tx.abort(handlerError);
-          }
-          // The serving drain's ERROR arm (events.md §5): the handler
-          // threw server-side — the error IS the consequence. The
-          // handler tx (with its consequenced mark) aborted above; the
-          // drain seals the error consequence in its own transaction.
-          reportServedEventFailure(served, {
-            kind: "error",
-            message: handlerError.message,
-          });
-          // A throwing handler is a final outcome for this event — settle the
-          // commit callback (with the aborted tx) instead of leaving callers
-          // that await it hanging.
-          runFinalCommitCallback();
-          tx.abandonStagedWork(eventAbandonError("handler threw"));
-        }
+        finalizeFailure(error);
         return;
       }
 
@@ -2156,10 +2197,7 @@ export async function dispatchQueuedEvent(state: {
       finalize(error);
     }
   } catch (error) {
-    if (tx.status().status === "ready") {
-      tx.clearReadOnly?.();
-      tx.abort(error);
-    }
+    finalizeFailure(error);
     throw error;
   }
 }

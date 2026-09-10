@@ -14,8 +14,13 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { createNonReactiveTransaction } from "../src/storage/extended-storage-transaction.ts";
 import {
   dispatchQueuedEvent,
+  dropQueuedEvent,
   preflightQueuedEventDependencies,
 } from "../src/scheduler/events.ts";
+import type {
+  QueuedEvent,
+  ServedEventFailureOutcome,
+} from "../src/scheduler/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Action, EventHandler } from "../src/scheduler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -182,18 +187,20 @@ describe("read-accounting", () => {
     runtime.telemetry.addEventListener("telemetry", (event) => {
       if (event instanceof RuntimeTelemetryEvent) markers.push(event.marker);
     });
-    const failure = new Error("injected preflight reporting failure");
+    const failure = new Error("dependency inspection failed");
+    const commits: IExtendedStorageTransaction[] = [];
+    const outcomes: ServedEventFailureOutcome[] = [];
     const handler = Object.assign(() => {}, {
       populateDependencies: (tx: IExtendedStorageTransaction) => {
         expect(
           runtime.getCell<{ value: number }>(space, "source", undefined, tx)
             .get().value,
         ).toBe(7);
-        throw new Error("dependency inspection failed");
+        throw failure;
       },
     });
     const access = runtime.scheduler.accessForTestingOnly;
-    const queued = {
+    const queued: QueuedEvent = {
       id: "preflight-fault",
       enqueueSeq: 0,
       eventLink: runtime.getCell(space, "source").getAsNormalizedFullLink(),
@@ -201,7 +208,16 @@ describe("read-accounting", () => {
       handler,
       event: undefined,
       retry: false,
+      onCommit: (tx) => {
+        commits.push(tx);
+      },
+      served: {
+        onFailure: (outcome) => {
+          outcomes.push(outcome);
+        },
+      },
     };
+    access.eventQueue.push(queued);
     const state: Parameters<typeof preflightQueuedEventDependencies>[0] = {
       ...access.eventExecutionState,
       nodes: access.nodes,
@@ -209,7 +225,7 @@ describe("read-accounting", () => {
       pendingActions: new Set(),
       eventBlockingDeps: new Set(),
       handleError: () => {
-        throw failure;
+        throw new Error("error reporter failed");
       },
       setEventPreflightTraceContext: () => {},
       collectInvalidUpstreamForLog: () => false,
@@ -217,7 +233,8 @@ describe("read-accounting", () => {
       getNextDebounceRunTime: () => undefined,
       getNextEligibleRunTime: () => undefined,
       scheduleWake: () => {},
-      dropEvent: () => {},
+      dropEvent: (event, reason) =>
+        dropQueuedEvent(access.eventExecutionState, event, reason),
     };
     expect(() => preflightQueuedEventDependencies(state, queued)).toThrow(
       failure.message,
@@ -228,6 +245,10 @@ describe("read-accounting", () => {
       ),
     ).toEqual([1]);
     expect(readStatsActive).toBe(false);
+    expect(access.eventQueue).toEqual([]);
+    expect(commits).toHaveLength(1);
+    expect(commits[0].status().status).toBe("error");
+    expect(outcomes).toHaveLength(1);
   });
 
   it("completes an event attempt when setup throws before invoking the handler", async () => {
@@ -236,11 +257,17 @@ describe("read-accounting", () => {
     runtime.telemetry.addEventListener("telemetry", (event) => {
       if (event instanceof RuntimeTelemetryEvent) markers.push(event.marker);
     });
+    const commits: IExtendedStorageTransaction[] = [];
+    const outcomes: ServedEventFailureOutcome[] = [];
+    const reported: Error[] = [];
+    const released: QueuedEvent[] = [];
+    const origin = runtime.edit();
+    let dispatchedTx: IExtendedStorageTransaction | undefined;
     let invoked = false;
     const handler = () => {
       invoked = true;
     };
-    const queued = {
+    const queued: QueuedEvent = {
       id: "setup-fault",
       enqueueSeq: 0,
       eventLink: runtime.getCell(space, "fault-event")
@@ -249,18 +276,37 @@ describe("read-accounting", () => {
       handler,
       event: undefined,
       retry: false,
+      originTx: origin,
+      onCommit: (tx) => {
+        commits.push(tx);
+      },
+      served: {
+        onFailure: (outcome) => {
+          outcomes.push(outcome);
+        },
+      },
     };
     const access = runtime.scheduler.accessForTestingOnly;
     access.eventQueue.push(queued);
     const failure = new Error("injected event setup failure");
     using _stamp = stub(runtime, "stampServerRun", (tx) => {
+      dispatchedTx = tx;
       expect(
         runtime.getCell<{ value: number }>(space, "source", undefined, tx).get()
           .value,
       ).toBe(7);
       throw failure;
     });
-    await expect(dispatchQueuedEvent(access.eventExecutionState, queued))
+    await expect(dispatchQueuedEvent({
+      ...access.eventExecutionState,
+      handleError: (error) => {
+        reported.push(error);
+        throw new Error("error reporter failed");
+      },
+      releaseLineageEvent: (_tx, event) => {
+        released.push(event);
+      },
+    }, queued))
       .rejects.toBe(failure);
     expect(invoked).toBe(false);
     expect(
@@ -269,6 +315,14 @@ describe("read-accounting", () => {
       ),
     ).toEqual([1]);
     expect(readStatsActive).toBe(false);
+    expect(commits).toEqual([dispatchedTx]);
+    expect(dispatchedTx?.status().status).toBe("error");
+    expect(reported).toEqual([failure]);
+    expect(released).toEqual([queued]);
+    expect(outcomes).toEqual([{ kind: "error", message: failure.message }]);
+    expect(access.eventQueue).toEqual([]);
+    expect(queued.finalOutcomeNotified).toBe(true);
+    origin.abort();
   });
 
   it("completes an edit attempt when commit preparation throws", () => {

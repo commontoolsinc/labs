@@ -109,8 +109,10 @@ Initialization excludes compilation and default environment setup, and includes
 pattern instantiation, initial settlement, and continuous UI mounting when
 enabled. Steps settle scheduler, storage, pending commits, and asynchronous
 builtin work with uncapped `runtime.settled(Infinity)` before evaluating limits.
-Skipped steps omit their operation and limits but still report any measured
-work in verbose mode. Unbudgeted tests retain their existing
+A settlement failure ends budget measurement and preserves the original error;
+the harness does not restart settlement over already-failed work.
+Skipped steps omit their operation and budget enforcement but still validate
+their declarations and report any measured work in verbose mode. Unbudgeted tests retain their existing
 settlement behavior. These totals cover the named local transaction paths;
 unrelated transactions, standalone harness reads, storage-server work, and
 network traffic are outside the measure. Plain eager values and primitive Cell

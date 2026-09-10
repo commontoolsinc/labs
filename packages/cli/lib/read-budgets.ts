@@ -4,24 +4,34 @@ import type { RuntimeTelemetryMarker } from "@commonfabric/runner";
 
 /** Keeps attempt totals separate from reactive-body maxima. */
 export class ReadBudgetMeasurement {
-  total = 0;
-  perRun = 0;
+  #total = 0;
+  #perRun = 0;
   readonly #contributors = new Map<
     string,
     { label: string; total: number; perRun: number }
   >();
 
+  /** Sum of completed attempt accesses in the current interval. */
+  get total(): number {
+    return this.#total;
+  }
+
+  /** Largest completed reactive-body access count in the current interval. */
+  get perRun(): number {
+    return this.#perRun;
+  }
+
   /** Records a completed attempt or body without adding a body twice. */
   record(marker: RuntimeTelemetryMarker): void {
     if (marker.type === "scheduler.read-attempt") {
-      this.total += marker.reads.proxyAccesses;
+      this.#total += marker.reads.proxyAccesses;
       const key = marker.actionId ?? marker.kind;
       const row = this.#contributors.get(key) ??
         { label: `${marker.kind}: ${key}`, total: 0, perRun: 0 };
       row.total += marker.reads.proxyAccesses;
       this.#contributors.set(key, row);
     } else if (marker.type === "scheduler.run.complete" && marker.reads) {
-      this.perRun = Math.max(this.perRun, marker.reads.proxyAccesses);
+      this.#perRun = Math.max(this.#perRun, marker.reads.proxyAccesses);
       const row = this.#contributors.get(marker.actionId) ??
         { label: marker.actionId, total: 0, perRun: 0 };
       row.label = marker.src ?? marker.actionInfo?.moduleName ??
@@ -33,14 +43,25 @@ export class ReadBudgetMeasurement {
 
   /** Starts a new interval after all work in the preceding one has settled. */
   clear(): void {
-    this.total = 0;
-    this.perRun = 0;
+    this.#total = 0;
+    this.#perRun = 0;
     this.#contributors.clear();
   }
 
   /** Names the largest measured contributors without truncating enforcement. */
   contributors(kind: "total" | "perRun", limit = 5): string[] {
-    return [...this.#contributors.values()].sort((a, b) => b[kind] - a[kind])
+    const grouped = new Map<
+      string,
+      { label: string; total: number; perRun: number }
+    >();
+    for (const row of this.#contributors.values()) {
+      const group = grouped.get(row.label) ??
+        { label: row.label, total: 0, perRun: 0 };
+      group.total += row.total;
+      group.perRun = Math.max(group.perRun, row.perRun);
+      grouped.set(row.label, group);
+    }
+    return [...grouped.values()].sort((a, b) => b[kind] - a[kind])
       .filter((row) => row[kind] > 0).slice(0, limit)
       .map((row) => `${row[kind]} accesses — ${row.label}`);
   }

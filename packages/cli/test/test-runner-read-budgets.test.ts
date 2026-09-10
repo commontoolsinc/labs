@@ -134,6 +134,33 @@ describe("test-runner read budgets", {
     );
   });
 
+  it("does not restart settlement after an action settlement failure", async () => {
+    const settled = Runtime.prototype.settled;
+    const idle = Runtime.prototype.idle;
+    let initialized = false;
+    let budgetBarriers = 0;
+    using _settled = stub(
+      Runtime.prototype,
+      "settled",
+      async function (maxRounds) {
+        if (maxRounds === Infinity) budgetBarriers++;
+        await settled.call(this, maxRounds);
+        if (maxRounds === Infinity) initialized = true;
+      },
+    );
+    using _idle = stub(Runtime.prototype, "idle", function (...args) {
+      if (initialized) {
+        return Promise.reject(new Error("action settlement failed"));
+      }
+      return idle.apply(this, args);
+    });
+    const result = await runTests(resolve(root, "passing.test.tsx"), { root });
+    expect(result.failed).toBeGreaterThan(0);
+    expect(result.results[0].error).toContain("action settlement failed");
+    expect(result.results[0].error).toContain("measurement incomplete");
+    expect(budgetBarriers).toBe(1);
+  });
+
   it("retains an assertion failure when the final budget settlement rejects", async () => {
     const settled = Runtime.prototype.settled;
     let boundaries = 0;
