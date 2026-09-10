@@ -128,9 +128,6 @@ CONSOLE_PORT=${CF_HARNESS_CONSOLE_PORT:-8135}
 
 require_reachable_port "shell" "$SHELL_PORT"
 require_reachable_port "toolshed" "$TOOLSHED_PORT"
-if [[ "$CF_HARNESS" == "true" ]]; then
-    require_reachable_port "cf-harness console" "$CONSOLE_PORT"
-fi
 if [[ "$INSPECT" == "true" ]]; then
     require_reachable_port "inspector" "$INSPECT_PORT"
 fi
@@ -187,9 +184,12 @@ free_port_if_forced() {
 
 free_port_if_forced "$TOOLSHED_PORT"
 free_port_if_forced "$SHELL_PORT"
-if [[ "$CF_HARNESS" == "true" ]]; then
-    free_port_if_forced "$CONSOLE_PORT"
-fi
+# Deliberately not the console's port. `--force` frees the ports THIS fabric
+# owns, and the console's is not one of them: it is not derived from
+# PORT_OFFSET, so every fabric on the machine addresses the same one, and
+# freeing it here would let one fabric's start kill another's console. A
+# console whose port is taken fails the way every other console failure does
+# — loudly, and without touching the pair.
 
 show_recent_log() {
     local name=$1
@@ -392,6 +392,16 @@ console_unavailable() {
     CONSOLE_STATUS="$reason"
     CF_HARNESS=false
 }
+
+read_blocked_ports
+if [[ "$CF_HARNESS" == "true" ]] && port_is_blocked "$CONSOLE_PORT"; then
+    # Checked here rather than beside the pair's ports, which exit the script:
+    # a console port a client refuses to connect to is a console problem, and a
+    # console problem never stops the fabric.
+    console_unavailable \
+        "port $CONSOLE_PORT is one clients refuse to connect to, so a console \
+there would bind and be unreachable. Set \`CF_HARNESS_CONSOLE_PORT\` elsewhere."
+fi
 
 if [[ "$CF_HARNESS" == "true" ]]; then
     # Everything the console needs comes from the fabric this script is
