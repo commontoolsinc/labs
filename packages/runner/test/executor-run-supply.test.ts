@@ -212,6 +212,52 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     expect(derivationStamps[0].scopeKeyIdentity).toBeUndefined();
   });
 
+  it("re-arms a node that ran with no demander reachable once a demander arrives for its root: the arrival run is the probe, stamped as the demander", async () => {
+    const rootId = "of:p2f-late-demander-root";
+    let demanders: Array<typeof alice> = [];
+    runtime.installSealDestination(passThroughDestination(), {
+      runStamper: recordingStamper,
+      runDemanderResolver: (pieceRootIds) =>
+        pieceRootIds.includes(rootId) ? demanders : [],
+    });
+    let invocations = 0;
+    const action = Object.assign(
+      (_tx: IExtendedStorageTransaction) => {
+        invocations += 1;
+      },
+      {
+        schedulerObservationIdentity: {
+          pieceId: `space:${rootId}`,
+          pieceRootId: rootId,
+        },
+      },
+    );
+    runtime.scheduler.subscribe(action, { reads: [], writes: [] });
+    await runtime.idle();
+    expect(invocations).toBe(1);
+    expect(stamped.filter((info) => info.kind === "derivation").length).toBe(
+      1,
+    );
+    expect(stamped[0].scopeKeyIdentity).toBeUndefined();
+
+    // Alice's demand reaches the root only now: the node has no known
+    // scope for her, so it runs again, and that run is her probe.
+    demanders = [alice];
+    stamped.length = 0;
+    expect(runtime.scheduler.invalidateActionsForDemandRoots([rootId])).toBe(
+      1,
+    );
+    await runtime.idle();
+    expect(invocations).toBe(2);
+    const derivationStamps = stamped.filter((info) =>
+      info.kind === "derivation"
+    );
+    expect(derivationStamps.length).toBe(1);
+    expect(derivationStamps[0].scopeKeyIdentity?.principal).toBe(
+      alice.principal,
+    );
+  });
+
   it("resolves a NESTED piece's instances through the OUTER root a client demands (Phase 7 demand-root chain): the child's actions run per demanded instance instead of falling to the service identity", async () => {
     // The lunch-gate wall's last mechanism: a sub-pattern instantiated by
     // function call gets its OWN result doc as `pieceRootId`, but a client

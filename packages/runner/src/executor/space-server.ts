@@ -3986,18 +3986,31 @@ export class SpaceServer implements TransactionSealDestination {
           // collapse-to-false it was unreachable and every real
           // load/start error masqueraded as a creation-race deferral,
           // silently retried each input-driven cycle (r3739139521).
-          const verdict = await this.#attemptStructureLoad(runtime, root);
+          // A demand naming an argument or derived doc resolves to the
+          // OWNING piece root; the per-(action × instance) run supply
+          // finds the demand's identity from that piece's actions through
+          // this mapping (stage P2-F). Recorded before the piece starts,
+          // so a run the start releases finds it. The piece may already
+          // be running, started by another key's load earlier in this
+          // pass, with its nodes run before this key's demanders were
+          // reachable: those nodes re-arm for them exactly as they do for
+          // a demander who arrives after the mapping (the arrival re-arm
+          // below).
+          const onOwningRoot = (rootId: string) => {
+            if (rootId === root.id) return;
+            if (this.#pieceRootByDemandKey.get(key) === rootId) return;
+            this.#pieceRootByDemandKey.set(key, rootId);
+            this.#indexResolvedRoot(key, rootId);
+            runtime.scheduler.invalidateActionsForDemandRoots([rootId]);
+          };
+          const verdict = await this.#attemptStructureLoad(
+            runtime,
+            root,
+            onOwningRoot,
+          );
           if (verdict.started) {
             this.#pendingStructureLoads.delete(key);
             this.#structureLoadDeferralStreaks.delete(key);
-            if (verdict.rootId !== undefined && verdict.rootId !== root.id) {
-              // The demand named an argument/derived doc; remember the
-              // OWNING piece root so the per-(action × instance) run
-              // supply finds this demand's identity from that piece's
-              // actions (stage P2-F).
-              this.#pieceRootByDemandKey.set(key, verdict.rootId);
-              this.#indexResolvedRoot(key, verdict.rootId);
-            }
           } else if (verdict.reason === "no-pattern-meta") {
             // The OW19 terminal class — but only ON CONFIRMED durable
             // state: an un-synced doc reads identically, so sync the
@@ -4009,16 +4022,11 @@ export class SpaceServer implements TransactionSealDestination {
               runtime,
               root,
               verdict,
+              onOwningRoot,
             );
             if (confirmed.started) {
               this.#pendingStructureLoads.delete(key);
               this.#structureLoadDeferralStreaks.delete(key);
-              if (
-                confirmed.rootId !== undefined && confirmed.rootId !== root.id
-              ) {
-                this.#pieceRootByDemandKey.set(key, confirmed.rootId);
-                this.#indexResolvedRoot(key, confirmed.rootId);
-              }
             } else if (confirmed.reason === "no-pattern-meta") {
               this.#pendingStructureLoads.delete(key);
               this.#structureLoadDeferralStreaks.delete(key);
@@ -4237,6 +4245,7 @@ export class SpaceServer implements TransactionSealDestination {
   async #attemptStructureLoad(
     runtime: Runtime,
     root: { id: string; scope?: string },
+    onOwningRoot: (rootId: string) => void,
   ): Promise<EnsurePieceVerdict> {
     const scope = root.scope ?? "space";
     const verdict = await ensurePieceRunningVerdict(runtime, {
@@ -4244,7 +4253,7 @@ export class SpaceServer implements TransactionSealDestination {
       id: root.id as never,
       scope: scope as never,
       path: [],
-    }, { propagateErrors: true });
+    }, { propagateErrors: true, onOwningRoot });
     if (
       verdict.started || scope === "space" ||
       verdict.reason !== "no-pattern-meta"
@@ -4256,7 +4265,7 @@ export class SpaceServer implements TransactionSealDestination {
       id: root.id as never,
       scope: "space",
       path: [],
-    }, { propagateErrors: true });
+    }, { propagateErrors: true, onOwningRoot });
     // Merge observed docs: the re-arm must watch both instances' reads.
     for (const id of verdict.observedDocIds) {
       if (!spaceVerdict.observedDocIds.includes(id)) {
@@ -4275,6 +4284,7 @@ export class SpaceServer implements TransactionSealDestination {
     runtime: Runtime,
     root: { id: string; scope?: string },
     verdict: EnsurePieceVerdict,
+    onOwningRoot: (rootId: string) => void,
   ): Promise<EnsurePieceVerdict> {
     const scopes = new Set<string>(["space", root.scope ?? "space"]);
     for (const id of verdict.observedDocIds) {
@@ -4293,7 +4303,7 @@ export class SpaceServer implements TransactionSealDestination {
         }
       }
     }
-    return await this.#attemptStructureLoad(runtime, root);
+    return await this.#attemptStructureLoad(runtime, root, onOwningRoot);
   }
 
   /**

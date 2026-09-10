@@ -5,7 +5,10 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Pattern } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { ensurePieceRunning } from "../src/ensure-piece-running.ts";
+import {
+  ensurePieceRunning,
+  ensurePieceRunningVerdict,
+} from "../src/ensure-piece-running.ts";
 import { trustPattern } from "./support/trusted-builder.ts";
 import { getDerivedInternalCell, getMetaCell } from "../src/link-utils.ts";
 import { setResultCell } from "../src/result-utils.ts";
@@ -197,6 +200,94 @@ describe("ensurePieceRunning", () => {
     await resultCell.pull();
 
     expect(patternRan).toBe(true);
+  });
+
+  it("reports the owning root before starting the piece", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { value: { type: "number" } },
+      },
+      resultSchema: {
+        type: "object",
+        properties: { doubled: { type: "number" } },
+      },
+      result: {
+        doubled: { $alias: { partialCause: "doubled", path: [] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (value: number) => value * 2,
+          },
+          inputs: { $alias: { cell: "argument", path: ["value"] } },
+          outputs: { $alias: { partialCause: "doubled", path: [] } },
+        },
+      ],
+    };
+    const patternIdentity = {
+      identity: "test-ensure-piece-owning-root",
+      symbol: "default",
+    };
+    runtime.patternManager.associatePatternIdentity(
+      trustPattern(runtime, pattern),
+      patternIdentity,
+    );
+    const resultCell = runtime.getCell(
+      space,
+      "owning root piece result",
+      pattern.resultSchema,
+      tx,
+    );
+    const argumentCell = getMetaCell(
+      resultCell,
+      "argument",
+      tx,
+      pattern.argumentSchema,
+    );
+    const doubledCell = getDerivedInternalCell(resultCell, {
+      partialCause: "doubled",
+    }, tx);
+    resultCell.setRaw({ doubled: doubledCell.getAsWriteRedirectLink() });
+    resultCell.setMetaRaw(
+      "patternIdentity",
+      patternIdentity,
+      rawMetaWriteAuthorization,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
+    );
+    setResultCell(argumentCell, resultCell);
+    setResultCell(doubledCell, resultCell);
+    argumentCell.set({ value: 5 });
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Named through the argument document: the chain resolves to the
+    // result cell, and the hook sees that root before the start runs.
+    const order: string[] = [];
+    const originalStart = runtime.start.bind(runtime);
+    runtime.start = (cell) => {
+      order.push("start");
+      return originalStart(cell);
+    };
+    try {
+      const verdict = await ensurePieceRunningVerdict(
+        runtime,
+        argumentCell.getAsNormalizedFullLink(),
+        {
+          onOwningRoot: (rootId) => order.push(`root:${rootId}`),
+        },
+      );
+      expect(verdict.started).toBe(true);
+    } finally {
+      runtime.start = originalStart;
+    }
+    const rootId = resultCell.getAsNormalizedFullLink().id;
+    expect(order).toEqual([`root:${rootId}`, "start"]);
   });
 
   it("should be idempotent - calling multiple times is safe", async () => {

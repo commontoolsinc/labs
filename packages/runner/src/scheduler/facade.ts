@@ -1099,15 +1099,20 @@ export class Scheduler {
    * root. Every NARROWED node whose demand roots intersect `rootIds` is
    * marked invalid and queued, with its per-instance record KEPT: only
    * the arriving principal's instances are not clean, so only those run
-   * (B7 — the siblings stay current). A node that has not narrowed needs
-   * nothing (its one output is shared); a node that never ran will run
-   * for everyone when demanded. Returns the number of nodes re-armed.
+   * (B7 — the siblings stay current). A node that ran with demanders and
+   * did not narrow needs nothing (its one output is shared). A node that
+   * ran with NO demander reachable — the wave-level fallback, before the
+   * first demand reached its roots — has no fan-out record and no known
+   * scope, so it re-arms too: its next run is the probe that learns
+   * whether it narrows for the arriving principal. A node that never ran
+   * will run for everyone when demanded. Returns the number of nodes
+   * re-armed.
    */
   invalidateActionsForDemandRoots(rootIds: readonly string[]): number {
     const roots = new Set(rootIds);
     let rearmed = 0;
     for (const record of this.#nodes.nodes()) {
-      if (record.fanOut === undefined || !record.fanOut.narrowed) continue;
+      if (record.fanOut !== undefined && !record.fanOut.narrowed) continue;
       const identity = (record.action as Partial<TelemetryAnnotations>)
         .schedulerObservationIdentity;
       const demandRootIds = identity?.demandRootIds ??
