@@ -425,17 +425,22 @@ The rejection carries no document values. Instead the server marks the commit's
 write targets and both read sets (`reads.confirmed` and `reads.pending`) dirty
 for the session — origin-less, so the session's own echo suppression does not
 hide them — and the next sync frame delivers the watched documents as ordinary
-upserts. Repair therefore arrives as a consistent cut over the
-session's watched view, with every document the frame links to delivered in the
-same cut. A dirty address outside that view does not gain a watch through dirty
-marking alone. Confirmed-read validation collects every stale read before
-rejecting. The error's `conflicts` array preserves each entity ID, scope, read
-sequence, and conflicting sequence, including when only one read is stale. A
-retry helper can explicitly sync all conflicting instances before retrying;
-repeated reads of one instance require only one pull. Each scope resolves under
-the rejected session's identity. Older responses can omit this array; their
-diagnostic identifies entities but does not preserve their scopes. The runner
-also exposes the first descriptor as `conflict` for existing consumers.
+upserts. Repair therefore arrives as a consistent cut over the session's watched
+view, with every document the frame links to delivered in the same cut. A dirty
+address outside that view does not gain a watch through dirty marking alone.
+Confirmed-read validation collects every stale read before rejecting. An unknown
+branch or unresolvable scope prevents validation from completing and takes
+precedence over any stale reads already found. The error's `conflicts` array
+preserves each entity ID, scope, read sequence, and conflicting sequence,
+including when only one read is stale. A retry helper can explicitly sync all
+conflicting instances before retrying; repeated reads of one instance require
+only one pull. Each scope resolves under the rejected session's identity. Older
+responses can omit this array; their diagnostic identifies entities but does not
+preserve their scopes. The runner also exposes the first descriptor as `conflict`
+for existing consumers. The diagnostic previews up to three distinct
+entity/sequence clauses and counts the remaining clauses; repeated path reads
+share a clause. The structured array remains complete regardless of the
+diagnostic's length.
 
 ## 3.7 Server-Side Commit Processing
 

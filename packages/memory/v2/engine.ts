@@ -1024,6 +1024,14 @@ export type Engine = {
   stagedDocumentCache?: Map<string, DocumentCacheEntry>;
 };
 
+/** A stale confirmed read, addressed within the committing session's scope. */
+export type ConfirmedReadConflict = {
+  of: string;
+  scope: CellScope;
+  seq: number;
+  conflictSeq: number;
+};
+
 export class ConflictError extends Error {
   /** Entity whose confirmed read went stale (stale-read conflicts only). */
   readonly of?: string;
@@ -1036,15 +1044,10 @@ export class ConflictError extends Error {
   readonly conflicts?: readonly ConfirmedReadConflict[];
   constructor(
     message: string,
-    details?: ConfirmedReadConflict | readonly ConfirmedReadConflict[],
+    conflicts?: readonly ConfirmedReadConflict[],
   ) {
     super(message);
     this.name = "ConflictError";
-    const conflicts = details === undefined
-      ? undefined
-      : Array.isArray(details)
-      ? details as readonly ConfirmedReadConflict[]
-      : [details as ConfirmedReadConflict];
     if (conflicts !== undefined && conflicts.length > 0) {
       this.conflicts = [...conflicts];
       this.of = conflicts[0].of;
@@ -1054,13 +1057,6 @@ export class ConflictError extends Error {
     }
   }
 }
-
-export type ConfirmedReadConflict = {
-  of: string;
-  scope: CellScope;
-  seq: number;
-  conflictSeq: number;
-};
 
 export class PreconditionFailedError extends Error {
   readonly precondition: "origin-committed" | "receipt-exists";
@@ -6198,12 +6194,21 @@ const validateConfirmedReads = (
     }
   }
   if (conflicts.length > 0) {
-    throw new ConflictError(
-      conflicts.map(({ of, seq, conflictSeq }) =>
-        `stale confirmed read: ${of} at seq ${seq} conflicted with seq ${conflictSeq}`
-      ).join("; "),
-      conflicts,
-    );
+    // Keep diagnostics compact for repeated path reads and large transactions.
+    // The structured array carries every read; each preview clause retains the
+    // entity/sequence grammar used by message-only clients to recover.
+    const messages = [
+      ...new Set(
+        conflicts.map(({ of, seq, conflictSeq }) =>
+          `stale confirmed read: ${of} at seq ${seq} conflicted with seq ${conflictSeq}`
+        ),
+      ),
+    ];
+    const preview = messages.slice(0, 3);
+    if (messages.length > preview.length) {
+      preview.push(`${messages.length - preview.length} more conflicts`);
+    }
+    throw new ConflictError(preview.join("; "), conflicts);
   }
 };
 

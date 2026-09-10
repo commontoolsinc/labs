@@ -2971,18 +2971,11 @@ export class PatternManager {
       // in one rejection and editWithRetry pulls the whole named set before
       // re-running. Further retries remain possible when a re-run reaches a
       // new dependency layer or another writer advances a document again.
-      // Budget by the chunk's edge count (source + compiled edge docs) with
-      // slack. A conflict-free write-back still commits on the first attempt,
-      // so the ceiling is only paid during recovery after a compiler-version
-      // bump.
-      //
-      // The historical fixed floor (16) is NOT applied per chunk — that would
-      // multiply the minimum by chunk count (six low-edge chunks = 96 retries
-      // vs the old closure-wide 16; Codex review on #5094). A single-chunk
-      // write-back keeps the exact historical budget; a multi-chunk one gives
-      // each chunk its edge-proportional share plus one round of slack, so
-      // the aggregate stays >= 16 (8 * 2 chunks minimum) without the 16x
-      // chunk-count inflation.
+      // The edge-proportional budget is conservative headroom for those
+      // additional layers and concurrent writes, not one retry per edge.
+      // A conflict-free write-back commits on its first attempt. Single-chunk
+      // write-backs have a floor of 16 retries; multiple chunks each receive
+      // eight retries of slack on top of their edge-proportional share.
       const importEdges = chunk.reduce((n, m) => n + m.imports.length, 0);
       const writebackMaxRetries = chunks.length === 1
         ? Math.max(16, 2 * importEdges + 8)
