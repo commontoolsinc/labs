@@ -1030,12 +1030,25 @@ describe("cfcSchemaWithInheritedDefs()", () => {
     });
   });
 
-  it("returns a fragment with no local ref as the same object", () => {
+  it("returns a deep-frozen fragment with no local ref as the same object", () => {
+    const plain = deepFreeze({
+      type: "object",
+      properties: { count: { type: "number" } },
+    }) as JSONSchema;
+    expect(cfcSchemaWithInheritedDefs(plain, definitions)).toBe(plain);
+  });
+
+  it("attaches the inherited definitions to a fragment that is not deep-frozen without scanning it for a local ref", () => {
+    // The scan memoizes only by identity of a deep-frozen object, so an
+    // unfrozen fragment is given the definitions whether or not it needs them.
     const plain: JSONSchema = {
       type: "object",
       properties: { count: { type: "number" } },
     };
-    expect(cfcSchemaWithInheritedDefs(plain, definitions)).toBe(plain);
+    expect(cfcSchemaWithInheritedDefs(plain, definitions)).toEqual({
+      ...plain,
+      $defs: definitions,
+    });
   });
 
   it("returns a fragment that declares its own `$defs` as the same object", () => {
@@ -1046,13 +1059,13 @@ describe("cfcSchemaWithInheritedDefs()", () => {
     expect(cfcSchemaWithInheritedDefs(own, definitions)).toBe(own);
   });
 
-  it("returns the same object when the only local ref sits under a child that declares its own `$defs`", () => {
-    const fragment: JSONSchema = {
+  it("returns a deep-frozen fragment as the same object when its only local ref sits under a child that declares its own `$defs`", () => {
+    const fragment = deepFreeze({
       type: "object",
       properties: {
         inner: { $ref: "#/$defs/Name", $defs: { Name: { type: "number" } } },
       },
-    };
+    }) as JSONSchema;
     expect(cfcSchemaWithInheritedDefs(fragment, definitions)).toBe(fragment);
   });
 

@@ -9,6 +9,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Writable } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -645,17 +646,21 @@ describe("plain-schema array traversal", () => {
 //
 
 describe("elementSchemaFor tuple (prefixItems) schemas", () => {
-  const tupleArraySchema = {
-    type: "array",
-    prefixItems: [
-      { $ref: "#/$defs/Point" },
-      { type: "number" },
-    ],
-    items: { type: "string" },
-    $defs: {
-      Point: { type: "object", properties: { x: { type: "number" } } },
-    },
-  } as const satisfies JSONSchema;
+  // Interned, as a cell's schema is: a slot with no local ref then comes back
+  // without `$defs`. An unfrozen schema would have them attached unscanned.
+  const tupleArraySchema = internSchema(
+    {
+      type: "array",
+      prefixItems: [
+        { $ref: "#/$defs/Point" },
+        { type: "number" },
+      ],
+      items: { type: "string" },
+      $defs: {
+        Point: { type: "object", properties: { x: { type: "number" } } },
+      },
+    } as const satisfies JSONSchema,
+  ) as JSONSchema;
 
   it("picks the slot schema for a covered index, threading $defs", () => {
     expect(elementSchemaFor(tupleArraySchema, 0)).toEqual({
