@@ -54,7 +54,11 @@ export type IterateArrayForm<DomainExtra> = {
  * indicates the contents of the container as `[key, value]` pairs (similar to
  * the return value from `Map.entries()` or `Object.entries()`), and by
  * returning this, the engine will iterate over the contents, calling
- * `ValueVisitor.visitMapContentsItem()` on each element.
+ * `ValueVisitor.visitMapContentsItem()` on each key and value in the mappings.
+ *
+ * **Note:** The visit calls per-mapping are specifically in key-then-value
+ * order, and if the result of visiting a key is a `mainResult`, then that ends
+ * the iteration before the corresponding value is visited.
  */
 export type IterateMapForm<DomainExtra> = {
   type: "iterateMap";
@@ -733,9 +737,14 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
               return result;
             }
             case "recurse": {
-              const recurseResult = this.#visitValue(item);
-              if (recurseResult?.type === "mainResult") {
-                return recurseResult;
+              const keyResult = this.#visitValue(key);
+              if (keyResult?.type === "mainResult") {
+                return keyResult;
+              }
+
+              const itemResult = this.#visitValue(item);
+              if (itemResult?.type === "mainResult") {
+                return itemResult;
               }
             }
           }
