@@ -95,7 +95,7 @@ Status legend:
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
-| 40 | Following a piece's source origin: origin resolution, identity lookup, verified closure compile, schema-compat gate, pointer write | `source-reconciler.ts`, called from `packages/piece/src/ops/pieces-controller.ts` when a piece is opened | serving-loop.md §3e | N/A server-side (a serving tenure opens no piece, so it follows no origin; the SWAP half it does own is row 41) |
+| 40 | Following a piece's source origin: origin resolution, identity lookup, verified closure compile, schema-compat gate, pointer write | `source-reconciler.ts`, called by `packages/piece/src/ops/pieces-controller.ts` and `builtins/wish.ts` on explicit piece opens | serving-loop.md §3e | Opener-owned: ON clients open ordinary pieces; the serving wish builtin opens its runtime-supplied sidecars. Root ensuring does not follow source. The SWAP half is row 41. |
 | 41 | `patternIdentity` watcher: live hot-swap of running pieces on pointer change (setup, teardown, reinstantiate); unloadable-pointer roll-forward (CT-1923) | `runner.ts:2331-2513` (`2375-2512`, `2340-2379`, `2418-2490`) | serving-loop.md §3e | COVERED (stage F: the swap runs in the SpaceServer — a pointer write is ordinary authored input; the swap's setup write stamps the `bookkeeping` kind; end-to-end test in `executor-serving-loop.test.ts`) |
 | 42 | Piece source lifecycle records (revisions, transitions, provenance) | `runner.ts:623-748`, `6578-6903` | none (authored data; rides along) | COVERED |
 
@@ -372,7 +372,10 @@ for the compile request.
 
 **N40/N41 (pattern updates — who triggers under v2).** The two halves
 have different owners. FOLLOWING a source origin belongs to whoever
-OPENS a piece, which is a client; a serving tenure opens none. The live
+explicitly OPENS a piece. ON clients open ordinary pieces, while the serving
+wish builtin opens its runtime-supplied sidecars through `openSidecarSurface`;
+existing sidecars reconcile their origins on that open. Tenure activation
+ensures root existence without following its source. The live
 hot-swap via the `patternIdentity` meta sink, including teardown +
 reinstantiation and the unloadable-pointer roll-forward, belongs to
 whichever runtime is running the piece. Under v2 pieces run only in the

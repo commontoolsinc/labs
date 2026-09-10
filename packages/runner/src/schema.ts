@@ -1321,7 +1321,6 @@ export function validateAndTransform(
       runIdentity ?? runtime.scopeKeyIdentity,
       options?.traverseCells ?? false,
       undefined,
-      undefined,
       // Absent link targets get an async load kicked (cross-space always;
       // same-space only when the replica has never seen the doc); the
       // tracked read re-runs the reader on arrival. A served per-instance

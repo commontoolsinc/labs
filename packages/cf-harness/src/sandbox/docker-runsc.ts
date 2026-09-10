@@ -525,6 +525,58 @@ export const cfcTransportReadinessFromDockerRuntimes = (options: {
   return readings as CfcTransportReadiness;
 };
 
+/**
+ * The prefix Docker Desktop's Linux VM writes in front of a host path in the
+ * runtime table it reports, for a path the host itself addresses without one.
+ */
+const DOCKER_DESKTOP_HOST_PREFIX = "/host_mnt";
+
+/**
+ * The host paths a registered runtime's own arguments name for the two CFC
+ * sidecar transports, or nothing for a transport the registration leaves out.
+ * `runtimes` is what `docker info --format '{{json .Runtimes}}'` reported.
+ *
+ * This is the question a caller asks when it is about to configure the harness
+ * to write those directories, rather than the one
+ * `cfcTransportReadinessFromDockerRuntimes` answers about a configuration it
+ * already has. So it translates Docker Desktop's `/host_mnt` spelling to the
+ * path the host writes at — a translation of one address into another, which
+ * is not the comparison of two spellings that readiness declines to make.
+ */
+export const registeredCfcSidecarHostDirs = (options: {
+  runtimeName: string;
+  runtimes: unknown;
+}): { resultDir?: string; invocationContextDir?: string } => {
+  if (!isObjectNotArray(options.runtimes)) {
+    return {};
+  }
+  const entry = options.runtimes[options.runtimeName];
+  if (!isObjectNotArray(entry)) {
+    return {};
+  }
+  const args = readRuntimeArgs(entry);
+  if (args === "unreadable") {
+    return {};
+  }
+  const hostDir = (flag: string): string | undefined => {
+    const registered = runtimeFlagValue(args, flag);
+    if (registered === undefined || !registered.startsWith("/")) {
+      return undefined;
+    }
+    return registered.startsWith(`${DOCKER_DESKTOP_HOST_PREFIX}/`)
+      ? registered.slice(DOCKER_DESKTOP_HOST_PREFIX.length)
+      : registered;
+  };
+  const resultDir = hostDir(CFC_RESULT_DIR_RUNTIME_FLAG);
+  const invocationContextDir = hostDir(
+    CFC_INVOCATION_CONTEXT_DIR_RUNTIME_FLAG,
+  );
+  return {
+    ...(resultDir !== undefined ? { resultDir } : {}),
+    ...(invocationContextDir !== undefined ? { invocationContextDir } : {}),
+  };
+};
+
 const byteLength = (text: string): number => textEncoder.encode(text).length;
 
 const appendStderr = (stderr: string, message: string): string =>

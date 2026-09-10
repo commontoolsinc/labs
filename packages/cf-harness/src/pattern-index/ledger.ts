@@ -1,14 +1,28 @@
 import type {
   HarnessPatternIndexClientFactory,
+  PatternIndexEventType,
   PatternIndexPublishRequest,
 } from "./client.ts";
 import { PATTERN_DISCOVERABILITY_REASONS } from "./publish-render-gate.ts";
 
 /**
- * One session's contributions to the pattern index, retaining one candidate
- * per capability rather than publishing every iteration as a candidate.
+ * Everything one session sends to the pattern index: the patterns it authored,
+ * and the events its runs report about the patterns they ran.
  *
- * ## The problem this exists for
+ * Each write is sent behind the one sent before it, and no caller waits for
+ * any of them. So the index sees this session's writes in the order they were
+ * sent — a dependency before the entry naming it, a run's `instantiated`
+ * before the terminal event that follows it — while what a session contributes
+ * to a shared catalog costs the run that contributed it nothing. A publication
+ * is held rather than sent when it is staged, for the reason below.
+ *
+ * `flush` is the session's one wait for all of it. The harness process ends
+ * through `Deno.exit`, which does not let a pending request finish, so a write
+ * nothing waits for is a write that can be cut off in flight; the prompt loop
+ * reaches `flush` before the process gets there. Nothing bounds that wait: a
+ * session whose index has stopped answering ends when its last request does.
+ *
+ * ## The problem holding a publication exists for
  *
  * A pattern-author that iterates runs the same capability three or four times
  * before it is happy. Each successful run published, and since the source
@@ -55,7 +69,7 @@ import { PATTERN_DISCOVERABILITY_REASONS } from "./publish-render-gate.ts";
  * index ranks a search against — so two entries this key cannot tell apart
  * are two entries a search cannot tell apart either.
  */
-export interface PatternIndexPublicationLedger {
+export interface PatternIndexLedger {
   /**
    * Holds `request` as this session's offer for its capability, publishing
    * anything it displaces as non-discoverable. Never throws and never awaits:
@@ -64,12 +78,22 @@ export interface PatternIndexPublicationLedger {
   stage(request: PatternIndexPublishRequest): void;
 
   /**
+   * Sends `eventType` for `patternId`, behind everything written before it.
+   * Never throws and never awaits: the run has said what it did with the
+   * pattern and is done with the report.
+   */
+  record(patternId: string, eventType: PatternIndexEventType): void;
+
+  /**
    * Publishes everything still held, ordered so that a held entry another
    * held entry names among its `dependencies` goes first. A request whose
    * turn never comes is still published, after everything that could be
    * ordered — nothing here produces a cycle, since a dependency is the
    * content-addressed identity of something that already compiled, but the
    * ordering does not assume it.
+   *
+   * Resolves once every write this session made has been answered, the
+   * publications above among them.
    */
   flush(): Promise<void>;
 }
@@ -91,17 +115,16 @@ export const patternCapabilityKey = (
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-export const createPatternIndexPublicationLedger = (
+export const createPatternIndexLedger = (
   getClient: HarnessPatternIndexClientFactory,
   options: { onError?: (message: string) => void } = {},
-): PatternIndexPublicationLedger => {
+): PatternIndexLedger => {
   const onError = options.onError ??
     ((message: string) => console.error(message));
   const held = new Map<string, PatternIndexPublishRequest>();
   const publishedByKey = new Map<string, string>();
-  // Publications are serialized behind one chain so a dependency staged
-  // before its dependent is also SENT before it, without any caller awaiting
-  // a publish.
+  // Every write is serialized behind one chain, so a write is sent once the
+  // write before it has been answered, without any caller awaiting either.
   let chain: Promise<void> = Promise.resolve();
 
   const send = (
@@ -146,6 +169,20 @@ export const createPatternIndexPublicationLedger = (
   };
 
   return {
+    record(patternId, eventType) {
+      chain = chain.then(async () => {
+        try {
+          const client = await getClient();
+          await client.recordEvent({ patternId, eventType });
+        } catch (error) {
+          onError(
+            `run_pattern could not record the ${eventType} event for pattern index entry "${patternId}": ${
+              errorMessage(error)
+            }`,
+          );
+        }
+      });
+    },
     stage(request) {
       const dependencies = new Set(request.dependencies ?? []);
       if (dependencies.size > 0) {

@@ -3953,7 +3953,10 @@ export class PieceController<T = unknown> {
   }
 
   async #loadCurrentPattern(
-    { projectResult = true }: { projectResult?: boolean } = {},
+    { projectResult = true, repairCache = true }: {
+      projectResult?: boolean;
+      repairCache?: boolean;
+    } = {},
   ): Promise<{
     pattern: Pattern;
     ref: { identity: string; symbol: string };
@@ -3967,6 +3970,7 @@ export class PieceController<T = unknown> {
       ref.identity,
       ref.symbol,
       this.#pieces.getSpace(),
+      { repairCache },
     );
     if (!pattern) {
       throw new Error(
@@ -4345,9 +4349,7 @@ export class PieceController<T = unknown> {
         }
       }
 
-      candidate = await compileProgram(this.#pieces, program, {
-        previousEntryIdentity: previousRef.identity,
-      });
+      candidate = await compileProgram(this.#pieces, program);
       const candidateRef = this.#pieces.runtime.patternManager
         .getArtifactEntryRef(candidate);
       if (candidateRef === undefined) {
@@ -4524,28 +4526,21 @@ export class PieceController<T = unknown> {
   }
 
   /**
-   * Would `setPattern(program)` be accepted? Answers without changing the piece.
-   *
-   * Drives the SAME review the apply path runs — no second copy of the rules,
-   * because a preflight that reimplements them drifts and starts lying.
-   *
-   * It is not, however, a pure read. Compiling the candidate goes through
-   * `compileAndSavePattern`, which writes the compiled module set and its
-   * source docs into the space's content-addressed store (CT-1623) — the same
-   * write the apply would do, idempotent, and attached to nothing. What it
-   * does NOT do is touch the piece: no pointer move, no argument re-stage, no
-   * source transition, no revision. So a refused check leaves the piece
-   * running exactly what it was running, which is the guarantee a caller
-   * actually needs; it does not leave the space byte-identical.
+   * Review a candidate with the same compatibility rules used by source setup.
+   * Compilation and source loading reuse verified caches without writing to
+   * storage or creating module-update authority. Reads retain their normal
+   * server-demand semantics. Apply validates retained input and source currency
+   * again at commit time.
    */
   async checkPattern(
     program: RuntimeProgram,
   ): Promise<PatternCompatibilityReport> {
-    const { pattern: previousPattern, ref: previousRef } = await this
-      .#loadCurrentPattern();
-    const candidate = await compileProgram(this.#pieces, program, {
-      previousEntryIdentity: previousRef.identity,
-    });
+    const { pattern: previousPattern } = await this
+      .#loadCurrentPattern({ repairCache: false });
+    const candidate = await this.#pieces.runtime.patternManager.compilePattern(
+      program,
+      { space: this.#pieces.getSpace(), persist: false },
+    );
     const candidateRef = this.#pieces.runtime.patternManager
       .getArtifactEntryRef(candidate);
     if (candidateRef === undefined) {
@@ -4678,13 +4673,7 @@ export class PieceController<T = unknown> {
             ? { allowUnavailable: true }
             : {},
         );
-        const pattern = await compileProgram(
-          this.#pieces,
-          program,
-          baseline.kind === "retain"
-            ? { previousEntryIdentity: previousRef.identity }
-            : {},
-        );
+        const pattern = await compileProgram(this.#pieces, program);
         const candidate = this.#pieces.runtime.patternManager
           .getArtifactEntryRef(pattern);
         if (candidate === undefined) {

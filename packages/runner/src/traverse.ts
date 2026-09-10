@@ -1290,28 +1290,15 @@ export type TraversalContext = {
    */
   scopeKeyIdentity: ScopeKeyIdentity;
 
-  includeMeta: boolean;
-
   /**
-   * Whether a document the traversal loads mid-walk, through a link
-   * crossing, has its metadata-linked documents loaded with it
-   * (`loadMetaLinkedDocs`), out of this runtime's own replica. On by
-   * default: a runtime traversal that loads a document generally intends
-   * to interpret it. The memory server's graph-query walk turns it off:
-   * what the server delivers with a document is the schema document its
-   * `cfc` envelope names (`loadLabelSchemaDoc`) and nothing else of its
-   * metadata, whichever way the walk reached it; a caller that wants a
-   * metadata target names it. Consulted only where `includeMeta` already
-   * gates the load; it does not affect `traverseCells`, which
-   * `includeMeta` also carries.
+   * Whether this is a query-shaped traversal. Such a traversal walks
+   * through `asCell` positions instead of stopping at them, skips a
+   * document already covered by a selector it tracks, takes no lazy-proxy
+   * or plain-schema fast path, and loads, beside every document it reaches
+   * through a link, the schema document that document's `cfc` envelope
+   * names (`loadLabelSchemaDoc`).
    */
-  chaseLoadedMeta: boolean;
-
-  /**
-   * Tracker keys of the documents whose metadata links this traversal has
-   * followed, and of the absent targets it tracked along the way.
-   */
-  metaDocsVisited: Set<string>;
+  traverseCells: boolean;
 
   /**
    * Reports a followed link whose target document is absent from the local
@@ -1357,8 +1344,7 @@ export function createTraversalContext(
   tracker: PointerCycleTracker,
   schemaTracker: MapSet<string, SchemaPathSelector>,
   scopeKeyIdentity: ScopeKeyIdentity,
-  includeMeta: boolean = false,
-  metaDocsVisited: Set<string> = new Set<string>(),
+  traverseCells: boolean = false,
   onMissingLinkTarget?: (
     link: NormalizedFullLink,
     sourceSpace: MemorySpace,
@@ -1366,15 +1352,12 @@ export function createTraversalContext(
   ) => void,
   schemaDocsLoaded: Set<string> = new Set<string>(),
   schemaDocsAvailable: Set<string> = new Set<string>(),
-  chaseLoadedMeta: boolean = true,
 ): TraversalContext {
   return {
     tracker,
     schemaTracker,
     scopeKeyIdentity,
-    includeMeta,
-    chaseLoadedMeta,
-    metaDocsVisited,
+    traverseCells,
     onMissingLinkTarget,
     schemaDocsLoaded,
     schemaDocsAvailable,
@@ -1383,10 +1366,9 @@ export function createTraversalContext(
 
 export function createDefaultTraversalContext(
   scopeKeyIdentity: ScopeKeyIdentity,
-  includeMeta: boolean = true,
+  traverseCells: boolean = true,
   schemaTracker: MapSet<string, SchemaPathSelector> =
     new MapSetStringToPathSelectors(true),
-  metaDocsVisited: Set<string> = new Set<string>(),
   onMissingLinkTarget?: (
     link: NormalizedFullLink,
     sourceSpace: MemorySpace,
@@ -1400,8 +1382,7 @@ export function createDefaultTraversalContext(
     >(),
     schemaTracker,
     scopeKeyIdentity,
-    includeMeta,
-    metaDocsVisited,
+    traverseCells,
     onMissingLinkTarget,
   );
 }
@@ -1737,7 +1718,7 @@ export abstract class BaseObjectTraverser {
   }
 
   protected get traverseCells(): boolean {
-    return this.context.includeMeta;
+    return this.context.traverseCells;
   }
 
   /**
@@ -2618,151 +2599,26 @@ function trackVisitedDoc(
       internPathSelector(selector),
     );
   }
-  // Load the metadata-linked docs recursively unless the address holds no
-  // value: every rail where the context grants a mid-walk load them
-  // (`chaseLoadedMeta`), and otherwise only the schema document the
-  // loaded document's `cfc` envelope names.
-  if (context.includeMeta) {
-    // Loading metadata requires the full doc. Ignore this read for scheduling.
+  // A document reached through a link is owed the schema document its
+  // `cfc` envelope names, whichever way the walk reached it.
+  if (context.traverseCells) {
+    // Reading the envelope takes the whole document. Ignore this read for
+    // scheduling.
     const { ok: fullDoc } = tx.read(
       { ...target, path: [] },
       { meta: ignoreReadForScheduling },
     );
     if (fullDoc) {
-      const loaded = {
-        address: { ...fullDoc.address, space: target.space },
-        value: fullDoc.value,
-      };
-      if (context.chaseLoadedMeta) {
-        loadMetaLinkedDocs(tx, loaded, context);
-      } else {
-        loadLabelSchemaDoc(tx, loaded, context);
-      }
-    }
-  }
-}
-
-// These meta links don't have full link chains. We only follow the first link.
-// `owed` receives the tracker key of each target the rail names that is
-// absent from the store: tracked, so its arrival re-runs the load, and
-// recorded so the arrival has its own metadata links followed in turn.
-function loadMetaLinkedDoc(
-  tx: IExtendedStorageTransaction,
-  valueEntry: IMemorySpaceAttestation,
-  meta: MetaRail,
-  schemaTracker: MapSet<string, SchemaPathSelector>,
-  identity: ScopeKeyIdentity,
-  owed?: Set<string>,
-): IMemorySpaceAttestation[] {
-  const targetObj = valueEntry.value as Immutable<JSONObject>;
-  if (!isObjectOrArray(targetObj) || !(meta in targetObj)) return [];
-  const loaded = [];
-  // The internal meta field contains a list of objects with links instead
-  if (meta === "internal") {
-    if (!Array.isArray(targetObj["internal"])) {
-      logger.warn(
-        "traverse",
-        () => ["Invalid internal manifest in", valueEntry.address],
+      loadLabelSchemaDoc(
+        tx,
+        {
+          address: { ...fullDoc.address, space: target.space },
+          value: fullDoc.value,
+        },
+        context,
       );
-      return [];
-    }
-    for (const manifestEntry of targetObj["internal"]) {
-      if (!isObjectOrArray(manifestEntry)) {
-        logger.warn(
-          "traverse",
-          () => ["Invalid internal manifest entry in", valueEntry.address],
-        );
-        continue;
-      }
-      if ("link" in manifestEntry && isSigilLink(manifestEntry.link)) {
-        const item = loadMetaLinkedDocFromLink(
-          tx,
-          valueEntry,
-          schemaTracker,
-          identity,
-          manifestEntry.link,
-          owed,
-        );
-        if (item !== undefined) {
-          loaded.push(item);
-        }
-      }
-    }
-  } else {
-    const linkObj = isSigilLink(targetObj[meta])
-      ? targetObj[meta] as SigilLink
-      : (meta === "cfc") // cfc links are different
-      ? cfcMetaToSigilLink(targetObj["cfc"])
-      : undefined;
-    if (linkObj === undefined) {
-      // undefined is strange, but acceptable
-      logger.warn(
-        "traverse",
-        () => ["Invalid meta link", meta, "in", valueEntry.address],
-      );
-      return [];
-    }
-    const item = loadMetaLinkedDocFromLink(
-      tx,
-      valueEntry,
-      schemaTracker,
-      identity,
-      linkObj,
-      owed,
-    );
-    if (item !== undefined) {
-      loaded.push(item);
     }
   }
-  return loaded;
-}
-
-function loadMetaLinkedDocFromLink(
-  tx: IExtendedStorageTransaction,
-  valueEntry: IMemorySpaceAttestation,
-  schemaTracker: MapSet<string, SchemaPathSelector>,
-  identity: ScopeKeyIdentity,
-  linkObj: SigilLink,
-  owed?: Set<string>,
-) {
-  const link = parseLink(linkObj, valueEntry.address)!;
-  // A metadata link is a same-space link (05-queries.md): one resolving to
-  // another space selects nothing — the per-space engine could not read it.
-  if (link.space !== valueEntry.address.space) {
-    logger.warn(
-      "traverse",
-      () => [
-        "Foreign-space metadata link ignored in",
-        valueEntry.address,
-        "->",
-        link.space,
-      ],
-    );
-    return undefined;
-  }
-  const address = {
-    space: link.space,
-    id: link.id!,
-    scope: link.scope,
-    path: [],
-  };
-  if (address === undefined) {
-    return undefined;
-  }
-  // Track the target before reading it: the tracker entry is what makes
-  // the graph reactive to this document — a change or a later arrival
-  // dirties a tracked key — so an absent-at-evaluation target must be
-  // tracked too, or nothing would re-run this load when it arrives. The
-  // read itself is deliberately not a scheduling read: delivery
-  // reactivity rides the tracker, not the runner scheduler.
-  const docKey = getTrackerKey(address, identity);
-  schemaTracker.add(docKey, REJECTING_SELECTOR);
-  const result = tx.read(address, { meta: ignoreReadForScheduling });
-  if (result.error || result.ok.value === undefined) {
-    owed?.add(docKey);
-    return undefined;
-  }
-  return { address, value: result.ok.value };
 }
 
 /**
@@ -2896,69 +2752,13 @@ function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
   return undefined;
 }
 
-/** The metadata fields that name other documents. */
-type MetaRail = "cfc" | "result" | "pattern" | "argument" | "internal";
-
-const ALL_META_RAILS: readonly MetaRail[] = [
-  "cfc",
-  "result",
-  "pattern",
-  "argument",
-  "internal",
-];
-
-// Recursively load the meta linked docs from the doc. Every loaded doc is
-// delivered whole — tracked under the rejecting selector — and never
-// schema-traversed; narrowing a meta document by schema is not a policy
-// this traversal has.
-export function loadMetaLinkedDocs(
-  tx: IExtendedStorageTransaction,
-  valueEntry: IMemorySpaceAttestation,
-  context: TraversalContext,
-) {
-  const valueEntryKey = getTrackerKey(
-    valueEntry.address,
-    context.scopeKeyIdentity,
-  );
-  if (context.metaDocsVisited.has(valueEntryKey)) {
-    return;
-  }
-  context.metaDocsVisited.add(valueEntryKey);
-
-  const pendingDocs = [valueEntry];
-  while (pendingDocs.length > 0) {
-    const currentDoc = pendingDocs.shift()!;
-    for (const meta of ALL_META_RAILS) {
-      const linkedDocs = loadMetaLinkedDoc(
-        tx,
-        currentDoc,
-        meta,
-        context.schemaTracker,
-        context.scopeKeyIdentity,
-        context.metaDocsVisited,
-      );
-      for (const linkedDoc of linkedDocs) {
-        // Don't recurse into invalid docs or cid docs
-        if (linkedDoc.address.id.startsWith("cid:")) {
-          continue;
-        }
-        const linkedDocKey = getTrackerKey(
-          linkedDoc.address,
-          context.scopeKeyIdentity,
-        );
-        if (context.metaDocsVisited.has(linkedDocKey)) continue;
-        context.metaDocsVisited.add(linkedDocKey);
-        pendingDocs.push(linkedDoc);
-      }
-    }
-  }
-}
-
 /**
  * Loads the schema document a document's `cfc` envelope names, and nothing
  * else of its metadata, into the traversal. A reader of a labeled document
  * checks what it may read against that schema, so the document is owed it
- * wherever a walk reaches it, named or not. The target enters the schema
+ * wherever a walk reaches it, named or not. The `pattern`, `argument`, and
+ * `result` links and the `internal` manifest are data on the document; a
+ * caller that wants a target names it. The target enters the schema
  * tracker, so an absent one arrives when it is written. A document without
  * an envelope loads nothing.
  */
@@ -2967,13 +2767,51 @@ export function loadLabelSchemaDoc(
   valueEntry: IMemorySpaceAttestation,
   context: TraversalContext,
 ): void {
-  loadMetaLinkedDoc(
-    tx,
-    valueEntry,
-    "cfc",
-    context.schemaTracker,
-    context.scopeKeyIdentity,
+  const doc = valueEntry.value as Immutable<JSONObject>;
+  if (!isObjectOrArray(doc) || !("cfc" in doc)) return;
+  const envelope = doc["cfc"];
+  const linkObj = isSigilLink(envelope)
+    ? envelope as SigilLink
+    : cfcMetaToSigilLink(envelope);
+  if (linkObj === undefined) {
+    logger.warn(
+      "traverse",
+      () => ["Invalid `cfc` envelope in", valueEntry.address],
+    );
+    return;
+  }
+  const link = parseLink(linkObj, valueEntry.address)!;
+  // A metadata link is a same-space link (05-queries.md): one resolving to
+  // another space selects nothing — the per-space engine could not read it.
+  if (link.space !== valueEntry.address.space) {
+    logger.warn(
+      "traverse",
+      () => [
+        "Foreign-space `cfc` schema link ignored in",
+        valueEntry.address,
+        "->",
+        link.space,
+      ],
+    );
+    return;
+  }
+  const address = {
+    space: link.space,
+    id: link.id!,
+    scope: link.scope,
+    path: [],
+  };
+  // Track the target before reading it: the tracker entry is what makes
+  // the graph reactive to this document — a change or a later arrival
+  // dirties a tracked key — so an absent-at-evaluation target must be
+  // tracked too, or nothing would re-run this load when it arrives. The
+  // read itself is deliberately not a scheduling read: delivery
+  // reactivity rides the tracker, not the runner scheduler.
+  context.schemaTracker.add(
+    getTrackerKey(address, context.scopeKeyIdentity),
+    REJECTING_SELECTOR,
   );
+  tx.read(address, { meta: ignoreReadForScheduling });
 }
 
 // With unified traversal code, we don't need to worry about the server

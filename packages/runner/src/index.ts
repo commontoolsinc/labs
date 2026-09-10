@@ -9,6 +9,7 @@ export { Runtime } from "./runtime.ts";
 export {
   fabricAuthorityMatchesSpaceHost,
   type FabricSpaceHostOptions,
+  isLoopbackHostname,
   normalizeSpaceHost,
   spaceHostFromFabricAuthority,
   SpaceHostValidationError,
@@ -230,6 +231,7 @@ export {
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
   SEALING_RECEIPT_REFUSAL,
+  SEALING_SOURCE_UPDATE_REFUSAL,
   setPatternRepository,
   setPatternSource,
   setPieceReconciliation,
