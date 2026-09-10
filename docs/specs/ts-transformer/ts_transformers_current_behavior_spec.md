@@ -214,7 +214,8 @@ list — is the authoritative source. As of this writing it recognizes:
   plain calls.)
 - conditional-helper calls: `ifElse`, `when`, `unless`
 - reactive array calls (`map`, `mapWithPattern`, `filter`, `filterWithPattern`,
-  `flatMap`, `flatMapWithPattern`)
+  `flatMap`, `flatMapWithPattern`, `count`, `countWithPattern`, `minBy`,
+  `minByWithPattern`, `maxBy`, `maxByWithPattern`)
 - cell factories (`cell`, `new Cell`, `new OpaqueCell`, `new Stream`, etc.),
   with legacy `.of(...)` still accepted
 - `Cell.for`-style calls
@@ -247,7 +248,8 @@ Remaining fallback behavior is intentionally narrow:
 - shadowed local helpers and object methods with Common Fabric-like names are not
   classified
 - a **synthetic** property call spelled `mapWithPattern` /
-  `filterWithPattern` / `flatMapWithPattern` whose method resolves to **no
+  `filterWithPattern` / `flatMapWithPattern` / `countWithPattern` /
+  `minByWithPattern` / `maxByWithPattern` whose method resolves to **no
   symbol** classifies as the array-method family by spelling alone. The
   closure stage emits these calls against receivers whose static type is
   still the plain array type (a site-lifted collection local, for example),
@@ -260,6 +262,11 @@ Remaining fallback behavior is intentionally narrow:
   not (an untyped receiver classifies as no call kind). Authored spellings
   of every family that fail symbol resolution still require a reactive
   receiver to classify
+
+The `*WithPattern` argument-hoisting path also requires a synthetic callee.
+Only closure-stage output guarantees that callback captures have been threaded
+through the params argument; an authored inline pattern stays in its enclosing
+scope.
 
 Builder-placement validation uses `detectDirectBuilderCall()`, so calls to
 functions returned by builders are not reclassified as direct `lift()` or
@@ -1229,7 +1236,11 @@ Result shape:
 
 - `receiver.<method>(fn[, thisArg])` ->
   `receiver.<method>WithPattern(pattern(callbackSchema, resultSchema, newCallback), paramsObj[, thisArg])`
-- currently supported methods are `map`, `filter`, and `flatMap`
+- supported callback methods are `map`, `filter`, `flatMap`, `count`, `minBy`,
+  and `maxBy`; the aggregate forms require explicit cell receivers in the
+  public type surface
+- argument-free `count`, `sum`, `min`, and `max` remain direct builtin-building
+  method calls
 - callback schema includes `{ element, index?, array? }` and adds `params` only
   when captures exist
 - computed destructuring keys are stabilized with generated key constants and
