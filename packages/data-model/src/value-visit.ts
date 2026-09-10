@@ -299,7 +299,7 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
    */
   visitPrimitive(
     value: Primitive | FabricPrimitive,
-    type: PrimitiveValueTag,
+    tag: PrimitiveValueTag,
   ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /**
@@ -371,7 +371,7 @@ export abstract class BaseValueVisitor<
   /** @inheritDoc */
   abstract visitPrimitive(
     value: Primitive | FabricPrimitive,
-    type: PrimitiveValueTag,
+    tag: PrimitiveValueTag,
   ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /** @inheritDoc */
@@ -462,7 +462,7 @@ export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
   /** @inheritDoc */
   visitPrimitive(
     _value: Primitive | FabricPrimitive,
-    _type: PrimitiveValueTag,
+    _tag: PrimitiveValueTag,
   ): LeafVisitorResult<DomainExtra, ResultType> {
     return undefined;
   }
