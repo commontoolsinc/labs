@@ -1,15 +1,14 @@
 {
-  "updated": "2026-09-10T23:20:03.571259+00:00",
-
+  "updated": "2026-09-10T23:29:54.955157+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
-  "pr": "https://github.com/commontoolsinc/labs/pull/7241",
-  "activity": "Both full runtime suites passed: 1,417 tests for read budgets integrated with main, and 1,411 for the C3 row invalidation fix. Correcting the synthetic cross-space fixture to use separate space transactions.",
-  "review": "Antagonistic reviews are clean for the C1 candidate fix and resolved budget merge. Normal follow-up pushes have resumed Cubic review on #7257; latest code/checkpoint reviews remain landing gates. #7264 is completing review and CI.",
+  "pr": "https://github.com/commontoolsinc/labs/pull/7257",
+  "activity": "Read-budget PR #7257 is mergeable and current-head CI is running. Integration with main ce3602b18a passes all 46 type-check groups and 50 focused event/accounting checks.",
+  "review": "Antagonistic review is clean. Cubic skipped the merge-only head; a fresh review of this checkpoint remains required before landing.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
-    "#7257: current-main integration passed 1,417 runner tests / 8,843 steps; focused accounting includes 21 steps. Full CLI completed with 1,821 passed and two known baseline color failures. All 46 type-check groups passed before the final two regression cases.",
+    "#7257: integration with main c8a64af840 passed 1,417 runner tests / 8,843 steps. Latest main ce3602b18a integration passes all 46 type-check groups and 50 focused checks. Full CLI completed with 1,821 passed and two known baseline color failures.",
     "#7261 merged as c8a64af840: all CI gates passed; latest Cubic reported zero issues; antagonistic review clean. Browser recordings remain available below."
   ],
   "stages": [
@@ -35,7 +34,7 @@
       "id": "A3",
       "title": "Read budgets and whole-step coverage",
       "status": "review",
-      "detail": "Six initial findings fixed. Current-main integration passes 1,417 runner tests / 8,843 steps plus new guard accounting and selector-failure regressions. Fresh publication, CI, and review remain."
+      "detail": "Implemented in #7257. Six initial code findings fixed; current-main integration passes type checking and 50 focused checks. CI and fresh Cubic review remain."
     },
     {
       "id": "A4",
@@ -70,8 +69,8 @@
     {
       "id": "B3",
       "title": "Deterministic aggregates",
-      "status": "review",
-      "detail": "Implemented and validated in #7259: count/sum/min/max/minBy/maxBy, deterministic numeric and identity contracts, cold-resume regressions, and 10/100/1000-row comparisons. Updates at 1000 rows use 77–159 proxy accesses versus 1001–3001 for generic reductions; initialization costs more. CI and final review gate landing."
+      "status": "done",
+      "detail": "Named incremental aggregates landed in #7259 with documented contracts and measured comparisons."
     },
     {
       "id": "B4",
@@ -212,5 +211,5 @@
       "detail": "Compare the same interaction before and after migration, with read work and measured time."
     }
   ],
-  "validatedRevision": "7aaac0b7fe"
+  "validatedRevision": "5de859f2b420c747513aaa6cf9e3c174f67cad0c"
 }
