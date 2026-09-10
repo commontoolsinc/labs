@@ -12,7 +12,11 @@ import { getLogger } from "@commonfabric/utils/logger";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import type { Pattern } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
-import { getDerivedInternalCellLink, parseLink } from "../src/link-utils.ts";
+import {
+  getDerivedInternalCell,
+  getDerivedInternalCellLink,
+  parseLink,
+} from "../src/link-utils.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -94,6 +98,10 @@ const CARDS_ITEM_SCHEMA = {
       item: { type: "object", properties: { seed: { type: "string" } } },
     },
   },
+} as const;
+const ITEMS_SCHEMA = {
+  type: "array",
+  items: { type: "object", properties: { seed: { type: "string" } } },
 } as const;
 // One card per case, each cold on the replica that runs it.
 const CARD_COUNT = 11;
@@ -289,6 +297,9 @@ describe("piece-named-before-start", () => {
     }) as Pattern;
     rcB = b.getCell<Record<string, unknown>>(space, RESULT_CAUSE, undefined);
     await rcB.key("cards").asSchema(CARDS_SCHEMA).sync();
+    // The host's items slot, which the locator reads: the host's own
+    // document, not any card's.
+    await rcB.key("items").asSchema(ITEMS_SCHEMA).sync();
     await quiesce(b);
     replicaB = (b.storageManager.open(space) as unknown as {
       replica: typeof replicaB;
@@ -480,12 +491,15 @@ describe("piece-named-before-start", () => {
 
   it("runs a piece whose family is local without holding it", async () => {
     const { cardB, itemB, argumentId, key } = locateCard(2);
-    // Naming the argument document delivers the card's family with it: the
-    // document's `result` names the card, whose manifest names its cells.
-    // What the argument links to — the map child's own argument, and the
-    // item behind it — is named hop by hop, as the run would read it.
+    // Everything the run reads is named here, one document at a time: the
+    // argument document and what it links to — the map child's own
+    // argument, and the item behind it — hop by hop, and each cell the
+    // card owns. The store delivers no family with any of them.
     await nameLinkChain(argumentId, 4);
     await itemB.sync();
+    for (const descriptor of cardPattern.derivedInternalCells ?? []) {
+      await getDerivedInternalCell(cardB, descriptor).sync();
+    }
     await quiesce(b);
     let held = false;
     waitForDeferredStart(b, "runner.deferred-start.pending", key).then(() => {

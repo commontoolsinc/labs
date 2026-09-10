@@ -299,7 +299,7 @@ describe("executor-trust-attribution", () => {
   const warmServedStream = async (names: { arg: string; result: string }) => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
-    const { argument, result } = await standUp(clientRuntime, names);
+    const { compiled, argument, result } = await standUp(clientRuntime, names);
     const cancelDemand = result.sink(() => {});
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
@@ -335,7 +335,15 @@ describe("executor-trust-attribution", () => {
       path: [...entry.stream.path],
       scope: (entry.stream.scope ?? "space") as never,
     };
-    return { engine, argument, result, cancelDemand, sidecarId, streamLink };
+    return {
+      engine,
+      compiled,
+      argument,
+      result,
+      cancelDemand,
+      sidecarId,
+      streamLink,
+    };
   };
 
   const entriesIn = (
@@ -568,7 +576,7 @@ describe("executor-trust-attribution", () => {
 
   describe("§9-2 per-wave multi-principal", () => {
     it("mints each run's own user when two users' handler runs share a drain, and both commits recheck clean — no cross-run contamination (INV-C)", async () => {
-      const { engine, cancelDemand, sidecarId, streamLink, result } =
+      const { engine, compiled, cancelDemand, sidecarId, streamLink, result } =
         await warmServedStream({
           arg: "multi-arg",
           result: "multi-result",
@@ -589,14 +597,17 @@ describe("executor-trust-attribution", () => {
         streamLink,
       );
 
-      // Bob joins the same piece.
+      // Bob joins the same piece, reading it under its result schema,
+      // which is what reaches the handler stream he sends to: the store
+      // delivers the piece's document alone, and the stream behind `bump`
+      // is a document of its own.
       const bob = openClient(bobSigner);
       extraManagers.push(bob.manager);
       extraRuntimes.push(bob.runtime);
       const bobResult = bob.runtime.getCell<Record<string, unknown>>(
         space,
         "multi-result",
-        undefined,
+        compiled.resultSchema,
       );
       await bobResult.sync();
 

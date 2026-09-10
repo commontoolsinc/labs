@@ -85,28 +85,6 @@ export type TrackedGraphState = {
   memo: SchemaMemo;
   manager: EngineObjectManager;
 
-  /** Every doc key a query has NAMED as a root, absent roots included —
-   * the persistent role record. A refresh re-walk consults it: a named
-   * document is owed its full family on every visit (and a healed absent
-   * root its first), while a merely tracked document keeps the crossing
-   * shape it was reached with — no family — so delivery does not depend
-   * on update history. */
-  roots: Set<string>;
-
-  /** Doc keys whose metadata family this state has chased: every named
-   * root a walk has visited, every document loaded as a member of such a
-   * family, whose own family the chase followed in turn, and every absent
-   * target a family link named, owed its family when it arrives. A
-   * refresh re-walk of a key here chases the family again, so a member
-   * whose metadata link moved delivers the new target. Keys are never
-   * released: the tracker keeps a delivered document for the state's
-   * lifetime too, so a member whose parent's link moved on stays
-   * delivered, and chased, until the state ends. A crossing records
-   * reach in the tracker and none of the family, so coverage of a later
-   * query that names a document requires its key here too: reach without
-   * family is not coverage for a root (see isGraphQueryCoveredByState). */
-  chased: Set<string>;
-
   /** Per-version scans of this state's delivered documents for embedded
    * schema refs (`docKey -> { seq, refs }`): the record the closure's
    * re-validation over the established set is answered from on every
@@ -898,8 +876,6 @@ export const cloneTrackedGraphState = (
     entities: new Map(state.entities),
     memo: new Map(state.memo),
     manager,
-    roots: new Set(state.roots),
-    chased: new Set(state.chased),
     schemaRefs: new Map(state.schemaRefs),
   };
 };
@@ -1493,8 +1469,6 @@ export const trackGraph = (
   };
   const sharedMemo = createSchemaMemo();
   const stats = createQueryTraversalStats();
-  const roots = new Set<string>();
-  const chased = new Set<string>();
   const readCountBefore = manager.readCount;
   const walk = new GraphQueryWalk({
     manager,
@@ -1526,20 +1500,13 @@ export const trackGraph = (
         type: "application/json",
       });
       const rootKey = rootDocKey(space, root, identityOf(manager));
-      roots.add(rootKey);
       if (loaded !== null) {
         walk.visit(loaded, selector, rootKey);
-        // The visit chased the named document's full family; an absent
-        // root is still a ROOT (recorded above) but records no family —
-        // its later creation owes it one.
-        chased.add(rootKey);
       } else {
         schemaTracker.add(rootKey, selector);
       }
     });
   }
-
-  for (const key of walk.chasedFamilyKeys) chased.add(key);
 
   const entities = entitiesFromTracker(space, schemaTracker, manager, branch);
   const schemaRefs: SchemaRefScans = new Map();
@@ -1570,8 +1537,6 @@ export const trackGraph = (
     entities,
     memo: sharedMemo,
     manager,
-    roots,
-    chased,
     schemaRefs,
   };
   if (
@@ -1625,9 +1590,8 @@ export const extendTrackedGraph = (
       const selector = toDocumentSelector(root.selector);
       const rootScope = root.scope ?? DEFAULT_SCOPE;
       const rootKey = rootDocKey(space, root, identityOf(manager));
-      state.roots.add(rootKey);
       touched.add(rootKey);
-      const evaluated = evaluateTrackedDocument(
+      evaluateTrackedDocument(
         space,
         manager,
         {
@@ -1643,12 +1607,6 @@ export const extendTrackedGraph = (
         state.memo,
         stats,
       );
-      // The visit chased the named document's full family; an absent
-      // root records nothing, so its later creation re-evaluates it.
-      if (evaluated !== null) {
-        state.chased.add(rootKey);
-        for (const key of evaluated.chasedFamilyKeys) state.chased.add(key);
-      }
     });
   }
 
@@ -1717,13 +1675,7 @@ export const isGraphQueryCoveredByState = (
   query.roots.every((root) => {
     const selector = toDocumentSelector(root.selector);
     const rootKey = rootDocKey(space, root, identityOf(state.manager));
-    // Reach without family is not coverage for a NAMED root: a crossing
-    // may have recorded the selector without chasing the family, and
-    // naming the document entitles the caller to it (extendTrackedGraph's
-    // visit supplies it, cheaply, when the selector itself is already
-    // covered).
-    return schemaTrackerCoversSelector(state.tracker, rootKey, selector) &&
-      state.chased.has(rootKey);
+    return schemaTrackerCoversSelector(state.tracker, rootKey, selector);
   });
 
 export const queryGraph = (
@@ -1884,33 +1836,10 @@ export const refreshTrackedGraph = (
       releaseReferrerMisses(state, key);
     }
 
-    // A document a query named, or one delivered as a member of a named
-    // document's family, is owed its family on every re-walk; a document the
-    // walks merely reached keeps its crossing shape.
-    const roleOf = (key: QueryDocKey) =>
-      state.roots.has(key) || state.chased.has(key)
-        ? "root" as const
-        : "crossing" as const;
-    // A named root that was absent when first tracked earns its family on
-    // the visit that finds it born, and a chase records every member it
-    // loaded so the member's own re-walk chases in turn.
-    const recordChased = (
-      key: QueryDocKey,
-      role: "root" | "crossing",
-      evaluated: EvaluatedDocument | null,
-    ) => {
-      if (evaluated === null || role !== "root") return;
-      state.chased.add(key);
-      for (const chasedKey of evaluated.chasedFamilyKeys) {
-        state.chased.add(chasedKey);
-      }
-    };
-
     for (const [key, selectors] of affectedDocs) {
       const { id, scope, scopeKey } = fromDocKey(key);
-      const role = roleOf(key);
       for (const selector of selectors) {
-        const evaluated = evaluateTrackedDocument(
+        evaluateTrackedDocument(
           space,
           manager,
           { id, scope, scopeKey },
@@ -1919,10 +1848,7 @@ export const refreshTrackedGraph = (
           recorder,
           sharedMemo,
           stats,
-          undefined,
-          role,
         );
-        recordChased(key, role, evaluated);
       }
     }
     phases.enter("misses");
@@ -1935,9 +1861,8 @@ export const refreshTrackedGraph = (
     const stillAbsent = new MapSetStringToPathSelectors(true);
     for (const [key, selectors] of affectedMisses) {
       const { id, scope, scopeKey } = fromDocKey(key);
-      const role = roleOf(key);
       for (const selector of selectors) {
-        const evaluated = evaluateTrackedDocument(
+        evaluateTrackedDocument(
           space,
           manager,
           { id, scope, scopeKey },
@@ -1947,9 +1872,7 @@ export const refreshTrackedGraph = (
           sharedMemo,
           stats,
           stillAbsent,
-          role,
         );
-        recordChased(key, role, evaluated);
       }
       // Retirement is decided by THIS evaluation's own outcome — the
       // throwaway sink received the key iff the doc was still absent. The
@@ -2042,12 +1965,6 @@ export const refreshTrackedGraph = (
   }
 };
 
-/** What `evaluateTrackedDocument` reports of a document it found present. */
-type EvaluatedDocument = {
-  /** The walk's `GraphQueryWalk.chasedFamilyKeys`. */
-  chasedFamilyKeys: ReadonlySet<string>;
-};
-
 const evaluateTrackedDocument = (
   space: string,
   manager: EngineObjectManager,
@@ -2068,8 +1985,7 @@ const evaluateTrackedDocument = (
   // into one batch, say) keeps waiting for a real arrival, so its
   // caller passes a sink the wire never sees.
   absentSink: MapSetStringToPathSelectors = schemaTracker,
-  role: "root" | "crossing" = "root",
-): EvaluatedDocument | null => {
+): void => {
   const docKey: QueryDocKey = address.scopeKey !== undefined
     ? `${space}/${address.scopeKey}/${address.id}`
     : toDocKey(
@@ -2081,7 +1997,7 @@ const evaluateTrackedDocument = (
   const loaded = manager.load(address);
   if (loaded === null || loaded.value === undefined) {
     absentSink.add(docKey, internPathSelector(selector));
-    return null;
+    return;
   }
   // A fresh walk per document, so each starts with an empty pointer-cycle
   // tracker while sharing the query's reach and its memoized schema results.
@@ -2094,8 +2010,7 @@ const evaluateTrackedDocument = (
     memo: sharedMemo,
     stats,
   });
-  walk.visit(loaded, selector, docKey, role);
-  return { chasedFamilyKeys: walk.chasedFamilyKeys };
+  walk.visit(loaded, selector, docKey);
 };
 
 export const toDocKey = (

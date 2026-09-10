@@ -52,3 +52,52 @@ the replace-not-compose policy dated to #3321 (text integrity enforced by
 default). Regression guards: the four "nested text integrity …" steps in
 `test/worker-reconciler-cfc-render-policy.test.ts` (two mount-time, two reactive
 block/unblock).
+
+## Nested pattern outputs
+
+A pattern embedded in another pattern's view reaches the reconciler as one
+cell: the parent's `$UI` holds a link to the sub-pattern's result document, and
+`renderCellChild` fits that cell's label against the ceiling before rendering
+anything below it. A label covering the result document decides the whole
+sub-view — the sub-pattern's headings, its controls, and the render boundaries
+inside it, which the walk stops short of.
+
+The labels a sub-pattern's result document carries are the ones its own fields
+earned. A field aliasing an argument cell carries that cell's label through the
+link machinery. A field fed by a lift or a handler carries the join that
+module makes onto its own result (`applyArgumentIfcToResult`, called from
+`packages/runner/src/builder/module.ts`), except where a built-in sets
+`propagateInputIfc: false` because it resolves label views at run time
+instead — `llmDialog` is the one that does. And under
+`cfcFlowLabels: "persist"` the per-transaction join is written as a `derived`
+component on each value write target; at `observe` it only reaches a
+diagnostic, and at `off` nothing derives it.
+
+The declared result schema adds none of its own: `factoryFromPattern` stores
+the schema the author declared, so a pattern that accepts a confidential
+argument does not thereby label its own view. That division is §8.12.8's. It
+gives the `declared` component schema `ifc` declarations and explicit
+store-label operations under a monotone discipline, and gives a transaction's
+measured dependency to the `derived` component under replace-on-overwrite,
+because a ratchet applied to a measurement is the label creep that section
+opens by ruling out. A join taken over the shape of an argument schema
+measures no transaction, so the declared component is not where it belongs;
+the flow join above is. §8.9.1 reaches the same place from the other side, for
+the collection helpers it is written about: where a runtime can decompose an
+operation, the conservative join is a structural fact of the journal and no
+claim is involved. A pattern body reads no value, so the join over its build
+transaction is empty by construction.
+
+Two consequences follow. The
+render boundaries a sub-pattern declares are reached, so a nested
+`declassifyConfidentiality` reaches the parent policy as a union
+(`childRenderPolicyForNode`), fail-closed to nothing under a
+`"deny"` declassification policy. And the write-policy grant recorded for each
+result binding (`recordOutputSchemaPolicyInputs`) is the schema at that
+binding's own path rather than one raised by a root entry, which narrows the
+grant — the direction that refuses rather than admits.
+
+`packages/runner/test/cfc-argument-ifc-propagation.test.ts` holds each builder
+against its own schema, and `packages/runner/test/pattern.test.ts` measures
+where the label reaches the result instead. The `cfc-render-policy-demo`
+integration test drives the composed case under the ceiling.

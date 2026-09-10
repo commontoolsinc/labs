@@ -232,8 +232,8 @@ export function setsrcRefreshWarning(
  *
  * A listing can be short in two ways, and neither may be silent — the hidden
  * counts always print, and so does the report that the compiled pattern could
- * not be read. The second is not recoverable with `--all`: nothing in this
- * command can name a verb the pattern would have named.
+ * not be read. The second is not recoverable with `--all`: the pattern is the
+ * listing's one source of names, so without it nothing is listed.
  *
  * Held apart from the command action so the exact text a caller sees is
  * assertable without driving cliffy. */
@@ -250,7 +250,7 @@ export function verbListingNotes(
   }
   if (listing.incomplete === "pattern-unavailable") {
     notes.push(
-      "the pattern could not be read, so verbs its result type omits are missing; the verbs listed are still callable",
+      "the pattern could not be read, so no verbs could be listed; a verb the piece stores is still callable by name",
     );
   }
   return notes;
@@ -344,7 +344,7 @@ export function verbListingJson(
 /** The parenthesised notes under a `cf piece describe` page, in print order.
  * The hidden-count note is the verbs listing's own; the incomplete note says
  * more here, because the page loses its purpose, state, and inputs to the
- * same failed pattern read that costs the listing its graph-only verbs. */
+ * same failed pattern read that costs the listing every verb. */
 export function pieceDescribeNotes(
   description: PieceDescription,
   partition: { wrapper: number; deprecated: number },
@@ -358,7 +358,7 @@ export function pieceDescribeNotes(
   }
   if (description.incomplete === "pattern-unavailable") {
     notes.push(
-      "the pattern could not be read, so its purpose, state, and inputs are missing, and so are verbs its result type omits; the verbs listed are still callable",
+      "the pattern could not be read, so its purpose, state, inputs, and verbs are missing; a verb the piece stores is still callable by name",
     );
   }
   return notes;
@@ -2555,7 +2555,7 @@ export const piece = targetOptions(
   )
   .option(
     "--check",
-    "Report whether the source could replace the piece's current one, without updating the piece. Exits non-zero when it could not.",
+    "Report whether the source could replace the piece's current one, without issuing storage writes. Exits non-zero when it could not.",
   )
   .arguments("<main:string>")
   .action(async (options, mainPath) => {

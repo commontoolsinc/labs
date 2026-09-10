@@ -3804,13 +3804,25 @@ export class PieceController<T = unknown> {
   }
 
   /**
+   * Helper for the meta reads below, which is the piece cell with no schema.
+   * A meta read registers a load of the document under the reading cell's
+   * schema, and this cell's is the pattern's result schema, so a read
+   * through it asks storage for every document the result reaches — a
+   * board's whole index — to answer one meta field. The schema-less view
+   * loads the document alone.
+   */
+  #metaView(): Cell<T> {
+    return this.#cell.asSchema(undefined);
+  }
+
+  /**
    * The piece's pattern pointer: the durable meta, or — for a KEYLESS piece
    * in the session that set it up — the runner's session-side pointer (the
    * never-durable contract, L3(a) RULED 2026-08-27: a keyless piece stamps
    * nothing durably; a fresh session correctly finds neither).
    */
   #patternPointer(): { identity: string; symbol: string } | undefined {
-    return getPatternIdentityRef(this.#cell) ??
+    return getPatternIdentityRef(this.#metaView()) ??
       this.#pieces.runtime.runner.sessionPatternPointerFor(this.#cell);
   }
 
@@ -3824,9 +3836,9 @@ export class PieceController<T = unknown> {
         ref: { kind: "uri", scheme: "pattern", hash: ref.identity },
       }),
     };
-    const repository = getPatternRepository(this.#cell);
+    const repository = getPatternRepository(this.#metaView());
     if (repository !== undefined) source.repository = repository;
-    const trackedSource = getPatternSource(this.#cell);
+    const trackedSource = getPatternSource(this.#metaView());
     if (trackedSource !== undefined) source.origin = trackedSource;
 
     try {
@@ -3941,7 +3953,10 @@ export class PieceController<T = unknown> {
   }
 
   async #loadCurrentPattern(
-    { projectResult = true }: { projectResult?: boolean } = {},
+    { projectResult = true, repairCache = true }: {
+      projectResult?: boolean;
+      repairCache?: boolean;
+    } = {},
   ): Promise<{
     pattern: Pattern;
     ref: { identity: string; symbol: string };
@@ -3955,6 +3970,7 @@ export class PieceController<T = unknown> {
       ref.identity,
       ref.symbol,
       this.#pieces.getSpace(),
+      { repairCache },
     );
     if (!pattern) {
       throw new Error(
@@ -4333,9 +4349,7 @@ export class PieceController<T = unknown> {
         }
       }
 
-      candidate = await compileProgram(this.#pieces, program, {
-        previousEntryIdentity: previousRef.identity,
-      });
+      candidate = await compileProgram(this.#pieces, program);
       const candidateRef = this.#pieces.runtime.patternManager
         .getArtifactEntryRef(candidate);
       if (candidateRef === undefined) {
@@ -4512,28 +4526,21 @@ export class PieceController<T = unknown> {
   }
 
   /**
-   * Would `setPattern(program)` be accepted? Answers without changing the piece.
-   *
-   * Drives the SAME review the apply path runs — no second copy of the rules,
-   * because a preflight that reimplements them drifts and starts lying.
-   *
-   * It is not, however, a pure read. Compiling the candidate goes through
-   * `compileAndSavePattern`, which writes the compiled module set and its
-   * source docs into the space's content-addressed store (CT-1623) — the same
-   * write the apply would do, idempotent, and attached to nothing. What it
-   * does NOT do is touch the piece: no pointer move, no argument re-stage, no
-   * source transition, no revision. So a refused check leaves the piece
-   * running exactly what it was running, which is the guarantee a caller
-   * actually needs; it does not leave the space byte-identical.
+   * Review a candidate with the same compatibility rules used by source setup.
+   * Compilation and source loading reuse verified caches without writing to
+   * storage or creating module-update authority. Reads retain their normal
+   * server-demand semantics. Apply validates retained input and source currency
+   * again at commit time.
    */
   async checkPattern(
     program: RuntimeProgram,
   ): Promise<PatternCompatibilityReport> {
-    const { pattern: previousPattern, ref: previousRef } = await this
-      .#loadCurrentPattern();
-    const candidate = await compileProgram(this.#pieces, program, {
-      previousEntryIdentity: previousRef.identity,
-    });
+    const { pattern: previousPattern } = await this
+      .#loadCurrentPattern({ repairCache: false });
+    const candidate = await this.#pieces.runtime.patternManager.compilePattern(
+      program,
+      { space: this.#pieces.getSpace(), persist: false },
+    );
     const candidateRef = this.#pieces.runtime.patternManager
       .getArtifactEntryRef(candidate);
     if (candidateRef === undefined) {
@@ -4666,13 +4673,7 @@ export class PieceController<T = unknown> {
             ? { allowUnavailable: true }
             : {},
         );
-        const pattern = await compileProgram(
-          this.#pieces,
-          program,
-          baseline.kind === "retain"
-            ? { previousEntryIdentity: previousRef.identity }
-            : {},
-        );
+        const pattern = await compileProgram(this.#pieces, program);
         const candidate = this.#pieces.runtime.patternManager
           .getArtifactEntryRef(pattern);
         if (candidate === undefined) {
@@ -4949,18 +4950,31 @@ async function syncRetainedLinkMetadata(
     roots.set(JSON.stringify([space, id, scope]), root);
   }
   await Promise.all([...roots.values()].map(async (root) => {
-    // Naming the source root loads its metadata family, including the owner
-    // result of an argument/internal document. A value crossing loads only
-    // the selected value and does not establish that contract evidence.
+    // Naming the source root loads the document with its metadata; a value
+    // crossing loads only the selected value and does not establish that
+    // contract evidence. The owner result an argument or internal document
+    // names through its `result` backlink is a document of its own, named
+    // in turn: the contract reads its metadata, and the store delivers no
+    // link target with the document that carries the link.
     await root.sync();
     const link = root.getAsNormalizedFullLink();
+    let metaRoot = root;
     if (
       link.scope !== "space" && root.getMetaRaw("schema") === undefined &&
       root.getMetaRaw("result") === undefined
     ) {
       // Scoped input redirects keep their producer metadata in base scope;
       // scoped results instead own their metadata in the selected partition.
-      await pieces.runtime.getCellFromLink({ ...link, scope: "space" }).sync();
+      metaRoot = pieces.runtime.getCellFromLink({ ...link, scope: "space" });
+      await metaRoot.sync();
+    }
+    const ownerLink = getMetaLink(metaRoot, "result");
+    if (ownerLink !== undefined) {
+      await pieces.runtime.getCellFromLink({
+        ...ownerLink,
+        path: [],
+        schema: undefined,
+      }).sync();
     }
   }));
 }

@@ -9,6 +9,7 @@ export { Runtime } from "./runtime.ts";
 export {
   fabricAuthorityMatchesSpaceHost,
   type FabricSpaceHostOptions,
+  isLoopbackHostname,
   normalizeSpaceHost,
   spaceHostFromFabricAuthority,
   SpaceHostValidationError,
@@ -71,13 +72,14 @@ export {
   type MetaLinkField,
 } from "./meta-seam.ts";
 export type { NormalizedFullLink, NormalizedLink } from "./link-types.ts";
-export { encodeJsonPointer } from "./link-types.ts";
+export { decodeJsonPointer, encodeJsonPointer } from "./link-types.ts";
 export type { SigilLink, URI } from "./sigil-types.ts";
 export {
   createRef,
   type EntityId,
   entityIdFrom,
   getEntityId,
+  idStringForEntityAddress,
 } from "./create-ref.ts";
 export type { CellResult as QueryResult } from "./query-result-proxy.ts";
 export type {
@@ -230,6 +232,7 @@ export {
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
   SEALING_RECEIPT_REFUSAL,
+  SEALING_SOURCE_UPDATE_REFUSAL,
   setPatternRepository,
   setPatternSource,
   setPieceReconciliation,
@@ -312,6 +315,7 @@ export {
 } from "./cfc.ts";
 export type { Mutable } from "@commonfabric/utils/types";
 export {
+  type ActionReadStats,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   type RuntimeTelemetryMarker,

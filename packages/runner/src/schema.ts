@@ -18,6 +18,7 @@ import {
   isNontrivialSchema,
   schemaWithProperties,
 } from "@commonfabric/data-model-schema";
+import { readStatsActive, recordLinkResolution } from "./read-stats.ts";
 import {
   readMaybeLink,
   resolveLink,
@@ -55,6 +56,7 @@ import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
 } from "./cfc.ts";
+import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForDereference,
@@ -143,7 +145,7 @@ const asCellCompoundCandidates = (
   if (branches.length > 0) {
     const { anyOf: _anyOf, oneOf: _oneOf, ...baseSchema } = schema;
     for (const branch of branches) {
-      const branchWithDefs = branchWithParentDefs(schema, branch);
+      const branchWithDefs = cfcSchemaWithInheritedDefs(branch, schema.$defs);
       const resolved = resolveSchema(branchWithDefs) ?? branchWithDefs;
       const merged = combineSchema(baseSchema as JSONSchemaObj, resolved);
       if (
@@ -229,46 +231,6 @@ const labelViewForLink = (
   return rebaseCfcLabelView(baseView, link.path);
 };
 
-const containsLocalRef = (
-  schema: JSONSchema,
-  seen: Set<JSONSchema> = new Set(),
-): boolean => {
-  if (!isObjectOrArray(schema) || seen.has(schema)) {
-    return false;
-  }
-  seen.add(schema);
-  if (typeof schema.$ref === "string" && schema.$ref.startsWith("#/")) {
-    return true;
-  }
-  return Object.entries(schema).some(([key, value]) => {
-    if (key === "$defs" || key === "definitions") {
-      return false;
-    }
-    if (Array.isArray(value)) {
-      return value.some((item) => containsLocalRef(item as JSONSchema, seen));
-    }
-    return containsLocalRef(value as JSONSchema, seen);
-  });
-};
-
-const branchWithParentDefs = (
-  parent: JSONSchemaObj,
-  branch: JSONSchema,
-): JSONSchema => {
-  if (
-    !isObjectOrArray(branch) ||
-    branch.$defs !== undefined ||
-    !isObjectOrArray(parent.$defs) ||
-    !containsLocalRef(branch)
-  ) {
-    return branch;
-  }
-  return {
-    ...branch,
-    $defs: parent.$defs,
-  } satisfies JSONSchemaObj;
-};
-
 const matchesConcreteValue = (
   schema: JSONSchema,
   value: unknown,
@@ -304,8 +266,8 @@ const matchesConcreteValue = (
       matchesConcreteValue(
         combineSchema(
           rest as JSONSchemaObj,
-          resolveSchema(branchWithParentDefs(resolved, branch)) ??
-            branchWithParentDefs(resolved, branch),
+          resolveSchema(cfcSchemaWithInheritedDefs(branch, resolved.$defs)) ??
+            cfcSchemaWithInheritedDefs(branch, resolved.$defs),
         ),
         value,
       )
@@ -317,8 +279,8 @@ const matchesConcreteValue = (
       matchesConcreteValue(
         combineSchema(
           rest as JSONSchemaObj,
-          resolveSchema(branchWithParentDefs(resolved, branch)) ??
-            branchWithParentDefs(resolved, branch),
+          resolveSchema(cfcSchemaWithInheritedDefs(branch, resolved.$defs)) ??
+            cfcSchemaWithInheritedDefs(branch, resolved.$defs),
         ),
         value,
       )
@@ -329,7 +291,7 @@ const matchesConcreteValue = (
     return Object.entries(resolved.properties).every(([key, childSchema]) =>
       value[key] === undefined ||
       matchesConcreteValue(
-        branchWithParentDefs(resolved, childSchema),
+        cfcSchemaWithInheritedDefs(childSchema, resolved.$defs),
         value[key],
       )
     );
@@ -346,7 +308,7 @@ const matchesConcreteValue = (
       value,
       (childSchema, childValue) =>
         matchesConcreteValue(
-          branchWithParentDefs(resolved, childSchema),
+          cfcSchemaWithInheritedDefs(childSchema, resolved.$defs),
           childValue,
         ),
     );
@@ -466,8 +428,8 @@ const selectMatchingCompoundBranch = (
   const baseSchema = rest as JSONSchemaObj;
   const matches = branches.flatMap((branch) => {
     const resolvedBranch =
-      resolveSchema(branchWithParentDefs(schema, branch)) ??
-        branchWithParentDefs(schema, branch);
+      resolveSchema(cfcSchemaWithInheritedDefs(branch, schema.$defs)) ??
+        cfcSchemaWithInheritedDefs(branch, schema.$defs);
     const merged = combineSchema(baseSchema, resolvedBranch);
     return matchesConcreteValue(merged, value) ? [merged] : [];
   });
@@ -511,7 +473,7 @@ export function resolveSchemaForValue(
   for (const [key, childSchema] of Object.entries(narrowed.properties)) {
     const childValue = value[key];
     const resolvedChild = resolveSchemaForValue(
-      branchWithParentDefs(narrowed, childSchema),
+      cfcSchemaWithInheritedDefs(childSchema, narrowed.$defs),
       childValue,
     );
     if (resolvedChild !== undefined && resolvedChild !== childSchema) {
@@ -812,7 +774,10 @@ export function processDefaultValue(
       }
       // Thread the array schema's $defs so a $ref slot resolves during
       // recursive default processing (PR #4969 review).
-      return branchWithParentDefs(resolvedSchema, covering as JSONSchema);
+      return cfcSchemaWithInheritedDefs(
+        covering as JSONSchema,
+        resolvedSchema.$defs,
+      );
     };
 
     const result = defaultValue.map((item, i) =>
@@ -1176,6 +1141,7 @@ export function validateAndTransform(
     // We've already followed all the writeRedirect links above.
     const next = readMaybeLink(tx, link);
     if (next !== undefined) {
+      if (readStatsActive) recordLinkResolution(tx);
       // This one-step hop bypasses resolveLink and the traversal, so it
       // carries the crossing seam itself (the schema.ts twin of
       // getNextCellLink).
@@ -1318,7 +1284,6 @@ export function validateAndTransform(
     createDefaultTraversalContext(
       runIdentity ?? runtime.scopeKeyIdentity,
       options?.traverseCells ?? false,
-      undefined,
       undefined,
       // Absent link targets get an async load kicked (cross-space always;
       // same-space only when the replica has never seen the doc); the

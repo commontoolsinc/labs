@@ -158,14 +158,17 @@ setting to fix.
 | `ENVIRONMENTAL_MIN_SOURCES` | 5 | sources | chosen | How many distinct sources a failure must span inside `CATCH_BREADTH_WINDOW_DAYS` before it reads as the environment. Up when a genuinely broad regression is written off; down when a broken runner's failures still count as catches. |
 | `CHURN_HALF_LIFE_DAYS` | 14 | days | chosen | Up when recent trouble should stay relevant for longer; down when a problem already fixed keeps its tests selected for weeks afterwards. |
 | `CHURN_WINDOW_DAYS` | 60 | days | chosen | How far back the decayed counts are read. Past this the weight is under one part in sixteen, so moving it is a performance decision rather than a policy one. |
-| `FLAKE_WINDOW_DAYS` | 60 | days | chosen | Up when a flake rate swings about on too little evidence; down when a test that has since been fixed stays excluded. |
+| `FLAKE_HALF_LIFE_RUNS` | 200 | runs | chosen | How many runs without disagreeing halve what a disagreement counts for. It is also how much evidence the share is measured over, so far below one over `FLAKE_EXCLUSION_RATE` the share swings about on too little: up when it does; down when a test that has plainly settled is still judged by what it did. |
+| `FLAKE_WINDOW_DAYS` | 60 | days | chosen | How far back the counts are read at all. The weight decays by runs rather than by days, so this bounds what is remembered rather than marking where the weight has faded: a test that runs rarely can still be carrying weight when its days fall off the end. |
 | `COST_WINDOW_DAYS` | 7 | days | chosen | Up when cost estimates are noisy; down when durations drift with the code or the runner image faster than the estimate follows. |
 | `FILL_VALUE_SHARE` | 0.6 | share of the run's budget | chosen | Up when expensive high-value tests are crowded out by cheap ones; down when a lane spends its budget on a few slow tests and runs little else. The three shares sum to one. |
 | `FILL_DENSITY_SHARE` | 0.25 | share of the run's budget | chosen | Up when more of the cheap tail should run; down when the tail is displacing tests with a record. |
 | `FILL_EXPLORATION_SHARE` | 0.15 | share of the run's budget | chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
-| `FLAKE_EXCLUSION_RATE` | 0.05 | share of runs | chosen | Up when fewer tests should be held back from pull requests; down when flakes are still blocking people. |
-| `FLAKE_REPEAT_RATES` | 0.01, 0.03 | share of runs | chosen | Up when repeats cost more lane time than the intermittent failures they catch are worth; down when intermittent failures are still slipping through. Every band stays under `FLAKE_EXCLUSION_RATE`, or an item is excluded before it reaches the band and the band never fires. |
-| `MAX_REPEATS` | 3 | runs of one item | chosen | Up when intermittent regressions still get through; down when repeats are crowding a lane. |
+| `FLAKE_EXCLUSION_RATE` | 0.005 | share of runs | chosen | Up when fewer tests should be held back from pull requests; down when flakes are still blocking people. |
+| `FLAKE_MIN_EXECUTIONS` | 2 | runs of one item | chosen | What an item that has ever disagreed runs. Down to one when the cheapest evidence of intermittency is not worth a second execution; nowhere useful above two, since the line through the anchor covers everything flakier. |
+| `FLAKE_ANCHOR_RATE` | 0.01 | share of runs | chosen | With `FLAKE_ANCHOR_EXECUTIONS`, the point the count's line passes through. Down to make the count climb faster with the rate; up to make it climb slower. |
+| `FLAKE_ANCHOR_EXECUTIONS` | 5 | runs of one item | chosen | What an item at `FLAKE_ANCHOR_RATE` runs. Up when intermittent regressions still get through; down when executions crowd a lane. |
+| `MAX_EXECUTIONS` | 10 | runs of one item | chosen | Where the line stops. Up when the flakiest items a change forces in still are not proven by what runs; down when they crowd a lane. |
 | `SUITE_FLAKE_PRIOR_RATE` | 0.02 | share of runs | chosen | Up when too many suites count as flake-prone and their new items are repeated needlessly; down when new tests in a noisy suite land unrepeated and then flake. |
 | `COVERAGE_COMMENT_LINES` | 25 | lines | chosen | Up when coverage comments are too noisy; down when debt is climbing unnoticed. |
 | `LOCAL_COVERAGE_MAX_SECONDS` | 30 | seconds | chosen | Up when too many packages are reported as expensive for the report to be worth reading; down when one is quietly eating a lane. Nothing is excluded either way; it only decides what the summary mentions. |
@@ -471,6 +474,19 @@ nothing has been recorded twice with no unit.
 A run folding into an empty aggregate has nothing to compare against, and
 says neither.
 
+## What the run on the default branch does with a flaky test
+
+A test whose flake share is above `FLAKE_EXCLUSION_RATE` is not selected
+for a change. Where it may be run without its neighbours, the run on the
+default branch runs it as many times as its share asks for and does not
+fail for it, so it goes on being measured while it is out of changes, and
+a green run of the default branch can carry a failure of one of these
+tests and still deploy. `explain <identity>` says of any test whether the
+newest manifest withholds it and how many runs it is given. The lanes are
+what carry this, so it describes what lands with them rather than what runs
+today, and the reasoning behind each part is in [the
+plan](../plans/pull-request-test-selection.md#an-excluded-test-still-runs-on-main).
+
 ## What the wall shows
 
 Two tiles read the newest manifest. The flake tile reports how many tests
@@ -530,7 +546,7 @@ A commit whose subject names a number that is not a pull request gets
 nothing. An issue takes comments the same way a pull request does, so
 the number is looked up before anything is written.
 
-The comment carries up to six notes, and it carries a note only when the
+The comment carries up to seven notes, and it carries a note only when the
 run found something the pull request's own run could not have found for
 itself.
 
@@ -587,6 +603,15 @@ itself.
   every test in the missing part look new — which passed and failed at
   this one commit, across the repeats a lane runs, across shards and
   across attempts.
+- **A test too flaky for a change that failed every one of its runs at
+  this commit and passed every one at the parent.** Those failures do not
+  fail the run, so the lane's job summary is the only other place they
+  appear, and nobody reads the summary of a run that passed. It says the
+  test is one the store has seen disagreeing with itself, that the run
+  stayed green, and that one bad runner produces the same record, since
+  every run of a test at a commit shares a lane. The
+  extra runs are what make the observation possible, so this note is
+  silent until they land.
 - **A rename that discarded history**, with the number of catches it
   would bring back and the line to append to
   `tasks/test-identity-aliases.jsonl`. Four things have to hold: the
@@ -611,8 +636,9 @@ is counted per author, per team, or per anything, and no history is kept:
 each comment is a pure function of one run, and no tile, report or query
 rolls them up. A test the selector declined to run is described as
 coverage this design traded away, because the author did not miss it. A
-test the store knows disagrees with itself is labelled as one. And the
-comment is edited in place rather than repeated, which the hidden marker
+test the store has seen disagreeing with itself is labelled as one, with
+the counts behind the label rather than a figure to be taken on trust.
+And the comment is edited in place rather than repeated, which the hidden marker
 at the top makes possible; a later attempt that finds nothing withdraws
 what an earlier one said.
 
