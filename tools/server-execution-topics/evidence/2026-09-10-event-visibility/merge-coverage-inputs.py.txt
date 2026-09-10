@@ -1,0 +1,27 @@
+"""Normalize captured source paths and join CI/focused LCOV inputs for scoring."""
+
+from pathlib import Path
+import sys
+
+ci_directory, focused_file, output_directory, checkout = map(Path, sys.argv[1:])
+output_directory.mkdir(parents=True, exist_ok=True)
+
+
+def normalize(text):
+    lines = []
+    for line in text.splitlines():
+        if line.startswith("SF:"):
+            positions = [line.find(marker) for marker in ("/packages/", "/tasks/")]
+            positions = [position for position in positions if position >= 0]
+            if positions:
+                line = "SF:" + str(checkout.resolve()) + line[min(positions):]
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+reports = [normalize(path.read_text()) for path in sorted(ci_directory.rglob("*.lcov"))]
+if not reports:
+    raise ValueError("No CI LCOV files found")
+(output_directory / "ci-normalized.lcov").write_text("\n".join(reports))
+reports.append(normalize(focused_file.read_text()))
+(output_directory / "ci-plus-controls.lcov").write_text("\n".join(reports))

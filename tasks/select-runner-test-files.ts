@@ -1,5 +1,8 @@
 #!/usr/bin/env -S deno run --allow-read
 
+import { walk } from "@std/fs/walk";
+import { fromFileUrl, relative, SEPARATOR } from "@std/path";
+
 import { parseShard } from "./shard-utils.ts";
 import { RUNNER_TEST_WEIGHTS } from "./test-timing-weights.ts";
 import { assignWeightedShards } from "./weighted-shards.ts";
@@ -22,14 +25,22 @@ export function selectRunnerTestFiles(
     .sort();
 }
 
-export async function listRunnerTests(): Promise<{ name: string }[]> {
-  const testDir = new URL("../packages/runner/test/", import.meta.url);
+/** Lists every `.test.ts` file by its path relative to the test directory. */
+export async function listRunnerTests(
+  testDir = new URL("../packages/runner/test/", import.meta.url),
+): Promise<{ name: string }[]> {
   const files: { name: string }[] = [];
 
-  for await (const entry of Deno.readDir(testDir)) {
-    if (entry.isFile && entry.name.endsWith(".test.ts")) {
-      files.push({ name: entry.name });
-    }
+  for await (
+    const entry of walk(testDir, {
+      includeDirs: false,
+      includeSymlinks: false,
+      match: [/\.test\.ts$/],
+    })
+  ) {
+    const name = relative(fromFileUrl(testDir), entry.path)
+      .split(SEPARATOR).join("/");
+    files.push({ name });
   }
 
   files.sort((a, b) => a.name.localeCompare(b.name));

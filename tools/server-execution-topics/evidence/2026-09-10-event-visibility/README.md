@@ -111,3 +111,46 @@ identify the code evaluated.
 `review-manifest-control.json` records a fresh ON baked-server run of a trivial
 Deno command to verify relative artifact addressing and provenance retention. It
 tests the capture helper, not the topics workload or client rendering.
+
+## CI discovery and complete teardown controls
+
+The runner CI collector recursively includes `*.test.ts` files below the package
+test directory. Relative paths distinguish equal basenames in separate
+subdirectories. `runner-discovery.patch` includes the collector change and its
+nested-file regression; apply it with `git apply --unidiff-zero` to the recorded
+base with the fixed runtime patch. Run
+`deno test -A tasks/select-runner-test-files.test.ts` from the root. The
+discovery regression fails with the original collector and passes with the
+patch. Existing shard weighting and exactly-once selection controls also pass.
+
+`coverage-controls.ts.txt` contains fifteen event-visibility cases. Copy it to
+`packages/runner/test/executor/space-server-event-visibility.test.ts` after
+applying the fixed runtime patch. It extends teardown coverage to sidecar sync,
+publication, and response boundaries, with success and failure after tenure
+ends. Run the same focused Deno command used by the matched controls, naming
+this test file instead of the probe. Every case asserts durable outcomes.
+
+`coverage-discovery.json` contains the discovery red/green output, focused
+coverage output, and the comparison against CI run 34454889755. The expanded
+suite covers 25 lines omitted from that CI report. Merging its local LCOV with
+the downloaded report yields runner debt 5,484, equal to that run's baseline;
+the recorded CI report alone measured 5,509. This is a coverage diagnosis, not a
+replacement for a successful CI run.
+
+`verifier-path-controls.json` records relative-directory and absolute-directory
+with spaces controls. A source mutation that accepts only topic count 5 passes
+the recorded verifier but fails the current verifier on count 1. The current
+verifier checks the default and positive counts 1, 2, and 5 against the positive
+integer contract. The original verifier is available at the PR's parent commit
+6ac3f8a2624463be00a14eea4b22ca0fc17c6ccc; commands in the control record
+preserve the capture machine's provenance.
+
+The LCOV inputs remain in the durable archive named in
+`coverage-discovery.json`, with its SHA-256 and retrieval/normalization/scoring
+commands. `coverage-inputs.sha256` lists every extracted input. The archive
+contains all 228 CI reports and the focused report, so replay does not depend on
+GitHub artifact retention. `merge-coverage-inputs.py.txt` rewrites source paths
+to the replay checkout and produces both joined reports. The scorer is the
+repository's `collectCoverageDebtMetricsFromLcov`, invoked by the exact
+JavaScript recorded in the manifest. Report byte hashes depend on the checkout
+path; the expected metric values do not.
