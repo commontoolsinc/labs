@@ -92,12 +92,19 @@ export interface MatrixConfig {
   optionCounts: readonly number[];
   userCounts: readonly number[];
   voteRounds: number;
+  /**
+   * How many users cast in each vote round, counted from the host; the rest
+   * only observe. `undefined` has every user cast.
+   */
+  voters?: number;
 }
 
 export interface CaseConfig {
   optionCount: number;
   userCount: number;
   voteRounds: number;
+  /** How many users cast, counted from the host; `undefined` is all of them. */
+  voters?: number;
 }
 
 interface CompactSessionSample {
@@ -160,11 +167,21 @@ interface PhaseSample {
   sessions: readonly CompactSessionSample[];
 }
 
-interface ChurnTotals {
+interface ChurnCounts {
   commitConflicts: number;
   commitPreempted: number;
   commitReverts: number;
   commitRejected: number;
+}
+
+interface SessionChurn extends ChurnCounts {
+  label: string;
+  /** Whether this session cast in the vote rounds or only observed. */
+  voter: boolean;
+}
+
+interface ChurnTotals extends ChurnCounts {
+  sessions: SessionChurn[];
 }
 
 export interface CaseResult {
@@ -172,6 +189,7 @@ export interface CaseResult {
     users: number;
     options: number;
     voteRounds: number;
+    voters: number;
   };
   churn: ChurnTotals;
   convergence: ConvergenceResult;
@@ -180,23 +198,38 @@ export interface CaseResult {
 
 async function collectChurn(
   sessions: readonly MultiRuntimeSession[],
+  voters: readonly MultiRuntimeSession[],
 ): Promise<ChurnTotals> {
   const totals: ChurnTotals = {
     commitConflicts: 0,
     commitPreempted: 0,
     commitReverts: 0,
     commitRejected: 0,
+    sessions: [],
   };
   for (const session of sessions) {
     const counts = await session.loggerCounts();
     const storage = counts["storage.v2"] ?? {};
-    totals.commitConflicts += storage["commit-conflict"]?.total ?? 0;
-    totals.commitPreempted += storage["commit-preempted"]?.total ?? 0;
-    totals.commitReverts += storage["commit-revert"]?.total ?? 0;
-    totals.commitRejected += storage["commit-rejected"]?.total ?? 0;
+    const churn: SessionChurn = {
+      label: session.label,
+      voter: voters.includes(session),
+      commitConflicts: storage["commit-conflict"]?.total ?? 0,
+      commitPreempted: storage["commit-preempted"]?.total ?? 0,
+      commitReverts: storage["commit-revert"]?.total ?? 0,
+      commitRejected: storage["commit-rejected"]?.total ?? 0,
+    };
+    totals.sessions.push(churn);
+    totals.commitConflicts += churn.commitConflicts;
+    totals.commitPreempted += churn.commitPreempted;
+    totals.commitReverts += churn.commitReverts;
+    totals.commitRejected += churn.commitRejected;
   }
   return totals;
 }
+
+const formatChurn = (churn: ChurnCounts): string =>
+  `conflicts=${churn.commitConflicts} preempted=${churn.commitPreempted} ` +
+  `reverts=${churn.commitReverts} rejected=${churn.commitRejected}`;
 
 export interface ConvergenceResult {
   converged: boolean;
@@ -741,6 +774,7 @@ export async function runCase(config: CaseConfig): Promise<CaseResult> {
   );
   const sessions = labels.map((label) => harness.session(label));
   const host = sessions[0];
+  const voters = sessions.slice(0, config.voters ?? sessions.length);
 
   try {
     // Standing in for the `#profile` wish, which is what a browser viewer
@@ -784,7 +818,7 @@ export async function runCase(config: CaseConfig): Promise<CaseResult> {
           const ids = await optionIds(host);
           if (ids.length === 0) return;
           await Promise.all(
-            sessions.map((session, index) =>
+            voters.map((session, index) =>
               session.send("castVote", {
                 optionId: ids[(round + index) % ids.length],
                 voteType: VOTE_COLORS[(round + index) % VOTE_COLORS.length],
@@ -802,13 +836,18 @@ export async function runCase(config: CaseConfig): Promise<CaseResult> {
       }
     }
 
-    const churn = await collectChurn(sessions);
+    const churn = await collectChurn(sessions, voters);
     console.error(
       `[lunch-poll diagnose] churn ${config.optionCount}x${config.userCount} ` +
         `admission=${Deno.env.get("CF_CONFLICT_ADMISSION") ?? "0"}: ` +
-        `conflicts=${churn.commitConflicts} preempted=${churn.commitPreempted} ` +
-        `reverts=${churn.commitReverts} rejected=${churn.commitRejected}`,
+        formatChurn(churn),
     );
+    for (const session of churn.sessions) {
+      console.error(
+        `[lunch-poll diagnose]   ${session.label} ` +
+          `(${session.voter ? "voter" : "observer"}): ${formatChurn(session)}`,
+      );
+    }
 
     // Settle once more, then assert all sessions converged on the shared state.
     await harness.settle(5);
@@ -831,6 +870,7 @@ export async function runCase(config: CaseConfig): Promise<CaseResult> {
         users: config.userCount,
         options: config.optionCount,
         voteRounds: config.voteRounds,
+        voters: voters.length,
       },
       churn,
       convergence,
@@ -902,6 +942,7 @@ function explicitCasesArg(
       optionCount,
       userCount,
       voteRounds: config.voteRounds,
+      voters: config.voters,
     }];
   });
   return cases.length > 0 ? cases : undefined;
@@ -939,7 +980,23 @@ export function matrixConfigFromArgs(
       args,
     ),
     voteRounds: numberArg("rounds", quick ? 1 : 3, args),
+    voters: votersArg(args),
   };
+}
+
+/**
+ * `--voters=N` has only the first `N` users cast in each vote round, the host
+ * among them, while the rest only observe. Absent, every user casts.
+ */
+function votersArg(args: readonly string[]): number | undefined {
+  const prefix = "--voters=";
+  const arg = args.find((entry) => entry.startsWith(prefix));
+  if (!arg) return undefined;
+  const parsed = Number(arg.slice(prefix.length));
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`--voters must be an integer >= 1; got ${arg}`);
+  }
+  return parsed;
 }
 
 export function casesFromConfig(
@@ -956,6 +1013,7 @@ export function casesFromConfig(
         optionCount,
         userCount,
         voteRounds: config.voteRounds,
+        voters: config.voters,
       });
     }
   }
@@ -985,7 +1043,10 @@ async function run(): Promise<void> {
   for (const caseConfig of cases) {
     console.error(
       `[lunch-poll diagnose] case ${caseConfig.optionCount} options x ` +
-        `${caseConfig.userCount} users, rounds=${caseConfig.voteRounds}`,
+        `${caseConfig.userCount} users, rounds=${caseConfig.voteRounds}` +
+        (caseConfig.voters === undefined
+          ? ""
+          : `, voters=${caseConfig.voters}`),
     );
     try {
       results.push({ ok: true, result: await runCase(caseConfig) });

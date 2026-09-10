@@ -31,6 +31,7 @@ describe("lunch-poll-diagnose", () => {
       optionCounts: [14],
       userCounts: [1],
       voteRounds: 3,
+      voters: undefined,
     });
 
     expect(() => matrixConfigFromArgs(["--production", "--quick"]))
@@ -42,19 +43,24 @@ describe("lunch-poll-diagnose", () => {
       "--options=2,4",
       "--users=3",
       "--rounds=5",
+      "--voters=2",
     ])).toEqual({
       program: "previous.tsx",
       optionCounts: [2, 4],
       userCounts: [3],
       voteRounds: 5,
+      voters: 2,
     });
+
+    expect(() => matrixConfigFromArgs(["--voters=0"]))
+      .toThrow("--voters must be an integer >= 1");
 
     const explicitArgs = ["--production", "--rounds=2", "--cases=2x3,4x5"];
     expect(
       casesFromConfig(matrixConfigFromArgs(explicitArgs), explicitArgs),
     ).toEqual([
-      { optionCount: 2, userCount: 3, voteRounds: 2 },
-      { optionCount: 4, userCount: 5, voteRounds: 2 },
+      { optionCount: 2, userCount: 3, voteRounds: 2, voters: undefined },
+      { optionCount: 4, userCount: 5, voteRounds: 2, voters: undefined },
     ]);
   });
 
