@@ -148,7 +148,7 @@ export function doMapContents<DomainExtra>(
  * process it further, and there is no specific value to return from (this part
  * of) the visit.
  */
-export type BaselineVisitResult<ResultType> =
+export type BaselineVisitResult<ResultType = FabricValue> =
   | MainResultForm<ResultType>
   | undefined;
 
@@ -158,7 +158,7 @@ export type BaselineVisitResult<ResultType> =
  *
  * See the included result types for details on what they mean.
  */
-export type ContainerIterationResult<ResultType> =
+export type ContainerIterationResult<ResultType = FabricValue> =
   | BaselineVisitResult<ResultType>
   | RecurseForm;
 
@@ -168,7 +168,10 @@ export type ContainerIterationResult<ResultType> =
  *
  * See the included result types for details on what they mean.
  */
-export type DispatchingVisitorResult<DomainExtra, ResultType> =
+export type DispatchingVisitorResult<
+  DomainExtra = never,
+  ResultType = FabricValue,
+> =
   | LeafVisitorResult<DomainExtra, ResultType>
   | VisitSubtypeForm;
 
@@ -183,7 +186,7 @@ export type DispatchingVisitorResult<DomainExtra, ResultType> =
  *
  * See the included result types for details on what they mean.
  */
-export type LeafVisitorResult<DomainExtra, ResultType> =
+export type LeafVisitorResult<DomainExtra = never, ResultType = FabricValue> =
   | BaselineVisitResult<ResultType>
   | ReplaceForm<DomainExtra>
   | ArrayContentsForm<DomainExtra>
@@ -300,8 +303,10 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
  * Base implementation of `ValueVisitor`, which leaves all visitor methods
  * `abstract` and includes `protected` helper methods.
  */
-export abstract class BaseValueVisitor<DomainExtra, ResultType>
-  implements ValueVisitor<DomainExtra, ResultType> {
+export abstract class BaseValueVisitor<
+  DomainExtra = never,
+  ResultType = FabricValue,
+> implements ValueVisitor<DomainExtra, ResultType> {
   //
   // Subclass contract
   //
@@ -379,7 +384,7 @@ export abstract class BaseValueVisitor<DomainExtra, ResultType>
  * returns `undefined`. This is meant to be a reasonable base class for more
  * useful visitors, not to be particularly useful by itself.
  */
-export class EmptyValueVisitor<DomainExtra, ResultType>
+export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
   extends BaseValueVisitor<DomainExtra, ResultType> {
   /** @inheritDoc */
   visitArrayContentsItem(
@@ -468,8 +473,10 @@ export class EmptyValueVisitor<DomainExtra, ResultType>
  * mappings -- `FabricValue` must be compatible with the `Domain` of instances.
  * This is enforced by the class.
  */
-export abstract class ContainerIteratingVisitor<DomainExtra, ResultType>
-  extends BaseValueVisitor<DomainExtra, ResultType> {
+export abstract class ContainerIteratingVisitor<
+  DomainExtra = never,
+  ResultType = FabricValue,
+> extends BaseValueVisitor<DomainExtra, ResultType> {
   /** @inheritDoc */
   visitFabricArray(
     value: FabricArray,
@@ -509,7 +516,7 @@ export abstract class ContainerIteratingVisitor<DomainExtra, ResultType>
  * State of a visit currently in progress, along with most of the visit
  * execution machinery.
  */
-class VisitInProgress<DomainExtra, ResultType> {
+class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   /** Concrete visitor implementation. */
   #visitor: ValueVisitor<DomainExtra, ResultType>;
 
@@ -789,7 +796,7 @@ export function visitValue<DomainExtra, ResultType>(
  * Creates a visitor function bound to the given visitor. The result is a
  * single-argument `visit(value)` function.
  */
-export function makeVisitFunction<DomainExtra, ResultType>(
+export function makeVisitValueFunction<DomainExtra, ResultType>(
   visitor: ValueVisitor<DomainExtra, ResultType>,
 ): (value: DomainFor<DomainExtra>) => BaselineVisitResult<ResultType> {
   return (value: DomainFor<DomainExtra>) => visitValue(value, visitor);
