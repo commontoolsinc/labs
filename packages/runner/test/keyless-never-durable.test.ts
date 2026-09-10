@@ -39,12 +39,8 @@ import {
  *   1. `Runner.setup()`'s durable `patternIdentity`/`patternSetupIdentity`
  *      stamps (`if (entryRef)` filters nothing — `entryRefForPattern`
  *      always mints);
- *   2. `Runner.#substituteOpPatternRefs`' `$patternRef` sentinel for keyless
- *      map/filter/flatMap ops (written into the node's durable inputs doc);
- *   3. the storage-boundary serializer itself (`patternToEncodableForm`):
- *      the mint sets the pattern's forward entry ref, so the designed
- *      "no entry ref -> full graph" fallback stops firing and every later
- *      boundary write of the VALUE emits the keyless ref.
+ *   2. map/filter/flatMap's durable op selection in the node inputs document;
+ *   3. a pattern value crossing a durable storage boundary.
  *
  * The first test is the blanket pin: a run exercising all three writers must
  * leave NO `keyless:` byte sequence anywhere in the raw sqlite store. The
@@ -227,8 +223,8 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
         ).toBe(true);
       }
 
-      // Writer 2: the map builtin's `$patternRef` sentinel for a keyless op
-      // (bare evaluation indexes nothing, so the op pattern has no ref).
+      // Writer 2: the map builtin's durable selection for a keyless op (bare
+      // evaluation indexes nothing, so the op pattern has no durable ref).
       const engine = runtime.harness as Engine;
       const evalResult = await engine.compileAndEvaluateModules(mapProgram);
       const factory = evalResult.main!.default as Parameters<

@@ -418,7 +418,9 @@ describe("scheduled Factory@1 handler lifecycle", () => {
       const update = runtime.edit();
       source.withTx(update).set(selectedB.shell);
       await commit(update);
-      expect(source.get()).toBe(selectedB.shell);
+      expect(factoryStateOf(source.get())).toEqual(
+        factoryStateOf(selectedB.shell),
+      );
     } finally {
       releaseLoad.resolve();
     }

@@ -22,10 +22,10 @@ import type { RuntimeProgram } from "./engine-test-support.ts";
  * ref-less remnant path: PR #4454 sealed the harness load path by
  * registration; this test pins the remnant.
  *
- * Now `Runner.#substituteOpPatternRefs` mints the op's `keyless:` content-hash
- * session identity (the same pointer a keyless ROOT pattern gets via
- * `entryRefForPattern`), so the op rides a `$patternRef` to its pristine
- * artifact and the embedded round-trip never happens.
+ * The runner mints the op's `keyless:` content-hash session identity (the same
+ * pointer a keyless root pattern receives), then retains the exact trusted
+ * callback for the immutable list-input document. The op therefore uses its
+ * pristine artifact and never depends on the embedded round-trip.
  *
  * The program is the CT-1811 regression pattern (gideon-tests/
  * ct-1811-mapped-subpattern-derived-output.test.tsx), with the traversal

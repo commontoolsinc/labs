@@ -1467,7 +1467,6 @@ export function generateObject<T extends Record<string, unknown>>(
       schema,
       system,
       cache,
-      tools,
       metadata,
       schemaSanitizePromptInjection,
       search,
@@ -1583,8 +1582,17 @@ export function generateObject<T extends Record<string, unknown>>(
         docs: "",
         observedConfidentiality: [],
       };
-    // Determine whether to use the tool-calling path or the direct generateObject path
-    const hasTools = isObjectNotArray(tools) && Object.keys(tools).length > 0;
+    // A heterogeneous direct PatternFactory cannot be projected through the
+    // legacy object-only LLMToolSchema. Read the raw entry map for the branch
+    // decision; buildToolCatalog() performs the admitted-factory validation and
+    // materialization on each child cell below.
+    const toolsCell = inputs.key("tools").asSchema({
+      type: "object",
+      additionalProperties: LLMToolSchema,
+    });
+    const rawTools = toolsCell.withTx(tx).getRaw();
+    const hasTools = isObjectNotArray(rawTools) &&
+      Object.keys(rawTools).length > 0;
     const validationSchema = schemaSanitizePromptInjection
       ? toDeepFrozenSchema(schema)
       : undefined;
@@ -1629,10 +1637,6 @@ export function generateObject<T extends Record<string, unknown>>(
           : {}),
       };
 
-      const toolsCell = inputs.key("tools").asSchema({
-        type: "object",
-        additionalProperties: LLMToolSchema,
-      });
       const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(
         toolsCell,
       );

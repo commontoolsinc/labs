@@ -458,7 +458,7 @@ export default pattern<PatternInput, PatternOutput>(
 
     const mailPieceAnalyses = (
       mailPieceImages as ReactiveArray<MailPieceImageInfo>
-    ).mapWithPattern(analyzeMailPiece, {});
+    ).mapWithPattern(analyzeMailPiece);
 
     // Count pending analyses
     const pendingCount = computed(
@@ -475,7 +475,7 @@ export default pattern<PatternInput, PatternOutput>(
 
     const mailPieces = (
       mailPieceAnalyses as ReactiveArray<MailPieceAnalysisItem>
-    ).mapWithPattern(extractMailPieceResult, {});
+    ).mapWithPattern(extractMailPieceResult);
 
     // Derived counts from stored mailPieces
     const mailCount = computed(() => mailPieces?.length || 0);

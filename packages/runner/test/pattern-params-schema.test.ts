@@ -13,6 +13,7 @@ import {
 } from "../src/builder/pattern.ts";
 import type { Frame, JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { resolveSchema } from "../src/schema.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("pattern params schema test");
@@ -88,21 +89,19 @@ describe("compiler-only pattern params schema", () => {
     if (state.kind !== "pattern") throw new Error("expected pattern state");
     expect(state.argumentSchema).toEqual(ARGUMENT_SCHEMA);
     expect(state.paramsSchema).toEqual(PARAMS_SCHEMA);
-    expect(factory.result).toEqual({
-      publicValue: {
-        $alias: {
-          cell: "argument",
-          path: ["value"],
-          schema: { type: "number" },
-        },
-      },
-      capturedValue: {
-        $alias: {
-          cell: "params",
-          path: ["value"],
-          schema: { type: "string" },
-        },
-      },
+    const result = factory.result as Record<
+      string,
+      { $alias: { cell: string; path: string[]; schema: JSONSchema } }
+    >;
+    expect(result.publicValue.$alias.cell).toBe("argument");
+    expect(result.publicValue.$alias.path).toEqual(["value"]);
+    expect(resolveSchema(result.publicValue.$alias.schema)).toEqual({
+      type: "number",
+    });
+    expect(result.capturedValue.$alias.cell).toBe("params");
+    expect(result.capturedValue.$alias.path).toEqual(["value"]);
+    expect(resolveSchema(result.capturedValue.$alias.schema)).toEqual({
+      type: "string",
     });
   });
 

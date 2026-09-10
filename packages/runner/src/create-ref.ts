@@ -156,6 +156,12 @@ export function createRef(
       );
     }
 
+    if (typeof obj === "function" && isReactive(obj)) {
+      throw new Error(
+        "[createRef] Cell method is not a value; cannot derive a stable id",
+      );
+    }
+
     if (typeof obj === "function") {
       if (allowLegacyImplementationFunction) return obj.toString();
       throw new TypeError(

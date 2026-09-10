@@ -114,7 +114,6 @@ const childLabelView = (
 ): CfcLabelView | undefined => rebaseCfcLabelView(cfcLabelView, [segment]);
 
 const childLink = (
-  runtime: Runtime,
   link: NormalizedFullLink,
   segment: string,
 ): NormalizedFullLink => ({
@@ -518,7 +517,7 @@ function createViewProxy<T>(
                           runtime,
                           childViewTx(),
                           tx,
-                          childLink(runtime, link, String(index)),
+                          childLink(link, String(index)),
                           depth + 1,
                           childLabelView(cfcLabelView, String(index)),
                           pinned,
@@ -584,7 +583,7 @@ function createViewProxy<T>(
                     runtime,
                     childViewTx(),
                     tx,
-                    childLink(runtime, link, String(i)),
+                    childLink(link, String(i)),
                     depth + 1,
                     childLabelView(cfcLabelView, String(i)),
                     pinned,
@@ -631,7 +630,7 @@ function createViewProxy<T>(
           runtime,
           childViewTx(),
           tx,
-          childLink(runtime, link, prop),
+          childLink(link, prop),
           depth + 1,
           childLabelView(cfcLabelView, String(prop)),
           pinned,
@@ -743,7 +742,7 @@ function createViewProxy<T>(
               runtime,
               childViewTx(),
               tx,
-              childLink(runtime, link, prop as string),
+              childLink(link, prop as string),
               depth + 1,
               childLabelView(cfcLabelView, String(prop)),
               pinned,

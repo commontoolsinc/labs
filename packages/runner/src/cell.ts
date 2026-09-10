@@ -241,17 +241,19 @@ type ListPatternCallbackInput<T> = {
  * Reactive/Cell. These wrapped the callback in an anonymous inline pattern,
  * which has no stable content-addressed `{ identity, symbol }` and so cannot be
  * passed/persisted by identity (CT-1623). Authored pattern code is always
- * lowered by the TS transformer to the `*WithPattern(pattern(...), params)` form
- * (with the pattern hoisted to a module export); direct builder-API callers must
- * use the `*WithPattern` variant explicitly.
+ * lowered by the TS transformer to a bound factory passed to the
+ * `*WithPattern(pattern(...))` form (with the pattern hoisted to a module
+ * export); direct builder-API callers must use the `*WithPattern` variant
+ * explicitly.
  */
 function throwOpFunctionFormMessage(
   method: "map" | "filter" | "flatMap",
 ): string {
   return `Reactive.${method}(fn) is no longer supported: an inline pattern has ` +
     `no stable identity. Authored \`.${method}(...)\` is lowered by the TS ` +
-    `transformer to \`.${method}WithPattern(pattern(...), { params })\`; if you ` +
-    `are calling the builder API directly, use \`.${method}WithPattern(op, params)\`.`;
+    `transformer to a bound factory passed to \`.${method}WithPattern(op)\`; ` +
+    `if you are calling the builder API directly, pass a PatternFactory to ` +
+    `\`.${method}WithPattern(op)\`.`;
 }
 
 // WeakMap to store connected nodes for each cell instance
@@ -1675,8 +1677,8 @@ export class CellImpl<T extends FabricValue>
       // the client side.
       //
       // TODO(danfuzz): constrain `T`, so that neither cast is needed.
-      const event = convertCellsToLinks(
-        newValue as CellLinkInput,
+      const event = flattenBuilderArtifacts(
+        convertCellsToLinks(newValue as CellLinkInput),
       ) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
       assertFactoryArtifactsPublishableForWrite(
@@ -2140,7 +2142,10 @@ export class CellImpl<T extends FabricValue>
       // retry on conflict.
       if (!this.#synced) this.sync();
 
-      const transformedValue = prepareFactoryStatesForWrite(newValue);
+      const transformedValue = flattenBuilderArtifacts(
+        prepareFactoryStatesForWrite(newValue),
+        { isLeaf: isCellResultForDereferencing },
+      );
 
       recordRelevantSchemaWritePolicyInput(
         this.tx,
@@ -2409,7 +2414,9 @@ export class CellImpl<T extends FabricValue>
     const array: readonly unknown[] = currentValue;
 
     // Append the new values to the array, preserving sparse holes in the original.
-    const preparedValues = prepareFactoryStatesForWrite(value) as typeof value;
+    const preparedValues = flattenBuilderArtifacts(
+      prepareFactoryStatesForWrite(value),
+    ) as typeof value;
     assertFactoryArtifactsPublishableForWrite(
       this.runtime,
       preparedValues,
@@ -2506,7 +2513,9 @@ export class CellImpl<T extends FabricValue>
     // Keep only the values not already present (by stored-value equality,
     // matching the server's add-unique dedup). The server re-dedups against
     // durable state, catching elements the local replica had not loaded.
-    const candidates = prepareFactoryStatesForWrite(value) as FabricValue[];
+    const candidates = flattenBuilderArtifacts(
+      prepareFactoryStatesForWrite(value),
+    ) as FabricValue[];
     const existing = array;
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
@@ -3261,7 +3270,9 @@ export class CellImpl<T extends FabricValue>
     // retry on conflict.
     if (!this.#synced) this.sync();
 
-    const inlined = findAndInlineDataUriLinks(value);
+    const inlined = findAndInlineDataUriLinks(
+      flattenBuilderArtifacts(value) as FabricValue,
+    );
     assertFactoryArtifactsPublishableForWrite(
       this.runtime,
       inlined,

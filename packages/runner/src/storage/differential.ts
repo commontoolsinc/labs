@@ -2,6 +2,7 @@ import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import {
   FabricSpecialObject,
   isFabricObjectOrArray,
+  isValidFabricValue,
   valueEqual,
 } from "@commonfabric/data-model";
 import {
@@ -258,6 +259,14 @@ const addStateChange = (
   before: State["is"] | undefined,
   after: State["is"] | undefined,
 ): void => {
+  if (
+    (before !== undefined && !isValidFabricValue(before)) ||
+    (after !== undefined && !isValidFabricValue(after))
+  ) {
+    throw new Error(
+      "Cannot compare an arbitrary function or other invalid Fabric value",
+    );
+  }
   if (valueEqual(before, after)) {
     return;
   }

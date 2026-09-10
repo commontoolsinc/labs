@@ -19,10 +19,10 @@ import {
 } from "@commonfabric/runner";
 
 import { EmulatedStorageManager } from "../../runner/src/storage/v2-emulate.ts";
-import type { Options } from "../../runner/src/storage/v2.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "../../runner/test/memory-v2-test-utils.ts";
-import { pieceId, PieceManager } from "../src/manager.ts";
-import { PieceController } from "../src/ops/piece-controller.ts";
+import { newSharedServer } from "../../runner/test/memory-v2-test-utils.ts";
+import { prepareFactory } from "../../runner/src/factory-materialization.ts";
+import { PiecesController } from "../src/ops/pieces-controller.ts";
+import { pieceId } from "../src/piece-id.ts";
 
 const signer = await Identity.fromPassphrase(
   "piece factory result round trip",
@@ -36,19 +36,18 @@ const FACTORY_RESULT_PROGRAM: RuntimeProgram = {
       "import { handler, lift, pattern, type HandlerFactory } from 'commonfabric';",
       "export const patternFactory = pattern<{ value: number }, { result: number }>(({ value }) => ({ result: value }));",
       "export const moduleFactory = lift((value: number): number => value + 1);",
-      "export const handlerFactory: HandlerFactory<{ prefix: string }, number> = handler(",
+      "export const handlerFactory: HandlerFactory<number, { prefix: string }> = handler(",
       "  { type: 'number' },",
       "  { type: 'object', properties: { prefix: { type: 'string' } }, required: ['prefix'] },",
       "  (_event: number, _context: { prefix: string }) => undefined,",
       ");",
-      "const exposeFactories = lift((_trigger: null) => ({",
+      "export default pattern(() => ({",
       "  nested: {",
       "    pattern: patternFactory,",
       "    module: moduleFactory,",
       "    handler: handlerFactory,",
       "  },",
       "}));",
-      "export default pattern(() => exposeFactories(null));",
     ].join("\n"),
   }],
 };
@@ -79,35 +78,8 @@ type FactoryResultSchema = {
   };
 };
 
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
 function createSharedServer(): MemoryV2Server.Server {
-  return new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
+  return newSharedServer();
 }
 
 function resultFactories(result: StoredFactoryResult): FabricValue[] {
@@ -133,7 +105,7 @@ function expectInertFactory(
 function invokeFactories(
   runtime: Runtime,
   space: MemorySpace,
-  factories: FabricValue[],
+  factories: unknown[],
 ): void {
   const frame = pushFrame({
     space,
@@ -154,16 +126,16 @@ function invokeFactories(
   }
 }
 
-describe("PieceManager Factory@1 result persistence", () => {
-  it("round-trips nested factories through a fresh PieceManager runtime", async () => {
+describe("PiecesController Factory@1 result persistence", () => {
+  it("round-trips nested factories through a fresh runner runtime", async () => {
     const server = createSharedServer();
-    let writerStorage: SharedServerStorageManager | undefined =
-      SharedServerStorageManager.connectTo(server, { as: signer });
+    let writerStorage: EmulatedStorageManager | undefined =
+      EmulatedStorageManager.connectTo(server, { as: signer });
     let writerRuntime: Runtime | undefined = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: writerStorage,
     });
-    let readerStorage: SharedServerStorageManager | undefined;
+    let readerStorage: EmulatedStorageManager | undefined;
     let readerRuntime: Runtime | undefined;
 
     try {
@@ -172,7 +144,7 @@ describe("PieceManager Factory@1 result persistence", () => {
         identity: signer,
         spaceName,
       });
-      const writerManager = new PieceManager(writerSession, writerRuntime);
+      const writerManager = new PiecesController(writerSession, writerRuntime);
       await writerManager.synced();
 
       let identity: string | undefined;
@@ -201,16 +173,24 @@ describe("PieceManager Factory@1 result persistence", () => {
         expect(factory).toBeDefined();
         return sealFactoryState(factory);
       });
+      await writerRuntime.patternManager.flushCompileCacheWrites();
+      for (const state of expectedStates) {
+        expect(
+          writerRuntime.patternManager.isArtifactAvailableInSpace(
+            state.ref.identity,
+            writerManager.getSpace(),
+          ),
+        ).toBe(true);
+      }
 
       const piece = await writerManager.runPersistent<StoredFactoryResult>(
         pattern,
         {},
         "piece-factory-result-roundtrip",
-        { start: true },
+        { start: false },
       );
       const id = pieceId(piece);
       expect(id).toBeDefined();
-      await writerRuntime.patternManager.flushCompileCacheWrites();
       await writerManager.synced();
       await writerStorage.synced();
 
@@ -219,7 +199,7 @@ describe("PieceManager Factory@1 result persistence", () => {
       await writerStorage.close();
       writerStorage = undefined;
 
-      readerStorage = SharedServerStorageManager.connectTo(server, {
+      readerStorage = EmulatedStorageManager.connectTo(server, {
         as: signer,
       });
       readerRuntime = new Runtime({
@@ -230,7 +210,7 @@ describe("PieceManager Factory@1 result persistence", () => {
         identity: signer,
         spaceName,
       });
-      const readerManager = new PieceManager(readerSession, readerRuntime);
+      const readerManager = new PiecesController(readerSession, readerRuntime);
       await readerManager.synced();
 
       for (const symbol of FACTORY_SYMBOLS) {
@@ -242,9 +222,8 @@ describe("PieceManager Factory@1 result persistence", () => {
         ).toBeUndefined();
       }
 
-      const freshPiece = await readerManager.get<StoredFactoryResult>(
+      const freshPiece = await readerManager.getPieceCell<StoredFactoryResult>(
         id!,
-        true,
       );
       const rawResult = freshPiece.resolveAsCell().getRaw() as
         | StoredFactoryResult
@@ -255,6 +234,14 @@ describe("PieceManager Factory@1 result persistence", () => {
         expectInertFactory(rawFactories[index], expectedStates[index]);
       }
 
+      const exposedFactories = await Promise.all(
+        rawFactories.map((factory) =>
+          prepareFactory(factory, {
+            runtime: readerRuntime!,
+            artifactSpace: readerManager.getSpace(),
+          })
+        ),
+      );
       expect(
         readerRuntime.patternManager.isArtifactAvailableInSpace(
           identity!,
@@ -269,10 +256,6 @@ describe("PieceManager Factory@1 result persistence", () => {
           ),
         ).toBeDefined();
       }
-
-      const controller = new PieceController(readerManager, freshPiece);
-      const exposed = await controller.result.get() as StoredFactoryResult;
-      const exposedFactories = resultFactories(exposed);
       for (let index = 0; index < exposedFactories.length; index++) {
         expect(isAdmittedFabricFactory(exposedFactories[index])).toBe(true);
         expect(sealFactoryState(exposedFactories[index])).toEqual(

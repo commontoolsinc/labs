@@ -86,6 +86,25 @@ describe("builder factory state", () => {
     expect(() => handlerFactory({})).not.toThrow();
   });
 
+  it("keeps direct pattern JSON as a full compatibility graph after indexing", async () => {
+    const compiled = await runtime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: [
+          "import { pattern } from 'commonfabric';",
+          "export default pattern((_input: {}) => ({ value: 1 }));",
+        ].join("\n"),
+      }],
+    });
+
+    expect(runtime.patternManager.getArtifactEntryRef(compiled)).toBeDefined();
+    const json = JSON.parse(JSON.stringify(compiled));
+    expect(json.$patternRef).toBeUndefined();
+    expect(Array.isArray(json.nodes)).toBe(true);
+    expect(json.result).toBeDefined();
+  });
+
   it("retains the authored pattern result schema as the public factory contract", () => {
     const publicResultSchema = {
       type: "array",
@@ -305,7 +324,7 @@ describe("builder factory state", () => {
     });
   });
 
-  it("promotes all three kinds only after their source closure is durable", async () => {
+  it("assigns all three kinds at verified evaluation before publication", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [{
@@ -328,11 +347,21 @@ describe("builder factory state", () => {
       sessionResult.main!.handlerFactory,
     ] as const;
 
-    for (const factory of sessionFactories) {
-      expect(runtime.patternManager.getArtifactEntryRef(factory)).toBeDefined();
-      expect(() => sealFactoryState(factory)).toThrow(
-        "artifact ref is not available",
-      );
+    const expectedKinds = ["pattern", "module", "handler"] as const;
+    for (let i = 0; i < sessionFactories.length; i++) {
+      const factory = sessionFactories[i];
+      const ref = runtime.patternManager.getArtifactEntryRef(factory);
+      expect(ref).toBeDefined();
+      expect(sealFactoryState(factory)).toMatchObject({
+        kind: expectedKinds[i],
+        ref,
+      });
+      expect(
+        runtime.patternManager.isArtifactAvailableInSpace(
+          ref!.identity,
+          space,
+        ),
+      ).toBe(false);
     }
 
     let entryIdentity: string | undefined;
@@ -345,8 +374,6 @@ describe("builder factory state", () => {
     expect(entryIdentity).toBeDefined();
 
     const symbols = ["default", "moduleFactory", "handlerFactory"] as const;
-    const expectedKinds = ["pattern", "module", "handler"] as const;
-
     for (let i = 0; i < symbols.length; i++) {
       const factory = runtime.patternManager.artifactFromIdentitySync(
         entryIdentity!,

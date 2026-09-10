@@ -272,7 +272,6 @@ describe("Pattern Runner - Core", () => {
         pattern(({ element }: FactoryInput<any>) =>
           lift((value: number) => value * 2)(element)
         ),
-        {},
       ),
     }));
     await verifyListElementPruning(
@@ -289,7 +288,6 @@ describe("Pattern Runner - Core", () => {
         pattern(({ element }: FactoryInput<any>) =>
           lift((value: number) => value % 2 === 0)(element)
         ),
-        {},
       ),
     }));
     await verifyListElementPruning(
@@ -306,7 +304,6 @@ describe("Pattern Runner - Core", () => {
         pattern(({ element }: FactoryInput<any>) =>
           lift((value: number) => [value, -value])(element)
         ),
-        {},
       ),
     }));
     await verifyListElementPruning(
@@ -323,7 +320,6 @@ describe("Pattern Runner - Core", () => {
         pattern(({ element }: FactoryInput<any>) =>
           lift((value: number) => value * 2)(element)
         ),
-        {},
       ),
     }));
     const before = runtime.runner.cancels.size;
@@ -354,7 +350,6 @@ describe("Pattern Runner - Core", () => {
         pattern(({ element }: FactoryInput<any>) => ({
           doubled: lift((value: number) => value * 2)(element),
         })),
-        {},
       ),
     }));
     const values = [1, 2];
@@ -473,7 +468,6 @@ describe("Pattern Runner - Core", () => {
         pattern(({ element }: FactoryInput<any>) =>
           lift((value: number) => value * 2)(element)
         ),
-        {},
       ),
     }));
 

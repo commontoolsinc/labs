@@ -44,10 +44,7 @@ import { detectTrustedFactoryType } from "@commonfabric/schema-generator";
 import { COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES } from "../core/commonfabric-runtime-registry.ts";
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
-import {
-  unwrapExpression,
-  unwrapTransparentWrapperOnce,
-} from "../utils/expression.ts";
+import { unwrapTransparentWrapperOnce } from "../utils/expression.ts";
 import {
   classifyArrayMethodCallSite,
   detectCallKind,

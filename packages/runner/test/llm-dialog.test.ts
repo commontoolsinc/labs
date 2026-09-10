@@ -1807,6 +1807,7 @@ describe("llmDialog", () => {
       { type: "object" },
       { type: "string" },
     );
+    installTestPatternArtifact(runtime, listItemsTool);
 
     // The dialog's own guidance describes what the dialog provides. A tool the
     // pattern supplies is the pattern's to introduce, in the system prompt it
@@ -1817,9 +1818,7 @@ describe("llmDialog", () => {
         const dialog = llmDialog({
           messages,
           tools: {
-            listItems: patternTool(
-              listItemsTool,
-            ) as unknown as BuiltInLLMTool,
+            listItems: listItemsTool as unknown as BuiltInLLMTool,
           },
         });
         return {
@@ -1888,6 +1887,7 @@ describe("llmDialog", () => {
       { type: "object" },
       { type: "string" },
     );
+    installTestPatternArtifact(runtime, pingTool);
 
     const testPattern = pattern(
       () => {
@@ -1903,7 +1903,7 @@ describe("llmDialog", () => {
             required: ["answer"],
           },
           tools: {
-            ping: patternTool(pingTool) as unknown as BuiltInLLMTool,
+            ping: pingTool as unknown as BuiltInLLMTool,
           },
         });
         return {

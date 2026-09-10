@@ -1,18 +1,12 @@
 import {
   fabricFromNativeValue,
-  FabricInstance,
   FabricSpecialObject,
-  type FabricValue,
 } from "@commonfabric/data-model";
 import {
   factoryStateOf,
   isAdmittedFabricFactory,
   mapFactoryStateValues,
 } from "@commonfabric/data-model/fabric-factory";
-import {
-  codecOf,
-  NULL_LIVE_ENVIRONMENT,
-} from "@commonfabric/data-model/codec-common";
 import {
   getModernCellRepConfig,
   resetModernCellRepConfig,
@@ -177,6 +171,10 @@ import { toURI } from "./uri-utils.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import {
+  hasTraversableFabricInstanceState,
+  mapFabricInstanceStateForTraversal,
+} from "./builder/factory-traversal.ts";
+import {
   getWriteStackTrace,
   setWriteStackTraceMatchers,
   type WriteStackTraceEntry,
@@ -253,12 +251,11 @@ const collectFactoryArtifactIdentities = (
     return;
   }
 
-  if (value instanceof FabricInstance) {
-    collectFactoryArtifactIdentities(
-      codecOf(value).encode(value as FabricValue, NULL_LIVE_ENVIRONMENT),
-      identities,
-      seen,
-    );
+  if (hasTraversableFabricInstanceState(value)) {
+    mapFabricInstanceStateForTraversal(value, (state) => {
+      collectFactoryArtifactIdentities(state, identities, seen);
+      return state;
+    });
     return;
   }
 

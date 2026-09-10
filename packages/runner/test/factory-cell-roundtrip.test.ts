@@ -155,11 +155,13 @@ function expectLiveFactories(
   value: StoredFactories,
   fixture: FactoryFixture,
 ): void {
-  for (const factory of leaves(value)) {
+  for (const [index, factory] of leaves(value).entries()) {
     expect(isAdmittedFabricFactory(factory)).toBe(true);
     expect(factoryStateOf(factory)).toEqual(fixture.state);
+    if (!Object.is(factory, fixture.live)) {
+      throw new Error(`Factory leaf ${index} remained an inert shell`);
+    }
     (factory as unknown as (input: { value: number }) => unknown)({ value: 7 });
-    expect(factory).toBe(fixture.live);
   }
 }
 

@@ -32,9 +32,12 @@ function schemaAtRef(
 ): JSONSchema | undefined {
   if (
     schema === true || schema === false ||
-    typeof schema.$ref !== "string" || !schema.$ref.startsWith("#/") ||
+    typeof schema.$ref !== "string" ||
     root === true || root === false
   ) return schema;
+  if (!schema.$ref.startsWith("#/")) {
+    return ContextualFlowControl.resolveSchemaRefs(schema, root);
+  }
   const current = resolveLocalSchemaRef(schema.$ref, root);
   if (current === undefined) return undefined;
   const { $ref: _, ...siblings } = schema;
@@ -343,7 +346,7 @@ function sourceSchemaContainsExpected(
   }
   if (
     isObjectNotArray(expected) && typeof expected.$ref === "string" &&
-    expected.$ref.startsWith("#/") && expectedRoot !== undefined
+    expectedRoot !== undefined
   ) {
     const sourceRef =
       isObjectNotArray(source) && typeof source.$ref === "string"
@@ -366,7 +369,7 @@ function sourceSchemaContainsExpected(
   }
   if (
     isObjectNotArray(source) && typeof source.$ref === "string" &&
-    source.$ref.startsWith("#/") && sourceRoot !== undefined
+    sourceRoot !== undefined
   ) {
     const expectedRef = isObjectNotArray(expected) &&
         typeof expected.$ref === "string"

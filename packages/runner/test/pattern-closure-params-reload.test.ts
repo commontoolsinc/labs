@@ -16,6 +16,7 @@ import {
   parseLink,
 } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
+import { parseExternalSchemaRef } from "../src/schema-decompose.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
@@ -159,6 +160,16 @@ describe("invocation-owned pattern params cold resume", () => {
 
       await runtime.patternManager.flushCompileCacheWrites();
       await storage.synced();
+      const rootArgumentSchemaRef = (rootArgumentLink.schema as {
+        $ref?: string;
+      } | undefined)?.$ref;
+      expect(rootArgumentSchemaRef).toBeDefined();
+      const rootArgumentSchemaHash = parseExternalSchemaRef(
+        rootArgumentSchemaRef!,
+      )?.taggedHash;
+      expect(rootArgumentSchemaHash).toBeDefined();
+      expect(storage.isSchemaDocPersisted(space, rootArgumentSchemaHash!))
+        .toBe(true);
       runtime.runner.stop(root);
       await runtime.dispose();
       runtime = undefined;

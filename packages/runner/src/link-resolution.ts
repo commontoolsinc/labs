@@ -642,20 +642,22 @@ export function resolveLinkTracingDereferences(
           const remainingPath = link.path.slice(lastValid.length);
           let { schema, ...restLink } = nextHop.link;
           const storedSchema = schema;
-          if (schema !== undefined && remainingPath.length > 0) {
+          if (schema !== undefined) {
             // The stored schema's external cid: refs must be registered
-            // before the narrowing walks them; the documents travel with
-            // the referring document, so they live in the referrer's
-            // space. A ref the closure cannot resolve names a corrupt or
-            // malformed declaration (the loader logs it): the declaration
-            // is ignored — narrowing it would throw on the dangling ref.
+            // before either narrowing or carrying that schema across the hop;
+            // the documents travel with the referring document, so they live
+            // in the referrer's space. A ref the closure cannot resolve names
+            // a corrupt or malformed declaration (the loader logs it): the
+            // declaration is ignored rather than carried as a dangling ref.
             const closureComplete = ensureExternalSchemaClosure(
               tx,
               nextHop.source.space,
               schema,
             );
             schema = closureComplete
-              ? ContextualFlowControl.getSchemaAtPath(schema, remainingPath)
+              ? remainingPath.length === 0
+                ? schema
+                : ContextualFlowControl.getSchemaAtPath(schema, remainingPath)
               : undefined;
           }
           nextHop = {

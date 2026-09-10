@@ -57,6 +57,7 @@ import type {
 import { RuntimeProgram } from "./harness/types.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import { snapshotQueryResult } from "./query-result-proxy.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import type { MemorySpace, Runtime, ServerRunInfo } from "./runtime.ts";
 
 import {
@@ -1315,7 +1316,7 @@ export class PatternManager {
       ]);
     }
     const identity = `${KEYLESS_PATTERN_IDENTITY_PREFIX}${
-      fromURI(toURI(createRef(root, "pattern")))
+      fromURI(toURI(createRef(flattenBuilderArtifacts(root), "pattern")))
     }`;
     const ref = { identity, symbol: "default" };
     this.associatePatternIdentity(root, ref);
@@ -1331,42 +1332,31 @@ export class PatternManager {
   keylessMintAnomalies = 0;
 
   /**
-   * Session-side resolution hints for _keyless_ list-builtin ops, keyed by the
-   * node's immutable inputs-doc address (`<space>\0<id>`). A keyless op's
-   * durable inputs carry its full embedded graph (the never-durable contract
-   * forbids the keyless `$patternRef` sentinel there), but the embedded
-   * round-trip corrupts nested output-alias defer levels, so the _same_ session
-   * that instantiated the node resolves the pristine artifact through this map
-   * instead. Entries are session-lifetime like the artifact index; a fresh
-   * session re-instantiates the node and re-registers. Content-addressed key,
-   * so two structurally identical nodes share one (equally valid) entry.
+   * Session-side resolution hints for constant list-builtin ops, keyed by the
+   * node's immutable inputs-doc address (`<space>\0<id>`). The current session
+   * already holds the exact bound callable from graph construction, so it can
+   * execute that trusted value without decoding its inline representation and
+   * imposing destination-space durability on an internal data-URI cell.
+   * Keyless callbacks additionally need the hint because their durable input
+   * fallback is an embedded graph. A fresh session has no hint and follows the
+   * ordinary Factory@1 or embedded-graph cold path.
    */
-  #keylessOpRefsByInputsDoc = new Map<
-    string,
-    { identity: string; symbol: string }
-  >();
+  #listOpPatternsByInputsDoc = new Map<string, Pattern>();
 
-  /** Record that the node whose immutable inputs doc is `inputsDocKey`
-   * carries a keyless op resolvable in-session as `ref` (already minted and
-   * indexed via {@link ensureKeylessPatternIdentity}). */
-  registerKeylessOpResolution(
+  /** Record the trusted live op used to construct one immutable inputs doc. */
+  registerListOpResolution(
     inputsDocKey: string,
-    ref: { identity: string; symbol: string },
+    pattern: Pattern,
   ): void {
-    this.#keylessOpRefsByInputsDoc.set(inputsDocKey, ref);
+    if (!isTrustedPattern(pattern)) {
+      throw new TypeError("List op resolution requires a trusted pattern");
+    }
+    this.#listOpPatternsByInputsDoc.set(inputsDocKey, pattern);
   }
 
-  /** The pristine in-session artifact for a keyless op registered under
-   * `inputsDocKey`, or undefined (no registration this session — the reader
-   * is not the instantiating session, so the embedded graph is all there
-   * is). */
-  keylessOpPatternFor(inputsDocKey: string): Pattern | undefined {
-    const ref = this.#keylessOpRefsByInputsDoc.get(inputsDocKey);
-    if (!ref) return undefined;
-    const live = this.artifactFromIdentitySync(ref.identity, ref.symbol);
-    return live !== undefined && isTrustedPattern(live)
-      ? live as Pattern
-      : undefined;
+  /** The exact in-session op for `inputsDocKey`, when this runtime built it. */
+  listOpPatternFor(inputsDocKey: string): Pattern | undefined {
+    return this.#listOpPatternsByInputsDoc.get(inputsDocKey);
   }
 
   /**
@@ -1909,7 +1899,7 @@ export class PatternManager {
    * lower-level `Engine.compileAndEvaluateModules` directly and skipped
    * registration (CT-1811): map/filter/flatMap ops then had no content-addressed
    * entry ref and fell back to a defer-corrupted embedded graph instead of their
-   * canonical `$patternRef` artifact.
+   * canonical content-addressed artifact.
    *
    * Registration is fused with evaluation here on purpose, so it cannot be
    * forgotten — mirroring what the runtime's own `compilePattern` /
@@ -2233,11 +2223,10 @@ export class PatternManager {
       this.#esmCacheStats[compiledBodiesServed ? "hits" : "misses"]++;
     }
     if (!warmHit || moduleDelegations.size > 0) {
-      // Persist the module set into this space. AWAITED (identity E4): refs-only
-      // pattern JSON makes artifact persistence part of the compilation
-      // contract — a cell can only carry a `$patternRef` after compilePattern
-      // returned, so completing the write here guarantees every persisted ref
-      // has a durable closure behind it (no race against session end). This
+      // Persist the module set into this space. AWAITED: artifact persistence
+      // is part of the compilation contract, so completing the write here
+      // guarantees every persisted factory ref has a durable closure behind it
+      // (no race against session end). This
       // covers BOTH a cold compile AND a process-byte-cache hit: in the latter
       // the transform-and-emit step was skipped, but this space's persisted
       // cache may be empty (e.g. a fresh space), and the by-identity reload path
@@ -2399,6 +2388,12 @@ export class PatternManager {
       this.#esmCacheStats.byIdentityHits++;
       return indexed as object;
     }
+    if (
+      this.isArtifactAvailableInSpace(entryIdentity, space) &&
+      this.#modulesByIdentity.has(entryIdentity)
+    ) {
+      return undefined;
+    }
     if (isKeylessPatternIdentity(entryIdentity)) return undefined;
     if (this.#runtime.cfcEnforcementMode === "disabled") return undefined;
 
@@ -2438,6 +2433,7 @@ export class PatternManager {
           entryIdentity,
           symbol,
           space,
+          true,
         );
       })().finally(() => this.#inProgressByIdentityLoads.delete(key));
       this.#inProgressByIdentityLoads.set(key, pending);
@@ -2479,11 +2475,21 @@ export class PatternManager {
     // compiled cache (and of CFC enforcement), so it serves the same artifact
     // `artifactFromIdentitySync` would return.
     const indexed = this.#addressableByIdentity.get(entryIdentity)?.get(symbol);
+    const exactSpaceAvailable =
+      this.isArtifactAvailableInSpace(entryIdentity, space) ||
+      this.#sessionOnlyArtifactIdentities.has(entryIdentity);
     if (
-      !retryFailedRecovery && indexed !== undefined && isTrustedPattern(indexed)
+      !retryFailedRecovery && exactSpaceAvailable && indexed !== undefined &&
+      isTrustedPattern(indexed)
     ) {
       this.#esmCacheStats.byIdentityHits++;
       return indexed;
+    }
+    if (
+      !retryFailedRecovery && exactSpaceAvailable &&
+      this.#modulesByIdentity.has(entryIdentity)
+    ) {
+      return undefined;
     }
     // A keyless identity is session-only by construction: no source or
     // compiled closure exists behind it anywhere, so once the in-memory index
@@ -2506,7 +2512,7 @@ export class PatternManager {
     const live = retryFailedRecovery
       ? undefined
       : this.#patternFromEvaluatedModule(entryIdentity, symbol);
-    if (live) {
+    if (live && exactSpaceAvailable) {
       this.#esmCacheStats.byIdentityHits++;
       return live;
     }
@@ -2558,7 +2564,42 @@ export class PatternManager {
     entryIdentity: string,
     symbol: string,
     space: MemorySpace,
+    sourceAlreadyVerified = false,
   ): Promise<Pattern | undefined> {
+    if (!sourceAlreadyVerified) {
+      const modules = await this.#loadVerifiedArtifactSourceModules(
+        space,
+        entryIdentity,
+      );
+      if (modules === undefined) return undefined;
+      this.#cacheArtifactPublicationClosures(space, modules, entryIdentity);
+      this.#recordPersistedClosureSpaces(
+        modules.map((module) => module.identity),
+        space,
+      );
+      for (const module of modules) {
+        const bucket = this.#addressableByIdentity.get(module.identity);
+        if (bucket === undefined) continue;
+        for (const [registeredSymbol, value] of bucket) {
+          setDurableArtifactEntryRef(value, {
+            identity: module.identity,
+            symbol: registeredSymbol,
+          });
+        }
+      }
+
+      const retryFailedRecovery = this.#failedCompileCacheRecoveries.has(
+        compileCacheRecoveryKey(space, entryIdentity),
+      );
+      const warm = this.#addressableByIdentity.get(entryIdentity)?.get(symbol);
+      if (
+        !retryFailedRecovery && warm !== undefined && isTrustedPattern(warm)
+      ) {
+        this.#esmCacheStats.byIdentityHits++;
+        return warm;
+      }
+    }
+
     const harness = this.#runtime.harness;
     const patternCoverage = this.#patternCoverageFor();
     // Select the same cached variant the compile path wrote. A coverage-on
@@ -2642,12 +2683,13 @@ export class PatternManager {
       }),
     );
 
+    let result: EvaluateResult;
     try {
       // Source-free: no sourceFiles. Sub-patterns fall back to identity.
       // Bodies came from the integrity-gated compiled-set read
       // (`loadCompiledClosure`, `requiredIntegrity`), so trust the CFC label and
       // skip redundant SES body re-verification.
-      const result = await harness.evaluateCachedModules(
+      result = await harness.evaluateCachedModules(
         cachedModules,
         entryIdentity,
         {
@@ -2655,12 +2697,6 @@ export class PatternManager {
           ...(patternCoverage ? { patternCoverage } : {}),
         },
       );
-      const pattern = this.#patternFromMain(result, symbol, entryIdentity);
-      this.#failedCompileCacheRecoveries.delete(
-        compileCacheRecoveryKey(space, entryIdentity),
-      );
-      this.#esmCacheStats.byIdentityHits++;
-      return pattern;
     } catch (error) {
       logger.warn("load-pattern-by-identity-miss", () => [
         `entry=${entryIdentity}`,
@@ -2673,6 +2709,22 @@ export class PatternManager {
         space,
         cacheOpts,
       );
+    }
+
+    try {
+      const pattern = this.#patternFromMain(result, symbol, entryIdentity);
+      this.#failedCompileCacheRecoveries.delete(
+        compileCacheRecoveryKey(space, entryIdentity),
+      );
+      this.#esmCacheStats.byIdentityHits++;
+      return pattern;
+    } catch (error) {
+      logger.warn("load-pattern-by-identity-miss", () => [
+        `entry=${entryIdentity}`,
+        `symbol=${symbol}`,
+        String(error),
+      ]);
+      return undefined;
     }
   }
 
@@ -2871,9 +2923,12 @@ export class PatternManager {
     // `isTrustedBuilderArtifact` — narrowing `#indexArtifact` would drop
     // exported lift/handler forward refs (the gap Codex flagged on an earlier
     // revision of #3912).
-    if (isTrustedPattern(pattern)) {
-      setArtifactEntryRef(pattern, { identity: entryIdentity, symbol });
+    if (!isTrustedPattern(pattern)) {
+      throw new Error(
+        `"${symbol}" is not a trusted pattern artifact in compiled module.`,
+      );
     }
+    setArtifactEntryRef(pattern, { identity: entryIdentity, symbol });
     return pattern;
   }
 
@@ -2987,10 +3042,13 @@ export class PatternManager {
     // the forward ref stays pinned to the original — acceptable because the
     // value is, by content identity, the original. `getArtifactEntryRef`
     // consumers tolerate this (it resolves to a real, addressable artifact).
-    if ((this.#persistedClosureSpaces.get(identity)?.size ?? 0) > 0) {
-      setDurableArtifactEntryRef(value, { identity, symbol });
-    } else {
+    if (
+      isKeylessPatternIdentity(identity) ||
+      this.#sessionOnlyArtifactIdentities.has(identity)
+    ) {
       setArtifactEntryRef(value, { identity, symbol });
+    } else {
+      setDurableArtifactEntryRef(value, { identity, symbol });
     }
     // Note: content-addressed CFC provenance is recorded by the engine at
     // evaluation time (Engine.#recordModuleProvenance) — the single home, so it
@@ -3363,8 +3421,8 @@ export class PatternManager {
    * `space`, on its own transaction, independent of the caller's. Uses
    * `editWithRetry` so a commit conflict (e.g. the cache write racing the
    * pattern's own space writes) retries rather than silently dropping the
-   * entry. A final failure throws because persisted refs-only pattern JSON
-   * requires a durable closure behind every `$patternRef`.
+   * entry. A final failure throws because every persisted factory ref requires
+   * a durable artifact closure.
    */
   async #writeBackCompileCache(
     space: MemorySpace,

@@ -13,6 +13,7 @@ import {
 
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("factory data URI writer");
 const destinationSpace = signer.did();
@@ -110,10 +111,19 @@ describe("canonical factory data URI writer", () => {
     ).toBe(false);
   });
 
-  it("rejects session-only factories and arbitrary JavaScript functions", async () => {
-    const sessionOnly = await runtime.patternManager.compilePattern(PROGRAM);
-    expect(() => runtime.getImmutableCell(destinationSpace, sessionOnly))
-      .toThrow("artifact ref is not available");
+  it("falls back only for ref-less capture-free patterns", () => {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const sessionOnly = commonfabric.pattern<{ value: number }>((
+      { value },
+    ) => ({
+      value,
+    }));
+    const embedded = runtime.getImmutableCell(
+      destinationSpace,
+      sessionOnly,
+    ).getRaw();
+    expect(isAdmittedFabricFactory(embedded)).toBe(false);
+    expect(embedded).toEqual(sessionOnly.toJSON());
     expect(() => runtime.getImmutableCell(destinationSpace, () => undefined))
       .toThrow("Not representable as a `FabricValue`: function");
   });

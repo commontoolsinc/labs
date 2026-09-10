@@ -189,11 +189,8 @@ describe("transactional setup ownership", () => {
       return {
         items,
         mapped: (items as unknown as {
-          mapWithPattern(
-            operation: unknown,
-            params: Record<string, never>,
-          ): unknown;
-        }).mapWithPattern(operation, {}),
+          mapWithPattern(operation: unknown): unknown;
+        }).mapWithPattern(operation),
       };
     });
     const setupTx = runtime.edit();

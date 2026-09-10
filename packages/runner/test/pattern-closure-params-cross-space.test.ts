@@ -13,6 +13,10 @@ import { getMetaLink, parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -186,6 +190,7 @@ describe("cross-space pattern closure params", () => {
       tx,
     );
     const sourceLink = source.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, sourceLink.space);
     tx.writeOrThrow({
       space: sourceLink.space,
       scope: sourceLink.scope,
@@ -196,7 +201,7 @@ describe("cross-space pattern closure params", () => {
       value: { nested: { value: 8 } },
       cfc: {
         version: 1,
-        schemaHash: "nested-capture-source",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{

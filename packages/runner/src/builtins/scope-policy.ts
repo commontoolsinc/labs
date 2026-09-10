@@ -168,13 +168,24 @@ export function boundPatternFactoryScope(
     }
   };
 
-  const state = factoryStateOf(pattern);
-  if (state.kind !== "pattern") {
-    throw new TypeError("bound list callback must carry pattern factory state");
-  }
-  scopes.push(state.defaultScope);
-  if ("params" in state) {
-    visit(state.params, sourceLink);
+  if (isAdmittedFabricFactory(pattern)) {
+    const state = factoryStateOf(pattern);
+    if (state.kind !== "pattern") {
+      throw new TypeError(
+        "bound list callback must carry pattern factory state",
+      );
+    }
+    scopes.push(state.defaultScope);
+    if ("params" in state) {
+      visit(state.params, sourceLink);
+    }
+  } else {
+    // A runtime-built keyless callback reaches this point as its embedded
+    // Pattern graph. It has no hidden Factory@1 params state, so conservatively
+    // collect every link the graph can observe together with its declared
+    // default scope.
+    scopes.push(pattern.defaultScope);
+    visit(pattern, sourceLink);
   }
   return narrowestScope(scopes);
 }

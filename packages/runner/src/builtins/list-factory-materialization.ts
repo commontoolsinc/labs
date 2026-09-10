@@ -39,6 +39,7 @@ type CanonicalSelection = {
 
 type CurrentSelection = CanonicalSelection & {
   raw: unknown;
+  inputsDocKey: string;
   sourceLink: NormalizedFullLink;
   dereferenceSources: readonly NormalizedFullLink[];
 };
@@ -97,6 +98,7 @@ function readSelection(
   return {
     raw,
     canonical: canonicalSelection(raw),
+    inputsDocKey: `${bindingLink.space}\0${bindingLink.id}`,
     sourceLink: resolvedOp,
     dereferenceSources,
   };
@@ -116,6 +118,23 @@ function materializeSelection(
   selection: CurrentSelection,
   builtinName: ListBuiltinName,
 ): Pattern {
+  const sessionPattern = runtime.patternManager.listOpPatternFor(
+    selection.inputsDocKey,
+  );
+  if (sessionPattern !== undefined) return sessionPattern;
+
+  // Runtime-built keyless patterns have no content-addressed artifact and
+  // therefore cross the immutable-input boundary as their embedded graph.
+  // They are already executable in this session and need no Factory@1
+  // materialization. Compiled callbacks always take the ref-backed factory
+  // path below.
+  if (
+    !isAdmittedFabricFactory(selection.raw) &&
+    isPattern(selection.raw)
+  ) {
+    return selection.raw;
+  }
+
   const context = {
     runtime,
     artifactSpace: selection.sourceLink.space,

@@ -104,11 +104,11 @@ describe("PatternManager exact-space artifact availability", () => {
     );
   });
 
-  it("upgrades already-indexed factories after their publication commit is confirmed", async () => {
+  it("keeps indexed factory refs separate from publication availability", async () => {
     const pattern = await runtime.patternManager.compilePattern(PROGRAM);
     const ref = runtime.patternManager.getArtifactEntryRef(pattern)!;
 
-    expect(factoryStateOf(pattern).ref).toBeUndefined();
+    expect(factoryStateOf(pattern).ref).toEqual(ref);
 
     runtime.patternManager.noteArtifactPublicationConfirmed(
       ref.identity,

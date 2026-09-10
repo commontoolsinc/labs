@@ -1,5 +1,8 @@
 import type { RuntimeProgram } from "../harness/types.ts";
-import type { FactoryStateView } from "@commonfabric/data-model/fabric-factory";
+import {
+  type FactoryStateView,
+  tryFactoryState,
+} from "@commonfabric/data-model/fabric-factory";
 import { isPattern, type Pattern } from "./types.ts";
 
 /**
@@ -490,8 +493,14 @@ export function isTrustedPattern(value: unknown): value is Pattern {
   if (!isPattern(value)) return false;
   const key = asKey(value);
   if (!key) return false;
-  return trustedPatterns.has(key) ||
-    trustedPatterns.has(resolveOriginal(key) as object);
+  if (
+    !trustedPatterns.has(key) &&
+    !trustedPatterns.has(resolveOriginal(key) as object)
+  ) {
+    return false;
+  }
+  const state = tryFactoryState(value);
+  return state === undefined || state.kind === "pattern";
 }
 
 /** Stamp a value as produced by a trusted non-pattern builder (lift/handler/…). */

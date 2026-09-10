@@ -2252,6 +2252,30 @@ export class StorageManager implements IStorageManager {
     });
     let loadFailure: unknown;
     try {
+      // A durable link may carry a reference-form selector into a fresh
+      // registry lease. Load each referenced schema document first so the
+      // normal selector externalizer can both recompose the closure and prove
+      // that the target space persists it. Schema-document pulls include
+      // their own closure, so one pull per root is sufficient. An absent or
+      // failed document remains unavailable and the selector gate below keeps
+      // failing closed rather than emitting an unbacked reference.
+      for (
+        const hash of collectExternalSchemaRefHashes(
+          (schema ?? false) as JSONSchema,
+        )
+      ) {
+        if (
+          provider.replica.isSchemaDocPersisted(hash) &&
+          lookupSchemaDocument(hash) !== undefined
+        ) {
+          continue;
+        }
+        const schemaResult = await provider.sync(`cid:${hash}` as URI, {
+          path: [],
+          schema: false,
+        });
+        loadFailure ??= schemaResult.error;
+      }
       const result = await provider.sync(
         id,
         {

@@ -19,6 +19,11 @@ reference form only when its whole closure is confirmed persisted in
 the target space, the fully inline form (recomposed through the realm
 registry when the schema itself carries references) otherwise, and a
 loud server error for a selector reference nothing backs. The
+cell-read boundary bootstraps a reference-form selector in a fresh process by
+syncing each referenced schema-document root before emitting the target
+selector; each root pull delivers its closure. This preserves the fail-closed
+wire gate without requiring the caller to keep an earlier process's registry
+warm. The
 connection-scoped
 transport experiment (`syncSchemaCasV1`, unmerged) is not being pursued;
 this design is the storage-side successor for link positions, and a
@@ -304,6 +309,9 @@ local store at the reading seams:
   contexts). A reference the store cannot back is corruption or a
   deliberately malformed declaration — logged, with the declaration
   selecting nothing (the fail-closed contract above).
+  Link resolution performs that warming for every schema-bearing hop before
+  either narrowing the schema or carrying it to the target, including a link
+  found at the exact requested path with no remaining segments.
 
 Verification happens at registration: a schema document's value is
 re-hashed and must match its id (the `loadSchemaDocument` precedent);

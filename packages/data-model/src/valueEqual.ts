@@ -65,7 +65,6 @@ export function valueEqual(a: FabricValue, b: FabricValue): boolean {
 
   while (pending.length > 0) {
     const [left, right] = pending.pop()!;
-    if (Object.is(left, right)) continue;
     if (typeof left === "function" || typeof right === "function") {
       const leftIsFactory = isAdmittedFabricFactory(left);
       const rightIsFactory = isAdmittedFabricFactory(right);
@@ -82,6 +81,7 @@ export function valueEqual(a: FabricValue, b: FabricValue): boolean {
       ]);
       continue;
     }
+    if (Object.is(left, right)) continue;
     if (
       left === null || right === null ||
       typeof left !== "object" || typeof right !== "object"

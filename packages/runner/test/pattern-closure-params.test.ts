@@ -12,6 +12,7 @@ import { getMetaCell, getMetaLink, parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("pattern closure params test");
@@ -179,7 +180,7 @@ describe("invocation-owned pattern closure params", () => {
     const childResult = owningResultCell(result.key("child").resolveAsCell());
     const paramsLink = getMetaLink(childResult, "params");
     expect(paramsLink).toBeDefined();
-    expect(paramsLink!.schema).toEqual(OFFSET_PARAMS_SCHEMA);
+    expect(resolvedSchema(paramsLink!.schema)).toEqual(OFFSET_PARAMS_SCHEMA);
 
     const inspectTx = runtime.edit();
     const deterministicLink = getMetaCell(

@@ -3863,7 +3863,7 @@ export class CellBridge {
       }
 
       const childSchema = expandSchemaReference(childCell.schema);
-      let callableKind = classifyCallableEntry(candidate, childSchema) ??
+      const callableKind = classifyCallableEntry(candidate, childSchema) ??
         classifyCallableEntry(resolvedCandidate, childSchema);
 
       if (!callableKind) continue;

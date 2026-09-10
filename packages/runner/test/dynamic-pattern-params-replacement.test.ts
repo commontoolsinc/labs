@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 
 import {
   createFactoryShell,
+  factoryStateOf,
   sealFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
 import { Identity } from "@commonfabric/identity";
@@ -20,6 +21,10 @@ import type { FactoryContract } from "../src/factory-materialization.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -162,8 +167,8 @@ describe("dynamic pattern params replacement", () => {
     tx = runtime.edit();
     commonfabric = createTrustedBuilder(runtime).commonfabric;
     invokeFactory = (commonfabric as unknown as {
-      invokeFactory: InvokeFactory;
-    }).invokeFactory;
+      __cfHelpers: { invokeFactory: InvokeFactory };
+    }).__cfHelpers.invokeFactory;
     warmArtifacts = new Map();
     releasePending = [];
     runtime.patternManager.artifactFromIdentitySync = (identity, symbol) =>
@@ -199,6 +204,7 @@ describe("dynamic pattern params replacement", () => {
     confidentiality: string,
   ): Promise<void> {
     const link = selector.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, link.space);
     tx.writeOrThrow({
       space: link.space,
       scope: link.scope,
@@ -209,7 +215,7 @@ describe("dynamic pattern params replacement", () => {
       value,
       cfc: {
         version: 1,
-        schemaHash: "dynamic-pattern-params-selector",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -360,7 +366,7 @@ describe("dynamic pattern params replacement", () => {
     const a3 = curry(baseA, { tag: "A3", offset: 1_000 });
     const selector = runtime.getCell<unknown>(
       space,
-      "dynamic-pattern-params-selector",
+      SEED_ENVELOPE_SCHEMA_HASH,
       undefined,
       tx,
     );
@@ -404,6 +410,9 @@ describe("dynamic pattern params replacement", () => {
       createFactoryShell(sealFactoryState(b2)),
       "selected-B2",
     );
+    const storedB2 = selector.withTx(runtime.readTx())
+      .getWithoutFactoryMaterialization();
+    expect(factoryStateOf(storedB2).ref).toEqual(REFS.b);
     // Scheduler actions are globally serialized: cancellation fences A1's
     // transaction immediately, but JavaScript cannot forcibly settle the
     // authored promise. Release it so the queued B2 generation can execute;

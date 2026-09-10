@@ -36,7 +36,7 @@ describe("factory-aware action schema walks", () => {
   });
 
   const collectors = () => {
-    const runner = runtime.runner as unknown as {
+    const runner = runtime.runner.accessForTestingOnly as unknown as {
       collectWritableCellArgumentLinks(
         schema: unknown,
         value: unknown,

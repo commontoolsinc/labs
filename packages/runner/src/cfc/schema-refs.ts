@@ -111,7 +111,7 @@ export const cfcSchemaChildRoot = (
 
 export const cfcSchemaIsInternalKey = (key: string): boolean =>
   key === "ifc" || key === "asCell" || key === "asStream" ||
-  key === "scope";
+  key === "asFactory" || key === "scope";
 
 export const cfcSchemaIsTrue = (schema: JSONSchema): boolean => {
   if (schema === true) {

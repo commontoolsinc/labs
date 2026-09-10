@@ -649,6 +649,40 @@ function linkPathAncestorIssue(
 }
 
 /**
+ * Remove the representation-only union used for a container that may be
+ * absent. The undefined branch exposes no descendant path, so it contributes
+ * presence uncertainty rather than a competing contract for that path.
+ */
+function unwrapAbsentContainerContract(
+  contract: PathSchemaContract,
+): PathSchemaContract {
+  const schema = contract.schema;
+  if (
+    typeof schema !== "object" || schema === null ||
+    Object.keys(schema).some((key) => key !== "anyOf") ||
+    !Array.isArray(schema.anyOf) || schema.anyOf.length !== 2
+  ) {
+    return contract;
+  }
+  const isUndefinedBranch = (branch: JSONSchema): boolean =>
+    typeof branch === "object" && branch !== null &&
+    Object.keys(branch).length === 1 && branch.type === "undefined";
+  const undefinedBranch = schema.anyOf.find(isUndefinedBranch);
+  const containerBranch = schema.anyOf.find((branch) =>
+    branch !== undefinedBranch
+  );
+  if (undefinedBranch === undefined || containerBranch === undefined) {
+    return contract;
+  }
+  return {
+    ...contract,
+    schema: containerBranch,
+    root: cfcSchemaChildRoot(containerBranch, contract.root),
+    mayBeMissing: true,
+  };
+}
+
+/**
  * Derive every schema conjunct that applies at a durable link target.
  *
  * `schemaAtPath()` intentionally returns a convenient approximation and loses
@@ -671,7 +705,9 @@ export function linkPathContracts(
     const part = String(segment);
     const next: PathSchemaContract[] = [];
     for (const unresolved of contracts) {
-      const contract = resolvePathSchemaContract(unresolved);
+      const contract = unwrapAbsentContainerContract(
+        resolvePathSchemaContract(unresolved),
+      );
       const { schema, root } = contract;
       if (schema === false) {
         next.push(contract);

@@ -3231,10 +3231,6 @@ export async function deriveSelectedValue(
     }),
   });
   const { lift, pattern } = commonfabric;
-  const paramsSchema: JSONSchema = {
-    type: "object",
-    additionalProperties: true,
-  };
 
   let predicatePattern: ReturnType<typeof pattern> | undefined;
   if (selection.filter !== undefined) {
@@ -3249,21 +3245,19 @@ export async function deriveSelectedValue(
           dereferencedElementSchema(elementSchema),
           KeepAsCell.OnlyStream,
         ),
-        params: paramsSchema,
       },
-      required: ["element", "params"],
+      required: ["element"],
       additionalProperties: false,
     };
     const predicateModule = lift(
-      ({ element, params }: {
+      ({ element }: {
         element: unknown;
-        params: { predicate: SelectionPredicate };
-      }) => evaluateSelectionPredicate(params.predicate, element),
+      }) => evaluateSelectionPredicate(selection.filter!.predicate, element),
       argumentSchema,
       { type: "boolean" },
     );
     predicatePattern = pattern(
-      ({ element, params }: any) => predicateModule({ element, params }),
+      ({ element }: any) => predicateModule({ element }),
       argumentSchema,
       { type: "boolean" },
     );
@@ -3348,12 +3342,10 @@ export async function deriveSelectedValue(
     ({ value }: any) => {
       let result: any = value;
       if (predicatePattern !== undefined) {
-        result = result.filterWithPattern(predicatePattern as any, {
-          predicate: selection.filter!.predicate,
-        });
+        result = result.filterWithPattern(predicatePattern as any);
       }
       if (itemProjectionPattern !== undefined) {
-        result = result.mapWithPattern(itemProjectionPattern as any, {});
+        result = result.mapWithPattern(itemProjectionPattern as any);
       } else if (directProjectionModule !== undefined) {
         result = directProjectionModule({ value: result });
       }

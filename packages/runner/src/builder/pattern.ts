@@ -49,7 +49,6 @@ import {
   SUBPATTERN_ARGUMENT_BUILTIN_REFS,
 } from "./builtin-replayability.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
-import { toJSONMethod } from "./json-member.ts";
 import {
   applyArgumentIfcToResult,
   applyInputIfcToOutput,
@@ -59,7 +58,6 @@ import { brandTrustedPattern, noteDerivedCopy } from "./pattern-metadata.ts";
 import { reactive } from "./reactive.ts";
 import {
   type CellAliasResolver,
-  moduleToEncodableForm,
   patternToEncodableForm,
   withAliasBindings,
 } from "./to-encodable-form.ts";

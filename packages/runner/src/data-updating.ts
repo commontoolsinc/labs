@@ -442,13 +442,15 @@ export function diffAndUpdate(
   // names without reading a member of it. Each member read on one resolves
   // through this transaction and is recorded on it as a dependency the commit
   // has to check.
+  const flattened = flattenBuilderArtifacts(newValue, {
+    isLeaf: isCellResultForDereferencing,
+  });
+  runtime.assertFactoryArtifactsPublishableForWrite(flattened, link.space);
   const changes = normalizeAndDiff(
     runtime,
     tx,
     link,
-    flattenBuilderArtifacts(newValue, {
-      isLeaf: isCellResultForDereferencing,
-    }),
+    flattened,
     context,
     readOptions,
     { seen: new Map(), nextAnchorId: anchorIds },

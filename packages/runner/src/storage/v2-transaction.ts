@@ -313,6 +313,14 @@ const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   ) {
     return value;
   }
+  // `isDeepFrozen()` intentionally accepts arbitrary functions for legacy
+  // general-purpose callers. Storage has the narrower Fabric-value contract:
+  // route every callable through the Fabric clone boundary so admitted
+  // factories are sealed and arbitrary functions are rejected, even when a
+  // replica returns the same already-frozen callable instance.
+  if (typeof value === "function") {
+    return cloneIfNecessary(value) as T;
+  }
   // What isolates a read from later mutation of its source is frozen-ness,
   // and `isDeepFrozen()` answers that question alone: a deep-frozen value
   // goes back by identity, and anything else is deep-cloned and frozen by

@@ -44,6 +44,7 @@ import {
   type MemorySpace,
 } from "../storage/interface.ts";
 import type { PatternBuilder } from "./pattern.ts";
+import type { invokeFactory } from "./invoke-factory.ts";
 import { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
 
 // Define runtime constants here - actual runtime values
@@ -525,7 +526,7 @@ export type InternalBuilderHelpers =
     "__cfHelpers"
   >
   & {
-    invokeFactory: typeof import("./invoke-factory.ts").invokeFactory;
+    invokeFactory: typeof invokeFactory;
     withPatternParamsSchema<T extends (...args: any[]) => unknown>(
       callback: T,
       schema: JSONSchema,

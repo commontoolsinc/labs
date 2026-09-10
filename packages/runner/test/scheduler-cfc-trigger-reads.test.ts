@@ -249,6 +249,7 @@ describe("trigger reads survive failed runs", () => {
       markInvalid: () => args.onMarkInvalid?.(),
       queueExecution: () => args.onQueueExecution?.(),
       getActionId: () => "test-action",
+      isActionGenerationCurrent: () => true,
       restoreInvalidCauses: args.onRestore,
     });
   }

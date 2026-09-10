@@ -8,7 +8,7 @@ import type { NormalizedFullLink } from "../link-types.ts";
 import type { RawBuiltinReturnType } from "../module.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import type { Runtime } from "../runtime.ts";
-import { type Action } from "../scheduler.ts";
+import { type Action, RetryWhenReady } from "../scheduler.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import {
   linkResolutionProbe,
@@ -152,6 +152,8 @@ export function map(
   // carry the same intent. Elements added by later (post-resume) reconciles
   // are fresh and must not wait.
   let resumeBatchAwaitSync = !!awaitSync;
+  let resumeRowsReadyKey: string | undefined;
+  let resumeRowsReadiness: Promise<void> | undefined;
 
   // Hold the durable container while the input list itself confirms. On a resume
   // reconcile the input can be undefined or a transient empty default standing in
@@ -202,6 +204,13 @@ export function map(
   };
 
   const reconcile: Action = (tx: IExtendedStorageTransaction) => {
+    if (resumeRowsReadiness !== undefined) {
+      throw new RetryWhenReady(
+        resumeRowsReadiness,
+        "map: resumed row patterns are waiting for durable state",
+        { keepDependenciesWhileWaiting: false },
+      );
+    }
     const rollback = trackListSetupRollback(tx, runtime, elementRuns);
     // Captured before the loop consumes it: this reconcile's element runs use
     // the current value; the flag is cleared only once a non-empty resume batch
@@ -372,9 +381,6 @@ export function map(
       throw new Error("map currently only supports arrays");
     }
 
-    // The resume batch has now been observed; later reconciles are post-resume.
-    if (list.length > 0) resumeBatchAwaitSync = false;
-
     // The whole current key set has to exist before any element is touched:
     // it is what says which children the list has stopped holding.
     const elementKeys = listElementKeys(list);
@@ -383,6 +389,49 @@ export function map(
       elementRuns,
       new Set(elementKeys.values()),
     );
+
+    if (elementAwaitSync) {
+      const rowKeys = [...elementKeys.values()];
+      const readyKey = JSON.stringify([factoryGeneration, rowKeys]);
+      if (resumeRowsReadyKey !== readyKey) {
+        const rowCells = rowKeys.map((elementKey) =>
+          listElementResultCell(
+            runtime,
+            tx,
+            "map",
+            result!,
+            elementKey,
+          ).withTx()
+        );
+        resumeRowsReadiness = Promise.all(
+          rowCells.map((rowCell) =>
+            runtime.runner.syncCellsForPatternResume(rowCell, opPattern)
+          ),
+        ).then(
+          () => {
+            resumeRowsReadyKey = readyKey;
+          },
+          (error) => {
+            logger.warn(
+              "resume-rows",
+              "syncing resumed row patterns failed; retrying",
+              { error },
+            );
+          },
+        ).finally(() => {
+          resumeRowsReadiness = undefined;
+        });
+        result = undefined;
+        throw new RetryWhenReady(
+          resumeRowsReadiness,
+          "map: resumed row patterns are waiting for durable state",
+          { keepDependenciesWhileWaiting: false },
+        );
+      }
+    }
+
+    // The resume batch has now been observed; later reconciles are post-resume.
+    if (list.length > 0) resumeBatchAwaitSync = false;
 
     const newArrayValue = new Array<any>(list.length);
     for (let i = 0; i < list.length; i++) {

@@ -1770,6 +1770,11 @@ export abstract class BaseObjectTraverser {
       );
     } else if (isPrimitive(doc.value)) {
       return doc.value;
+    } else if (isAdmittedFabricFactory(doc.value)) {
+      // Factory@1 callables are atomic Fabric values. A schema-aware traversal
+      // may validate their contract, but the generic DAG reconstruction must
+      // never descend into or discard the callable shell itself.
+      return doc.value;
     } else if (Array.isArray(doc.value)) {
       const newValue = new Array<FabricValue>(doc.value.length);
       using t = this.tracker.include(doc.value, true, newValue, doc);
@@ -4068,7 +4073,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
     }
     if (
       ContextualFlowControl.isTrueSchema(resolved) &&
-      !SchemaObjectTraverser.hasAsCell(resolved)
+      !SchemaObjectTraverser.hasAsCell(resolved) &&
+      !(isAdmittedFabricFactory(doc.value) && isObjectOrArray(resolved) &&
+        "asFactory" in resolved)
     ) {
       const defaultValue = isObjectOrArray(resolved)
         ? resolved["default"]

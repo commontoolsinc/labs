@@ -24,6 +24,10 @@ import type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "../src/storage/interface.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -211,6 +215,7 @@ describe("factory-valued pattern closure params provenance", () => {
     // guard and reject this synthetic ref because this test runtime has no
     // artifact proof yet. Seed through the underlying storage transaction so
     // the consumer paths below can exercise cold/warm loading and provenance.
+    writeSeedEnvelopeDoc(tx, link.space);
     const seeded = tx.tx.write({
       space: link.space,
       scope: link.scope,
@@ -221,7 +226,7 @@ describe("factory-valued pattern closure params provenance", () => {
       value: shell,
       cfc: {
         version: 1,
-        schemaHash: "nested-factory-param-selector",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{

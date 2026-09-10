@@ -152,6 +152,7 @@ describe("reactive retries", () => {
         queued++;
       },
       getActionId: () => "test-action",
+      isActionGenerationCurrent: () => true,
       restoreInvalidCauses: options.restoreInvalidCauses ?? (() => {}),
       reportTerminalRejection: (terminalError) => {
         reported.push(terminalError);

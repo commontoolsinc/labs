@@ -941,7 +941,9 @@ type MaterializedFactoryTool =
   & { factory: MaterializedFactory & Readonly<Pattern> };
 
 function admittedFactoryFromCell(cell: Cell<unknown>): unknown {
-  const resolved = cell.resolveAsCell();
+  const resolved = typeof cell.resolveAsCell === "function"
+    ? cell.resolveAsCell()
+    : cell;
   for (const read of [() => resolved.getRaw(), () => resolved.get()]) {
     try {
       const value = read();
@@ -958,15 +960,17 @@ function factoryToolSelection(
   toolDef: Cell<unknown>,
   toolValue?: unknown,
 ): FactoryToolSelection | undefined {
-  if (isAdmittedFabricFactory(toolValue)) {
-    return { selection: toolValue, leafCell: toolDef, metadata: {} };
-  }
   const direct = admittedFactoryFromCell(toolDef);
   if (isAdmittedFabricFactory(direct)) {
     return { selection: direct, leafCell: toolDef, metadata: {} };
   }
 
+  if (isAdmittedFabricFactory(toolValue)) {
+    return { selection: toolValue, leafCell: toolDef, metadata: {} };
+  }
+
   const metadata = isObjectNotArray(toolValue) ? toolValue : {};
+  if (!Object.hasOwn(metadata, "pattern")) return undefined;
   const patternValue = metadata.pattern;
   if (isAdmittedFabricFactory(patternValue)) {
     return {
@@ -1134,12 +1138,21 @@ function collectToolEntries(
   toolsCell: Cell<Record<string, Schema<typeof LLMToolSchema>>>,
   includeBuiltinTools = true,
 ): { legacy: LegacyToolEntry[]; pieces: PieceToolEntry[] } {
-  const tools = toolsCell.get() ?? {};
+  const projectedTools = toolsCell.get() ?? {};
+  const rawTools = toolsCell.getRaw();
+  const names = new Set(Object.keys(projectedTools));
+  if (isObjectNotArray(rawTools)) {
+    for (const name of Object.keys(rawTools)) names.add(name);
+  }
   const legacy: LegacyToolEntry[] = [];
   const pieces: PieceToolEntry[] = [];
 
-  for (const [name, tool] of Object.entries(tools)) {
+  for (const name of names) {
     assertToolNameAvailable(name, includeBuiltinTools);
+    const cell = toolsCell.key(name) as unknown as Cell<
+      Schema<typeof LLMToolSchema>
+    >;
+    const tool = projectedTools[name] ?? cell.getRaw();
 
     if (tool?.piece?.get?.()) {
       const piece: Cell<any> = tool.piece;
@@ -1157,9 +1170,7 @@ function collectToolEntries(
     legacy.push({
       name,
       tool,
-      cell: toolsCell.key(name) as unknown as Cell<
-        Schema<typeof LLMToolSchema>
-      >,
+      cell,
     });
   }
 

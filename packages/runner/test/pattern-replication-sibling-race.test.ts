@@ -507,13 +507,13 @@ describe("closure replication: the in-flight sibling supplier race", () => {
       if (libIdentity === undefined) throw new Error("no lib identity");
       expect(libIdentity).not.toBe(importerEntry.identity);
 
-      // The lib pattern arrives the CI way: served from the in-memory
-      // artifact index by its own module identity — no per-space persist
-      // happens on this path, so the named space (dry D) stays dry.
-      const libPattern = await runtime.patternManager.loadPatternByIdentity(
+      // The lib pattern arrives the CI way: served directly from the
+      // in-memory artifact index by its own module identity. An async
+      // by-identity load verifies an exact source space, so using it here
+      // would contradict the dry-origin geometry this test pins.
+      const libPattern = runtime.patternManager.artifactFromIdentitySync(
         libIdentity,
         "libPattern",
-        spaceD,
       );
       expect(libPattern).toBeDefined();
 
@@ -1025,11 +1025,11 @@ describe("closure replication: the in-flight sibling supplier race", () => {
       "is the importer, not the module: an entry-matched wake would " +
       "sleep through exactly this record)",
     async () => {
-      // R1 compiles the importer program into A (durable); rt2 warm-loads
-      // the LIB pattern by its own module identity from A — the load path
-      // persists NOTHING and records NOTHING (that is the lunch
-      // geometry's supplier hole), so rt2's map stays dry while its
-      // in-memory index can serve the lib pattern object.
+      // R1 compiles the importer program into A (durable) and already has the
+      // LIB pattern in its in-memory index. Passing that trusted object to rt2
+      // keeps rt2's exact-space availability map dry. An async by-identity
+      // load through rt2 would verify A and record it as a usable fallback,
+      // eliminating the supplier-hole geometry this test pins.
       const importer = await runtime.patternManager.compileOrGetPattern(
         PROGRAM_WITH_LIB,
         spaceA,
@@ -1067,10 +1067,9 @@ describe("closure replication: the in-flight sibling supplier race", () => {
         experimental: { serverExecution: true },
       });
       try {
-        const libPattern = await rt2.patternManager.loadPatternByIdentity(
+        const libPattern = runtime.patternManager.artifactFromIdentitySync(
           libIdentity,
           "libPattern",
-          spaceA,
         );
         expect(libPattern).toBeDefined();
 

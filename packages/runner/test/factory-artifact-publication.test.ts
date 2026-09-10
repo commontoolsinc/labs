@@ -7,10 +7,10 @@ import { Identity } from "@commonfabric/identity";
 
 import { getMetaCell } from "../src/link-utils.ts";
 import { sendValueToBinding } from "../src/pattern-binding.ts";
-import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import type { Cell } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase(
   "factory artifact publication test",
@@ -76,25 +76,22 @@ describe("Factory@1 artifact publication fences", () => {
     expect(resultCell.key("factory").getRaw()).toBeUndefined();
   });
 
-  it("rejects an unavailable factory before a writable query-result write", () => {
+  it("rejects an unavailable factory before a query-result Cell write", () => {
     const destination = runtime.getCell<{ factory?: FabricValue }>(
       destinationSpace,
       "unavailable factory query result",
-      undefined,
+      {
+        type: "object",
+        properties: { factory: { asCell: ["cell"] } },
+      },
       tx,
     );
-    destination.set({});
-    const writable = createQueryResultProxy<{ factory?: FabricValue }>(
-      runtime,
-      tx,
-      destination.getAsNormalizedFullLink(),
-      0,
-      true,
-    );
+    destination.set({ factory: null });
+    const writable = destination.get() as { factory: Cell<FabricValue> };
 
     expect(() => {
-      writable.factory = unavailableFactory;
+      writable.factory.set(unavailableFactory);
     }).toThrow(expectedUnavailableMessage());
-    expect(destination.key("factory").getRaw()).toBeUndefined();
+    expect(destination.key("factory").getRaw()).toBeNull();
   });
 });

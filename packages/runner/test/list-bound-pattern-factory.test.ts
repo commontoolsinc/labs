@@ -22,6 +22,10 @@ import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 
 const signer = await Identity.fromPassphrase("bound list pattern factory test");
 const space = signer.did();
@@ -469,6 +473,7 @@ describe("bound PatternFactory list operations", () => {
     );
     const selectorLink = selector.getAsNormalizedFullLink();
     const writeSelection = (label: string): void => {
+      writeSeedEnvelopeDoc(tx, selectorLink.space);
       tx.writeOrThrow({
         space: selectorLink.space,
         scope: selectorLink.scope,
@@ -479,7 +484,7 @@ describe("bound PatternFactory list operations", () => {
         value: selected,
         cfc: {
           version: 1,
-          schemaHash: "bound-list-label-only-selector",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{

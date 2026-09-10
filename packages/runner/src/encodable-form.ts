@@ -11,7 +11,10 @@
  * is left for the encoder to reject rather than being broken here.
  */
 
-import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
+import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 /**
@@ -173,10 +176,14 @@ type AnyFunction = (...args: never[]) => unknown;
  * defined itself is user data, and the conversion rejects it, that `toJSON`
  * being a function-valued member.
  *
- * An artifact is reached as either an object or a function. Admitted
- * `Factory@1` callables are already Fabric values and remain atomic leaves;
- * other functions are replaced but never descended into because their members
- * are builder state, not content.
+ * An artifact is reached as either an object or a function. Ref-backed
+ * `Factory@1` callables are already Fabric values and remain atomic leaves.
+ * A capture-free hand-built PatternFactory has no durable ref and therefore
+ * cannot cross a Fabric boundary as `Factory@1`; it takes the established
+ * embedded-graph fallback instead. A closure-bearing keyless factory cannot
+ * take that fallback because its hidden params state would be lost. Other
+ * functions are replaced but never descended into because their members are
+ * builder state, not content.
  *
  * Subtrees carrying no artifact come back by identity, which keeps an already
  * deep-frozen `FabricValue` eligible for the conversion's identity fast path
@@ -222,11 +229,33 @@ function replace(
     return flattened === IN_PROGRESS ? value : flattened;
   }
 
-  // An admitted factory is already a Fabric value. Other functions with an
-  // encodable form are legacy builder artifacts; arbitrary functions reach the
-  // data model unchanged and are rejected there.
+  // A ref-backed admitted factory is already a Fabric value. A capture-free
+  // hand-built PatternFactory is deliberately different: without a content-
+  // addressed ref it has no cold reconstruction path, so its graph-local
+  // representation is the embedded graph. A closure-bearing keyless pattern
+  // would lose its params state in that form, while keyless module and handler
+  // factories have no graph fallback at all; leave each atomic so the data-
+  // model boundary rejects it.
+  // Other functions with an encodable form are legacy builder artifacts;
+  // arbitrary functions reach the data model unchanged and are rejected there.
   if (isFunction) {
     if (isAdmittedFabricFactory(value)) {
+      const state = factoryStateOf(value);
+      if (
+        state.kind === "pattern" && state.ref === undefined &&
+        state.paramsSchema === undefined
+      ) {
+        const method = ownEncodableFormMethod(value);
+        if (method !== undefined) {
+          seen.set(value, IN_PROGRESS);
+          return copied(
+            replace(encodableFormFrom(method, value), seen, onCopy, hooks),
+            value,
+            seen,
+            onCopy,
+          );
+        }
+      }
       return replaced(value, hooks, seen, onCopy);
     }
     const method = ownEncodableFormMethod(value);

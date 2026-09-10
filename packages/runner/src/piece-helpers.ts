@@ -49,19 +49,27 @@ export function resolveCellPath<T>(
   options: { requireProjection?: boolean } = {},
 ): unknown {
   let currentCell: Cell<unknown> = cell;
-  let value: unknown = cell.get();
+  let value: unknown;
   for (const [index, segment] of path.entries()) {
     if (isCell(value)) {
       currentCell = value;
       value = value.get();
     }
-    currentCell = currentCell.key(segment);
-    if (value === undefined && !options.requireProjection) {
-      // A sparse root can fail to materialize while a selected child is
-      // readable. Correlated schemas require a matching root projection.
-      value = currentCell.get();
-      if (value !== undefined || index < path.length - 1) continue;
+    const parentCell = currentCell;
+    currentCell = parentCell.key(segment);
+    if (!options.requireProjection) {
+      // Narrow first: materializing a whole object can be blocked by an
+      // unrelated cold factory sibling even though the requested child is
+      // already readable. A missing or undefined child falls through to the
+      // parent projection so membership and useful error messages remain
+      // exact. Correlated schemas explicitly request that projection below.
+      const narrowed = currentCell.get();
+      if (narrowed !== undefined || index < path.length - 1) {
+        value = narrowed;
+        continue;
+      }
     }
+    value = parentCell.get();
     if (value != null && typeof value !== "object") {
       throw new Error(
         `Cannot access path "${

@@ -110,6 +110,20 @@ Canonical Fabric writers dispatch through the Factory@1 codec. `$implRef`
 remains current only inside instantiated execution-module descriptors; it is
 not factory state and is never accepted as a Factory@1 ref.
 
+A capture-free PatternFactory constructed directly by trusted runtime code may
+still appear inside a current graph before it has a content-addressed artifact
+ref. Storage preflight replaces that value with its embedded Pattern graph; it
+does not encode the callable as Factory@1, grant it a durable factory identity,
+or create a cold reconstruction path. This graph-local fallback is unavailable
+to a keyless pattern with a compiler-declared params slot, whether bound or
+unbound, because the embedded graph does not contain the hidden factory params
+state. Such a value remains a factory at the Fabric boundary and fails the
+normal missing-ref validation. Keyless module and handler factories have no
+embedded-graph fallback. A session-local keyless pattern identity hashes the
+same normalized embedded graph. Result projection likewise normalizes
+graph-local builder artifacts before alias binding, so the binding walk does
+not misclassify builder artifacts as arbitrary JavaScript functions.
+
 ## Goals
 
 1. Let every content-addressed factory kind round-trip through cells, pieces,
@@ -200,7 +214,9 @@ The callable exposure depends on where the value is consumed:
   data are materialized before that event's callback runs. Context is read for
   each event, so a context change affects later events but does not invoke the
   handler by itself. A factory carried by value in an event is that event's
-  snapshot; an explicit `Cell<Factory>` retains normal Cell semantics.
+  canonical `Factory@1` state snapshot; storage decode may return a distinct
+  inert shell with the same state. An explicit `Cell<Factory>` retains normal
+  Cell semantics.
 
 These rules are based on value origin, not merely lexical nesting. A factory
 delivered as a schema-driven `lift` or handler callback argument is live and
@@ -353,6 +369,10 @@ JSON registry has a dedicated callable-factory codec slot; it does not classify
 `FactoryCodec.canEncode()` accepts only values admitted to the internal
 factory-state table. The brand is checked before legacy `toJSON()` conversion
 and before generic function rejection.
+
+Pattern-only trust gates also inspect the discriminated factory state. A module
+or handler factory that happens to expose pattern-shaped fields is not a
+pattern and cannot enter a pattern-only load or execution path.
 
 No property on `Function` or `Function.prototype` is changed.
 
@@ -551,6 +571,9 @@ binding preserve symbolic aliases without loading code. Transformed symbolic
 invocation passes the binding to the dynamic node, which reads its current
 value before calling the materializer. Context-free `valueFromJson()` remains
 the intentional shell-returning boundary.
+An `asFactory`-only schema is an executable leaf contract, not an open `true`
+schema. Schema traversal must therefore dispatch that leaf before its generic
+flag-only-schema fast path, including for nested array and object positions.
 
 Materialization returns another function, not a wrapper object, and preserves
 the canonical codec state for reserialization. Preservation requires exact
@@ -614,11 +637,26 @@ Publication preserves the memory system's optimistic local-commit contract:
    A deterministic preparation or integrity failure rejects the containing
    commit and follows ordinary speculative-revert and dependent-commit rules.
    Only confirmation of that atomic commit grants destination-space artifact
-   availability. At confirmation, the runner also upgrades every already-indexed
-   live factory under the confirmed content identity with its durable artifact
-   ref; a factory evaluated before publication therefore becomes synchronously
-   sealable without re-evaluation. Later evaluations of the same verified
-   identity receive the same durable ref immediately.
+   availability. Indexed factories already carry the complete artifact ref
+   assigned by verified evaluation; confirmation records that the same
+   identity is now available in this destination space. Later evaluations of
+   the same verified identity receive the same ref immediately.
+
+Verified module evaluation assigns every indexed builder callable its complete
+content-addressed artifact ref immediately; exact-space artifact availability
+is a separate fact. This lets internal inline inputs encode canonical Factory@1
+and lets a runtime use an already-loaded trusted callable synchronously. A
+durable containing write still requires the publication proof above, and only
+confirmation grants availability in its destination space.
+
+An evaluated artifact may be reused across spaces because its identity fixes
+the module bytes, but the requested source space is verified independently
+before that reuse grants exact-space availability. A globally warm evaluation
+alone never authorizes a source space and a compiled-only cache is insufficient
+without the verified source closure needed for cold recovery.
+Once a verified module identity evaluates successfully, a missing export or
+hoist symbol is a definitive miss for that evaluation; it does not trigger a
+second compilation or evaluation of the same bytes.
 
 Consequently, a remote runtime cannot observe a canonical factory ref before
 the referenced artifact closure is durable in that value's space. A local
@@ -786,6 +824,17 @@ must preserve `Factory@1` as an atomic value at its document path (normally
 `value` or a descendant). They use the same Fabric freeze, equality, and
 arbitrary-function rejection rules as generic reads and writes; no raw-state
 reader or root-function document representation is part of this contract.
+Path-addressed readers narrow to the requested child before materializing a
+containing object, so an unrelated cold factory sibling cannot block an
+already-readable field.
+
+A constant list callback serializes into the immutable inputs document as
+Factory@1 when it has a verified artifact ref. A ref-less, capture-free callback
+uses its embedded graph, never a session-only identity. The runtime that
+constructs either document may retain a session-local association from the
+inputs-document address to the exact trusted bound callback; list materialization
+prefers that association in the same session and treats the embedded graph as
+the cold fallback.
 
 ### Structured-clone runtime IPC
 
@@ -847,11 +896,24 @@ Cells and links remain atomic references whose own source-space provenance is
 preserved. A registered instance whose codec is deliberately unimplemented also
 remains atomic during ancillary graph transforms; the canonical writer still
 rejects it at the codec boundary, so this is not an admission of that value.
+Generic query DAG reconstruction likewise returns an admitted `Factory@1`
+callable as an atomic leaf; only its schema-aware factory branch may inspect and
+validate the callable's public contract.
+When a stored link carries a factory contract by content-addressed schema ref,
+link resolution registers that schema closure from the referring document
+before carrying the contract across the hop, even when the factory occupies the
+exact requested path.
 
 Every canonical by-value write route uses this traversal, including direct Cell
-and stream writes, normal result/output binding, writable query-result proxies,
-runtime-client, CLI, and FUSE adapters. A route may not bypass publication merely
-because it reaches storage through a binding or proxy rather than `Cell.set()`.
+and stream writes, normal result/output binding, query-result-derived Cell
+handles, runtime-client, CLI, and FUSE adapters. A route may not bypass
+publication merely because it reaches storage through a binding or a derived
+handle rather than `Cell.set()` directly.
+Factory-publication preflight uses the same atomic-leaf classifications as the
+write it precedes. In particular, it does not enumerate live query-result
+views, because doing so would add dependencies proportional to unread container
+contents, and it does not invoke deliberately unimplemented Fabric-instance
+codecs before the canonical writer reaches their existing rejection boundary.
 When a raw Cell read follows a link, runner provenance records the resolved
 target space, not the address space of the link container. A later cross-space
 publication therefore copies from the space that actually supplied the artifact.
@@ -892,6 +954,10 @@ when the callback only forwards or writes the capture and even after earlier
 compiler stages have rebuilt the working source tree. Compiler schema resolution
 therefore uses exact semantic types and the type checker's canonical program
 source scope rather than transient symbols from an emitted working tree.
+Factory construction also records every derived internal Cell's explicit
+resolved scope in the manifest, including the default `space` scope. Full-graph
+serialization must preserve that field; absence is not an alternative spelling
+for the resolved default.
 Every emitted descendant type node for which the compiler carries an exact
 semantic type remains paired with that type: node syntax is authoritative for
 compiler refinements and wrapper syntax such as `Default`, while the semantic
@@ -917,6 +983,14 @@ control-only expressions remain path-precise. A full-shape
 observation is a read capability and a retained schema path even when no
 separate property access is recorded. Compiler-modeled projection and traversal
 methods, such as `map`, retain their precise path semantics.
+
+An optional container may be represented as an `anyOf` containing exactly one
+`undefined` branch and one concrete container branch. Durable link-path
+validation treats this shape as presence uncertainty: it descends through the
+single concrete branch and records that the path may be absent. An `anyOf` with
+multiple path-capable branches remains correlated with its parent and fails
+closed rather than laundering a branch-specific contract.
+
 A detached synthetic node only adds structure when it still carries every
 syntax-only obligation needed by that structure. In particular, an inferred
 CFC alias that retains `ownerPrincipal` or a `TrustedActionWrite` UI contract
@@ -1161,6 +1235,10 @@ semantics.
 
 Version 1 requires the stored factory's canonical public schemas to equal the
 call site's generated schemas after reference resolution and normalization.
+When a symbolic Cell binding carries content-addressed schema refs, validation
+resolves those refs from the trusted schema registry before comparing the
+binding with the compiler-generated contract; externalization must not turn an
+equivalent symbolic binding into a schema mismatch.
 When closure conversion returns a captured factory through a nested pattern,
 the compiler recovers that leaf's public contract in strict provenance order:
 compiler-owned metadata for the concrete builder/value first; then the
@@ -1176,6 +1254,9 @@ returned factory-valued property must therefore retain its complete nested
 factory's `resultSchema` when the hoisted factory's own emitted result schema
 has the exact factory leaf. Type-directed recovery carries only the public
 kind and schemas; it never invents `FrameworkProvided` authority.
+Sanitizing an outer link schema likewise treats `asFactory` as semantic
+metadata: stripping that outer link's `asCell` annotations must never rewrite
+the public schemas nested inside the factory contract.
 For anonymous union, nullable, and optional captures, every trusted factory arm
 receives its own compiler hint while non-factory arms remain in the union. The
 schema writer formats each hinted public contract through the same
@@ -1431,6 +1512,12 @@ schemas, resolves the trusted base artifact, applies modifier and pattern-param
 state, and tail-calls the existing pattern, JavaScript-module, or handler
 instantiation path. It does not call authored code during decode, selection, or
 cold loading.
+For a link-backed binding, the dependency read records the complete dereference
+chain and the selected value is read from the resolved target Cell; rereading
+the link container itself is not a substitute for reading the factory it names.
+A sink notification is only the invalidation signal: it may observe the link
+boundary while a cross-space target is arriving, so the supervisor always uses
+the explicit resolved-target reread as selection authority.
 
 The direct dynamic node is a switch-latest supervisor for one materialized
 child/action/handler. It owns that instance's cancellation scope, result-owned
@@ -1456,6 +1543,20 @@ remain on the scheduled path. JavaScript promises are not forcibly settled;
 the canceled promise may finish later, but its transaction and subscriptions
 are generation-fenced and cannot commit. The replacement begins when the
 ordinary scheduler lane advances.
+Cancellation owns both an installed child registration and any deferred
+named-family start that has not installed one yet; a superseded deferred start
+cannot become live after the replacement has written its params.
+The selection transaction stages the new content-addressed pattern pointer
+before a named-family delay in the child's full setup. That pointer is visible
+through the normal synchronous speculative commit, and subsequent setup commits
+remain causally behind it, so an intervening reader waits for the new factory
+instead of restarting canceled code against the new params.
+
+The same fence applies to the selected child's pattern-identity watcher. A
+queued initial or intermediate pointer notification verifies that it still
+names the pointer stored at the stable output identity before swapping code; a
+late watcher callback cannot restore a superseded factory over the newer
+generation's params.
 
 Replaying the same canonical `Factory@1` state is a no-op while the selection
 has an active child or a still-valid readiness attempt. It is not a no-op after
@@ -1549,7 +1650,13 @@ that lands between dequeue and readiness registration cannot strand the child.
 A resumed list coordinator's separate row
 pre-sync is recoverable supervisor work: a transient row-sync rejection settles
 the parked attempt without recording the ready key, so the scheduler reruns the
-coordinator and starts a fresh pre-sync. The enclosing handler stream
+coordinator and starts a fresh pre-sync. A coordinator parked on either cold
+factory readiness or this row readiness is deliberately absent from ordinary
+scheduler running-work counts. Consequently `idle()` and `settled()` are not
+completion signals for the readiness-dependent update; observers and tests wait
+for its successful commit or another explicit readiness-dependent event.
+Readiness passes may consume attempt numbers without reaching a commit, and
+commit callbacks may arrive out of attempt order. The enclosing handler stream
 subscription remains active so it can receive the event, but no handler body,
 normal success receipt/result graph,
 or event-created child/action subscription is created before readiness. Owner
@@ -1804,6 +1911,20 @@ discovery recognizes a direct PatternFactory or the factory in an ordinary
 metadata wrapper and publishes that public schema unchanged; it does not infer
 or subtract closure-capture keys.
 
+Tool maps are heterogeneous, so their static schema cannot truthfully use a
+wildcard `asFactory` contract: that annotation requires one exact kind and
+input/output contract. Runtime tool discovery therefore enumerates raw child
+cells, then independently admits each direct factory or metadata wrapper,
+checks that its factory kind is `pattern`, derives the public schema from the
+admitted Factory@1 state, and materializes it through the runner. Reading the
+raw map is only an enumeration mechanism; it does not bypass per-entry schema,
+kind, provenance, framework-path, or materialization checks. Each child is
+examined for a direct admitted factory before any object projection of that
+child is interpreted as metadata, because a heterogeneous map schema can
+project a direct factory shell to an empty object. Discovery reads an
+already-resolved leaf directly; it does not require another resolution
+operation before applying the same admission checks.
+
 ## Compatibility and Migration
 
 The repository is pre-launch. On 2026-07-12 the product/runtime owner confirmed
@@ -1820,6 +1941,10 @@ Factory-function `toJSON()` compatibility remains until every Fabric boundary
 is proven to dispatch through registered codecs. It emits the full graph, never
 the retired `$patternRef` sentinel. This does not affect canonical Factory@1
 storage, hashing, memory, CLI, FUSE, or LLM boundaries.
+Builder-internal graph serialization still hands its enclosing artifact walk a
+raw graph so aliases, scopes, and causes are assigned exactly once. Direct
+`toJSON()` performs that walk itself. Both forms remain full graphs; the
+distinction is graph-processing ownership, not a second wire representation.
 Canonical FUSE projection must inspect the original registered callable before
 JavaScript invokes a legacy `toJSON()` hook on it.
 
@@ -1887,7 +2012,8 @@ Each stage is independently testable and revertible.
   cycle tracking, and formal type declarations.
 - `packages/memory` and runner storage/update paths: treat branded factories as
   atomic codec values at storage boundaries, preserve them through patches and
-  diffs, and reject unbranded functions.
+  diffs, and reject unbranded functions even when an identical callable reaches
+  a read or comparison fast path.
 - `packages/api`: mirrored FabricFactory and `asFactory` schema declarations;
   keep `.curry` out of the public `PatternFactory` type.
 - `packages/runner/src/builder`: brand/state attachment for every factory,
@@ -2005,7 +2131,9 @@ This proposal is complete when:
 
 1. Every content-addressed pattern/module/handler factory is directly branded
    and round-trips through a runner as a callable `Factory@1` value; keyless and
-   session-only factories fail durable encoding.
+   session-only factories fail durable Factory@1 encoding. A capture-free,
+   trusted keyless pattern may instead remain an embedded current-graph Pattern
+   under the narrow graph-local fallback above.
 2. Arbitrary functions remain rejected.
 3. Factory-valued eager pattern inputs and captures invoke through one dynamic
    supervisor path; factory values delivered to `lift` and handler callbacks

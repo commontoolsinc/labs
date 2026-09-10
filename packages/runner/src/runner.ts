@@ -1,7 +1,6 @@
 import {
   fabricFromNativeValue,
   FabricInstance,
-  FabricSpecialObject,
   type FabricValue,
   hashOf,
   hashStringOf,
@@ -135,7 +134,6 @@ import {
   unwrapOneLevelAndBindToDoc,
 } from "./pattern-binding.ts";
 import { PatternManager } from "./pattern-manager.ts";
-import { isCellResultForDereferencing } from "./query-result-proxy.ts";
 import type { Runtime } from "./runtime.ts";
 import { type Action, ignoreReadForScheduling } from "./scheduler.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
@@ -2822,9 +2820,11 @@ export class Runner {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     // `Pattern` erases its authored result type to `JSONValue`, so validate
     // that actual execution value here, then restore its association with
-    // `Cell<R>`.
+    // `Cell<R>`. Builder artifacts must take their storage form before the
+    // binding walk, whose function branch admits only first-class factories
+    // and rejects arbitrary callables.
     let result = unwrapOneLevelAndBindToDoc(
-      pattern.result,
+      flattenBuilderArtifacts(pattern.result),
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
@@ -2853,7 +2853,7 @@ export class Runner {
     // artifact is not a `FabricValue`, so it is replaced before the
     // conversion. That keeps the gate below comparing what a write would
     // actually store, which is the whole point of converting first.
-    const fabricResult = fabricFromNativeValue(flattenBuilderArtifacts(result));
+    const fabricResult = fabricFromNativeValue(result);
     if (!valueEqual(fabricResult, previousResult)) {
       recordSetupProjectionPolicyInputs(
         tx,
@@ -4225,6 +4225,19 @@ export class Runner {
           const newRef = asPatternIdentityRef(newValue);
           if (!newRef) return;
           const newKey = patternIdentityKey(newRef);
+          // Sink callbacks are scheduled work: an initial or intermediate
+          // pointer notification can still be queued after a newer dynamic
+          // generation has committed. Never let that stale callback swap the
+          // stable output identity back to superseded code.
+          const storedRef = getPatternIdentityRef(
+            resultCell.withTx(this.#runtime.readTx()),
+          );
+          if (
+            storedRef !== undefined &&
+            patternIdentityKey(storedRef) !== newKey
+          ) {
+            return;
+          }
           if (newKey === currentPatternKey) return; // No change
           currentPatternKey = newKey;
 
@@ -8159,9 +8172,10 @@ export class Runner {
       const dereferenceSources = resolution.traces.map((trace) => ({
         ...trace.source,
       } as NormalizedFullLink));
+      const resolvedCell = this.#runtime.getCellFromLink<unknown>(resolved)
+        .withTx(readTx);
       return {
-        selection: bindingCell.withTx(readTx)
-          .getWithoutFactoryMaterialization(),
+        selection: resolvedCell.getWithoutFactoryMaterialization(),
         artifactSpace: resolved.space,
         sourceLink: resolved,
         dereferenceSources,
@@ -8489,9 +8503,14 @@ export class Runner {
     };
 
     sinkCancel = bindingCell.sink(
-      (selection, cfcLabel) => {
+      (_selection, _cfcLabel) => {
         try {
-          select(selection, cfcLabel);
+          // The sink value can stop at a cross-space link while its
+          // dependency walk is being established. Selection authority comes
+          // from the explicit resolved-source reread, which also provides the
+          // artifact space and complete CFC label view used by replacement.
+          const current = readCurrent();
+          select(current.selection, current.cfcLabel);
         } catch (error) {
           // Cell.sink invokes once before installing its subscription. Keep the
           // supervisor alive across a preloaded invalid value so a later valid
@@ -10938,7 +10957,7 @@ export class Runner {
     outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     pattern: Pattern,
-    moduleRefName: string | undefined,
+    moduleRefName?: string,
   ): {
     argumentCellLink: NormalizedFullLink;
     mappedOutputBindings: FabricExecValue;
@@ -10961,6 +10980,33 @@ export class Runner {
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
+
+    // Preserve a constant list callback under the immutable inputs document's
+    // address. This runtime can execute the exact trusted bound callable it
+    // used to build the inline document; a fresh runtime instead decodes its
+    // Factory@1 state and follows the ordinary cold path. A ref-less callback
+    // still serializes as its embedded-graph fallback and receives a session-
+    // only keyless identity for stable local bookkeeping.
+    let liveListOp: Pattern | undefined;
+    if (
+      (moduleRefName === "map" || moduleRefName === "filter" ||
+        moduleRefName === "flatMap") &&
+      isObjectOrArray(mappedInputBindings)
+    ) {
+      const op = (mappedInputBindings as Record<string, unknown>).op;
+      if (op !== null && (typeof op === "object" || typeof op === "function")) {
+        const original = resolveOriginal(op as object);
+        if (isTrustedBuilderArtifact(original) && isPattern(original)) {
+          const ref = this.#runtime.patternManager.ensureKeylessPatternIdentity(
+            original as Pattern,
+          );
+          if (
+            PatternManager.isKeylessPatternIdentity(ref.identity) ||
+            isAdmittedFabricFactory(op)
+          ) liveListOp = op as Pattern;
+        }
+      }
+    }
 
     // Opaque forwarded references (argument keys the module's schema marks
     // `asCell: ["opaque"]`, e.g. ifElse's `ifTrue`/`ifFalse` branches) are
@@ -10998,6 +11044,13 @@ export class Runner {
       tx,
       undefined,
     );
+    if (liveListOp !== undefined) {
+      const inputsLink = inputsCell.getAsNormalizedFullLink();
+      this.#runtime.patternManager.registerListOpResolution(
+        `${inputsLink.space}\0${inputsLink.id}`,
+        liveListOp,
+      );
+    }
     // CT-1623: the output spot this node writes through is reserved for this
     // node, so its fully-resolved coordinates are a stable, position-derived,
     // program-independent identity. Builtins that mint a result container
@@ -11554,6 +11607,23 @@ export class Runner {
           : undefined,
       );
     }
+    if (factorySelectionLink !== undefined) {
+      const selectedRef = getArtifactEntryRef(patternImpl);
+      if (
+        selectedRef !== undefined &&
+        !PatternManager.isKeylessPatternIdentity(selectedRef.identity)
+      ) {
+        // Dynamic replacement commits the selected pointer before any
+        // named-family delay in the child's full setup. Local speculative
+        // visibility is synchronous, so a reader arriving in that interval
+        // follows (and, if necessary, waits for) the new factory instead of
+        // restarting the canceled generation against newly written params.
+        childResultCell.withTx(tx).setMetaRaw("patternIdentity", {
+          identity: selectedRef.identity,
+          symbol: selectedRef.symbol,
+        }, rawMetaWriteAuthorization);
+      }
+    }
     const childRun = this.#runWithStartOwnership(
       tx,
       patternImpl,
@@ -11582,6 +11652,11 @@ export class Runner {
       );
     }
 
+    // A child whose named-family sync has not landed owns no installed
+    // registration yet. Its deferred start still belongs to this generation
+    // and must be canceled with it, or it can install superseded code after a
+    // dynamic replacement has already written the next generation's params.
+    addCancel(childRun.cancelDeferredStart);
     addCancel(() =>
       this.releaseChild(childResultCell, childRun.installedCancel)
     );

@@ -27,7 +27,8 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { defer } from "@commonfabric/utils/defer";
 
 import { createBuilder } from "../src/builder/factory.ts";
-import type { Cell, FactoryInput, JSONSchema } from "../src/builder/types.ts";
+import { withPatternParamsSchema } from "../src/builder/pattern.ts";
+import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
 import { INJECTION_SAFE_ATOM } from "../src/cfc/schema-sanitization.ts";
@@ -35,7 +36,10 @@ import { getMetaLink, parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { waitForLlmSettled } from "./support/llm-result.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
 
 // D1b (cfc-llm-derived-stamp-builtins.test.ts): generateObject stamps LlmDerived
 // on EVERY node of the result schema so the mark rides split child-document
@@ -57,9 +61,6 @@ describe("generateObject with tools", () => {
   let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
   let str: ReturnType<typeof createBuilder>["commonfabric"]["str"];
   let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
-  let patternTool: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["patternTool"];
   let generateObject: ReturnType<
     typeof createBuilder
   >["commonfabric"]["generateObject"];
@@ -88,7 +89,6 @@ describe("generateObject with tools", () => {
       handler,
       Cell,
       lift,
-      patternTool,
       str,
     } = commonfabric);
     dummyPattern = pattern(() => ({}), { type: "object" });
@@ -755,7 +755,7 @@ describe("generateObject with tools", () => {
     });
   });
 
-  it("should handle multiple tool calls with patternTool-based tools before presentResult", async () => {
+  it("should handle multiple direct pattern tools before presentResult", async () => {
     loadConversationFixture({
       description: "listItems → countItems → presentResult",
       responses: [
@@ -816,6 +816,53 @@ describe("generateObject with tools", () => {
       required: ["name", "itemCount"],
     };
 
+    const itemsSchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          value: { type: "string" },
+        },
+        required: ["label", "value"],
+        additionalProperties: false,
+      },
+    } as const satisfies JSONSchema;
+    const paramsSchema = {
+      type: "object",
+      properties: { items: itemsSchema },
+      required: ["items"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+    const listItemsToolBase = installTestPatternArtifact(
+      runtime,
+      pattern(
+        withPatternParamsSchema(
+          ((_argument: never, { items }: any) => ({ result: items })) as any,
+          paramsSchema,
+        ) as any,
+        { type: "object", additionalProperties: false },
+        { type: "object", properties: { result: itemsSchema } },
+      ),
+    );
+    const countItemsToolBase = installTestPatternArtifact(
+      runtime,
+      pattern(
+        withPatternParamsSchema(
+          ((_argument: never, { items }: any) => ({
+            count: items.length,
+          })) as any,
+          paramsSchema,
+        ) as any,
+        { type: "object", additionalProperties: false },
+        {
+          type: "object",
+          properties: { count: { type: "number" } },
+          required: ["count"],
+        },
+      ),
+    );
+
     const testPattern = pattern<Record<string, never>>(
       () => {
         const itemsData = Cell.of([
@@ -823,47 +870,19 @@ describe("generateObject with tools", () => {
           { label: "Item B", value: "b" },
           { label: "Item C", value: "c" },
         ]);
-
-        const listItems = pattern<
-          { items: Array<{ label: string; value: string }> },
-          { result: Array<{ label: string; value: string }> }
-        >(
-          ({ items }) => {
-            const result = (items as any).mapWithPattern(
-              pattern(({ element, index, array }: FactoryInput<any>) =>
-                (((item: any) => ({
-                  label: item.label,
-                  value: item.value,
-                })) as any)(element, index, array)
-              ),
-              {},
-            );
-            return { result };
-          },
-          { type: "object", properties: { items: { type: "array" } } },
-        );
-
-        const countItems = pattern<
-          { items: Array<any> },
-          { count: number }
-        >(
-          ({ items }) => {
-            const count = items.length;
-            return { count };
-          },
-          { type: "object", properties: { items: { type: "array" } } },
-        );
+        const listItemsTool = (listItemsToolBase as unknown as {
+          curry(params: unknown): typeof listItemsToolBase;
+        }).curry({ items: itemsData });
+        const countItemsTool = (countItemsToolBase as unknown as {
+          curry(params: unknown): typeof countItemsToolBase;
+        }).curry({ items: itemsData });
 
         const result = generateObject({
           prompt: "test-multi-tool-pattern-based",
           schema: resultSchema,
           tools: {
-            listItems: patternTool(listItems, {
-              items: itemsData,
-            }) as unknown as BuiltInLLMTool,
-            countItems: patternTool(countItems, {
-              items: itemsData,
-            }) as unknown as BuiltInLLMTool,
+            listItems: listItemsTool as unknown as BuiltInLLMTool,
+            countItems: countItemsTool as unknown as BuiltInLLMTool,
           },
         });
         return result;
@@ -890,7 +909,7 @@ describe("generateObject with tools", () => {
     });
   });
 
-  it("should handle mixed handler and patternTool-based tools", async () => {
+  it("should handle mixed handler and direct pattern tools", async () => {
     loadConversationFixture({
       description: "loadData → analyzeData → presentResult",
       responses: [
@@ -976,9 +995,31 @@ describe("generateObject with tools", () => {
       required: ["analysis"],
     });
 
+    const analyzeDataToolBase = installTestPatternArtifact(
+      runtime,
+      pattern(
+        withPatternParamsSchema(
+          ((_argument: never, { data }: any) => analyzeData({ data })) as any,
+          {
+            type: "object",
+            properties: {
+              data: { type: "array", items: { type: "number" } },
+            },
+            required: ["data"],
+            additionalProperties: false,
+          },
+        ) as any,
+        { type: "object", additionalProperties: false },
+        analyzeData.resultSchema,
+      ),
+    );
+
     const testPattern = pattern<Record<string, never>>(
       () => {
         const dataCell = Cell.of([1, 2, 3, 4, 5]);
+        const analyzeDataTool = (analyzeDataToolBase as unknown as {
+          curry(params: unknown): typeof analyzeDataToolBase;
+        }).curry({ data: dataCell });
         const result = generateObject({
           prompt: "test-mixed-tools",
           schema: resultSchema,
@@ -987,9 +1028,7 @@ describe("generateObject with tools", () => {
               description: "Fetch data from source",
               handler: loadData({}),
             },
-            analyzeData: patternTool(analyzeData, {
-              data: dataCell,
-            }) as unknown as BuiltInLLMTool,
+            analyzeData: analyzeDataTool as unknown as BuiltInLLMTool,
           },
         });
         return result;
@@ -1075,12 +1114,13 @@ describe("generateObject with tools", () => {
       required: ["ok"],
     };
     const returnLinked = pattern<Record<string, never>>(() => linkedCell);
+    installTestPatternArtifact(runtime, returnLinked);
     const testPattern = pattern<Record<string, never>>(() =>
       generateObject({
         prompt: "test-pattern-tool-result-location-link",
         schema: resultSchema,
         tools: {
-          returnLinked: patternTool(returnLinked) as unknown as BuiltInLLMTool,
+          returnLinked: returnLinked as unknown as BuiltInLLMTool,
         },
       })
     );
@@ -1222,7 +1262,7 @@ describe("generateObject with tools", () => {
     });
   });
 
-  it("should run fixture-style patternTool bindings with help field and bound source", async () => {
+  it("runs an inline tool closure with public help and captured source", async () => {
     const searchTool = pattern(
       ({ query, help, source }: {
         query: string;
@@ -1257,9 +1297,19 @@ describe("generateObject with tools", () => {
       } as const satisfies JSONSchema,
     );
 
-    const tool = patternTool(searchTool, {
-      source: "bound-source",
-    });
+    const tool = pattern(
+      ({ query, help }: { query: string; help: string }) =>
+        searchTool({ query, help, source: "bound-source" }),
+      {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          help: { type: "string" },
+        },
+        required: ["query", "help"],
+      },
+      searchTool.resultSchema,
+    );
     const resultCell = runtime.getCell(
       space,
       "pattern-tool-bound-source-test",
@@ -1269,11 +1319,10 @@ describe("generateObject with tools", () => {
 
     const result = runtime.run(
       tx,
-      tool.pattern,
+      tool,
       {
         query: "milk",
         help: "literal-help",
-        ...tool.extraParams,
       },
       resultCell,
     );
@@ -1510,6 +1559,18 @@ describe("generateObject with tools", () => {
       },
       childResultSchema,
     );
+    const sanitizePageTool = installTestPatternArtifact(
+      runtime,
+      pattern(
+        () =>
+          subAgentPattern({
+            prompt: `${childPrompt}\n\n${hostileBody}`,
+          }),
+        { type: "object", additionalProperties: false },
+        childResultSchema,
+      ),
+    );
+    installTestPatternArtifact(runtime, restrictedTool);
 
     const testPattern = pattern<Record<string, never>>(
       () => {
@@ -1521,14 +1582,12 @@ describe("generateObject with tools", () => {
             sanitizePage: {
               description:
                 "Analyze the hostile page with a higher ceiling and return a safe verdict.",
-              ...(patternTool(subAgentPattern, {
-                prompt: str`${childPrompt}\n\n${hostileBody}`,
-              }) as unknown as Record<string, unknown>),
+              pattern: sanitizePageTool,
               useResultSchemaForObservation: true,
             } as unknown as BuiltInLLMTool,
             restrictedTool: {
               description: "Only callable after clean subagent output.",
-              ...(patternTool(restrictedTool) as unknown as BuiltInLLMTool),
+              pattern: restrictedTool,
             },
           },
         });
@@ -1968,6 +2027,7 @@ describe("generateObject with tools", () => {
         required: ["ok"],
       },
     );
+    installTestPatternArtifact(runtime, childHelperTool);
 
     const parseResultSchema = lift(
       ({ resultSchema }) => {
@@ -2000,9 +2060,7 @@ describe("generateObject with tools", () => {
           prompt,
           schema: parsedResultSchema,
           tools: {
-            helperTool: patternTool(
-              childHelperTool,
-            ) as unknown as BuiltInLLMTool,
+            helperTool: childHelperTool as unknown as BuiltInLLMTool,
           },
         } as any).result;
       },
@@ -2023,6 +2081,7 @@ describe("generateObject with tools", () => {
       },
       true,
     );
+    installTestPatternArtifact(runtime, subAgentPattern);
 
     const testPattern = pattern<Record<string, never>>(
       () => {
@@ -2033,7 +2092,7 @@ describe("generateObject with tools", () => {
             delegate: {
               description:
                 "Run a child agent and require it to return data matching resultSchema.",
-              ...(patternTool(subAgentPattern) as unknown as BuiltInLLMTool),
+              pattern: subAgentPattern,
             },
           },
         });
@@ -2185,48 +2244,49 @@ describe("generateObject with tools", () => {
       },
       true,
     );
-    const subAgentPattern = pattern<any, any>(
-      ({
-        messages,
-        resultSchema,
-        observationMaxConfidentiality,
-        schemaSanitizePromptInjection,
-      }) => {
-        const parsedResultSchema = parseResultSchema({ resultSchema });
-        const response = generateObject({
-          messages,
-          schema: parsedResultSchema,
-          observationMaxConfidentiality,
-          schemaSanitizePromptInjection,
-        } as any);
-        return response.result;
-      },
-      {
-        type: "object",
-        properties: {
-          prompt: { type: "string" },
-          messages: {
-            type: "array",
-            items: { type: "object", additionalProperties: true },
+    const subAgentPattern = installTestPatternArtifact(
+      runtime,
+      pattern<any, any>(
+        withPatternParamsSchema(
+          (({ resultSchema }: any, { messages }: any) => {
+            const parsedResultSchema = parseResultSchema({ resultSchema });
+            const response = generateObject({
+              messages,
+              schema: parsedResultSchema,
+              observationMaxConfidentiality: [promptRisk, promptInfluence],
+              schemaSanitizePromptInjection: true,
+            } as any);
+            return response.result;
+          }) as any,
+          {
+            type: "object",
+            properties: {
+              messages: {
+                type: "array",
+                items: { type: "object", additionalProperties: true },
+              },
+            },
+            required: ["messages"],
+            additionalProperties: false,
           },
-          resultSchema: {
-            anyOf: [
-              { type: "object", additionalProperties: true },
-              { type: "boolean" },
-              { type: "string" },
-            ],
+        ) as any,
+        {
+          type: "object",
+          properties: {
+            prompt: { type: "string" },
+            resultSchema: {
+              anyOf: [
+                { type: "object", additionalProperties: true },
+                { type: "boolean" },
+                { type: "string" },
+              ],
+            },
           },
-          context: { type: "object", additionalProperties: true },
-          observationMaxConfidentiality: {
-            type: "array",
-            items: {},
-          },
-          schemaSanitizePromptInjection: { type: "boolean" },
+          required: ["prompt", "resultSchema"],
+          additionalProperties: false,
         },
-        required: ["prompt", "resultSchema"],
-        additionalProperties: false,
-      },
-      true,
+        true,
+      ),
     );
 
     const testPattern = pattern<Record<string, never>>(() => {
@@ -2238,6 +2298,9 @@ describe("generateObject with tools", () => {
         items: { type: "object", additionalProperties: true },
         ifc: { confidentiality: [promptRisk, promptInfluence] },
       });
+      const delegateTool = (subAgentPattern as unknown as {
+        curry(params: unknown): typeof subAgentPattern;
+      }).curry({ messages: briefingMessages });
       return generateObject({
         prompt: parentPrompt,
         schema: parentResultSchema,
@@ -2246,11 +2309,7 @@ describe("generateObject with tools", () => {
           delegate: {
             description:
               "Run a higher-clearance worker and return schema-limited data.",
-            ...(patternTool(subAgentPattern, {
-              messages: briefingMessages,
-              observationMaxConfidentiality: [promptRisk, promptInfluence],
-              schemaSanitizePromptInjection: true,
-            }) as unknown as BuiltInLLMTool),
+            pattern: delegateTool,
           },
         },
       });
@@ -2363,6 +2422,7 @@ describe("generateObject with tools", () => {
       },
       true,
     );
+    installTestPatternArtifact(runtime, subAgentPattern);
 
     const testPattern = pattern<Record<string, never>>(() =>
       generateObject({
@@ -2371,7 +2431,7 @@ describe("generateObject with tools", () => {
         tools: {
           delegate: {
             description: "Run a child agent.",
-            ...(patternTool(subAgentPattern) as unknown as BuiltInLLMTool),
+            pattern: subAgentPattern,
           },
         },
       } as any)

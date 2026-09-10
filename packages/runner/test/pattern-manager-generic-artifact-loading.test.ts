@@ -217,7 +217,7 @@ describe("PatternManager generic artifact loading", () => {
     expect(evaluations.count()).toBe(1);
   });
 
-  it("does not share a cold flight for the same identity across spaces", async () => {
+  it("reuses evaluation after verifying the identity in both spaces", async () => {
     const { reader, identity } = await storeProgram([spaceA, spaceB]);
     const manager = reader.patternManager;
     const evaluations = countCachedEvaluations(reader);
@@ -238,7 +238,7 @@ describe("PatternManager generic artifact loading", () => {
     const [artifactA, artifactB] = await Promise.all([loadA, loadB]);
     expect(isTrustedBuilderArtifact(artifactA)).toBe(true);
     expect(isTrustedBuilderArtifact(artifactB)).toBe(true);
-    expect(evaluations.count()).toBe(2);
+    expect(evaluations.count()).toBe(1);
     expect(manager.isArtifactAvailableInSpace(identity, spaceA)).toBe(true);
     expect(manager.isArtifactAvailableInSpace(identity, spaceB)).toBe(true);
   });
