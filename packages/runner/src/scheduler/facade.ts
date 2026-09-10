@@ -313,11 +313,12 @@ export class Scheduler {
     MAX_ACTION_STATS,
   );
 
+  #collectReadStats = false;
+
   #actionTimingState: ActionTimingState = {
     actionStats: this.#actionStats,
     getActionId: (action) => this.#getActionId(action),
   };
-  #readAccountingEnabled = false;
   #actionIdentityState: SchedulerActionIdentityState = {
     anonymousActionIds: new WeakMap<Action | EventHandler, string>(),
     anonymousActionCounter: 0,
@@ -1838,14 +1839,6 @@ export class Scheduler {
   }
 
   /**
-   * Enables read accounting for subsequent reactive action bodies, including
-   * builtins and effects. In-flight runs retain their starting setting.
-   */
-  setReadAccountingEnabled(enabled: boolean): void {
-    this.#readAccountingEnabled = enabled;
-  }
-
-  /**
    * Returns filter statistics for the current/last execution cycle.
    */
   getFilterStats(): { filtered: number; executed: number } {
@@ -1858,6 +1851,11 @@ export class Scheduler {
   resetFilterStats(): void {
     this.#filterStats.filtered = 0;
     this.#filterStats.executed = 0;
+  }
+
+  /** Enables or disables per-action read accounting for subsequent runs. */
+  setReadStatsEnabled(enabled: boolean): void {
+    this.#collectReadStats = enabled;
   }
 
   /**
@@ -2773,8 +2771,7 @@ export class Scheduler {
       runtime: this.runtime,
       actionChangeGroups: this.#actionChangeGroups,
       actionTimingState: this.#actionTimingState,
-      // Each run snapshots this setting before invoking its first fan-out instance.
-      getReadAccountingEnabled: () => this.#readAccountingEnabled,
+      getReadStatsEnabled: () => this.#collectReadStats,
       retries: this.#retries,
       offBudgetRetries: this.#offBudgetRetries,
       pending: this.#pending,

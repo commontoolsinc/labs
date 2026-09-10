@@ -1,9 +1,10 @@
 # Pattern computation cost: implementation sequence
 
-Status: A0 controlled baseline, initial A1 reactive action counters, and A2
-verbose reports implemented and validated in
-[PR #7241](https://github.com/commontoolsinc/labs/pull/7241). Whole-step
-accounting remains part of A3.
+Status: A1/A2 instrumentation is shipped in
+[PR #7246](https://github.com/commontoolsinc/labs/pull/7246). The controlled A0
+fixture, accounting and reporting regressions, and dashboard are being reconciled
+in [PR #7241](https://github.com/commontoolsinc/labs/pull/7241). A3's local
+implementation requires adaptation to the shipped accounting API before review.
 
 This tracker executes the design in
 [PR #7155](https://github.com/commontoolsinc/labs/pull/7155), reviewed at commit
@@ -87,7 +88,7 @@ replacement advice requires a shipped replacement.
       are the initial boundary; event dispatch and commit work must be added
       before claiming whole-step budget coverage.
   - [x] Define proxy access events, actual link crossings, distinct documents
-        identified by space and entity, and registered dependencies. Specify
+        identified by replica document object, and registered dependencies. Specify
         repeated reads, missing values, enumeration, shallow reads, and memo
         hits. A read activity is not interchangeable with a proxy access.
   - [x] Define per-run ownership, cumulative totals, and per-step aggregation.

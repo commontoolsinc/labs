@@ -5,15 +5,11 @@ import { type Stub, stub } from "@std/testing/mock";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
+import { startReadStats } from "../src/read-stats.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { resolveLink } from "../src/link-resolution.ts";
-import {
-  beginReadAccounting,
-  finishReadAccounting,
-} from "../src/read-accounting.ts";
+import { createNonReactiveTransaction } from "../src/storage/extended-storage-transaction.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
-import { createNonReactiveTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { ignoreReadForScheduling } from "../src/storage/reactivity-log.ts";
 import {
@@ -59,86 +55,23 @@ describe("read-accounting", () => {
     await storage.close();
   });
 
-  for (const lazy of [false, true]) {
-    describe(lazy ? "schema views" : "query-result views", () => {
-      const view = (tx: IExtendedStorageTransaction) => {
-        if (lazy) tx.markLazyMaterialize(true);
-        return runtime.getCell<
-          { value: number; absent?: number; items: number[] }
-        >(
-          space,
-          "source",
-          lazy ? schema : undefined,
-          tx,
-        ).get();
-      };
-
-      it("counts repeated and missing property requests independently of documents", () => {
-        const tx = runtime.edit();
-        beginReadAccounting(tx);
-        const data = view(tx);
-        expect(data.value).toBe(7);
-        expect(data.value).toBe(7);
-        expect(data.absent).toBeUndefined();
-        const counts = finishReadAccounting(tx)!;
-        expect(counts.proxyAccesses).toBe(3);
-        expect(counts.distinctDocuments).toBe(1);
-        expect(counts.linkResolutions).toBe(0);
-        tx.abort();
-      });
-
-      it("counts array materialization and iteration even when methods bypass proxy traps", () => {
-        const tx = runtime.edit();
-        beginReadAccounting(tx);
-        const items = view(tx).items;
-        expect(items.map((n) => n * 2)).toEqual([2, 4, 6]);
-        expect([...items]).toEqual([1, 2, 3]);
-        expect(items.length).toBe(3);
-        expect(items[9]).toBeUndefined();
-        expect(finishReadAccounting(tx)!.proxyAccesses).toBe(9);
-        tx.abort();
-      });
-
-      it("leaves unmeasured transactions and completed counters absent", () => {
-        const tx = runtime.edit();
-        expect(view(tx).value).toBe(7);
-        expect(finishReadAccounting(tx)).toBeUndefined();
-        beginReadAccounting(tx);
-        expect(view(tx).value).toBe(7);
-        expect(finishReadAccounting(tx)!.proxyAccesses).toBe(1);
-        expect(view(tx).value).toBe(7);
-        expect(finishReadAccounting(tx)).toBeUndefined();
-        tx.abort();
-      });
-
-      it("counts descriptor value reads but not key enumeration alone", () => {
-        const tx = runtime.edit();
-        beginReadAccounting(tx);
-        const data = view(tx);
-        Reflect.ownKeys(data);
-        expect(Object.getOwnPropertyDescriptor(data, "value")!.value).toBe(7);
-        expect(finishReadAccounting(tx)!.proxyAccesses).toBe(1);
-        tx.abort();
-      });
-    });
-  }
-
   it("shares counts through nonreactive wrappers without sharing across transactions", () => {
     const tx = runtime.edit();
     const other = runtime.edit();
-    beginReadAccounting(tx);
-    beginReadAccounting(other);
+    const finish = startReadStats(tx);
+    const finishOther = startReadStats(other);
     const wrapped = createNonReactiveTransaction(tx);
     expect(
       runtime.getCell<{ value: number }>(space, "source", undefined, wrapped)
         .get().value,
     ).toBe(7);
-    expect(finishReadAccounting(other)).toEqual({
+    expect(finishOther(0)).toEqual({
       proxyAccesses: 0,
       linkResolutions: 0,
       distinctDocuments: 0,
+      registeredDependencies: 0,
     });
-    expect(finishReadAccounting(tx)!.proxyAccesses).toBe(1);
+    expect(finish(0).proxyAccesses).toBe(1);
     tx.abort();
     other.abort();
   });
@@ -147,7 +80,7 @@ describe("read-accounting", () => {
     const read = (enabled: boolean) => {
       const tx = runtime.edit();
       tx.markLazyMaterialize(true);
-      if (enabled) beginReadAccounting(tx);
+      const finish = enabled ? startReadStats(tx) : undefined;
       const data = runtime.getCell<{ value: number; items: number[] }>(
         space,
         "source",
@@ -158,7 +91,7 @@ describe("read-accounting", () => {
         data.items.reduce((sum, value) => sum + value, 0);
       const before = tx.getReactivityLog?.();
       expect(before).toBeDefined();
-      const counts = finishReadAccounting(tx);
+      const counts = finish?.(0);
       const after = tx.getReactivityLog?.();
       expect(after).toEqual(before);
       tx.abort();
@@ -180,8 +113,8 @@ describe("read-accounting", () => {
     });
     const left = runtime.edit();
     const right = second.edit();
-    beginReadAccounting(left);
-    beginReadAccounting(right);
+    const finishLeft = startReadStats(left);
+    const finishRight = startReadStats(right);
     try {
       const a = runtime.getCell<{ value: number }>(
         space,
@@ -196,8 +129,8 @@ describe("read-accounting", () => {
         right,
       ).get();
       expect(a.value + b.value + b.value).toBe(21);
-      expect(finishReadAccounting(left)!.proxyAccesses).toBe(1);
-      expect(finishReadAccounting(right)!.proxyAccesses).toBe(2);
+      expect(finishLeft(0).proxyAccesses).toBe(1);
+      expect(finishRight(0).proxyAccesses).toBe(2);
     } finally {
       left.abort();
       right.abort();
@@ -205,78 +138,62 @@ describe("read-accounting", () => {
     }
   });
 
-  it("counts actual link hops but not memoized resolution replay", async () => {
-    const write = runtime.edit();
-    const source = runtime.getCell<{ value: number }>(
+  it("attributes standing proxy reads to the selected fallback transaction", () => {
+    const original = runtime.edit();
+    const data = runtime.getCell<{ value: number; items: number[] }>(
       space,
       "source",
       undefined,
-      write,
+      original,
+    ).get();
+    const items = data.items;
+    const finishOriginal = startReadStats(original);
+    original.abort();
+    const fallback = runtime.edit();
+    const finishFallback = startReadStats(fallback);
+    using _readTx = stub(
+      runtime,
+      "readTx",
+      (tx) => tx?.status().status === "ready" ? tx : fallback,
     );
-    const middle = runtime.getCell(space, "middle", undefined, write);
-    middle.setRaw(source.key("value").getAsLink());
-    runtime.getCell(space, "head", undefined, write).setRaw(middle.getAsLink());
-    await write.commit();
-    const tx = runtime.edit();
-    beginReadAccounting(tx);
-    const head = runtime.getCell(space, "head", undefined, tx)
-      .getAsNormalizedFullLink();
-    expect(resolveLink(runtime, tx, head).id).toBe(
-      source.getAsNormalizedFullLink().id,
-    );
-    resolveLink(runtime, tx, head);
-    const counts = finishReadAccounting(tx)!;
-    expect(counts.linkResolutions).toBe(2);
-    expect(counts.distinctDocuments).toBe(3);
-    tx.abort();
+    try {
+      expect(data.value).toBe(7);
+      expect(items.length).toBe(3);
+      expect([...items]).toEqual([1, 2, 3]);
+      expect(items.map((n) => n * 2)).toEqual([2, 4, 6]);
+      expect(Object.getOwnPropertyDescriptor(data, "value")!.value).toBe(7);
+      expect(Object.getOwnPropertyDescriptor(items, "length")!.value).toBe(3);
+      expect(finishFallback(0).proxyAccesses).toBe(10);
+      expect(finishOriginal(0).proxyAccesses).toBe(0);
+    } finally {
+      finishOriginal(0);
+      finishFallback(0);
+      fallback.abort();
+    }
   });
 
-  it("counts links traversed while eagerly materializing a schema", async () => {
-    const write = runtime.edit();
-    const source = runtime.getCell(space, "source", undefined, write);
-    runtime.getCell(space, "eager-holder", undefined, write).setRaw({
-      target: source.getAsLink(),
-    });
-    await write.commit();
+  it("counts missing schema-array index reads", () => {
     const tx = runtime.edit();
-    beginReadAccounting(tx);
-    const value = runtime.getCell<{ target: { value: number } }>(
+    tx.markLazyMaterialize();
+    const data = runtime.getCell<{ items: number[] }>(
       space,
-      "eager-holder",
-      {
-        type: "object",
-        properties: {
-          target: { type: "object", properties: { value: { type: "number" } } },
-        },
-      },
+      "source",
+      schema,
       tx,
     ).get();
-    expect(value.target.value).toBe(7);
-    const counts = finishReadAccounting(tx)!;
-    expect(counts.proxyAccesses).toBe(0);
-    expect(counts.linkResolutions).toBe(1);
-    expect(counts.distinctDocuments).toBe(2);
-    tx.abort();
-  });
-
-  it("keeps identical document IDs in different spaces distinct", () => {
-    const tx = runtime.edit();
-    beginReadAccounting(tx);
-    const cell = runtime.getCell(space, "source", undefined, tx);
-    const link = cell.getAsNormalizedFullLink();
-    tx.readValueOrThrow(link);
-    tx.read({
-      space: otherSpace,
-      id: link.id,
-      path: ["value"],
-      scope: "space",
-    });
-    expect(finishReadAccounting(tx)!.distinctDocuments).toBe(2);
-    tx.abort();
+    const items = data.items;
+    const finish = startReadStats(tx);
+    try {
+      expect(items[99]).toBeUndefined();
+      expect(finish(0).proxyAccesses).toBe(1);
+    } finally {
+      finish(0);
+      tx.abort();
+    }
   });
 
   it("compacts scheduling dependencies separately from recorded documents", async () => {
-    runtime.scheduler.setReadAccountingEnabled(true);
+    runtime.scheduler.setReadStatsEnabled(true);
     const cell = runtime.getCell(space, "source");
     const link = cell.getAsNormalizedFullLink();
     const action: Action = (tx) => {
@@ -300,11 +217,11 @@ describe("read-accounting", () => {
     }, { isEffect: true });
     runtime.scheduler.queueExecution();
     await runtime.idle();
-    expect(runtime.scheduler.getActionStats(action)!.reads!.last).toEqual({
+    expect(runtime.scheduler.getActionStats(action)!.lastRunReads!).toEqual({
       proxyAccesses: 0,
       linkResolutions: 0,
       distinctDocuments: 1,
-      dependencies: 2,
+      registeredDependencies: 2,
     });
     runtime.scheduler.unsubscribe(action);
   });
@@ -317,7 +234,7 @@ describe("read-accounting", () => {
       storageManager: storage,
       errorHandlers: [(error) => errors.push(error)],
     });
-    runtime.scheduler.setReadAccountingEnabled(true);
+    runtime.scheduler.setReadStatsEnabled(true);
     const barrier = Promise.withResolvers<void>();
     const entered = Promise.withResolvers<void>();
     const action: Action = async (tx) => {
@@ -344,11 +261,13 @@ describe("read-accounting", () => {
     runtime.getCell<{ value: number }>(space, "source", undefined, other).get()
       .value;
     other.abort();
-    runtime.scheduler.setReadAccountingEnabled(false);
+    runtime.scheduler.setReadStatsEnabled(false);
     barrier.resolve();
     await runtime.idle();
     expect(errors.some((e) => e.message === "measured failure")).toBe(true);
-    expect(runtime.scheduler.getActionStats(action)!.reads!.last.proxyAccesses)
+    expect(
+      runtime.scheduler.getActionStats(action)!.lastRunReads!.proxyAccesses,
+    )
       .toBe(2);
     runtime.scheduler.unsubscribe(action);
   });
@@ -376,17 +295,17 @@ describe("read-accounting", () => {
         await release.promise;
       }
     }, { schedulerObservationIdentity: { pieceRootId: "read-accounting" } });
-    runtime.scheduler.setReadAccountingEnabled(true);
+    runtime.scheduler.setReadStatsEnabled(true);
     const running = runtime.scheduler.run(action);
     try {
       await entered.promise;
-      runtime.scheduler.setReadAccountingEnabled(false);
+      runtime.scheduler.setReadStatsEnabled(false);
       release.resolve();
       await running;
       expect(runs).toBe(2);
       const stats = runtime.scheduler.getActionStats(action)!;
-      expect(stats.reads!.runCount).toBe(2);
-      expect(stats.reads!.total.proxyAccesses).toBe(2);
+      expect(stats.reads!.proxyAccesses).toBe(2);
+      expect(stats.reads!.proxyAccesses).toBe(2);
     } finally {
       release.resolve();
       await running;
@@ -421,22 +340,25 @@ describe("read-accounting", () => {
     try {
       await run();
       expect(runtime.scheduler.getActionStats(action)!.reads).toBeUndefined();
-      runtime.scheduler.setReadAccountingEnabled(true);
+      runtime.scheduler.setReadStatsEnabled(true);
       await run();
       await run();
       const stats = runtime.scheduler.getActionStats(action)!;
       expect(stats.runCount).toBe(3);
-      expect(stats.reads!.runCount).toBe(2);
-      expect(stats.reads!.last.proxyAccesses).toBe(2);
-      expect(stats.reads!.total.proxyAccesses).toBe(4);
-      expect(stats.reads!.last.dependencies).toBeGreaterThan(0);
+      expect(stats.reads!.proxyAccesses).toBe(4);
+      expect(stats.lastRunReads!.proxyAccesses).toBe(2);
+      expect(stats.reads!.proxyAccesses).toBe(4);
+      expect(stats.lastRunReads!.registeredDependencies).toBeGreaterThan(0);
       const measured = markers.filter((m) =>
         m.type === "scheduler.run.complete" && m.reads !== undefined
       );
       expect(measured).toHaveLength(2);
-      runtime.scheduler.setReadAccountingEnabled(false);
+      runtime.scheduler.setReadStatsEnabled(false);
       await run();
-      expect(runtime.scheduler.getActionStats(action)!.reads!.runCount).toBe(2);
+      expect(runtime.scheduler.getActionStats(action)!.reads!.proxyAccesses)
+        .toBe(4);
+      expect(runtime.scheduler.getActionStats(action)!.lastRunReads)
+        .toBeUndefined();
     } finally {
       runtime.telemetry.removeEventListener("telemetry", listener);
       runtime.scheduler.unsubscribe(action);

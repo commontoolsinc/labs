@@ -2,34 +2,41 @@
 // to record events that can be subscribed to in other
 // contexts to visualize or log events inside the runtime.
 
+import type { CfcRefusalDetail } from "./cfc/refusal-detail.ts";
 import type { FabricValue } from "@commonfabric/data-model";
 
-import type { CfcRefusalDetail } from "./cfc/refusal-detail.ts";
-import type { ReadAccessCounts } from "./read-accounting.ts";
 import { IMemoryChange } from "./storage/interface.ts";
+
+/** Read work performed by one action run, or summed across runs. */
+export type ActionReadStats = {
+  /** Reactive property and element reads, including cached reads. */
+  proxyAccesses: number;
+
+  /** Stored-link traversal attempts, including repeated fallback reads. */
+  linkResolutions: number;
+
+  /** Distinct replica documents read, counted separately in each run. */
+  distinctDocuments: number;
+
+  /** Compacted deep and shallow scheduling reads before commit preparation. */
+  registeredDependencies: number;
+};
 
 /**
  * Statistics tracked for each action's execution performance.
  */
 export type ActionStats = {
+  /** Read counts summed over measured runs only. */
+  reads?: ActionReadStats;
+
+  /** Read counts from the latest run, absent when accounting is disabled. */
+  lastRunReads?: ActionReadStats;
+
   runCount: number;
   totalTime: number;
   averageTime: number;
   lastRunTime: number;
   lastRunTimestamp: number; // When the action last ran (performance.now())
-
-  /** Read measurements for runs that explicitly enabled accounting. */
-  reads?: {
-    runCount: number;
-    total: ActionReadStats;
-    last: ActionReadStats;
-  };
-};
-
-/** Read work and compacted scheduling dependencies at action-body completion. */
-export type ActionReadStats = ReadAccessCounts & {
-  /** Recursive and shallow read paths, compacted separately as in scheduling. */
-  readonly dependencies: number;
 };
 
 // Types for scheduler graph visualization
@@ -85,9 +92,6 @@ export type SchedulerGraphSnapshot = {
 };
 
 export type SchedulerActionInfo = {
-  /** Verified authored call site, when this action has one. */
-  src?: string;
-
   patternName?: string;
   moduleName?: string;
   reads?: string[];
@@ -178,8 +182,12 @@ export type RuntimeTelemetryMarker = {
   actionId: string;
   actionInfo?: SchedulerActionInfo;
   durationMs: number;
-  /** This body's read work when accounting was enabled at its start. */
+
+  /** Read work for this run, when accounting is enabled. */
   reads?: ActionReadStats;
+
+  /** Authored file, line, and column for the measured action. */
+  src?: string;
 
   error?: string;
 } | {

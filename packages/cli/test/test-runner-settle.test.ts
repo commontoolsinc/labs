@@ -36,19 +36,17 @@ describe(
       for (
         const interval of [
           "initialization",
-          "step 1",
-          "settle step 2",
-          "step 3",
-          "settle step 4",
+          "action_1",
+          "settle_1",
+          "assertion_1",
+          "settle_3",
         ]
       ) {
         expect(
-          reports.some((line) =>
-            line.includes(`Read cost (${interval}; action bodies)`)
-          ),
+          reports.some((line) => line.includes(`Read cost (${interval})`)),
         ).toBe(true);
       }
-      expect(reports.find((line) => line.includes("settle step 4"))).toContain(
+      expect(reports.find((line) => line.includes("settle_3"))).toContain(
         "0 runs, 0 accesses",
       );
     });

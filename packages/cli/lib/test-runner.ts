@@ -85,8 +85,8 @@ import {
 } from "@commonfabric/utils/logger";
 import { timeout } from "@commonfabric/utils/sleep";
 
+import { ActionReadReport } from "./action-read-report.ts";
 import { assertionOutcome } from "./assert-record.ts";
-import { ReadCostReport } from "./read-cost-report.ts";
 import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
 import {
   appendLoggerDeltaMessages,
@@ -340,6 +340,9 @@ export interface TestRunResult {
 export interface TestRunnerOptions {
   timeout?: number;
   verbose?: boolean;
+
+  /** Disables the verification replay for performance measurements only. */
+  noIdempotencyCheck?: boolean;
 
   /**
    * Root directory for resolving imports. If not provided, the nearest
@@ -1160,23 +1163,19 @@ export async function runTestPattern(
         },
       })),
   );
-  runtime.enableIdempotencyCheck();
-  const readCost = options.verbose ? new ReadCostReport() : undefined;
-  const onReadCost = (event: Event) => {
-    if (event instanceof RuntimeTelemetryEvent) readCost?.record(event.marker);
-  };
-  const printReadCost = (label: string, started: number) => {
-    if (
-      readCost === undefined ||
-      performance.now() - started < (options.statsThreshold ?? 5000)
-    ) return;
-    for (const line of readCost.lines(label, options.statsActionLimit ?? 10)) {
-      console.log(line);
+  if (!options.noIdempotencyCheck) runtime.enableIdempotencyCheck();
+  else if (options.verbose) {
+    console.log("  Idempotency verification disabled for this measurement.");
+  }
+  const readReport = options.verbose ? new ActionReadReport() : undefined;
+  const onReadReport = (event: Event) => {
+    if (event instanceof RuntimeTelemetryEvent) {
+      readReport?.record(event.marker);
     }
   };
-  if (readCost !== undefined) {
-    runtime.scheduler.setReadAccountingEnabled(true);
-    runtime.telemetry.addEventListener("telemetry", onReadCost);
+  if (readReport) {
+    runtime.scheduler.setReadStatsEnabled(true);
+    runtime.telemetry.addEventListener("telemetry", onReadReport);
   }
   // Channel 1: capture pattern-code console.error / console.warn calls that
   // flow through the scheduler's harness console event.  The handler must
@@ -1518,6 +1517,16 @@ export async function runTestPattern(
       );
     };
 
+    /** Formats the current step when its duration reaches the reporting threshold. */
+    const printReadReport = (label: string, duration: number): void => {
+      if (!readReport || duration < (options.statsThreshold ?? 5000)) return;
+      for (
+        const line of readReport.format(label, options.statsActionLimit ?? 10)
+      ) {
+        console.log(line);
+      }
+    };
+
     // 5. Process tests sequentially
     const results: TestResult[] = [];
     let lastActionIndex: number | null = null;
@@ -1525,16 +1534,20 @@ export async function runTestPattern(
     let actionCount = 0;
     let renderCount = 0;
 
-    if (readCost !== undefined) {
+    if (readReport) {
       for (
-        const line of readCost.lines(
+        const line of readReport.format(
           "initialization",
           options.statsActionLimit ?? 10,
         )
-      ) console.log(line);
+      ) {
+        console.log(line);
+      }
+      readReport.clear();
     }
+
     for (let i = 0; i < testSteps.length; i++) {
-      readCost?.clear();
+      readReport?.clear();
       if (options.verbose) {
         resetAllCountBaselines();
         resetAllTimingBaselines();
@@ -1566,7 +1579,7 @@ export async function runTestPattern(
         try {
           if (!stepValue.skip) await settleFully(i);
         } finally {
-          printReadCost(`settle step ${i + 1}`, itemStart);
+          printReadReport(`settle_${i}`, performance.now() - itemStart);
         }
         continue;
       }
@@ -1589,7 +1602,7 @@ export async function runTestPattern(
             console.log(`  ⊘ ${renderName} (skipped)`);
           }
         } finally {
-          printReadCost(`${renderName} (step ${i + 1})`, itemStart);
+          printReadReport(renderName, performance.now() - itemStart);
         }
         continue;
       }
@@ -1900,9 +1913,12 @@ export async function runTestPattern(
       // Print delta stats for slow steps
       if (options.verbose) {
         const statsThreshold = options.statsThreshold ?? 5000;
+        printReadReport(
+          isAction ? `action_${actionCount}` : `assertion_${assertionCount}`,
+          performance.now() - itemStart,
+        );
         const stepDuration = performance.now() - itemStart;
         if (stepDuration > statsThreshold || statsThreshold === 0) {
-          printReadCost(`step ${i + 1}`, itemStart);
           const stepLabel = isAction
             ? `action_${actionCount}`
             : `assertion_${assertionCount}`;
@@ -1994,7 +2010,7 @@ export async function runTestPattern(
       consoleWarnings,
     };
   } finally {
-    runtime.telemetry.removeEventListener("telemetry", onReadCost);
+    runtime.telemetry.removeEventListener("telemetry", onReadReport);
     if (
       patternCoverage && options.patternCoverageDir &&
       writeLocalPatternCoverage

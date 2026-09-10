@@ -1,7 +1,6 @@
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { getTopFrame } from "../builder/pattern.ts";
-import { getAuthoredDebugSource } from "../harness/authored-debug-source.ts";
 import { type Frame } from "../builder/types.ts";
 import {
   getCellOrThrow,
@@ -92,7 +91,6 @@ export function getSchedulerActionTelemetryInfo(
   const annotated = action as Partial<TelemetryAnnotations>;
 
   const patternName = getOptionalName(annotated.pattern);
-  const src = getAuthoredDebugSource(annotated.module?.implementation)?.src;
   const moduleName = getOptionalName(annotated.module);
   const reads = Array.isArray(annotated.reads)
     ? annotated.reads.map(formatTelemetryLink)
@@ -101,14 +99,11 @@ export function getSchedulerActionTelemetryInfo(
     ? annotated.writes.map(formatTelemetryLink)
     : undefined;
 
-  if (
-    !src && !patternName && !moduleName && !reads?.length && !writes?.length
-  ) {
+  if (!patternName && !moduleName && !reads?.length && !writes?.length) {
     return undefined;
   }
 
   return {
-    ...(src === undefined ? {} : { src }),
     patternName,
     moduleName,
     reads: reads?.length ? reads : undefined,

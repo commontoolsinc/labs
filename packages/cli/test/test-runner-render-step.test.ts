@@ -142,9 +142,7 @@ describe(
         "VDOM materialization failed: Invalid VDOM content",
       );
       expect(
-        output.some((line) =>
-          line.includes("Read cost (render_1 (step 1); action bodies):")
-        ),
+        output.some((line) => line.includes("Read cost (render_1):")),
       ).toBe(true);
     });
 

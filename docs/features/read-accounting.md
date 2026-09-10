@@ -1,6 +1,6 @@
 # Reactive action read accounting
 
-`runtime.scheduler.setReadAccountingEnabled(true)` enables counters for
+`runtime.scheduler.setReadStatsEnabled(true)` enables counters for
 subsequent reactive action bodies, including builtins and scheduler effects. It
 defaults off. A run retains the setting it started with, even if the setting
 changes while an asynchronous body is suspended.
@@ -17,9 +17,9 @@ which step reports print; initialization always prints in verbose mode.
 | Counter             | Definition                                                                                                                                                                                                                                                                     |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `proxyAccesses`     | Property or element value requests through schema-backed or query-result views, including repeats, missing properties, array length, and descriptor values. Array iteration and methods count the elements they materialize even when they bypass a JavaScript proxy trap.     |
-| `linkResolutions`   | Actual stored-link hops taken by link resolution, schema traversal. Replaying a memoized resolution adds no hops. A followed link with an absent target counts; a scope-blocked or cycle-rejected hop does not.                                                                |
-| `distinctDocuments` | Distinct `(space, entity ID)` pairs in the transaction's recorded read activities. Repeated paths and scopes in one entity contribute one document. Machinery reads and reads ignored for scheduling count. Inline data URI values that produce no read activity do not.       |
-| `dependencies`      | Recursive and shallow scheduling read paths at body completion, compacted separately with the scheduler's own compaction rules. Ignored scheduling reads do not count. This is the body's dependency footprint, not the eventual union of all served instances' subscriptions. |
+| `linkResolutions` | Stored-link traversal attempts on cache misses, including eager handle conversion and repeated fast-path/fallback reads. Missing-target reads count; a cycle rejected before a target read contributes no attempt. Memoized replay contributes no attempts. |
+| `distinctDocuments` | Distinct replica document objects selected by storage reads. Repeated paths in one replica document contribute one document; separate scope replicas can contribute separately. Machinery reads and reads ignored for scheduling count. Inline data URI values that produce no read activity do not.       |
+| `registeredDependencies`      | Recursive and shallow scheduling read paths at body completion, compacted separately with the scheduler's own compaction rules. Ignored scheduling reads do not count. This is the body's dependency footprint, not the eventual union of all served instances' subscriptions. |
 
 Property reads performed by runtime helpers count as well as reads directly
 written in the pattern. Fetching a method or symbol, and enumerating keys
@@ -50,21 +50,20 @@ action bodies, not the entire cost of an interaction. Whole-step budgets need
 the additional execution coverage tracked by
 [the implementation sequence](../plans/pattern-computation-cost-implementation.md).
 
-The probes allocate no counter or document sets when disabled. Enabled runs
-allocate two integer counters; completion computes document cardinality from the
-existing storage read activities and dependencies from the existing reactivity
-log. Probes never write read metadata or add subscriptions. The disabled probes
-still perform a weak-map lookup; their overhead must be measured before claiming
-an instrumentation-free production path.
+Read sites check `readStatsActive` before looking up a transaction's collector.
+Disabled accounting allocates no collector or document set. Enabled runs retain
+two integer counters and a set of replica document objects; completion derives
+dependencies from the existing reactivity log. Probes never write read metadata
+or add subscriptions. Measure instrumentation overhead on the workload before
+making timing claims.
 
 ## Results and aggregation
 
-`ActionStats.reads` contains the number of measured runs, the last measured run,
-and cumulative totals. Runs with accounting disabled still increment the
-ordinary run count but leave these measurements untouched. Totals for documents
-and dependencies sum per-run cardinalities; they are not unions across runs. CLI
-output calls them `document-runs` and `dependency-runs` to make that distinction
-explicit.
+`ActionStats.reads` contains cumulative counts over measured runs, and
+`ActionStats.lastRunReads` contains the latest run's sample. An unmeasured run
+increments the ordinary run count and clears the latest sample while retaining
+the cumulative counts. Document and dependency totals sum per-run cardinalities;
+they are not unions across runs. CLI output labels them as per-run sums.
 
 Each `scheduler.run.complete` telemetry marker carries the run's measurements
 when enabled. The CLI aggregates these events, so actions removed from the graph
@@ -72,5 +71,5 @@ or evicted from the bounded statistics map still contribute to the step's
 report. It adds each run once rather than combining parent-inclusive totals with
 their children's totals.
 
-The implementation is in `packages/runner/src/read-accounting.ts`, the scheduler
-completion path, and `packages/cli/lib/read-cost-report.ts`.
+The implementation is in `packages/runner/src/read-stats.ts`, the scheduler
+completion path, and `packages/cli/lib/action-read-report.ts`.

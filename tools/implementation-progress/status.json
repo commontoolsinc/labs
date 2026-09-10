@@ -1,11 +1,11 @@
 {
-  "updated": "2026-09-10T20:12:08.881332+00:00",
+  "updated": "2026-09-10T20:33:42.667895+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7241",
-  "head": "fe1434a27d",
-  "activity": "Publishing the approved coverage fix and five-demo dashboard checkpoint to PR #7241. A3 is locally committed as f37d25f6d6; A4 worker accounting control is locally committed as bbd0ac8907. The on-screen scaling benchmark remains in progress.",
-  "review": "Push authorized by Mike. Latest-revision CI and Cubic review must complete before merging; the earlier Cubic fan-out finding remains open despite its tested fix.",
+  "head": "af49d7d30a",
+  "activity": "Worker control is under CI and Cubic review in PR #7256. #7241 reconciliation passes type checks, 598 documentation blocks, and the refreshed lunch-poll fixture. Full runner validation continues. A3 accounting migration passes 64 focused steps.",
+  "review": "Latest #7241 Cubic review found zero new issues, but its earlier fan-out finding remains open. Main integration requires fresh checks and review. Mike authorizes merging after all gates pass.",
   "checks": [
     "Current fixes: runner accounting regression 20 steps passed",
     "Current fixes: CLI render-demand regression 13 steps passed",
@@ -30,7 +30,11 @@
     "Final A3 repository type checks, formatting, lint, 597 documentation blocks, package-cycle and conflict checks pass",
     "Final A3 antagonistic review: no outstanding blockers after five substantive findings were fixed",
     "A4 worker diagnostic control: enable/disable verified through client request routing against a real runtime",
-    "A4 runtime-client full suite: 30 tests / 650 steps passed, zero failures"
+    "A4 runtime-client full suite: 30 tests / 650 steps passed, zero failures",
+    "#7241 reconciliation: repository type checks and 598 documentation blocks passed",
+    "#7241 refreshed controlled lunch-poll: five assertions passed; demo uses shipped #7246 counters",
+    "A3 migration: accounting suites passed 64 steps",
+    "Worker control #7256: full runtime-client suite passed 30 tests / 650 steps; antagonistic review clean"
   ],
   "stages": [
     {
@@ -42,26 +46,26 @@
     {
       "id": "A1",
       "title": "Reactive read accounting",
-      "status": "review",
-      "detail": "Four body counters implemented; fan-out setting fix passes regression testing. Cubic finding remains open."
+      "status": "done",
+      "detail": "Core instrumentation shipped in #7246. Additional accounting and reporting regressions are being reconciled in #7241."
     },
     {
       "id": "A2",
       "title": "Attributed CLI reports",
-      "status": "review",
-      "detail": "Attributed initialization and step reports implemented, including reports for failed render/settle operations."
+      "status": "done",
+      "detail": "Core instrumentation shipped in #7246. Additional accounting and reporting regressions are being reconciled in #7241."
     },
     {
       "id": "A3",
       "title": "Read budgets and whole-step coverage",
-      "status": "review",
-      "detail": "Locally verified and committed as f37d25f6d6. Full runner: 1,403 tests / 8,678 steps pass. Twelve budget harness cases pass. Publication and Cubic review remain pending."
+      "status": "active",
+      "detail": "Local implementation f37d25f6d6 passed validation and antagonistic review. Adapting to the accounting API shipped by #7246 is required before publication."
     },
     {
       "id": "A4",
       "title": "Read-side benchmark",
       "status": "active",
-      "detail": "Worker accounting control implemented in isolated worktree; full runtime-client suite passes 30 tests / 650 steps. On-screen vote workload and scaling benchmark remain to build."
+      "detail": "Worker control bbd0ac8907 passed 30 tests / 650 steps locally. Adapt to the shipped accounting API, then build the on-screen scaling benchmark."
     },
     {
       "id": "A5",
@@ -177,9 +181,9 @@
     {
       "id": "Q2",
       "title": "Merge automatically after all gates pass?",
-      "proposal": "Merge and continue after required checks, antagonistic review, and clean latest-head Cubic review.",
-      "blocks": "Merge only; further implementation can use stacked branches.",
-      "status": "Awaiting answer"
+      "proposal": "Mike authorizes continued implementation and merging after checks, antagonistic review, and clean latest Cubic review.",
+      "blocks": "None; review and CI gates still apply.",
+      "status": "Approved"
     },
     {
       "id": "Q3",

@@ -1,5 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { recordLinkResolution } from "./read-accounting.ts";
+import { readStatsActive, recordLinkResolution } from "./read-stats.ts";
 import {
   ensureExternalSchemaClosure,
   markIfcBearingLinkCrossing,
@@ -715,7 +715,7 @@ export function resolveLinkTracingDereferences(
         throw new Error(`Link cycle detected at ${key}: ${detail}`);
       }
       traces.push(recordDereferenceHop(tx, nextHop));
-      recordLinkResolution(tx);
+      if (readStatsActive) recordLinkResolution(tx);
       followedHop = true;
       // The crossing seam's data: schema-bearing hops are collected AS
       // STORED and evaluated at mark time below (and on memo hits), for

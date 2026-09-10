@@ -1,9 +1,9 @@
 /**
- * Compatibility preflight collects issues without moving the source pointer
- * or restaging inputs. Candidate compilation stores unattached artifacts.
- * Stored-value validation is shared with setup, while enforcement runs inside
- * the apply transaction. These cases compare the verdicts and check that a
- * refused preflight leaves the piece intact.
+ * Compatibility preflight collects issues without moving the source pointer,
+ * restaging inputs, or saving candidate artifacts. Stored-value validation is
+ * shared with setup, while enforcement runs inside the apply transaction. These
+ * cases compare the verdicts and check that a refused preflight leaves the piece
+ * intact.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -361,11 +361,8 @@ describe("setsrc compatibility preflight", () => {
     await piece.checkPattern(incompatibleProgram());
     await runtime.idle();
 
-    // The piece is what must be untouched. (The check is not a pure read: it
-    // compiles the candidate, which writes content-addressed artifacts into
-    // the space. Those are attached to nothing — the POINTER is the thing a
-    // caller cares about, so assert it directly rather than inferring it from
-    // the rendered result.)
+    // The source pointer is the caller's invariant, so assert it directly
+    // rather than inferring it from the rendered result.
     expect(getPatternIdentityRef(piece.getCell())).toEqual(refBefore);
     expect(JSON.stringify(piece.getCell().getAsQueryResult())).toBe(before);
 

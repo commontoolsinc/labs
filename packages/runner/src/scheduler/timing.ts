@@ -17,42 +17,36 @@ export function recordActionTime(
   const actionId = state.getActionId(action);
   const existing = state.actionStats.get(actionId);
   if (existing) {
+    existing.lastRunReads = reads;
+    if (reads) {
+      const total = existing.reads;
+      existing.reads = total
+        ? {
+          proxyAccesses: total.proxyAccesses + reads.proxyAccesses,
+          linkResolutions: total.linkResolutions + reads.linkResolutions,
+          distinctDocuments: total.distinctDocuments + reads.distinctDocuments,
+          registeredDependencies: total.registeredDependencies +
+            reads.registeredDependencies,
+        }
+        : { ...reads };
+    }
     existing.runCount++;
     existing.totalTime += elapsed;
     existing.averageTime = existing.totalTime / existing.runCount;
     existing.lastRunTime = elapsed;
     existing.lastRunTimestamp = now;
-    if (reads !== undefined) {
-      const previous = existing.reads;
-      existing.reads = {
-        runCount: (previous?.runCount ?? 0) + 1,
-        total: {
-          proxyAccesses: (previous?.total.proxyAccesses ?? 0) +
-            reads.proxyAccesses,
-          linkResolutions: (previous?.total.linkResolutions ?? 0) +
-            reads.linkResolutions,
-          distinctDocuments: (previous?.total.distinctDocuments ?? 0) +
-            reads.distinctDocuments,
-          dependencies: (previous?.total.dependencies ?? 0) +
-            reads.dependencies,
-        },
-        last: reads,
-      };
-    }
     // Setting it again moves it to the young end, so the map ages entries by
     // when their action last ran.
     state.actionStats.set(actionId, existing);
     return;
   }
   state.actionStats.set(actionId, {
+    ...(reads ? { reads: { ...reads }, lastRunReads: reads } : {}),
     runCount: 1,
     totalTime: elapsed,
     averageTime: elapsed,
     lastRunTime: elapsed,
     lastRunTimestamp: now,
-    ...(reads === undefined ? {} : {
-      reads: { runCount: 1, total: { ...reads }, last: reads },
-    }),
   });
 }
 
