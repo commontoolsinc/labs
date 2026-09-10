@@ -1244,12 +1244,20 @@ export function validateAndTransform(
               blocked = true;
             },
           });
-          return !blocked && !slot.pendingHopDoc &&
-            !slot.id.startsWith("data:") &&
+          if (
+            blocked || slot.pendingHopDoc || slot.id.startsWith("data:") ||
             tx.readValueOrThrow(slot, {
                 nonRecursive: true,
                 meta: linkResolutionProbe,
-              }) === undefined;
+              }) !== undefined
+          ) return false;
+          const address = toMemorySpaceAddress(slot);
+          const parent = tx.readOrThrow({
+            ...address,
+            path: address.path.slice(0, -1),
+          }, { nonRecursive: true, meta: linkResolutionProbe });
+          return !isObjectOrArray(parent) ||
+            !Object.hasOwn(parent, address.path.at(-1)!);
         },
       );
       if (absentSlot) link = linkWithAsCellScope(link, handleEntry);

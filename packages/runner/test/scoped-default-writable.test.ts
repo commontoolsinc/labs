@@ -1,7 +1,9 @@
 import { expect } from "@std/expect";
+import { toFileUrl } from "@std/path";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
+import * as Engine from "@commonfabric/memory/v2/engine";
 
 import type { CellScope, JSONSchema } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
@@ -104,6 +106,109 @@ describe("scoped-default-writable", () => {
           scope,
         }).getRaw(),
       ).toBeUndefined();
+    });
+
+    it(`preserves an explicitly undefined space slot under a ${scope} declaration`, async () => {
+      const raw = runtime.getCell<Record<string, unknown>>(
+        space,
+        `undefined-${scope}`,
+      );
+      const seed = runtime.edit();
+      raw.withTx(seed).set({ count: undefined });
+      expect((await seed.commit()).error).toBeUndefined();
+      expect(Object.hasOwn(raw.get(), "count")).toBe(true);
+
+      const shaped = raw.asSchema(countSchema(scope));
+      const projected = shaped.key("count").get()!;
+      expect(shaped.get().count!.getAsNormalizedFullLink().scope).toBe("space");
+      expect(projected.getAsNormalizedFullLink().scope).toBe("space");
+      expect(projected.get()).toBe(0);
+      const write = runtime.edit();
+      projected.withTx(write).set(8);
+      expect((await write.commit()).error).toBeUndefined();
+      expect(raw.key("count").get()).toBe(8);
+      expect(
+        runtime.getCell(
+          space,
+          `undefined-${scope}`,
+          undefined,
+          undefined,
+          scope,
+        )
+          .key("count").getRaw(),
+      ).toBeUndefined();
+    });
+
+    it(`rejects a ${scope} default write when a concurrent writer fills the space slot`, async () => {
+      const raw = runtime.getCell<Record<string, unknown>>(
+        space,
+        `inferred-target-${scope}`,
+      );
+      const seed = runtime.edit();
+      raw.withTx(seed).set({});
+      expect((await seed.commit()).error).toBeUndefined();
+      const holder = runtime.edit();
+      const projected = raw.withTx(holder).asSchema(countSchema(scope))
+        .key("count").get()!;
+      expect(projected.getAsNormalizedFullLink().scope).toBe(scope);
+      projected.set(7);
+      const replica = storageManager.open(space).replica as SpaceReplica;
+      const reads = replica.accessForTestingOnly.buildReads(holder.tx, 1);
+      const id = raw.getAsNormalizedFullLink().id;
+      holder.abort();
+
+      // Validate the captured wire reads at the engine, independently of the
+      // originating replica's local snapshot-conflict check.
+      for (const fill of [false, true]) {
+        const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+        const engine = await Engine.open({ url: toFileUrl(path) });
+        try {
+          Engine.applyCommit(engine, {
+            sessionId: "writer",
+            principal: signer.did(),
+            commit: {
+              localSeq: 1,
+              reads: { confirmed: [], pending: [] },
+              operations: [{ op: "set", id, value: { value: {} } }],
+            },
+          });
+          if (fill) {
+            Engine.applyCommit(engine, {
+              sessionId: "writer",
+              principal: signer.did(),
+              commit: {
+                localSeq: 2,
+                reads: { confirmed: [], pending: [] },
+                operations: [{
+                  op: "patch",
+                  id,
+                  patches: [{ op: "add", path: "/value/count", value: 3 }],
+                }],
+              },
+            });
+          }
+          const commit = () =>
+            Engine.applyCommit(engine, {
+              sessionId: "holder",
+              principal: signer.did(),
+              commit: {
+                localSeq: 1,
+                reads,
+                operations: [{
+                  op: "set",
+                  id,
+                  scope,
+                  value: { value: { count: 7 } },
+                }],
+              },
+            });
+          if (fill) expect(commit).toThrow(Engine.ConflictError);
+          else expect(commit).not.toThrow();
+        } finally {
+          Engine.close(engine);
+          await Deno.remove(path);
+        }
+      }
     });
 
     for (const overwrite of ["this", "redirect"] as const) {
