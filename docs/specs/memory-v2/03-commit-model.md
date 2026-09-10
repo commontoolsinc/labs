@@ -444,9 +444,10 @@ protocol's branch-aware queries. Each scope resolves under the rejected session'
 identity. Older responses can omit this array; their diagnostic identifies
 entities but does not preserve their scopes. The runner also exposes the first
 descriptor as `conflict` for existing consumers. The diagnostic previews up to
-three distinct entity/sequence clauses and counts the remaining clauses;
-repeated path reads share a clause. The structured array remains complete
-regardless of the diagnostic's length.
+three distinct entity IDs and counts the remaining IDs. Each entity's clause
+uses its first reported instance's sequences; other scopes or branches of that
+entity share the clause. The structured array remains complete regardless of
+the diagnostic's length.
 
 ## 3.7 Server-Side Commit Processing
 

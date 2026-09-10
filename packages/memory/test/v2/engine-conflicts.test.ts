@@ -107,6 +107,45 @@ describe("engine-conflicts", () => {
     );
   });
 
+  it("keeps addresses containing delimiter characters distinct", () => {
+    const addresses = [
+      { branch: "feature", id: "left\u0000space\u0000right" },
+      { branch: "feature\u0000space\u0000left", id: "right" },
+    ];
+    for (const { branch } of addresses) createBranch(engine, branch);
+    for (const [index, { branch, id }] of addresses.entries()) {
+      applyCommit(engine, {
+        sessionId: "session:delimiter-updates",
+        commit: {
+          localSeq: index + 1,
+          branch,
+          reads: { confirmed: [], pending: [] },
+          operations: [{ op: "set", id, value: { value: 1 } }],
+        },
+      });
+    }
+    let caught: unknown;
+    try {
+      commitReads(addresses.map((address) => ({
+        ...address,
+        path: toDocumentPath(["value"]),
+        seq: 1,
+      })));
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ConflictError);
+    expect((caught as ConflictError).conflicts).toEqual(
+      addresses.map(({ branch, id }, index) => ({
+        of: id,
+        scope: "space",
+        branch,
+        seq: 1,
+        conflictSeq: index + 2,
+      })),
+    );
+  });
+
   it("retains distinct branches while deduplicating repeated reads on each branch", () => {
     createBranch(engine, "feature");
     for (const [index, branch] of [DEFAULT_BRANCH, "feature"].entries()) {
@@ -156,6 +195,9 @@ describe("engine-conflicts", () => {
     }]);
     expect(error.branch).toBe("feature");
     expect(scans.calls).toHaveLength(2);
+    expect(error.message).toBe(
+      `stale confirmed read: ${ids[0]} at seq 1 conflicted with seq 3`,
+    );
   });
 
   it("keeps the first stale path's sequences and skips later patch scans", () => {

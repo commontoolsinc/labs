@@ -6175,17 +6175,18 @@ const validateConfirmedReads = (
   // against that writer identity, even when the read points at another branch.
   // Cross-branch reads inherit this same principal context.
   const conflicts: ConfirmedReadConflict[] = [];
-  const staleInstances = new Set<string>();
+  const staleInstances = new Map<BranchName, Map<ScopeKey, Set<EntityId>>>();
   for (const read of commit.reads.confirmed) {
     const readBranch = read.branch ?? branch;
     ensureReadableBranch(engine, readBranch);
     const scopeKey = resolveScopeKey(read.scope, scopeContext);
     const scope = read.scope ?? DEFAULT_SCOPE;
-    const key = revisionKey(readBranch, read.id, scopeKey);
+    let staleScopes = staleInstances.get(readBranch);
+    let staleIds = staleScopes?.get(scopeKey);
     // Further path scans cannot change a known-stale entity's recovery address.
     // Every read still validates its branch and scope before skipping the scan,
     // so invalid addresses take precedence over stale-read conflicts.
-    if (staleInstances.has(key)) continue;
+    if (staleIds?.has(read.id)) continue;
     const conflictSeq = findConflictSeq(
       engine,
       readBranch,
@@ -6196,7 +6197,15 @@ const validateConfirmedReads = (
       read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
-      staleInstances.add(key);
+      if (staleScopes === undefined) {
+        staleScopes = new Map();
+        staleInstances.set(readBranch, staleScopes);
+      }
+      if (staleIds === undefined) {
+        staleIds = new Set();
+        staleScopes.set(scopeKey, staleIds);
+      }
+      staleIds.add(read.id);
       conflicts.push({
         of: read.id,
         scope,
@@ -6207,19 +6216,21 @@ const validateConfirmedReads = (
     }
   }
   if (conflicts.length > 0) {
-    // Keep diagnostics compact for repeated path reads and large transactions.
-    // The array carries every stale instance; each preview clause retains the
-    // entity/sequence grammar used by message-only clients to recover.
-    const messages = [
-      ...new Set(
-        conflicts.map(({ of, seq, conflictSeq }) =>
-          `stale confirmed read: ${of} at seq ${seq} conflicted with seq ${conflictSeq}`
-        ),
-      ),
-    ];
-    const preview = messages.slice(0, 3);
-    if (messages.length > preview.length) {
-      const remaining = messages.length - preview.length;
+    // Message-only clients recover by entity ID. Multiple scopes or branches
+    // of one entity must not crowd other entities out of the bounded preview.
+    // The array carries every stale instance and its diagnostic sequences.
+    const messages = new Map<EntityId, string>();
+    for (const { of, seq, conflictSeq } of conflicts) {
+      if (!messages.has(of)) {
+        messages.set(
+          of,
+          `stale confirmed read: ${of} at seq ${seq} conflicted with seq ${conflictSeq}`,
+        );
+      }
+    }
+    const preview = [...messages.values()].slice(0, 3);
+    if (messages.size > preview.length) {
+      const remaining = messages.size - preview.length;
       preview.push(`${remaining} more conflict${remaining === 1 ? "" : "s"}`);
     }
     throw new ConflictError(preview.join("; "), conflicts);
