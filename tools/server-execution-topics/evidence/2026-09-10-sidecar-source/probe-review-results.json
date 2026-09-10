@@ -1,12 +1,12 @@
 {
-  "method": "Exact probe source with import locations preserved; controlled path alias, setup/flush failures; subprocesses cleaned after measuring refusal/cleanup. No latency claim.",
+  "method": "Exact captured/current source; path alias and injected setup/flush failures. Current cleanup closes the manager exactly once and releases the serving enabler. Raw replays write results.json; this file is the compact snapshot. No latency claim.",
   "runtime": "deno 2.9.4 (stable, release, aarch64-apple-darwin)\nv8 15.0.245.2-rusty\ntypescript 6.0.3\n",
   "cases": [
     {
       "variant": "captured",
       "case": "path",
       "sourceSha256": "cb4cd070f208a7423e7a71729478bd570cb7a55fa9e617c27b64eb616b53b137",
-      "injectedSourceSha256": "4bc9600921b8f88e611ae01a19aba405dda3f6372e0f7a0fa5b5ee2b771943d7",
+      "injectedSourceSha256": "b6cf9cf54bc7302806243f17216df796d5355fee6db0d0eda21c214c8325f163",
       "exitCode": 1,
       "passed": false
     },
@@ -55,16 +55,16 @@
     {
       "variant": "current",
       "case": "path",
-      "sourceSha256": "c6eede2b73f15d597a6fe274c9fc61c195b9139b4cca2e81967c385eede4d60a",
-      "injectedSourceSha256": "cf71567c0c0227f0048e1734537828d120ecbf09a8f5165afee4683b8241d478",
+      "sourceSha256": "529be9a13435180d153fe5f92ee455c6c0fe6fc8a616b35c98fca74783663b5c",
+      "injectedSourceSha256": "340647457b3f754efd79ba281da73b46f26a71d8898c0add73e8a7b43d54e6c4",
       "exitCode": 0,
       "passed": true
     },
     {
       "variant": "current",
       "case": "construction",
-      "sourceSha256": "c6eede2b73f15d597a6fe274c9fc61c195b9139b4cca2e81967c385eede4d60a",
-      "injectedSourceSha256": "46f44239d679e447fd3ad59ddfa00c39fa2ee4ec4c21c5bfe083ebdb70a8ae74",
+      "sourceSha256": "529be9a13435180d153fe5f92ee455c6c0fe6fc8a616b35c98fca74783663b5c",
+      "injectedSourceSha256": "097aa678204ec9ccb45620691476f0846d06398dd0aa38d17d9fa50353c5c813",
       "exitCode": 0,
       "observed": {
         "case": "construction",
@@ -77,13 +77,13 @@
     {
       "variant": "current",
       "case": "posture",
-      "sourceSha256": "c6eede2b73f15d597a6fe274c9fc61c195b9139b4cca2e81967c385eede4d60a",
-      "injectedSourceSha256": "ba44e7b8c94838665bba791436ac8ae394fab109ba5a65cc3dac6ef49e9137d8",
+      "sourceSha256": "529be9a13435180d153fe5f92ee455c6c0fe6fc8a616b35c98fca74783663b5c",
+      "injectedSourceSha256": "21d141cb95bcc1374ab13adf5e0e7163359ff22280bef1f1998cd5ada0fb4a75",
       "exitCode": 0,
       "observed": {
         "case": "posture",
         "disposed": 1,
-        "closed": 2,
+        "closed": 1,
         "enabled": false,
         "error": "Error: controlled setup failure"
       }
@@ -91,13 +91,13 @@
     {
       "variant": "current",
       "case": "flush",
-      "sourceSha256": "c6eede2b73f15d597a6fe274c9fc61c195b9139b4cca2e81967c385eede4d60a",
-      "injectedSourceSha256": "6e8644883063090b72becf0df93c020825629242253dee46faff01f7eeb070b0",
+      "sourceSha256": "529be9a13435180d153fe5f92ee455c6c0fe6fc8a616b35c98fca74783663b5c",
+      "injectedSourceSha256": "153419770ef633acefae09180f95723f2130dbc55922dda0974bddc9f37e4a2e",
       "exitCode": 0,
       "observed": {
         "case": "flush",
         "disposed": 1,
-        "closed": 2,
+        "closed": 1,
         "enabled": false,
         "error": "Error: controlled setup failure"
       }

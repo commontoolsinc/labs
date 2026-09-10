@@ -39,8 +39,11 @@ Run them from this PR's checkout, with a new output directory outside it:
 python3 tools/server-execution-topics/evidence/2026-09-10-sidecar-source/probe-review-control.py "$PWD" /absolute/outside-checkout/probe-review
 ```
 
-`probe-review-results.json` records the eight expected red/green outcomes. The
-control stores each injected source and its hash in the output directory.
+The checked-in `probe-review-results.json` summarizes the eight expected
+red/green outcomes. A new replay writes its raw case rows to `results.json` in
+the requested output directory, alongside each injected source and its hash. The
+cleanup cases require exactly one manager close. Runtime disposal keeps storage
+open, and the probe closes the manager afterward.
 
 For the red regression, apply `regression.patch` alone to a fresh baseline and
 run:

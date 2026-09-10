@@ -72,7 +72,7 @@ await __manager?.close();
                 observed=json.loads([line for line in process.stdout.splitlines() if line.startswith(b'{"case"')][-1]);row['observed']=observed
                 assert 'controlled setup failure' in observed['error']
                 if variant=='current':
-                    assert observed['closed']>0 and observed['enabled'] is False,observed
+                    assert observed['closed']==1 and observed['enabled'] is False,observed
                     assert observed['disposed']==(0 if case=='construction' else 1),observed
                 else:
                     assert observed['closed']==0 and observed['disposed']==0,observed

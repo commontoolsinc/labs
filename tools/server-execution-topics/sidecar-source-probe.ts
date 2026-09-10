@@ -114,7 +114,7 @@ for (const enabled of [false, true]) {
     console.log(JSON.stringify({ enabled, rows }));
   } finally {
     try {
-      await runtime?.dispose();
+      await runtime?.dispose({ closeStorage: false });
     } finally {
       await manager.close();
     }
