@@ -154,6 +154,38 @@ const flag = ext();`;
   }
 });
 
+Deno.test("semantics: resolves a Deno workspace package export", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(
+      join(root, "deno.json"),
+      JSON.stringify({ workspace: ["./app", "./dependency"] }),
+    );
+    Deno.mkdirSync(join(root, "app"));
+    Deno.writeTextFileSync(join(root, "app", "deno.json"), "{}");
+    Deno.mkdirSync(join(root, "dependency"));
+    Deno.writeTextFileSync(
+      join(root, "dependency", "deno.json"),
+      JSON.stringify({
+        name: "@example/dependency",
+        exports: { "./api": "./api.ts" },
+      }),
+    );
+    Deno.writeTextFileSync(
+      join(root, "dependency", "api.ts"),
+      "export function answer(): number { return 42; }\n",
+    );
+    const blob = `// transformed: /main.ts
+import { answer } from "@example/dependency/api";
+const value = answer();`;
+    const doc = parseDocument(blob);
+    const sem = createSemantics(blob, { cwd: join(root, "app") })!;
+    assertEquals(sem.typeAt(nameOffsetOf(doc, "value")), "number");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("semantics: prefix import map resolves under the mapped dir", () => {
   // `lib/` -> `./src/lib/`. A same-named decoy one directory up must not win.
   const root = Deno.makeTempDirSync();
