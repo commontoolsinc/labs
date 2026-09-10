@@ -2,12 +2,14 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  type ConsoleLaunchRecords,
+  consoleLaunchReport,
+  DEPLOYMENT_PATTERN_INDEX_URL,
+  DEPLOYMENT_SKILLS_REGISTRY_URL,
   LAUNCHER_OWNED_VARIABLES,
-  type LoomInstanceRecords,
-  loomLaunchReport,
-  resolveLoomLaunchPlan,
+  resolveConsoleLaunchPlan,
   WEAVER_PAIRING_PORT,
-} from "../../console/launch-from-loom.ts";
+} from "../../console/launch.ts";
 
 const PIECES_JSON = JSON.stringify({
   defaults: {
@@ -28,30 +30,44 @@ const DOCKER_RUNTIMES = {
   },
 };
 
-const RECORDS: LoomInstanceRecords = {
-  piecesJson: PIECES_JSON,
-  piecesJsonPath: "/loom/instances/loom/pieces.json",
-  toolshedStoreDir: "file:///loom/instances/loom/toolshed-store/68239506e79d/",
+const RECORDS: ConsoleLaunchRecords = {
+  instance: {
+    id: "loom",
+    piecesJson: PIECES_JSON,
+    piecesJsonPath: "/loom/instances/loom/pieces.json",
+    toolshedStoreDir:
+      "file:///loom/instances/loom/toolshed-store/68239506e79d/",
+  },
   dockerRuntimes: DOCKER_RUNTIMES,
 };
 
 const OPTIONS = {
-  instance: "loom",
   patternIndexUrl: "https://index.example",
   skillsRegistryUrl: "https://skills.example",
 };
 
+/** The same fabric, named on the command line rather than read off loom. */
+const NAMED_FABRIC = {
+  ...OPTIONS,
+  identity: "/keys/dev.key",
+  space: "cf-harness-dev",
+  toolshedUrl: "http://localhost:8000",
+  store: "/checkout/packages/toolshed/cache/memory",
+};
+
+const NO_INSTANCE: ConsoleLaunchRecords = { dockerRuntimes: DOCKER_RUNTIMES };
+
 const withPieces = (
   defaults: Record<string, unknown>,
-): LoomInstanceRecords => ({
+): ConsoleLaunchRecords => ({
   ...RECORDS,
-  piecesJson: JSON.stringify({ defaults }),
+  instance: { ...RECORDS.instance!, piecesJson: JSON.stringify({ defaults }) },
 });
 
-describe("launch-from-loom", () => {
-  describe("resolveLoomLaunchPlan()", () => {
+describe("launch", () => {
+  describe("resolveConsoleLaunchPlan()", () => {
     it("returns the identity, space and toolshed the instance records", () => {
-      const plan = resolveLoomLaunchPlan(RECORDS, OPTIONS);
+      const plan = resolveConsoleLaunchPlan(RECORDS, OPTIONS);
 
       expect(plan.environment.CF_HARNESS_FABRIC_IDENTITY).toBe(
         "/keys/instance.key",
@@ -67,7 +83,7 @@ describe("launch-from-loom", () => {
       // `file://` URL it walks nothing, falls through to its other candidate
       // roots, and reads another store's cells as this space's.
 
-      const plan = resolveLoomLaunchPlan(RECORDS, OPTIONS);
+      const plan = resolveConsoleLaunchPlan(RECORDS, OPTIONS);
 
       expect(plan.environment.MEMORY_DIR).toBe(
         "/loom/instances/loom/toolshed-store/68239506e79d/",
@@ -75,8 +91,14 @@ describe("launch-from-loom", () => {
     });
 
     it("returns a store loom printed as a plain path unchanged", () => {
-      const plan = resolveLoomLaunchPlan(
-        { ...RECORDS, toolshedStoreDir: "/loom/store/memory/" },
+      const plan = resolveConsoleLaunchPlan(
+        {
+          ...RECORDS,
+          instance: {
+            ...RECORDS.instance!,
+            toolshedStoreDir: "/loom/store/memory/",
+          },
+        },
         OPTIONS,
       );
 
@@ -84,7 +106,7 @@ describe("launch-from-loom", () => {
     });
 
     it("returns the sidecar directories the registered runtime names, as host paths", () => {
-      const plan = resolveLoomLaunchPlan(RECORDS, OPTIONS);
+      const plan = resolveConsoleLaunchPlan(RECORDS, OPTIONS);
 
       expect(plan.environment.CF_HARNESS_RUNSC_CFC_RESULT_DIR).toBe(
         "/store/runsc-cfc/sidecars/results",
@@ -95,7 +117,7 @@ describe("launch-from-loom", () => {
     });
 
     it("returns the Weaver pairing port and a console directory naming it", () => {
-      const plan = resolveLoomLaunchPlan(RECORDS, OPTIONS);
+      const plan = resolveConsoleLaunchPlan(RECORDS, OPTIONS);
 
       expect(plan.environment.CF_HARNESS_CONSOLE_PORT).toBe(
         String(WEAVER_PAIRING_PORT),
@@ -106,8 +128,14 @@ describe("launch-from-loom", () => {
     });
 
     it("returns a distinct console directory for each port", () => {
-      const first = resolveLoomLaunchPlan(RECORDS, { ...OPTIONS, port: 8136 });
-      const second = resolveLoomLaunchPlan(RECORDS, { ...OPTIONS, port: 8137 });
+      const first = resolveConsoleLaunchPlan(RECORDS, {
+        ...OPTIONS,
+        port: 8136,
+      });
+      const second = resolveConsoleLaunchPlan(RECORDS, {
+        ...OPTIONS,
+        port: 8137,
+      });
 
       expect(first.environment.CF_HARNESS_CONSOLE_DIR).not.toBe(
         second.environment.CF_HARNESS_CONSOLE_DIR,
@@ -115,7 +143,7 @@ describe("launch-from-loom", () => {
     });
 
     it("returns the enforcing posture with flow labels persisted", () => {
-      const plan = resolveLoomLaunchPlan(RECORDS, OPTIONS);
+      const plan = resolveConsoleLaunchPlan(RECORDS, OPTIONS);
 
       expect(plan.environment.CF_HARNESS_FABRIC_CFC_POSTURE).toBe(
         "max-enforcement",
@@ -129,7 +157,7 @@ describe("launch-from-loom", () => {
     });
 
     it("returns a named value over the record that would decide it", () => {
-      const plan = resolveLoomLaunchPlan(RECORDS, {
+      const plan = resolveConsoleLaunchPlan(RECORDS, {
         ...OPTIONS,
         consoleDir: "/consoles/branch",
         cfcResultDir: "/elsewhere/results",
@@ -144,8 +172,7 @@ describe("launch-from-loom", () => {
     });
 
     it("leaves the index and the registry out of the environment when waived", () => {
-      const plan = resolveLoomLaunchPlan(RECORDS, {
-        instance: "loom",
+      const plan = resolveConsoleLaunchPlan(RECORDS, {
         noPatternIndex: true,
         noSkillsRegistry: true,
       });
@@ -154,49 +181,52 @@ describe("launch-from-loom", () => {
       expect(plan.environment.CF_HARNESS_SKILLS_REGISTRY_URL).toBeUndefined();
     });
 
-    it("throws naming `defaults.identity` when the instance records none", () => {
+    it("throws naming `--fabric-identity` when nothing records one", () => {
       expect(() =>
-        resolveLoomLaunchPlan(
+        resolveConsoleLaunchPlan(
           withPieces({
             local_space: "s",
             server_urls: { toolshed: "http://localhost:8001" },
           }),
           OPTIONS,
         )
-      ).toThrow("`defaults.identity`");
+      ).toThrow("`--fabric-identity`");
     });
 
-    it("throws naming `defaults.local_space` when the instance records none", () => {
+    it("throws naming `--fabric-space` when nothing records one", () => {
       expect(() =>
-        resolveLoomLaunchPlan(
+        resolveConsoleLaunchPlan(
           withPieces({
             identity: "/keys/instance.key",
             server_urls: { toolshed: "http://localhost:8001" },
           }),
           OPTIONS,
         )
-      ).toThrow("`defaults.local_space`");
+      ).toThrow("`--fabric-space`");
     });
 
-    it("throws naming `defaults.server_urls.toolshed` when the instance records none", () => {
+    it("throws naming `--fabric-api-url` when nothing records one", () => {
       expect(() =>
-        resolveLoomLaunchPlan(
+        resolveConsoleLaunchPlan(
           withPieces({ identity: "/keys/instance.key", local_space: "s" }),
           OPTIONS,
         )
-      ).toThrow("`defaults.server_urls.toolshed`");
+      ).toThrow("`--fabric-api-url`");
     });
 
-    it("throws naming the store command when loom printed no store", () => {
+    it("throws naming `--store` when loom printed none", () => {
       expect(() =>
-        resolveLoomLaunchPlan({ ...RECORDS, toolshedStoreDir: "" }, OPTIONS)
-      ).toThrow("`loom toolshed-store-dir loom`");
+        resolveConsoleLaunchPlan({
+          ...RECORDS,
+          instance: { ...RECORDS.instance!, toolshedStoreDir: "" },
+        }, OPTIONS)
+      ).toThrow("`--store`");
     });
 
     it("throws naming `--cfc-result-dir` when no runtime registration names it", () => {
       const { dockerRuntimes: _omitted, ...withoutDocker } = RECORDS;
 
-      expect(() => resolveLoomLaunchPlan(withoutDocker, OPTIONS)).toThrow(
+      expect(() => resolveConsoleLaunchPlan(withoutDocker, OPTIONS)).toThrow(
         "`--cfc-result-dir`",
       );
     });
@@ -205,7 +235,7 @@ describe("launch-from-loom", () => {
       const { dockerRuntimes: _omitted, ...withoutDocker } = RECORDS;
 
       expect(() =>
-        resolveLoomLaunchPlan({
+        resolveConsoleLaunchPlan({
           ...withoutDocker,
           dockerRuntimesUnreadable:
             "`docker info` exited 1: daemon is not running",
@@ -214,7 +244,7 @@ describe("launch-from-loom", () => {
     });
 
     it("returns the sidecar directories a separate-token registration names", () => {
-      const plan = resolveLoomLaunchPlan({
+      const plan = resolveConsoleLaunchPlan({
         ...RECORDS,
         dockerRuntimes: {
           "runsc-cfc": {
@@ -236,7 +266,7 @@ describe("launch-from-loom", () => {
     });
 
     it("returns the last directory a registration names for a flag twice", () => {
-      const plan = resolveLoomLaunchPlan({
+      const plan = resolveConsoleLaunchPlan({
         ...RECORDS,
         dockerRuntimes: {
           "runsc-cfc": {
@@ -255,37 +285,31 @@ describe("launch-from-loom", () => {
     });
 
     it("throws naming `--cfc-invocation-context-dir` when the registration omits it", () => {
-      const records: LoomInstanceRecords = {
+      const records: ConsoleLaunchRecords = {
         ...RECORDS,
         dockerRuntimes: {
           "runsc-cfc": { runtimeArgs: ["--cfc-result-dir=/store/results"] },
         },
       };
 
-      expect(() => resolveLoomLaunchPlan(records, OPTIONS)).toThrow(
+      expect(() => resolveConsoleLaunchPlan(records, OPTIONS)).toThrow(
         "`--cfc-invocation-context-dir`",
       );
     });
 
     it("throws when an index is both named and waived", () => {
       expect(() =>
-        resolveLoomLaunchPlan(RECORDS, { ...OPTIONS, noPatternIndex: true })
+        resolveConsoleLaunchPlan(RECORDS, { ...OPTIONS, noPatternIndex: true })
       ).toThrow("contradict each other");
     });
 
     it("throws when a skills registry is both named and waived", () => {
       expect(() =>
-        resolveLoomLaunchPlan(RECORDS, { ...OPTIONS, noSkillsRegistry: true })
-      ).toThrow("contradict each other");
-    });
-
-    it("throws naming `--pattern-index-url` when no index is named or waived", () => {
-      expect(() =>
-        resolveLoomLaunchPlan(RECORDS, {
-          instance: "loom",
-          skillsRegistryUrl: "https://skills.example",
+        resolveConsoleLaunchPlan(RECORDS, {
+          ...OPTIONS,
+          noSkillsRegistry: true,
         })
-      ).toThrow("`--pattern-index-url`");
+      ).toThrow("contradict each other");
     });
 
     it("returns only variables `LAUNCHER_OWNED_VARIABLES` names", () => {
@@ -293,34 +317,119 @@ describe("launch-from-loom", () => {
       // ones, so a key it can set that is missing from that list would survive
       // from the operator's shell and contradict the printed report.
 
-      const waived = resolveLoomLaunchPlan(RECORDS, {
-        instance: "loom",
-        noPatternIndex: true,
-        noSkillsRegistry: true,
-      });
-      const named = resolveLoomLaunchPlan(RECORDS, OPTIONS);
+      const plans = [
+        resolveConsoleLaunchPlan(RECORDS, {}),
+        resolveConsoleLaunchPlan(RECORDS, {
+          noPatternIndex: true,
+          noSkillsRegistry: true,
+        }),
+        resolveConsoleLaunchPlan(NO_INSTANCE, NAMED_FABRIC),
+      ];
 
-      for (const plan of [waived, named]) {
+      for (const plan of plans) {
         for (const key of Object.keys(plan.environment)) {
           expect(LAUNCHER_OWNED_VARIABLES).toContain(key);
         }
       }
     });
 
-    it("throws naming `--skills-registry-url` when no registry is named or waived", () => {
-      expect(() =>
-        resolveLoomLaunchPlan(RECORDS, {
-          instance: "loom",
-          patternIndexUrl: "https://index.example",
-        })
-      ).toThrow("`--skills-registry-url`");
+    it("returns the deployment's index and registry when neither is named", () => {
+      const plan = resolveConsoleLaunchPlan(RECORDS, {});
+
+      expect(plan.environment.CF_HARNESS_PATTERN_INDEX_URL).toBe(
+        DEPLOYMENT_PATTERN_INDEX_URL,
+      );
+      expect(plan.environment.CF_HARNESS_SKILLS_REGISTRY_URL).toBe(
+        DEPLOYMENT_SKILLS_REGISTRY_URL,
+      );
+    });
+
+    it("returns the deployment default beside the source that says so", () => {
+      const plan = resolveConsoleLaunchPlan(RECORDS, {});
+      const index = plan.resolved.find((entry) => entry.name === "index");
+
+      expect(index?.source).toBe("labs deployment default");
     });
   });
 
-  describe("loomLaunchReport()", () => {
+  // ----------------------------------------------------------------------
+  // A fabric with no loom instance behind it
+  //
+  // The plain labs checkout, where nothing records the identity, the space,
+  // the toolshed or the store, and the caller names all four.
+  // ----------------------------------------------------------------------
+
+  describe("resolveConsoleLaunchPlan() without an instance", () => {
+    it("returns every value the caller named", () => {
+      const plan = resolveConsoleLaunchPlan(NO_INSTANCE, NAMED_FABRIC);
+
+      expect(plan.environment.CF_HARNESS_FABRIC_IDENTITY).toBe("/keys/dev.key");
+      expect(plan.environment.CF_HARNESS_FABRIC_SPACE).toBe("cf-harness-dev");
+      expect(plan.environment.CF_HARNESS_FABRIC_API_URL).toBe(
+        "http://localhost:8000",
+      );
+      expect(plan.environment.MEMORY_DIR).toBe(
+        "/checkout/packages/toolshed/cache/memory",
+      );
+    });
+
+    it("returns a console directory naming the port alone", () => {
+      const plan = resolveConsoleLaunchPlan(NO_INSTANCE, {
+        ...NAMED_FABRIC,
+        port: 8140,
+      });
+
+      expect(plan.environment.CF_HARNESS_CONSOLE_DIR).toBe(
+        ".cf-harness-console-8140",
+      );
+    });
+
+    it("reports no instance among the resolved values", () => {
+      const plan = resolveConsoleLaunchPlan(NO_INSTANCE, NAMED_FABRIC);
+
+      expect(plan.resolved.some((entry) => entry.name === "instance")).toBe(
+        false,
+      );
+    });
+
+    it("throws naming `--fabric-identity` when the caller names none", () => {
+      const { identity: _omitted, ...withoutIdentity } = NAMED_FABRIC;
+
+      expect(() => resolveConsoleLaunchPlan(NO_INSTANCE, withoutIdentity))
+        .toThrow("`--fabric-identity`");
+    });
+
+    it("throws naming `--store` when the caller names none", () => {
+      const { store: _omitted, ...withoutStore } = NAMED_FABRIC;
+
+      expect(() => resolveConsoleLaunchPlan(NO_INSTANCE, withoutStore))
+        .toThrow("`--store`");
+    });
+
+    it("names no `pieces.json` in an error when no instance was read", () => {
+      // The error text is what an operator acts on, and a plain labs checkout
+      // has no loom instance to edit.
+
+      const { space: _omitted, ...withoutSpace } = NAMED_FABRIC;
+
+      expect(() => resolveConsoleLaunchPlan(NO_INSTANCE, withoutSpace))
+        .toThrow(/^(?!.*pieces\.json).*$/s);
+    });
+
+    it("throws for a space named by DID, which composes no piece URL", () => {
+      expect(() =>
+        resolveConsoleLaunchPlan(NO_INSTANCE, {
+          ...NAMED_FABRIC,
+          space: "did:key:z6Mk",
+        })
+      ).toThrow("rather than a DID");
+    });
+  });
+
+  describe("consoleLaunchReport()", () => {
     it("returns a line for every resolved value, each naming its source", () => {
-      const plan = resolveLoomLaunchPlan(RECORDS, OPTIONS);
-      const lines = loomLaunchReport(plan);
+      const plan = resolveConsoleLaunchPlan(RECORDS, OPTIONS);
+      const lines = consoleLaunchReport(plan);
 
       for (const entry of plan.resolved) {
         expect(
@@ -332,7 +441,9 @@ describe("launch-from-loom", () => {
     });
 
     it("returns the space and store an operator checks the console against", () => {
-      const lines = loomLaunchReport(resolveLoomLaunchPlan(RECORDS, OPTIONS))
+      const lines = consoleLaunchReport(
+        resolveConsoleLaunchPlan(RECORDS, OPTIONS),
+      )
         .join("\n");
 
       expect(lines).toContain("ben-loom-dev-6");

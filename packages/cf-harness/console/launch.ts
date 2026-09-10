@@ -1,33 +1,43 @@
 #!/usr/bin/env -S deno run -A
 
 /**
- * The launch path for a console that shares a loom instance's fabric: read the
- * instance's own records, print what they resolved to, and serve.
+ * The console's one launch path: resolve its configuration from the fabric
+ * being started, print what each value resolved to and where it came from, and
+ * serve.
  *
- *   deno task --cwd packages/cf-harness console:loom --instance loom
+ *   deno task --cwd packages/cf-harness console:launch --instance loom
+ *   deno task --cwd packages/cf-harness console:launch \
+ *     --fabric-api-url http://localhost:8000 --store <dir>
  *
- * The console needs six things the instance already knows — the identity key,
- * the space, the toolshed URL, the store the toolshed serves, and the two
- * `runsc-cfc` sidecar directories the sandbox's mediation moves over — and an
- * operator transcribing them by hand gets a console that starts cleanly and is
- * wrong: a store keyed to a superseded labs pin reads as "no data at cell",
- * and sidecar directories no registered runtime writes drop every input label
- * in silence. So each value is derived from the record that decides it, tagged
- * with where it came from, and printed once before the server binds. Anything
- * that cannot be derived is a named flag whose absence is an error naming it,
- * never a default nobody chose. Arguments after `--` reach the console
- * untouched, so a flag this launcher has no opinion about is still reachable
- * through it rather than through a second launch path.
+ * The console needs an identity, a space, a toolshed URL, the store that
+ * toolshed serves, and the two `runsc-cfc` sidecar directories the sandbox's
+ * mediation moves over. An operator transcribing those by hand gets a console
+ * that starts cleanly and is wrong: a store keyed to a superseded labs pin
+ * reads as "no data at cell", and sidecar directories no registered runtime
+ * writes drop every input label in silence. So each value is derived from the
+ * record that decides it, tagged with where it came from, and printed once
+ * before the server binds. Anything that cannot be derived is a named flag
+ * whose absence is an error naming it, never a default nobody chose.
  *
- * The console's own flags and routes are in [`README.md`](README.md), and the
- * operator procedure this path belongs to is in
+ * A loom instance is one source among several rather than the shape of this
+ * module: `--instance` reads the identity, space and toolshed URL off that
+ * instance's records, and a fabric with no instance behind it names them
+ * itself. Arguments after `--` reach the console untouched, so a flag this
+ * launcher has no opinion about is still reachable through it rather than
+ * through a second launch path.
+ *
+ * `scripts/start-local-dev.sh --cf-harness` is what calls this for the fabric
+ * it is starting, and is how a person starts a console. The console's own flags
+ * and routes are in [`README.md`](README.md); the operator procedure is in
  * [`../docs/WEAVER.md`](../docs/WEAVER.md).
  */
-
 import { parseArgs } from "@std/cli/parse-args";
 import { join } from "@std/path";
 
-import { registeredCfcSidecarHostDirs } from "../src/sandbox/docker-runsc.ts";
+import {
+  DEFAULT_DOCKER_BINARY,
+  registeredCfcSidecarHostDirs,
+} from "../src/sandbox/docker-runsc.ts";
 import { startConsoleServer } from "./server.ts";
 
 /** The port Weaver's harness-console setting and loom's proxy both address. */
@@ -35,6 +45,16 @@ export const WEAVER_PAIRING_PORT = 8135;
 
 /** The Docker runtime whose registration sites the CFC sidecar transports. */
 const RUNSC_CFC_RUNTIME = "runsc-cfc";
+
+/**
+ * The index and registry this deployment's consoles read. They belong to the
+ * deployment rather than to any one fabric, so nothing derives them; they are
+ * stated here, printed as what they are, and moved by the environment variables
+ * the console already reads.
+ */
+export const DEPLOYMENT_PATTERN_INDEX_URL =
+  "https://us-central1-pattern-index.cloudfunctions.net";
+export const DEPLOYMENT_SKILLS_REGISTRY_URL = "https://skills.sh";
 
 /**
  * Proxy variables reach the console as ambient environment and break it two
@@ -88,11 +108,13 @@ export interface ResolvedValue {
 }
 
 /**
- * The records a loom instance keeps, read for the launcher. Every field is the
- * verbatim content of one record, so resolution itself touches no filesystem
- * and no subprocess.
+ * A loom instance's own records, when the fabric being started is an
+ * instance's. Every field is the verbatim content of one record, so resolution
+ * itself touches no filesystem and no subprocess.
  */
 export interface LoomInstanceRecords {
+  /** The instance's name, for error text and the console's directory. */
+  id: string;
   /** The instance's `pieces.json`. */
   piecesJson: string;
   /** The absolute path `piecesJson` was read from, for error text. */
@@ -103,6 +125,12 @@ export interface LoomInstanceRecords {
    * could not instance-scope it.
    */
   toolshedStoreDir: string;
+}
+
+/** What the launcher read before resolving anything. */
+export interface ConsoleLaunchRecords {
+  /** Present only when `--instance` named a loom instance. */
+  instance?: LoomInstanceRecords;
   /**
    * The runtime table `docker info --format '{{json .Runtimes}}'` reported, or
    * `undefined` when it could not be read. The running daemon's table rather
@@ -114,11 +142,18 @@ export interface LoomInstanceRecords {
   dockerRuntimesUnreadable?: string;
 }
 
-/** What an operator names themselves, over what the records decide. */
-export interface LoomLaunchOptions {
-  instance: string;
+/**
+ * What the caller names itself. Each of these wins over whatever record would
+ * otherwise decide the same value, and is reported as named rather than
+ * derived.
+ */
+export interface ConsoleLaunchOptions {
   port?: number;
   consoleDir?: string;
+  identity?: string;
+  space?: string;
+  toolshedUrl?: string;
+  store?: string;
   patternIndexUrl?: string;
   skillsRegistryUrl?: string;
   noPatternIndex?: boolean;
@@ -131,10 +166,14 @@ export interface LoomLaunchOptions {
 }
 
 /** The environment to serve under, and the printout that accounts for it. */
-export interface LoomLaunchPlan {
+export interface ConsoleLaunchPlan {
   environment: Record<string, string>;
   resolved: readonly ResolvedValue[];
 }
+
+/** Source labels the printout uses for a value nothing recorded. */
+const NAMED = "named on the command line";
+const LAUNCHER_DEFAULT = "launcher default";
 
 const nonEmpty = (value: string | undefined): string | undefined =>
   value === undefined || value.trim() === "" ? undefined : value.trim();
@@ -197,55 +236,99 @@ const storeDirectoryPath = (memoryDir: string): string => {
 };
 
 /**
- * Resolves the environment a console shares a loom instance's fabric under.
+ * Resolves the environment the console serves under, and the account of where
+ * each value came from.
  *
- * Throws with the flag to set whenever a value is neither recorded by the
- * instance nor named by `options`, so an operator reads what to supply
- * rather than discovering later that a run had no labels or no data.
+ * Throws with the flag to set whenever a value is neither recorded by a loom
+ * instance nor named by `options`, so an operator reads what to supply rather
+ * than discovering later that a run had no labels or no data.
  */
-export const resolveLoomLaunchPlan = (
-  records: LoomInstanceRecords,
-  options: LoomLaunchOptions,
-): LoomLaunchPlan => {
-  const { instance } = options;
-  const pieces = parseJsonRecord(records.piecesJson, records.piecesJsonPath);
-  const defaults = objectField(pieces, "defaults");
-
-  const identity = stringField(defaults, "identity");
-  if (identity === undefined) {
-    throw new Error(
-      `loom instance \`${instance}\` records no \`defaults.identity\` in ` +
-        `\`${records.piecesJsonPath}\`; the console signs with the ` +
-        `instance's key and has no other source for it`,
-    );
-  }
-  const space = stringField(defaults, "local_space");
-  if (space === undefined) {
-    throw new Error(
-      `loom instance \`${instance}\` records no \`defaults.local_space\` in ` +
-        `\`${records.piecesJsonPath}\`; the console writes into the ` +
-        `instance's space and has no other source for it`,
-    );
-  }
-  const toolshedUrl = stringField(
-    objectField(defaults, "server_urls"),
-    "toolshed",
+export const resolveConsoleLaunchPlan = (
+  records: ConsoleLaunchRecords,
+  options: ConsoleLaunchOptions,
+): ConsoleLaunchPlan => {
+  const { instance } = records;
+  const defaults = instance === undefined ? {} : objectField(
+    parseJsonRecord(instance.piecesJson, instance.piecesJsonPath),
+    "defaults",
   );
-  if (toolshedUrl === undefined) {
+  const instanceSource = instance === undefined
+    ? undefined
+    : `\`${instance.piecesJsonPath}\``;
+
+  // Each of the four the console cannot start without, in one shape: what the
+  // caller named, else what the instance recorded, else an error naming the
+  // flag and the variable that supply it. A fabric with no instance behind it
+  // reaches the same error rather than a different code path.
+  const fromPieces = (
+    record: Record<string, unknown>,
+    key: string,
+  ): { value: string; source: string } | undefined => {
+    const value = stringField(record, key);
+    return value === undefined || instanceSource === undefined
+      ? undefined
+      : { value, source: instanceSource };
+  };
+  const required = (
+    named: string | undefined,
+    recorded: { value: string; source: string } | undefined,
+    what: string,
+    flag: string,
+    variable: string,
+  ): { value: string; source: string } => {
+    if (named !== undefined) {
+      return { value: named, source: NAMED };
+    }
+    if (recorded !== undefined) {
+      return recorded;
+    }
     throw new Error(
-      `loom instance \`${instance}\` records no ` +
-        `\`defaults.server_urls.toolshed\` in \`${records.piecesJsonPath}\`; ` +
-        `the console reaches the instance's fabric at that URL`,
+      `no ${what}: set \`${flag}\` or \`${variable}\`` +
+        (instance === undefined
+          ? ""
+          : `, or record it in \`${instance.piecesJsonPath}\``),
+    );
+  };
+
+  const identity = required(
+    options.identity,
+    fromPieces(defaults, "identity"),
+    "identity keyfile, which the console signs every write with",
+    "--fabric-identity",
+    "CF_IDENTITY",
+  );
+  const space = required(
+    options.space,
+    fromPieces(defaults, "local_space"),
+    "space, which the console writes its pieces into",
+    "--fabric-space",
+    "CF_SPACE",
+  );
+  const toolshedUrl = required(
+    options.toolshedUrl,
+    fromPieces(objectField(defaults, "server_urls"), "toolshed"),
+    "toolshed URL, which is the fabric the console runs against",
+    "--fabric-api-url",
+    "CF_HARNESS_FABRIC_API_URL",
+  );
+  if (space.value.startsWith("did:")) {
+    throw new Error(
+      `the space must be a name rather than a DID: \`assign_slug\` composes ` +
+        `a piece's URL from the name, and offers none for ${space.value}`,
     );
   }
-  const memoryDir = nonEmpty(records.toolshedStoreDir);
-  if (memoryDir === undefined) {
-    throw new Error(
-      `\`loom toolshed-store-dir ${instance}\` printed no store, so loom ` +
-        `could not key the instance's store to the labs commit it vendors; ` +
-        `a console pointed at any other store reads the space as empty`,
-    );
-  }
+  const store = required(
+    options.store,
+    instance === undefined || nonEmpty(instance.toolshedStoreDir) === undefined
+      ? undefined
+      : {
+        value: instance.toolshedStoreDir,
+        source: `\`loom toolshed-store-dir ${instance.id}\``,
+      },
+    "store, which is where the console reads the labels a run wrote",
+    "--store",
+    "MEMORY_DIR",
+  );
 
   const sidecars = registeredCfcSidecarHostDirs({
     runtimeName: RUNSC_CFC_RUNTIME,
@@ -288,74 +371,69 @@ export const resolveLoomLaunchPlan = (
         "other; name a registry or waive it, not both",
     );
   }
-  if (
-    options.patternIndexUrl === undefined && options.noPatternIndex !== true
-  ) {
-    throw new Error(
-      "a pattern index is a deployment's own, and loom records none: set " +
-        "`--pattern-index-url`, or `--no-pattern-index` to run a console " +
-        "whose sessions cannot search for published parts",
-    );
-  }
-  if (
-    options.skillsRegistryUrl === undefined &&
-    options.noSkillsRegistry !== true
-  ) {
-    throw new Error(
-      "a skills registry is a deployment's own, and loom records none: set " +
-        "`--skills-registry-url`, or `--no-skills-registry` to run a console " +
-        "whose sessions cannot search for skills",
-    );
-  }
+  // Not derived and not required: these belong to the deployment rather than
+  // to the fabric, so the constant is the answer and the flag moves it.
+  const patternIndexUrl = options.noPatternIndex === true
+    ? undefined
+    : options.patternIndexUrl ?? DEPLOYMENT_PATTERN_INDEX_URL;
+  const skillsRegistryUrl = options.noSkillsRegistry === true
+    ? undefined
+    : options.skillsRegistryUrl ?? DEPLOYMENT_SKILLS_REGISTRY_URL;
 
   const port = options.port ?? WEAVER_PAIRING_PORT;
   const consoleDir = options.consoleDir ??
-    `.cf-harness-console-${instance}-${port}`;
+    (instance === undefined
+      ? `.cf-harness-console-${port}`
+      : `.cf-harness-console-${instance.id}-${port}`);
   const posture = options.posture ?? "max-enforcement";
   const flowLabels = options.flowLabels ?? "persist";
   const enforcementMode = options.enforcementMode ?? "enforce-explicit";
 
-  const instanceSource = `\`${records.piecesJsonPath}\``;
-  const launcherDefault = "launcher default";
-  const named = "named on the command line";
+  const deploymentDefault = "labs deployment default";
+  const registrationSourceName =
+    `\`${RUNSC_CFC_RUNTIME}\` as \`docker info\` reports it`;
 
   const resolved: ResolvedValue[] = [
-    { name: "instance", value: instance, source: named },
+    ...(instance === undefined ? [] : [{
+      name: "instance",
+      value: instance.id,
+      source: NAMED,
+    }]),
     {
       name: "port",
       value: String(port),
       source: options.port === undefined
-        ? `${launcherDefault} (the port Weaver pairs with)`
-        : named,
+        ? `${LAUNCHER_DEFAULT} (the port Weaver pairs with)`
+        : NAMED,
     },
     {
       name: "console dir",
       value: consoleDir,
       source: options.consoleDir === undefined
-        ? `${launcherDefault} (one directory per instance and port)`
-        : named,
+        ? `${LAUNCHER_DEFAULT} (one directory per fabric and port)`
+        : NAMED,
     },
-    { name: "space", value: space, source: instanceSource },
-    { name: "identity", value: identity, source: instanceSource },
-    { name: "toolshed", value: toolshedUrl, source: instanceSource },
+    { name: "space", value: space.value, source: space.source },
+    { name: "identity", value: identity.value, source: identity.source },
+    { name: "toolshed", value: toolshedUrl.value, source: toolshedUrl.source },
     {
       name: "store",
-      value: storeDirectoryPath(memoryDir),
-      source: `\`loom toolshed-store-dir ${instance}\``,
+      value: storeDirectoryPath(store.value),
+      source: store.source,
     },
     {
       name: "cfc results",
       value: cfcResultDir,
       source: options.cfcResultDir === undefined
-        ? `\`${RUNSC_CFC_RUNTIME}\` as \`docker info\` reports it`
-        : named,
+        ? registrationSourceName
+        : NAMED,
     },
     {
       name: "cfc contexts",
       value: cfcInvocationContextDir,
       source: options.cfcInvocationContextDir === undefined
-        ? `\`${RUNSC_CFC_RUNTIME}\` as \`docker info\` reports it`
-        : named,
+        ? registrationSourceName
+        : NAMED,
     },
     {
       name: "posture",
@@ -363,18 +441,24 @@ export const resolveLoomLaunchPlan = (
       source: options.posture === undefined &&
           options.flowLabels === undefined &&
           options.enforcementMode === undefined
-        ? launcherDefault
-        : named,
+        ? LAUNCHER_DEFAULT
+        : NAMED,
     },
     {
       name: "index",
-      value: options.patternIndexUrl ?? "(none: --no-pattern-index)",
-      source: named,
+      value: patternIndexUrl ?? "(none: --no-pattern-index)",
+      source:
+        patternIndexUrl === undefined || options.patternIndexUrl !== undefined
+          ? NAMED
+          : deploymentDefault,
     },
     {
       name: "skills",
-      value: options.skillsRegistryUrl ?? "(none: --no-skills-registry)",
-      source: named,
+      value: skillsRegistryUrl ?? "(none: --no-skills-registry)",
+      source: skillsRegistryUrl === undefined ||
+          options.skillsRegistryUrl !== undefined
+        ? NAMED
+        : deploymentDefault,
     },
     {
       name: "proxy",
@@ -386,20 +470,20 @@ export const resolveLoomLaunchPlan = (
   const environment: Record<string, string> = {
     CF_HARNESS_CONSOLE_PORT: String(port),
     CF_HARNESS_CONSOLE_DIR: consoleDir,
-    CF_HARNESS_FABRIC_API_URL: toolshedUrl,
-    CF_HARNESS_FABRIC_IDENTITY: identity,
-    CF_HARNESS_FABRIC_SPACE: space,
+    CF_HARNESS_FABRIC_API_URL: toolshedUrl.value,
+    CF_HARNESS_FABRIC_IDENTITY: identity.value,
+    CF_HARNESS_FABRIC_SPACE: space.value,
     CF_HARNESS_FABRIC_CFC_POSTURE: posture,
     CF_HARNESS_FABRIC_CFC_FLOW_LABELS: flowLabels,
     CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE: enforcementMode,
     CF_HARNESS_RUNSC_CFC_RESULT_DIR: cfcResultDir,
     CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR: cfcInvocationContextDir,
-    MEMORY_DIR: storeDirectoryPath(memoryDir),
-    ...(options.patternIndexUrl !== undefined
-      ? { CF_HARNESS_PATTERN_INDEX_URL: options.patternIndexUrl }
+    MEMORY_DIR: storeDirectoryPath(store.value),
+    ...(patternIndexUrl !== undefined
+      ? { CF_HARNESS_PATTERN_INDEX_URL: patternIndexUrl }
       : {}),
-    ...(options.skillsRegistryUrl !== undefined
-      ? { CF_HARNESS_SKILLS_REGISTRY_URL: options.skillsRegistryUrl }
+    ...(skillsRegistryUrl !== undefined
+      ? { CF_HARNESS_SKILLS_REGISTRY_URL: skillsRegistryUrl }
       : {}),
   };
 
@@ -407,15 +491,15 @@ export const resolveLoomLaunchPlan = (
 };
 
 /** The lines the launcher prints before the server binds. */
-export const loomLaunchReport = (
-  plan: LoomLaunchPlan,
+export const consoleLaunchReport = (
+  plan: ConsoleLaunchPlan,
 ): readonly string[] => {
   const width = plan.resolved.reduce(
     (widest, entry) => Math.max(widest, entry.name.length),
     0,
   );
   return [
-    "  cf-harness console, configured from loom:",
+    "  cf-harness console, resolved from the fabric it runs against:",
     ...plan.resolved.map((entry) =>
       `  ${entry.name.padEnd(width)}  ${entry.value}   [${entry.source}]`
     ),
@@ -530,10 +614,10 @@ const positiveInteger = (value: string, flag: string): number => {
 };
 
 /**
- * Resolves a loom instance's records into a console environment, prints what
- * they resolved to, and serves under it.
+ * Reads what the fabric records, resolves the console's environment from it,
+ * prints the account, and serves.
  */
-export const launchConsoleFromLoom = async (
+export const launchConsole = async (
   args: readonly string[] = Deno.args,
   env: Record<string, string | undefined> = Deno.env.toObject(),
 ): Promise<void> => {
@@ -543,6 +627,10 @@ export const launchConsoleFromLoom = async (
       "loom-bin",
       "port",
       "console-dir",
+      "fabric-identity",
+      "fabric-space",
+      "fabric-api-url",
+      "store",
       "pattern-index-url",
       "skills-registry-url",
       "cfc-result-dir",
@@ -550,7 +638,6 @@ export const launchConsoleFromLoom = async (
       "fabric-cfc-posture",
       "fabric-cfc-flow-labels",
       "fabric-cfc-enforcement-mode",
-      "docker-bin",
     ],
     boolean: ["no-pattern-index", "no-skills-registry"],
     "--": true,
@@ -558,30 +645,42 @@ export const launchConsoleFromLoom = async (
   const flag = (name: string): string | undefined =>
     typeof parsed[name] === "string" ? nonEmpty(parsed[name]) : undefined;
 
-  const instance = flag("instance") ?? nonEmpty(env.LOOM_INSTANCE_ID);
-  if (instance === undefined) {
-    throw new Error(
-      "no loom instance named: set `--instance` or `LOOM_INSTANCE_ID`",
-    );
-  }
+  // `--instance` alone opts into reading a loom instance's records. An
+  // inherited `LOOM_INSTANCE_ID` does not: the console comes along because
+  // someone asked for it, and the ambient variable is a fact about the process
+  // tree rather than a decision.
+  const instanceId = flag("instance");
   const loomBinary = flag("loom-bin") ?? nonEmpty(env.LOOM_BIN) ?? "loom";
-  const instanceDir = join(loomDataDirectory(env), "instances", instance);
-  const piecesJsonPath = join(instanceDir, "pieces.json");
-  const piecesJson = await readOptionalFile(piecesJsonPath);
-  if (piecesJson === undefined) {
-    throw new Error(
-      `loom instance \`${instance}\` has no \`${piecesJsonPath}\`; name a ` +
-        `running instance with \`--instance\``,
+  let instance: LoomInstanceRecords | undefined;
+  if (instanceId !== undefined) {
+    const piecesJsonPath = join(
+      loomDataDirectory(env),
+      "instances",
+      instanceId,
+      "pieces.json",
     );
+    const piecesJson = await readOptionalFile(piecesJsonPath);
+    if (piecesJson === undefined) {
+      throw new Error(
+        `loom instance \`${instanceId}\` has no \`${piecesJsonPath}\`; name ` +
+          `a running instance with \`--instance\``,
+      );
+    }
+    instance = {
+      id: instanceId,
+      piecesJson,
+      piecesJsonPath,
+      toolshedStoreDir: await readToolshedStoreDir(loomBinary, instanceId),
+    };
   }
-  const dockerBinary = flag("docker-bin") ?? nonEmpty(env.CF_HARNESS_DOCKER) ??
-    "docker";
-  const docker = await readDockerRuntimes(dockerBinary);
 
-  const plan = resolveLoomLaunchPlan({
-    piecesJson,
-    piecesJsonPath,
-    toolshedStoreDir: await readToolshedStoreDir(loomBinary, instance),
+  // Not configurable: the sandbox runs `docker`, so a launcher reading the
+  // runtime table from anything else would print directories the runs never
+  // reach.
+  const docker = await readDockerRuntimes(DEFAULT_DOCKER_BINARY);
+
+  const plan = resolveConsoleLaunchPlan({
+    ...(instance !== undefined ? { instance } : {}),
     ...(docker.runtimes !== undefined
       ? { dockerRuntimes: docker.runtimes }
       : {}),
@@ -589,7 +688,16 @@ export const launchConsoleFromLoom = async (
       ? { dockerRuntimesUnreadable: docker.unreadable }
       : {}),
   }, {
-    instance,
+    ...(flag("fabric-identity") ?? nonEmpty(env.CF_IDENTITY)) !== undefined
+      ? { identity: (flag("fabric-identity") ?? nonEmpty(env.CF_IDENTITY))! }
+      : {},
+    ...(flag("fabric-space") ?? nonEmpty(env.CF_SPACE)) !== undefined
+      ? { space: (flag("fabric-space") ?? nonEmpty(env.CF_SPACE))! }
+      : {},
+    ...(flag("fabric-api-url") !== undefined
+      ? { toolshedUrl: flag("fabric-api-url")! }
+      : {}),
+    ...(flag("store") !== undefined ? { store: flag("store")! } : {}),
     ...(flag("port") !== undefined
       ? { port: positiveInteger(flag("port")!, "--port") }
       : {}),
@@ -622,7 +730,7 @@ export const launchConsoleFromLoom = async (
   });
 
   console.log("");
-  for (const line of loomLaunchReport(plan)) {
+  for (const line of consoleLaunchReport(plan)) {
     console.log(line);
   }
 
@@ -638,7 +746,7 @@ export const launchConsoleFromLoom = async (
 // Running the file serves; importing it (the tests do) serves nothing.
 if (import.meta.main) {
   try {
-    await launchConsoleFromLoom();
+    await launchConsole();
   } catch (error) {
     // A misconfigured launch is an operator's problem to fix, and the message
     // is the whole of what they need; the stack behind it is noise.

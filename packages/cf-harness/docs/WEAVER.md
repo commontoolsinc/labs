@@ -63,13 +63,23 @@ curl -s http://127.0.0.1:<loom-port>/config | jq '{serverUrls, identityDid}'
 
 ## 2. The console, on loom's fabric
 
-One command starts a console on a loom instance's fabric. From a labs checkout:
+The console comes along when the fabric starts. Loom starts its instance's pair
+through labs' `scripts/start-local-dev.sh` and passes `--cf-harness`, so
+`loom start`, `loom restart` and the daemon's own toolshed recovery each bring a
+console up with the toolshed and stop it with the pair. Nothing is launched by
+hand, and loom holds no configuration for it.
+
+A labs developer gets one the same way, against their own dev fabric:
 
 ```sh
-deno task --cwd packages/cf-harness console:loom \
-  --instance <instance> \
-  --pattern-index-url <index URL> \
-  --skills-registry-url <registry URL>
+./scripts/start-local-dev.sh --cf-harness
+```
+
+Either way the flag calls one resolver, and that resolver is reachable directly
+when a console is wanted against a fabric that is already running:
+
+```sh
+deno task --cwd packages/cf-harness console:launch --instance <instance>
 ```
 
 It resolves the identity, the space and the toolshed URL from the instance's
@@ -78,24 +88,32 @@ directories from the `runsc-cfc` registration `docker info` reports. It prints
 every value beside the record that decided it, and serves on 8135 — the port
 Weaver's harness console setting and loom's proxy both address. Read the
 printout before opening Weaver: a value that is wrong names where to fix it, and
-the three sources are three different places.
+those are three different places.
 
-Everything the launcher cannot derive is a flag, and its absence is an error
-naming it rather than a default nobody chose. A pattern index and a skills
-registry belong to a deployment rather than to loom, so name each one or waive
-it with `--no-pattern-index` or `--no-skills-registry`. `--port` moves the
-console, `--console-dir` moves its state, and `--fabric-cfc-posture`,
+Without `--instance` there is no instance to read, so the identity and the space
+are named instead — `--fabric-identity`/`CF_IDENTITY` and
+`--fabric-space`/`CF_SPACE` — and their absence is an error naming them rather
+than a default nobody chose. The pattern index and the skills registry are this
+deployment's rather than any fabric's, so they are constants the printout labels
+as such; `--pattern-index-url` and `--skills-registry-url` move them, and
+`--no-pattern-index` and `--no-skills-registry` run without them. `--port` moves
+the console, `--console-dir` moves its state, and `--fabric-cfc-posture`,
 `--fabric-cfc-flow-labels` and `--fabric-cfc-enforcement-mode` move it off the
-enforcing posture the launcher otherwise runs under. Arguments after `--` reach
-the console untouched, so every other flag it takes —
+enforcing posture it otherwise runs under. Arguments after `--` reach the
+console untouched, so every other flag it takes —
 [`../console/README.md`](../console/README.md) has them — is reachable through
 this one path:
 
 ```sh
-deno task --cwd packages/cf-harness console:loom --instance <instance> \
-  --pattern-index-url <index URL> --skills-registry-url <registry URL> \
+deno task --cwd packages/cf-harness console:launch --instance <instance> \
   -- --host-mount name=corpus,source=/absolute/corpus,target=/corpus
 ```
+
+**A console that cannot start does not take the fabric down.** It needs Docker
+and a connected model provider, and when either is missing the flag reports it
+in the script's output and in `packages/cf-harness/local-dev-console.log`, and
+the shell and toolshed keep running. That is the shape to expect: the pair is
+the fabric, and the console is a surface on it.
 
 **One console per state directory.** The launcher names a directory per instance
 and port, so two consoles started this way keep separate runs, sessions and

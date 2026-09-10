@@ -14,10 +14,31 @@
 ./scripts/restart-local-dev.sh --clear-cache # Clear disposable caches (preserves spaces)
 ./scripts/restart-local-dev.sh --dangerously-clear-all-spaces # Clear databases/spaces
 ./scripts/restart-local-dev.sh --bg-updater  # Also start background-piece-service
+./scripts/start-local-dev.sh --cf-harness    # ...and a cf-harness console
 ./scripts/check-local-dev.sh          # Health check both servers
 ./scripts/share-pattern-via-tailscale.sh packages/patterns/lunch-poll/main.tsx  # Host a pattern + share on your tailnet
 ./scripts/share-pattern-via-tailscale.sh --down                                 # Tear that down
 ```
+
+### `--cf-harness`
+
+`--cf-harness` starts a cf-harness console against the fabric these scripts are
+starting, on the port Weaver pairs with, and stops it with the pair.
+`restart-local-dev.sh` forwards the flag. The console resolves the rest from
+that fabric — the toolshed URL and store from this script's own values, the
+sandbox's sidecar directories from Docker's runtime registration — and prints
+every value beside the record that decided it, so a wrong one names where to fix
+it. Two values it cannot derive: set `CF_IDENTITY` to an identity keyfile and
+`CF_SPACE` to a space name, or pass `--instance <loom-instance>` to read both
+off that instance's `pieces.json`.
+
+The console is a surface on the fabric rather than part of it. It needs Docker
+and a connected model provider, and when it cannot start — either of those
+missing, its port taken, a value underivable — it says so in the script's output
+and in `packages/cf-harness/local-dev-console.log`, and the shell and toolshed
+keep running. `packages/cf-harness/console/README.md` covers the console itself,
+and [`../../packages/cf-harness/docs/WEAVER.md`](../../packages/cf-harness/docs/WEAVER.md)
+the operator procedure it belongs to.
 
 Source-run build metadata describes the checkout the same way compiled
 binaries do: `start-local-dev.sh` defaults `COMMIT_SHA` to the checkout's
