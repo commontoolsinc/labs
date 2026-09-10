@@ -23,6 +23,9 @@
  * held state an accepted casualty — cannot be recorded away and must not be
  * deleted away. It is declared in `pattern-compat-accepted-breaks.ts`, which
  * forgives named `(pattern, baseline)` pairs and nothing else.
+ * A contract whose stored population has been explicitly retired remains in
+ * the append-only baseline tree but is excluded by the exact pairs in
+ * `pattern-compat-retirements.ts`.
  */
 
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
@@ -36,6 +39,7 @@ import {
 } from "./pattern-files.ts";
 import { UNEVALUABLE_PATTERNS } from "./pattern-compat-unevaluable.ts";
 import { ACCEPTED_CONTRACT_BREAKS } from "./pattern-compat-accepted-breaks.ts";
+import { PATTERN_BASELINE_RETIREMENTS } from "./pattern-compat-retirements.ts";
 import {
   deriveRequiredPatternKeys,
   recordExistsUnder,
@@ -48,6 +52,7 @@ import {
 import {
   acceptedBreakKey,
   checkPattern,
+  filterRetiredBaselines,
   type Finding,
   findRetired,
   parseArgs,
@@ -55,6 +60,7 @@ import {
   partitionAcceptedBreaks,
   type PatternContract,
   readBaselines,
+  retirementConfigurationIssues,
   shouldRecord,
   writeBaseline,
 } from "./pattern-compat-lib.ts";
@@ -200,6 +206,27 @@ async function main() {
   }
 
   const findings: Finding[] = [];
+
+  const retirementBaselines = new Map(
+    await Promise.all(
+      [...new Set(PATTERN_BASELINE_RETIREMENTS.map(({ pattern }) => pattern))]
+        .map(async (pattern) =>
+          [pattern, await readBaselines(BASELINES_DIR, pattern)] as const
+        ),
+    ),
+  );
+  const retirementIssues = retirementConfigurationIssues(
+    PATTERN_BASELINE_RETIREMENTS,
+    retirementBaselines,
+  );
+  if (retirementIssues.length > 0) {
+    console.error(
+      `Invalid pattern baseline retirement configuration:\n${
+        retirementIssues.map((issue) => `- ${issue}`).join("\n")
+      }`,
+    );
+    Deno.exit(1);
+  }
   // Retirement is a whole-tree question, so only an unfiltered shard 1 asks it;
   // otherwise every pattern outside this shard would look retired.
   if (only.length === 0 && shard.index === 0) {
@@ -256,7 +283,11 @@ async function main() {
     });
   for (const key of keys) {
     const current = contracts.get(key);
-    const baselines = await readBaselines(BASELINES_DIR, key);
+    const baselines = filterRetiredBaselines(
+      key,
+      await readBaselines(BASELINES_DIR, key),
+      PATTERN_BASELINE_RETIREMENTS,
+    );
     const checkStarted = performance.now();
     const allFindings = checkPattern(key, current, baselines);
     checkMsByKey.set(key, performance.now() - checkStarted);

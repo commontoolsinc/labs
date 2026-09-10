@@ -9,6 +9,24 @@ import type { BaselineRetirement } from "./pattern-compat-lib.ts";
  */
 export const PATTERN_BASELINE_RETIREMENTS: readonly BaselineRetirement[] = [
   {
+    pattern: "deep-research.tsx",
+    baseline: "20260729T022742Z-6PInVAlNOHThJNGH",
+    reason:
+      "Pre-launch Factory@1 schema-authority migration normalized Common Fabric Default optionality; owner-approved data wipe is recorded in the factory shipping spec.",
+  },
+  {
+    pattern: "deep-research.tsx",
+    baseline: "20260729T230006Z-iBQX-llGuoFgYm69",
+    reason:
+      "Pre-launch Factory@1 schema-authority migration normalized Common Fabric Default optionality; owner-approved data wipe is recorded in the factory shipping spec.",
+  },
+  {
+    pattern: "deep-research.tsx",
+    baseline: "20260904T235034Z-lb6pxx4elktvgy47",
+    reason:
+      "Pre-launch Factory@1 schema-authority migration normalized Common Fabric Default optionality; owner-approved data wipe is recorded in the factory shipping spec.",
+  },
+  {
     pattern: "examples/array-in-cell-with-remove-editable.tsx",
     baseline: "20260729T022742Z--kRTqpCBkByWzcff",
     reason:
@@ -17,6 +35,18 @@ export const PATTERN_BASELINE_RETIREMENTS: readonly BaselineRetirement[] = [
   {
     pattern: "google/core/experimental/gmail-agentic-search.tsx",
     baseline: "20260729T022742Z-dZgG8iv9TdVC9NpM",
+    reason:
+      "Pre-launch Factory@1 handler migration; owner-approved data wipe is recorded in the factory shipping spec.",
+  },
+  {
+    pattern: "google/core/experimental/gmail-agentic-search.tsx",
+    baseline: "20260729T230006Z-zHe7Wfv96nCyTOL4",
+    reason:
+      "Pre-launch Factory@1 handler contract correction; owner-approved data wipe is recorded in the factory shipping spec.",
+  },
+  {
+    pattern: "google/core/experimental/gmail-agentic-search.tsx",
+    baseline: "20260909T184755Z-sg-Ns3ZECcKelvw9",
     reason:
       "Pre-launch Factory@1 handler migration; owner-approved data wipe is recorded in the factory shipping spec.",
   },
@@ -33,8 +63,32 @@ export const PATTERN_BASELINE_RETIREMENTS: readonly BaselineRetirement[] = [
       "Pre-launch patternTool-to-Factory@1 migration; owner-approved data wipe is recorded in the factory shipping spec.",
   },
   {
+    pattern: "notes/note.tsx",
+    baseline: "20260813T162832Z-GFSMvyzQ-Yxqugmf",
+    reason:
+      "Pre-launch patternTool-to-Factory@1 migration; owner-approved data wipe is recorded in the factory shipping spec.",
+  },
+  {
+    pattern: "notes/note.tsx",
+    baseline: "20260813T163905Z-zqmv7qgvTzGuEEY5",
+    reason:
+      "Pre-launch patternTool-to-Factory@1 migration; owner-approved data wipe is recorded in the factory shipping spec.",
+  },
+  {
+    pattern: "notes/note.tsx",
+    baseline: "20260817T073231Z-r-8BY2Mq4VO8Z-gh",
+    reason:
+      "Pre-launch patternTool-to-Factory@1 migration; owner-approved data wipe is recorded in the factory shipping spec.",
+  },
+  {
     pattern: "system/common-fabric.tsx",
     baseline: "20260729T022742Z-33-wy7gTBm_BLP4I",
+    reason:
+      "Pre-launch patternTool-to-Factory@1 migration; owner-approved data wipe is recorded in the factory shipping spec.",
+  },
+  {
+    pattern: "system/common-fabric.tsx",
+    baseline: "20260730T215848Z-gI9SlVAQGk94saSd",
     reason:
       "Pre-launch patternTool-to-Factory@1 migration; owner-approved data wipe is recorded in the factory shipping spec.",
   },

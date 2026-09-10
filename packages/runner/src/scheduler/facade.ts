@@ -431,6 +431,7 @@ export class Scheduler {
 
   #idlePromises: (() => void)[] = [];
   #backgroundTasks = new Set<Promise<unknown>>();
+  #pendingDurableReadiness = new Map<Promise<void>, Cancel>();
   #pendingDurableEventReadiness = new Set<Promise<void>>();
 
   /**
@@ -961,8 +962,45 @@ export class Scheduler {
     });
   }
 
+  /**
+   * Keep the client-facing durability barrier open for reactive work that is
+   * parked outside the scheduler's running set. Plain `idle()` remains free so
+   * unrelated actions can continue while the prerequisite is pending.
+   *
+   * The returned cancel releases the barrier without canceling `work`; owners
+   * use it during teardown to fence a prerequisite that can no longer produce
+   * a live result. The work's own success or failure also releases it.
+   */
+  trackDurableReadiness(work: PromiseLike<unknown>): Cancel {
+    const gate = Promise.withResolvers<void>();
+    let active = true;
+    const release = () => {
+      if (!active) return;
+      active = false;
+      this.#pendingDurableReadiness.delete(gate.promise);
+      gate.resolve();
+    };
+    this.#pendingDurableReadiness.set(gate.promise, release);
+    Promise.resolve(work).then(release, release);
+    return release;
+  }
+
   idle(): Promise<void> {
     return this.#waitForQuiescence(false);
+  }
+
+  /**
+   * Reach the reactive fixpoint a cell pull has always promised, and join the
+   * client durability barrier only when that pass discovers parked work whose
+   * result the pull depends on. This keeps ordinary pulls independent of
+   * unrelated commit confirmation while preventing a resumed list from being
+   * returned before its pre-synced rows can run.
+   */
+  async idleForPull(): Promise<void> {
+    await this.idle();
+    if (this.#pendingDurableReadiness.size > 0) {
+      await this.idleWithPendingCommits();
+    }
   }
 
   /**
@@ -1085,6 +1123,16 @@ export class Scheduler {
         // unrelated work, but the client-facing safe-reload barrier waits
         // until that intent is requeued, canceled, or rejected.
         Promise.allSettled([...this.#pendingDurableEventReadiness]).then(
+          recheck,
+        );
+      } else if (
+        awaitPendingCommits && this.#pendingDurableReadiness.size > 0
+      ) {
+        // Reactive readiness does not occupy the scheduler's running set, so
+        // ordinary idle stays available to unrelated actions. A client-facing
+        // safe-read/reload barrier must still wait for selected work to rerun
+        // or be canceled by its owner.
+        Promise.allSettled([...this.#pendingDurableReadiness.keys()]).then(
           recheck,
         );
       } else if (this.#disposed) {
@@ -2069,6 +2117,9 @@ export class Scheduler {
     this.runtime.storageManager.unsubscribe?.(this.#storageSubscription);
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
+    for (const release of [...this.#pendingDurableReadiness.values()]) {
+      release();
+    }
     this.#disposed = true;
     this.#gates.cancelWake();
     if (this.#pendingQueueTaskTimer !== null) {

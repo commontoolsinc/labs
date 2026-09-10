@@ -253,6 +253,39 @@ function withoutNestedAsCell(schema: JSONSchema): JSONSchema {
   return visit(schema) as JSONSchema;
 }
 
+/** Collapse schema-generator's expanded `T[] | Default<[]>` representation. */
+function collapseExpandedDefaultArrays(schema: JSONSchema): JSONSchema {
+  if (schema === true || schema === false) return schema;
+  const visit = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(visit);
+    if (!isObjectNotArray(value)) return value;
+    const normalized = Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, visit(child)]),
+    );
+    if (
+      Object.keys(normalized).length !== 1 ||
+      !Array.isArray(normalized.anyOf) || normalized.anyOf.length !== 2
+    ) {
+      return normalized;
+    }
+    const defaultArm = normalized.anyOf.find((branch) =>
+      isObjectNotArray(branch) && branch.type === "array" &&
+      Object.keys(branch).length === 3 &&
+      branch.items === false && Array.isArray(branch.default) &&
+      branch.default.length === 0
+    );
+    const valueArm = normalized.anyOf.find((branch) =>
+      branch !== defaultArm && isObjectNotArray(branch) &&
+      branch.type === "array" && !Object.hasOwn(branch, "default")
+    );
+    if (!isObjectNotArray(defaultArm) || !isObjectNotArray(valueArm)) {
+      return normalized;
+    }
+    return { ...valueArm, default: [] };
+  };
+  return visit(schema) as JSONSchema;
+}
+
 function asCellEntry(value: unknown):
   | { kind: string; scope?: string }
   | undefined {
@@ -358,11 +391,14 @@ function sourceSchemaContainsExpected(
     if (resolved === undefined || resolved === expected) return false;
     const nextSeen = new Set(seenRefs);
     nextSeen.add(refPair);
+    const resolvedRoot = expected.$ref.startsWith("#/")
+      ? expectedRoot
+      : resolved;
     return sourceSchemaContainsExpected(
       resolved,
       source,
       keyword,
-      expectedRoot,
+      resolvedRoot,
       sourceRoot,
       nextSeen,
     );
@@ -381,12 +417,13 @@ function sourceSchemaContainsExpected(
     if (resolved === undefined || resolved === source) return false;
     const nextSeen = new Set(seenRefs);
     nextSeen.add(refPair);
+    const resolvedRoot = source.$ref.startsWith("#/") ? sourceRoot : resolved;
     return sourceSchemaContainsExpected(
       expected,
       resolved,
       keyword,
       expectedRoot,
-      sourceRoot,
+      resolvedRoot,
       nextSeen,
     );
   }
@@ -509,15 +546,16 @@ function symbolicFailure(
   );
   // A runner Cell binding (live or serialized) has already established the
   // outer symbolic capability. Its exported content schema may have nested
-  // `asCell` annotations removed by durable-link schema sanitization, so
-  // compare the remaining content contract without treating that serialization
-  // detail as authored evidence. Reactive-shaped objects do not receive this.
+  // `asCell` annotations removed by durable-link schema sanitization or use the
+  // schema generator's expanded Default<[]> representation, so compare the
+  // normalized content contract. Reactive-shaped objects receive neither
+  // allowance.
   const runnerCellBinding = isRunnerCellBinding(value);
   const comparableExpected = runnerCellBinding
-    ? withoutNestedAsCell(expectedContent)
+    ? collapseExpandedDefaultArrays(withoutNestedAsCell(expectedContent))
     : expectedContent;
   const comparableSource = runnerCellBinding
-    ? withoutNestedAsCell(sourceContent)
+    ? collapseExpandedDefaultArrays(withoutNestedAsCell(sourceContent))
     : sourceContent;
   if (
     sourceSchema !== true && sourceSchema !== false &&

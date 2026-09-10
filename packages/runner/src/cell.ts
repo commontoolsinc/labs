@@ -533,7 +533,7 @@ declare module "@commonfabric/api" {
       options?: SinkOptions,
     ): Cancel;
     sync(): Promise<Cell<T>>;
-    pull(): Promise<Readonly<T>>;
+    pull(options?: { materializeFactories?: boolean }): Promise<Readonly<T>>;
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
@@ -1375,10 +1375,16 @@ export class CellImpl<T extends FabricValue>
    * const value = await cell.pull();
    * ```
    *
+   * Runner-owned state inspection may pass `materializeFactories: false` to
+   * preserve inert Factory@1 atoms while still converging link reads. Ordinary
+   * callers keep executable factory exposure by default.
+   *
    * @returns A promise that resolves to the cell's current value after all
    *          dependencies have been computed.
    */
-  pull(): Promise<Readonly<T>> {
+  pull(
+    options?: { materializeFactories?: boolean },
+  ): Promise<Readonly<T>> {
     if (!this.#synced) {
       // Register the kicked first sync in the settled pool the convergence
       // loop below drains. sync() resolves once the doc is confirmed —
@@ -1405,7 +1411,15 @@ export class CellImpl<T extends FabricValue>
     return new Promise((resolve) => {
       const action: Action = (tx) => {
         // Read the value inside the effect - this ensures dependencies are pulled
-        const value = validateAndTransform(this.runtime, tx, this.#viewRef);
+        const value = validateAndTransform(
+          this.runtime,
+          tx,
+          this.#viewRef,
+          [],
+          {
+            materializeFactories: options?.materializeFactories ?? true,
+          },
+        );
 
         // If no schema or TrueSchema, traverse the result to register all
         // nested values as read dependencies.
@@ -1435,7 +1449,7 @@ export class CellImpl<T extends FabricValue>
       // rounds is bounded by the reachable-doc depth; the fixed cap is only
       // a backstop against a pathological graph. Pulls that kicked nothing
       // take the zero-iteration path and keep their previous timing.
-      this.runtime.scheduler.idle().then(async () => {
+      this.runtime.scheduler.idleForPull().then(async () => {
         const storage = this.runtime.storageManager;
         // The pending pool is manager-global (same semantics as `synced()`):
         // this pull may also wait on loads kicked by concurrent readers.
@@ -1443,7 +1457,7 @@ export class CellImpl<T extends FabricValue>
         for (; round < 100; round++) {
           if ((storage.pendingCrossSpacePromiseCount?.() ?? 0) === 0) break;
           await (storage.crossSpaceSettled?.() ?? Promise.resolve());
-          await this.runtime.scheduler.idle();
+          await this.runtime.scheduler.idleForPull();
         }
         if (
           round === 100 && (storage.pendingCrossSpacePromiseCount?.() ?? 0) > 0
@@ -1465,7 +1479,11 @@ export class CellImpl<T extends FabricValue>
         // holding a long-lived open transaction has snapshots in it from
         // before the computations this pull just drove, so reading through it
         // would hand back exactly the stale values pull() exists to avoid.
-        resolve(validateAndTransform(this.runtime, undefined, this.#viewRef));
+        resolve(
+          validateAndTransform(this.runtime, undefined, this.#viewRef, [], {
+            materializeFactories: options?.materializeFactories ?? true,
+          }),
+        );
       });
     });
   }

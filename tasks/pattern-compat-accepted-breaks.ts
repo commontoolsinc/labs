@@ -488,19 +488,4 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "system-role message materializes under the new contract unchanged.",
     record: "docs/history/features/llm-message-role-narrowing-break.md",
   },
-  {
-    // The second pattern of the same ruling. Its baseline appears in no other
-    // entry, so the pairs stay disjoint.
-    pattern: "deep-research.tsx",
-    baselines: [
-      "20260729T022742Z-6PInVAlNOHThJNGH",
-    ],
-    paths: [
-      "argument.messages[].role",
-    ],
-    reason:
-      "The `system` role leaving `LLMMessageSchema`, recorded once for both " +
-      "patterns it breaks.",
-    record: "docs/history/features/llm-message-role-narrowing-break.md",
-  },
 ];

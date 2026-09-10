@@ -640,7 +640,11 @@ Publication preserves the memory system's optimistic local-commit contract:
    availability. Indexed factories already carry the complete artifact ref
    assigned by verified evaluation; confirmation records that the same
    identity is now available in this destination space. Later evaluations of
-   the same verified identity receive the same ref immediately.
+   the same verified identity receive the same ref immediately. If a stored
+   graph associated that real identity with a live root before source
+   verification, confirmation ends the session-only association and promotes
+   every builder artifact already indexed under that identity to its canonical
+   durable ref.
 
 Verified module evaluation assigns every indexed builder callable its complete
 content-addressed artifact ref immediately; exact-space artifact availability
@@ -654,6 +658,10 @@ the module bytes, but the requested source space is verified independently
 before that reuse grants exact-space availability. A globally warm evaluation
 alone never authorizes a source space and a compiled-only cache is insufficient
 without the verified source closure needed for cold recovery.
+Source verification also does not satisfy a deferred compiled-cache repair. If
+a non-persisting preview warmed an artifact, the next ordinary load bypasses
+that warm artifact, repairs the runtime-versioned cache, and only then clears
+the deferred-repair marker; another preview may reuse it without persisting.
 Once a verified module identity evaluates successfully, a missing export or
 hoist symbol is a definitive miss for that evaluation; it does not trigger a
 second compilation or evaluation of the same bytes.
@@ -1247,7 +1255,10 @@ call site's generated schemas after reference resolution and normalization.
 When a symbolic Cell binding carries content-addressed schema refs, validation
 resolves those refs from the trusted schema registry before comparing the
 binding with the compiler-generated contract; externalization must not turn an
-equivalent symbolic binding into a schema mismatch.
+equivalent symbolic binding into a schema mismatch. Following an external ref
+also changes the local-definition root: any `#/$defs/...` refs inside the
+resolved document are interpreted against that document, not against the
+schema that contained the external ref.
 When closure conversion returns a captured factory through a nested pattern,
 the compiler recovers that leaf's public contract in strict provenance order:
 compiler-owned metadata for the concrete builder/value first; then the
@@ -1361,7 +1372,13 @@ Because JSON Schema defines `enum` as a set, normalization compares its members
 independently of array order while still requiring the exact same member values.
 This permits schema sanitization and Fabric round-tripping to reorder an enum
 without creating a false factory-contract mismatch; no other array-valued
-keyword is made order-insensitive by this rule. Schema variance is deferred.
+keyword is made order-insensitive by this rule. Schema-generator's expanded
+`T[] | Default<[]>` form is also normalized to the equivalent array schema with
+`default: []` before comparing a trusted symbolic Cell binding. This equivalence
+is limited to a real runner Cell and that exact two-arm empty-array
+representation: the absence arm contains only `type: "array"`, `items: false`,
+and `default: []`. It does not apply to arbitrary reactive-shaped values or
+widen ordinary authored unions. Schema variance is deferred.
 Local URI-fragment JSON Pointers are split into segments before percent decoding,
 so a `%2F` names a slash inside one property rather than a path separator.
 Every `argumentSchema`, `resultSchema`, `contextSchema`, and `eventSchema`
@@ -1670,9 +1687,15 @@ pre-sync is recoverable supervisor work: a transient row-sync rejection settles
 the parked attempt without recording the ready key, so the scheduler reruns the
 coordinator and starts a fresh pre-sync. A coordinator parked on either cold
 factory readiness or this row readiness is deliberately absent from ordinary
-scheduler running-work counts. Consequently `idle()` and `settled()` are not
-completion signals for the readiness-dependent update; observers and tests wait
-for its successful commit or another explicit readiness-dependent event.
+scheduler running-work counts, so plain `idle()` remains available to unrelated
+reactive work. Once a resumed row pre-sync is selected, it is registered with
+the client-facing durable-readiness barrier: `idleWithPendingCommits()`. The
+`pull()`/piece-start safe-read paths join that barrier when their ordinary
+reactive-idle pass discovers pending durable readiness. They stay open until the
+coordinator can rerun or its owner cancels the work, while ordinary pulls with
+no such readiness retain their existing independence from unrelated commit
+confirmation. This registration never preloads an unused factory and teardown
+releases the barrier even when the underlying read cannot be canceled.
 Readiness passes may consume attempt numbers without reaching a commit, and
 commit callbacks may arrive out of attempt order. The enclosing handler stream
 subscription remains active so it can receive the event, but no handler body,
@@ -1943,6 +1966,13 @@ project a direct factory shell to an empty object. Discovery reads an
 already-resolved leaf directly; it does not require another resolution
 operation before applying the same admission checks.
 
+The same no-wildcard rule applies to scheduled callbacks that choose among
+heterogeneous factories. Their input schema must retain every concrete factory
+contract, either as independently named factory leaves or as an unambiguous
+ordered union. `PatternFactory<any, any>` is not permission to accept arbitrary
+pattern schemas. A static dispatcher may capture each concrete factory and call
+only the selected materialized function inside the scheduled callback.
+
 ## Compatibility and Migration
 
 The repository is pre-launch. On 2026-07-12 the product/runtime owner confirmed
@@ -1974,6 +2004,22 @@ are retired in
 decision; they are not deleted or treated as compatible with Factory@1.
 Canonical Factory@1 contracts are recorded as new active baselines, and future
 updates remain checked against every active contract.
+
+State-continuity vintages that materialize a retired pre-Factory@1 graph are
+not compatible evidence: exact factory contract admission must reject that
+graph rather than reinterpret it as Factory@1. Under the same owner-approved
+pre-launch wipe decision, an affected pinned vintage is deliberately removed
+and replaced with a fresh pinned capture after canonical Factory@1 writers
+land. Unaffected vintages remain append-only, and the replacement remains the
+state-continuity floor for subsequent pattern updates.
+
+The state-continuity gate may hold back a transformer-derived
+`__cfPattern_N` hoist when its stored state either fails the current argument
+schema or lacks closure params that the current parent pattern supplies. Those
+hoists are recomputed when the authored parent runs, so their stored inputs are
+derived state rather than a root compatibility contract. This exception is
+limited to names the transformer reserves and emits; authored exports,
+including `default`, remain fully gated under the same failures.
 
 ## Delivery Order
 

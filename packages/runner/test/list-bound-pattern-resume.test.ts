@@ -276,9 +276,10 @@ describe("bound PatternFactory list operation cold resume", () => {
       resetAllLoggerCounts();
       resetAllTimingStats();
       expect(await runtime.start(resumedRoot)).toBe(true);
+      const resumedMappedCell = resumedRoot.key("mapped") as Cell<number[]>;
       const resumedMapped = waitForCellValue<number[]>(
         runtime,
-        resumedRoot.key("mapped"),
+        resumedMappedCell,
         (value) => JSON.stringify(value) === JSON.stringify([22, 43]),
       );
       const mapRuns = () =>
@@ -287,6 +288,17 @@ describe("bound PatternFactory list operation cold resume", () => {
         )?.stats?.runCount ?? 0;
       await retryStarted.promise;
       const parkedRuns = mapRuns();
+      await runtime.idle();
+      let pullSettled = false;
+      const pulledMapped = resumedMappedCell.pull().then(
+        (value) => {
+          pullSettled = true;
+          return value;
+        },
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(pullSettled).toBe(false);
       const argument = runtime.getCellFromLink(
         getMetaLink(resumedRoot, "argument")!,
       );
@@ -302,6 +314,7 @@ describe("bound PatternFactory list operation cold resume", () => {
       resetAllLoggerCounts();
       resetAllTimingStats();
       rowReadiness.resolve();
+      expect(await pulledMapped).toEqual([22, 43]);
       expect(await resumedMapped).toEqual([22, 43]);
       expect(
         getLoggerCountsBreakdown()["storage.v2"]?.["commit-conflict"]

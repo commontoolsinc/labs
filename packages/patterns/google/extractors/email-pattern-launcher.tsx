@@ -129,18 +129,6 @@ export interface PatternOutput {
   [TILE_UI]: VNode;
 }
 
-type LaunchablePattern = (
-  input: { overrideAuth?: GoogleAuthCell },
-) => unknown;
-
-function hasPatternLauncher(value: unknown): value is {
-  for: (patternUri: string) => unknown;
-} {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as { for?: unknown };
-  return typeof candidate.for === "function";
-}
-
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // ==========================================================================
   // FETCH REGISTRY
@@ -221,18 +209,6 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // LAUNCH MATCHED PATTERNS
   // ==========================================================================
 
-  const patterns: Record<string, LaunchablePattern> = {
-    "google/extractors/usps-informed-delivery.tsx": USPSInformedDeliveryPattern,
-    "google/extractors/berkeley-library.tsx": BerkeleyLibraryPattern,
-    "google/extractors/chase-bill-tracker.tsx": ChaseBillPattern,
-    "google/extractors/bam-school-dashboard.tsx": BAMSchoolDashboardPattern,
-    "google/extractors/bofa-bill-tracker.tsx": BofABillTrackerPattern,
-    "google/extractors/email-ticket-finder.tsx": EmailTicketFinderPattern,
-    "google/extractors/calendar-change-detector.tsx": CalendarDetectorPattern,
-    "google/extractors/email-notes.tsx": EmailNotesPattern,
-    "google/extractors/united-flight-tracker.tsx": UnitedFlightTrackerPattern,
-  };
-
   // Launch each matched pattern - use .map() for reactive pattern instantiation
   const launchedPatterns = patternMatches.map((matchInfo) => {
     /*
@@ -258,13 +234,28 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     */
 
     const result = computed<Record<string, unknown> | null>(() => {
-      const child = patterns[matchInfo.patternUri]?.({ overrideAuth });
-      if (!child) return null;
-      const launcher = hasPatternLauncher(child);
-      const childResult = launcher ? child.for(matchInfo.patternUri) : child;
-      return typeof childResult === "object" && childResult !== null
-        ? childResult as Record<string, unknown>
-        : null;
+      switch (matchInfo.patternUri) {
+        case "google/extractors/usps-informed-delivery.tsx":
+          return USPSInformedDeliveryPattern({ overrideAuth });
+        case "google/extractors/berkeley-library.tsx":
+          return BerkeleyLibraryPattern({ overrideAuth });
+        case "google/extractors/chase-bill-tracker.tsx":
+          return ChaseBillPattern({ overrideAuth });
+        case "google/extractors/bam-school-dashboard.tsx":
+          return BAMSchoolDashboardPattern({ overrideAuth });
+        case "google/extractors/bofa-bill-tracker.tsx":
+          return BofABillTrackerPattern({ overrideAuth });
+        case "google/extractors/email-ticket-finder.tsx":
+          return EmailTicketFinderPattern({ overrideAuth });
+        case "google/extractors/calendar-change-detector.tsx":
+          return CalendarDetectorPattern({ overrideAuth });
+        case "google/extractors/email-notes.tsx":
+          return EmailNotesPattern({ overrideAuth });
+        case "google/extractors/united-flight-tracker.tsx":
+          return UnitedFlightTrackerPattern({ overrideAuth });
+        default:
+          return null;
+      }
     });
 
     return {

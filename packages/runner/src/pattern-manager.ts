@@ -685,6 +685,20 @@ export class PatternManager {
         this.#persistedClosureSpaces.set(identity, spaces);
       }
       spaces.add(space);
+      if (!isKeylessPatternIdentity(identity)) {
+        // A stored graph can associate its live root with the real artifact
+        // identity before this runtime has verified the corresponding source
+        // closure. Once verification records exact-space availability, that
+        // identity is no longer session-only, and every artifact already
+        // indexed from the module can expose its canonical durable ref.
+        this.#sessionOnlyArtifactIdentities.delete(identity);
+        for (
+          const [symbol, value] of this.#addressableByIdentity.get(identity) ??
+            []
+        ) {
+          setDurableArtifactEntryRef(value, { identity, symbol });
+        }
+      }
       const parked = this.#parkedFailedReplications.get(identity);
       if (parked === undefined) continue;
       for (const [key, record] of [...parked]) {
@@ -977,12 +991,6 @@ export class PatternManager {
     artifactSpace: MemorySpace,
   ): void {
     this.#recordPersistedClosureSpaces([identity], artifactSpace);
-    const indexed = this.#addressableByIdentity.get(identity);
-    if (indexed !== undefined) {
-      for (const [symbol, value] of indexed) {
-        setDurableArtifactEntryRef(value, { identity, symbol });
-      }
-    }
   }
 
   #artifactPublicationKey(space: MemorySpace, identity: string): string {
@@ -2308,16 +2316,11 @@ export class PatternManager {
     } else {
       this.#esmCacheStats[compiledBodiesServed ? "hits" : "misses"]++;
     }
-    if (
-      cacheCtx.persist !== false &&
-      (!warmHit || moduleDelegations.size > 0)
-    ) {
+    if (cacheCtx.persist !== false && !warmHit) {
       // Persist the module set into this space. AWAITED (identity E4): refs-only
       // pattern JSON makes artifact persistence part of ordinary compilation.
       // Preview callers explicitly skip persistence and cannot use the returned
-      // artifact as a durable source until an ordinary compile saves it. A
-      // warm closure is also written when module delegations must be attached.
-      // This
+      // artifact as a durable source until an ordinary compile saves it. This
       // covers BOTH a cold compile AND a process-byte-cache hit: in the latter
       // the transform-and-emit step was skipped, but this space's persisted
       // cache may be empty (e.g. a fresh space), and the by-identity reload path
@@ -2329,7 +2332,6 @@ export class PatternManager {
         modules,
         entryIdentity,
         cacheOpts,
-        moduleDelegations,
       );
     }
 
@@ -2708,9 +2710,11 @@ export class PatternManager {
         }
       }
 
-      const retryFailedRecovery = this.#failedCompileCacheRecoveries.has(
-        compileCacheRecoveryKey(space, entryIdentity),
-      );
+      const recoveryKey = compileCacheRecoveryKey(space, entryIdentity);
+      const retryFailedRecovery =
+        this.#failedCompileCacheRecoveries.has(recoveryKey) ||
+        (options.repairCache !== false &&
+          this.#unpersistedPatternRecoveries.has(recoveryKey));
       const warm = this.#addressableByIdentity.get(entryIdentity)?.get(symbol);
       if (
         !retryFailedRecovery && warm !== undefined && isTrustedPattern(warm)

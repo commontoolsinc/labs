@@ -1,5 +1,6 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 
 import { assertValidPatternParams } from "../src/builder/factory-params.ts";
 import { isReactiveMarker, type JSONSchema } from "../src/builder/types.ts";
@@ -7,6 +8,10 @@ import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { getCellOrThrow } from "../src/query-result-proxy.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  acquireSchemaRegistryLease,
+  registerSchemaDocument,
+} from "../src/schema-registry.ts";
 
 function symbolic(schema: JSONSchema): unknown {
   return {
@@ -264,6 +269,209 @@ Deno.test("pattern curry resolves nested refs for a capability-shrunk stream", a
   } finally {
     await runtime.dispose();
     await storageManager.close();
+  }
+});
+
+Deno.test("pattern curry accepts equivalent expanded Default array stream schemas", async () => {
+  const signer = await Identity.fromPassphrase(
+    "factory-params-expanded-default-array-stream-test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const expectedItemSchema = {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      attachments: {
+        type: "array",
+        items: { asCell: ["cell"] },
+        default: [],
+      },
+    },
+    required: ["title", "attachments"],
+  } as const satisfies JSONSchema;
+  const sourceItemSchema = {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      attachments: {
+        anyOf: [
+          { type: "array", items: { asCell: ["opaque"] } },
+          { type: "array", items: false, default: [] },
+        ],
+      },
+    },
+    required: ["title", "attachments"],
+  } as const satisfies JSONSchema;
+  const sourceEventSchema = {
+    type: "object",
+    properties: { item: sourceItemSchema },
+    required: ["item"],
+  } as const satisfies JSONSchema;
+  const paramsSchema = {
+    type: "object",
+    properties: {
+      removeItem: {
+        type: "object",
+        properties: { item: { $ref: "#/$defs/Item" } },
+        required: ["item"],
+        asCell: ["stream"],
+      },
+    },
+    required: ["removeItem"],
+    $defs: { Item: expectedItemSchema },
+  } as const satisfies JSONSchema;
+
+  try {
+    const { pattern, handler } = createTrustedBuilder(runtime).commonfabric;
+    pattern(
+      () => {
+        const removeItem = handler(
+          sourceEventSchema,
+          true,
+          () => undefined,
+        )({});
+        assertEquals(
+          assertValidPatternParams({ removeItem }, paramsSchema),
+          undefined,
+        );
+        return {};
+      },
+      true,
+      true,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("pattern curry does not normalize expanded defaults from arbitrary reactive values", () => {
+  const paramsSchema = {
+    type: "object",
+    properties: {
+      items: {
+        type: "array",
+        items: { type: "string" },
+        default: [],
+        asCell: ["cell"],
+      },
+    },
+    required: ["items"],
+  } as const satisfies JSONSchema;
+  const sourceSchema = {
+    anyOf: [
+      { type: "array", items: { type: "string" } },
+      { type: "array", items: false, default: [] },
+    ],
+    asCell: ["cell"],
+  } as const satisfies JSONSchema;
+
+  assertThrows(
+    () =>
+      assertValidPatternParams({ items: symbolic(sourceSchema) }, paramsSchema),
+    TypeError,
+    "symbolic binding schema mismatch",
+  );
+});
+
+Deno.test("pattern curry resolves local refs inside an expected content-addressed schema", () => {
+  const release = acquireSchemaRegistryLease();
+  try {
+    const entrySchema = {
+      type: "object",
+      properties: { title: { type: "string" } },
+      required: ["title"],
+    } as const satisfies JSONSchema;
+    const sourceDocument = {
+      type: "array",
+      items: { $ref: "#/$defs/Entry" },
+      $defs: { Entry: entrySchema },
+    } as const satisfies JSONSchema;
+    const hash = internSchemaAsTaggedHashString(sourceDocument);
+    registerSchemaDocument(hash, sourceDocument);
+    const paramsSchema = {
+      type: "object",
+      properties: {
+        entries: {
+          $ref: `cid:${hash}`,
+          asCell: ["cell"],
+        },
+      },
+      required: ["entries"],
+    } as const satisfies JSONSchema;
+
+    assertEquals(
+      assertValidPatternParams(
+        {
+          entries: symbolic({
+            $ref: `cid:${hash}`,
+            asCell: ["cell"],
+          }),
+        },
+        paramsSchema,
+      ),
+      undefined,
+    );
+  } finally {
+    release();
+  }
+});
+
+Deno.test("pattern curry resolves local refs inside a nested content-addressed source schema", () => {
+  const release = acquireSchemaRegistryLease();
+  try {
+    const detailSchema = {
+      type: "object",
+      properties: { body: { type: "string" } },
+      required: ["body"],
+    } as const satisfies JSONSchema;
+    const entryDocument = {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        detail: { $ref: "#/$defs/Detail" },
+      },
+      required: ["title", "detail"],
+      $defs: { Detail: detailSchema },
+    } as const satisfies JSONSchema;
+    const hash = internSchemaAsTaggedHashString(entryDocument);
+    registerSchemaDocument(hash, entryDocument);
+    const paramsSchema = {
+      type: "object",
+      properties: {
+        entries: {
+          type: "array",
+          items: {
+            type: entryDocument.type,
+            properties: entryDocument.properties,
+            required: entryDocument.required,
+          },
+          asCell: ["cell"],
+        },
+      },
+      required: ["entries"],
+      $defs: { Detail: detailSchema },
+    } as const satisfies JSONSchema;
+
+    assertEquals(
+      assertValidPatternParams(
+        {
+          entries: symbolic({
+            type: "array",
+            items: { $ref: `cid:${hash}` },
+            asCell: ["cell"],
+          }),
+        },
+        paramsSchema,
+      ),
+      undefined,
+    );
+  } finally {
+    release();
   }
 });
 

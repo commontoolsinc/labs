@@ -568,9 +568,10 @@ function extensionOf(path: string): ts.Extension {
 //
 
 /**
- * Map a specifier to a real local file via the import map. Values in `importMap`
- * are already absolute (resolved against the deno.json that declared them), so
- * resolution does not depend on where cf view was launched.
+ * Map a specifier to a real local file via the import map. Local values in
+ * `importMap` are already absolute (resolved against the deno.json that
+ * declared them), so resolution does not depend on where cf view was launched.
+ * Non-local values remain as precedence markers and resolve to no local file.
  */
 function mapSpecifier(
   spec: string,
@@ -608,18 +609,14 @@ function discoverConfig(
   let root = cwd;
   let dir = cwd;
   for (let depth = 0; depth < 64; depth++) {
-    for (const file of ["deno.json", "deno.jsonc"]) {
-      let raw: string;
-      try {
-        raw = Deno.readTextFileSync(join(dir, file));
-      } catch {
-        continue;
-      }
+    const raw = readEffectiveDenoConfig(dir);
+    if (raw !== undefined) {
       root = dir; // a config lives here; allow reads under the topmost one
       for (const [key, value] of Object.entries(parseImports(raw))) {
         if (key in importMap) continue; // a nearer config already set this key
-        if (!isLocalSpecifier(value)) continue; // jsr:/npm:/https: → leave as any
-        importMap[key] = isAbsolute(value) ? value : join(dir, value);
+        importMap[key] = isLocalSpecifier(value)
+          ? isAbsolute(value) ? value : join(dir, value)
+          : value;
       }
       for (const [key, value] of Object.entries(workspaceExports(raw, dir))) {
         // An explicit import map entry, including one inherited from a nearer
@@ -632,6 +629,20 @@ function discoverConfig(
     dir = parent;
   }
   return { importMap, root };
+}
+
+/** Read the one Deno config effective in a directory. */
+function readEffectiveDenoConfig(dir: string): string | undefined {
+  try {
+    return Deno.readTextFileSync(join(dir, "deno.json"));
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) return undefined;
+  }
+  try {
+    return Deno.readTextFileSync(join(dir, "deno.jsonc"));
+  } catch {
+    return undefined;
+  }
 }
 
 function parseConfig(raw: string): Record<string, unknown> | undefined {
@@ -671,15 +682,8 @@ function workspaceExports(
   for (const member of members) {
     if (typeof member !== "string") continue;
     const memberDir = isAbsolute(member) ? member : join(configDir, member);
-    let config: Record<string, unknown> | undefined;
-    for (const file of ["deno.json", "deno.jsonc"]) {
-      try {
-        config = parseConfig(Deno.readTextFileSync(join(memberDir, file)));
-      } catch {
-        continue;
-      }
-      if (config) break;
-    }
+    const raw = readEffectiveDenoConfig(memberDir);
+    const config = raw === undefined ? undefined : parseConfig(raw);
     if (!config || typeof config.name !== "string") continue;
     const exports = config.exports;
     if (typeof exports === "string" && isLocalSpecifier(exports)) {

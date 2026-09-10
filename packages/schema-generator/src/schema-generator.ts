@@ -258,9 +258,10 @@ export class SchemaGenerator {
    * When TypeScript widens a type to 'any' (e.g., for array element types or synthetic nodes),
    * the TypeNode structure is more reliable than the Type.
    *
-   * EXCEPTION: Wrapper types (Default/Cell/Stream/OpaqueCell) erase to their inner type,
-   * which may appear as 'any', but they should use type-based analysis because
-   * CommonFabricFormatter handles them specially via typeNode context.
+   * EXCEPTION: Wrapper types (Default/Cell/Stream/OpaqueCell and the
+   * PerSpace/PerUser/PerSession/PerAny scope wrappers) erase to their inner
+   * type, which may appear as 'any', but they should use type-based analysis
+   * because CommonFabricFormatter handles them specially via typeNode context.
    */
   #shouldUseNodeBasedAnalysis(
     type: ts.Type,

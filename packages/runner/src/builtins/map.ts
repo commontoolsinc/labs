@@ -2,7 +2,7 @@ import { internSchema } from "@commonfabric/data-model-schema";
 import { getLogger } from "@commonfabric/utils/logger";
 
 import { type Pattern } from "../builder/types.ts";
-import { type AddCancel } from "../cancel.ts";
+import { type AddCancel, type Cancel } from "../cancel.ts";
 import { type Cell } from "../cell.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import type { RawBuiltinReturnType } from "../module.ts";
@@ -154,6 +154,17 @@ export function map(
   let resumeBatchAwaitSync = !!awaitSync;
   let resumeRowsReadyKey: string | undefined;
   let resumeRowsReadiness: Promise<void> | undefined;
+  let resumeRowsDurableReadiness:
+    | { resolve: () => void; release: Cancel }
+    | undefined;
+  const completeResumeRowsDurableReadiness = (): void => {
+    const durableReadiness = resumeRowsDurableReadiness;
+    if (durableReadiness === undefined) return;
+    resumeRowsDurableReadiness = undefined;
+    durableReadiness.resolve();
+    durableReadiness.release();
+  };
+  addCancel(completeResumeRowsDurableReadiness);
 
   // Hold the durable container while the input list itself confirms. On a resume
   // reconcile the input can be undefined or a transient empty default standing in
@@ -403,7 +414,7 @@ export function map(
             elementKey,
           ).withTx()
         );
-        resumeRowsReadiness = Promise.all(
+        const readiness = Promise.all(
           rowCells.map((rowCell) =>
             runtime.runner.syncCellsForPatternResume(rowCell, opPattern)
           ),
@@ -418,12 +429,25 @@ export function map(
               { error },
             );
           },
-        ).finally(() => {
-          resumeRowsReadiness = undefined;
+        );
+        resumeRowsReadiness = readiness;
+        if (resumeRowsDurableReadiness === undefined) {
+          const completion = Promise.withResolvers<void>();
+          resumeRowsDurableReadiness = {
+            resolve: completion.resolve,
+            release: runtime.scheduler.trackDurableReadiness(
+              completion.promise,
+            ),
+          };
+        }
+        void readiness.finally(() => {
+          if (resumeRowsReadiness === readiness) {
+            resumeRowsReadiness = undefined;
+          }
         });
         result = undefined;
         throw new RetryWhenReady(
-          resumeRowsReadiness,
+          readiness,
           "map: resumed row patterns are waiting for durable state",
           { keepDependenciesWhileWaiting: false },
         );
@@ -524,6 +548,7 @@ export function map(
       }
     }
     probeScoped(() => resultWithLog.set(newArrayValue));
+    completeResumeRowsDurableReadiness();
   };
 
   // Child-starting coordinator: its reconcile must run on resume to

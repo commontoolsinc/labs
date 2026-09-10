@@ -137,7 +137,6 @@ import {
   PatternManager,
   type PreparedSourceUpdate,
 } from "./pattern-manager.ts";
-import { isCellResultForDereferencing } from "./query-result-proxy.ts";
 import type { Runtime } from "./runtime.ts";
 import { type Action, ignoreReadForScheduling } from "./scheduler.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";

@@ -8,6 +8,7 @@ import { isTrustedBuilderArtifact } from "../src/builder/pattern-metadata.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { type MemorySpace, Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase(
   "pattern-manager generic artifact loading",
@@ -168,6 +169,28 @@ describe("PatternManager generic artifact loading", () => {
     expect(
       await manager.loadPatternByIdentity(identity, "patternFactory", spaceA),
     ).toBe(patternFactory);
+  });
+
+  it("promotes artifacts after a session-only root learns durable availability", async () => {
+    const { reader, identity } = await storeProgram();
+    const manager = reader.patternManager;
+    const { pattern } = createTrustedBuilder(reader).commonfabric;
+    const placeholder = pattern(() => ({}), true, true);
+    manager.associatePatternIdentity(placeholder, {
+      identity,
+      symbol: "default",
+    });
+
+    const moduleFactory = await manager.loadArtifactByIdentity(
+      identity,
+      "moduleFactory",
+      spaceA,
+    );
+
+    expect(factoryStateOf(moduleFactory).ref).toEqual({
+      identity,
+      symbol: "moduleFactory",
+    });
   });
 
   it("shares one identity evaluation across symbols and negative lookups", async () => {

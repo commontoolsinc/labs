@@ -325,6 +325,19 @@ describe("typed Factory@1 Cell round trips", () => {
     });
   }
 
+  it("keeps cold factory atoms inert in non-materializing Cell.pull reads", async () => {
+    const fixture = fixtures.pattern;
+    const stored = await store("pattern", "cold-non-materializing-pull");
+    makeCold("pattern");
+
+    const pulled = await stored.pull({
+      materializeFactories: false,
+    }) as StoredFactories;
+    for (const value of leaves(pulled)) {
+      expectInertFactory(value, fixture.state);
+    }
+  });
+
   it("rejects a Cell write when its factory artifact is unavailable in the destination space", () => {
     const tx = runtime.edit();
     const destination = runtime.getCell<{ nested: { factory: FabricValue } }>(

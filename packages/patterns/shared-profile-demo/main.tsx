@@ -1,8 +1,8 @@
-import { computed, NAME, pattern, UI, wish } from "commonfabric";
+import { computed, NAME, pattern, UI, type VNode, wish } from "commonfabric";
 
 interface SharedProfileDemoOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
 }
 
 export default pattern<never, SharedProfileDemoOutput>(
