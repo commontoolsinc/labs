@@ -21,7 +21,7 @@ in the same change.
 flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-09-03. Each flag's section carries the date its status
+**Last reviewed:** 2026-09-09. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -35,7 +35,7 @@ was last checked against the code.
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
 | [`readerSchemaPrecedence`](#readerschemaprecedence)                         | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` env, or `RuntimeOptions.experimental`                                                                   | on                                                                                   | Robin McCollum (#6338)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
-| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **off** (`SERVER_EXECUTION_DEFAULT_ENABLED = false`; explicit `true` selects the other arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main at the ON default, then delete the flag and OFF path | Phases 1–7 landed; the section's dated entries carry each flip; stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
+| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **off** (`SERVER_EXECUTION_DEFAULT_ENABLED = false`; explicit `true` selects the other arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main at the ON default, then delete the flag and OFF path | Serving stack landed; OW28 served compilation remains open; the section's dated entries carry each flip; stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-explicit`                                                                   | Bernhard Seefeld (#3263)                              | tighten default toward `enforce-strict`                                                                                                                                                                                           | active; ladder is permanent                                                     |
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4479)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
@@ -368,9 +368,10 @@ server](#clients-that-are-not-built-alongside-their-server).
   [`packages/memory/v2/server-execution-default.ts`](../../packages/memory/v2/server-execution-default.ts)
   (a test pins the cell to the constant); the dated status entries below
   carry its history (landed flip-ready dark at `false` 2026-08-16; flipped
-  ON 2026-08-28 after the plan's Phase-7 ordered gates; each later flip has
-  its own entry). It is read by every deployed-topology entry
-  point — the `productionServer` / `remoteClient` construction presets
+  ON 2026-08-28; each later flip has its own entry). OW28's served
+  `compileAndRun` port remains an unmet Phase-7 ordered gate, so the flip
+  record is not evidence that every planned surface is implemented. The default
+  is read by every deployed-topology entry point — the `productionServer` / `remoteClient` construction presets
   (toolshed's operator runtime, the background piece service, the CLI,
   every pieces controller and integration harness against a toolshed),
   toolshed's serving-host gate and its memory ACL principal lists (the
@@ -413,6 +414,14 @@ server](#clients-that-are-not-built-alongside-their-server).
   OFF code path is removed — a separate post-soak
   PR (the plan's Phase 7 task 2; it also removes the opposite guard lanes and
   `build-toolshed-opposite`).
+- **Status on 2026-09-09 (coverage reconciliation).** The first-party
+  default remains OFF and the ON soak is paused. OW28's served `compileAndRun`
+  outbox/completion port is missing on main and remains an unmet Phase-7
+  ordered gate. Restore and verify that port before a renewed ON rollout;
+  the preserved sibling implementation is an input to that work, not proof
+  of a landed capability. The
+  [coverage register](../specs/server-side-execution/verification-coverage.md#current-status)
+  carries the current scope and the audit's evidence boundaries.
 - **Status on 2026-09-03 (the ROLLBACK).** The rollback PR (#6840)
   returned the constant to `false` — the first data-only flip: this value
   and this registry's current-status prose, with no workflow, test, or role

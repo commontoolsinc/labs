@@ -52,9 +52,12 @@ rejected until the checked source-replication path exists.
 
 Following an origin is ONE mechanism, triggered by opening a piece — which a
 user does for most pieces and the runtime does for the surfaces it supplies. No
-kind of piece has a path of its own, nothing reconciles a piece nobody opened,
-and a serving tenure — which opens none — owes a space the existence of its
-root and nothing more. What that mechanism follows is a `system:` ref and a
+kind of piece has a path of its own, and nothing reconciles a piece nobody
+opened. Tenure activation owes a space the existence of its root without
+following the root's source. A served wish explicitly opens its runtime-supplied
+sidecars, so those pieces follow their origins on the serving runtime; the ON
+client only references the served sidecars. What that mechanism follows is a
+`system:` ref and a
 fabric URL, and those are the only two things it will follow. The candidate a
 `system:` origin resolves to is adopted as it stands, because the release that
 produced it was gated by golden replays; a candidate from any other origin has
@@ -1203,8 +1206,9 @@ the owner of the piece. How that reaches a person is open design work.
 
 Reconciliation is triggered by opening the piece — which a user does for most
 pieces, and the runtime does for the surfaces it instantiates for itself.
-Nothing reconciles a piece nobody opened: a serving tenure owes a space the
-existence of its root, not the freshness of anyone's source. A root follows its
+Nothing reconciles a piece nobody opened. Tenure activation ensures root
+existence without following source; a served wish's explicit sidecar open
+invokes reconciliation just as another opener does. A root follows its
 origin on that same trigger and through that same sequence, and receives no
 narrower repair contract and skips no check when prior source is unavailable.
 Retained compatibility descriptors let this sequence replace an obsolete

@@ -1103,6 +1103,14 @@ export type SessionOpenResult = {
 
 export type MemoryProtocolFlags = {
   modernCellRep: boolean;
+
+  /**
+   * Expression result stores are keyed on their owning piece and output spot.
+   * Servers require this marker when admitting a session; clients require it
+   * from servers so incompatible writers cannot share their computed cells.
+   */
+  stableExpressionResultIds: boolean;
+
   commitPreconditions: boolean;
 
   /** The server integrates durable collaborative operation streams. */
@@ -1189,6 +1197,10 @@ export type MemoryProtocolFlags = {
  */
 export type WireMemoryProtocolFlags = {
   modernCellRep?: boolean;
+
+  /** Expression result identity contract required for session admission. */
+  stableExpressionResultIds?: boolean;
+
   commitPreconditions?: boolean;
   applyOp?: boolean;
   operationCodecs?: readonly string[];
@@ -1970,6 +1982,7 @@ export function resetOwnWriteEchoConfig(): void {
 
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
+  stableExpressionResultIds: true,
   commitPreconditions: getCommitPreconditionsConfig(),
   applyOp: true,
   operationCodecs: [CODEMIRROR_CHANGESET_CODEC],
@@ -1999,10 +2012,8 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
 });
 
 /**
- * Commit preconditions and the other capability flags are optional
- * capabilities, not data-model wire contracts. Peers with different
- * capability flags can still share memory data; the server's flags control
- * what is accepted on that connection.
+ * Compares data-model wire contracts. Capability flags govern accepted
+ * operations separately; `stableExpressionResultIds` governs session admission.
  */
 export const compatibleMemoryProtocolFlags = (
   left: MemoryProtocolFlags,
@@ -2017,6 +2028,14 @@ export const parseMemoryProtocolFlags = (
   value: unknown,
 ): MemoryProtocolFlags | null => {
   if (!isObjectNotArray(value)) {
+    return null;
+  }
+
+  const stableExpressionResultIds = value.stableExpressionResultIds;
+  if (
+    stableExpressionResultIds !== undefined &&
+    typeof stableExpressionResultIds !== "boolean"
+  ) {
     return null;
   }
 
@@ -2126,6 +2145,7 @@ export const parseMemoryProtocolFlags = (
 
   return {
     modernCellRep: modernCellRep === true,
+    stableExpressionResultIds: stableExpressionResultIds === true,
     commitPreconditions: commitPreconditions === true,
     applyOp: applyOp === true,
     ...(operationCodecs === undefined
@@ -2160,6 +2180,7 @@ export const wireMemoryProtocolFlags = (
   flags: MemoryProtocolFlags,
 ): WireMemoryProtocolFlags => ({
   modernCellRep: flags.modernCellRep,
+  stableExpressionResultIds: flags.stableExpressionResultIds,
   commitPreconditions: flags.commitPreconditions,
   applyOp: flags.applyOp,
   ...(flags.operationCodecs === undefined
