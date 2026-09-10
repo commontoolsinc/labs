@@ -271,6 +271,17 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   ): ContainerIterationResult<ResultType>;
 
   /**
+   * Visits a gap (one or more holes) in an `iterateArray` result. `start` is
+   * the start index of the gap (integer `>= 0`), and `count` is the number of
+   * holes in the gap (integer `>= 1`). The return type _does not_ include
+   * `recurse` as a possibility; there's nothing to recurse over.
+   */
+  visitArrayGap(
+    start: number,
+    count: number,
+  ): BaselineVisitResult<ResultType>;
+
+  /**
    * Visits a value which is already in the process of being visited. The
    * visitor engine calls this method _before_ calling `visitValue()` when the
    * value to be visited is already in the middle of being visited as a
@@ -373,6 +384,12 @@ export abstract class BaseValueVisitor<
   ): ContainerIterationResult<ResultType>;
 
   /** @inheritDoc */
+  abstract visitArrayGap(
+    start: number,
+    count: number,
+  ): BaselineVisitResult<ResultType>;
+
+  /** @inheritDoc */
   abstract visitCycle(
     value: DomainFor<DomainExtra>,
     originalDepth: number,
@@ -446,6 +463,14 @@ export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
     _index: number,
     _value: DomainFor<DomainExtra>,
   ): ContainerIterationResult<ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitArrayGap(
+    start: number,
+    count: number,
+  ): BaselineVisitResult<ResultType> {
     return undefined;
   }
 
