@@ -323,6 +323,8 @@ export class Scheduler {
     MAX_ACTION_STATS,
   );
 
+  #collectReadStats = false;
+
   #actionTimingState: ActionTimingState = {
     actionStats: this.#actionStats,
     getActionId: (action) => this.#getActionId(action),
@@ -1892,6 +1894,11 @@ export class Scheduler {
     this.#filterStats.executed = 0;
   }
 
+  /** Enables or disables per-action read accounting for subsequent runs. */
+  setReadStatsEnabled(enabled: boolean): void {
+    this.#collectReadStats = enabled;
+  }
+
   /**
    * Enables collection of per-iteration settle stats during `#execute()`.
    * Call this once before running patterns to opt in to the overhead.
@@ -2813,6 +2820,7 @@ export class Scheduler {
       runtime: this.runtime,
       actionChangeGroups: this.#actionChangeGroups,
       actionTimingState: this.#actionTimingState,
+      getReadStatsEnabled: () => this.#collectReadStats,
       retries: this.#retries,
       offBudgetRetries: this.#offBudgetRetries,
       pending: this.#pending,

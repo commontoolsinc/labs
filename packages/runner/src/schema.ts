@@ -19,6 +19,7 @@ import {
   isNontrivialSchema,
   schemaWithProperties,
 } from "@commonfabric/data-model-schema";
+import { readStatsActive, recordLinkResolution } from "./read-stats.ts";
 import {
   readMaybeLink,
   resolveLink,
@@ -1224,6 +1225,7 @@ export function validateAndTransformResult(
     // We've already followed all the writeRedirect links above.
     const next = readMaybeLink(tx, link);
     if (next !== undefined) {
+      if (readStatsActive) recordLinkResolution(tx);
       // This one-step hop bypasses resolveLink and the traversal, so it
       // carries the crossing seam itself (the schema.ts twin of
       // getNextCellLink).

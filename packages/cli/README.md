@@ -1,5 +1,37 @@
 # @commonfabric/cli
 
+## Pattern test read costs
+
+`cf test <file.test.tsx> --verbose --stats-threshold 0` reports read costs for
+each step of a single-runtime test, including assertions, explicit renders, and
+settles. Initialization is reported separately. Each report groups actions by
+authored file, line, and column, then sorts those sources by total proxy
+accesses. Actions without an authored source are grouped by builtin name, or by
+action ID when no name is available.
+
+The counters measure reactive data property and element reads (including array
+method materialization and cached reads), stored-link traversal attempts on
+cache misses, distinct storage documents per action run, and compacted
+scheduling read dependencies at action completion. The last two columns sum
+per-run counts; they are not a union of documents or subscriptions across the
+step. Link hops can exceed proxy accesses because schema traversal and runtime
+code also follow links. Missing-target reads count; a fast-path target read
+followed by a fallback counts twice, since both attempts perform work. These
+counters exclude plain JavaScript arithmetic, event-handler transactions, commit
+preparation, and the idempotency verification replay.
+
+The total includes every measured scheduler run, including builtin and
+coordinator actions and actions removed before the step ends.
+`--stats-action-limit` limits displayed rows only. `max/run` identifies the
+largest individual run without hiding the accumulated cost of repeated runs. An
+assertion can demand work that the preceding action left lazy, so compare
+corresponding steps and keep test-harness reads in view.
+
+For timing experiments, `--no-idempotency-check` disables verification replay in
+both single-runtime and multi-user tests. Verification stays enabled by default;
+a measurement with it disabled does not establish idempotency. Read-cost tables
+currently cover the single-runtime runner.
+
 ## View pager
 
 `cf view [file]` is an interactive pager for transformed TypeScript, source
@@ -137,22 +169,22 @@ differently from the rest of `cf`, which takes those two as ordinary slugs;
 [#6992](https://github.com/commontoolsinc/labs/issues/6992) retires the
 difference by refusing them as slug values.
 
-| Verb                         | What it does                                                                                                                                                                                                                                                                   |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `cd <ref>`                   | Moves the place, once the fabric says it is there. Takes relative segments, `..`, `-`, `/`, `.` for where you stand, `./<ref>` for a member and `.@scope` for the scope, rooted and complete references, slugs, and `#name` entry points.                                      |
-| `ls`                         | Lists what stands where you are: a space root's facets, the slugs the index records, the space's pieces, or the keys under a cell. Rows are numbered, a row that is one of the piece's callables says so, and one screenful is written. `--limit <rows>` overrides the height. |
-| `pwd`                        | The complete address of the place, both dimensions.                                                                                                                                                                                                                            |
-| `get [<ref>]`                | Reads the value at a cell, defaulting to where you stand. A trailing `#argument` reads the piece's arguments cell. Takes `cf cell get`'s read options — `--filter`, `--select`, `--schema`, `--json` — and writes one screenful of JSON, or the whole value under `--json`.    |
-| `set <ref> <value>`          | Writes a value at a cell, which copies rather than links. The value is JSON, and a bare word is the string it spells. `-` is refused, standard input being the keyboard.                                                                                                       |
-| `edit [<ref>]`               | Opens a cell's value in `$EDITOR` and writes back what you save. A value JSON cannot carry is refused before the editor opens, and text that will not parse is refused with the file it is still in.                                                                           |
-| `link <ref> <ref>`           | Writes a reference at the second cell naming the first, `ln -s`'s order. The one spelling that makes a cell read another cell.                                                                                                                                                 |
-| `call <ref> <name> [input…]` | Invokes a piece's verb. The verb name opens the callable's own section, so its schema-derived flags follow bare and `--` closes it. A callable handle off `verbs` carries the name already, as in `call %4`.                                                                   |
-| `verbs [<ref>]`              | Lists a piece's callables, numbering each so `call %n` invokes it. `--all` shows the rows the marks hide.                                                                                                                                                                      |
-| `describe [<ref>]`           | The page `cf piece describe` writes: what the piece is, what it holds, and what it takes. `--all` as above.                                                                                                                                                                    |
-| `wish <#name>`               | Resolves a named entry point, exactly as `cf wish` does.                                                                                                                                                                                                                       |
-| `more`                       | Writes the next page of a listing or a value that did not fit, a listing continuing under the numbers it already gave its rows.                                                                                                                                                |
-| `where`                      | The whole ambient record: the connection, and the place `pwd` prints.                                                                                                                                                                                                          |
-| `help [<verb>]`              | Lists the verbs, or writes one verb's page. `<verb> --help` writes the same page.                                                                                                                                                                                              |
+| Verb                         | What it does                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cd <ref>`                   | Moves the place, once the fabric says it is there. Takes relative segments, `..`, `-`, `/`, `.` for where you stand, `./<ref>` for a member and `.@scope` for the scope, rooted and complete references, slugs, and `#name` entry points.                                                                                                           |
+| `ls`                         | Lists what stands where you are: a space root's facets, the slugs the index records, the space's pieces, or the keys under a cell. Rows are numbered, a row that is one of the piece's callables says so, a piece shows the name it carries beside the handle that reaches it, and one screenful is written. `--limit <rows>` overrides the height. |
+| `pwd`                        | The complete address of the place, both dimensions.                                                                                                                                                                                                                                                                                                 |
+| `get [<ref>]`                | Reads the value at a cell, defaulting to where you stand. A trailing `#argument` reads the piece's arguments cell. Takes `cf cell get`'s read options — `--filter`, `--select`, `--schema`, `--json` — and writes one screenful of JSON, or the whole value under `--json`.                                                                         |
+| `set <ref> <value>`          | Writes a value at a cell, which copies rather than links. The value is JSON, and a bare word is the string it spells. `-` is refused, standard input being the keyboard.                                                                                                                                                                            |
+| `edit [<ref>]`               | Opens a cell's value in `$EDITOR` and writes back what you save. A value JSON cannot carry is refused before the editor opens, and text that will not parse is refused with the file it is still in.                                                                                                                                                |
+| `link <ref> <ref>`           | Writes a reference at the second cell naming the first, `ln -s`'s order. The one spelling that makes a cell read another cell.                                                                                                                                                                                                                      |
+| `call <ref> <name> [input…]` | Invokes a piece's verb. The verb name opens the callable's own section, so its schema-derived flags follow bare and `--` closes it. A callable handle off `verbs` carries the name already, as in `call %4`.                                                                                                                                        |
+| `verbs [<ref>]`              | Lists a piece's callables, numbering each so `call %n` invokes it. `--all` shows the rows the marks hide.                                                                                                                                                                                                                                           |
+| `describe [<ref>]`           | The page `cf piece describe` writes: what the piece is, what it holds, and what it takes. `--all` as above.                                                                                                                                                                                                                                         |
+| `wish <#name>`               | Resolves a named entry point, exactly as `cf wish` does.                                                                                                                                                                                                                                                                                            |
+| `more`                       | Writes the next page of a listing or a value that did not fit, a listing continuing under the numbers it already gave its rows.                                                                                                                                                                                                                     |
+| `where`                      | The whole ambient record: the connection, and the place `pwd` prints.                                                                                                                                                                                                                                                                               |
+| `help [<verb>]`              | Lists the verbs, or writes one verb's page. `<verb> --help` writes the same page.                                                                                                                                                                                                                                                                   |
 
 A listing numbers its rows, and `%n` names a row until the next listing replaces
 the numbering — `more` continues the current one rather than starting another.
