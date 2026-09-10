@@ -1468,10 +1468,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const mostRecentTitle = computed(() => newestFirstVisits[0]?.title ?? "");
     // 📊 Lunch stats — per-place visit + green/yellow/red tallies from the
     // embedded vote snapshots (see summarizePlaces for the per-place scoping).
-    const placeStats = computed(() => summarizePlaces([...visits]));
+    const placeStats = computed(() => summarizePlaces(visits));
     // Total embedded vote snapshots across all visits.
     const voteHistoryCount = computed(() =>
-      [...visits].reduce((n, v) => n + v.votes.length, 0)
+      visits.reduce((n, v) => n + v.votes.length, 0)
     );
     // The viewer's display name, resolved from their STORED roster entry so a
     // The viewer's own roster entry as a 0-or-1 array: the header chip renders
