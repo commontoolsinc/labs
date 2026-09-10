@@ -513,6 +513,152 @@ describe("applyCommit() with an identity commit", () => {
     ).toThrow(ConflictError);
   });
 
+  it("reconstructs the view past a layer's operations on other documents", () => {
+    // Session a's layer sets another document beside its patch of this
+    // one; only the patch is replayed. Session b's replace of n makes the
+    // read stale, and from the view {n: 1, m: 1} the replace of n lands
+    // on the stored {n: 2, m: 1}.
+    const install = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, { operations: [setOp("of:doc", { n: 1 })] }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        operations: [
+          setOp("of:other", { x: 1 }),
+          patchOp("of:doc", [{ op: "add", path: "/value/m", value: 1 }]),
+        ],
+      }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:b",
+      commit: commit(1, {
+        operations: [patchOp("of:doc", [
+          { op: "replace", path: "/value/n", value: 2 },
+        ])],
+      }),
+    });
+
+    const verdict = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(3, {
+        reads: {
+          confirmed: [],
+          pending: [{
+            id: "of:doc",
+            path: [],
+            localSeq: 2,
+            basisSeq: install.seq,
+          }],
+        },
+        operations: [patchOp("of:doc", [
+          { op: "replace", path: "/value/n", value: 2 },
+        ])],
+      }),
+    });
+
+    expect(verdict.elidedOpIndexes).toEqual([0]);
+    expect(verdict.revisions).toEqual([]);
+  });
+
+  it("reconstructs the view through a layer that deleted the document", () => {
+    // Session a deletes the document in one layer and recreates it in the
+    // next, so its view is the recreated {n: 2}; session b then adds m: 1.
+    // Adding m: 1 from that view lands on what is stored.
+    const install = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, { operations: [setOp("of:doc", { n: 1 })] }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        operations: [{ op: "delete", id: "of:doc" } as never],
+      }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(3, { operations: [setOp("of:doc", { n: 2 })] }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:b",
+      commit: commit(1, {
+        operations: [patchOp("of:doc", [
+          { op: "add", path: "/value/m", value: 1 },
+        ])],
+      }),
+    });
+
+    const verdict = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(4, {
+        reads: {
+          confirmed: [],
+          pending: [{
+            id: "of:doc",
+            path: [],
+            localSeq: [2, 3],
+            basisSeq: install.seq,
+          }],
+        },
+        operations: [patchOp("of:doc", [
+          { op: "add", path: "/value/m", value: 1 },
+        ])],
+      }),
+    });
+
+    expect(verdict.elidedOpIndexes).toEqual([0]);
+    expect(verdict.revisions).toEqual([]);
+  });
+
+  it("gives no exemption to a pending read naming a layer on another branch", () => {
+    // Session a's named layer was committed on `feature`; its operations
+    // say nothing about the parent branch's document, so the view cannot
+    // be reconstructed and the refusal stands.
+    const install = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, { operations: [setOp("of:doc", { n: 1 })] }),
+    });
+    createBranch(engine, "feature");
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        branch: "feature",
+        operations: [patchOp("of:doc", [
+          { op: "add", path: "/value/m", value: 1 },
+        ])],
+      }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:b",
+      commit: commit(1, {
+        operations: [patchOp("of:doc", [
+          { op: "replace", path: "/value/n", value: 2 },
+        ])],
+      }),
+    });
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(3, {
+          reads: {
+            confirmed: [],
+            pending: [{
+              id: "of:doc",
+              path: [],
+              localSeq: 2,
+              basisSeq: install.seq,
+            }],
+          },
+          operations: [patchOp("of:doc", [
+            { op: "replace", path: "/value/n", value: 2 },
+          ])],
+        }),
+      })
+    ).toThrow(ConflictError);
+  });
+
   it("gives no exemption to a pending read that declares no basis", () => {
     // The same shape as the accepted patch-from-basis case, with a legacy
     // pending read: without a declared basis the reader's view cannot be

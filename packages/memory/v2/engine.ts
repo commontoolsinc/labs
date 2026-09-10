@@ -5585,6 +5585,7 @@ const applyCommitTransaction = (
   type Basis =
     | { known: true; document: EntityDocument | undefined }
     | { known: false };
+  const REPLAYABLE_LAYER_OPS = new Set(["set", "patch", "delete"]);
   const basisOf = (
     first: DocumentOps[number],
     stored: EntityDocument,
@@ -5614,14 +5615,11 @@ const applyCommitTransaction = (
         const layer = decodeMemoryBoundary(row.original) as ClientCommit;
         for (const operation of layer.operations) {
           if (operation.op === "sqlite" || !sameDocument(operation)) continue;
-          if (operation.op === "delete") {
-            document = undefined;
-            continue;
-          }
-          if (operation.op !== "set" && operation.op !== "patch") {
-            return { known: false };
-          }
-          document = replay(document, [operation]);
+          // An op-field operation on the document is not replayable here.
+          if (!REPLAYABLE_LAYER_OPS.has(operation.op)) return { known: false };
+          document = operation.op === "delete"
+            ? undefined
+            : replay(document, [operation as DocumentOps[number]]);
         }
       }
       return { known: true, document };
