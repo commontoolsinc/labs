@@ -938,7 +938,10 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
     | IterateArrayOfForm<DomainExtra>
     | IterateMapForm<DomainExtra>
     | IterateMapOfForm<DomainExtra> {
-    if (origValue === finalValue) {
+    // On the use of `Object.is()`: Even though it's unlikely to be done in
+    // practice, this class _does_ let a visitor treat a number as a container,
+    // so this choice of comparison is the most correct option.
+    if (Object.is(origValue, finalValue)) {
       return result;
     }
 
