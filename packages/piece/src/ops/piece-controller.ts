@@ -3,6 +3,7 @@ import { fabricAwareEqual, taggedHashStringOf } from "@commonfabric/data-model";
 import { schemaWithProperties } from "@commonfabric/data-model-schema";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
+  acceptsOpaqueCellOrUnresolvedLink,
   applyPieceSourceTransition,
   Cell,
   type CellPath,
@@ -28,6 +29,7 @@ import {
   mergeSchemaDefaults,
   NAME,
   type NormalizedLink,
+  overlayUnreadableLinkPlaceholders,
   parseFabricRef,
   parseLinkOrThrow,
   type Pattern,
@@ -3374,6 +3376,25 @@ class PiecePropIo implements PieceCellIo {
           writePath,
           materializedValue,
         );
+        // A slot the write leaves untouched whose stored value routes through
+        // a link this replica cannot read — another principal's per-user
+        // instance, a document not replicated here — materializes as absent,
+        // and judged as it stands would refuse the write for a value owned
+        // elsewhere. Such slots are staged as the unresolved-link placeholder
+        // and accepted opaquely; their schema check happens when a reactive
+        // read materializes them, the rule stored-argument validation
+        // applies. The written slot is never deferred: its counterpart in the
+        // raw tree below is the value being written, not a link.
+        const judgedRoot = overlayUnreadableLinkPlaceholders(
+          tx,
+          targetCell.getAsNormalizedFullLink(),
+          replaceMaterializedValueAtPath(
+            targetCell.withTx(tx).getRaw(),
+            writePath,
+            materializedValue,
+          ),
+          stagedRoot,
+        );
         const mergedRoot = mergeSchemaDefaults(
           stagedRoot,
           extractDefaultValues(schema),
@@ -3400,12 +3421,12 @@ class PiecePropIo implements PieceCellIo {
                 validateSchemaValue(
                   schema,
                   replaceMaterializedValueAtPath(
-                    stagedRoot,
+                    judgedRoot,
                     writePath,
                     candidate,
                   ),
                   schema,
-                  { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+                  { acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink },
                 ) === undefined,
             },
           );
@@ -3413,7 +3434,7 @@ class PiecePropIo implements PieceCellIo {
         const validationRoot = writePath.length === 0
           ? nextValue
           : replaceMaterializedValueAtPath(
-            stagedRoot,
+            judgedRoot,
             writePath,
             nextValue,
           );
@@ -3421,7 +3442,7 @@ class PiecePropIo implements PieceCellIo {
           schema,
           validationRoot,
           schema,
-          { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+          { acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink },
         );
         if (issue !== undefined) {
           throw new Error(`updated input does not match its schema: ${issue}`);

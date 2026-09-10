@@ -29,7 +29,14 @@ const UNRESOLVED_LINK_PLACEHOLDER = Object.freeze({
   "unresolved cell link": true,
 });
 
-const acceptsOpaqueCellOrUnresolvedLink = (
+/**
+ * Whether `value` needs no schema check where it stands: an opaque Cell whose
+ * wrapper the schema declares, or the placeholder
+ * {@link overlayUnreadableLinkPlaceholders} leaves for a stored link this
+ * replica cannot read. The two together are what let a document be judged
+ * here without judging values that are owned elsewhere.
+ */
+export const acceptsOpaqueCellOrUnresolvedLink = (
   value: unknown,
   schema: JSONSchema,
 ): boolean =>
