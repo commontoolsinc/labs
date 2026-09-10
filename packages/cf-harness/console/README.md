@@ -6,11 +6,12 @@ server holding one in-process interactive chat service, and two Lit pages
 reading its events over Server-Sent Events: the console itself, and the live
 pane a host embeds to show one session working.
 
-The server binds `127.0.0.1`, and it treats loopback as an address rather than
-as an authorization: a page anywhere on the web can drive requests at the
-socket, so every request must name this server's own host and every `/api` route
-except health must carry the per-process token the page is handed as a
-`SameSite=Strict` cookie when it loads. Do not put it behind a public address.
+The server binds `127.0.0.1` and asks one thing of a request: that it names this
+server's own host. A hostile name that resolves to `127.0.0.1` would otherwise
+make these routes same-origin to a browser, and that name is visible on the
+wire. Nothing else is asked and no client carries a credential, so the network
+is the boundary: run this where reaching it already means being trusted — on a
+shared host, a tailnet with an access policy — and not behind a public address.
 
 ## Prerequisites
 
@@ -174,24 +175,24 @@ durable: restarting the server and reopening the page replays the log.
 
 ## HTTP routes
 
-Every route retains the console's loopback `Host` and `Origin` checks. The token
-column refers to the per-process cookie, which is handed to whichever of the two
-pages is loaded — `/` or `/live/<sessionId>` — and to the assets they pull.
+Every route is behind the loopback `Host` check and nothing else. A caller that
+names this server's host may call any of them, in one request, with no preceding
+one.
 
-| Method | Route                        | Token | Result                                                                                                                         |
-| ------ | ---------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `GET`  | `/api/health`                | No    | Console health, configured Fabric API URL, and honestly limited Fabric-session liveness                                        |
-| `POST` | `/api/task`                  | Yes   | Starts a session or a follow-up turn                                                                                           |
-| `POST` | `/api/cancel`                | Yes   | Cancels the active turn                                                                                                        |
-| `GET`  | `/api/sessions`              | Yes   | Durable session summaries                                                                                                      |
-| `GET`  | `/api/status`                | Yes   | Session status and artifact roots                                                                                              |
-| `GET`  | `/api/policy`                | Yes   | What a new session here would run under                                                                                        |
-| `GET`  | `/api/turns/<turnId>/result` | Yes   | Durable structured result for a completed turn                                                                                 |
-| `GET`  | `/api/events`                | Yes   | Live and replayed chat events over SSE                                                                                         |
-| `GET`  | `/api/runs`                  | Yes   | Run summaries                                                                                                                  |
-| `GET`  | `/api/runs/<runId>/...`      | Yes   | Run detail, flow, graph, artifacts, and tool outputs                                                                           |
-| `POST` | `/api/index/call`            | Yes   | One allowlisted pattern-index read                                                                                             |
-| `GET`  | `/live/<sessionId>`          | No    | The live pane for one session, which is handed the token the way `/` is; takes `?turn=<turnId>` and `?piecesBase=<url-prefix>` |
+| Method | Route                        | Result                                                                                  |
+| ------ | ---------------------------- | --------------------------------------------------------------------------------------- |
+| `GET`  | `/api/health`                | Console health, configured Fabric API URL, and honestly limited Fabric-session liveness |
+| `POST` | `/api/task`                  | Starts a session or a follow-up turn                                                    |
+| `POST` | `/api/cancel`                | Cancels the active turn                                                                 |
+| `GET`  | `/api/sessions`              | Durable session summaries                                                               |
+| `GET`  | `/api/status`                | Session status and artifact roots                                                       |
+| `GET`  | `/api/policy`                | What a new session here would run under                                                 |
+| `GET`  | `/api/turns/<turnId>/result` | Durable structured result for a completed turn                                          |
+| `GET`  | `/api/events`                | Live and replayed chat events over SSE                                                  |
+| `GET`  | `/api/runs`                  | Run summaries                                                                           |
+| `GET`  | `/api/runs/<runId>/...`      | Run detail, flow, graph, artifacts, and tool outputs                                    |
+| `POST` | `/api/index/call`            | One allowlisted pattern-index read                                                      |
+| `GET`  | `/live/<sessionId>`          | The live pane for one session; takes `?turn=<turnId>` and `?piecesBase=<url-prefix>`    |
 
 Health returns `ok`, `fabricApiUrl`, and `fabricSession`. The last field is
 `unverified`: the console has no inspectable Fabric-session connection state,
@@ -337,11 +338,10 @@ replaying the feed.
 
 `GET /live/<sessionId>` is the same work in a column, for a host that can show a
 task running beside the thing that asked for it and can only open a plain web
-address. It is served from the same build as the console page and handed the
-same token cookie, so its own script reaches `/api` on this origin and nothing
-else does: the `Host` gate covers it, and the content security policy that keeps
-the console page out of a frame keeps this one out too. It is opened at the top
-level of a view, never framed.
+address. It is served from the same build as the console page, and the `Host`
+gate covers it; the content security policy that keeps the console page out of a
+frame keeps this one out too. It is opened at the top level of a view, never
+framed.
 
 `?turn=<turnId>` narrows the pane to one turn. Without it the pane shows the
 session's activity in order, however many turns it has taken.
@@ -355,8 +355,8 @@ prefix a host fronts the console at, with no rewriting on the host's side.
 Both pages address the console RELATIVE to where they were opened — assets,
 `/api` fetches and the event stream all go under the mount `src/mount.ts` reads
 off the page's own address — so a host may serve the console under a prefix on
-its own origin (loom's daemon fronts it at `/harness-console`, satisfying the
-`Host` gate and carrying the token cookie itself). At the console's own root the
+its own origin (loom's daemon fronts it at `/harness-console`, rewriting `Host`
+to the loopback address this server insists on). At the console's own root the
 mount is empty and every path is what it always was.
 
 `?piecesBase=<url-prefix>` says where the host renders a piece. A piece's own
@@ -417,10 +417,9 @@ capabilities, policy, and, once a run has started, its own `artifactRoot`. A
 need a run's artifacts use the session's root when it is present and the
 top-level root as the console-wide fallback.
 
-Status requires the per-process token cookie obtained by loading the console
-page. The top-level fields are present even before the console has any sessions,
-so an unattended client can check the route contract before starting a model
-turn.
+Status is read directly, with no preceding request: page. The top-level fields
+are present even before the console has any sessions, so an unattended client
+can check the route contract before starting a model turn.
 
 ### Policy route
 
@@ -443,11 +442,9 @@ process. `allowedToolIds` is what the policy asks for; the prompt loop withholds
 a tool again when its backing is absent, so this says a session may reach a tool
 rather than that a turn will hold it.
 
-The route carries the token, as the status route carrying the same policy on a
-live session does — and the space name and the two host paths, which nothing
-outside this server's own page has business reading. The health route's
-exemption is for a client that has no token yet and wants liveness; a client
-acting on this answer has loaded the page and holds one.
+The route carries the space name and the two host paths alongside the digest, so
+it says what a session here would run under without a session having been
+started.
 
 An unattended client is the caller this route is for: the measurement batch
 runner refuses a whole batch when the console it found is not the cell its
@@ -707,8 +704,7 @@ forwarded, so nothing extra survives the crossing. `getPattern` is called
 without `includeSource`: this surface shows metadata, schemas, dependencies and
 events, and a pattern's source is read through the CLI.
 
-The route sits under `/api/`, so it carries the protected routes' `Host`,
-`Origin`, and token gates.
+The route sits under `/api/`, so it is behind the same `Host` gate as the rest.
 
 Three panes:
 

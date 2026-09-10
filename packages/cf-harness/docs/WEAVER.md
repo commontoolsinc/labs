@@ -157,8 +157,8 @@ Verify the console before opening Weaver, on the host it runs on:
 - `GET /api/status` names the run directory the launcher printed.
 - `GET /live/x` answers 200: the live pane the pill embeds is served.
 
-A wire check without Weaver: fetch `/` for the token cookie, `POST /api/task`
-with `{"text": "a hello card"}`, and when the turn ends open
+A wire check without Weaver: `POST /api/task` with `{"text": "a hello card"}` —
+one request, no cookie and no `Origin` — and when the turn ends open
 `http://127.0.0.1:<loom-port>/pattern-pane/<space>/<slug>`.
 
 ## 3. The stack over a tailnet
@@ -191,9 +191,14 @@ the ports off `pieces.json` before serving anything, never from this table.
 
 The console needs no serve entry of its own: loom's daemon reverse-proxies
 `/harness-console/*` to the loopback address the console binds, rewriting the
-`Host` header the console's own gate insists on. Weaver derives that URL from
-the loom base it resolved, so its harness console setting is left blank for a
-remote loom and holds `http://127.0.0.1:8135` for a local one.
+`Host` header the console's own gate insists on. That rewrite is the whole of
+what the proxy has to do. It also re-scopes a `Set-Cookie` to its own prefix and
+declines to forward `Origin`, and a client may still fetch the page before
+calling `/api`; none of that is needed any more and none of it is an error — the
+console sets no cookie, reads none, and accepts any `Origin` or none. Weaver
+derives that URL from the loom base it resolved, so its harness console setting
+is left blank for a remote loom and holds `http://127.0.0.1:8135` for a local
+one.
 
 The console's port is the one place the offset does not reach: the daemon
 proxies to 8135 whatever the instance's offset, because that is the port Weaver

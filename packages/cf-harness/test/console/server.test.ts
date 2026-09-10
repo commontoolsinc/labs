@@ -193,9 +193,6 @@ const writeTurnTranscript = async (
 describe("console/server", () => {
   let server: ConsoleServer;
 
-  /** The `Cookie` header the page carries, as loading the page hands it out. */
-  let cookie: string;
-
   beforeEach(async () => {
     server = new ConsoleServer(
       await config(),
@@ -206,9 +203,6 @@ describe("console/server", () => {
           onEvent,
         }),
     );
-    const page = await server.handle(getRequest("/"));
-    await page.body?.cancel();
-    cookie = page.headers.get("set-cookie")!.split(";")[0];
   });
 
   /** Starts a task and waits for the turn it started to finish. */
@@ -216,7 +210,7 @@ describe("console/server", () => {
     body: unknown,
   ): Promise<{ sessionId: string; turnId: string }> => {
     const response = await server.handle(
-      jsonRequest("/api/task", body, { cookie }),
+      jsonRequest("/api/task", body),
     );
     expect(response.status).toBe(200);
     const started = await response.json();
@@ -226,7 +220,7 @@ describe("console/server", () => {
 
   const listSessions = async (): Promise<ConsoleSessionListing> => {
     const response = await server.handle(
-      getRequest("/api/sessions", { cookie }),
+      getRequest("/api/sessions"),
     );
     expect(response.status).toBe(200);
     return await response.json();
@@ -247,7 +241,7 @@ describe("console/server", () => {
   const indexServer = async (
     responses: readonly Response[],
   ): Promise<
-    { server: ConsoleServer; cookie: string; requests: IndexRequest[] }
+    { server: ConsoleServer; requests: IndexRequest[] }
   > => {
     const requests: IndexRequest[] = [];
     let answered = 0;
@@ -277,13 +271,7 @@ describe("console/server", () => {
           }),
         ),
     );
-    const page = await indexed.handle(getRequest("/"));
-    await page.body?.cancel();
-    return {
-      server: indexed,
-      cookie: page.headers.get("set-cookie")!.split(";")[0],
-      requests,
-    };
+    return { server: indexed, requests };
   };
 
   /** Reads one live completed event backed by its durable run transcript. */
@@ -321,15 +309,12 @@ describe("console/server", () => {
       );
       const page = await resultServer.handle(getRequest("/"));
       await page.body?.cancel();
-      const resultCookie = page.headers.get("set-cookie")!.split(";")[0];
       const response = await resultServer.handle(getRequest(
         "/api/events?afterSequence=0",
-        { cookie: resultCookie },
+        {},
       ));
       const startedResponse = await resultServer.handle(
-        jsonRequest("/api/task", { text: "track my books" }, {
-          cookie: resultCookie,
-        }),
+        jsonRequest("/api/task", { text: "track my books" }, {}),
       );
       expect(startedResponse.status).toBe(200);
       return (await envelopesUntil(response, "turn_completed")).at(-1)!.event
@@ -598,7 +583,7 @@ describe("console/server", () => {
   describe("GET /api/status", () => {
     it("answers with the configured artifact root before a task is started", async () => {
       const response = await server.handle(
-        getRequest("/api/status", { cookie }),
+        getRequest("/api/status"),
       );
 
       expect(response.status).toBe(200);
@@ -612,7 +597,7 @@ describe("console/server", () => {
   describe("GET /api/policy", () => {
     it("returns what a session started here would run under, before any session exists", async () => {
       const response = await server.handle(
-        getRequest("/api/policy", { cookie }),
+        getRequest("/api/policy"),
       );
 
       expect(response.status).toBe(200);
@@ -626,12 +611,6 @@ describe("console/server", () => {
         artifactRoot: resolved.artifactRoot,
         sessionDbPath: null,
       });
-    });
-
-    it("answers 403 without the token, as the route carrying the same policy on a session does", async () => {
-      const response = await server.handle(getRequest("/api/policy"));
-
-      expect(response.status).toBe(403);
     });
   });
 
@@ -660,7 +639,7 @@ describe("console/server", () => {
     it("rejects malformed Loom targets before starting a turn", async () => {
       for (const loomId of ["../private", {}, "loom-not-valid"]) {
         const response = await server.handle(
-          jsonRequest("/api/task", { text: "Make a Loom", loomId }, { cookie }),
+          jsonRequest("/api/task", { text: "Make a Loom", loomId }),
         );
         expect(response.status).toBe(400);
       }
@@ -689,19 +668,19 @@ describe("console/server", () => {
     it("returns named errors for malformed and unknown turn paths", async () => {
       const malformedRoute = await server.handle(getRequest(
         "/api/turns/not-a-result",
-        { cookie },
+        {},
       ));
       expect(malformedRoute.status).toBe(404);
 
       const malformedEncoding = await server.handle(getRequest(
         "/api/turns/%/result",
-        { cookie },
+        {},
       ));
       expect(malformedEncoding.status).toBe(404);
 
       const unknownTurn = await server.handle(getRequest(
         "/api/turns/turn-nobody-started/result",
-        { cookie },
+        {},
       ));
       expect(unknownTurn.status).toBe(404);
       expect(await unknownTurn.json()).toEqual({
@@ -715,7 +694,7 @@ describe("console/server", () => {
 
       const response = await server.handle(getRequest(
         `/api/turns/${started.turnId}/result`,
-        { cookie },
+        {},
       ));
 
       expect(response.status).toBe(404);
@@ -755,14 +734,11 @@ describe("console/server", () => {
         );
         const page = await resultServer.handle(getRequest("/"));
         await page.body?.cancel();
-        const resultCookie = page.headers.get("set-cookie")!.split(";")[0];
         const startedResponse = await resultServer.handle(
           jsonRequest("/api/task", {
             text: "track my books",
             loomId: "loom-1111111111111111",
-          }, {
-            cookie: resultCookie,
-          }),
+          }, {}),
         );
         const started = await startedResponse.json();
         await resultServer.service.waitForTurn(
@@ -786,7 +762,7 @@ describe("console/server", () => {
 
         const response = await resultServer.handle(getRequest(
           `/api/turns/${started.turnId}/result`,
-          { cookie: resultCookie },
+          {},
         ));
 
         expect(response.status).toBe(200);
@@ -843,11 +819,8 @@ describe("console/server", () => {
         );
         const firstPage = await firstServer.handle(getRequest("/"));
         await firstPage.body?.cancel();
-        const firstCookie = firstPage.headers.get("set-cookie")!.split(";")[0];
         const startedResponse = await firstServer.handle(
-          jsonRequest("/api/task", { text: "persist this turn" }, {
-            cookie: firstCookie,
-          }),
+          jsonRequest("/api/task", { text: "persist this turn" }, {}),
         );
         const started = await startedResponse.json();
         await firstServer.service.waitForTurn(
@@ -862,13 +835,10 @@ describe("console/server", () => {
         await restoredServer.service.initializeFromStore();
         const restoredPage = await restoredServer.handle(getRequest("/"));
         await restoredPage.body?.cancel();
-        const restoredCookie = restoredPage.headers.get("set-cookie")!.split(
-          ";",
-        )[0];
 
         const response = await restoredServer.handle(getRequest(
           `/api/turns/${started.turnId}/result`,
-          { cookie: restoredCookie },
+          {},
         ));
 
         expect(response.status).toBe(200);
@@ -905,17 +875,14 @@ describe("console/server", () => {
       );
       const page = await waitingServer.handle(getRequest("/"));
       await page.body?.cancel();
-      const waitingCookie = page.headers.get("set-cookie")!.split(";")[0];
       const startedResponse = await waitingServer.handle(
-        jsonRequest("/api/task", { text: "keep working" }, {
-          cookie: waitingCookie,
-        }),
+        jsonRequest("/api/task", { text: "keep working" }, {}),
       );
       const started = await startedResponse.json();
       try {
         const response = await waitingServer.handle(getRequest(
           `/api/turns/${started.turnId}/result`,
-          { cookie: waitingCookie },
+          {},
         ));
 
         expect(response.status).toBe(409);
@@ -949,11 +916,8 @@ describe("console/server", () => {
       );
       const page = await failingServer.handle(getRequest("/"));
       await page.body?.cancel();
-      const failingCookie = page.headers.get("set-cookie")!.split(";")[0];
       const startedResponse = await failingServer.handle(
-        jsonRequest("/api/task", { text: "build it" }, {
-          cookie: failingCookie,
-        }),
+        jsonRequest("/api/task", { text: "build it" }, {}),
       );
       const started = await startedResponse.json();
       await failingServer.service.waitForTurn(
@@ -963,7 +927,7 @@ describe("console/server", () => {
 
       const response = await failingServer.handle(getRequest(
         `/api/turns/${started.turnId}/result`,
-        { cookie: failingCookie },
+        {},
       ));
 
       expect(response.status).toBe(410);
@@ -998,17 +962,12 @@ describe("console/server", () => {
       );
       const page = await waitingServer.handle(getRequest("/"));
       await page.body?.cancel();
-      const waitingCookie = page.headers.get("set-cookie")!.split(";")[0];
       const startedResponse = await waitingServer.handle(
-        jsonRequest("/api/task", { text: "keep working" }, {
-          cookie: waitingCookie,
-        }),
+        jsonRequest("/api/task", { text: "keep working" }, {}),
       );
       const started = await startedResponse.json();
       const canceled = await waitingServer.handle(
-        jsonRequest("/api/cancel", { sessionId: started.sessionId }, {
-          cookie: waitingCookie,
-        }),
+        jsonRequest("/api/cancel", { sessionId: started.sessionId }, {}),
       );
       expect(canceled.status).toBe(200);
       finish!();
@@ -1019,7 +978,7 @@ describe("console/server", () => {
 
       const response = await waitingServer.handle(getRequest(
         `/api/turns/${started.turnId}/result`,
-        { cookie: waitingCookie },
+        {},
       ));
 
       expect(response.status).toBe(410);
@@ -1052,7 +1011,7 @@ describe("console/server", () => {
       const response = await server.handle(jsonRequest("/api/task", {
         text: "track my books",
         sessionId: "session-nobody-started",
-      }, { cookie }));
+      }));
 
       expect(response.status).toBe(404);
       expect((await response.json()).code).toBe("session_not_found");
@@ -1062,7 +1021,7 @@ describe("console/server", () => {
       const response = await server.handle(jsonRequest("/api/task", {
         text: "track my books",
         sessionId: 7,
-      }, { cookie }));
+      }));
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toBe("sessionId must be a string");
@@ -1087,12 +1046,11 @@ describe("console/server", () => {
       );
       const page = await capturing.handle(getRequest("/"));
       await page.body?.cancel();
-      const capturedCookie = page.headers.get("set-cookie")!.split(";")[0];
 
       const response = await capturing.handle(jsonRequest("/api/task", {
         text: "summarize the trip",
         inputCells: [{ name: "itinerary", ref: `/${CELL_ID}/days` }],
-      }, { cookie: capturedCookie }));
+      }));
       expect(response.status).toBe(200);
       const started = await response.json();
       await capturing.service.waitForTurn(started.sessionId, started.turnId);
@@ -1106,7 +1064,7 @@ describe("console/server", () => {
       const response = await server.handle(jsonRequest("/api/task", {
         text: "summarize the trip",
         inputCells: [{ name: "not a name", ref: `/${CELL_ID}/days` }],
-      }, { cookie }));
+      }));
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toContain("--input-cell name");
@@ -1120,7 +1078,7 @@ describe("console/server", () => {
           name: "transactions",
           ref: `/fid1:${"A".repeat(43)}/account`,
         }],
-      }, { cookie }));
+      }));
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toContain(
@@ -1133,7 +1091,7 @@ describe("console/server", () => {
       const response = await server.handle(jsonRequest("/api/task", {
         text: "summarize the trip",
         inputCells: [{ name: "itinerary" }],
-      }, { cookie }));
+      }));
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toBe(
@@ -1145,7 +1103,7 @@ describe("console/server", () => {
       const response = await server.handle(jsonRequest("/api/task", {
         text: "summarize the trip",
         inputCells: { itinerary: `/${CELL_ID}/days` },
-      }, { cookie }));
+      }));
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toBe("inputCells must be an array");
@@ -1155,7 +1113,7 @@ describe("console/server", () => {
       const response = await server.handle(jsonRequest("/api/task", {
         text: "summarize the trip",
         inputCells: [`itinerary=/${CELL_ID}/days`],
-      }, { cookie }));
+      }));
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toBe(
@@ -1172,7 +1130,7 @@ describe("console/server", () => {
           { name: "itinerary", ref: `/${CELL_ID}/days` },
           { name: "itinerary", ref: `/${CELL_ID}/nights` },
         ],
-      }, { cookie }));
+      }));
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toBe(
@@ -1237,13 +1195,12 @@ describe("console/server", () => {
       );
       const page = await capturing.handle(getRequest("/"));
       await page.body?.cancel();
-      const capturedCookie = page.headers.get("set-cookie")!.split(";")[0];
 
       try {
         const response = await capturing.handle(jsonRequest("/api/task", {
           text: "use pat-expenses for a dice roller app",
           patternRefs: [{ patternId: "pat-expenses" }],
-        }, { cookie: capturedCookie }));
+        }));
         expect(response.status).toBe(200);
         const started = await response.json();
         await capturing.service.waitForTurn(started.sessionId, started.turnId);
@@ -1267,7 +1224,7 @@ describe("console/server", () => {
       const response = await server.handle(jsonRequest("/api/task", {
         text: "use it for a dice roller app",
         patternRefs: [{ patternId: "it for a dice roller app" }],
-      }, { cookie }));
+      }));
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toContain("patternId must match");
@@ -1278,7 +1235,7 @@ describe("console/server", () => {
       const response = await server.handle(jsonRequest("/api/task", {
         text: "total my spending",
         patternRefs: { patternId: "pat-expenses" },
-      }, { cookie }));
+      }));
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toBe(
@@ -1292,7 +1249,7 @@ describe("console/server", () => {
       const response = await server.handle(jsonRequest("/api/task", {
         text: "total my spending",
         patternRefs: ["pat-expenses"],
-      }, { cookie }));
+      }));
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toBe(
@@ -1306,7 +1263,7 @@ describe("console/server", () => {
       const response = await server.handle(jsonRequest("/api/task", {
         text: "total my spending",
         patternRefs: [null],
-      }, { cookie }));
+      }));
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toBe(
@@ -1318,7 +1275,7 @@ describe("console/server", () => {
       const response = await server.handle(jsonRequest("/api/task", {
         text: "total my spending",
         patternRefs: [{ id: "pat-expenses" }],
-      }, { cookie }));
+      }));
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toBe(
@@ -1333,7 +1290,7 @@ describe("console/server", () => {
           { patternId: "pat-expenses" },
           { patternId: "pat-expenses" },
         ],
-      }, { cookie }));
+      }));
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toBe(
@@ -1348,7 +1305,7 @@ describe("console/server", () => {
           { length: MAX_HARNESS_PATTERN_REFS + 1 },
           (_unused, index) => ({ patternId: `pat-${index}` }),
         ),
-      }, { cookie }));
+      }));
 
       expect(response.status).toBe(400);
       expect((await response.json()).error).toContain(
@@ -1372,7 +1329,7 @@ describe("console/server", () => {
 
       const response = await server.handle(getRequest(
         `/api/events?sessionId=${started.sessionId}&afterSequence=0`,
-        { cookie },
+        {},
       ));
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toBe("text/event-stream");
@@ -1442,7 +1399,7 @@ describe("console/server", () => {
 
       const response = await server.handle(getRequest(
         `/api/events?sessionId=${second.sessionId}&afterSequence=0`,
-        { cookie },
+        {},
       ));
       const sessionIds = new Set(
         (await envelopesUntil(response, "turn_completed")).map((envelope) =>
@@ -1455,7 +1412,7 @@ describe("console/server", () => {
 
     it("answers 400 for an afterSequence that is not a sequence", async () => {
       const response = await server.handle(
-        getRequest("/api/events?afterSequence=later", { cookie }),
+        getRequest("/api/events?afterSequence=later"),
       );
 
       expect(response.status).toBe(400);
@@ -1465,11 +1422,11 @@ describe("console/server", () => {
   describe("POST /api/index/call", () => {
     /** Posts one proxied read at a server that has an index. */
     const call = async (
-      indexed: { server: ConsoleServer; cookie: string },
+      indexed: { server: ConsoleServer },
       body: unknown,
     ): Promise<Response> =>
       await indexed.server.handle(
-        jsonRequest("/api/index/call", body, { cookie: indexed.cookie }),
+        jsonRequest("/api/index/call", body),
       );
 
     it("answers a host-side failure generically, never with its message", async () => {
@@ -1488,9 +1445,8 @@ describe("console/server", () => {
       );
       const page = await server.handle(getRequest("/"));
       await page.body?.cancel();
-      const cookie = page.headers.get("set-cookie")!.split(";")[0];
       const response = await server.handle(
-        jsonRequest("/api/index/call", { fn: "listPatterns" }, { cookie }),
+        jsonRequest("/api/index/call", { fn: "listPatterns" }),
       );
       expect(response.status).toBe(502);
       const body = await response.json();
@@ -1596,10 +1552,7 @@ describe("console/server", () => {
       const response = await indexed.server.handle(
         new Request("http://127.0.0.1:8100/api/index/call", {
           method: "POST",
-          headers: {
-            cookie: indexed.cookie,
-            "content-type": "application/json",
-          },
+          headers: { "content-type": "application/json" },
           body: "not json",
         }),
       );
@@ -1639,7 +1592,7 @@ describe("console/server", () => {
 
     it("answers 404 when the server was started without an index", async () => {
       const response = await server.handle(
-        jsonRequest("/api/index/call", { fn: "listPatterns" }, { cookie }),
+        jsonRequest("/api/index/call", { fn: "listPatterns" }),
       );
 
       expect(response.status).toBe(404);
@@ -1676,7 +1629,7 @@ describe("console/server", () => {
 
     it("does not answer an API route with a page policy", async () => {
       const response = await server.handle(
-        getRequest("/api/sessions", { cookie }),
+        getRequest("/api/sessions"),
       );
       await response.json();
 
@@ -1685,17 +1638,6 @@ describe("console/server", () => {
   });
 
   describe("the live pane", () => {
-    it("hands the live pane the same token cookie the console page carries", async () => {
-      const response = await server.handle(getRequest("/live/session-1"));
-      await response.body?.cancel();
-
-      const setCookie = response.headers.get("set-cookie") ?? "";
-      expect(setCookie).toMatch(/^cf_harness_console_token=.+/);
-      expect(setCookie).toContain("SameSite=Strict");
-      expect(setCookie).toContain("HttpOnly");
-      expect(setCookie).toContain("Path=/");
-    });
-
     it("confines the live pane with the page's content security policy", async () => {
       const response = await server.handle(getRequest("/live/session-1"));
       await response.body?.cancel();
@@ -1704,15 +1646,6 @@ describe("console/server", () => {
       expect(policy).toContain("default-src 'self'");
       // The pane is opened at the top level of its own view, never framed.
       expect(policy).toContain("frame-ancestors 'none'");
-    });
-
-    it("hands that cookie to a pane whose session id the address escaped", async () => {
-      const response = await server.handle(getRequest("/live/session%2F1"));
-      await response.body?.cancel();
-
-      expect(response.headers.get("set-cookie")).toMatch(
-        /^cf_harness_console_token=/,
-      );
     });
 
     it("answers 403 for a live pane request naming another host", async () => {
@@ -1731,7 +1664,6 @@ describe("console/server", () => {
       await response.body?.cancel();
 
       expect(response.status).toBe(404);
-      expect(response.headers.get("set-cookie")).toBeNull();
     });
 
     it("sends the trailing-slash live address to its canonical form, relatively", async () => {
@@ -1744,7 +1676,6 @@ describe("console/server", () => {
 
       expect(response.status).toBe(308);
       expect(response.headers.get("location")).toBe("../session-1");
-      expect(response.headers.get("set-cookie")).toBeNull();
     });
 
     it("keeps the turn and pieces base a trailing-slash live address carries", async () => {
@@ -1772,25 +1703,39 @@ describe("console/server", () => {
     });
   });
 
-  describe("request authorization", () => {
-    it("hands the page a strictly same-site token cookie", async () => {
-      const response = await server.handle(getRequest("/"));
-      await response.body?.cancel();
+  describe("the host gate", () => {
+    it("answers an API request carrying no cookie", async () => {
+      const response = await server.handle(getRequest("/api/sessions"));
 
-      const setCookie = response.headers.get("set-cookie") ?? "";
-      expect(setCookie).toMatch(/^cf_harness_console_token=.+/);
-      expect(setCookie).toContain("SameSite=Strict");
-      expect(setCookie).toContain("HttpOnly");
-      expect(setCookie).toContain("Path=/");
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ sessions: [] });
     });
 
-    it("answers an API request carrying that cookie", async () => {
+    it("answers an API request from any other origin", async () => {
       const response = await server.handle(
-        getRequest("/api/sessions", { cookie }),
+        getRequest("/api/sessions", { origin: "http://elsewhere.test" }),
       );
 
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ sessions: [] });
+    });
+
+    it("starts a turn from a request carrying neither cookie nor origin", async () => {
+      const response = await server.handle(
+        jsonRequest("/api/task", { text: "track my books" }),
+      );
+
+      expect(response.status).toBe(200);
+      const started = await response.json();
+      await server.service.waitForTurn(started.sessionId, started.turnId);
+      expect((await listSessions()).sessions).toHaveLength(1);
+    });
+
+    it("hands the page no cookie", async () => {
+      const response = await server.handle(getRequest("/"));
+      await response.body?.cancel();
+
+      expect(response.headers.get("set-cookie")).toBeNull();
     });
 
     it("answers 403 for a page request naming another host", async () => {
@@ -1804,96 +1749,17 @@ describe("console/server", () => {
 
     it("answers 403 for an API request naming another host", async () => {
       const response = await server.handle(
-        getRequest("/api/sessions", { cookie, host: "evil.test:8100" }),
+        getRequest("/api/sessions", { host: "evil.test:8100" }),
       );
 
       expect(response.status).toBe(403);
-    });
-
-    it("answers 403 for an API request from another origin", async () => {
-      const response = await server.handle(jsonRequest("/api/task", {
-        text: "track my books",
-      }, { cookie, origin: "http://evil.test" }));
-
-      expect(response.status).toBe(403);
-    });
-
-    it("answers 403 for a first turn started without the cookie", async () => {
-      const response = await server.handle(
-        jsonRequest("/api/task", { text: "track my books" }),
-      );
-
-      expect(response.status).toBe(403);
-      expect(await listSessions()).toEqual({ sessions: [] });
-    });
-
-    it("answers 403 for a follow-up turn started without the cookie", async () => {
-      const started = await startTask({ text: "track my books" });
-
-      const response = await server.handle(jsonRequest("/api/task", {
-        text: "add a rating",
-        sessionId: started.sessionId,
-      }));
-
-      expect(response.status).toBe(403);
-      expect((await listSessions()).sessions[0].turnCount).toBe(1);
-    });
-
-    it("answers 403 for a session listing read without the cookie", async () => {
-      const response = await server.handle(getRequest("/api/sessions"));
-
-      expect(response.status).toBe(403);
-    });
-
-    it("answers 403 for an event stream opened without the cookie", async () => {
-      const response = await server.handle(getRequest("/api/events"));
-      await response.body?.cancel();
-
-      expect(response.status).toBe(403);
-      expect(response.headers.get("content-type")).not.toBe(
-        "text/event-stream",
-      );
-    });
-
-    it("answers 403 for an API request carrying another process's token", async () => {
-      const response = await server.handle(
-        getRequest("/api/sessions", {
-          cookie:
-            "cf_harness_console_token=00000000-0000-4000-8000-000000000000",
-        }),
-      );
-
-      expect(response.status).toBe(403);
-    });
-
-    it("answers 403 for an index read made without the cookie", async () => {
-      const indexed = await indexServer([]);
-      const response = await indexed.server.handle(
-        jsonRequest("/api/index/call", { fn: "listPatterns" }),
-      );
-
-      expect(response.status).toBe(403);
-      expect(indexed.requests).toEqual([]);
-    });
-
-    it("answers 403 for an index read from another origin", async () => {
-      const indexed = await indexServer([]);
-      const response = await indexed.server.handle(
-        jsonRequest("/api/index/call", { fn: "listPatterns" }, {
-          cookie: indexed.cookie,
-          origin: "http://evil.test",
-        }),
-      );
-
-      expect(response.status).toBe(403);
-      expect(indexed.requests).toEqual([]);
     });
 
     it("answers 415 for a task posted as a form submission", async () => {
       const response = await server.handle(
         new Request("http://127.0.0.1:8100/api/task", {
           method: "POST",
-          headers: { cookie, "content-type": "text/plain;charset=UTF-8" },
+          headers: { "content-type": "text/plain;charset=UTF-8" },
           body: JSON.stringify({ text: "track my books" }),
         }),
       );

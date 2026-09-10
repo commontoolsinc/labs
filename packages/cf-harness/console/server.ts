@@ -9,14 +9,14 @@
  *   deno task --cwd packages/cf-harness console
  *   open http://127.0.0.1:8100
  *
- * The server binds 127.0.0.1, and loopback is where its trust ends rather than
- * where it begins: a page anywhere on the web can drive requests at this
- * socket, and a hostile name that resolves to 127.0.0.1 can make these routes
- * same-origin. So every request has to name this server's own host, and every
- * `/api` route except health has to carry the per-process token the page is
- * handed as a `SameSite=Strict` cookie when it loads — a token a cross-origin
- * caller cannot send and a rebound origin cannot obtain. Do not put this
- * behind a public address.
+ * The server binds 127.0.0.1 and asks one thing of a request: that it names
+ * this server's own host. A hostile name that resolves to 127.0.0.1 would
+ * otherwise make these routes same-origin to a browser, and that name is
+ * visible on the wire. Nothing else is asked, and no client carries a
+ * credential — a caller that reaches this socket is a caller the network
+ * admitted. So the network is the boundary: run this where reaching it already
+ * means being trusted, which on a shared host means a tailnet with an access
+ * policy, and not behind a public address.
  *
  * What a task runs under is not decided here. This server resolves flags, the
  * environment and the request body into a `HarnessSessionConfig` — the same
@@ -140,9 +140,6 @@ import {
 /** Loopback only. See the module comment on what does and does not protect. */
 const HOSTNAME = "127.0.0.1";
 
-/** The cookie the page carries this process's token back in. */
-const TOKEN_COOKIE = "cf_harness_console_token";
-
 /**
  * The host names a request may address this server by: its own loopback
  * addresses at its own port, and the bare forms when the port is the one a
@@ -156,23 +153,6 @@ const allowedHosts = (port: number): readonly string[] => [
   ...(port === 80 ? ["127.0.0.1", "localhost"] : []),
 ];
 
-const allowedOrigins = (port: number): readonly string[] =>
-  allowedHosts(port).map((host) => `http://${host}`);
-
-/** One cookie's value out of a `Cookie` header, or nothing. */
-const cookieValue = (
-  header: string | null,
-  name: string,
-): string | undefined => {
-  for (const pair of header?.split(";") ?? []) {
-    const separator = pair.indexOf("=");
-    if (separator > 0 && pair.slice(0, separator).trim() === name) {
-      return pair.slice(separator + 1).trim();
-    }
-  }
-  return undefined;
-};
-
 /**
  * The paths served from the built page rather than from an API route: the page
  * itself, and the two directories felt emits into.
@@ -182,8 +162,7 @@ const ASSET_PATH = /^\/(scripts\/|styles\/|build-manifest\.json$|$)/;
 /**
  * The live pane's address, which names the session it shows. It is served the
  * same built page whatever session it names — the page reads the session out
- * of its own address — and it is one of the paths served from the build, so it
- * is handed the token cookie its own script needs to reach `/api`.
+ * of its own address — and it is one of the paths served from the build.
  */
 const LIVE_PATH = /^\/live\/[^/]+\/?$/;
 
@@ -859,7 +838,6 @@ export class ConsoleServer {
   readonly #clients = new Set<StreamClient>();
   readonly #config: ConsoleConfig;
   readonly #service: HarnessInteractiveChatService;
-  readonly #token = crypto.randomUUID();
   readonly #patternIndexClientFactory:
     | HarnessPatternIndexClientFactory
     | undefined;
@@ -1041,14 +1019,6 @@ export class ConsoleServer {
         "content-security-policy",
         CONTENT_SECURITY_POLICY,
       );
-      response.headers.append(
-        "set-cookie",
-        // No `Secure`: this is plain http on loopback, and a `Secure` cookie
-        // would simply never be stored. `SameSite=Strict` is what a
-        // cross-origin request cannot carry, and `HttpOnly` keeps the token
-        // out of reach of anything scripted into the page.
-        `${TOKEN_COOKIE}=${this.#token}; SameSite=Strict; HttpOnly; Path=/`,
-      );
       return response;
     }
     if (request.method === "POST" && url.pathname === "/api/task") {
@@ -1093,12 +1063,9 @@ export class ConsoleServer {
 
   /**
    * What stands between this socket and the rest of the web, or nothing when
-   * the request is one this server's own page made. The `Host` gate comes
-   * first and covers every route, including the page: a request that arrived
-   * under another name was addressed to somewhere else, whatever it asks for.
-   * The token then gates the API's artifact reads and writes. Health carries
-   * configuration and an explicitly unverified liveness value, so it keeps
-   * the host and origin gates and needs no token.
+   * the request may proceed. One gate, covering every route including the
+   * page: a request that arrived under another name was addressed to somewhere
+   * else, whatever it asks for.
    */
   #refuse(request: Request, url: URL): Response | undefined {
     const port = this.#config.port;
@@ -1111,18 +1078,6 @@ export class ConsoleServer {
     }
     if (!url.pathname.startsWith("/api/")) {
       return undefined;
-    }
-    const origin = request.headers.get("origin");
-    if (origin !== null && !allowedOrigins(port).includes(origin)) {
-      return new Response("forbidden", { status: 403 });
-    }
-    if (request.method === "GET" && url.pathname === "/api/health") {
-      return undefined;
-    }
-    if (
-      cookieValue(request.headers.get("cookie"), TOKEN_COOKIE) !== this.#token
-    ) {
-      return new Response("forbidden", { status: 403 });
     }
     if (
       request.method === "POST" &&
