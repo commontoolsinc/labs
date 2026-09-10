@@ -30,6 +30,11 @@ import { shallowFabricFromNativeValue } from "@/native-conversion.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
 import { valueEqual } from "@/valueEqual.ts";
 import { hashStringOf } from "@/value-hash.ts";
+import {
+  tagFromFabricValueElseNull,
+  tagFromNativeValueElseNull,
+  VALUE_TAGS,
+} from "@/value-tags.ts";
 
 describe("DataUnavailable", () => {
   it("is one concrete FabricInstance with four discriminated reasons", () => {
@@ -196,6 +201,12 @@ describe("DataUnavailable", () => {
 
     expect(foreignPending instanceof FabricInstance).toBe(false);
     expect(isDataUnavailable(foreignPending)).toBe(true);
+    expect(tagFromFabricValueElseNull(foreignPending)).toBe(
+      VALUE_TAGS.FabricInstance,
+    );
+    expect(tagFromNativeValueElseNull(foreignPending)).toBe(
+      VALUE_TAGS.FabricInstance,
+    );
     expect(shallowFabricFromNativeValue(foreignPending)).toBe(foreignPending);
   });
 

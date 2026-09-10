@@ -52,6 +52,31 @@ describe("extended-storage-transaction", () => {
     return { tx, cell: runtime.getCell(space, cause, SCHEMA, tx) };
   };
 
+  describe("the read-result cache across a batch write", () => {
+    it("keeps its entries across a batch holding no writes", () => {
+      const tx = runtime.edit();
+      tx.setCachedReadResult!("key", "variant", 1);
+
+      tx.writeValuesOrThrow!([]);
+
+      expect(tx.getCachedReadResult!("key", "variant")).toEqual({ value: 1 });
+      tx.abort("done");
+    });
+
+    it("drops its entries once a batch writes", async () => {
+      const { tx, cell } = await seeded("batch-write-drops-cache");
+      tx.setCachedReadResult!("key", "variant", 1);
+
+      tx.writeValuesOrThrow!([{
+        address: cell.getAsNormalizedFullLink(),
+        value: { value: 1 },
+      }]);
+
+      expect(tx.getCachedReadResult!("key", "variant")).toBeUndefined();
+      tx.abort("done");
+    });
+  });
+
   describe("the read-result cache under an epoch", () => {
     it("serves nothing while a read resolves against an earlier epoch", () => {
       const tx = runtime.edit();

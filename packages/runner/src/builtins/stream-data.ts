@@ -125,11 +125,14 @@ function createStreamDataAction(
       if (cellsInitialized && cellScope !== outputScope) {
         previousCall = "";
       }
+      const namespace = contract === "legacy"
+        ? "streamData"
+        : "streamDataResult";
       pending = ownedCell<boolean>(
         runtime,
         tx,
         parentCell,
-        { streamData: { pending: cause } },
+        { [namespace]: { pending: cause } },
         undefined,
         outputScope,
       );
@@ -139,20 +142,27 @@ function createStreamDataAction(
         runtime,
         tx,
         parentCell,
-        {
-          streamData: { result: cause },
-        },
+        { [namespace]: { result: cause } },
         undefined,
         outputScope,
       );
+
+      if (contract === "availability") {
+        partial = ownedCell<any | undefined>(
+          runtime,
+          tx,
+          parentCell,
+          { [namespace]: { partial: cause } },
+          undefined,
+          outputScope,
+        );
+      }
 
       error = ownedCell<any | undefined>(
         runtime,
         tx,
         parentCell,
-        {
-          streamData: { error: cause },
-        },
+        { [namespace]: { error: cause } },
         undefined,
         outputScope,
       );
@@ -270,7 +280,10 @@ function createStreamDataAction(
 
     enqueueSinkRequestPostCommitEffect(
       tx,
-      effectNamespace,
+      // Both persisted contracts perform the same external stream operation;
+      // the deployment ceiling is declared for that capability, not for the
+      // graph-version-specific result namespace below.
+      "streamData",
       `${effectNamespace}:${requestId}`,
       materializedRequest,
       `${effectNamespace}-start`,

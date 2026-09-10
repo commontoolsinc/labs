@@ -322,8 +322,7 @@ Mike's call, after S4.
    `../history/plans/collection-naming-s6-backfill-rehearsal-2026-09-05.md`:
    `backfillNames` writes the name into the board's map, the topic goes on
    reading none, and one `cf piece link` per topic closes it. The operator
-   procedure is the "Naming the Topics that predate the namespace" section of
-   `skills/topics/SKILL.md`.
+   procedure is `skills/topics/references/namespace-backfill.md`.
 
    **Held 2026-09-06, and not for a technical reason.** The step is rehearsed
    twice; the second run, after the positional-link fix, is recorded at
@@ -347,9 +346,13 @@ Mike's call, after S4.
    2. Deploy the board leg, which is refused over topics filed before the
       namespace and needs `--dangerously-allow-incompatible-schema` until a
       general mechanism for adding a property to existing data exists.
-   3. Backfill, then bind `namesTable` onto each topic `addTopic` did not
-      wire. Run it from a host: laptop runs died 4-6 minutes in during the
-      2026-08-28 migration. Never pass `--allow-non-existing` (#6965).
+   3. Update each topic to a pattern whose input schema selects `boardNames`.
+      Backfill, then bind `namesTable` onto each topic `addTopic` did not wire.
+      The topic's `boardNames` default materializes `[]`, so this bind needs no
+      `--allow-non-existing` flag. The flag only overrides missing endpoint
+      values or pieces; it cannot override a topic's input schema (#6965).
+      Run it from a host: laptop runs died 4-6 minutes in during the
+      2026-08-28 migration.
    4. Verify by reading both the board's index and the member addresses. In
       the rerun the fixed board's index agreed with its members at all three
       reads; the two reads that disagreed were on the instrument board
@@ -360,21 +363,21 @@ Mike's call, after S4.
 
    **The board leg of the deploy needs
    `--dangerously-allow-incompatible-schema`.** `setsrc --check` refuses it over
-   a board holding topics filed before the namespace, with
-   `input link at topics.0.shortName: an unconstrained schema is no longer
-   accepted`. That refusal is not about `shortName`, and not about the
-   property's spelling: two probes, each the pre-graft board with one property
-   added to `TopicDemand` and nothing else changed, were both refused with the
-   identical message at `topics.0.probeField` — `probeField?: string` and
-   `probeField?: unknown` alike. The rule is on the STORED side: the schema
-   recorded on a member's retained link is unconstrained at every path that
-   recorded schema does not name, so a property only the candidate demand names
-   is a narrowing of `true`, which is what
-   `packages/piece/src/schema-compatibility.ts` refuses. Expect it for a new
-   per-member demand property generally. The flag is
-   held behind explicit team authorization by `skills/topics/SKILL.md`, so this
-   step carries a decision it did not carry before. What the forced deploy
-   leaves behind is measured, in the 2026-09-06 rerun below.
+   a board holding topics filed before the namespace, because the typed
+   `topics.0.shortName` demand constrains an unconstrained producer. An open
+   producer contract permits any value at an undeclared
+   property. A new string demand narrows that contract even when optional:
+   absence is allowed, but a present non-string value is not. An optional
+   `unknown` demand adds no value restriction and is compatible. The retained
+   link proof uses producer-owned durable metadata; a schema carried by the
+   alias is not a producer guarantee. The
+   [issue 6969 gates record](../history/development/issue-6969-upgrade-gates-2026-09-09.md)
+   replays the August 31 snapshot and separates this refusal, which stands,
+   from the two false ones the checker no longer raises. The flag is held
+   behind explicit team authorization by
+   `skills/topics/references/pattern-updates.md`, so this step
+   carries a decision it did not carry before. What the forced deploy leaves
+   behind is measured, in the 2026-09-06 rerun below.
 
    **Why the gates said otherwise.** `deno task pattern-compat` and
    `deno task pattern-vintage` are both clean and neither can see this: the
@@ -393,7 +396,7 @@ Mike's call, after S4.
    `--root` at or above `packages/patterns`, because the board imports the
    naming library from a sibling directory and the default program root is the
    entry's own.
-5. `skills/topics/SKILL.md` describes `top/42` addressing.
+5. `skills/topics/references/naming.md` describes `top/42` addressing.
 
 ### S5 — Deferred, not scheduled
 

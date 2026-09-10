@@ -163,6 +163,7 @@ export function filter(
       aggregateNoun: "filtered list",
       elementNoun: "predicate",
       contribute: (included, inputElement, out) => {
+        if (isDataUnavailable(included)) return included;
         if (included) out.push(inputElement);
         else if (included === undefined) return "pending";
       },
@@ -497,12 +498,19 @@ export function filter(
       // Truthy/falsy coercion, not strict boolean.
       const childCell = elementRuns.get(elementKey)!.resultCell;
       if (elementAwaitSync) resumeCells.push(childCell);
-      const included = childCell.withTx(tx).get();
-      if (included) {
+      const included = readAvailabilityAwareCell(tx, childCell);
+      if (isDataUnavailable(included)) {
+        unavailable = preferDataUnavailable(unavailable, included);
+      } else if (included) {
         newArrayValue.push(list[i]); // Original element cell reference
       } else if (included === undefined) {
         pendingCells.push(childCell);
       }
+    }
+
+    if (unavailable !== undefined) {
+      resultWithLog.setRawUntyped(unavailable, true);
+      return;
     }
 
     // Wait for the whole resume batch before the aggregate moves. Its

@@ -127,9 +127,13 @@ const collectChangedPaths = (
     // frozen nor a leaf — it can hold outgoing references to other
     // memory-tracked objects, so a fully correct walk would descend into them
     // (cf. `codecOf()` in cell.ts) and emit per-reference change paths. Lumping
-    // it in as a leaf here is a safe approximation only because nothing in the
-    // system stores `FabricInstance`s yet; revisit when that part of the system
-    // (still in flux) gels.
+    // it in as a leaf here misses a change to a reference an instance holds:
+    // the fetch builtins store a `FabricError` as a result, so an instance does
+    // reach storage.
+    //
+    // TODO(danfuzz): descend an instance by its codec contents here, at which
+    // point this arm covers only the `FabricPrimitive` leaves it is correct
+    // for.
     if (
       before instanceof FabricSpecialObject ||
       after instanceof FabricSpecialObject

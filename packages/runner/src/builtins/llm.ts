@@ -1060,6 +1060,7 @@ export function llm(
                   const groundingSources = extractGroundingSources(llmResult);
 
                   await runtime.editWithRetry((tx) => {
+                    if (hash !== previousCallHash) return;
                     markEffectCompletion(tx, effectKey);
                     // D1b: attribute FIRST, then stamp the model-output fields —
                     // `result`/`partial` carry `LlmDerived`; the control-state
@@ -1526,6 +1527,7 @@ export function generateText(
                   const groundingSources = extractGroundingSources(llmResult);
 
                   await runtime.editWithRetry((tx) => {
+                    if (thisRun !== getRunForWrite()) return;
                     markEffectCompletion(tx, effectKey);
                     // D1b: attribute FIRST, then stamp the model-output fields.
                     attributeModelOutputWrite(tx, runtime, "generateText");
@@ -2224,6 +2226,7 @@ export function generateObject<T extends Record<string, unknown>>(
               if (isWriteStale()) return;
 
               const writeback = await runtime.editWithRetry((tx) => {
+                if (isWriteStale()) return false;
                 markEffectCompletion(tx, effectKey);
                 // The InjectionSafe annotations on resultSchema are minted by
                 // the trusted sanitizer; attribute this write to the builtin so
@@ -2552,6 +2555,7 @@ export function generateObject<T extends Record<string, unknown>>(
                 if (isWriteStale()) return;
 
                 const writeback = await runtime.editWithRetry((tx) => {
+                  if (isWriteStale()) return false;
                   markEffectCompletion(tx, effectKey);
                   // The InjectionSafe annotations on resultSchema are minted by
                   // the trusted sanitizer; attribute this write to the builtin

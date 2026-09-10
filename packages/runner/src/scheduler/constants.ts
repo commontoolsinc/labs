@@ -37,6 +37,19 @@ export const MAX_ACTION_RUN_TRACE_HISTORY = 2000;
 // event count, so the "block-and-count" timer cannot grow without limit. Well
 // above any normal burst, so it never changes ordinary delivery.
 export const MAX_EVENT_BACKLOG_PER_STREAM = 256;
+
+/**
+ * Consecutive deferrals before a served event the drain keeps re-delivering
+ * hardens into events.md §5's DROP, and the same threshold for a client
+ * dispatch whose handler body keeps not running (`HANDLER_NOT_RUN_BACKOFF_LIMIT`
+ * in backpressure.ts). On the serving side a deferral re-arms the scan from
+ * the NEXT INPUT (the creation commit arriving) or, absent input, from a
+ * real-time backstop tick — never synchronously, so the budget cannot be
+ * consumed back-to-back inside one quiet moment and drop an event whose
+ * creation input is milliseconds away.
+ */
+export const EVENT_DEFERRAL_DROP_THRESHOLD = 8;
+
 export const MAX_RETRIES_FOR_REACTIVE = 10;
 // A stale-basis rejection (conflict / same-replica race) is retried off the
 // bounded budget, on the assumption that the action's subscription will

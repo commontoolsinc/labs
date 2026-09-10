@@ -300,9 +300,22 @@ const identityTag = (value: object): number => {
  * The address a link names, which is both the walk's cycle-detection key and
  * the tail of its memo key. Computed once and reused for both, so a resolution
  * that misses the memo pays for exactly the one the walk needed anyway.
+ *
+ * A prefix code rather than a join: the id and every path segment are
+ * preceded by their length, and the path by its segment count, so two
+ * addresses that differ only in where a boundary falls take different keys
+ * even where a part contains the separator itself. The space is a DID, which
+ * holds no NUL, and the scope is one of a few fixed words.
  */
-const linkAddressKey = (link: NormalizedFullLink): string =>
-  JSON.stringify([link.space, link.id, link.scope, link.path]);
+const linkAddressKey = (link: NormalizedFullLink): string => {
+  let key = `${link.space}\0${link.id.length}\0${link.id}\0` +
+    `${link.scope ?? ""}\0${link.path.length}`;
+  for (const component of link.path) {
+    const segment = String(component);
+    key += `\0${segment.length}\0${segment}`;
+  }
+  return key;
+};
 
 /**
  * What distinguishes two resolutions of the same address. `schema` and

@@ -76,6 +76,7 @@ export const flatMapContribution: ElementContribution = (
   _inputElement,
   out,
 ) => {
+  if (isDataUnavailable(elemResult)) return elemResult;
   if (Array.isArray(elemResult)) elemResult.forEach((v) => out.push(v));
   else if (elemResult !== undefined) out.push(elemResult);
   else return "pending";
@@ -502,8 +503,10 @@ export function flatMap(
       // have undefined result cells on the first pass before the pattern runs).
       const childCell = elementRuns.get(elementKey)!.resultCell;
       if (elementAwaitSync) resumeCells.push(childCell);
-      const elemResult = childCell.withTx(tx).get();
-      if (Array.isArray(elemResult)) {
+      const elemResult = readAvailabilityAwareCell(tx, childCell);
+      if (isDataUnavailable(elemResult)) {
+        unavailable = preferDataUnavailable(unavailable, elemResult);
+      } else if (Array.isArray(elemResult)) {
         // forEach skips holes in sub-arrays (sparse-safe)
         elemResult.forEach((v) => {
           newArrayValue.push(v);
@@ -513,6 +516,11 @@ export function flatMap(
       } else {
         pendingCells.push(childCell);
       }
+    }
+
+    if (unavailable !== undefined) {
+      resultWithLog.setRawUntyped(unavailable, true);
+      return;
     }
 
     // Wait for the whole resume batch before the aggregate moves. Its

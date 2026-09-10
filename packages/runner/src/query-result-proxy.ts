@@ -1,4 +1,7 @@
-import { FabricPrimitive } from "@commonfabric/data-model";
+import {
+  FabricPrimitive,
+  isWalkableObjectOrArray,
+} from "@commonfabric/data-model";
 import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
@@ -301,9 +304,11 @@ function createViewProxy<T>(
   //
   // The key names no more than the caches below it already distinguish, so
   // this index can never be the reason two things that differ share a view.
-  // `depth` and `pinned` are not in it, because `byLink` conflates the first
-  // and the second changes nothing about what a view of this link against this
-  // transaction is.
+  // `depth` is not in it, because `byLink` conflates it. `pinned` is: a memo
+  // may outlive a write when a reader holds the instant it describes, and
+  // after that write a pinned view still describes that instant while an
+  // unpinned handle reads current state, so the two are different things
+  // under one link.
   //
   // A caller-supplied label view would have to be part of the key, and
   // serializing one costs more than the read it saves. Those reads take the
@@ -312,7 +317,9 @@ function createViewProxy<T>(
   const viewMemo = cfcLabelView === undefined && resolved.memoKey !== undefined
     ? viewTx.getSnapshotMemo?.()
     : undefined;
-  const viewKey = viewMemo === undefined ? "" : `view:${resolved.memoKey}`;
+  const viewKey = viewMemo === undefined
+    ? ""
+    : `view:${pinned ? "pinned" : "handle"}:${resolved.memoKey}`;
   const cached = viewMemo?.get(viewKey) as { view: unknown } | undefined;
   if (cached !== undefined) return cached.view as T;
   const remember = <V>(view: V): V => {
@@ -802,15 +809,21 @@ export function isCellResult(value: any): value is CellResult<any> {
 export function snapshotQueryResult<T>(value: T): T {
   const seen = new WeakMap<object, unknown>();
   const snapshot = (current: unknown): unknown => {
-    // TODO(danfuzz): the leaf test covers `FabricPrimitive` but not
-    // `FabricInstance`, so an instance (live traffic — the fetch builtins
-    // store a `FabricError` result) falls to the `Object.keys` rebuild below
-    // and snapshots as `{}`, its codec contents lost. It wants the same
-    // leaf-through treatment until a codec-contents walk exists.
+    // A special object leafs through whole. It has no own properties for the
+    // rebuild below to copy, so snapshotting one by its keys would return
+    // `{}` and lose the value.
+    //
+    // TODO(danfuzz): that covers a value handed over directly and not one
+    // arriving through a cell read. This function's callers pass `cell.get()`,
+    // and the proxy erases the prototype, so a proxied `FabricInstance` still
+    // reaches the rebuild below and snapshots as `{}`. The fix is the one the
+    // marker further down this file names.
     if (
-      current === null || typeof current !== "object" ||
-      current instanceof FabricPrimitive || isDataUnavailable(current)
-    ) return current;
+      isDataUnavailable(current) ||
+      !isWalkableObjectOrArray(current)
+    ) {
+      return current;
+    }
     const existing = seen.get(current);
     if (existing !== undefined) return existing;
     if (Array.isArray(current)) {

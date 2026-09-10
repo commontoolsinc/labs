@@ -15,6 +15,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 import { assertSuppliedLinkSchemasCompatible } from "../../src/ops/piece-controller.ts";
+import { PieceInputPathError } from "../../src/ops/piece-input-path.ts";
 import { PiecesController } from "../../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("piece link contract tests");
@@ -162,6 +163,25 @@ describe("PiecesController", () => {
 
         await expect(pieces.link(source.id, ["rows"], target.id, ["rows"]))
           .rejects.toThrow("rows[].piece");
+
+        expect(runtime.runner.cancels.size).toBe(0);
+        expect(valueEqual(argument.getRawUntyped(), before)).toBe(true);
+        expect(pieces.getResult(target.getCell()).get()).toEqual({
+          label: "empty",
+        });
+      });
+
+      it("leaves a cold target stopped and unchanged when its input hides the destination", async () => {
+        const source = await pieces.create(rowProducer());
+        const targetId = (await pieces.create(rowConsumer("ReadonlyCell"))).id;
+        await reopenPieces();
+        const target = await pieces.get(targetId, false);
+        const argument = pieces.getArgument(target.getCell());
+        const before = argument.getRawUntyped();
+        expect(runtime.runner.cancels.size).toBe(0);
+
+        await expect(pieces.link(source.id, ["rows"], target.id, ["hidden"]))
+          .rejects.toThrow(PieceInputPathError);
 
         expect(runtime.runner.cancels.size).toBe(0);
         expect(valueEqual(argument.getRawUntyped(), before)).toBe(true);

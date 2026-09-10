@@ -127,15 +127,16 @@ describe("raw builtin data unavailability propagation", () => {
       "missing linked control condition",
     );
     const missingConditionId = missingCondition.getAsNormalizedFullLink().id;
-    const originalSyncCell = storageManager.syncCell.bind(storageManager);
+    const provider = storageManager.open(space);
+    const originalSync = provider.sync.bind(provider);
     const started = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
-    storageManager.syncCell = async <T>(cell: Cell<T>): Promise<Cell<T>> => {
-      if (cell.getAsNormalizedFullLink().id === missingConditionId) {
+    provider.sync = async (id, selector, scope, instance) => {
+      if (id === missingConditionId) {
         started.resolve();
         await release.promise;
       }
-      return await originalSyncCell(cell);
+      return await originalSync(id, selector, scope, instance);
     };
 
     try {
@@ -150,10 +151,23 @@ describe("raw builtin data unavailability propagation", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, Root, {
-        condition: missingCondition.getAsLink() as unknown as boolean,
-      }, resultCell);
+      const inputs = runtime.getCell<{ condition: boolean }>(
+        space,
+        "linked control inputs",
+        Root.argumentSchema,
+        tx,
+      );
+      inputs.set({ condition: false });
+      const result = runtime.run(tx, Root, inputs, resultCell);
 
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+      tx = runtime.edit();
+      await result.pull();
+
+      inputs.withTx(tx).key("condition").setRawUntyped(
+        missingCondition.getAsLink(),
+      );
       runtime.prepareTxForCommit(tx);
       await tx.commit();
       tx = runtime.edit();
@@ -171,13 +185,16 @@ describe("raw builtin data unavailability propagation", () => {
       await storageManager.synced();
       await pull;
       await runtime.idle();
+      tx.abort();
+      tx = runtime.edit();
 
-      expect(result.key("ifElse").get()).toBe("no");
-      expect(finalRaw(result.key("when"))).toBeUndefined();
-      expect(result.key("unless").get()).toBe("no");
+      const current = result.withTx(tx);
+      expect(current.key("ifElse").get()).toBe("no");
+      expect(current.key("when").resolveAsCell().getRaw()).toBeUndefined();
+      expect(current.key("unless").get()).toBe("no");
     } finally {
       release.resolve();
-      storageManager.syncCell = originalSyncCell;
+      provider.sync = originalSync;
     }
   });
 

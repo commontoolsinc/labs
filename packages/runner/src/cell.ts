@@ -15,6 +15,7 @@ import {
   type FabricValue,
   type FabricValueLayer,
   hashStringOf,
+  refuseFabricInstance,
   shallowCleanArray,
   shallowCleanPlainObject,
   shallowFabricFromNativeObjectElseUndefined,
@@ -25,6 +26,7 @@ import {
   entityRefFromString,
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
@@ -123,7 +125,6 @@ import {
   dataUriFromValueWithResolvedLinks,
   findAndInlineDataUriLinks,
 } from "./data-uri.ts";
-import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { type LastNode, resolveLink } from "./link-resolution.ts";
 import {
   areLinksSame,
@@ -1239,7 +1240,10 @@ export class CellImpl<T extends FabricValue>
   }
 
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>> {
-    const result = this.getWithStatus(options);
+    const result = this.getWithStatus({
+      ...options,
+      unavailableAsStatus: false,
+    });
     return ("ok" in result ? result.ok : undefined) as Readonly<
       StripDefaultBrand<T>
     >;
@@ -1247,6 +1251,7 @@ export class CellImpl<T extends FabricValue>
 
   getWithStatus(options?: {
     traverseCells?: boolean;
+    unavailableAsStatus?: boolean;
   }): ValidateAndTransformResult {
     if (!this.#synced) this.sync(); // No await, just kicking this off
 
@@ -1268,7 +1273,9 @@ export class CellImpl<T extends FabricValue>
       // invalidation is load-bearing: bypass the cache so a post-prepare read
       // still goes through readOrThrow() and invalidates the prepared digest.
       tx.getCfcState().prepare.status !== "prepared";
-    const variant = `${options?.traverseCells ?? false}|${this.#synced}`;
+    const variant = `${options?.traverseCells ?? false}|${this.#synced}|${
+      options?.unavailableAsStatus ?? true
+    }`;
     const cacheKey = cacheable ? this.#viewRefHash() : undefined;
     if (cacheable) {
       const cached = tx.getCachedReadResult!(cacheKey!, variant);
@@ -2705,24 +2712,8 @@ export class CellImpl<T extends FabricValue>
       throw new Error("Can't remove from non-array value");
     }
     const array = got as ElemT[];
-    // TODO(danfuzz): `typeof ref === "object"` routes a `FabricPrimitive`
-    // (or `FabricInstance`) ref to `areLinksSame`, which parses both
-    // operands as links and returns `false` when either is not one — so a
-    // fabric-valued ref matches only by reference identity, never by value,
-    // and the call otherwise silently no-ops. The sibling `removeByValue`
-    // has the right shape: link comparison for cells, `valueEqual` (which
-    // has a fabric arm) for everything else.
     const index = typeof ref === "object"
-      ? array.findIndex((item) =>
-        areLinksSame(
-          item,
-          ref,
-          this as unknown as Cell<any>,
-          true, // resolveBeforeComparing
-          this.tx,
-          this.runtime,
-        )
-      )
+      ? array.findIndex((item) => this.#refMatchesElement(ref, item))
       // Primitives match by `Object.is` (`NaN` is findable; `0` and `-0` are
       // distinct), unlike `indexOf`'s `===`.
       : array.findIndex((item) => Object.is(item, ref));
@@ -2746,24 +2737,42 @@ export class CellImpl<T extends FabricValue>
       throw new Error("Can't remove from non-array value");
     }
     const array = got as ElemT[];
-    // TODO(danfuzz): same gap as `remove()` above — a fabric-valued `ref`
-    // reaches `areLinksSame` and matches only by reference identity, never
-    // by value, so the call otherwise silently no-ops.
     // Cast needed: TS can't prove ElemT[] reconstitutes to T
     const newArray = array.filter((item) =>
       typeof ref === "object"
-        ? !areLinksSame(
-          item,
-          ref,
-          this as unknown as Cell<any>,
-          true, // resolveBeforeComparing
-          this.tx,
-          this.runtime,
-        )
+        ? !this.#refMatchesElement(ref, item)
         // As in `remove()`: primitives match by `Object.is`.
         : !Object.is(item, ref)
     ) as unknown as T;
     this.set(newArray);
+  }
+
+  /**
+   * Whether an object-valued `remove()`/`removeAll()` argument names the given
+   * array element. A cell or a link names its element by link, which is what
+   * `areLinksSame()` decides. A `FabricSpecialObject` keeps its state in
+   * private fields, so a link comparison can only tell whether the two are the
+   * same object -- and two equal fabric values written at different times never
+   * are. Those name their element by content, the way `removeByValue()`
+   * matches.
+   */
+  #refMatchesElement(ref: unknown, element: unknown): boolean {
+    if (
+      areLinksSame(
+        element,
+        ref,
+        this as unknown as Cell<any>,
+        true, // resolveBeforeComparing
+        this.tx,
+        this.runtime,
+      )
+    ) {
+      return true;
+    }
+
+    return ref instanceof FabricSpecialObject &&
+      element instanceof FabricSpecialObject &&
+      valueEqual(element, ref);
   }
 
   equals(other: any): boolean {
@@ -4097,12 +4106,13 @@ function validateStaticData(value: unknown): void {
       // enumerable own properties, so `Object.keys()` is empty and the
       // descent ends -- and a leaf holds no cell for this validation to find.
       //
-      // A `FabricInstance` is refused instead. Its codec contents can hold a
-      // `Cell`, which is exactly what this validation exists to reject, and
-      // those contents are not reachable by property name -- so passing one
-      // through _smuggles_ a cell into static data past the check meant to
-      // stop it. That is not a completeness gap; it is the validation failing
-      // open.
+      // A general `FabricInstance` is refused instead. Its codec contents can
+      // hold a `Cell`, which is exactly what this validation exists to reject,
+      // and those contents are not reachable by property name -- so passing
+      // one through _smuggles_ a cell into static data past the check meant to
+      // stop it. `DataUnavailable` is the narrow exception: it is a
+      // runtime-owned atomic control value whose codec state is closed over
+      // its fixed reason and, for the error variant, a frozen FabricError.
       //
       // Nothing reaches this in production today, de facto rather than by
       // construction: a `FabricError` is ungated and exposed to pattern
@@ -4111,7 +4121,7 @@ function validateStaticData(value: unknown): void {
       //
       // TODO(danfuzz): descend by codec-mediated traversal into instance
       // state, at which point this becomes a walk rather than a refusal.
-      if (obj instanceof FabricInstance) {
+      if (obj instanceof FabricInstance && !isDataUnavailable(obj)) {
         refuseFabricInstance(obj, `in \`Cell.of()\` static data`);
       }
 

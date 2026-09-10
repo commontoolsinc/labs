@@ -128,15 +128,15 @@ The label is attached when the **query result is written back into the result
 cell** (the read path), in a transaction separate from — and after — the read.
 This is distinct from a SQL mutation, which joins the *caller's* transaction and
 is only ceiling-checked; the result-cell write is its own CFC-relevant write and
-must be prepared like any `ifc`-bearing write before it commits. The per-field
-label lands on each split-out row entity, and a downstream consumer inherits it
-by accumulating labels across the dereferences its read traverses (not from the
+is prepared like any `ifc`-bearing write before it commits. The per-field label
+lands on each split-out row entity, and a downstream consumer inherits it by
+accumulating labels across the dereferences its read traverses (not from the
 label of a single navigated cell).
 
 > Implementation: the result write is the post-commit effect of `db.query`,
-> committed via `runtime.editWithRetry` (which runs `prepareTxForCommit`); the
-> SQL mutation is `db.exec` recording a `sqlite` op on `this.tx`; downstream
-> inheritance is `cfcLabelViewForDereferenceTraces`, not `cfcLabelViewForCell`.
+> committed via `runtime.editWithRetry`; the SQL mutation is `db.exec`
+> recording a `sqlite` op on `this.tx`; downstream inheritance is
+> `cfcLabelViewForDereferenceTraces`, not `cfcLabelViewForCell`.
 
 ### Write — ceiling check
 

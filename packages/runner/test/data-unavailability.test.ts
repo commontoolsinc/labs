@@ -734,11 +734,11 @@ describe("JavaScript-node data unavailability", () => {
         if (value instanceof DataUnavailable) localWrites.push(value.reason);
       },
     });
-    // Current-main's static same-space presync can establish authoritative
-    // absence before the value node first runs, so no transient is required.
-    expect(localStates[0]).toBe("schema-mismatch");
+    // The same-space pre-sync is already in flight when the value node joins
+    // it, so the node exposes the same transient as a remote linked target.
+    expect(localStates[0]).toBe("syncing");
     expect(localStates.at(-1)).toBe("schema-mismatch");
-    expect(localWrites[0]).toBe("schema-mismatch");
+    expect(localWrites[0]).toBe("syncing");
     expect(localWrites.at(-1)).toBe("schema-mismatch");
     expect((localOutput as DataUnavailable).reason).toBe("schema-mismatch");
   });

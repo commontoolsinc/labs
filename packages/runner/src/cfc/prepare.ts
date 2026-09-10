@@ -15,12 +15,18 @@ import {
 import {
   cloneForMutation,
   type CloneForMutationResult,
+  fabricAwareEqual,
   FabricInstance,
   FabricPrimitive,
   isFabricObjectOrArray,
+  isKeyableObjectOrArray,
+  isWalkableObjectOrArray,
+  refuseFabricInstance,
   valueEqual,
 } from "@commonfabric/data-model";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
+import { STREAM_ENTRIES_DOC_PREFIX } from "@commonfabric/memory/v2";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
@@ -29,7 +35,6 @@ import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { entityKindOfIdString } from "../entity-kind.ts";
-import { refuseFabricInstance } from "../fabric-special-object.ts";
 import {
   containsExternalSchemaRef,
   decomposeSchema,
@@ -1411,7 +1416,25 @@ const stripWriterIdentityStamp = (value: unknown): unknown => {
   if (Array.isArray(value)) {
     return value.map(stripWriterIdentityStamp);
   }
-  if (!isObjectOrArray(value)) {
+  // A link is carried whole. It is a reference rather than a record of the
+  // writer's, so there is no stamp inside one to strip.
+  if (isPrimitiveCellLink(value)) {
+    return value;
+  }
+  // A fabric-valued node -- a schema `default`, say -- is carried by
+  // reference: rebuilding one by its properties would return `{}` and erase
+  // the difference between two schemas that differ only there.
+  //
+  // TODO(danfuzz): this still rebuilds every plain record it visits, schema
+  // `default` VALUES included, so a default that happens to carry `file`
+  // beside `bundleId` has the stamp keys stripped out of it and compares
+  // equal to one that never carried them. Value-bearing keys want to be
+  // carried by reference too.
+  //
+  // An instance is carried whole here as well. This arm returns rather than
+  // rebuilding, so nothing of it is lost, and refusing would take down a
+  // schema comparison over a default that holds one.
+  if (!isKeyableObjectOrArray(value)) {
     return value;
   }
 
@@ -1428,18 +1451,11 @@ const stripWriterIdentityStamp = (value: unknown): unknown => {
   return next;
 };
 
-// TODO(danfuzz): `stripWriterIdentityStamp` rebuilds every record node it
-// meets, including schema `default` VALUES, and a `FabricSpecialObject`
-// rebuilds as `{}` — so two schemas whose only difference is a
-// `FabricSpecialObject`-valued default compare equal here, and the candidate's
-// default is silently discarded by the merge-skip decisions this feeds. The
-// strip wants to carry value-bearing keys by reference and the comparison wants
-// a fabric-aware equality.
 const schemasEqualIgnoringWriterStamp = (
   left: JSONSchema,
   right: JSONSchema,
 ): boolean =>
-  deepEqual(
+  fabricAwareEqual(
     stripWriterIdentityStamp(left),
     stripWriterIdentityStamp(right),
   );
@@ -1937,16 +1953,43 @@ const isMetaSeamPath = (
 ): boolean => metaOnlyByPath?.get(pathKey(path)) === true;
 
 /**
+ * Whether `id` names a document of one of the two id classes no schema can
+ * declare a store policy on.
+ *
+ * A computed cell holds a derivation's result, under its own URI scheme
+ * (`computed:fid1:<hash>`; see `entity-kind.ts` and
+ * `docs/specs/computed-cell-identity.md`). A stream's entries document holds
+ * that stream's durable event entries and the marks recording which have been
+ * handled, at an id derived from the stream's link so that every party — the
+ * firing client, the serving space's drain, another space's outbox delivery —
+ * addresses the same document with no coordination (`STREAM_ENTRIES_DOC_PREFIX`
+ * in `@commonfabric/memory/v2`).
+ *
+ * This is an enumeration of two id classes rather than a rule about documents
+ * the runtime mints. The runtime mints many more, and route 2 (§8.12.5) is
+ * what most of them take: the document anchoring splits out of a value has an
+ * id derived from its parent's, which no author named either, and it is
+ * measured. Adding a class here means arguing that case on its own.
+ *
+ * The entries document's half is a prefix inside the `of:` scheme rather than
+ * a scheme of its own, so the id shape alone does not say who wrote it. Two
+ * gates compose over one instead: this one skips the ceiling, and the memory
+ * server owns the shape — an authored write reaches a document under that
+ * prefix only as a declared tail append, and only under
+ * `EXPERIMENTAL_SERVER_EXECUTION` (events.md §1, §4).
+ */
+const isUndeclarableIdClass = (id: string): boolean =>
+  entityKindOfIdString(id) === "computed" ||
+  id.startsWith(STREAM_ENTRIES_DOC_PREFIX);
+
+/**
  * Whether a schema could have declared a store policy for a write at `path`
  * on `id` — the surfaces the §8.12.4 writer-fit measurement quantifies over.
  *
- * Two are outside it. The raw meta seam is one, per {@link isMetaSeamPath}:
- * no value schema describes the document-root siblings of `value`. A computed
- * cell is the other: the derived internal cell the runtime materializes to
- * hold a derivation's result, addressed under its own URI scheme
- * (`computed:fid1:<hash>`; see `entity-kind.ts` and
- * `docs/specs/computed-cell-identity.md`). A pattern declares policy on the
- * data it names, and it names neither.
+ * Two things are outside it. The raw meta seam is one, per {@link
+ * isMetaSeamPath}: no value schema describes the document-root siblings of
+ * `value`. The two id classes of {@link isUndeclarableIdClass} are the other.
+ * A pattern declares policy on the data it names, and it names none of them.
  *
  * Both stay flow stamp targets: the join lands on them as the `derived`
  * component, so a later read of one is tainted and a later egress of one is
@@ -1962,7 +2005,7 @@ const isDeclarablePolicyPath = (
   metaOnlyByPath: ReadonlyMap<string, boolean> | undefined,
   path: readonly string[],
 ): boolean =>
-  (entityKindOfIdString(id) !== "computed" || !joinIsLocal) &&
+  (!isUndeclarableIdClass(id) || !joinIsLocal) &&
   !isMetaSeamPath(metaOnlyByPath, path);
 
 // S16 flow labels (default transition): one conservative confidentiality join
@@ -1996,19 +2039,24 @@ export const flowReadExcluded = (
 // non-link leaf (string, number, boolean, null) makes the value content.
 // Such writes get `structure` (shape-only) stamps instead of covering
 // `derived` ones — see `pureLinkContainerPaths`.
-// TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, whose
-// `Object.values` are empty and vacuously "all links" — so a `FabricBytes`
-// leaf, or a `FabricInstance` with real contents, classifies as pure link
-// structure and the write receives shape-only stamps in place of its content
-// label. Fails open. Wants a `FabricSpecialObject` test taking the
-// content-bearing (`false`) arm.
+// A `FabricSpecialObject` is a content leaf like any other: its state is
+// private, so enumerating it finds no members and would classify a byte blob
+// or an unavailable-result marker as pure structure. This classifier has a
+// complete answer for that case without walking the private state: no special
+// object is pure link structure.
 const isPureLinkStructure = (value: unknown): boolean => {
   if (value === undefined) return true;
   if (isPrimitiveCellLink(value)) return true;
+  if (
+    isDataUnavailable(value) || value instanceof FabricInstance ||
+    value instanceof FabricPrimitive
+  ) {
+    return false;
+  }
   if (Array.isArray(value)) {
     return value.every((member) => isPureLinkStructure(member));
   }
-  if (isObjectOrArray(value)) {
+  if (isWalkableObjectOrArray(value)) {
     return Object.values(value).every((member) => isPureLinkStructure(member));
   }
   return false;
@@ -2033,6 +2081,12 @@ const pureLinkContainerPaths = (
   if (isPrimitiveCellLink(value) || value === undefined) {
     return;
   }
+  if (
+    isDataUnavailable(value) || value instanceof FabricInstance ||
+    value instanceof FabricPrimitive
+  ) {
+    return;
+  }
   if (Array.isArray(value)) {
     out.push(path);
     value.forEach((member, index) =>
@@ -2040,11 +2094,9 @@ const pureLinkContainerPaths = (
     );
     return;
   }
-  // TODO(danfuzz): same `isObjectOrArray` gap as `isPureLinkStructure` above: a
-  // `FabricPrimitive` is pushed as if it were a container (a stamp path for
-  // an opaque leaf), and a `FabricInstance`'s codec contents are never
-  // enumerated, so nothing nested in one gets a per-slot stamp.
-  if (isObjectOrArray(value)) {
+  // A `FabricSpecialObject` mints no path here: it is a content leaf, not a
+  // container whose shape the writing transaction computed.
+  if (isWalkableObjectOrArray(value)) {
     out.push(path);
     for (const [key, member] of Object.entries(value)) {
       pureLinkContainerPaths(member, [...path, key], out);
@@ -3175,15 +3227,17 @@ const linkedWriteValueForPolicy = (
   });
 };
 
-// TODO(danfuzz): this descent (and `changedValuesAtPatternPath` below) gates on
-// `typeof value === "object"` and then `head in value`, both true-shaped for a
-// `FabricSpecialObject` — but no key of an instance's codec contents is an own
-// (or any) property, so a pattern path into one resolves to no values and the
-// policy condition it feeds is never evaluated for that content.
-// `changedValuesAtPatternPath`'s leaf case additionally compares with
-// `deepEqual`, which calls two same-class `FabricSpecialObject`s equal
-// regardless of contents, so a genuine change reads as "unchanged". Both fail
-// open.
+// Whether a pattern-path descent may address `value` by key.
+//
+// A path segment never addresses anything inside a `FabricSpecialObject`, so
+// the two descents below stop at one rather than resolving the segment against
+// its class surface. That covers a `FabricInstance` as well: these descents run
+// over ordinary stored values, a `FabricError` among them.
+//
+// TODO(danfuzz): stopping is an incomplete answer for an instance. No key of
+// its codec contents is reachable by property name, so a pattern path into one
+// resolves to no values and the policy condition it feeds is never evaluated
+// for that content. Fails open.
 const valuesAtPatternPath = (
   value: unknown,
   path: readonly string[],
@@ -3202,7 +3256,13 @@ const valuesAtPatternPath = (
     );
   }
 
-  if (value === null || value === undefined || typeof value !== "object") {
+  // A pattern path does not descend through a link: the reference is the value
+  // at that slot, and what it points at is resolved elsewhere. Under the
+  // legacy representation a link is written as a record, which the container
+  // question below reads as keyable, so this test is what stops the descent
+  // there. Under `modernCellRep` a link is a `FabricLink`, which that question
+  // stops at on its own.
+  if (isPrimitiveCellLink(value) || !isKeyableObjectOrArray(value)) {
     return [];
   }
   if (!(head in value)) {
@@ -3217,7 +3277,7 @@ const changedValuesAtPatternPath = (
   path: readonly string[],
 ): unknown[] => {
   if (path.length === 0) {
-    return deepEqual(value, previousValue) ? [] : [value];
+    return fabricAwareEqual(value, previousValue) ? [] : [value];
   }
 
   const [head, ...rest] = path;
@@ -3233,12 +3293,13 @@ const changedValuesAtPatternPath = (
     );
   }
 
-  if (value === null || value === undefined || typeof value !== "object") {
+  // As in `valuesAtPatternPath`: a link ends the descent, and the test comes
+  // before the walk question for the same reason.
+  if (isPrimitiveCellLink(value) || !isKeyableObjectOrArray(value)) {
     return [];
   }
-  const previousChild = previousValue !== null &&
-      previousValue !== undefined &&
-      typeof previousValue === "object"
+  const previousChild = !isPrimitiveCellLink(previousValue) &&
+      isKeyableObjectOrArray(previousValue)
     ? (previousValue as Record<string, unknown>)[head]
     : undefined;
   if (!(head in value)) {
@@ -3332,20 +3393,14 @@ const policySchemaMatchesValue = (
     }
     return policySchemaMatchesValue(resolved, value, schemaRoot);
   }
-  // TODO(danfuzz): these `deepEqual` checks call two same-class fabric
-  // values equal regardless of contents, so a fabric-valued `const`/`enum`
-  // condition matches the wrong value; and the `properties` arm below admits
-  // a `FabricSpecialObject` through `isObjectOrArray` and reads `undefined` for
-  // every key, matching vacuously. Each fails open — the ifc entry applies
-  // (or the policy passes) with nothing actually checked. `valueEqual` and a
-  // `FabricSpecialObject` gate are the fabric-aware shapes;
-  // `schemaTypeMatchesValue` below already carries the type half.
-  if (schema.const !== undefined && !deepEqual(schema.const, value)) {
+  if (
+    schema.const !== undefined && !fabricAwareEqual(schema.const, value)
+  ) {
     return false;
   }
   if (
     Array.isArray(schema.enum) &&
-    !schema.enum.some((candidate) => deepEqual(candidate, value))
+    !schema.enum.some((candidate) => fabricAwareEqual(candidate, value))
   ) {
     return false;
   }
@@ -3369,7 +3424,21 @@ const policySchemaMatchesValue = (
       policySchemaMatchesValue(branch, value, schemaRoot)
     );
   }
-  if (isObjectOrArray(value) && isObjectOrArray(schema.properties)) {
+  // A link matches by what it is, not by what a `properties` condition would
+  // read off the record a legacy one is written as. `isPrimitiveCellLink()`
+  // recognizes whichever form the active regime uses, so it takes a
+  // `FabricLink` out of the walk question's way as well; a modern argument
+  // link arriving here is what makes that load-bearing rather than tidy.
+  //
+  // A `FabricSpecialObject` carries no property for a `properties` condition
+  // to read, so it falls past this arm. `DataUnavailable` is a FabricInstance
+  // that can legitimately reach a policy boundary as an atomic control value;
+  // asking the strict structural-walk predicate about it would throw instead
+  // of evaluating the surrounding write policy.
+  if (
+    !isPrimitiveCellLink(value) && isKeyableObjectOrArray(value) &&
+    isObjectOrArray(schema.properties)
+  ) {
     return Object.entries(schema.properties).every(([key, childSchema]) =>
       value[key] === undefined ||
       policySchemaMatchesValue(childSchema, value[key], schemaRoot)
@@ -3558,11 +3627,7 @@ const ifcEntryAppliesToAttemptedWrite = (
     sawTargetWrite = true;
     const writePath = write.address.path.slice(1).map((entry) => String(entry));
     if (pathPatternMatches(path, writePath)) {
-      // TODO(danfuzz): `deepEqual` calls two same-class `FabricSpecialObject`s
-      // equal regardless of contents, so a genuine change to a slot holding
-      // one reads as "unchanged" and the ifc entry is skipped. Fails open;
-      // `valueEqual` is the fabric-aware comparison.
-      return !deepEqual(write.value, write.previousValue) &&
+      return !fabricAwareEqual(write.value, write.previousValue) &&
         wildcardPolicyMatchesValue(tx, target, schema, write.value, root);
     }
     if (concretePathHasPrefix(prefix, writePath)) {
@@ -4393,13 +4458,7 @@ const verifyExactCopyRequirements = (
       path: sourcePath,
     });
 
-    // TODO(danfuzz): `deepEqual` calls two same-class `FabricSpecialObject`s
-    // equal regardless of contents — under the modern cell rep even two
-    // `FabricLink`s to different documents — so an `exactCopyOf` claim over
-    // `FabricSpecialObject`-valued state verifies for values that are not
-    // copies, and the source label is carried anyway. Fails open; wants
-    // `valueEqual`.
-    if (!deepEqual(sourceValue, targetValue)) {
+    if (!fabricAwareEqual(sourceValue, targetValue)) {
       return `exactCopyOf failed at /${entry.path.join("/")}`;
     }
   }
@@ -4465,10 +4524,7 @@ const verifyProjectionRequirements = (
       path: sourcePath,
     });
 
-    // TODO(danfuzz): same `deepEqual` gap as `verifyExactCopyRequirements`
-    // above — fabric-valued state verifies as a projection when it is not
-    // one. Fails open; wants `valueEqual`.
-    if (!deepEqual(sourceValue, targetValue)) {
+    if (!fabricAwareEqual(sourceValue, targetValue)) {
       return `projection claim failed at /${entry.path.join("/")}`;
     }
   }
@@ -7235,7 +7291,7 @@ export const prepareBoundaryCommit = (
         }
       }
       // Writer-fit measures the surfaces a schema could have declared a
-      // policy at, which leaves out the raw meta seam and computed cells
+      // policy at, which leaves out the raw meta seam and two id classes
       // alike (`isDeclarablePolicyPath`). The measurement is skipped on both
       // at every rung, so neither raises a strict reject nor a
       // persist-and-flag diagnostic.

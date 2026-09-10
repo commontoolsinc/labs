@@ -48,14 +48,17 @@ export function waitForLlmSettled<T = unknown>(
   return waitForCellValue<LlmResultState<T>>(
     runtime,
     cell,
-    (value) => {
-      if (value?.pending === false) return true;
-      if (value?.pending !== undefined || value?.result === undefined) {
+    () => {
+      const current = cell.withTx();
+      const pending = current.key("pending").resolveAsCell().getRaw();
+      if (pending === false) return true;
+      const result = current.key("result").resolveAsCell().getRaw();
+      if (pending !== undefined || result === undefined) {
         return false;
       }
-      return !isDataUnavailable(value.result) ||
-        value.result.reason === "error" ||
-        value.result.reason === "schema-mismatch";
+      return !isDataUnavailable(result) ||
+        result.reason === "error" ||
+        result.reason === "schema-mismatch";
     },
   );
 }

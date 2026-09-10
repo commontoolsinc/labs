@@ -6,9 +6,9 @@ import {
   assertValidFabricValueLayer,
   FabricInstance,
   FabricPrimitive,
+  refuseFabricInstance,
   shallowFabricFromNativeObjectElseUndefined,
 } from "@commonfabric/data-model";
-import { refuseFabricInstance } from "../fabric-special-object.ts";
 import { type AliasBinding, isAliasBinding } from "../alias-binding.ts";
 import {
   type FabricExecPlainObject,

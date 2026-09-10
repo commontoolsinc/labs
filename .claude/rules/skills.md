@@ -28,9 +28,9 @@ costs something, because the procedure ages worse than the model does.
 ## Load-bearing facts have to be testable
 
 `deno task check-skill-facts` fails when an import specifier or repository path
-cited by a skill, an `AGENTS.md`, or a rule stops resolving. Run it after
-editing a skill; a file moved elsewhere in the repository is the usual way one
-goes stale.
+cited by a skill, an `AGENTS.md`, a rule, or a hook script under
+`.claude/scripts/` stops resolving. Run it after editing a skill; a file moved
+elsewhere in the repository is the usual way one goes stale.
 
 That gate only sees paths and imports, which is half the problem.
 `docs/development/skill-audit.md` covers the other half and which mechanism

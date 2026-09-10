@@ -80,9 +80,9 @@ wrapper classes (Section 1.4).
 > declarations in `interface.ts`, the conversions in `native-conversion.ts`, the
 > clone helpers in `value-clone.ts`, and the operations a value of any class is
 > subject to -- `deep-freeze.ts`, `value-hash.ts`, `value-debug.ts`, and the tag
-> vocabulary in `VALUE_TAGS.ts` and `native-type-tags.ts`. None of those is an
-> exported subpath. `codec-interface/` is internal in the same way, reached
-> through `@commonfabric/data-model/codec-common`, which re-exports it.
+> vocabulary in `value-tags.ts`. None of those is an exported subpath.
+> `codec-interface/` is internal in the same way, reached through
+> `@commonfabric/data-model/codec-common`, which re-exports it.
 > `codec-common/`, `fabric-bases/` and `fabric-instances/` are exported subpaths
 > in their own right and are imported directly under those names; the main entry
 > point does *not* re-export the codec vocabulary, so `LiveEnvironment` and its
@@ -3301,7 +3301,7 @@ The implementation is split across several files for separation of concerns:
 
 | File | Purpose |
 |------|---------|
-| `index.ts` | Public surface, and the package's main entry point: re-exports the conversion functions (from `native-conversion.ts`), the type declarations (from `interface.ts`), the clone helpers (from `value-clone.ts`), the deep freeze (from `deep-freeze.ts`), the hash (from `value-hash.ts`), the debug renderers (from `value-debug.ts`), and the tag vocabulary (from `VALUE_TAGS.ts` and `native-type-tags.ts`); defines `valueEqual()` |
+| `index.ts` | Public surface, and the package's main entry point: re-exports the conversion functions (from `native-conversion.ts`), the type declarations (from `interface.ts`), the clone helpers (from `value-clone.ts`), the deep freeze (from `deep-freeze.ts`), the hash (from `value-hash.ts`), the debug renderers (from `value-debug.ts`), and the tag vocabulary (from `value-tags.ts`); defines `valueEqual()` |
 | `native-conversion.ts` | Conversion: `fabricFromNativeValue`, `shallowFabricFromNativeValue`, `nativeFromFabricValue`, `isValidFabricConvertibleValue` |
 | `fabric-bases/` | The abstract bases a concrete `FabricValue` extends, one per branch of the type hierarchy: `BaseFabricInstance.ts`, `BaseFabricPrimitive.ts` (plus an `index.ts` barrel). These are the implementer's half of the hierarchy; `interface.ts` is the client's, and reaching it does not reach these. |
 | `fabric-instances/` | Concrete `FabricInstance` subclasses, each in its own file: `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricLink.ts`, `FabricMap.ts`, `FabricSet.ts` (plus an `index.ts` barrel). `UnknownValue` and `ProblematicValue` are `FabricInstance`s too, but live in `codec-common/`, existing only as products of a decode fault. |
@@ -3883,23 +3883,37 @@ export function fabricFromNativeValue(
 | `FabricValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
 | `{ [key: string]: FabricValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
 
-> **Implementation: tag-based type dispatch.** The conversion functions use a
-> tag-based dispatch mechanism (`tagFromNativeValue()` in
-> `packages/data-model/native-type-tags.ts`) to classify values in O(1) via a
-> `switch` on the value's constructor. This replaces sequential `instanceof`
-> chains with a single constructor lookup that returns a tag string (e.g.,
-> `"Error"`, `"Date"`, `"RegExp"`, `"Array"`, `"Object"`, `"Primitive"`,
-> `"FabricInstance"`). The conversion function then switches on the tag to route
-> to the appropriate wrapping logic. An array is the exception to the
-> constructor lookup: `Array.isArray()` is consulted first and returns `"Array"`
-> unconditionally, so a subclass instance, a severed-prototype array, and a
-> cross-realm array all reach array handling and are handled by the array rule
-> of Section 1.5, rather than being rejected as some unrecognized class or
-> routed elsewhere by something the array carries. Fallback paths handle exotic
-> Error subclasses (via `Error.isError()`) and null-prototype objects. Tagging a
-> null-prototype object `"Object"` classifies more broadly than the type admits,
-> for the same reason the array tag does: it is what lets the object rule of
-> Section 1.5 reject the value by name rather than as some unrecognized class.
+> **Implementation: tag-based type dispatch.** The conversion functions
+> classify a value through `tagFromNativeValueElseNull()` (in
+> `packages/data-model/src/value-tags.ts`), which returns a tag string from the
+> `VALUE_TAGS` vocabulary -- the JS type tags of `JS_TYPE_VALUE_TAGS` (the
+> `typeof` name of each primitive and of a function, plus `"null"`),
+> `"Array"`, `"Object"`, `"JsError"`, `"JsMap"`, `"JsSet"`, `"JsDate"`,
+> `"JsUint8Array"`, `"JsRegExp"`, the primitive tags of
+> `FABRIC_PRIMITIVE_VALUE_TAGS` (one reported by each `FabricPrimitive` class,
+> under a `Fabric` prefix), and `"FabricInstance"` -- or `null` for an object
+> it does not recognize. The conversion function then switches on the tag to
+> route to the appropriate wrapping logic. The dispatch asks its questions in
+> a fixed order.
+> An array is tagged first, by `Array.isArray()`, so a subclass instance, a
+> severed-prototype array, and a cross-realm array all reach array handling and
+> are handled by the array rule of Section 1.5, rather than being rejected as
+> some unrecognized class or routed elsewhere by something the array carries.
+> A plain object is decided next, by its prototype being `Object.prototype`,
+> plain objects being the common case. A null-prototype object is tagged
+> `"JsError"` if `Error.isError()` says so and otherwise `"Object"`, which
+> classifies more broadly than the type admits, for the same reason the array
+> tag does: it is what lets the object rule of Section 1.5 reject the value by
+> name rather than as some unrecognized class. Then the tests that hold where
+> no class does: an error by `Error.isError()`, which holds across realms; a
+> `FabricPrimitive` by the tag its instance reports, one of
+> `FABRIC_PRIMITIVE_VALUE_TAGS`; a `FabricInstance` by class. What remains is
+> a native class instance, decided last by its class, read from its prototype,
+> by a `switch` on constructor identity; a recognized one is a value the
+> conversion has yet to import, the heavier path, so the lookup's cost sits on
+> it alone. A `FabricPrimitive` subclass that reports no tag of its own is
+> tagged as its parent, which is a defect in that subclass rather than one the
+> dispatch guards against.
 
 > **Implementation: centralized shallow-clone utility.** The conversion
 > functions use a centralized `cloneIfNecessary()` utility (in

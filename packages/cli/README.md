@@ -479,6 +479,14 @@ pointer, restage its arguments, or create a source revision. The target, entry,
 root, export, test, data-file, and repository flags on the check must match the
 apply.
 
+Preflight uses setup's stored-argument validation: optional fields holding
+`undefined` count as absent, and unreadable linked values defer to reactive
+reads. A compatible verdict therefore does not prove that every linked value has
+loaded. A committed direct handle retained under an unchanged input contract
+keeps its producer's policy; the check does not require the consumer to
+redeclare that policy. New links and changed handle contracts require the full
+producer-contract proof. A successful render after apply is required.
+
 ```bash
 cf piece setsrc --cell fid1:piece --root packages/patterns \
   --check packages/patterns/example/main.tsx

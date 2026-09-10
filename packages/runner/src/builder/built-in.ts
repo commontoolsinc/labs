@@ -190,7 +190,8 @@ type FetchState<T> = {
   error?: unknown;
 };
 
-const fetchBinaryState = createNodeFactory({
+/** @internal Raw persisted state factory for compatibility and runtime tests. */
+export const fetchBinaryState = createNodeFactory({
   type: "ref",
   implementation: "fetchBinary",
 }) as (
@@ -203,7 +204,8 @@ const fetchBinaryState = createNodeFactory({
 export const fetchBinary =
   ((params) => fetchBinaryState(params).result) as FetchBinaryFunction;
 
-const fetchTextState = createNodeFactory({
+/** @internal Raw persisted state factory for compatibility and runtime tests. */
+export const fetchTextState = createNodeFactory({
   type: "ref",
   implementation: "fetchText",
 }) as (
@@ -216,7 +218,8 @@ const fetchTextState = createNodeFactory({
 export const fetchText =
   ((params) => fetchTextState(params).result) as FetchTextFunction;
 
-const fetchJsonState = createNodeFactory({
+/** @internal Raw persisted state factory for compatibility and runtime tests. */
+export const fetchJsonState = createNodeFactory({
   type: "ref",
   implementation: "fetchJson",
 }) as <T>(
@@ -236,7 +239,8 @@ export const cellFromUrl = createNodeFactory({
 export const fetchJson =
   ((params) => fetchJsonState(params).result) as FetchJsonFunction;
 
-const fetchJsonUncheckedState = createNodeFactory({
+/** @internal Raw persisted state factory for compatibility and runtime tests. */
+export const fetchJsonUncheckedState = createNodeFactory({
   type: "ref",
   implementation: "fetchJsonUnchecked",
 }) as (
@@ -250,7 +254,8 @@ export const fetchJsonUnchecked =
   ((params) =>
     fetchJsonUncheckedState(params).result) as FetchJsonUncheckedFunction;
 
-const fetchProgramState = createNodeFactory({
+/** @internal Raw persisted state factory for compatibility and runtime tests. */
+export const fetchProgramState = createNodeFactory({
   type: "ref",
   implementation: "fetchProgram",
 }) as (
@@ -273,7 +278,7 @@ type StreamDataState<T> = {
 };
 
 /** @internal Raw persisted state for the direct streamData contract. */
-const streamDataState = createNodeFactory({
+export const streamDataState = createNodeFactory({
   type: "ref",
   implementation: "streamDataResult",
 }) as <T>(

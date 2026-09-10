@@ -81,6 +81,7 @@ import {
   type ExternalDependencyActionToken,
   Scheduler,
 } from "./scheduler.ts";
+import { entityKey } from "./scheduler/keys.ts";
 import {
   type CommitBackpressurePolicy,
   resolveCommitBackpressure,
@@ -117,9 +118,6 @@ import {
   type CfcTrustConfigInput,
   type CfcWriteFloorMode,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
-  externalIngestStamp,
-  flowLabelWorkExists,
-  gatedSinkRequestExists,
   linkCfcLabelView,
   type PolicySnapshot,
   resolveCfcDials,
@@ -2653,14 +2651,28 @@ export class Runtime {
     const connectionClosed = connectionState?.status === "closed";
     const reserved = !connectionClosed && sameSpace &&
       this.storageManager.shouldPullDoc?.(space, id, scope, identity) === true;
-    if (sameSpace && !connectionClosed && !reserved) return "settled";
+    const pendingLoadKey = entityKey(
+      { space, id, scope },
+      effectiveIdentity,
+    );
+    const pendingLoadGeneration = this.storageManager.pendingLoadGeneration?.(
+      pendingLoadKey,
+    );
+    if (
+      sameSpace && !connectionClosed && !reserved &&
+      pendingLoadGeneration === undefined
+    ) {
+      return "settled";
+    }
 
-    const status: MissingDocLoadEntry["status"] =
-      connectionState?.status === "disconnected"
-        ? "waiting-for-connection"
-        : connectionClosed
-        ? "error"
-        : "retry-ready";
+    const joiningPendingLoad = pendingLoadGeneration !== undefined;
+    const status: MissingDocLoadEntry["status"] = joiningPendingLoad
+      ? "pending"
+      : connectionState?.status === "disconnected"
+      ? "waiting-for-connection"
+      : connectionClosed
+      ? "error"
+      : "retry-ready";
     const entry: MissingDocLoadEntry = {
       status,
       space,
@@ -2674,10 +2686,49 @@ export class Runtime {
         : {}),
     };
     this.#missingDocLoads.set(key, entry);
-    if (entry.status === "retry-ready") {
+    if (joiningPendingLoad) {
+      this.#observePendingDocLoad(key, pendingLoadKey, entry);
+    } else if (entry.status === "retry-ready") {
       this.#startMissingDocLoadAttempt(key, link, entry);
     }
     return entry.status === "error" ? "error" : "pending";
+  }
+
+  /**
+   * Join a document load that another read already started. `shouldPullDoc()`
+   * returns false once its one-shot reservation has been taken, which does not
+   * by itself mean the replica has authoritative coverage: the reserved load
+   * may still be in flight. Park the current derivation on that exact load
+   * generation and wake it when the load settles.
+   */
+  #observePendingDocLoad(
+    key: string,
+    pendingLoadKey: string,
+    entry: MissingDocLoadEntry,
+  ): void {
+    const work = this.storageManager.loadsSettled?.([pendingLoadKey]) ??
+      Promise.resolve();
+    const tracked = work.then(
+      () => {
+        if (this.#missingDocLoads.get(key) !== entry) return;
+        entry.status = "settled";
+        this.#wakeMissingDocLoadWaiters(entry);
+        entry.waiters.clear();
+      },
+      (cause) => {
+        if (this.#missingDocLoads.get(key) !== entry) return;
+        const connectionState = this.#storageConnectionStates.get(entry.space);
+        if (connectionState?.status === "disconnected") {
+          entry.status = "waiting-for-connection";
+          return;
+        }
+        entry.status = "error";
+        entry.error = cause instanceof Error ? cause : new Error(String(cause));
+        this.#wakeMissingDocLoadWaiters(entry);
+        entry.waiters.clear();
+      },
+    );
+    this.storageManager.trackUntilSettled(tracked);
   }
 
   #observeStorageConnection(
@@ -2921,13 +2972,20 @@ export class Runtime {
   }
 
   /**
-   * Creates a storage transaction that can be used to read / write data into
-   * locally replicated memory spaces. Transaction allows reading from many
-   * multiple spaces but writing only to one space.
+   * Runs `fn` in a storage transaction over locally replicated memory spaces.
+   * The transaction can read from multiple spaces but write to only one.
    *
-   * If the transaction fails with a RETRYABLE commit rejection, it will be
-   * retried up to maxRetries times. Retryability is decided by the shared
-   * rejection vocabulary (`isRetryableCommitRejection`, storage/rejection.ts),
+   * After `fn` returns, while retry budget remains, the runtime may load
+   * documents read as absent that the replica has not examined. If any exist,
+   * it aborts the staged attempt and invokes `fn` with a fresh transaction
+   * before sending a commit. These reconciliation re-runs and retries after
+   * commit rejection share one `maxRetries` budget, in addition to the initial
+   * invocation. With no budget left, reconciliation is skipped and the current
+   * transaction proceeds to ordinary commit validation.
+   *
+   * A retryable commit rejection also re-runs `fn` while budget remains.
+   * Retryability is decided by the shared rejection vocabulary
+   * (`isRetryableCommitRejection`, `storage/rejection.ts`),
    * which is an allow-list: a stale basis (server conflict or the local
    * inconsistency guard), a liveness failure the memory client heals on its own
    * (a transport failure, an undecodable frame), a discarded attempt
@@ -2937,10 +2995,10 @@ export class Runtime {
    * authorization denial, a precondition failure, a commit-rule violation, a
    * CFC boundary refusal (`CfcCommitRefusalError`, a deterministic verdict on
    * the transaction's own reads and writes), a `SessionError` (nothing on this
-   * path remounts the session, so
-   * every attempt reuses the handle the server just refused) — is returned on
-   * the FIRST attempt, because re-running cannot change the outcome and each
-   * doomed attempt costs a round-trip plus a subscriber revert notification.
+   * path remounts the session, so every attempt reuses the handle the server
+   * just refused) — is returned without another retry, because re-running
+   * cannot change the outcome and each doomed attempt costs a round-trip plus
+   * a subscriber revert notification.
    *
    * Every retry invokes `fn` again with a fresh transaction. Aborting an
    * attempt discards only the operations staged in that transaction; an effect
@@ -2957,7 +3015,8 @@ export class Runtime {
    * stages nothing before it declines.
    *
    * @param fn - Function to execute with the transaction.
-   * @param maxRetries - Maximum number of retries.
+   * @param maxRetries - Maximum combined number of reconciliation re-runs and
+   *   commit-rejection retries after the initial invocation.
    * @returns `{ ok }` once the transaction commits, carrying whatever `fn`
    *   returned, or `{ error }` when it does not commit: a rejection that is not
    *   retryable, a retryable one whose retries are spent, or `fn` itself
@@ -3345,59 +3404,24 @@ export class Runtime {
     }
   }
 
+  /**
+   * Settles whether `tx` is CFC-relevant and prepares it when it is, by
+   * forwarding to `tx.prepareForCommit()`, which carries the step.
+   *
+   * `commit()` runs the same step, so calling this is never what decides
+   * whether the transaction is enforced. Call it where the commit's caller
+   * reads what prepare produces before the commit runs: the CFC outbox the
+   * scheduler counts as post-commit work, and the label-map writes that a
+   * reactivity log built before the commit carries.
+   *
+   * It stays a method on the runtime because a caller's prepare is
+   * replaceable per runtime instance through it: the scheduler's backstop
+   * for a throw out of prepare, and the cases that stand in for a caller
+   * that never prepares, are exercised by replacing it here rather than by
+   * patching every transaction the process makes.
+   */
   prepareTxForCommit(tx: IExtendedStorageTransaction): void {
-    // A transaction that is no longer open takes no prepare work, because it
-    // can no longer commit. Everything below reaches storage through the
-    // transaction: the flow probe reads stored metadata, and prepareCfc reads
-    // and writes the derived label map. A settled transaction refuses both,
-    // and its commit reports the terminal state as the result.
-    if (tx.status().status !== "ready") {
-      return;
-    }
-    const state = tx.getCfcState();
-    if (state.enforcementMode === "disabled") {
-      // A vouched ingest still needs its provenance mark minted even where CFC
-      // enforcement is disabled (an explicit `cfcEnforcementMode: "disabled"`
-      // opt-in — no shipped host today; toolshed passes no CFC options and so
-      // runs the enforce-explicit default). The mint
-      // is a builtin-authored boundary-commit step that never rejects, so run
-      // prepare for it explicitly rather than forcing the enforcement dial up
-      // (which would desync ingest txs from the runtime's real mode). The
-      // stamp already marked the tx relevant; nothing else here applies when
-      // disabled, so fall straight through to prepareCfc.
-      if (externalIngestStamp(tx) !== undefined) {
-        if (state.prepare.status === "unprepared") {
-          tx.prepareCfc();
-        }
-      }
-      return;
-    }
-    // Flow-label relevance is computed, not caller-marked (S16): the
-    // laundering txs are exactly the ones nothing marked relevant.
-    // Stage C tuning T1: probed ONCE per transaction activity epoch — the
-    // commit chokepoint re-uses this call's negative verdict (see
-    // IExtendedStorageTransaction.probeFlowLabelWork).
-    if (
-      !state.relevant &&
-      state.flowLabelsMode !== "off" &&
-      (tx.probeFlowLabelWork?.() ?? flowLabelWorkExists(tx))
-    ) {
-      tx.markCfcRelevant("flow-labels");
-    }
-    // Sink-request ceiling relevance is also computed, not caller-marked
-    // (audit item 21): a request assembled from a value pulled through a
-    // schema-less link marks nothing, so without this the egress commits
-    // without `prepareCfc` and the ceiling is never checked. Independent of
-    // the flow dial — the ceiling enforces even when flow labels are off.
-    if (!state.relevant && gatedSinkRequestExists(tx)) {
-      tx.markCfcRelevant("sink-request-ceiling");
-    }
-    if (!state.relevant) {
-      return;
-    }
-    if (state.prepare.status === "unprepared") {
-      tx.prepareCfc();
-    }
+    tx.prepareForCommit();
   }
 
   /**

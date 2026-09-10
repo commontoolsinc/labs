@@ -757,7 +757,11 @@ describe("stream-data outbox mechanism", () => {
     );
 
     const rejectedTx = runtime.edit();
-    refuseAtCommitBoundary(rejectedTx, "streamData retry regression");
+    refuseAtCommitBoundary(
+      rejectedTx,
+      space,
+      "streamData retry regression",
+    );
     action(rejectedTx);
     const rejectedResult = await rejectedTx.commit();
     expect(isCfcEnforcementRejection(rejectedResult.error)).toBe(true);

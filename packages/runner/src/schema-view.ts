@@ -43,6 +43,7 @@ import type {
 import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model-schema";
 import { FabricPrimitive } from "@commonfabric/data-model";
 import type { FabricValue } from "@commonfabric/data-model";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
@@ -521,6 +522,14 @@ export function materializeSchemaView(
         `expected ${JSON.stringify(schema.type)}, found ${actualType}`,
       );
     }
+  }
+
+  // Availability markers are control-flow leaves, not user containers. The
+  // eager traverser preserves them through any declared result schema; the
+  // lazy view must make the same decision before its container-shape checks.
+  if (isDataUnavailable(value)) {
+    tx.readValueOrThrow(link, { nonRecursive: true });
+    return value;
   }
 
   // An opaque leaf still owes the schema's `required` keys. A `FabricPrimitive`

@@ -95,16 +95,25 @@ Deno.test("resolveCfcEnforcementMode can inherit from a run manifest", () => {
 });
 
 Deno.test("resolveCfcEnforcementMode ignores malformed in-memory run manifest modes", () => {
+  const manifest = {
+    type: "cf-harness.loom-run-manifest",
+    version: 1,
+    source: "loom",
+  } as const;
+  const malformed = {
+    ...manifest,
+    cfc: { enforcementMode: "bogus" as CfcEnforcementMode },
+  };
+  // A mode nothing parses contributes nothing: the resolution is the one the
+  // same manifest gets naming no mode at all, and the source is `default`.
   assertEquals(
-    resolveCfcEnforcementMode({
-      runManifest: {
-        type: "cf-harness.loom-run-manifest",
-        version: 1,
-        source: "loom",
-        cfc: { enforcementMode: "bogus" as CfcEnforcementMode },
-      },
-    }),
-    DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE,
+    resolveCfcEnforcementMode({ runManifest: malformed }),
+    resolveCfcEnforcementMode({ runManifest: manifest }),
+  );
+  // And the source says so: the manifest decided nothing.
+  assertEquals(
+    resolveCfcEnforcementModeSource({ runManifest: malformed }),
+    "default",
   );
 });
 

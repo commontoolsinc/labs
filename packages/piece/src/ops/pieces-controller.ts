@@ -93,6 +93,10 @@ import {
   assertWritablePiecePath,
   PieceController,
 } from "./piece-controller.ts";
+import {
+  assertPieceInputPath,
+  PieceInputPathError,
+} from "./piece-input-path.ts";
 import { reconcilePieceSource } from "./piece-origin.ts";
 import { compileProgram } from "./utils.ts";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
@@ -1727,19 +1731,18 @@ export class PiecesController<T = unknown> {
   }
 
   /**
-   * Set the target cell's argument cell at target path to be a link to the
-   * link cell's content at linkPath.
+   * Links the source result at `linkPath` into the target argument at
+   * `targetPath`. A target piece must declare the path in its current input
+   * schema; raw cell targets accept paths without a piece-schema check.
    *
    * Piece inputs validate the binding against durable producer metadata in
    * the write transaction. Sources without that metadata remain dynamic
    * bindings without a static producer-contract proof. Binding a Stream
    * stores its handle; it does not send an event.
    *
-   * @param linkPieceId
-   * @param linkPath
-   * @param targetPieceId
-   * @param targetPath
-   * @param options
+   * @throws {PieceInputPathError} If the target piece's input schema does not
+   * expose the path. Update its source with `cf piece setsrc` to declare the
+   * input before linking it.
    */
   async link(
     linkPieceId: string,
@@ -1799,6 +1802,7 @@ export class PiecesController<T = unknown> {
           undefined,
           tx,
         );
+        assertPieceInputPath(targetInputCell, targetPath);
         const targetSchema = targetArgumentLink.schema ?? true;
         assertWritablePiecePath(
           targetSchema,
@@ -1825,6 +1829,12 @@ export class PiecesController<T = unknown> {
       );
     });
     if (result.error) {
+      if (
+        result.error.name === "StorageTransactionAborted" &&
+        result.error.reason instanceof PieceInputPathError
+      ) {
+        throw result.error.reason;
+      }
       throw new Error(
         `Cannot link ${linkPieceId}/${linkPath.join("/")} to ${targetPieceId}/${
           targetPath.join("/")

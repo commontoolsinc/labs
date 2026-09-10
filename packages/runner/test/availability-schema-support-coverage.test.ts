@@ -9,7 +9,6 @@ import { Runtime } from "../src/runtime.ts";
 import { validateAndTransformResult } from "../src/schema.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { isInternalVerifierRead } from "../src/storage/reactivity-log.ts";
-import { InvalidDataURIError } from "../src/storage/transaction/attestation.ts";
 import {
   assertValidUnavailableInputPolicy,
 } from "../src/unavailable-input-policy.ts";
@@ -101,13 +100,13 @@ describe("availability schema support coverage", () => {
     );
     source.set(42);
 
-    const originalRead = tx.read.bind(tx);
-    tx.read = ((address, options) => {
+    const originalReadOrThrow = tx.readOrThrow.bind(tx);
+    tx.readOrThrow = ((address, options) => {
       if (isInternalVerifierRead(options?.meta)) {
-        return { error: InvalidDataURIError("unexpected verifier failure") };
+        throw new Error("unexpected verifier failure");
       }
-      return originalRead(address, options);
-    }) as IExtendedStorageTransaction["read"];
+      return originalReadOrThrow(address, options);
+    }) as IExtendedStorageTransaction["readOrThrow"];
 
     expect(() =>
       validateAndTransformResult(

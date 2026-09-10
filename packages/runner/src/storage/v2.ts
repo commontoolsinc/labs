@@ -1,5 +1,9 @@
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
-import { cloneIfNecessary, hashStringOf } from "@commonfabric/data-model";
+import {
+  cloneIfNecessary,
+  hashStringOf,
+  isKeyableObjectOrArray,
+} from "@commonfabric/data-model";
 import {
   hasDataUriScheme,
   valueFromDataUri,
@@ -1899,6 +1903,20 @@ export class StorageManager implements IStorageManager {
         this.#connectionStates.clear();
         return;
       }
+      // Teardown itself owns the terminal transition. A provider may still be
+      // waiting for its session factory, so relying on that late session's
+      // client.close() notification would leave subscribers stuck at idle (or
+      // lost) until the factory eventually settles. Publishing first also
+      // makes #publishConnectionState's terminal guard reject a late ready.
+      const closeCause = new Error("storage manager closed");
+      for (const space of this.#providers.keys()) {
+        const epoch = this.#connectionStates.get(space)?.epoch ?? 0;
+        this.#publishConnectionState(space, {
+          status: "closed",
+          epoch,
+          cause: closeCause,
+        });
+      }
       // allSettled: one rejecting teardown must not release the lease (the
       // finally below) while sibling teardowns are still draining frames.
       const outcomes = await Promise.allSettled(
@@ -1927,6 +1945,15 @@ export class StorageManager implements IStorageManager {
       if (this.#providers.size === 0) {
         this.#connectionStates.clear();
         return;
+      }
+      const closeCause = new Error("storage manager closed");
+      for (const space of this.#providers.keys()) {
+        const epoch = this.#connectionStates.get(space)?.epoch ?? 0;
+        this.#publishConnectionState(space, {
+          status: "closed",
+          epoch,
+          cause: closeCause,
+        });
       }
       const outcomes = await Promise.allSettled(
         [...this.#providers.values()].map((provider) => provider.destroyNow()),
@@ -2582,12 +2609,12 @@ export class StorageManager implements IStorageManager {
       return;
     }
 
-    // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, whose
-    // `Object.keys` are empty, so a cell link held inside a `FabricInstance`
-    // reconstructed from the data URI is never found here and its target
-    // document is never synced — the later read finds it absent. (A
-    // `FabricPrimitive` ends the walk harmlessly; it is a leaf.)
-    if (isObjectOrArray(value)) {
+    // TODO(danfuzz): the walk stops at a `FabricSpecialObject`, so a cell link
+    // held inside a `FabricInstance` reconstructed from the data URI is never
+    // found here and its target document is never synced — the later read
+    // finds it absent. (Stopping at a `FabricPrimitive` costs nothing; it is a
+    // leaf.)
+    if (isKeyableObjectOrArray(value)) {
       for (const key of Object.keys(value)) {
         const child = value[key];
         if (

@@ -4,6 +4,7 @@ import { createSession, Identity } from "@commonfabric/identity";
 import { defer } from "@commonfabric/utils/defer";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
+  type Cell,
   getPatternIdentityRef,
   getPatternSource,
   getPieceReconciliation,
@@ -19,6 +20,7 @@ import {
   readPieceSourceState,
   reconcilePieceSource,
 } from "../src/ops/piece-origin.ts";
+import type { PieceController } from "../src/ops/piece-controller.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
@@ -1249,13 +1251,29 @@ describe("piece source lifecycle", () => {
     expect(await piece.result.get(["version"])).toBe("reviewed");
   });
 
+  /** Seeds retained input authored by a client that bypassed piece projection. */
+  async function seedLegacyModeLink(
+    piece: PieceController,
+    source: Cell<unknown>,
+  ) {
+    const input = await piece.input.getCell();
+    const write = await runtime.editWithRetry((tx) => {
+      input.withTx(tx).key("mode").setRawUntyped(source.getAsLink({
+        base: input,
+        includeSchema: true,
+      }));
+    });
+    expect(write.error).toBeUndefined();
+    await pieces.synced();
+  }
+
   it("offers confirmation for a retained-link incompatibility", async () => {
     const source = await pieces.create(unionValueProgram(), { input: {} });
     const piece = await pieces.create(optionalModeProgram(1), {
       input: { value: 4 },
     });
     const sourceResult = await source.result.getCell();
-    await piece.input.set(sourceResult.key("value"), ["mode"]);
+    await seedLegacyModeLink(piece, sourceResult.key("value"));
 
     const origin = "system:linked.tsx";
     await stampOrigin(piece, origin);
@@ -1366,9 +1384,9 @@ describe("piece source lifecycle", () => {
     const piece = await pieces.create(optionalModeProgram(1), {
       input: { value: 4 },
     });
-    await piece.input.set(
+    await seedLegacyModeLink(
+      piece,
       (await source.result.getCell()).key("value"),
-      ["mode"],
     );
 
     const origin = "system:combined-warning.tsx";
@@ -1405,9 +1423,9 @@ describe("piece source lifecycle", () => {
     const piece = await pieces.create(optionalModeProgram(1), {
       input: { value: 4 },
     });
-    await piece.input.set(
+    await seedLegacyModeLink(
+      piece,
       (await firstSource.result.getCell()).key("value"),
-      ["mode"],
     );
 
     const origin = "system:changed-link.tsx";
@@ -1428,9 +1446,9 @@ describe("piece source lifecycle", () => {
     if (firstWarning.status !== "incompatible") {
       throw new Error("expected an incompatibility warning");
     }
-    await piece.input.set(
+    await seedLegacyModeLink(
+      piece,
       (await secondSource.result.getCell()).key("value"),
-      ["mode"],
     );
 
     const secondWarning = await piece.changeSource(action, {
@@ -1457,9 +1475,9 @@ describe("piece source lifecycle", () => {
     const piece = await pieces.create(optionalModeProgram(1), {
       input: { value: 4 },
     });
-    await piece.input.set(
+    await seedLegacyModeLink(
+      piece,
       (await source.result.getCell()).key("value"),
-      ["mode"],
     );
     const origin = "system:resolved-link.tsx";
     await stampOrigin(piece, origin);
@@ -1497,9 +1515,9 @@ describe("piece source lifecycle", () => {
     const piece = await pieces.create(optionalModeProgram(1), {
       input: { value: 4 },
     });
-    await piece.input.set(
+    await seedLegacyModeLink(
+      piece,
       (await firstSource.result.getCell()).key("value"),
-      ["mode"],
     );
     const origin = "system:execution-race.tsx";
     await stampOrigin(piece, origin);
@@ -1523,9 +1541,9 @@ describe("piece source lifecycle", () => {
     };
     const runWithPattern = pieces.runWithPattern.bind(pieces);
     mutablePieces.runWithPattern = async (...args) => {
-      await piece.input.set(
+      await seedLegacyModeLink(
+        piece,
         (await secondSource.result.getCell()).key("value"),
-        ["mode"],
       );
       return await runWithPattern(...args);
     };
@@ -1547,9 +1565,9 @@ describe("piece source lifecycle", () => {
     const piece = await pieces.create(optionalModeProgram(1), {
       input: { value: 4 },
     });
-    await piece.input.set(
+    await seedLegacyModeLink(
+      piece,
       (await source.result.getCell()).key("value"),
-      ["mode"],
     );
     const origin = "system:missing-argument.tsx";
     await stampOrigin(piece, origin);
@@ -1612,9 +1630,9 @@ describe("piece source lifecycle", () => {
     };
     const runWithPattern = pieces.runWithPattern.bind(pieces);
     mutablePieces.runWithPattern = async (...args) => {
-      await piece.input.set(
+      await seedLegacyModeLink(
+        piece,
         (await source.result.getCell()).key("value"),
-        ["mode"],
       );
       return await runWithPattern(...args);
     };

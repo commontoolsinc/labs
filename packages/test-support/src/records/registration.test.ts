@@ -16,6 +16,7 @@ import {
   registeringModule,
   relativeToRoot,
   repositoryRootOf,
+  runDirectory,
   serializeSkipList,
 } from "./registration.ts";
 // Imported for what loading it declares: the shared fixture runner calls
@@ -32,11 +33,12 @@ const FIXTURE_RUNNER = new URL("../fixture-runner.ts", import.meta.url).href;
 async function writeNameMap(
   dir: string,
   label: string,
-  map: Record<string, unknown>,
+  names: Record<string, unknown>,
+  ranIn?: string,
 ): Promise<void> {
   await Deno.writeTextFile(
     join(dir, `${NAME_MAP_PREFIX}${label}${NAME_MAP_SUFFIX}`),
-    JSON.stringify(map),
+    JSON.stringify({ ...(ranIn === undefined ? {} : { dir: ranIn }), names }),
   );
 }
 
@@ -253,11 +255,101 @@ describe("registration", () => {
         });
         expect((await readNameMaps(dir)).get("shared")).toBeUndefined();
         expect(
-          (await readNameMaps(dir, { within: "packages/a" })).get("shared"),
+          (await readNameMaps(dir, { ranIn: "packages/a" })).get("shared"),
         ).toBe("packages/a/one.test.ts");
         expect(
-          (await readNameMaps(dir, { within: "packages/b/" })).get("shared"),
+          (await readNameMaps(dir, { ranIn: "packages/b/" })).get("shared"),
         ).toBe("packages/b/two.test.ts");
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("keeps a file outside the scope from a map written there", async () => {
+      // A test task may name a file anywhere in the tree — the one that
+      // holds the repository tools' own regression tests does — so a map
+      // the scope's own process wrote is read whole.
+
+      const dir = await Deno.makeTempDir();
+      try {
+        await writeNameMap(
+          dir,
+          "01",
+          { "tools > wraps": "tools/wrap.test.ts" },
+          "packages/a",
+        );
+        expect(
+          (await readNameMaps(dir, { ranIn: "packages/a" })).get(
+            "tools > wraps",
+          ),
+        ).toBe("tools/wrap.test.ts");
+        // Another package's read is not offered it.
+        expect(
+          (await readNameMaps(dir, { ranIn: "packages/b" })).get(
+            "tools > wraps",
+          ),
+        ).toBeUndefined();
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("takes nothing from a map another directory wrote", async () => {
+      // Its files say nothing about whose names they are: what the
+      // scope's own process registered is what the scope's read wants,
+      // and a name the two disagree on would otherwise be dropped from
+      // both.
+
+      const dir = await Deno.makeTempDir();
+      try {
+        await writeNameMap(
+          dir,
+          "01",
+          { shared: "packages/a/one.test.ts" },
+          "packages/a",
+        );
+        await writeNameMap(
+          dir,
+          "02",
+          { shared: "packages/a/two.test.ts" },
+          "packages/b",
+        );
+        expect(
+          (await readNameMaps(dir, { ranIn: "packages/a" })).get("shared"),
+        ).toBe("packages/a/one.test.ts");
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("takes every file of a map naming no directory at the root", async () => {
+      // The empty string is the repository root, which every
+      // repository-relative file sits under.
+
+      const dir = await Deno.makeTempDir();
+      try {
+        await writeNameMap(dir, "01", {
+          inside: "packages/a/one.test.ts",
+          outside: "tools/wrap.test.ts",
+        });
+        const names = await readNameMaps(dir, { ranIn: "" });
+        expect(names.get("inside")).toBe("packages/a/one.test.ts");
+        expect(names.get("outside")).toBe("tools/wrap.test.ts");
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("judges a map naming no directory by its files alone", async () => {
+      const dir = await Deno.makeTempDir();
+      try {
+        await writeNameMap(dir, "01", {
+          inside: "packages/a/one.test.ts",
+          outside: "tools/wrap.test.ts",
+        });
+        const names = await readNameMaps(dir, { ranIn: "packages/a" });
+        expect(names.get("inside")).toBe("packages/a/one.test.ts");
+        expect(names.get("outside")).toBeUndefined();
       } finally {
         await Deno.remove(dir, { recursive: true });
       }
@@ -410,7 +502,11 @@ describe("what the capture does with what it cannot read", () => {
         join(dir, `${NAME_MAP_PREFIX}03${NAME_MAP_SUFFIX}`),
         "null",
       );
-      await writeNameMap(dir, "04", { one: "packages/a/one.test.ts" });
+      await Deno.writeTextFile(
+        join(dir, `${NAME_MAP_PREFIX}04${NAME_MAP_SUFFIX}`),
+        JSON.stringify({ names: ["a name"] }),
+      );
+      await writeNameMap(dir, "05", { one: "packages/a/one.test.ts" });
       const names = await readNameMaps(dir);
       expect([...names.keys()]).toEqual(["one"]);
     } finally {
@@ -423,7 +519,9 @@ describe("what the capture does with what it cannot read", () => {
     try {
       await Deno.writeTextFile(
         join(dir, `${NAME_MAP_PREFIX}01${NAME_MAP_SUFFIX}`),
-        JSON.stringify({ a: 7, b: "", c: "packages/a/one.test.ts" }),
+        JSON.stringify({
+          names: { a: 7, b: "", c: "packages/a/one.test.ts" },
+        }),
       );
       const names = await readNameMaps(dir);
       expect([...names.keys()]).toEqual(["c"]);
@@ -456,6 +554,20 @@ describe("repositoryRootOf()", () => {
     } finally {
       await Deno.remove(outside, { recursive: true });
     }
+  });
+});
+
+describe("runDirectory()", () => {
+  it("names the working directory as the repository sees it", () => {
+    const dir = runDirectory();
+    expect(dir).toBeDefined();
+    // Repository-relative, so that a caller can compare it against a
+    // workspace member's path: it neither starts at the filesystem root
+    // nor climbs out of the repository.
+    expect(dir!.startsWith("/")).toBe(false);
+    expect(dir!.split("/")).not.toContain("..");
+    const root = repositoryRootOf(join(Deno.cwd(), "a.ts"));
+    expect(join(root!, dir!)).toBe(Deno.cwd());
   });
 });
 
@@ -518,6 +630,47 @@ describe("what the capture does when it cannot write", () => {
       capture.flush();
       const names = await readNameMaps(spool);
       expect(names.get("a test")).toBe("packages/a/one.test.ts");
+    } finally {
+      await Deno.remove(spool, { recursive: true });
+    }
+  });
+
+  it("writes the directory it was told it was running in", async () => {
+    const spool = await Deno.makeTempDir();
+    try {
+      const { capture } = buildCapture({
+        registrar,
+        spool,
+        dir: "packages/b",
+      });
+      capture.names.set("a test", "tools/one.test.ts");
+      capture.flush();
+      // A read scoped to that directory takes the map whole, file and
+      // all, where a read scoped elsewhere is offered nothing: the file
+      // sits under neither directory.
+      expect(
+        (await readNameMaps(spool, { ranIn: "packages/b" })).get("a test"),
+      ).toBe("tools/one.test.ts");
+      expect(
+        (await readNameMaps(spool, { ranIn: "packages/a" })).get("a test"),
+      ).toBeUndefined();
+    } finally {
+      await Deno.remove(spool, { recursive: true });
+    }
+  });
+
+  it("writes the empty directory of a run at the repository root", async () => {
+    const spool = await Deno.makeTempDir();
+    try {
+      const { capture } = buildCapture({ registrar, spool, dir: "" });
+      capture.names.set("a test", "packages/a/one.test.ts");
+      capture.flush();
+      expect(
+        (await readNameMaps(spool, { ranIn: "" })).get("a test"),
+      ).toBe("packages/a/one.test.ts");
+      expect(
+        (await readNameMaps(spool, { ranIn: "packages/a" })).get("a test"),
+      ).toBeUndefined();
     } finally {
       await Deno.remove(spool, { recursive: true });
     }

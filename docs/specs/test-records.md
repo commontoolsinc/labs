@@ -29,7 +29,11 @@ A test's identity has three required parts, scoped within a repository:
   invented for it, named `global`, and every chain that file goes on to
   run opens with that name. A suite it registers as ignored is reported
   under its bare name. The runner keeps such a suite out of the root
-  suite and never runs its body.
+  suite and never runs its body. A `describe` or `it` call carrying no
+  name of its own is named after the body it was given, and a name the
+  call carries stands even where it is empty, so a chain can hold an
+  empty element. The runner refuses an empty name for the outermost
+  registration of a file, so an empty element is never the first.
 - **variant**, when present — a stable name for a non-default configuration
   that runs the same test. The default configuration has no variant. The
   server-execution deployed-topology lanes have stable `default` and
@@ -119,6 +123,18 @@ with that name. A suite title two files share says nothing about either
 and is dropped from the merged map; a leaf's whole chain is what usually
 survives that, and `global` is a title every file declaring such a hook
 shares.
+
+Every package of a workspace run writes into one spool, so each map also
+names the repository-relative directory its process ran in. A caller
+ingesting one package's report asks for that directory. A map naming it
+belongs to that package and is read whole, whatever files it names: a
+test task may name a file anywhere in the tree, and
+`packages/test-support` runs `tools/write-iframe-wrapper.test.ts`, two
+directories above itself. A map naming no directory at all is judged by
+its files instead, and contributes only those under the directory asked
+for. Either way the scope is applied before ambiguity is judged, or a
+name two packages happen to share would cost each of them a file it held
+unambiguously.
 
 The context line carries `schema` (this document describes version 1, the
 `v1` in object paths), a per-object ULID `reportId`, the canonical `repo`
