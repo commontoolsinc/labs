@@ -110,7 +110,11 @@ function buildCounterPiece(
   documentId: string;
   total: () => number;
   invocations: () => number;
-  queueAdd: (value: number, eventId: string) => void;
+  queueAdd: (
+    value: number,
+    eventId: string,
+    onCommit?: (tx: IExtendedStorageTransaction) => void,
+  ) => void;
 } {
   const { commonfabric } = createTrustedBuilder(runtime);
   const { cell, handler, pattern } = commonfabric;
@@ -126,7 +130,7 @@ function buildCounterPiece(
     },
     (event, { effects }) => {
       invocations++;
-      events.push(`attempt-${invocations}`);
+      events.push(`run:${event.value}`);
       const total = effects.key("total");
       total.set(total.get() + event.value);
     },
@@ -151,12 +155,12 @@ function buildCounterPiece(
     documentId: resolved("effects").id,
     total: () => (root.key("effects").key("total") as Cell<number>).get() ?? 0,
     invocations: () => invocations,
-    queueAdd: (value, eventId) => {
+    queueAdd: (value, eventId, onCommit) => {
       runtime.scheduler.queueEvent(
         resolved("stream"),
         { value },
         undefined,
-        undefined,
+        onCommit,
         false,
         { eventId },
       );
@@ -172,12 +176,14 @@ describe("scheduler event retry readiness", () => {
   // pending-commit barrier open for the whole wait.
   //
   // Under the auto-advancing fake clock the backoff step is the only wait
-  // an ungated requeue has, and `clock.tick` moves logical time past every
-  // step the policy below can produce. So the barrier for the negative
-  // cases is a tick past the backoff followed by a scheduler drain: a
-  // requeue that did not wait for readiness has dispatched by then, which
-  // the release step of each case confirms by observing exactly that
-  // dispatch once the gate opens.
+  // a requeue has besides its readiness, and `clock.tick` moves logical
+  // time past every step the policy below can produce while draining the
+  // zero-delay execution tick the wake timer queues. So the barrier for the
+  // negative cases is a tick past the backoff: a requeue that did not wait
+  // for readiness has dispatched by then, which the release step of each
+  // case confirms by observing exactly that dispatch once the gate opens.
+  // `runtime.idle()` is not the barrier here — it holds on the parked head
+  // for as long as the gate does, which the last case pins.
 
   const backoff = {
     baseDelayMs: 1,
@@ -224,18 +230,13 @@ describe("scheduler event retry readiness", () => {
       await gateAwaited.promise;
 
       await clock.tick(pastEveryBackoffStep);
-      await runtime.idle();
       expect(piece.invocations()).toBe(1);
       expect(piece.total()).toBe(0);
 
       gate.resolve();
       await runtime.scheduler.idleWithPendingCommits();
 
-      expect(events).toEqual([
-        "attempt-1",
-        "readiness-awaited",
-        "attempt-2",
-      ]);
+      expect(events).toEqual(["run:3", "readiness-awaited", "run:3"]);
       expect(injector.refusals()).toBe(1);
       expect(piece.total()).toBe(3);
     } finally {
@@ -271,7 +272,6 @@ describe("scheduler event retry readiness", () => {
         .then(() => "released" as const);
 
       await clock.tick(pastEveryBackoffStep);
-      await runtime.idle();
       // `barrier` is listed first, so a barrier that already released wins
       // the race over the settled sentinel.
       expect(await Promise.race([barrier, Promise.resolve("held" as const)]))
@@ -305,15 +305,99 @@ describe("scheduler event retry readiness", () => {
       await runtime.scheduler.idleWithPendingCommits();
 
       expect(events).toEqual([
-        "attempt-1",
+        "run:3",
         "readiness-awaited",
         `sync:${piece.documentId}`,
-        "attempt-2",
+        "run:3",
       ]);
       expect(piece.total()).toBe(3);
     } finally {
       injector.restore();
       syncs.restore();
     }
+  });
+
+  it("holds a later event behind the retry until the retry has run", async () => {
+    // The retry keeps its FIFO slot for the wait. Without that, a follower
+    // sent after the rejection would run and commit first, and the retry
+    // would then land over it — an event overtaking one sent before it.
+    const events: string[] = [];
+    const piece = buildCounterPiece(runtime, tx, "readiness-fifo-root", events);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    const gate = Promise.withResolvers<void>();
+    const gateAwaited = Promise.withResolvers<void>();
+    const injector = refuseFirstEventCommit(
+      runtime,
+      staleReadRefusal(piece.documentId, () => {
+        events.push("readiness-awaited");
+        gateAwaited.resolve();
+        return gate.promise;
+      }),
+    );
+    try {
+      piece.queueAdd(3, "evt:readiness-fifo:0:readiness-fifo-root");
+      await gateAwaited.promise;
+      piece.queueAdd(4, "evt:readiness-fifo:1:readiness-fifo-root");
+      const idle = runtime.idle().then(() => "released" as const);
+
+      await clock.tick(pastEveryBackoffStep);
+      expect(events).toEqual(["run:3", "readiness-awaited"]);
+      expect(await Promise.race([idle, Promise.resolve("held" as const)]))
+        .toBe("held");
+
+      gate.resolve();
+      expect(await idle).toBe("released");
+      await runtime.scheduler.idleWithPendingCommits();
+
+      expect(events).toEqual(["run:3", "readiness-awaited", "run:3", "run:4"]);
+      expect(piece.total()).toBe(7);
+    } finally {
+      injector.restore();
+    }
+  });
+
+  it("drops the retry when the runtime closes its storage during the wait", async () => {
+    // A runtime of this case's own, since disposing it closes its storage.
+    // Closing tears down writes before anything is drained, so the wait
+    // returns at the teardown and the retry ends there: the event leaves the
+    // queue, its commit callback settles on the refused transaction, and
+    // the handler does not run again.
+    const own = createSchedulerTestRuntime(import.meta.url, {
+      commitBackpressure: backoff,
+    });
+    const events: string[] = [];
+    const piece = buildCounterPiece(
+      own.runtime,
+      own.tx,
+      "readiness-teardown-root",
+      events,
+    );
+    await own.tx.commit();
+    await own.runtime.idle();
+
+    const gate = Promise.withResolvers<void>();
+    const gateAwaited = Promise.withResolvers<void>();
+    refuseFirstEventCommit(
+      own.runtime,
+      staleReadRefusal(piece.documentId, () => {
+        events.push("readiness-awaited");
+        gateAwaited.resolve();
+        return gate.promise;
+      }),
+    );
+    piece.queueAdd(
+      3,
+      "evt:readiness-teardown:0:readiness-teardown-root",
+      (tx) => events.push(`callback:${tx.status().status}`),
+    );
+    await gateAwaited.promise;
+
+    await own.runtime.dispose();
+
+    expect(events).toEqual(["run:3", "readiness-awaited", "callback:error"]);
+    expect(piece.invocations()).toBe(1);
   });
 });

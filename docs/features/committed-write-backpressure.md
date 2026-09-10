@@ -90,23 +90,29 @@ The event-handler commit path classifies each commit result and acts on it
   `settled()` already wait for a parked head event, so a write that converges
   still completes within a settle.
 
-  The re-run needs the fresh state it is re-running against, so the requeue
-  waits for it before the event re-enters the queue: the replica's catch-up
-  to the conflict point (the rejection's `readyToRetry` gate, which the wire
+  The re-run needs the fresh state it is re-running against, so the requeued
+  event holds its slot until that state arrives: the replica's catch-up to
+  the conflict point (the rejection's `readyToRetry` gate, which the wire
   attaches to a `ConflictError`) and a pull of the document the conflict
   names (`Runtime.awaitCommitRetryReadiness`, the readiness `editWithRetry`
-  and the reactive path await before their own re-runs). The backoff step is
-  the pacing floor under that wait: the step's `notBefore` is fixed when the
-  rejection is classified, so a readiness that outlasts the delay dispatches
-  the re-run as soon as it resolves, and one that resolves sooner leaves the
-  event parked until the step elapses. The retry window is unaffected either
-  way, since the deadline rides the requeued event. The wait is part of the
+  and the reactive path await before their own re-runs). The event re-enters
+  the queue at once, in send order, marked `retryReadinessPending`; dispatch
+  passes over it and `idle()` stays open as for any parked head, so a later
+  event cannot overtake the retry, and a cascade victim whose own readiness
+  resolves sooner queues up behind it. The backoff step is the pacing floor
+  under that wait: the step's `notBefore` is fixed when the rejection is
+  classified, so a readiness that outlasts the delay dispatches the re-run as
+  soon as it resolves, and one that resolves sooner leaves the event parked
+  until the step elapses. The retry window is unaffected either way, since
+  the deadline rides the requeued event. The wait is also part of the
   commit's tracked chain, so the pending-commit barrier
-  (`idleWithPendingCommits`, and `settled()` through it) stays open until the
-  event is back in the queue rather than releasing between the rejection and
-  its requeue. A runtime that begins tearing down its writes during the wait
-  ends the retry instead: no re-run is coming, so the event's commit callback
-  and staged work settle as they do on the give-up path.
+  (`idleWithPendingCommits`, and `settled()` through it) stays open across
+  it. A runtime disposing with its storage kept open drains that barrier
+  before it tears down its writes, so the drain waits for the readiness the
+  way it waits for the reactive path's catch-up; a runtime closing its
+  storage tears down its writes first, and the wait then returns and the
+  event is dropped, its commit callback and staged work settling as they do
+  on the give-up path.
 - **Window elapsed without converging** — a terminal `CommitConvergenceError` is
   surfaced through the scheduler error channel (`scheduler.onError`). The write
   fails loudly rather than disappearing. This is the bounded-resource backstop:
@@ -276,9 +282,10 @@ must be actively retried rather than recovered by re-derivation.
 - `packages/runner/test/scheduler-event-retry-readiness.test.ts` — the wait
   ahead of the re-run. A refusal carrying a test-held `readyToRetry` gate
   shows no re-dispatch while the gate is held, once logical time has passed
-  every backoff step, and exactly one once it opens; the pending-commit
-  barrier stays open for the same hold; and the document the conflict names
-  is synced before the handler runs again.
+  every backoff step, and exactly one once it opens; a later event queued
+  during the hold runs only after the retry; the pending-commit barrier stays
+  open for the same hold; and the document the conflict names is synced
+  before the handler runs again.
 - `packages/runner/test/mergeable-append-multispace-conflict.test.ts` — a
   mergeable append survives a `StorageTransactionInconsistent` storm (windowed),
   and an `AuthorizationError` on the same commit fails fast without entering the
