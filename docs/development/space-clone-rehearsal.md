@@ -114,6 +114,15 @@ deno task cf inspect churn $DB --bucket 60 \
 deno task cf space reset $CLONE
 ```
 
+Run `cf piece setsrc --check` against the clone before applying, with the same
+source package and target flags. The check issues no storage writes and grants
+no new module authority. Its normal reads can demand server-side materialization
+when server execution is active, so use the clone's fingerprint to establish
+whether the baseline remains pristine. Apply can persist compilation artifacts
+even when setup refuses, so reset before repeating an apply rehearsal. A
+compatible check still needs the apply, render, and content verification below:
+it cannot prove future source currency or the running pattern's behavior.
+
 Add one `cf test` command and one `--test` flag for every authored test entry,
 and one `--datafile` flag for every attached data file. Run `setsrc` once per
 piece with the complete flag set: a rehearsal that omits part of the source
@@ -296,6 +305,17 @@ These are all failures that actually happened, not hypotheticals:
   creates space stores on demand, so a link to another space silently
   manufactures an empty local one. A pattern with cross-space reads will look
   cleaner on a clone than in production.
+- **`setsrc --check` and `piece restore` refuse a clone whose links leave the
+  space.** A voter or member link into a home space the snapshot does not
+  carry reads as absent on the clone (the point above), and the review those two
+  commands run judges the stored value strictly: `votes: 0: voter: value does
+  not match type object`, for the deployed source as much as for the candidate.
+  The apply path's setup defers such a link as a placeholder instead, so
+  rehearse the update with `setsrc` itself and read its receipt; on a clone of
+  this shape `--check` vouches for nothing. Nor can the CLI plant the missing
+  link by hand — `cf cell set` of a link into a profile is refused with "source
+  has no durable schema contract" — so a rehearsal that needs a participant
+  with a profile creates one through the UI against the clone.
 - **A clone tests the store and the runtime, not the deployment.** CDN and shell
   versions, and concurrent human traffic, are all absent.
   [`staging-space-copy.md`](staging-space-copy.md) is what covers that gap, at

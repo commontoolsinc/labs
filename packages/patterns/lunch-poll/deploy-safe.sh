@@ -36,6 +36,7 @@ tests=(
   "$root/lunch-poll/multi-user.test.tsx"
   "$root/lunch-poll/participant-identity-card.test.tsx"
   "$root/lunch-poll/poll-option-card.test.tsx"
+  "$root/lunch-poll/read-cost.test.tsx"
 )
 package_args=(--root "$root")
 for test_path in "${tests[@]}"; do

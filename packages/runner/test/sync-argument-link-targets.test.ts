@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import { Identity } from "@commonfabric/identity";
-import type { Cell } from "../src/cell.ts";
+import { type Cell, CellImpl } from "../src/cell.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -28,8 +29,10 @@ describe("syncArgumentLinkTargets", () => {
   // from walking it once. Sync counts cannot show it: documents dedupe
   // separately, so a doubled walk syncs the same documents.
   let walkedIds: string[];
+  let restoreRawReads: (() => void) | undefined;
 
   beforeEach(() => {
+    restoreRawReads = undefined;
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -46,32 +49,22 @@ describe("syncArgumentLinkTargets", () => {
       syncedIds.push(cell.getAsNormalizedFullLink().id);
       return original(cell);
     };
-    const originalFromLink = runtime.getCellFromLink.bind(runtime);
-    const counted = new WeakSet<object>();
-    (runtime as unknown as {
-      getCellFromLink: (...args: unknown[]) => Cell<unknown>;
-    }).getCellFromLink = (...args: unknown[]) => {
-      const cell = originalFromLink(
-        ...args as Parameters<typeof originalFromLink>,
-      );
-      if (!counted.has(cell)) {
-        counted.add(cell);
-        const originalGetRaw = cell.getRawUntyped.bind(cell);
-        Object.defineProperty(cell, "getRawUntyped", {
-          configurable: true,
-          value: () => {
-            walkedIds.push(cell.getAsNormalizedFullLink().id);
-            return originalGetRaw();
-          },
-        });
-      }
-      return cell;
-    };
+    const prototype = CellImpl.prototype;
+    const originalGetRaw = prototype.getRawUntyped;
+    const rawReads = stub(prototype, "getRawUntyped", function (
+      this: typeof prototype,
+      ...args: Parameters<typeof originalGetRaw>
+    ) {
+      walkedIds.push(this.getAsNormalizedFullLink().id);
+      return originalGetRaw.apply(this, args);
+    });
+    restoreRawReads = () => rawReads.restore();
   });
 
   afterEach(async () => {
-    await runtime.dispose();
-    await storageManager.close();
+    restoreRawReads?.();
+    await runtime?.dispose();
+    await storageManager?.close();
   });
 
   // A root document holding links under `a`, `b`, and `hidden`; the document

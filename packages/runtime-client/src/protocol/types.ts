@@ -276,6 +276,9 @@ export enum RequestType {
   /** Turns telemetry notifications on or off. */
   SetTelemetryEnabled = "runtime:setTelemetryEnabled",
 
+  /** Enables read measurements on subsequent reactive action bodies. */
+  SetReadStatsEnabled = "runtime:setReadStatsEnabled",
+
   /** Changes memory WebSocket compression without reconnecting. */
   SetMemoryMessageCompression = "runtime:setMemoryMessageCompression",
 
@@ -1579,6 +1582,13 @@ export type SetTelemetryEnabledRequest = BaseRequest & {
   enabled: boolean;
 };
 
+/** The {@link RequestType.SetReadStatsEnabled} request. */
+export type SetReadStatsEnabledRequest = BaseRequest & {
+  type: RequestType.SetReadStatsEnabled;
+  /** Whether subsequent reactive bodies record read counts. */
+  enabled: boolean;
+};
+
 /** The {@link RequestType.SetMemoryMessageCompression} request. */
 export type SetMemoryMessageCompressionRequest = BaseRequest & {
   type: RequestType.SetMemoryMessageCompression;
@@ -2843,6 +2853,7 @@ export type IPCClientRequest =
   | SetLoggerLevelRequest
   | SetLoggerEnabledRequest
   | SetTelemetryEnabledRequest
+  | SetReadStatsEnabledRequest
   | SetMemoryMessageCompressionRequest
   | SetForwardWorkerConsoleRequest
   | ResetLoggerBaselinesRequest
@@ -3559,6 +3570,10 @@ export type Commands = {
   };
   [RequestType.SetTelemetryEnabled]: {
     request: SetTelemetryEnabledRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.SetReadStatsEnabled]: {
+    request: SetReadStatsEnabledRequest;
     response: EmptyResponse;
   };
   [RequestType.SetMemoryMessageCompression]: {
