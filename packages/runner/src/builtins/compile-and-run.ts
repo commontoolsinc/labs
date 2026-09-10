@@ -152,6 +152,8 @@ export function compileAndRun(
         outputScope,
       );
       if (served && runtime.servingPosture) {
+        // The fixed node cause gives each scope one child registration,
+        // shared by every actor selecting a program in that scope.
         const scope = result.getAsNormalizedFullLink().scope ?? "space";
         if (!retainedChildScopes.has(scope)) {
           retainedChildScopes.add(scope);

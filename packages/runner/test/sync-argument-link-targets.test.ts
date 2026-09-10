@@ -29,9 +29,10 @@ describe("syncArgumentLinkTargets", () => {
   // from walking it once. Sync counts cannot show it: documents dedupe
   // separately, so a doubled walk syncs the same documents.
   let walkedIds: string[];
-  let restoreRawReads: () => void;
+  let restoreRawReads: (() => void) | undefined;
 
   beforeEach(() => {
+    restoreRawReads = undefined;
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -61,9 +62,9 @@ describe("syncArgumentLinkTargets", () => {
   });
 
   afterEach(async () => {
-    restoreRawReads();
-    await runtime.dispose();
-    await storageManager.close();
+    restoreRawReads?.();
+    await runtime?.dispose();
+    await storageManager?.close();
   });
 
   // A root document holding links under `a`, `b`, and `hidden`; the document

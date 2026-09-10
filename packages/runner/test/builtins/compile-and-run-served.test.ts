@@ -119,18 +119,38 @@ const PROGRAM: RuntimeProgram = {
 };
 
 describe("compile-and-run-served", () => {
-  it("publishes resolved output links for each acting user", async () => {
+  it("publishes resolved links in each acting user's transaction", async () => {
     const f = await fixture(true);
     const bob = await Identity.fromPassphrase("compile publication bob");
     try {
       expect(await f.run({ files: [], main: "" })).toBe(false);
-      expect(f.publication.key("pending").get()).toBe(false);
 
-      const tx = f.runtime.edit();
-      tx.tx.scopeKeyIdentity = { principal: bob.did(), sessionId: "bob" };
-      f.action(tx);
-      expect(f.publication.withTx(tx).key("pending").get()).toBe(false);
-      expect((await tx.commit()).error).toBeUndefined();
+      for (
+        const identity of [
+          f.runtime.scopeKeyIdentity,
+          { principal: bob.did(), sessionId: "bob" },
+        ]
+      ) {
+        const tx = f.runtime.edit();
+        tx.tx.scopeKeyIdentity = identity;
+        try {
+          f.action(tx);
+          const publication = f.publication.withTx(tx);
+          expect(publication.key("pending").get()).toBe(false);
+          expect(publication.key("result").get()).toBeUndefined();
+          expect(publication.key("error").get()).toBeUndefined();
+          expect(publication.key("errors").get()).toBeUndefined();
+          for (
+            const field of ["pending", "result", "error", "errors"] as const
+          ) {
+            expect(
+              publication.key(field).resolveAsCell().getAsNormalizedFullLink(),
+            ).toMatchObject(f.outputs[field].getAsNormalizedFullLink());
+          }
+        } finally {
+          tx.abort("Staged user publication inspected");
+        }
+      }
     } finally {
       await f.close();
     }

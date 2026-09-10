@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { resolveScopeKey } from "@commonfabric/memory/v2";
 import type { Cell } from "../../src/cell.ts";
 import type { ServerRunInfo } from "../../src/runtime.ts";
 import { txToReactivityLog } from "../../src/scheduler.ts";
@@ -121,6 +122,120 @@ describe("guarded-event-handlers", () => {
       { actionId: "a", eventId: `${alice}:1` },
       { actionId: "b", eventId: `${bob}:2` },
     ]);
+  });
+
+  it("supplies transient demand to every live candidate root at a shared stream", async () => {
+    register(implementation("unannotated"));
+    register(Object.assign(implementation("a"), {
+      schedulerObservationIdentity: {
+        pieceId: "piece-a",
+        pieceRootId: "of:piece-a",
+        demandRootIds: ["of:piece-a", "of:parent-a"],
+      },
+    }));
+    register(Object.assign(implementation("b"), {
+      schedulerObservationIdentity: {
+        pieceId: "piece-b",
+        pieceRootId: "of:piece-b",
+      },
+    }));
+    queue(alice, 1);
+    queue(bob, 2);
+    const actors = [
+      { principal: alice, sessionId: "session" },
+      { principal: bob, sessionId: "session" },
+    ];
+    expect(env.runtime.scheduler.transientEventDemandersFor(["of:piece-b"]))
+      .toEqual(actors);
+    expect(env.runtime.scheduler.transientEventDemandersFor(["of:piece-a"]))
+      .toEqual(actors);
+    expect(env.runtime.scheduler.transientEventDemandersFor(["of:parent-a"]))
+      .toEqual(actors);
+    await env.runtime.idle();
+    expect(calls).toEqual([`a:${alice}:1`, `b:${bob}:2`]);
+  });
+
+  it("keeps candidate roots demanded before program selection is materialized", async () => {
+    const arrivingActor = "did:key:guarded-arriving";
+    let selectionProbes = 0;
+    for (const key of ["a", "b"]) {
+      const candidate = implementation(key);
+      const matches = candidate.implementationSelection!.matches;
+      candidate.implementationSelection!.matches = (tx) => {
+        selectionProbes++;
+        return matches(tx);
+      };
+      register(Object.assign(candidate, {
+        schedulerObservationIdentity: {
+          pieceId: `piece-${key}`,
+          pieceRootId: `of:piece-${key}`,
+        },
+      }));
+    }
+    queue(arrivingActor, 1);
+    for (const root of ["of:piece-a", "of:piece-b"]) {
+      expect(env.runtime.scheduler.transientEventDemandersFor([root]))
+        .toEqual([{ principal: arrivingActor, sessionId: "session" }]);
+    }
+    expect(selectionProbes).toBe(0);
+    await env.runtime.idle();
+    expect(calls).toEqual([]);
+  });
+
+  it("updates candidate roots when a queued implementation is replaced or cancelled", async () => {
+    const withRoot = (key: string, root: string) =>
+      Object.assign(implementation(key), {
+        schedulerObservationIdentity: { pieceId: root, pieceRootId: root },
+      });
+    const cancelA = register(withRoot("a", "of:piece-a"));
+    const cancelOldB = register(withRoot("b", "of:old-b"));
+    queue(bob, 1);
+    register(withRoot("b", "of:new-b"));
+    cancelOldB();
+    cancelA();
+    expect(env.runtime.scheduler.transientEventDemandersFor([
+      "of:piece-a",
+      "of:old-b",
+    ])).toEqual([]);
+    expect(env.runtime.scheduler.transientEventDemandersFor(["of:new-b"]))
+      .toEqual([{ principal: bob, sessionId: "session" }]);
+    await env.runtime.idle();
+    expect(calls).toEqual([`b:${bob}:1`]);
+  });
+
+  it("preserves a userless event's explicit identity through selection and presync", async () => {
+    const userless = implementation("space");
+    userless.implementationSelection!.matches = (tx) => {
+      selection.withTx(tx).get();
+      const identity = tx.tx.scopeKeyIdentity;
+      return identity !== undefined && identity.principal === undefined;
+    };
+    userless.presyncInputs = (_event, identity) => {
+      expect(identity).toEqual({ principal: undefined, sessionId: undefined });
+      expect(resolveScopeKey("space", identity!)).toBe("space");
+      expect(() => resolveScopeKey("user", identity!)).toThrow(
+        "user scoped memory operations require a principal",
+      );
+      presyncs.push("space");
+      return Promise.resolve();
+    };
+    register(userless);
+    env.runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      1,
+      false,
+      undefined,
+      false,
+      { eventId: "userless", served: { firedAt: { session: "server" } } },
+    );
+    await env.runtime.idle();
+    expect(calls).toEqual(["space:undefined:1"]);
+    expect(probes).toContain("space:undefined");
+    expect(presyncs).toEqual(["space"]);
+    expect(stamps.find((stamp) => stamp.kind === "event-handler"))
+      .toMatchObject({
+        scopeKeyIdentity: { principal: undefined, sessionId: undefined },
+      });
   });
 
   it("uses the replacement for an event already queued at the same stream", async () => {

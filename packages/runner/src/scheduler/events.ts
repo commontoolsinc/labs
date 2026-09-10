@@ -143,11 +143,30 @@ function createGuardedDispatcher(
     get: () => {
       const registration = dispatcher[guardedImplementations];
       const current = registration.current();
-      const implementation = current === dispatcher
-        ? registration.implementations.values().next().value?.handler
-        : current;
-      return (implementation as Partial<TelemetryAnnotations> | undefined)
-        ?.schedulerObservationIdentity;
+      if (current !== dispatcher) {
+        return (current as Partial<TelemetryAnnotations> | undefined)
+          ?.schedulerObservationIdentity;
+      }
+      const identities = [...registration.implementations.values()].flatMap(
+        ({ handler }) => {
+          const identity = (handler as Partial<TelemetryAnnotations>)
+            .schedulerObservationIdentity;
+          return identity === undefined ? [] : [identity];
+        },
+      );
+      if (identities.length <= 1) return identities[0];
+      // A queued event supplies its actor to every candidate root before
+      // selection: the selector itself can need that actor's cold inputs.
+      // Dispatch and its diagnostics use the selected handler's own identity.
+      return {
+        ...identities[0],
+        demandRootIds: [
+          ...new Set(identities.flatMap((identity) =>
+            identity.demandRootIds ??
+              (identity.pieceRootId === undefined ? [] : [identity.pieceRootId])
+          )),
+        ],
+      };
     },
   });
   dispatcher.populateDependencies = (tx, event) => {
