@@ -721,7 +721,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   }
 
   /**
-   * Iteratively call `visitValue()` and `visitCycle()` on the visitor, until
+   * Iteratively calls `visitValue()` and `visitCycle()` on the visitor, until
    * the visitor returns something other than a `replace` result.
    */
   #visitResolvingCyclesAndReplacement(
@@ -761,7 +761,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   }
 
   /**
-   * Iteratively call `visitValue()`, `visitCycle()`, and the subtype-specific
+   * Iteratively calls `visitValue()`, `visitCycle()`, and the subtype-specific
    * visitor methods, until the visitor returns something other than a `replace`
    * or `visitSubtype` result.
    */
@@ -795,7 +795,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       }
 
       const tag = this.#tagFromValueElseNull(value);
-      let result;
+      let result: DispatchingVisitorResult<DomainExtra, ResultType>;
 
       switch (tag) {
         case VALUE_TAGS.Array: {
