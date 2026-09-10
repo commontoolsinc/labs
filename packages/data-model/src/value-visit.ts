@@ -1,6 +1,10 @@
 /**
  * Types and classes for visiting (a/k/a, iterating or walking over)
  * `FabricValue`s.
+ *
+ * **IMPORTANT NOTE:** This file is a work-in-progress and not meant to be used
+ * outside of the `data-model`. This is why it is _not_ exposed via the
+ * `data-model`'s export map.
  */
 
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
