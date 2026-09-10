@@ -239,13 +239,12 @@ past that anchor until `MAX_EXECUTIONS` stops it. So a test that has been
 seen to disagree at all is run at least twice, because one execution
 cannot tell a pass from a lucky pass.
 
-A share the manifest records is rounded, and a share that is not zero is
-held above zero rather than rounded to it. Zero is the one point the
-count steps at, between running a test once and running it at least
-twice, and a rounding that reached zero would take that step on the
-strength of how many times a test had run. Above zero the count follows
-the size of the share, and so does the exclusion, which a share held just
-above zero leaves far under `FLAKE_EXCLUSION_RATE`.
+Zero is the one point the count steps at, between running a test once and
+running it at least twice, which is why the manifest records a share as
+it was measured rather than to a few places. A share written to four
+places reaches zero once a test has twenty thousand runs behind one
+disagreement, and the step would then be taken on how often the test ran
+rather than on whether it had ever disagreed.
 
 The line runs past `FLAKE_EXCLUSION_RATE`, which the exclusion rule makes
 sensible rather than contradictory. A test that flaky is not selected, so
