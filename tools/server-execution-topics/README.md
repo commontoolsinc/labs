@@ -62,23 +62,11 @@ the same JavaScript runtime.
 ## Run against matching baked toolshed arms
 
 `run-arm.ts` uses the repository's CI capabilities, role mapping, posture probe,
-and process ownership. It starts a baked toolshed in a new store and requires
-the published build SHA to match the workload head. Build the binaries at that
-head before using it:
-
-```sh
-campaign_head=$(git rev-parse HEAD)
-campaign_opposite=$(deno eval 'import { serverExecutionCiLane } from "./tasks/server-execution-ci.ts"; console.log(serverExecutionCiLane("opposite").enabled)')
-mkdir -p .ci-cache/binaries
-COMMIT_SHA="$campaign_head" env -u EXPERIMENTAL_SERVER_EXECUTION deno task build-binaries toolshed
-cp dist/toolshed .ci-cache/binaries/toolshed-baked-default
-COMMIT_SHA="$campaign_head" EXPERIMENTAL_SERVER_EXECUTION="$campaign_opposite" deno task build-binaries toolshed
-cp dist/toolshed .ci-cache/binaries/toolshed-baked-opposite
-```
-
-Builds temporarily change compilation configuration. Finish them before running
-another task that reads that configuration. Keep binary hashes and build logs
-with the evidence; do not commit generated binaries.
+and process ownership. It builds the requested baked toolshed from the clean
+workload head, starts it in a new store, and requires the published build SHA to
+match. Builds temporarily change compilation configuration: run one arm at a
+time in each checkout. The capture retains binary hashes and build logs; do not
+commit generated binaries.
 
 ```sh
 deno run -A tools/server-execution-topics/run-arm.ts default /absolute/new-off-run correctness run -A tools/server-execution-topics/seed-check.ts
@@ -118,6 +106,7 @@ a cached binary contains the current source.
 The child environment always follows the requested lane, even when the parent's
 execution flag disagrees. Endpoint reads reject unsuccessful HTTP responses; the
 server, client, and baked shell must agree with the lane. The seed checker
-resolves an unset execution flag through the first-party default. Latency runs
-require the quiet-machine condition both before setup and after compilation, and
-every sample during the workload must satisfy it.
+independently asserts the raw flag's mapping before resolving an unset value
+through the first-party default. Latency runs require the quiet-machine
+condition both before setup and after compilation, and every sample during the
+workload must satisfy it.
