@@ -21,6 +21,7 @@ import {
   type ServingLoopStats,
 } from "../src/executor/stats.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("lifecycle verbs space");
 const space = spaceSigner.did() as MemorySpace;
@@ -127,7 +128,7 @@ describe("ExecutorHost.runLifecycleVerb", () => {
     expect(host.stats().lifecycleVerbs).toEqual({ runs: 1, failures: 0 });
   });
 
-  it("derives a piece the verb stages before the receipt returns, when the verb names the piece as its demand root", async () => {
+  it("derives a piece the verb stages after the receipt, once the verb names the piece as its demand root", async () => {
     host = newHost();
     const PATTERN = [
       "import { computed, pattern } from 'commonfabric';",
@@ -166,9 +167,10 @@ describe("ExecutorHost.runLifecycleVerb", () => {
     });
     expect(receipt.rootId).toMatch(/^of:/);
 
-    // A reader opening its session only now, under the result schema so
-    // the read reaches the computed's own document: the receipt came after
-    // the wave that derived the piece, so the value is in the store.
+    // The receipt follows the creation's wave; the loop re-announces the
+    // staged documents to itself and derives the piece in the cycle after.
+    // A reader under the result schema, so the read reaches the computed's
+    // own document, sees the value once that wave lands.
     const reader = clientRuntime();
     const cell = reader.getCell<{ total: number }>(
       space,
@@ -176,7 +178,10 @@ describe("ExecutorHost.runLifecycleVerb", () => {
       receipt.resultSchema,
     );
     await cell.sync();
-    expect(cell.key("total").get()).toBe(42);
+    await waitUntil(async () => {
+      await cell.sync();
+      return cell.key("total").get() === 42;
+    }, "the verb-staged piece's first derivation");
   });
 
   it("rejects with the verb's own error and counts the failure", async () => {

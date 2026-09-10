@@ -91,6 +91,8 @@ const REFUSAL_STATUS: Record<
   "incompatible": 409,
   "source-moved": 409,
   "setup-failed": 422,
+  "slug-taken": 409,
+  "no-space-root": 422,
 };
 
 /** The document a piece id names — the root the serving loop demands. */
@@ -199,6 +201,9 @@ export function processInstantiate(
     space: string;
     argument?: Record<string, unknown>;
     repository?: string;
+    slug?: string;
+    force?: boolean;
+    register?: boolean;
   },
 ): Promise<LifecycleResult<ServedInstantiateReceipt>> {
   const source = wireSource(input);
@@ -218,6 +223,9 @@ export function processInstantiate(
         ...(input.repository === undefined
           ? {}
           : { repository: input.repository }),
+        ...(input.slug === undefined ? {} : { slug: input.slug }),
+        ...(input.force === undefined ? {} : { force: input.force }),
+        ...(input.register === undefined ? {} : { register: input.register }),
         actingUser: callerDid,
       }),
     confirm: (runtime, receipt) =>

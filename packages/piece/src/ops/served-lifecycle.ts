@@ -24,6 +24,7 @@ import {
 } from "./piece-controller.ts";
 import type { PiecesController } from "./pieces-controller.ts";
 import { pieceId as pieceIdOf } from "../piece-id.ts";
+import { claimSlugInTx, prepareSlugClaim } from "../slugs.ts";
 import { assertPatternSchemasBackwardCompatible } from "../schema-compatibility.ts";
 import { prepareSourceClosureVerification } from "../../../runner/src/compilation-cache/cell-cache.ts";
 import {
@@ -39,9 +40,11 @@ import {
   type PieceSourceSnapshot,
   type PieceSourceTransitionBaseline,
   preparePieceSourceTransitionBaseline,
+  resolveSpaceRootPattern,
   type Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
+import { pieceListSchema } from "@commonfabric/runner/schemas";
 
 /** A content-addressed pattern pointer: the closure and the export run. */
 export type ServedPatternRef = { identity: string; symbol: string };
@@ -71,7 +74,11 @@ export type ServedLifecycleRefusalCode =
   /** The piece's source moved between the verb's read and its write. */
   | "source-moved"
   /** Setup refused the pattern or the argument. */
-  | "setup-failed";
+  | "setup-failed"
+  /** The requested slug already names something, and `force` was not set. */
+  | "slug-taken"
+  /** The space has no root to register the piece with. */
+  | "no-space-root";
 
 /** A served verb's refusal, carrying the code the wire reports. */
 export class ServedLifecycleRefusal extends Error {
@@ -102,6 +109,15 @@ export interface ServedInstantiateRequest {
   /** Repository locator stored with the piece's source. */
   repository?: string;
 
+  /** A name for the new piece, claimed in the creation transaction. */
+  slug?: string;
+
+  /** Take `slug` even when it already names something. */
+  force?: boolean;
+
+  /** Add the piece to the space root's registry, in the same transaction. */
+  register?: boolean;
+
   /**
    * The principal the verb acts for. The creation transaction carries this
    * principal's trust snapshot, so a label the setup mints attributes to
@@ -114,6 +130,9 @@ export interface ServedInstantiateRequest {
 export interface ServedInstantiateReceipt {
   pieceId: string;
   pattern: ServedPatternRef;
+
+  /** The name the piece was created under, when one was asked for. */
+  slug?: string;
 }
 
 /** What `setsrc` asks for. */
@@ -190,14 +209,16 @@ async function resolveServedPattern(
 }
 
 /**
- * Create a piece from the requested pattern: the result document with its
- * pattern metadata and argument, and the first source revision. The piece
- * is set up here and never started here: a graph instantiated on the
- * serving runtime before anything demands it is not live, so its first run
- * would not happen and a later demand would find it registered and skip
- * the load that runs it. The caller names the new piece's root as the
+ * Create a piece from the requested pattern in one transaction: the result
+ * document with its pattern metadata and argument, the first source
+ * revision, the registry entry when asked for, and the slug when asked for
+ * — a name already taken refuses the whole creation unless `force` is set.
+ * The piece is set up here and never started here: a graph instantiated on
+ * the serving runtime before anything demands it is not live, so its first
+ * run would not happen and a later demand would find it registered and
+ * skip the load that runs it. The caller names the new piece's root as the
  * verb's demand instead, and the serving loop loads and derives it once
- * the creation has committed, before the verb's receipt returns.
+ * the creation has committed.
  */
 export async function servedInstantiatePiece(
   pieces: PiecesController,
@@ -215,6 +236,26 @@ export async function servedInstantiatePiece(
   // Setup verifies the source closure behind a content-addressed entry
   // ref synchronously, so the parser it needs is loaded ahead of it.
   await prepareSourceClosureVerification();
+  let registry: Cell<Cell<unknown>[]> | undefined;
+  if (request.register === true) {
+    const root = await resolveSpaceRootPattern(runtime, space);
+    if (root === undefined) {
+      throw new ServedLifecycleRefusal(
+        "no-space-root",
+        "the space has no root pattern to register the piece with",
+      );
+    }
+    registry = root.asSchema({
+      type: "object",
+      properties: { pieceRegistry: pieceListSchema },
+    }).key("pieceRegistry") as Cell<Cell<unknown>[]>;
+    await registry.sync();
+  }
+  const slugClaim = request.slug === undefined
+    ? undefined
+    : await prepareSlugClaim(pieces, request.slug, piece, {
+      writeTargetMetadata: true,
+    });
   const address = piece.getAsNormalizedFullLink().id;
   const outcome = await runtime.editWithRetry((tx) => {
     // Per attempt: the trust snapshot governs the reads that follow it,
@@ -234,6 +275,21 @@ export async function servedInstantiatePiece(
         : { patternRepository: request.repository }),
       initializePieceSourceHistory: true,
     });
+    registry?.withTx(tx).addUnique(piece);
+    if (slugClaim !== undefined) {
+      const refusal = claimSlugInTx(pieces, slugClaim, tx, {
+        ...(request.force === undefined ? {} : { force: request.force }),
+      });
+      if (refusal !== undefined) {
+        throw new ServedLifecycleRefusal(
+          "slug-taken",
+          `Slug "${slugClaim.validSlug}" already points at ` +
+            `${refusal.held ?? "nothing"}, so assigning it would take that ` +
+            "address from whoever holds it. Pass `force` to take it anyway; " +
+            "nothing was created.",
+        );
+      }
+    }
   });
   if (outcome.error !== undefined) {
     // A setup that threw is reported through the aborted transaction's
@@ -242,6 +298,7 @@ export async function servedInstantiatePiece(
       "reason" in outcome.error && outcome.error.reason !== undefined
         ? outcome.error.reason
         : outcome.error;
+    if (cause instanceof ServedLifecycleRefusal) throw cause;
     throw new ServedLifecycleRefusal("setup-failed", messageOf(cause), {
       cause,
     });
@@ -250,7 +307,11 @@ export async function servedInstantiatePiece(
   if (pieceId === undefined) {
     throw new Error("the new piece has no entity id");
   }
-  return { pieceId, pattern: ref };
+  return {
+    pieceId,
+    pattern: ref,
+    ...(slugClaim === undefined ? {} : { slug: slugClaim.validSlug }),
+  };
 }
 
 /**

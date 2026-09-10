@@ -29,6 +29,9 @@ const programSchema = z.object({
   sourceRoots: z.array(z.string()).optional().describe(
     "Entry points retained and compiled without being run, such as tests.",
   ),
+  dataFiles: z.array(z.string()).optional().describe(
+    "Names of entries in `files` that carry data rather than code.",
+  ),
 }).describe(
   "A program as the client resolved it: every file it needs, by name.",
 );
@@ -74,7 +77,8 @@ const commonResponses = {
   [HttpStatusCodes.CONFLICT]: {
     ...jsonError,
     description:
-      "The candidate cannot replace the piece's source, or the source moved",
+      "The candidate cannot replace the piece's source, the source moved, " +
+      "or the requested slug is taken",
   },
   [HttpStatusCodes.REQUEST_TOO_LONG]: {
     ...jsonError,
@@ -143,6 +147,16 @@ export const instantiate = createRoute({
             repository: z.string().optional().describe(
               "Repository locator stored with the piece's source.",
             ),
+            slug: z.string().optional().describe(
+              "A name for the piece, claimed in the creation transaction; " +
+                "a name already taken refuses the whole creation.",
+            ),
+            force: z.boolean().optional().describe(
+              "Take `slug` even when it already names something.",
+            ),
+            register: z.boolean().optional().describe(
+              "Add the piece to the space root's registry.",
+            ),
           }),
         },
       },
@@ -155,6 +169,7 @@ export const instantiate = createRoute({
           schema: z.object({
             pieceId: z.string(),
             pattern: patternRefSchema,
+            slug: z.string().optional(),
           }),
         },
       },

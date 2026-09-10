@@ -1638,8 +1638,9 @@ async function lifecycleClient(
 
 /**
  * The served half of `newPiece`: the serving runtime compiles the program
- * and materializes the piece — the creation act — and this connection then
- * starts it the way it starts any piece it opens, running the graph as
+ * and materializes the piece — the creation act, with its registry entry
+ * and its name in the same transaction — and this connection then starts
+ * it the way it starts any piece it opens, running the graph as
  * speculation while the server derives on demand.
  */
 async function createOnServer(
@@ -1647,7 +1648,7 @@ async function createOnServer(
   pieces: PiecesController,
   program: RuntimeProgram,
   entry: EntryConfig,
-  options: { start?: boolean } | undefined,
+  options: { start?: boolean; slug?: string; force?: boolean } | undefined,
   deps: PieceOperationDependencies,
 ): Promise<{ id: string; getCell: () => Cell<unknown> }> {
   const receipt = await (deps.instantiatePieceOnServer ??
@@ -1657,6 +1658,9 @@ async function createOnServer(
       ...(entry.repository === undefined
         ? {}
         : { repository: entry.repository }),
+      ...(options?.slug === undefined ? {} : { slug: options.slug }),
+      ...(options?.force === undefined ? {} : { force: options.force }),
+      register: true,
     });
   const cell = await pieces.getPieceCell(receipt.pieceId, false);
   if (options?.start !== false) await pieces.startPiece(cell);
@@ -1714,8 +1718,9 @@ export async function newPiece(
   const PIECE_START_TIMEOUT_MS = 60_000;
   const runtimeErrors = runtimeErrorLog(pieces.runtime);
   const errorCountBefore = runtimeErrors.length;
+  const served = servesLifecycleVerbs(pieces);
   const piece = await timeCliPhase("newPiece.create", () => {
-    const createPromise = servesLifecycleVerbs(pieces)
+    const createPromise = served
       ? createOnServer(config, pieces, program, entry, options, deps)
       : pieces.create(program, {
         repository: entry.repository,
@@ -1745,6 +1750,9 @@ export async function newPiece(
   // the space, and a slug or registry step that throws afterwards leaves a
   // partial write that the operator is owed the location of.
   noteWroteTo(config.space);
+  // A served creation named and registered the piece in its own
+  // transaction; what follows is the client-side creation's second half.
+  if (served) return piece.id;
 
   if (options?.slug) {
     try {

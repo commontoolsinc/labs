@@ -51,7 +51,7 @@ runs it ahead of a cycle's event drain, its seals joining that cycle's
 wave, and once the wave has committed re-announces the documents the
 verb staged to itself as a warm-marked notice — the same carrier as the
 provisioning path's — so the next cycle loads and derives the staged
-piece; the request settles after the wave carrying those first runs —
+piece; the request settles at the verb's own wave commit —
 [docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).)*
 
 What activation LOADS (RULED 2026-08-02): there is NO piece-start

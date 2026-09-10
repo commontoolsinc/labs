@@ -73,6 +73,7 @@ export function wireProgram(program: RuntimeProgram): {
   mainExport?: string;
   files: { name: string; contents: string }[];
   sourceRoots?: string[];
+  dataFiles?: string[];
 } {
   return {
     main: program.main,
@@ -83,6 +84,9 @@ export function wireProgram(program: RuntimeProgram): {
     ...(program.sourceRoots === undefined
       ? {}
       : { sourceRoots: program.sourceRoots }),
+    ...(program.dataFiles === undefined
+      ? {}
+      : { dataFiles: program.dataFiles }),
   };
 }
 
@@ -140,7 +144,10 @@ export async function uploadPatternOnServer(
   });
 }
 
-/** Create a piece in `space` from `program`, set up and not started. */
+/**
+ * Create a piece in `space` from `program`, set up and not started, with
+ * its registry entry and its name when asked for, all in one transaction.
+ */
 export async function instantiatePieceOnServer(
   config: LifecycleClientConfig,
   input: {
@@ -148,13 +155,19 @@ export async function instantiatePieceOnServer(
     program: RuntimeProgram;
     argument?: object;
     repository?: string;
+    slug?: string;
+    force?: boolean;
+    register?: boolean;
   },
-): Promise<{ pieceId: string; pattern: PatternRef }> {
+): Promise<{ pieceId: string; pattern: PatternRef; slug?: string }> {
   return await call(config, "instantiate", {
     space: input.space,
     program: wireProgram(input.program),
     ...(input.argument === undefined ? {} : { argument: input.argument }),
     ...(input.repository === undefined ? {} : { repository: input.repository }),
+    ...(input.slug === undefined ? {} : { slug: input.slug }),
+    ...(input.force === undefined ? {} : { force: input.force }),
+    ...(input.register === undefined ? {} : { register: input.register }),
   });
 }
 

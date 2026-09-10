@@ -511,9 +511,12 @@ or commit in this process. Each resolves the program from disk, pins its fabric
 imports, and sends it to the deployment's pattern-lifecycle route, signed with
 the identity the command connects as; the space's serving runtime compiles it,
 creates the piece or replaces its source, and answers with the receipt these
-commands print. The identity must hold WRITE or OWNER on the space. What stays
-in this process after `piece new`'s receipt is what opening a piece does anyway:
-the start (`--no-start` skips it), the registry add, and the slug. Against any
+commands print. The identity must hold WRITE or OWNER on the space. The registry
+entry and the slug travel with the creation, so a taken name refuses it before
+anything is created. What stays in this process after `piece new`'s receipt is
+what opening a piece does anyway: the start, which `--no-start` skips. The
+receipt returns once the piece is durable; the serving loop derives it in the
+cycle after, so a reader that needs the derived value pulls it. Against any
 other deployment, and under `cf test`, the commands perform every step
 themselves, as before. The contract, including the refusals and their codes, is
 [`server-pattern-lifecycle.md`](../../docs/features/server-pattern-lifecycle.md).

@@ -27,7 +27,7 @@ the space already holds.
 | verb          | body                                                                                              | receipt                                                                            |
 | ------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | `upload`      | `program`                                                                                         | `{ pattern }` — the pointer the space now holds the program under                  |
-| `instantiate` | `program` or `pattern`; optional `argument`, `repository`                                         | `{ pieceId, pattern }`                                                             |
+| `instantiate` | `program` or `pattern`; optional `argument`, `repository`, `slug`, `force`, `register`            | `{ pieceId, pattern, slug? }`                                                      |
 | `setsrc`      | `program` or `pattern`; `piece`; optional `repository`, `dangerouslyAllowIncompatibleSchema`, `check` | with `check`, a compatibility report; otherwise the update receipt described below |
 
 The `setsrc` receipt is the same shape the client-side apply produces:
@@ -45,9 +45,9 @@ client branches on; `error` is prose for a person.
 | 401    | `unauthorized`                         | no valid first-party request proof                                           |
 | 403    | `forbidden`                            | the caller is not a writer of the space, or there is no such space           |
 | 404    | `pattern-not-found`, `piece-not-found` | the named pattern or piece is not in the space                               |
-| 409    | `incompatible`, `source-moved`         | the candidate cannot replace the source; the source moved under the request |
+| 409    | `incompatible`, `source-moved`, `slug-taken` | the candidate cannot replace the source; the source moved under the request; the slug names something and `force` was not set |
 | 413    | `payload-too-large`                    | the body exceeds the limit, checked before authentication                    |
-| 422    | `compile-failed`, `setup-failed`       | the program did not compile; setup refused the pattern or the argument       |
+| 422    | `compile-failed`, `setup-failed`, `no-space-root` | the program did not compile; setup refused the pattern or the argument; nothing to register the piece with |
 | 500    | `internal`                             | the serving side failed for a reason it does not name                        |
 | 503    | `server-execution-off`, `space-not-served` | no serving loop on this deployment; the space's lease is held elsewhere |
 
@@ -101,17 +101,20 @@ so once the wave has committed the loop re-announces those documents to
 itself as a warm-marked notice, the carrier provisioning uses for the setup
 it stages in another space; the next cycle takes it as input, its demand
 pass loads the piece from the now-committed store, and the piece's first
-runs seal into that cycle's wave. The receipt is held until that wave has
-committed: the loop resolves it when every root's graph is installed, the
-scheduler has nothing to run, no document load is in flight, nothing is
-sealed into an uncommitted wave, and a wave has committed since the hold
-began — or, for a graph with nothing to derive, after two such quiet cycles.
-A caller holding a receipt therefore holds a piece whose first derivation
-is in the store, which is what a fresh session's read of it needs.
+runs seal into that cycle's wave.
 
-The served source replacement starts the piece's new graph in the same run
-that swaps the pointer, and names the piece as its demand root the same way,
-so its receipt waits for the swapped graph's first runs as well.
+The receipt does not wait for that derivation. It returns once the verb's
+own wave has committed and `confirm` has read the piece back, which is the
+point at which the piece is durable and can be resumed; the loop owes its
+first run and serves it in the cycle after. A reader that needs the derived
+value pulls it, which is demand the loop serves, rather than expecting a
+creation to have run the graph.
+
+The served creation takes the whole creation act into one transaction:
+with `register`, the piece joins the space root's registry, and with `slug`
+it is named — a name already pointing somewhere refuses the creation
+outright unless `force` is set, so a refused creation leaves nothing
+behind. `cf piece new` asks for both.
 
 That seat rules out two things the client-side operations do. A transaction
 the runtime seals into a wave cannot mint a durability receipt of its own, so
@@ -135,11 +138,8 @@ resolves the program locally — reading the files, pinning fabric imports —
 and sends it. What `cf piece new` still does in its own process after the
 receipt is what any client does when it opens a piece: it starts the piece,
 which under the flag runs the graph as speculation while the serving loop
-serves the derived values, registers the piece with the space root through
-the root's `addPiece` handler (an authored event append the serving loop
-handles), and assigns a slug when one was asked for (an authored write).
-`--no-start` skips the client's start only; the served creation has already
-derived the piece by the time its receipt arrives.
+serves the derived values. `--no-start` skips that. The registry entry and
+the slug are part of the served creation.
 
 `cf piece setsrc --check` and `cf piece setsrc` send the same request with
 and without `check`, and `--dangerously-allow-incompatible-schema` travels

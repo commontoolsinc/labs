@@ -19,6 +19,8 @@ import { ExecutorHost } from "@commonfabric/runner/executor/host";
 import { LoopbackStorageManager } from "@commonfabric/runner/executor/loopback-storage";
 import { EmulatedStorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
+import { pieceId } from "../src/piece-id.ts";
+import { resolveSlugTargetCell } from "../src/slugs.ts";
 import {
   confirmServedInstantiate,
   confirmServedSourceUpdate,
@@ -179,6 +181,7 @@ describe("served lifecycle verbs", () => {
   const instantiate = (
     source: ServedPatternSource,
     argument?: object,
+    naming: { slug?: string; force?: boolean; register?: boolean } = {},
   ) =>
     served(
       "instantiate",
@@ -186,6 +189,7 @@ describe("served lifecycle verbs", () => {
         servedInstantiatePiece(pieces, {
           source,
           ...(argument === undefined ? {} : { argument }),
+          ...naming,
           actingUser: aliceSigner.did(),
         }),
       (runtime, receipt) => confirmServedInstantiate(runtime, space, receipt),
@@ -235,6 +239,41 @@ describe("served lifecycle verbs", () => {
         pattern: { identity: "no-such-identity", symbol: "default" },
       }));
       expect(refusal.code).toBe("pattern-not-found");
+    });
+
+    it("claims the slug with the creation, refuses a taken name, and takes it under force", async () => {
+      const first = await instantiate({ program: BASE_PROGRAM }, undefined, {
+        slug: "named-piece",
+      });
+      expect(first.slug).toBe("named-piece");
+      const pieces = await clientPieces();
+      expect(pieceId(await resolveSlugTargetCell(pieces, "named-piece")))
+        .toBe(first.pieceId);
+
+      const refusal = await refusalOf(
+        instantiate({ program: BASE_PROGRAM }, undefined, {
+          slug: "named-piece",
+        }),
+      );
+      expect(refusal.code).toBe("slug-taken");
+      expect(refusal.message).toContain("nothing was created");
+
+      const taken = await instantiate({ program: BASE_PROGRAM }, undefined, {
+        slug: "named-piece",
+        force: true,
+      });
+      // A client opened after the forced claim: the earlier one holds the
+      // name's document from before it moved.
+      const later = await clientPieces();
+      expect(pieceId(await resolveSlugTargetCell(later, "named-piece")))
+        .toBe(taken.pieceId);
+    });
+
+    it("refuses to register a piece in a space with no root", async () => {
+      const refusal = await refusalOf(
+        instantiate({ program: BASE_PROGRAM }, undefined, { register: true }),
+      );
+      expect(refusal.code).toBe("no-space-root");
     });
 
     it("refuses a program that does not compile, naming the failure", async () => {

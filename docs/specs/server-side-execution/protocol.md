@@ -84,8 +84,8 @@ snapshot — or swaps the source, as a step of a wave cycle
 ([docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md)).
 The scheduler tell is unchanged: the verb's writes are still commits made
 outside the scheduler, made now by the serving side on the requester's
-behalf. The registry add stays the client's authored event append and the
-slug its authored write, and every other client of the piece controller —
+behalf, the registry entry and the slug in the same transaction as the
+piece. Every other client of the piece controller —
 the shell, the background piece service — keeps the client-side shape
 until its own migration.)*
 

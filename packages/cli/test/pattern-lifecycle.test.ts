@@ -100,16 +100,18 @@ describe("pattern-lifecycle client", () => {
   });
 
   describe("wireProgram", () => {
-    it("carries the entry, its export, the files, and the source roots, and nothing else", () => {
+    it("carries the entry, its export, the files, the source roots, and the data files, and nothing else", () => {
       const carried = wireProgram({
         ...PROGRAM,
         sourceRoots: ["/main.test.tsx"],
+        dataFiles: ["/data/cities.json"],
         // A field the wire does not take.
         extra: 1,
       } as never);
       expect(carried).toEqual({
         ...PROGRAM,
         sourceRoots: ["/main.test.tsx"],
+        dataFiles: ["/data/cities.json"],
       });
     });
   });
