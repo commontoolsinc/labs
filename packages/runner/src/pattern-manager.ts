@@ -2967,15 +2967,15 @@ export class PatternManager {
     for (const chunk of chunks) {
       // The write-back re-writes source docs whose values carry quote-cell
       // indirections (one derived doc per import edge). On a cold replica
-      // those derived docs are unknown. The engine reports every stale read
+      // those derived docs are unknown. The engine reports every stale instance
       // in one rejection and editWithRetry pulls the whole named set before
       // re-running. Further retries remain possible when a re-run reaches a
       // new dependency layer or another writer advances a document again.
       // The edge-proportional budget is conservative headroom for those
       // additional layers and concurrent writes, not one retry per edge.
-      // A conflict-free write-back commits on its first attempt. Single-chunk
-      // write-backs have a floor of 16 retries; multiple chunks each receive
-      // eight retries of slack on top of their edge-proportional share.
+      // A conflict-free write-back commits on its first attempt. Applying the
+      // floor per chunk would multiply the minimum budget by the chunk count,
+      // so only a single-chunk write-back receives the full floor.
       const importEdges = chunk.reduce((n, m) => n + m.imports.length, 0);
       const writebackMaxRetries = chunks.length === 1
         ? Math.max(16, 2 * importEdges + 8)

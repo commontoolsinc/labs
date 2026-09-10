@@ -411,7 +411,7 @@ interface ConflictError extends Error {
    * reaching this seq reflects the winning write.
    */
   retryAfterSeq: number;
-  /** Every stale confirmed read, including a single-read conflict. */
+  /** First stale confirmed read per entity and scope, even for one conflict. */
   conflicts?: Array<{
     of: string;
     scope: "space" | "user" | "session";
@@ -428,19 +428,20 @@ hide them — and the next sync frame delivers the watched documents as ordinary
 upserts. Repair therefore arrives as a consistent cut over the session's watched
 view, with every document the frame links to delivered in the same cut. A dirty
 address outside that view does not gain a watch through dirty marking alone.
-Confirmed-read validation collects every stale read before rejecting. An unknown
-branch or unresolvable scope prevents validation from completing and takes
-precedence over any stale reads already found. The error's `conflicts` array
-preserves each entity ID, scope, read sequence, and conflicting sequence,
-including when only one read is stale. A retry helper can explicitly sync all
-conflicting instances before retrying; repeated reads of one instance require
-only one pull. Each scope resolves under the rejected session's identity. Older
-responses can omit this array; their diagnostic identifies entities but does not
-preserve their scopes. The runner also exposes the first descriptor as `conflict`
-for existing consumers. The diagnostic previews up to three distinct
-entity/sequence clauses and counts the remaining clauses; repeated path reads
-share a clause. The structured array remains complete regardless of the
-diagnostic's length.
+Confirmed-read validation reports each stale entity and scope once. Its first
+stale read supplies the diagnostic read sequence and conflicting sequence;
+subsequent reads of that instance skip the staleness scan. Every read still
+validates its branch and resolves its scope. An unknown branch or unresolvable
+scope takes precedence over any stale reads already found. The `conflicts` array
+includes an entry even when only one instance is stale. A retry helper can
+explicitly sync all conflicting instances before retrying; repeated reads of one
+instance require only one pull. Each scope resolves under the rejected session's
+identity. Older responses can omit this array; their diagnostic identifies
+entities but does not preserve their scopes. The runner also exposes the first
+descriptor as `conflict` for existing consumers. The diagnostic previews up to
+three distinct entity/sequence clauses and counts the remaining clauses;
+repeated path reads share a clause. The structured array remains complete
+regardless of the diagnostic's length.
 
 ## 3.7 Server-Side Commit Processing
 

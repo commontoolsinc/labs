@@ -1735,7 +1735,7 @@ export type V2Error = {
   precondition?: string;
   retryAfterSeq?: number;
 
-  /** Every stale confirmed read, with scope resolved by the session. */
+  /** First stale confirmed read per entity and scope, resolved by the session. */
   conflicts?: Array<{
     of: string;
     scope: CellScope;

@@ -1054,7 +1054,7 @@ interface ConflictError extends Error {
   name: "ConflictError";
   /** Server head seq at rejection time (§3.6.4). */
   retryAfterSeq: number;
-  /** Every stale confirmed read, including a single-read conflict. */
+  /** First stale confirmed read per entity and scope, even for one conflict. */
   conflicts?: Array<{
     of: string;
     scope: "space" | "user" | "session";

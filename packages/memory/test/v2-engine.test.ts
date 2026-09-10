@@ -1278,7 +1278,7 @@ Deno.test("memory v2 engine conflicts are scoped by declared scope", async () =>
 
 Deno.test("memory v2 engine: stale-read ConflictError carries every conflicted entity and previews them in the message", async () => {
   // The message preview is a compatibility surface for transports that retain
-  // only standard Error fields. The structured array includes every stale read.
+  // only standard Error fields. The structured array includes every stale instance.
 
   const { engine, path } = await createEngine();
   const sessionId = "session:alice";

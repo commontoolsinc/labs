@@ -1024,7 +1024,7 @@ export type Engine = {
   stagedDocumentCache?: Map<string, DocumentCacheEntry>;
 };
 
-/** A stale confirmed read, addressed within the committing session's scope. */
+/** The first stale confirmed read of an entity in the session's declared scope. */
 export type ConfirmedReadConflict = {
   of: string;
   scope: CellScope;
@@ -6171,10 +6171,17 @@ const validateConfirmedReads = (
   // against that writer identity, even when the read points at another branch.
   // Cross-branch reads inherit this same principal context.
   const conflicts: ConfirmedReadConflict[] = [];
+  const staleIdsByScope = new Map<CellScope, Set<EntityId>>();
   for (const read of commit.reads.confirmed) {
     const readBranch = read.branch ?? branch;
     ensureReadableBranch(engine, readBranch);
     const scopeKey = resolveScopeKey(read.scope, scopeContext);
+    const scope = read.scope ?? DEFAULT_SCOPE;
+    let staleIds = staleIdsByScope.get(scope);
+    // Further path scans cannot change a known-stale entity's recovery address.
+    // Every read still validates its branch and scope before skipping the scan,
+    // so invalid addresses take precedence over stale-read conflicts.
+    if (staleIds?.has(read.id)) continue;
     const conflictSeq = findConflictSeq(
       engine,
       readBranch,
@@ -6185,9 +6192,14 @@ const validateConfirmedReads = (
       read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
+      if (staleIds === undefined) {
+        staleIds = new Set();
+        staleIdsByScope.set(scope, staleIds);
+      }
+      staleIds.add(read.id);
       conflicts.push({
         of: read.id,
-        scope: read.scope ?? DEFAULT_SCOPE,
+        scope,
         seq: read.seq,
         conflictSeq,
       });
@@ -6195,7 +6207,7 @@ const validateConfirmedReads = (
   }
   if (conflicts.length > 0) {
     // Keep diagnostics compact for repeated path reads and large transactions.
-    // The structured array carries every read; each preview clause retains the
+    // The array carries every stale instance; each preview clause retains the
     // entity/sequence grammar used by message-only clients to recover.
     const messages = [
       ...new Set(
@@ -6206,7 +6218,8 @@ const validateConfirmedReads = (
     ];
     const preview = messages.slice(0, 3);
     if (messages.length > preview.length) {
-      preview.push(`${messages.length - preview.length} more conflicts`);
+      const remaining = messages.length - preview.length;
+      preview.push(`${remaining} more conflict${remaining === 1 ? "" : "s"}`);
     }
     throw new ConflictError(preview.join("; "), conflicts);
   }
