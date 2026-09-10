@@ -1,10 +1,10 @@
 # Pattern computation cost: implementation sequence
 
-Status: A1/A2 instrumentation is shipped in
-[PR #7246](https://github.com/commontoolsinc/labs/pull/7246). The controlled A0
-fixture, accounting and reporting regressions, and dashboard are being reconciled
-in [PR #7241](https://github.com/commontoolsinc/labs/pull/7241). A3's local
-implementation requires adaptation to the shipped accounting API before review.
+Status: A1/A2 instrumentation shipped in #7246; worker control shipped in
+#7256. The controlled A0 fixture and accounting regressions are in #7241.
+A3 budget enforcement is locally implemented against the shipped counters,
+with full runner validation and targeted CLI regression coverage complete.
+Publication, CI, and Cubic review remain before landing.
 
 This tracker executes the design in
 [PR #7155](https://github.com/commontoolsinc/labs/pull/7155), reviewed at commit
@@ -138,14 +138,14 @@ durations are used as performance evidence.
 ## 3–4. Defend and calibrate measurements: A3–A5
 
 - [ ] **A3 — Add opt-in pattern-test budgets.** The
-      [budget contract](read-cost-budgets.md) defines the pending surface,
+      [budget contract](read-cost-budgets.md) defines the surface,
       execution coverage, and pass/fail demo.
-  - [ ] Define the test declaration and diagnostics for per-action-run and
+  - [x] Define the test declaration and diagnostics for per-action-run and
         per-step-through-settle limits, with separate initialization limits.
-  - [ ] Include every execution in a step, including builtins, coordinators,
+  - [x] Include every execution in a step, including builtins, coordinators,
         failed attempts, and short-lived actions according to A1a's contract. Do
         not depend solely on retained graph snapshots for enforcement.
-  - [ ] Test exact-boundary pass, one-over failure, one expensive run, and many
+  - [x] Test exact-boundary pass, one-over failure, one expensive run, and many
         individually cheap runs exceeding the step budget. Verify unbudgeted
         tests preserve their behavior.
 - [ ] **A4 — Add the read-side benchmark.**
@@ -291,9 +291,9 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Define A3's budget declaration and extend measurement to event dispatch and
-commit work before enforcing whole-step budgets. Preserve separate
-initialization limits and include short-lived actions and failed attempts. The
+Publish A3's locally validated implementation for CI and Cubic review. Its
+declaration, separate initialization limits, and five real pass/fail demos are
+implemented. Continue A4's browser read benchmark in an isolated worktree. The
 controlled A0 fixture is available for count comparisons; A4/A5 still need
 browser and cross-space measurements before product performance claims. Do not
 implement collection operators before the measurement and semantic gates above

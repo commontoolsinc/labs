@@ -1,0 +1,184 @@
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+import { resolve } from "@std/path";
+import { stub } from "@std/testing/mock";
+import { Runtime } from "@commonfabric/runner";
+
+import { runTests } from "../lib/test-runner.ts";
+
+const root = resolve(import.meta.dirname!, "fixtures/read-budgets");
+
+describe("test-runner read budgets", {
+  sanitizeOps: false,
+  sanitizeResources: false,
+}, () => {
+  it("passes functional assertions with generous limits and a zero-work override", async () => {
+    const output: string[] = [];
+    using _log = stub(console, "log", (...args: unknown[]) => {
+      output.push(args.map(String).join(" "));
+    });
+    const result = await runTests(resolve(root, "passing.test.tsx"), {
+      root,
+      verbose: true,
+      statsThreshold: 0,
+    });
+    expect(result.results.map((r) => r.error)).toEqual([undefined]);
+    expect(result.failed).toBe(0);
+    expect(result.passed).toBe(1);
+    expect(output.some((line) => line.includes("Read budget (initialization)")))
+      .toBe(true);
+    expect(
+      output.some((line) =>
+        line.includes(
+          "Read budget (step 3): 0 attempt accesses, 0 maximum body accesses",
+        )
+      ),
+    ).toBe(true);
+  });
+
+  it("fails a zero total budget even when the functional assertion passes", async () => {
+    const output: string[] = [];
+    using _log = stub(console, "log", (...args: unknown[]) => {
+      output.push(args.map(String).join(" "));
+    });
+    const result = await runTests(resolve(root, "failing-step.test.tsx"), {
+      root,
+      verbose: true,
+      statsThreshold: 0,
+    });
+    expect(result.failed).toBeGreaterThan(0);
+    const steps = result.results.flatMap((r) => r.results);
+    expect(
+      steps.some((s) =>
+        s.error?.includes("step 2: read budget total exceeded")
+      ),
+    ).toBe(true);
+    expect(steps.find((s) => s.name === "assertion_1")?.passed).toBe(true);
+    expect(
+      output.some((line) =>
+        line.includes("Read budget (step 2)") && line.includes("FAIL")
+      ),
+    ).toBe(true);
+  });
+
+  it("enforces initialization separately from subsequent steps", async () => {
+    const result = await runTests(
+      resolve(root, "failing-initialization.test.tsx"),
+      { root, continuousUI: true },
+    );
+    expect(result.failed).toBeGreaterThan(0);
+    const steps = result.results.flatMap((r) => r.results);
+    expect(
+      steps.some((s) =>
+        s.error?.includes("initialization: read budget total exceeded")
+      ),
+    ).toBe(true);
+    expect(steps.find((s) => s.name === "assertion_1")?.passed).toBe(true);
+  });
+
+  it("enforces the maximum reactive body independently of the total ceiling", async () => {
+    const result = await runTests(resolve(root, "failing-per-run.test.tsx"), {
+      root,
+    });
+    const steps = result.results.flatMap((r) => r.results);
+    expect(steps.some((s) => s.error?.includes("read budget perRun exceeded")))
+      .toBe(true);
+    expect(steps.some((s) => s.error?.includes("read budget total exceeded")))
+      .toBe(false);
+  });
+
+  it("rejects step limits without a module opt-in", async () => {
+    const result = await runTests(resolve(root, "missing-opt-in.test.tsx"), {
+      root,
+    });
+    expect(result.results[0].error).toContain(
+      "without a module-level `readBudgets` export",
+    );
+  });
+
+  it("rejects invalid module limits before executing assertions", async () => {
+    const result = await runTests(
+      resolve(root, "invalid-declaration.test.tsx"),
+      { root },
+    );
+    expect(result.results[0].error).toContain("nonnegative safe integer");
+    expect(result.results[0].results).toEqual([]);
+  });
+
+  it("rejects multi-user budgets instead of claiming incomplete enforcement", async () => {
+    const result = await runTests(resolve(root, "multi-user.test.tsx"), {
+      root,
+    });
+    expect(result.results[0].error).toContain(
+      "Read budgets are not supported in multi-user tests",
+    );
+  });
+
+  it("preserves render errors alongside an initialization budget failure", async () => {
+    const result = await runTests(resolve(root, "invalid-render.test.tsx"), {
+      root,
+      continuousUI: true,
+    });
+    expect(result.results[0].error).toContain(
+      "initialization: read budget total exceeded",
+    );
+    expect(result.results[0].error).toContain("VDOM");
+  });
+
+  it("rejects multi-user step overrides even without a module declaration", async () => {
+    const result = await runTests(resolve(root, "multi-user-step.test.tsx"), {
+      root,
+    });
+    expect(result.results[0].error).toContain(
+      "read budgets are not supported in multi-user tests",
+    );
+  });
+
+  it("retains an assertion failure when the final budget settlement rejects", async () => {
+    const settled = Runtime.prototype.settled;
+    let boundaries = 0;
+    using _settled = stub(
+      Runtime.prototype,
+      "settled",
+      async function (maxRounds) {
+        if (maxRounds === Infinity && ++boundaries === 2) {
+          throw new Error("budget settlement failed");
+        }
+        await settled.call(this, maxRounds);
+      },
+    );
+    const result = await runTests(resolve(root, "failing-assertion.test.tsx"), {
+      root,
+    });
+    expect(boundaries).toBeGreaterThanOrEqual(2);
+    expect(result.results[0].error).toContain("budget settlement failed");
+    expect(result.results[0].error).toContain("assertion_1");
+    expect(
+      result.results[0].results.find((r) => r.name === "assertion_1")?.passed,
+    ).toBe(false);
+  });
+
+  for (
+    const [file, exceeded, within] of [
+      ["many-cheap.test.tsx", "total", "perRun"],
+      ["one-expensive.test.tsx", "perRun", "total"],
+    ]
+  ) {
+    it(`distinguishes ${exceeded} from ${within} limits in ${file}`, async () => {
+      const result = await runTests(resolve(root, file), {
+        root,
+        continuousUI: true,
+      });
+      const steps = result.results.flatMap((r) => r.results);
+      expect(
+        steps.some((r) =>
+          r.error?.includes(`read budget ${exceeded} exceeded`)
+        ),
+      ).toBe(true);
+      expect(
+        steps.some((r) => r.error?.includes(`read budget ${within} exceeded`)),
+      ).toBe(false);
+      expect(steps.find((r) => r.name === "assertion_1")?.passed).toBe(true);
+    });
+  }
+});

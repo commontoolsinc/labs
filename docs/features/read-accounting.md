@@ -73,3 +73,46 @@ their children's totals.
 
 The implementation is in `packages/runner/src/read-stats.ts`, the scheduler
 completion path, and `packages/cli/lib/action-read-report.ts`.
+
+## Pattern-test budgets
+
+A single-user test module can export `readBudgets` with `initialization` and
+`steps` objects. Each accepts optional `total` and `perRun` nonnegative safe
+integer limits on proxy accesses. Equality passes, zero is valid, and omitted
+limits impose no constraint. An executable test step's `readBudget` object
+replaces its default step limits completely; an empty override clears them.
+Step overrides require the module export, including an empty export object.
+Invalid declarations fail explicitly. Multi-user module budgets are rejected.
+
+`perRun` limits the largest completed reactive-body sample. `total` sums separate
+`scheduler.read-attempt` markers after full runtime settlement. It never adds
+body samples to attempt totals. Budget failures include the interval, actual
+count, limit, and largest contributors, and fail the test even when functional
+assertions pass. Verbose output reports each budgeted interval's total and body
+maximum. Budget declarations do not demand UI; use render steps or continuous
+UI demand to measure rendering work.
+
+Attempt accounting is enabled with
+`runtime.scheduler.setReadStatsEnabled(true, { attempts: true })`. It
+covers reactive transactions through settlement, event dependency preflights,
+event handlers, the harness's pattern-instantiation transaction, and each
+`runtime.editWithRetry` attempt, including asynchronous builtin writebacks.
+Commit and abort callbacks emit each attempt once. Aborting inside a reactive
+body preserves its per-run sample. Probes stop at settlement; diagnostic
+idempotency reruns remain excluded.
+
+Attempt markers retain proxy-access and link-hop counts, independently of the
+transaction read logs that commit can clear. Document cardinality and dependency
+diagnostics remain body-only; no full-attempt document count is claimed.
+
+Initialization excludes compilation and default environment setup, and includes
+pattern instantiation, initial settlement, and continuous UI mounting when
+enabled. Steps settle scheduler, storage, pending commits, and asynchronous
+builtin work with uncapped `runtime.settled(Infinity)` before evaluating limits.
+Skipped steps omit their operation and limits but still report any measured
+work in verbose mode. Unbudgeted tests retain their existing
+settlement behavior. These totals cover the named local transaction paths;
+unrelated transactions, standalone harness reads, storage-server work, and
+network traffic are outside the measure. Plain eager values and primitive Cell
+reads are not proxy accesses. A zero count does not mean zero CPU work or zero
+storage reads.

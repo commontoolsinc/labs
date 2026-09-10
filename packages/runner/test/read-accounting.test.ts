@@ -5,11 +5,19 @@ import { type Stub, stub } from "@std/testing/mock";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import { startReadStats } from "../src/read-stats.ts";
+import {
+  type ReadAttemptCounts,
+  readStatsActive,
+  startReadStats,
+} from "../src/read-stats.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { createNonReactiveTransaction } from "../src/storage/extended-storage-transaction.ts";
+import {
+  dispatchQueuedEvent,
+  preflightQueuedEventDependencies,
+} from "../src/scheduler/events.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { Action } from "../src/scheduler.ts";
+import type { Action, EventHandler } from "../src/scheduler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { ignoreReadForScheduling } from "../src/storage/reactivity-log.ts";
 import {
@@ -53,6 +61,267 @@ describe("read-accounting", () => {
     await storage.synced();
     await runtime.dispose();
     await storage.close();
+  });
+
+  it("leaves accounting disabled when attempt observer registration is refused", () => {
+    const tx = runtime.edit();
+    tx.setReadOnly!("accounting setup test");
+    expect(() => startReadStats(tx, () => {})).toThrow();
+    expect(readStatsActive).toBe(false);
+    tx.clearReadOnly!();
+    tx.abort();
+    expect(readStatsActive).toBe(false);
+  });
+
+  for (const settle of ["commit", "abort"] as const) {
+    it(`retains attempt reads through ${settle} without changing the body snapshot`, async () => {
+      const tx = runtime.edit();
+      const completed: ReadAttemptCounts[] = [];
+      const finish = startReadStats(tx, (counts) => completed.push(counts));
+      const data = runtime.getCell<{ value: number }>(
+        space,
+        "source",
+        undefined,
+        tx,
+      )
+        .get();
+      expect(data.value).toBe(7);
+      const body = finish(0);
+      expect(body?.proxyAccesses).toBe(1);
+      expect(completed).toEqual([]);
+      expect(data.value).toBe(7);
+      if (settle === "commit") await tx.commit();
+      else tx.abort();
+      expect(completed).toHaveLength(1);
+      expect(completed[0].proxyAccesses).toBe(2);
+      expect(body?.distinctDocuments).toBe(1);
+      expect(body?.proxyAccesses).toBe(1);
+      expect(readStatsActive).toBe(false);
+    });
+  }
+
+  it("retains a body sample when its action aborts before returning", () => {
+    const tx = runtime.edit();
+    const completed: ReadAttemptCounts[] = [];
+    const finish = startReadStats(tx, (counts) => completed.push(counts));
+    const data = runtime.getCell<{ value: number }>(
+      space,
+      "source",
+      undefined,
+      tx,
+    ).get();
+    expect(data.value).toBe(7);
+    tx.abort();
+    expect(completed).toHaveLength(1);
+    expect(completed[0].proxyAccesses).toBe(1);
+    expect(finish(0)?.proxyAccesses).toBe(1);
+    expect(readStatsActive).toBe(false);
+  });
+
+  it("disables body-only probes when the body ends", () => {
+    const tx = runtime.edit();
+    const finish = startReadStats(tx);
+    const data = runtime.getCell<{ value: number }>(
+      space,
+      "source",
+      undefined,
+      tx,
+    )
+      .get();
+    expect(data.value).toBe(7);
+    expect(finish(0)?.proxyAccesses).toBe(1);
+    expect(data.value).toBe(7);
+    expect(readStatsActive).toBe(false);
+    tx.abort();
+  });
+
+  it("records event bodies and preflights as independent completed attempts", async () => {
+    runtime.scheduler.setReadStatsEnabled(true, { attempts: true });
+    const markers: RuntimeTelemetryMarker[] = [];
+    runtime.telemetry.addEventListener("telemetry", (event) => {
+      if (event instanceof RuntimeTelemetryEvent) markers.push(event.marker);
+    });
+    const eventCell = runtime.getCell(space, "budget-event");
+    const read = (tx: IExtendedStorageTransaction) => {
+      const data = runtime.getCell<{ value: number }>(
+        space,
+        "source",
+        undefined,
+        tx,
+      ).get();
+      expect(data.value).toBe(7);
+    };
+    const handler: EventHandler = (tx) => {
+      read(tx);
+      read(tx);
+    };
+    handler.populateDependencies = (tx) => read(tx);
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventCell.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      undefined,
+    );
+    await runtime.settled();
+    const attempts = markers.filter((m) => m.type === "scheduler.read-attempt");
+    expect(
+      attempts.filter((m) => m.kind === "event").map((m) =>
+        m.reads.proxyAccesses
+      ),
+    ).toEqual([2]);
+    const preflights = attempts.filter((m) => m.kind === "preflight");
+    expect(preflights.length).toBeGreaterThan(0);
+    expect(preflights.every((m) => m.reads.proxyAccesses === 1)).toBe(true);
+  });
+
+  it("closes read-only preflight accounting when error reporting throws", () => {
+    runtime.scheduler.setReadStatsEnabled(true, { attempts: true });
+    const markers: RuntimeTelemetryMarker[] = [];
+    runtime.telemetry.addEventListener("telemetry", (event) => {
+      if (event instanceof RuntimeTelemetryEvent) markers.push(event.marker);
+    });
+    const failure = new Error("injected preflight reporting failure");
+    const handler = Object.assign(() => {}, {
+      populateDependencies: (tx: IExtendedStorageTransaction) => {
+        expect(
+          runtime.getCell<{ value: number }>(space, "source", undefined, tx)
+            .get().value,
+        ).toBe(7);
+        throw new Error("dependency inspection failed");
+      },
+    });
+    const access = runtime.scheduler.accessForTestingOnly;
+    const queued = {
+      id: "preflight-fault",
+      enqueueSeq: 0,
+      eventLink: runtime.getCell(space, "source").getAsNormalizedFullLink(),
+      action: handler,
+      handler,
+      event: undefined,
+      retry: false,
+    };
+    const state: Parameters<typeof preflightQueuedEventDependencies>[0] = {
+      ...access.eventExecutionState,
+      nodes: access.nodes,
+      pending: access.pending,
+      pendingActions: new Set(),
+      eventBlockingDeps: new Set(),
+      handleError: () => {
+        throw failure;
+      },
+      setEventPreflightTraceContext: () => {},
+      collectInvalidUpstreamForLog: () => false,
+      isDebouncedComputationWaiting: () => false,
+      getNextDebounceRunTime: () => undefined,
+      getNextEligibleRunTime: () => undefined,
+      scheduleWake: () => {},
+      dropEvent: () => {},
+    };
+    expect(() => preflightQueuedEventDependencies(state, queued)).toThrow(
+      failure.message,
+    );
+    expect(
+      markers.filter((m) => m.type === "scheduler.read-attempt").map((m) =>
+        m.reads.proxyAccesses
+      ),
+    ).toEqual([1]);
+    expect(readStatsActive).toBe(false);
+  });
+
+  it("completes an event attempt when setup throws before invoking the handler", async () => {
+    runtime.scheduler.setReadStatsEnabled(true, { attempts: true });
+    const markers: RuntimeTelemetryMarker[] = [];
+    runtime.telemetry.addEventListener("telemetry", (event) => {
+      if (event instanceof RuntimeTelemetryEvent) markers.push(event.marker);
+    });
+    let invoked = false;
+    const handler = () => {
+      invoked = true;
+    };
+    const queued = {
+      id: "setup-fault",
+      enqueueSeq: 0,
+      eventLink: runtime.getCell(space, "fault-event")
+        .getAsNormalizedFullLink(),
+      action: handler,
+      handler,
+      event: undefined,
+      retry: false,
+    };
+    const access = runtime.scheduler.accessForTestingOnly;
+    access.eventQueue.push(queued);
+    const failure = new Error("injected event setup failure");
+    using _stamp = stub(runtime, "stampServerRun", (tx) => {
+      expect(
+        runtime.getCell<{ value: number }>(space, "source", undefined, tx).get()
+          .value,
+      ).toBe(7);
+      throw failure;
+    });
+    await expect(dispatchQueuedEvent(access.eventExecutionState, queued))
+      .rejects.toBe(failure);
+    expect(invoked).toBe(false);
+    expect(
+      markers.filter((m) => m.type === "scheduler.read-attempt").map((m) =>
+        m.reads.proxyAccesses
+      ),
+    ).toEqual([1]);
+    expect(readStatsActive).toBe(false);
+  });
+
+  it("completes an edit attempt when commit preparation throws", () => {
+    runtime.scheduler.setReadStatsEnabled(true, { attempts: true });
+    const attempts: RuntimeTelemetryMarker[] = [];
+    runtime.telemetry.addEventListener("telemetry", (event) => {
+      if (event instanceof RuntimeTelemetryEvent) attempts.push(event.marker);
+    });
+    const read = (tx: IExtendedStorageTransaction) => {
+      expect(
+        runtime.getCell<{ value: number }>(space, "source", undefined, tx).get()
+          .value,
+      ).toBe(7);
+    };
+    using _prepare = stub(runtime, "prepareTxForCommit", (tx) => {
+      read(tx);
+      throw new Error("injected preparation failure");
+    });
+    expect(() => runtime.editWithRetry(read, 0)).toThrow(
+      "injected preparation failure",
+    );
+    expect(
+      attempts.filter((m) => m.type === "scheduler.read-attempt").map((m) =>
+        m.reads.proxyAccesses
+      ),
+    ).toEqual([2]);
+    expect(readStatsActive).toBe(false);
+  });
+
+  it("includes successful and failed editWithRetry bodies in attempt totals", async () => {
+    runtime.scheduler.setReadStatsEnabled(true, { attempts: true });
+    const markers: RuntimeTelemetryMarker[] = [];
+    runtime.telemetry.addEventListener("telemetry", (event) => {
+      if (event instanceof RuntimeTelemetryEvent) markers.push(event.marker);
+    });
+    for (const fail of [false, true]) {
+      const result = await runtime.editWithRetry((tx) => {
+        const data = runtime.getCell<{ value: number }>(
+          space,
+          "source",
+          undefined,
+          tx,
+        ).get();
+        expect(data.value).toBe(7);
+        if (fail) throw new Error("measured edit failure");
+      });
+      expect(result.error !== undefined).toBe(fail);
+    }
+    expect(
+      markers.filter((m) => m.type === "scheduler.read-attempt")
+        .filter((m) => m.kind === "editWithRetry")
+        .map((m) => m.reads.proxyAccesses),
+    ).toEqual([1, 1]);
   });
 
   it("shares counts through nonreactive wrappers without sharing across transactions", () => {
