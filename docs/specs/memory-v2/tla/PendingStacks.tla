@@ -263,31 +263,42 @@ DurableWriters(p, k) == {i \in 1..(k - 1) : p \in log[i].writes}
 ContentBelow(p, k) == {log[i].val : i \in DurableWriters(p, k)}
 ContentAt(p, n) == ContentBelow(p, n + 1)
 
-(* The basis the identity proof replays a write to p from: the seq of the
-   commit's own read of p - a confirmed read's basis, or for a pending read
-   the resolution of the highest layer the read names, which is where the
-   engine's patchBasisSeq puts it whatever BasisMode the staleness scan
-   uses - and the stored content itself when the commit did not read p
-   (a write with no read is an identity only where it is idempotent). *)
-IdentityBasis(s, c, p, k) ==
+(* The content the reader SAW at p, reconstructed from the commit's own
+   read of p as the engine's basisOf does: a confirmed read's content at
+   its basis; a pending read's content at its confirmed basis plus the
+   values the own layers it names wrote to p - an elided layer's included,
+   since the client folded that write whether or not the server recorded
+   a revision for it; and the stored content itself when the commit did
+   not read p (a write with no read is an identity only where it is
+   idempotent).  What this is NOT is the durable content at a named
+   layer's resolution: that carries every foreign write that landed
+   before the layer, which the reader had not integrated, and judging
+   from it accepts a write the reader's own view would not have produced
+   (the reviewed defect this definition replaced). *)
+LayerVal(s, d) ==
+  IF res[s][d].st = "acc" THEN {log[res[s][d].seq].val} ELSE {}
+LayerWrote(s, d, p) ==
+  /\ res[s][d].st = "acc"
+  /\ p \in log[res[s][d].seq].writes \cup log[res[s][d].seq].elided
+ObservedContent(s, c, p, k) ==
   IF \E r \in c.reads : r.path = p
   THEN LET r == CHOOSE r \in c.reads : r.path = p
-       IN IF r.kind = "confirmed" THEN r.cbasis ELSE res[s][Max(r.deps)].seq
-  ELSE k - 1
+       IN ContentAt(p, r.cbasis) \cup
+            UNION {LayerVal(s, d) : d \in {d \in r.deps : LayerWrote(s, d, p)}}
+  ELSE ContentBelow(p, k)
 
 (* The identity proof of 03-commit-model.md section 3.6.1 over content:
-   for every path the commit writes, folding its value onto the content at
-   the reader's basis yields the stored content, and folding it onto the
+   for every path the commit writes, folding its value onto the content
+   the reader saw yields the stored content, and folding it onto the
    stored content leaves that unchanged.  Under the set-union fold the
    second half is membership and the first says nothing but the commit's
-   own value landed on the path since the basis.  Only reachable from a
-   staleness refusal; HasDeadDep is decided first. *)
+   own value landed on the path since the reader's view.  Only reachable
+   from a staleness refusal; HasDeadDep is decided first. *)
 IsIdentity(s, c, k) ==
   /\ IdentityMode = "elide"
   /\ \A p \in c.writes :
        /\ c.val \in ContentBelow(p, k)
-       /\ ContentBelow(p, k) \subseteq
-            ContentAt(p, IdentityBasis(s, c, p, k)) \cup {c.val}
+       /\ ContentBelow(p, k) \subseteq ObservedContent(s, c, p, k) \cup {c.val}
 
 (* An elided acceptance appends an entry with no writes: the commit takes
    seq k and resolves its localSeq like any accepted commit, and records
@@ -438,8 +449,6 @@ ReadCoherenceOfWrites ==
    wrote something is held to it; an elided commit is the deviation
    09-invariants.md records under INV-1: its observation may be stale, and
    it produced no write for that staleness to have misled. *)
-LayerVal(s, d) ==
-  IF res[s][d].st = "acc" THEN {log[res[s][d].seq].val} ELSE {}
 ObsContent(s, r) ==
   {log[i].val : i \in r.obsC} \cup UNION {LayerVal(s, d) : d \in r.obsP}
 

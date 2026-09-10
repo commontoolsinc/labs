@@ -6,6 +6,7 @@ import {
   applyCommit,
   close,
   ConflictError,
+  createBranch,
   type Engine,
   open,
 } from "../v2/engine.ts";
@@ -448,6 +449,212 @@ describe("applyCommit() with an identity commit", () => {
               localSeq: 2,
               basisSeq: install,
             }],
+          },
+          operations: [patchOp("of:doc", [
+            { op: "replace", path: "/value/a", value: 2 },
+          ])],
+        }),
+      })
+    ).toThrow(ConflictError);
+  });
+
+  it("replays a pending read's view from its declared basis, not from the layer's durable snapshot", () => {
+    // Session a's view of the document is {a: 0} plus its own blind layer
+    // adding c: 1, so {a: 0, c: 1}. Session b replaced the document with
+    // {a: 1} before that layer landed, and then added b: 2, so the
+    // durable document at the layer's resolution is {a: 1, c: 1} and the
+    // stored one {a: 1, b: 2, c: 1}. A patch adding b: 2, replayed from
+    // the layer's durable snapshot, would match what is stored; replayed
+    // from the view session a in fact held it yields {a: 0, b: 2, c: 1},
+    // so the commit's stale read of a is a real one and it is refused.
+    const install = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, { operations: [setOp("of:doc", { a: 0 })] }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:b",
+      commit: commit(1, { operations: [setOp("of:doc", { a: 1 })] }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        operations: [patchOp("of:doc", [
+          { op: "add", path: "/value/c", value: 1 },
+        ])],
+      }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:b",
+      commit: commit(2, {
+        operations: [patchOp("of:doc", [
+          { op: "add", path: "/value/b", value: 2 },
+        ])],
+      }),
+    });
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(3, {
+          reads: {
+            confirmed: [],
+            pending: [{
+              id: "of:doc",
+              path: [],
+              localSeq: 2,
+              basisSeq: install.seq,
+            }],
+          },
+          operations: [patchOp("of:doc", [
+            { op: "add", path: "/value/b", value: 2 },
+          ])],
+        }),
+      })
+    ).toThrow(ConflictError);
+  });
+
+  it("gives no exemption to a pending read that declares no basis", () => {
+    // The same shape as the accepted patch-from-basis case, with a legacy
+    // pending read: without a declared basis the reader's view cannot be
+    // reconstructed, and the staleness refusal stands.
+    const install = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, { operations: [setOp("of:doc", { n: 1 })] }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        reads: {
+          confirmed: [{ id: "of:doc", path: [], seq: install.seq }],
+          pending: [],
+        },
+        operations: [patchOp("of:doc", [
+          { op: "add", path: "/value/m", value: 1 },
+        ])],
+      }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:b",
+      commit: commit(1, {
+        operations: [patchOp("of:doc", [
+          { op: "replace", path: "/value/n", value: 2 },
+        ])],
+      }),
+    });
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(3, {
+          reads: {
+            confirmed: [],
+            pending: [{ id: "of:doc", path: [], localSeq: 2 }],
+          },
+          operations: [patchOp("of:doc", [
+            { op: "replace", path: "/value/n", value: 2 },
+          ])],
+        }),
+      })
+    ).toThrow(ConflictError);
+  });
+
+  // Session a installs the document with the parent branch at seq 1,
+  // `feature` forks there, session a writes {a: 1, b: 1} on `feature`, and
+  // session x replaces that with {a: 1, b: 0}. Returns the install seq and
+  // the seq of session a's feature write.
+  function installForkThenReplaceOnFeature(): {
+    install: number;
+    onFeature: number;
+  } {
+    const install = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, { operations: [setOp("of:doc", { a: 1, b: 0 })] }),
+    });
+    createBranch(engine, "feature");
+    const onFeature = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        branch: "feature",
+        operations: [setOp("of:doc", { a: 1, b: 1 })],
+      }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:x",
+      commit: commit(1, {
+        branch: "feature",
+        operations: [setOp("of:doc", { a: 1, b: 0 })],
+      }),
+    });
+    return { install: install.seq, onFeature: onFeature.seq };
+  }
+
+  it("passes over a read of the entity on another branch when choosing the basis", () => {
+    // The parent-branch read comes first and its seq names a feature
+    // revision that happens to equal the stored one, so a replay from it
+    // would pass; the feature read is the commit's view of this branch,
+    // and from {a: 1, b: 1} the replace of a leaves b: 1, not the stored
+    // b: 0.
+    const { install, onFeature } = installForkThenReplaceOnFeature();
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(3, {
+          branch: "feature",
+          reads: {
+            confirmed: [
+              { id: "of:doc", branch: undefined, path: [], seq: install },
+              { id: "of:doc", branch: "feature", path: [], seq: onFeature },
+            ],
+            pending: [],
+          },
+          operations: [patchOp("of:doc", [
+            { op: "replace", path: "/value/a", value: 1 },
+          ])],
+        }),
+      })
+    ).toThrow(ConflictError);
+  });
+
+  it("refuses rather than failing to read when the other branch's read seq predates the fork", () => {
+    // Two parent-branch writes precede the fork, so the parent read's seq
+    // has no feature revision to read; taken as the basis it would surface
+    // as a read failure instead of the conflict the feature read carries.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, { operations: [setOp("of:doc", { a: 1 })] }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, { operations: [setOp("of:other", { x: 1 })] }),
+    });
+    createBranch(engine, "feature");
+    const onFeature = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(3, {
+        branch: "feature",
+        operations: [setOp("of:doc", { a: 2 })],
+      }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:x",
+      commit: commit(1, {
+        branch: "feature",
+        operations: [setOp("of:doc", { a: 3 })],
+      }),
+    });
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(4, {
+          branch: "feature",
+          reads: {
+            confirmed: [
+              { id: "of:doc", path: [], seq: 1 },
+              { id: "of:doc", branch: "feature", path: [], seq: onFeature },
+            ],
+            pending: [],
           },
           operations: [patchOp("of:doc", [
             { op: "replace", path: "/value/a", value: 2 },

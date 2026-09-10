@@ -315,31 +315,43 @@ The validation model is path-aware and seq-based. A later write to an unrelated
 path on the same entity does not invalidate the read.
 
 An **identity commit** is exempt from this rule and from the staleness half of
-§3.6.3. It is a commit whose every operation leaves its document as the space
+§3.6.3. It is a commit that leaves every document it writes as the space
 already holds it. The server proves that only once a staleness check has
-refused the commit, since the proof reads stored documents and, for a patch,
-reconstructs one at the reader's basis; a commit that validates pays nothing
-for it, and one refused for an unresolved or rejected dependency is not a
-candidate. The proof, per operation:
+refused the commit, since the proof reads stored documents and reconstructs
+the reader's view of each; a commit that validates pays nothing for it, and
+one refused for an unresolved or rejected dependency is not a candidate. The
+proof is per document, over the commit's `set` and `patch` operations on that
+document in order, so a commit that creates a document with a `set` and then
+patches it is judged as one write of the final value:
 
-- a `set` whose value equals the stored document;
-- a `patch` that, replayed on the document as the commit's read of that
-  document saw it, yields the stored document, and that replayed on the
-  stored document leaves it unchanged. The basis is the resolution of the
-  highest own layer a pending read of the document names, since that read is
-  the view the value came through, even where the commit also carries a
-  confirmed read of the document; the confirmed read's `seq` where there is
-  no pending read; and the stored document itself when the commit did not
-  read the document at all. The second condition is for the
-  writer's replica, which re-folds the patch over whatever confirmed base it
-  holds when the accept arrives: a patch idempotent on the durable value
-  lands on that value from any base between the read and the head, where a
-  positional splice replayed over a base already carrying its elements would
-  duplicate them.
+- replayed on the document as the commit's read of that document saw it, the
+  sequence yields the stored document;
+- replayed on the stored document, the sequence leaves it unchanged. This
+  condition is for the writer's replica, which re-folds the operations over
+  whatever confirmed base it holds when the accept arrives: a sequence
+  idempotent on the durable value lands on that value from any base between
+  the read and the head, where a positional splice replayed over a base
+  already carrying its elements would duplicate them.
+
+The reader's view of a document is reconstructed from the commit's own read
+of it, on the commit's branch: for a pending read, the document at the read's
+declared `basisSeq` with exactly the own layers the read names replayed on it
+in local order, since that read is the view the value came through, even
+where the commit also carries a confirmed read of the document; for a
+confirmed read, the document at its `seq`; and the stored document itself
+when the commit did not read the document, where the sequence is an identity
+only if it is idempotent. A read of the same entity on another branch is
+passed over. A pending read that declares no `basisSeq` leaves the view
+unreconstructable, and the commit gets no exemption: the durable document at
+a named layer's resolution is not that view, since it carries every foreign
+write on other paths that landed before the layer and that the reader had not
+integrated.
 
 Applying such a commit changes nothing, so no read it recorded can have led it
 to a wrong write, and refusing it would only make the writer re-derive the
-value the space already holds. Every operation of an identity commit elides
+value the space already holds. An operation that is not a `set` or a `patch`,
+or that no reconstructed view accepts, keeps the commit out of the exemption.
+Every operation of an identity commit elides
 (§3.7.1 step 5). The exemption covers staleness only: a pending read naming an
 unresolved or rejected layer still refuses the commit (§3.6.3), so a commit the
 client has cascade-dropped is never accepted (`09-invariants.md`, INV-6). A

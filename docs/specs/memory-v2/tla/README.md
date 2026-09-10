@@ -28,9 +28,9 @@ digit.
 | `PendingStacks_Filtered5.cfg` | `filtered` | `confirmed` | `atomic` | **All invariants hold** at `MaxTotal = 5` with single-path writes (110.7M distinct states, ~5 min) — deep enough for a foreign write to reject a *middle* pending layer beneath a reader, the case where overlap-filtering actually drops a dependency. |
 | `PendingStacks_Channel.cfg` | `fullstack` | `confirmed` | `channel` (delayed verdict delivery) | **All invariants hold**, including `AcceptedVersusDropped` (INV-6), at 39,966,805 distinct states, `MaxTotal = 4`, ~90s. Certifies the decided-but-unprocessed window: commits built there name decided-dead layers and are refused by the dead-dependency admission rule; commits built after the processed rejection's drop record sparse arrays (§3.5's view-relative completeness). Negative control: deleting `HasDeadDep` from `Process` violates `CascadeTotality` within a second — the rule is load-bearing, not decorative. |
 | `PendingStacks_ChannelFiltered.cfg` | `filtered` | `confirmed` | `channel` | **All invariants hold** (39,967,453 distinct states, ~90s) — the overlap-filtered narrowing composed with delayed delivery, so the two live refinement directions are certified together rather than only separately. |
-| `PendingStacks_Identity.cfg` | `fullstack` | `confirmed` | `atomic`, `IdentityMode = "elide"`, `Values = {"a", "b"}` | **All invariants hold** — `ContentCoherence`, `ElidedUnchanged`, `CascadeTotality`, `MonotonicResolution` — at 306,235,237 distinct states, `MaxTotal = 4`, ~14 min. Certifies the identity-commit acceptance of §3.6.1: a commit refused for staleness and proved to change no path's content is accepted with its writes elided, and no commit that wrote anything is ever admitted on an observation whose content differs from durable history — including a commit built on top of an elided layer, and one whose identity proof replayed from a pending read's highest named layer rather than its confirmed basis. |
+| `PendingStacks_Identity.cfg` | `fullstack` | `confirmed` | `atomic`, `IdentityMode = "elide"`, `Values = {"a", "b"}` | **All invariants hold** — `ContentCoherence`, `ElidedUnchanged`, `CascadeTotality`, `MonotonicResolution` — at 304,439,185 distinct states, `MaxTotal = 4`, ~14 min. Certifies the identity-commit acceptance of §3.6.1: a commit refused for staleness and proved to change no path's content, judged from the content its reader saw (its confirmed basis plus the values its own named layers wrote), is accepted with its writes elided, and no commit that wrote anything is ever admitted on an observation whose content differs from durable history — including a commit built on top of an elided layer. |
 | `PendingStacks_IdentityWriterForm.cfg` | `fullstack` | `confirmed` | `atomic`, `IdentityMode = "elide"` | **ReadCoherenceOfWrites violated** at depth 8, within seconds — the same run as the row above held to the writer-set form of INV-1 over the commits that wrote something. The trace: a foreign commit writes `p1 = a`; the reader's own stale `p1 = a` is elided at the next seq; the reader integrates the foreign write, keeps its elided layer on the stack, and its next commit observes `p1` through that layer — contributors `{1, 2}` where durable history holds `{1}`, the same content either way. Kept as the witness that the content form is the statement under elision, not a weakening. |
-| `PendingStacks_ChannelIdentity.cfg` | `fullstack` | `confirmed` | `channel`, `IdentityMode = "elide"`, `Values = {"a", "b"}` | **All invariants hold**, `AcceptedVersusDropped` included, at 170,131,105 distinct states, `MaxTotal = 4` with single-path writes (`WriteChoices <- SingletonWrites`, the Filtered5 bound), ~9 min. The identity acceptance composed with delayed delivery: an elided layer's accept is processed by `Deliver`, stands on the stack through the parking window, and is named by builds there without a durable write behind it. With multi-path writes this config passes 680M distinct states in half an hour without finishing, which is why the bound is narrowed rather than the depth. |
+| `PendingStacks_ChannelIdentity.cfg` | `fullstack` | `confirmed` | `channel`, `IdentityMode = "elide"`, `Values = {"a", "b"}` | **All invariants hold**, `AcceptedVersusDropped` included, at 169,592,041 distinct states, `MaxTotal = 4` with single-path writes (`WriteChoices <- SingletonWrites`, the Filtered5 bound), ~9 min. The identity acceptance composed with delayed delivery: an elided layer's accept is processed by `Deliver`, stands on the stack through the parking window, and is named by builds there without a durable write behind it. With multi-path writes this config passes 680M distinct states in half an hour without finishing, which is why the bound is narrowed rather than the depth. |
 
 Read the violation together with the catalog: the maxdep counterexample is an
 INV-1 failure through the staleness basis, orthogonal to dependency
@@ -173,14 +173,17 @@ or missed contributor directly.
   values its accepted writes carried. Writing a value the path already
   holds changes nothing, which is what an identity commit
   (`03-commit-model.md` §3.6.1) is in this abstraction, and the set-union
-  fold is the idempotence the patch rule requires of it. The identity proof
-  replays a write from the content at its reader's basis — a confirmed
-  read's seq, or the resolution of the highest layer a pending read names,
-  where the engine's `patchBasisSeq` puts it whatever basis the staleness
-  scan uses — and asks that only the commit's own value landed since. Two
-  values are enough to tell an identity from a real write; the value
-  alphabet does not model what a real patch can do to a document beyond
-  that, and the engine's per-document replay of arbitrary patches is the
+  fold is the idempotence the rule requires of it. The identity proof
+  replays a write from the content the reader saw — a confirmed read's
+  basis, or for a pending read the content at its confirmed basis plus the
+  values its own named layers wrote, which is the reconstructed view the
+  engine's `basisOf` builds — and asks that only the commit's own value
+  landed since. Two values are enough to tell an identity from a real
+  write. What the alphabet does not model is a commit's ordered sequence
+  of operations on one document: a commit here is one write of one value
+  per path, which is the engine's per-document rule with the sequence
+  collapsed to its final effect. The replay of an arbitrary sequence, and
+  what a patch can do to a document beyond adding a value, is the engine
   unit tests' and the differential harness's to check.
 - **Verdict delivery is a mode.** `atomic` fuses the server's verdict with
   the client's mirrored cascade in one action — the original abstraction,

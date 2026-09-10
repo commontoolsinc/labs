@@ -5550,33 +5550,90 @@ const applyCommitTransaction = (
   // value lands on that value from any base between the read and the head,
   // where a positional splice replayed over a base already carrying its
   // elements would duplicate them.
-  const patchBasisSeq = (
-    operation: { id: string; scope?: Parameters<typeof normalizeScope>[0] },
-  ): number | undefined => {
+  type DocumentOps = Array<
+    Extract<typeof commit.operations[number], { op: "set" | "patch" }>
+  >;
+  const replay = (
+    base: EntityDocument | undefined,
+    operations: DocumentOps,
+  ): EntityDocument | undefined => {
+    let document = base;
+    for (const operation of operations) {
+      document = operation.op === "set"
+        ? operation.value as EntityDocument
+        : applyPatchToDocument(document, operation.patches);
+    }
+    return document;
+  };
+  // The document as the commit's read of it saw it, on the commit's branch
+  // under the write's scope. A pending read is the view the value came
+  // through: the document at the read's declared confirmed basis with
+  // exactly the own layers the read names replayed on it in local order.
+  // The layers' resolution seqs would not do: the durable document at the
+  // highest one carries every foreign write on other paths that landed
+  // before it, which the reader had not integrated, so a patch judged from
+  // there could pass as an identity while the reader's own view would not
+  // have produced the stored document. A pending read that declares no
+  // basis (a legacy client) leaves the view unreconstructable, and such a
+  // commit gets no exemption. Where a commit also carries a confirmed read
+  // of the same document (a shape-only read that names the non-speculative
+  // stack), the pending read decides. A confirmed read's view is the
+  // document at its seq; a read of the same entity on another branch says
+  // nothing about this branch and is passed over. With no read of the
+  // document at all the sequence is an identity only where it is
+  // idempotent, so the stored document is the basis.
+  type Basis =
+    | { known: true; document: EntityDocument | undefined }
+    | { known: false };
+  const basisOf = (
+    first: DocumentOps[number],
+    stored: EntityDocument,
+    at: (seq: number) => EntityDocument | null,
+  ): Basis => {
     const sameDocument = (candidate: { id: string; scope?: unknown }) =>
-      candidate.id === operation.id &&
+      candidate.id === first.id &&
       normalizeScope(
           candidate.scope as Parameters<typeof normalizeScope>[0],
         ) ===
-        normalizeScope(operation.scope);
-    // A pending read is the view the value came through: the reader's own
-    // layers stacked on its confirmed basis. Where a commit also carries a
-    // confirmed read of the same document (a shape-only read that names
-    // the non-speculative stack), replaying from that confirmed seq would
-    // drop the layers' effects and could match a stored document that
-    // lost them, so the pending read decides the basis whenever there is
-    // one. The highest layer's resolution is the seq at which the view is
-    // durable, when it is.
+        normalizeScope(first.scope);
+    const documentAt = (seq: number): EntityDocument | undefined =>
+      seq === 0 ? undefined : at(seq) ?? undefined;
     const pending = commit.reads.pending.find(sameDocument);
     if (pending !== undefined) {
-      const layers = pendingReadLayers(pending);
-      const row = engine.statements.selectPendingResolution.get({
-        session_id: sessionKey,
-        local_seq: Math.max(...layers),
-      }) as { seq: number } | undefined;
-      return row?.seq;
+      if (pending.basisSeq === undefined) return { known: false };
+      let document = documentAt(pending.basisSeq);
+      const layers = [...pendingReadLayers(pending)].sort((a, b) => a - b);
+      for (const localSeq of layers) {
+        const row = engine.statements.selectExistingCommit.get({
+          session_id: sessionKey,
+          local_seq: localSeq,
+        }) as CommitRow | undefined;
+        if (row === undefined || (row.branch || DEFAULT_BRANCH) !== branch) {
+          return { known: false };
+        }
+        const layer = decodeMemoryBoundary(row.original) as ClientCommit;
+        for (const operation of layer.operations) {
+          if (operation.op === "sqlite" || !sameDocument(operation)) continue;
+          if (operation.op === "delete") {
+            document = undefined;
+            continue;
+          }
+          if (operation.op !== "set" && operation.op !== "patch") {
+            return { known: false };
+          }
+          document = replay(document, [operation]);
+        }
+      }
+      return { known: true, document };
     }
-    return commit.reads.confirmed.find(sameDocument)?.seq;
+    const confirmed = commit.reads.confirmed.find((candidate) =>
+      sameDocument(candidate) &&
+      (candidate.branch ?? DEFAULT_BRANCH) === branch
+    );
+    return {
+      known: true,
+      document: confirmed === undefined ? stored : documentAt(confirmed.seq),
+    };
   };
   // Proving the identity reads the stored document and, for a patch, the
   // document at the reader's basis, so it runs only once a staleness check
@@ -5588,12 +5645,7 @@ const applyCommitTransaction = (
   // whole sequence can compare with what is stored.
   const isIdentityCommit = (): boolean => {
     if (commit.operations.length === 0) return false;
-    type DocOps = {
-      opIndex: number;
-      operations: Array<
-        Extract<typeof commit.operations[number], { op: "set" | "patch" }>
-      >;
-    };
+    type DocOps = { opIndex: number; operations: DocumentOps };
     const byDocument = new Map<string, DocOps>();
     for (const [opIndex, operation] of commit.operations.entries()) {
       if (operation.op !== "set" && operation.op !== "patch") return false;
@@ -5614,18 +5666,6 @@ const applyCommitTransaction = (
         group.operations.push(operation);
       }
     }
-    const replay = (
-      base: EntityDocument | undefined,
-      operations: DocOps["operations"],
-    ): EntityDocument | undefined => {
-      let document = base;
-      for (const operation of operations) {
-        document = operation.op === "set"
-          ? operation.value as EntityDocument
-          : applyPatchToDocument(document, operation.patches);
-      }
-      return document;
-    };
     for (const { opIndex, operations } of byDocument.values()) {
       const first = operations[0];
       const at = (seq?: number) =>
@@ -5640,17 +5680,14 @@ const applyCommitTransaction = (
         });
       const stored = at();
       if (stored === null) return false;
-      // The base is the document as the commit's read of it saw it, the
-      // empty document where that read found it absent, and the stored
-      // document where the commit did not read it at all: there the
-      // sequence is an identity only where it is idempotent.
-      const basisSeq = patchBasisSeq(first);
-      const basis = basisSeq === undefined ? stored : at(basisSeq) ?? undefined;
-      // A patch that cannot be applied to one of the two bases proves no
-      // identity, and the staleness refusal it arrived with stands; the
-      // ordinary apply path reports the patch's own failure on the retry.
+      // A view that cannot be reconstructed, or a patch that cannot be
+      // applied to one of the two bases, proves no identity, and the
+      // staleness refusal the commit arrived with stands; the ordinary
+      // apply path reports a patch's own failure on the retry.
       try {
-        const fromBasis = replay(basis, operations);
+        const basis = basisOf(first, stored, at);
+        if (!basis.known) return false;
+        const fromBasis = replay(basis.document, operations);
         const onStored = replay(stored, operations);
         if (
           !valueEqual(fromBasis as FabricValue, stored as FabricValue) ||
