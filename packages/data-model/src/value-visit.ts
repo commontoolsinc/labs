@@ -520,6 +520,15 @@ export abstract class ContainerIteratingVisitor<
 //
 
 /**
+ * Special result form used to indicate what actual value to use as the target
+ * of a `visitSubtype`, based on following the `replace` chain. This is used
+ * _only_ when a replacement has been made (expected to be uncommon), thereby
+ * avoiding allocation for the common un-replaced `visitSubtype` cases.
+ */
+type VisitSubtypeOfForm<DomainExtra> =
+  { type: "visitSubtypeOf", value: DomainFor<DomainExtra> };
+
+/**
  * State of a visit currently in progress, along with most of the visit
  * execution machinery.
  */
@@ -715,22 +724,34 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    */
   #visitResolvingCyclesAndReplacement(
     value: DomainFor<DomainExtra>,
-  ): Exclude<
+  ): VisitSubtypeOfForm<DomainExtra> | Exclude<
     DispatchingVisitorResult<DomainExtra, ResultType>,
     ReplaceForm<DomainExtra>
   > {
     const vis = this.#visitor;
+    let resultValue = value;
 
     for (;;) {
-      const cycleAt = this.#stack.indexOf(value);
+      const cycleAt = this.#stack.indexOf(resultValue);
       const result = (cycleAt === -1)
-        ? vis.visitValue(value)
-        : vis.visitCycle(value, cycleAt, this.#stack.depth);
+        ? vis.visitValue(resultValue)
+        : vis.visitCycle(resultValue, cycleAt, this.#stack.depth);
 
-      if (result?.type === "replace") {
-        value = result.value;
-      } else {
-        return result;
+      switch(result?.type) {
+        case "replace": {
+          resultValue = result.value;
+          break;
+        }
+
+        case "visitSubtype": {
+          return (value === resultValue)
+            ? result
+            : { type: "visitSubtypeOf", value: resultValue };
+        }
+
+        default: {
+          return result;
+        }
       }
     }
   }
@@ -749,14 +770,29 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
     const vis = this.#visitor;
 
     for (;;) {
-      let result: DispatchingVisitorResult<DomainExtra, ResultType> = this
-        .#visitResolvingCyclesAndReplacement(value);
+      const resolvedResult = this.#visitResolvingCyclesAndReplacement(value);
 
-      if (result?.type !== "visitSubtype") {
-        return result;
+      switch (resolvedResult?.type) {
+        case "visitSubtype": {
+          // Need dispatch. `value` _has not_ been replaced.
+          break;
+        }
+
+        case "visitSubtypeOf": {
+          // Need dispatch. `value` _has_ been replaced.
+          value = resolvedResult.value;
+          break;
+        }
+
+        default: {
+          // No dispatch required.
+          return resolvedResult;
+        }
       }
 
       const tag = this.#tagFromValueElseNull(value);
+      let result;
+
       switch (tag) {
         case VALUE_TAGS.Array: {
           const array = value as FabricArray;
