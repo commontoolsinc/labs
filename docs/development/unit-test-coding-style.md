@@ -426,6 +426,38 @@ cover. A stand-in the test hands the class declares itself as one where it is
 passed in, with an `as` on the argument or a small typed helper, never with a
 cast on the receiver.
 
+**`SpaceReplica.getDocument()` reads `undefined` for three different states.**
+The replica has never examined the document, the replica examined it and found
+it absent, and the replica holds a record whose value materializes as
+`undefined` all read the same. So
+`expect(replica.getDocument(id, scope)).toBeUndefined()` states only that the
+replica has no value for the document, whichever of the three put it in that
+position. Where the document is one no passing run holds a value for, the case
+cannot fail: a change that makes the replica examine that document leaves it
+green. Say which state is meant. Either name a document a run genuinely could
+hold a value for, so a value arriving where none belongs turns the case red, or
+read the record alongside the value:
+
+```ts
+// Shown at module scope.
+import { expect } from "@std/expect";
+import type { URI } from "@commonfabric/memory/interface";
+import type { SpaceReplica } from "@commonfabric/runner/storage/v2";
+
+declare const replica: SpaceReplica;
+declare const id: URI;
+
+expect(replica.accessForTestingOnly.hasDocumentRecord(id, "space")).toBe(true);
+expect(replica.getDocument(id, "space")).toBeUndefined();
+```
+
+`hasDocumentRecord()` reports whether the replica holds a record for the
+document, which is the predicate the absence-reconciliation path in
+`packages/runner/src/storage/v2.ts` decides by. A record appears once the
+replica has examined the document and also once a local write for it is
+pending, so a case turning on the first of those says in a comment that
+nothing has written the document yet.
+
 ## What a claim ranges over
 
 A test exhibits instances. To exhibit an absence it has to exhaust the set the
