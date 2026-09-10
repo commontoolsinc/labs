@@ -1359,6 +1359,51 @@ type BoundNodeIO = {
   writes: NormalizedFullLink[];
 };
 
+/**
+ * A raw node's bound inputs and outputs as `#instantiateRawNode()` hands
+ * them to the builtin. `inputCells` is `reads` less the opaque forwarded
+ * references the builtin never value-reads; `inputsCell` is the immutable
+ * document the builtin reads its argument from.
+ */
+type RawNodeInputs = BoundNodeIO & {
+  argumentCellLink: NormalizedFullLink;
+  inputCells: NormalizedFullLink[];
+  inputsCell: Cell<any>;
+  resolvedOutputSpot: NormalizedFullLink | undefined;
+  outputBinding: NormalizedFullLink | undefined;
+};
+
+/**
+ * A pattern node's bound child and the result cell it runs under.
+ * `childResultCell` is `undefined` when the outputs hold no write redirect
+ * to anchor the child's identity on. `sendToBindings` says whether the
+ * child's link is written through the outputs, or the outputs already name
+ * the child's result cell.
+ */
+type PatternNodeBinding = BoundNodeIO & {
+  child: Pattern;
+  childResultCell: Cell<any> | undefined;
+  sendToBindings: boolean;
+};
+
+/**
+ * What one node's bindings resolve to on a result cell: the module the node
+ * runs, its inputs and outputs bound to the piece's argument and result
+ * documents, the write-redirect links those bindings read and write
+ * through, and what the node's kind adds. Instantiation and the pre-sync
+ * derive it the same way, so what the pre-sync names is what the
+ * instantiated node reads.
+ */
+export type NodePlan =
+  | ({ kind: "javascript"; module: Module } & BoundNodeIO)
+  | ({
+    kind: "raw";
+    module: Module;
+    moduleRefName: string | undefined;
+  } & RawNodeInputs)
+  | ({ kind: "passthrough"; module: Module } & BoundNodeIO)
+  | ({ kind: "pattern"; module: Module } & PatternNodeBinding);
+
 type ResolvedJavaScriptModule = {
   fn: (...args: any[]) => any;
   name: string | undefined;
@@ -1983,8 +2028,8 @@ export class Runner {
    * The result and pointer tables, the start-attempt set, the dependency
    * syncer and deferred-start committer a test may supply, the setup,
    * storage-subscription, commit-gated run, ownership, key, sync, walk, and
-   * retry steps, and the implementation invoker, which a test drives
-   * directly.
+   * retry steps, the implementation invoker, and the node planner, which a
+   * test drives directly.
    */
   get accessForTestingOnly(): {
     readonly locallyPreparedResults: BoundedKeyMap<
@@ -2059,6 +2104,12 @@ export class Runner {
       fn: (...args: any[]) => any,
       argument: unknown,
     ): unknown;
+    nodePlan(
+      tx: IExtendedStorageTransaction,
+      node: Node,
+      resultCell: Cell<any>,
+      pattern: Pattern,
+    ): NodePlan | undefined;
   } {
     // deno-lint-ignore no-this-alias
     const outerThis = this;
@@ -2158,6 +2209,8 @@ export class Runner {
         this.#resolvePendingSpaceNamesAndRetry(frame, tx),
       invokeJavaScriptImplementation: (module, fn, argument) =>
         this.#invokeJavaScriptImplementation(module, fn, argument),
+      nodePlan: (tx, node, resultCell, pattern) =>
+        this.#nodePlan(tx, node, resultCell, pattern),
     };
   }
 
@@ -3718,9 +3771,7 @@ export class Runner {
           const baseCell = resultCell.withTx(actualTx);
           this.#instantiateNode(
             actualTx,
-            node.module,
-            node.inputs,
-            node.outputs,
+            node,
             baseCell,
             addNodeCancel,
             pattern,
@@ -6598,6 +6649,10 @@ export class Runner {
     // right here because node inputs nearly always alias the argument doc;
     // collectResumeOwnedCells instead passes the possibly-missing link through
     // and skips per-node, since sub-pattern outputs rarely alias it.
+    // Planning resolves each node's output redirect chain, which reads link
+    // metadata through a transaction. The plans only read, so the
+    // transaction is discarded afterward.
+    const planTx = this.#runtime.edit();
     const argumentMetaLink = getMetaLink(resultCell, "argument");
     if (argumentMetaLink === undefined) {
       // Instrumentation for how often the meta link is missing here (fresh
@@ -6611,27 +6666,9 @@ export class Runner {
       ]);
     } else {
       for (const node of pattern.nodes) {
-        let inputs: NormalizedFullLink[];
-        let outputs: NormalizedFullLink[];
+        let plan: NodePlan | undefined;
         try {
-          inputs = findAllWriteRedirectCells(
-            unwrapOneLevelAndBindToDoc(
-              node.inputs,
-              argumentMetaLink,
-              resultCell,
-              { derivedInternalCells: pattern.derivedInternalCells },
-            ),
-            resultCell,
-          );
-          outputs = findAllWriteRedirectCells(
-            unwrapOneLevelAndBindToDoc(
-              node.outputs,
-              argumentMetaLink,
-              resultCell,
-              { derivedInternalCells: pattern.derivedInternalCells },
-            ),
-            resultCell,
-          );
+          plan = this.#nodePlan(planTx, node, resultCell, pattern);
         } catch (error) {
           // A node whose bindings cannot be bound contributes nothing rather
           // than breaking the pre-sync walk; log it so a resume that silently
@@ -6642,14 +6679,15 @@ export class Runner {
           ]);
           continue;
         }
+        if (plan === undefined) continue;
 
-        [...inputs, ...outputs].forEach((link) => {
+        [...plan.reads, ...plan.writes].forEach((link) => {
           cells.push(this.#runtime.getCellFromLink(link));
         });
         // Each input link carries the schema its binding declared, which is
         // the read surface the node's first run holds to — the bound the
         // link-target scan follows.
-        inputs.forEach((link) => {
+        plan.reads.forEach((link) => {
           argumentRoots.push({
             cell: this.#runtime.getCellFromLink(link),
             schema: link.schema,
@@ -6678,20 +6716,16 @@ export class Runner {
     // batched instantiation commit loses and reverts — stranding the optimistic
     // writes that the resumed actions then depend on. Pulling them here keeps
     // that commit read-mostly.
-    // Resolving each sub-pattern node's output redirect chain needs a
-    // transaction (resolveLink reads link metadata). The walk only reads, so the
-    // transaction is discarded afterward.
-    const resolveTx = this.#runtime.edit();
     const instances: ResumePatternInstance[] = [];
     this.#collectResumeOwnedCells(
       pattern,
       resultCell,
       cells,
       new Set(),
-      resolveTx,
+      planTx,
       instances,
     );
-    resolveTx.abort("collectResumeOwnedCells: read-only resolution");
+    planTx.abort("resume node plans: read-only resolution");
 
     // Sync all the previously computed results.
     if (pattern.resultSchema !== undefined) {
@@ -7261,66 +7295,19 @@ export class Runner {
       out.push(getDerivedInternalCell(resultCell, descriptor));
     }
 
-    // May be undefined: this walk runs before setup writes the meta on fresh
-    // first runs, and child result cells are not synced yet on a cold-cache
-    // resume. That is fine for binding — unwrapOneLevelAndBindToDoc only needs
-    // the argument link when an output actually aliases the argument doc, and
-    // throws otherwise. Substituting a different document instead would derive
-    // the wrong `resultFor` identity and pre-sync the wrong owned-cell subtree
-    // (CT-1897).
-    const argumentLink = getMetaLink(resultCell, "argument");
-
     for (const [nodeIndex, node] of pattern.nodes.entries()) {
       const module = node.module;
       if (module.type !== "pattern" || !isPattern(module.implementation)) {
         continue;
       }
       const childPattern = module.implementation;
-      const targetSpace = module.targetSpace ?? resultCell.space;
-      // Resolve the node's reserved output spot the way instantiatePatternNode
-      // does: unwrap one level (so a deferred-alias output is decremented and
-      // followed) and follow the write-redirect chain to its resolved end (a
-      // pattern node reserves one result cell). The minting path keys the child
-      // result cell on the fully resolved redirect, so deriving from the same
-      // resolved spot yields the same `resultFor` identity the child's setup
-      // mints; the unresolved head of a multi-hop binding would be a different
-      // cell, pre-syncing the wrong owned-cell subtree.
-      let spotLink: NormalizedFullLink | undefined;
-      let boundChildPattern: Pattern;
+      // The child's result cell, derived exactly as its instantiation mints
+      // it: the plan resolves the node's output spot to its end, so a
+      // multi-hop binding yields the same `resultFor` identity the child's
+      // setup mints rather than the unresolved head.
+      let plan: NodePlan | undefined;
       try {
-        // The identity bind, manifest-blind exactly as `#instantiatePatternNode`
-        // performs it: a partialCause output renders as its derived cell's
-        // kind-free id, which `causeOnlySpotIds` below has the scan take as
-        // it stands. Binding with the manifest instead would render the
-        // KINDED cell and resolve through it to a different spot — a child
-        // identity the instantiation never mints.
-        const unwrappedOutputs = unwrapOneLevelAndBindToDoc(
-          node.outputs,
-          argumentLink,
-          resultCell,
-        );
-        // The child's nodes are walked as the child's own start sees them:
-        // `#instantiatePatternNode` binds the implementation once at this
-        // level before the child instantiates it, and that bind is what
-        // crosses one `defer` boundary of every alias inside it. Walking the
-        // raw implementation instead leaves each nested level one decrement
-        // behind, so its deferred outputs never resolve and every such child
-        // stays invisible to the resume.
-        boundChildPattern = unwrapOneLevelAndBindToDoc(
-          childPattern,
-          argumentLink,
-          resultCell,
-          { derivedInternalCells: pattern.derivedInternalCells },
-        );
-        // The same cause-only skip instantiatePatternNode's spot
-        // derivation applies, so the two derive identical coordinates.
-        spotLink = firstResolvedOutputRedirect(
-          this.#runtime,
-          tx,
-          unwrappedOutputs,
-          resultCell,
-          causeOnlySpotIds(resultCell, pattern.derivedInternalCells),
-        );
+        plan = this.#nodePlan(tx, node, resultCell, pattern);
       } catch (error) {
         // A node whose outputs cannot be bound (e.g. they alias the argument
         // doc while the argument link is unavailable) or resolved contributes
@@ -7333,7 +7320,8 @@ export class Runner {
         ]);
         continue;
       }
-      if (spotLink === undefined) {
+      if (plan?.kind !== "pattern") continue;
+      if (plan.childResultCell === undefined) {
         // The same two skips as the catch above — this node's owned-cell
         // pre-sync AND the recursion that would reach the child's own
         // `derivedInternalCells` manifest — reached without an error: the
@@ -7362,29 +7350,9 @@ export class Runner {
         ]);
         continue;
       }
-      const childScope = patternDefaultScope(boundChildPattern) ??
-        module.defaultScope;
-      let childResultCell = this.#runtime.getCell(
-        targetSpace,
-        {
-          resultFor: {
-            space: spotLink.space,
-            id: spotLink.id,
-            path: [...spotLink.path],
-          },
-        },
-        boundChildPattern.resultSchema,
-      );
-      if (childScope !== undefined && childScope !== "space") {
-        const childLink = childResultCell.getAsNormalizedFullLink();
-        childResultCell = this.#runtime.getCellFromLink({
-          ...childLink,
-          scope: childScope,
-        });
-      }
       this.#collectResumeOwnedCells(
-        boundChildPattern,
-        childResultCell,
+        plan.child,
+        plan.childResultCell,
         out,
         seen,
         tx,
@@ -7653,15 +7621,69 @@ export class Runner {
 
   #instantiateNode(
     tx: IExtendedStorageTransaction,
-    module: Module,
-    inputBindings: FabricExecValue,
-    outputBindings: FabricExecValue,
+    node: Node,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
-    moduleRefName?: string,
   ) {
+    const plan = this.#nodePlan(tx, node, resultCell, pattern);
+    if (plan === undefined) return;
+    switch (plan.kind) {
+      case "javascript":
+        this.#instantiateJavaScriptNode(
+          tx,
+          plan,
+          resultCell,
+          addCancel,
+          pattern,
+          schedulerRehydration,
+        );
+        break;
+      case "raw":
+        this.#instantiateRawNode(
+          tx,
+          plan,
+          resultCell,
+          addCancel,
+          pattern,
+          schedulerRehydration,
+        );
+        break;
+      case "passthrough":
+        this.#instantiatePassthroughNode(tx, plan, resultCell, pattern);
+        break;
+      case "pattern":
+        this.#instantiatePatternNode(
+          tx,
+          plan,
+          resultCell,
+          addCancel,
+          pattern,
+          schedulerRehydration,
+        );
+        break;
+    }
+  }
+
+  /**
+   * The plan for `node` on `resultCell`: its module resolved through the
+   * registry, its bindings bound to the piece's argument and result
+   * documents, and the links those bindings read and write through.
+   * `undefined` for a dynamic node, which nothing instantiates. Binding
+   * resolution is op-wiring machinery: the write-redirect walk reads alias
+   * shells and plumbing containers' child paths, and those reads must not
+   * consume `*`-path membership templates (machineryRead;
+   * template-population §6, the SC-8 machinery-read boundary).
+   */
+  #nodePlan(
+    tx: IExtendedStorageTransaction,
+    node: Node,
+    resultCell: Cell<any>,
+    pattern: Pattern,
+    moduleRefName?: string,
+  ): NodePlan | undefined {
+    const module = node.module;
     if (isModule(module)) {
       switch (module.type) {
         case "ref": {
@@ -7676,72 +7698,55 @@ export class Runner {
             refName,
             module.defaultScope,
           );
-          this.#instantiateNode(
+          return this.#nodePlan(
             tx,
-            resolved,
-            inputBindings,
-            outputBindings,
+            { ...node, module: resolved },
             resultCell,
-            addCancel,
             pattern,
-            schedulerRehydration,
             refName,
           );
-          break;
         }
         case "javascript":
-          this.#instantiateJavaScriptNode(
-            tx,
-            module,
-            inputBindings,
-            outputBindings,
-            resultCell,
-            addCancel,
-            pattern,
-            schedulerRehydration,
-          );
-          break;
-        case "raw":
-          this.#instantiateRawNode(
-            tx,
-            module,
-            inputBindings,
-            outputBindings,
-            resultCell,
-            addCancel,
-            pattern,
-            schedulerRehydration,
-            moduleRefName,
-          );
-          break;
         case "passthrough":
-          this.#instantiatePassthroughNode(
-            tx,
+          return tx.runWithAmbientReadMeta(machineryRead, () => ({
+            kind: module.type as "javascript" | "passthrough",
             module,
-            inputBindings,
-            outputBindings,
-            resultCell,
-            addCancel,
-            pattern,
-          );
-          break;
+            ...this.#bindNodeIO(node.inputs, node.outputs, resultCell, pattern),
+          }));
+        case "raw":
+          return tx.runWithAmbientReadMeta(machineryRead, () => ({
+            kind: "raw",
+            module,
+            moduleRefName,
+            ...this.#buildRawNodeInputs(
+              tx,
+              module,
+              node.inputs,
+              node.outputs,
+              resultCell,
+              pattern,
+              moduleRefName,
+            ),
+          }));
         case "pattern":
-          this.#instantiatePatternNode(
-            tx,
+          return tx.runWithAmbientReadMeta(machineryRead, () => ({
+            kind: "pattern",
             module,
-            inputBindings,
-            outputBindings,
-            resultCell,
-            addCancel,
-            pattern,
-            schedulerRehydration,
-          );
-          break;
+            ...this.#bindPatternNode(
+              tx,
+              module,
+              node.inputs,
+              node.outputs,
+              resultCell,
+              pattern,
+            ),
+          }));
         default:
           throw new Error(`Unknown module type: ${module.type}`);
       }
     } else if (isWriteRedirectLink(module) || isAliasBinding(module)) {
       // TODO(seefeld): Implement, a dynamic node
+      return undefined;
     } else {
       throw new Error(`Unknown module: ${toCompactDebugString(module)}`);
     }
@@ -9798,28 +9803,13 @@ export class Runner {
 
   #instantiateJavaScriptNode(
     tx: IExtendedStorageTransaction,
-    module: Module,
-    inputBindings: FabricExecValue,
-    outputBindings: FabricExecValue,
+    plan: NodePlan & { kind: "javascript" },
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
   ) {
-    // Binding resolution is op-wiring machinery: the write-redirect walk
-    // reads alias shells and plumbing containers' child paths, and those
-    // reads must not consume `*`-path membership templates (machineryRead;
-    // template-population §6 — the SC-8 machinery-read boundary).
-    const io = tx.runWithAmbientReadMeta(
-      machineryRead,
-      () =>
-        this.#bindNodeIO(
-          inputBindings,
-          outputBindings,
-          resultCell,
-          pattern,
-        ),
-    );
+    const { module, inputs, outputs, reads, writes } = plan;
     const { fn, name } = this.#resolveJavaScriptFunction(module);
     const context: JavaScriptNodeContext = {
       tx,
@@ -9830,11 +9820,14 @@ export class Runner {
       fn,
       name,
       schedulerRehydration,
-      ...io,
+      inputs,
+      outputs,
+      reads,
+      writes,
     };
 
     const { streamLink, eventTarget } = this.#resolveJavaScriptStreamLink(
-      io.inputs,
+      inputs,
       resultCell.getAsNormalizedFullLink(),
       tx,
     );
@@ -10041,15 +10034,7 @@ export class Runner {
     resultCell: Cell<any>,
     pattern: Pattern,
     moduleRefName: string | undefined,
-  ): {
-    argumentCellLink: NormalizedFullLink;
-    mappedOutputBindings: FabricExecValue;
-    inputCells: NormalizedFullLink[];
-    outputCells: NormalizedFullLink[];
-    inputsCell: Cell<any>;
-    resolvedOutputSpot: NormalizedFullLink | undefined;
-    outputBinding: NormalizedFullLink | undefined;
-  } {
+  ): RawNodeInputs {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const mappedInputBindings = unwrapOneLevelAndBindToDoc(
       inputBindings,
@@ -10152,10 +10137,16 @@ export class Runner {
       }
       : undefined;
     return {
+      inputs: mappedInputBindings,
+      outputs: mappedOutputBindings,
+      // The full read surface, opaque keys included: what the pre-sync
+      // names. The builtin's declared reads are `inputCells`.
+      reads: opaqueInputKeys.size > 0
+        ? findAllWriteRedirectCells(mappedInputBindings, resultCell)
+        : inputCells,
+      writes: outputCells,
       argumentCellLink,
-      mappedOutputBindings,
       inputCells,
-      outputCells,
       inputsCell,
       resolvedOutputSpot,
       outputBinding,
@@ -10164,15 +10155,23 @@ export class Runner {
 
   #instantiateRawNode(
     tx: IExtendedStorageTransaction,
-    module: Module,
-    inputBindings: FabricExecValue,
-    outputBindings: FabricExecValue,
+    plan: NodePlan & { kind: "raw" },
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
-    moduleRefName?: string,
   ) {
+    const {
+      module,
+      moduleRefName,
+      argumentCellLink,
+      outputs: mappedOutputBindings,
+      inputCells,
+      writes: outputCells,
+      inputsCell,
+      resolvedOutputSpot,
+      outputBinding,
+    } = plan;
     if (typeof module.implementation !== "function") {
       throw new Error(
         `Raw module is not a function, got: ${module.implementation}`,
@@ -10183,23 +10182,6 @@ export class Runner {
     if (builtinIdentity) {
       tx.setCfcImplementationIdentity(builtinIdentity);
     }
-    const {
-      argumentCellLink,
-      mappedOutputBindings,
-      inputCells,
-      outputCells,
-      inputsCell,
-      resolvedOutputSpot,
-      outputBinding,
-    } = this.#buildRawNodeInputs(
-      tx,
-      module,
-      inputBindings,
-      outputBindings,
-      resultCell,
-      pattern,
-      moduleRefName,
-    );
 
     const builtinFrame = builtinIdentity
       ? pushFrameFromCause(undefined, {
@@ -10411,70 +10393,71 @@ export class Runner {
 
   #instantiatePassthroughNode(
     tx: IExtendedStorageTransaction,
-    _module: Module,
-    inputBindings: FabricExecValue,
-    outputBindings: FabricExecValue,
+    plan: NodePlan & { kind: "passthrough" },
     resultCell: Cell<any>,
-    _addCancel: AddCancel,
     pattern: Pattern,
   ) {
-    const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    const inputs = unwrapOneLevelAndBindToDoc(
-      inputBindings,
-      argumentCellLink,
-      resultCell,
-      { derivedInternalCells: pattern.derivedInternalCells },
-    );
-    const outputs = unwrapOneLevelAndBindToDoc(
-      outputBindings,
-      argumentCellLink,
-      resultCell,
-      { derivedInternalCells: pattern.derivedInternalCells },
-    );
-
     sendValueToBinding(
       tx,
       resultCell,
-      argumentCellLink,
-      outputs,
-      inputs,
+      getMetaLink(resultCell, "argument")!,
+      plan.outputs,
+      plan.inputs,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
   }
 
-  #instantiatePatternNode(
+  /**
+   * Binds a pattern node's child, inputs, and outputs on `resultCell`, and
+   * derives the result cell the child runs under, the way its instantiation
+   * mints it: from the fully resolved output spot the node writes through.
+   */
+  #bindPatternNode(
     tx: IExtendedStorageTransaction,
     module: Module,
     inputBindings: FabricExecValue,
     outputBindings: FabricExecValue,
     resultCell: Cell<any>,
-    addCancel: AddCancel,
     pattern: Pattern,
-    schedulerRehydration: SchedulerRehydrationSubscriptionOptions = {},
-  ) {
-    const parentResultCell = resultCell;
-    const argumentCellLink = getMetaLink(resultCell, "argument")!;
+  ): PatternNodeBinding {
+    // May be undefined: the pre-sync plans before setup writes the meta on a
+    // fresh first run, and a child result cell is not synced yet on a
+    // cold-cache resume. Binding needs the link only when an alias actually
+    // names the argument document, and throws otherwise. Substituting a
+    // different document instead would derive the wrong `resultFor`
+    // identity and pre-sync the wrong owned-cell subtree (CT-1897).
+    const argumentCellLink = getMetaLink(resultCell, "argument");
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
-    const patternImpl = unwrapOneLevelAndBindToDoc(
+    // The child's nodes are bound as the child's own start sees them: this
+    // bind crosses one `defer` boundary of every alias inside the
+    // implementation before the child instantiates it.
+    const child = unwrapOneLevelAndBindToDoc(
       module.implementation,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
-    const inputs = unwrapOneLevelAndBindToDoc(
-      inputBindings,
-      argumentCellLink,
-      resultCell,
-      {
-        targetSchema: patternImpl.argumentSchema,
-        derivedInternalCells: pattern.derivedInternalCells,
-        // The links serialized into the sub-piece's argument doc must keep the
-        // containing pattern's declared slot scopes; the authored schema is
-        // the only place those declarations still exist (the meta link
-        // carries a sanitized schema). See foldDeclaredScopeIntoLinkSchema.
-        sourceSchemas: { argument: pattern.argumentSchema },
-      },
-    );
+    // A node's inputs nearly always alias the argument document, so without
+    // the link they stay unbound: a walk that runs before setup writes the
+    // link wants the child's identity, which the outputs alone anchor, and
+    // instantiation never runs without it.
+    const inputs = argumentCellLink === undefined
+      ? inputBindings
+      : unwrapOneLevelAndBindToDoc(
+        inputBindings,
+        argumentCellLink,
+        resultCell,
+        {
+          targetSchema: child.argumentSchema,
+          derivedInternalCells: pattern.derivedInternalCells,
+          // The links serialized into the sub-piece's argument doc must keep
+          // the containing pattern's declared slot scopes; the authored
+          // schema is the only place those declarations still exist (the
+          // meta link carries a sanitized schema). See
+          // foldDeclaredScopeIntoLinkSchema.
+          sourceSchemas: { argument: pattern.argumentSchema },
+        },
+      );
     // VALUE BIND (kind: the descriptor's). Binding WITH the manifest resolves a
     // partialCause output to the descriptor's derived internal cell, so
     // `getDerivedInternalCellLink` mints its id under the descriptor's kind:
@@ -10482,115 +10465,141 @@ export class Runner {
     // and the same `of:fid1:<hash>` the identity bind below mints for a kindless
     // one (the classifier declines the node, or `experimental.computedCellIds`
     // is off). This is the binding the child link is SENT to
-    // (`sendValueToBinding` below), so this is where the child's value actually
-    // lives — at a DIFFERENT entity from the identity bind's only when the
-    // descriptor carries a kind. See the identity bind for the pairing.
+    // (`sendValueToBinding` in `#instantiatePatternNode`), so this is where
+    // the child's value actually lives — at a DIFFERENT entity from the
+    // identity bind's only when the descriptor carries a kind. See the
+    // identity bind for the pairing.
     const outputs = unwrapOneLevelAndBindToDoc(
       outputBindings,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
+    const io = {
+      child,
+      inputs,
+      outputs,
+      reads: argumentCellLink === undefined
+        ? []
+        : findAllWriteRedirectCells(inputs, resultCell),
+      writes: findAllWriteRedirectCells(outputs, resultCell),
+    };
 
     // If output bindings is a link to a non-redirect cell,
     // use that instead of creating a new cell.
-    let sendToBindings: boolean;
-    let childResultCell: Cell<any>;
     if (isSigilLink(outputs) && !isWriteRedirectLink(outputs)) {
-      childResultCell = this.#runtime.getCellFromLink(
-        parseLink(outputs, resultCell),
-        patternImpl.resultSchema,
-        tx,
-      );
-      sendToBindings = false;
-    } else {
-      const resultScope = patternDefaultScope(patternImpl) ??
-        module.defaultScope;
-      const targetSpace = module.targetSpace ?? resultCell.space;
-      // CT-1623: identify the result cell by the (fully resolved) output spot
-      // reserved for this node — a stable, position-derived, program-independent
-      // identity — rather than hashing the pattern object (which drags in the
-      // session-varying `program` and forces `materializeRuntimeProgram`). We
-      // still mint a NEW cell and point the binding at it (`sendToBindings`
-      // below); we only borrow the resolved output link's coordinates as the
-      // cause. A pattern node always writes through a write redirect, so the
-      // absence of one is a bug (the legacy non-redirect variants are removed).
-      //
-      // Bind the output bindings first (as `#instantiateRawNode` does), so the
-      // `argument`/`internal`/`result` pseudo-cell aliases resolve to their
-      // DISTINCT concrete cells. Resolving the raw bindings would let pseudo
-      // cells at the same path (e.g. `internal.x` vs `result.x`) collapse onto
-      // the base result cell and collide on one shared child cell.
-      // `bindPatterns: false` — output bindings never carry sub-patterns to
-      // instantiate, so skip that work; we only need the pseudo-cell aliases
-      // resolved to their concrete links.
-      //
-      // IDENTITY BIND (kind: always `of:`). CT-1943: this omits
-      // `derivedInternalCells` where the value bind above passes it, and the
-      // manifest descriptor is what carries the entity kind. Same cause, same
-      // hash preimage — but no descriptor means no kind, so this mint always
-      // lands on the unkinded `of:fid1:<hash>`
-      // (docs/specs/computed-cell-identity.md: the preimage is kind-free, the
-      // URI scheme IS the kind). Whether that is a SECOND entity depends on the
-      // descriptor the value bind saw:
-      //   - descriptor with `kind: "computed"` — the value bind minted
-      //     `computed:fid1:<hash>`, so the two binds address two distinct
-      //     entities that differ only by scheme, and the child link lives on
-      //     the `computed:` one;
-      //   - kindless descriptor (the classifier declined the node, or
-      //     `experimental.computedCellIds` is off) — both binds land on this
-      //     same `of:` entity, and the child link is written here.
-      // The split is fine here, and in `#collectResumeOwnedCells`, because both
-      // use the link purely as the `resultFor` CAUSE — a stable coordinate,
-      // never read for a value. But anything that wants to READ the child link
-      // must use the id the VALUE bind minted: where the descriptor was
-      // computed, reading the `of:` one returns undefined for a healthy piece.
-      const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
-        outputBindings,
-        argumentCellLink,
-        resultCell,
-      );
-      // The manifest-blind bind above renders a partialCause alias as its
-      // derived cell's kind-free id, which is cause-only — resolving it
-      // would read an entity the kinded data never lives at (and kick a
-      // doc pull nothing can satisfy), so the scan is told to take those
-      // coordinates as they stand.
-      const outputRedirect = firstResolvedOutputRedirect(
-        this.#runtime,
-        tx,
-        mappedOutputBindings,
-        resultCell,
-        causeOnlySpotIds(resultCell, pattern.derivedInternalCells),
-      );
-      if (!outputRedirect) {
-        throw new Error(
-          "instantiatePatternNode: result cell requires a write-redirect " +
-            "output binding to anchor a reload-stable identity",
-        );
-      }
-      const baseResultCell = this.#runtime.getCell(
-        targetSpace,
-        {
-          resultFor: {
-            space: outputRedirect.space,
-            id: outputRedirect.id,
-            path: [...outputRedirect.path],
-          },
-        },
-        patternImpl.resultSchema,
-        tx,
-      );
-
-      childResultCell = baseResultCell;
-      if (resultScope !== undefined && resultScope !== "space") {
-        let resultCellLink = baseResultCell.getAsNormalizedFullLink();
-        resultCellLink = { ...resultCellLink, scope: resultScope };
-        // The result cell's scope isn't "space", so we may have just created
-        // this cell. If so, create the corresponding argument/internal cells.
-        childResultCell = createCell(this.#runtime, resultCellLink, tx);
-      }
-      sendToBindings = true;
+      return {
+        ...io,
+        childResultCell: this.#runtime.getCellFromLink(
+          parseLink(outputs, resultCell),
+          child.resultSchema,
+          tx,
+        ),
+        sendToBindings: false,
+      };
     }
+    // CT-1623: identify the result cell by the (fully resolved) output spot
+    // reserved for this node — a stable, position-derived, program-independent
+    // identity — rather than hashing the pattern object (which drags in the
+    // session-varying `program` and forces `materializeRuntimeProgram`). We
+    // still mint a NEW cell and point the binding at it (`sendToBindings`);
+    // we only borrow the resolved output link's coordinates as the cause. A
+    // pattern node always writes through a write redirect, so the absence of
+    // one leaves `childResultCell` undefined, which the instantiation refuses.
+    //
+    // Bind the output bindings first (as `#buildRawNodeInputs` does), so the
+    // `argument`/`internal`/`result` pseudo-cell aliases resolve to their
+    // DISTINCT concrete cells. Resolving the raw bindings would let pseudo
+    // cells at the same path (e.g. `internal.x` vs `result.x`) collapse onto
+    // the base result cell and collide on one shared child cell.
+    // `bindPatterns: false` — output bindings never carry sub-patterns to
+    // instantiate, so skip that work; we only need the pseudo-cell aliases
+    // resolved to their concrete links.
+    //
+    // IDENTITY BIND (kind: always `of:`). CT-1943: this omits
+    // `derivedInternalCells` where the value bind above passes it, and the
+    // manifest descriptor is what carries the entity kind. Same cause, same
+    // hash preimage — but no descriptor means no kind, so this mint always
+    // lands on the unkinded `of:fid1:<hash>`
+    // (docs/specs/computed-cell-identity.md: the preimage is kind-free, the
+    // URI scheme IS the kind). Whether that is a SECOND entity depends on the
+    // descriptor the value bind saw:
+    //   - descriptor with `kind: "computed"` — the value bind minted
+    //     `computed:fid1:<hash>`, so the two binds address two distinct
+    //     entities that differ only by scheme, and the child link lives on
+    //     the `computed:` one;
+    //   - kindless descriptor (the classifier declined the node, or
+    //     `experimental.computedCellIds` is off) — both binds land on this
+    //     same `of:` entity, and the child link is written here.
+    // The split is fine because both use the link purely as the `resultFor`
+    // CAUSE — a stable coordinate, never read for a value. But anything that
+    // wants to READ the child link must use the id the VALUE bind minted:
+    // where the descriptor was computed, reading the `of:` one returns
+    // undefined for a healthy piece.
+    const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
+      outputBindings,
+      argumentCellLink,
+      resultCell,
+    );
+    // The manifest-blind bind above renders a partialCause alias as its
+    // derived cell's kind-free id, which is cause-only — resolving it
+    // would read an entity the kinded data never lives at (and kick a
+    // doc pull nothing can satisfy), so the scan is told to take those
+    // coordinates as they stand.
+    const outputRedirect = firstResolvedOutputRedirect(
+      this.#runtime,
+      tx,
+      mappedOutputBindings,
+      resultCell,
+      causeOnlySpotIds(resultCell, pattern.derivedInternalCells),
+    );
+    if (outputRedirect === undefined) {
+      return { ...io, childResultCell: undefined, sendToBindings: true };
+    }
+    const resultScope = patternDefaultScope(child) ?? module.defaultScope;
+    const targetSpace = module.targetSpace ?? resultCell.space;
+    let childResultCell = this.#runtime.getCell(
+      targetSpace,
+      {
+        resultFor: {
+          space: outputRedirect.space,
+          id: outputRedirect.id,
+          path: [...outputRedirect.path],
+        },
+      },
+      child.resultSchema,
+      tx,
+    );
+    if (resultScope !== undefined && resultScope !== "space") {
+      // The result cell's scope isn't "space", so we may have just created
+      // this cell. If so, create the corresponding argument/internal cells.
+      childResultCell = createCell(
+        this.#runtime,
+        { ...childResultCell.getAsNormalizedFullLink(), scope: resultScope },
+        tx,
+      );
+    }
+    return { ...io, childResultCell, sendToBindings: true };
+  }
+
+  #instantiatePatternNode(
+    tx: IExtendedStorageTransaction,
+    plan: NodePlan & { kind: "pattern" },
+    resultCell: Cell<any>,
+    addCancel: AddCancel,
+    pattern: Pattern,
+    schedulerRehydration: SchedulerRehydrationSubscriptionOptions = {},
+  ) {
+    const parentResultCell = resultCell;
+    const argumentCellLink = getMetaLink(resultCell, "argument")!;
+    const { child: patternImpl, inputs, outputs, sendToBindings } = plan;
+    if (plan.childResultCell === undefined) {
+      throw new Error(
+        "instantiatePatternNode: result cell requires a write-redirect " +
+          "output binding to anchor a reload-stable identity",
+      );
+    }
+    const childResultCell = plan.childResultCell;
 
     const sourceKey = getTxDebugActionId(tx) ?? "none";
     triggerFlowLogger.debug(`instantiate-pattern-node/${sourceKey}`, () => [
