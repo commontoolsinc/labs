@@ -1,15 +1,15 @@
 {
-  "updated": "2026-09-10T21:59:50.470379+00:00",
+  "updated": "2026-09-10T22:10:37.773752+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7241",
-  "activity": "Merged #7241 and #7256. Benchmark #7261 and dashboard #7264 have clean latest Cubic reviews and are completing CI. Read-budget fixes are pushed in #7257; Cubic skipped the rebased push, so a fresh review remains required. Linked-profile remote-row probes pass.",
-  "review": "Antagonistic reviews completed for budget, benchmark, dashboard, and initial C1 probes. Cubic is clean on latest #7261 and #7264; #7257 needs a fresh review after rebase.",
+  "activity": "Merged #7261 browser benchmark. C1 initial probes are in #7265. A stronger nested-swatch fixture reproduces missing rendered children despite an updated outer-row title; investigating demand and rendering before choosing a repair.",
+  "review": "Merged #7241, #7256, and #7261. Dashboard #7264 and C1 probes #7265 are in review. Budget #7257 needs Cubic review after its rebase; permission to request that review remains pending.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
-    "#7257: full runner 1,410 tests / 8,765 steps passed. Full CLI 1,821 tests / 2,916 steps passed with two known baseline color failures. Rebased focused tests and all 46 type-check groups pass.",
-    "#7261: all three browser sizes passed. Final click/commit guard passes real-browser validation; latest Cubic reports zero issues. CI running."
+    "#7257: full runner passed 1,410 tests / 8,765 steps. Full CLI completed: 1,821 tests passed and two known baseline color tests failed. Rebased focused tests and all 46 type-check groups pass.",
+    "#7261 merged as c8a64af840: all CI gates passed; latest Cubic reported zero issues; antagonistic review clean. Browser recordings remain available below."
   ],
   "stages": [
     {
@@ -40,7 +40,7 @@
       "id": "A4",
       "title": "Read-side benchmark",
       "status": "review",
-      "detail": "Browser benchmark #7261 has clean latest Cubic and antagonistic reviews. All three sizes recorded below; CI running."
+      "detail": "Browser benchmark landed in #7261; all three sizes recorded below. Regression ceilings remain after read-budget landing."
     },
     {
       "id": "A5",
@@ -52,7 +52,7 @@
       "id": "C1",
       "title": "Multi-replica reproductions",
       "status": "active",
-      "detail": "Nested filters and derived tally rows pass remote-update browser and independent-replica probes with linked same-space profiles. Cold cross-space loading, membership/reordering, and production nested swatches remain; workaround retained."
+      "detail": "Initial linked-profile probes in #7265 pass. A stronger nested-map fixture reproduces missing swatches while its outer-row title updates. Valid transformed mapWithPattern expression confirmed by antagonistic review; cause and cold cross-space behavior remain under investigation."
     },
     {
       "id": "B1",
