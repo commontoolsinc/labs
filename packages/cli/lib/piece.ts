@@ -461,6 +461,7 @@ export interface PieceResolutionDeps {
 }
 
 interface PieceOperationDependencies extends PieceResolutionDeps {
+  loadPieceForRead?: typeof loadPieceForRead;
   loadIdentity?: typeof loadIdentity;
   getProgramFromFile?: typeof getProgramFromFile;
   getPinnedProgramFromFile?: typeof getPinnedProgramFromFile;
@@ -4736,6 +4737,19 @@ export async function setCellCfcLabel(
   return cfcLabelViewForCommand(targetCell, path);
 }
 
+/** Resolve the canonical piece before the read selects its demand boundary. */
+async function loadPieceForRead(
+  pieces: PiecesController,
+  id: string,
+  step: boolean,
+  scope: PieceConfig["pieceScope"],
+): Promise<PieceController> {
+  return new PieceController(
+    pieces,
+    await pieces.getPieceCell(id, step, undefined, scope),
+  );
+}
+
 export async function getCellValue(
   config: PieceConfig,
   addressedPath: (string | number)[],
@@ -4753,10 +4767,10 @@ export async function getCellValue(
   const piece = await timeCliPhase(
     "getCellValue.piece",
     () =>
-      pieces.get(
+      (deps.loadPieceForRead ?? loadPieceForRead)(
+        pieces,
         resolvedConfig.piece,
         shouldStep,
-        undefined,
         resolvedConfig.pieceScope,
       ),
   );

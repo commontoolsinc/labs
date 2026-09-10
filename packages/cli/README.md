@@ -863,6 +863,12 @@ cf cell get --cell ID items \
   --select id,title,author.name
 ```
 
+A path read first resolves the piece's canonical result and metadata, then pulls
+the selected path. It does not first synchronize the producer's entire result
+schema. Reading the root still requests the whole result. `--step` also starts
+the piece, so its execution can demand inputs beyond the selected output.
+Missing-path diagnostics can require a broader root read.
+
 `cf piece call` writes them **past the `--` that closes the callable's
 section**. The callable name opens that section, so everything between the two
 belongs to the verb, and a projection reaches the read step by stepping past the
