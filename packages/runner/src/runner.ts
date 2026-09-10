@@ -346,12 +346,16 @@ function narrowChildSchema(schema: JSONSchema, key: string): JSONSchema {
 // picks the `asCell` branch and hands back a cell handle, so `Cell<T> |
 // undefined` is a handle rather than something read through. The depth bound
 // terminates a declaration that refers to itself, which resolves to itself
-// however many times it is followed.
+// however many times it is followed. A `$ref` resolves against the nearest
+// enclosing `$defs`, and a union's arms carry none of their own, so the scope
+// the union was declared in travels down to every arm as `inheritedDefs`.
 function isReferenceOnlySchema(
   schema: JSONSchema | undefined,
   depth: number = 4,
+  inheritedDefs?: JSONSchemaObj["$defs"],
 ): boolean {
   if (depth <= 0 || !isObjectOrArray(schema)) return false;
+  const defs = schema.$defs ?? inheritedDefs;
   if (schema.asCell !== undefined) return true;
   // `unknown` is the deliberate request for reference semantics — a value
   // compared by identity rather than read through, opaque at this hop and
@@ -364,9 +368,13 @@ function isReferenceOnlySchema(
     return true;
   }
   if ("$ref" in schema) {
+    const scoped = schema.$defs === undefined && defs !== undefined
+      ? { ...schema, $defs: defs }
+      : schema;
     return isReferenceOnlySchema(
-      resolveSchemaRefsCanonical(schema as JSONSchemaObj),
+      resolveSchemaRefsCanonical(scoped as JSONSchemaObj),
       depth - 1,
+      defs,
     );
   }
   // Both keywords together describe one set of alternatives the run may
@@ -378,7 +386,7 @@ function isReferenceOnlySchema(
     ? [...anyOf, ...oneOf]
     : anyOf ?? oneOf;
   if (arms !== undefined && arms.length > 0) {
-    return arms.some((arm) => isReferenceOnlySchema(arm, depth - 1));
+    return arms.some((arm) => isReferenceOnlySchema(arm, depth - 1, defs));
   }
   return false;
 }

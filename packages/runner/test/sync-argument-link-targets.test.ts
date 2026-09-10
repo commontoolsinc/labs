@@ -323,6 +323,40 @@ describe("syncArgumentLinkTargets", () => {
     expect(syncedIds).toContain(id(behindMissing));
   });
 
+  it("resolves a `$ref` in a union arm against the union's `$defs`", async () => {
+    const { make, commit } = docBuilder("ref in arm");
+    const behindArm = make("behind arm", { n: 1 });
+    const viaArm = make("via arm", { child: behindArm });
+    const behindNested = make("behind nested", { n: 2 });
+    const viaNested = make("via nested", { child: behindNested });
+    const root = make("root", { arm: viaArm, nested: viaNested });
+    await commit();
+    await run(root, {
+      type: "object",
+      properties: {
+        // The shape a generated optional handle takes when the handle type is
+        // hoisted into `$defs`. The arms carry no `$defs` of their own.
+        arm: {
+          anyOf: [{ "$ref": "#/$defs/Handle" }, { type: "undefined" }],
+        },
+        nested: {
+          anyOf: [
+            { oneOf: [{ "$ref": "#/$defs/Handle" }] },
+            { type: "undefined" },
+          ],
+        },
+      },
+      "$defs": {
+        Handle: { type: "object", asCell: ["cell"] },
+      },
+    } as JSONSchema);
+    expect(syncedIds).toContain(id(viaArm));
+    expect(syncedIds).not.toContain(id(behindArm));
+    // The scope reaches an arm of an arm, not only the first level.
+    expect(syncedIds).toContain(id(viaNested));
+    expect(syncedIds).not.toContain(id(behindNested));
+  });
+
   it("descends a subtree once when two declared paths link to it", async () => {
     const { make, commit } = docBuilder("diamond");
     const leaf = make("leaf", { n: 1 });
