@@ -1,10 +1,10 @@
 # Pattern computation cost: implementation sequence
 
-Status: A1/A2 instrumentation is shipped in
-[PR #7246](https://github.com/commontoolsinc/labs/pull/7246). The controlled A0
-fixture, accounting and reporting regressions, and dashboard are being reconciled
-in [PR #7241](https://github.com/commontoolsinc/labs/pull/7241). A3's local
-implementation requires adaptation to the shipped accounting API before review.
+Status: A1/A2 instrumentation shipped in #7246, and the controlled A0 fixture,
+accounting regressions, and dashboard shipped in #7241. A3 budgets are under
+review in #7257. A4's browser benchmark shipped in #7261; count limits remain.
+C1's remote-row reproductions and the C3 inline-element dependency repair are
+under review in [PR #7265](https://github.com/commontoolsinc/labs/pull/7265).
 
 B3's named aggregates are implemented and validated in
 [PR #7259](https://github.com/commontoolsinc/labs/pull/7259), with
@@ -95,9 +95,9 @@ replacement advice requires a shipped replacement.
       are the initial boundary; event dispatch and commit work must be added
       before claiming whole-step budget coverage.
   - [x] Define proxy access events, actual link crossings, distinct documents
-        identified by replica document object, and registered dependencies. Specify
-        repeated reads, missing values, enumeration, shallow reads, and memo
-        hits. A read activity is not interchangeable with a proxy access.
+        identified by replica document object, and registered dependencies.
+        Specify repeated reads, missing values, enumeration, shallow reads, and
+        memo hits. A read activity is not interchangeable with a proxy access.
   - [x] Define per-run ownership, cumulative totals, and per-step aggregation.
         Distinguish a union of documents across a step from a sum of per-run
         cardinalities. Define failure, restart, idempotency verification, nested
@@ -180,6 +180,40 @@ durations are used as performance evidence.
   - [ ] Establish failure before repair, or demonstrate that the current system
         already passes the faithful reproduction. Record the cause or evidence
         before deciding what C2/C3 need to change.
+
+  The
+  [independent-replica probes](../../packages/patterns/integration/reactive-vote-rows.test.ts)
+  assert nested-filter membership and derived tally updates. The
+  [browser tests](../../packages/patterns/integration/reactive-vote-rows-browser.test.ts)
+  cover same-space and cross-space profiles, remote colors, profile-only edits,
+  membership additions, ranking changes, and nested mapped swatches. The browser
+  subscribes before votes are created. Cross-space profiles are created in a
+  separate transaction and edited directly in their own space. Headless result
+  reads explicitly pull data, so browser rendering owns the passive-update
+  check. C1 remains open for cold-materialization verification, removals, and
+  reconnects. These synthetic probes do not authorize removing the lunch-poll
+  workaround or accessing the live poll.
+
+  C3's candidate fix records the mutable inline element used when resolving a
+  nested array to a content-addressed snapshot. The
+  [cell callback regression](../../packages/runner/test/cell-callbacks.test.ts)
+  fails without the fix after initial demand settles, then passes with the fix;
+  it also verifies that changing a neighboring inline element causes no rerun.
+  Four browser cases and the full runner suite (1,411 tests / 8,764 steps) pass
+  before the current-main merge. After integrating main `ce3602b18a`, all 46
+  type-check groups and 142 focused runtime checks pass. C3 remains open pending
+  review and its remaining acceptance checks.
+
+  To record synthetic browser evidence with a local test server, set `API_URL`
+  and `FRONTEND_URL`, then run:
+
+  ```sh
+  CF_ROW_REPRO_ARTIFACT_DIR=/tmp/reactive-row-artifacts deno test -A packages/patterns/integration/reactive-vote-rows-browser.test.ts
+  ```
+
+  The artifact directory receives screenshots and assertion metadata for all
+  four cases. Live poll access requires coordination with Mike.
+
 - [ ] **C2 — Repair partial materialization.** Verify complete inputs under cold
       reads, remote inserts/removals, and reconnect where relevant.
 - [ ] **C3 — Repair remote row invalidation.** Verify affected rows update,
@@ -226,10 +260,9 @@ durations are used as performance evidence.
   - [x] Keep ordinary `reduce` as the full-rerun order-dependent operation.
 - [ ] **B4 — Publish contracts and complexity with each operator.** Update
       public doc comments, pattern-author documentation, and executable examples
-      in the same slice that ships the API.
-      The aggregate portion is documented in
-      [collection aggregates](../features/collection-aggregates.md); index and
-      join documentation remains pending.
+      in the same slice that ships the API. The aggregate portion is documented
+      in [collection aggregates](../features/collection-aggregates.md); index
+      and join documentation remains pending.
 
 **Deferred B3a:** Reconsider restricted append folds only after B1–B3 ship and a
 remaining use case justifies them. Requires a separate contract excluding
@@ -305,8 +338,8 @@ Define A3's budget declaration and extend measurement to event dispatch and
 commit work before enforcing whole-step budgets. Preserve separate
 initialization limits and include short-lived actions and failed attempts. The
 controlled A0 fixture is available for count comparisons; A4/A5 still need
-browser and cross-space measurements before product performance claims.
-For the pending collection operators, settle B1's index contracts before
-implementing `groupBy`/`keyBy`, then build B2's keyed lookup and join. Their
-measurements use the shipped counters and the aggregate comparison method;
-A4/A5 gate deployed-product claims rather than operator implementation.
+browser and cross-space measurements before product performance claims. For the
+pending collection operators, settle B1's index contracts before implementing
+`groupBy`/`keyBy`, then build B2's keyed lookup and join. Their measurements use
+the shipped counters and the aggregate comparison method; A4/A5 gate
+deployed-product claims rather than operator implementation.
