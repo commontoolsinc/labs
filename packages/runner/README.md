@@ -835,6 +835,15 @@ The Runtime coordinates several core services:
 All services receive the Runtime instance as a dependency, enabling proper
 isolation and testability without global state.
 
+`PatternManager.compileOrGetPattern()` snapshots its program input before
+starting compilation. Its in-memory cache and concurrent-request deduplication
+use that complete program content: source files, entry point and export,
+retained source roots, and attached data-file names. Query-result views with
+identical content share a compiled pattern across cell addresses. Changing a
+program's content selects the cache entry for that content and compiles it on a
+miss. Changes to the caller's input after a request begins do not change the
+program being compiled.
+
 ## Contributing
 
 See the project's main contribution guide for details on development workflow,

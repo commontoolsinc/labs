@@ -54,6 +54,7 @@ import type {
 } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
+import { snapshotQueryResult } from "./query-result-proxy.ts";
 import type { MemorySpace, Runtime, ServerRunInfo } from "./runtime.ts";
 
 import {
@@ -3124,8 +3125,9 @@ export class PatternManager {
   }
 
   /**
-   * Compile a pattern from source, or return a cached/in-flight result.
-   * Provides single-flight deduplication based on program content.
+   * Compiles a pattern from source, or returns a cached/in-flight result.
+   * Snapshots the program at entry and deduplicates by that content, including
+   * when the input is a query-result view.
    *
    * @param input - Source code string or RuntimeProgram to compile
    * @param space - When provided, routes the ESM compile through the
@@ -3138,7 +3140,6 @@ export class PatternManager {
     input: string | RuntimeProgram,
     space?: MemorySpace,
   ): Promise<Pattern> {
-    // Normalize to RuntimeProgram
     let program: RuntimeProgram;
     if (typeof input === "string") {
       program = {
@@ -3148,6 +3149,10 @@ export class PatternManager {
     } else {
       program = input;
     }
+
+    // Query views name cells to `createRef()`. Detach their contents so the key
+    // and the asynchronous compiler consume the same program snapshot.
+    program = snapshotQueryResult(program);
 
     // Content-hash key (createRef as a pure digest, NOT a cell id). Identical
     // source returns the same compiled instance; concurrent compiles share one
