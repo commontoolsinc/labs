@@ -10,7 +10,7 @@ import {
   type Engine,
   open,
 } from "../v2/engine.ts";
-import { DEFAULT_BRANCH } from "../v2.ts";
+import { DEFAULT_BRANCH, ProtocolError } from "../v2.ts";
 
 const setOp = (id: string, value: unknown) =>
   ({ op: "set", id, value: { value } }) as never;
@@ -919,6 +919,36 @@ describe("applyCommit() with an identity commit", () => {
         }),
       })
     ).toThrow(ConflictError);
+  });
+
+  it("still refuses a malformed pending basis on the identity path", () => {
+    // The stale confirmed read sends the commit to the proof, which would
+    // accept the identical set; the pending read of another document
+    // claims a basis ahead of the log, and that is a protocol violation
+    // whichever path the commit takes.
+    const installSeq = installThenRewrite();
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, { operations: [setOp("of:other", { x: 1 })] }),
+    });
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(3, {
+          reads: {
+            confirmed: [{ id: "of:doc", path: [], seq: installSeq }],
+            pending: [{
+              id: "of:other",
+              path: [],
+              localSeq: 2,
+              basisSeq: 999,
+            }],
+          },
+          operations: [setOp("of:doc", { n: 2 })],
+        }),
+      })
+    ).toThrow(ProtocolError);
   });
 
   it("refuses a commit with no operations over a stale confirmed read", () => {

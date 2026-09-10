@@ -90,6 +90,9 @@ describe("lunch-poll-diagnose", () => {
     await expect(
       runCase({ optionCount: 1, userCount: 2, voteRounds: 0, voters: 3 }),
     ).rejects.toThrow("--voters=3 exceeds the 2 users of 1x2");
+    await expect(
+      runCase({ optionCount: 1, userCount: 2, voteRounds: 0, voters: 0 }),
+    ).rejects.toThrow("--voters must be an integer >= 1; got 0");
   });
 
   it("measures a poll two voters joined, filled, and voted in", async () => {

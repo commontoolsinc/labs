@@ -128,10 +128,6 @@ const conflictSeq = (
 };
 
 /**
- * The reference admission decision for `commit` from `sessionId`, given the
- * accepted history so far. Mirrors §3.6 exactly, without shortcuts.
- */
-/**
  * Whether `commit` leaves every document `store` holds as it is: an identity
  * commit, which the engine accepts without a staleness check because
  * applying it changes nothing (03-commit-model.md §3.6.1). Per document,
@@ -172,6 +168,10 @@ export const naiveIsIdentityCommit = (
   return true;
 };
 
+/**
+ * The reference admission decision for `commit` from `sessionId`, given the
+ * accepted history so far. Mirrors §3.6 exactly, without shortcuts.
+ */
 export const naiveAdmit = (
   history: NaiveHistory,
   sessionId: string,

@@ -976,7 +976,11 @@ function validateVoters(
   userCount: number,
   source: string,
 ): void {
-  if (voters !== undefined && voters > userCount) {
+  if (voters === undefined) return;
+  if (!Number.isInteger(voters) || voters < 1) {
+    throw new Error(`--voters must be an integer >= 1; got ${voters}`);
+  }
+  if (voters > userCount) {
     throw new Error(
       `--voters=${voters} exceeds the ${userCount} users of ${source}`,
     );

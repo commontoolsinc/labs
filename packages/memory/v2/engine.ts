@@ -6548,8 +6548,11 @@ const resolvePendingReads = (
     // basisSeq) keeps the max-dependency basis, so the over-advance
     // deviation persists for it alone
     // (docs/specs/memory-v2/09-invariants.md, INV-1).
-    if (!options.checkStaleness) continue;
+    // The declared basis is validated whether or not the scan runs: an
+    // identity commit's reads are exempt from staleness, not from the
+    // protocol.
     const trueBasis = pendingReadBasisSeq(engine, read);
+    if (!options.checkStaleness) continue;
     const conflictSeq = trueBasis !== undefined
       ? findConflictSeq(
         engine,
