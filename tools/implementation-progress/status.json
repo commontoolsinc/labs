@@ -1,15 +1,16 @@
 {
-  "updated": "2026-09-10T23:26:20.057645+00:00",
+  "updated": "2026-09-10T23:47:28.440003+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7241",
-  "activity": "Four synthetic remote-row browser cases pass, including cross-space profiles. Read-budget integration is being reconciled with newly landed main changes. B3 named aggregates landed in #7259.",
+  "activity": "Row invalidation fix #7265 merged after all 69 gates and clean reviews. A4 count-limit work exposed a separate union-branch schema-scope issue; its isolated fix passes focused tests.",
   "review": "Antagonistic reviews are clean for the C1 candidate fix and resolved budget merge. Normal follow-up pushes have resumed Cubic review on #7257; latest code/checkpoint reviews remain landing gates. #7264 is completing review and CI.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
     "#7257: full runner passed 1,410 tests / 8,765 steps. Full CLI completed: 1,821 tests passed and two known baseline color tests failed. Rebased focused tests and all 46 type-check groups pass.",
-    "#7261 merged as c8a64af840: all CI gates passed; latest Cubic reported zero issues; antagonistic review clean. Browser recordings remain available below."
+    "#7261 merged as c8a64af840: all CI gates passed; latest Cubic reported zero issues; antagonistic review clean. Browser recordings remain available below.",
+    "#7265: merged as 3aee034aff after all 69 CI gates, zero-issue latest Cubic review, and clean antagonistic review."
   ],
   "stages": [
     {
@@ -88,7 +89,7 @@
       "id": "C3",
       "title": "Remote row invalidation",
       "status": "active",
-      "detail": "Inline-element dependency fix passes the full runner suite (1,411 tests / 8,764 steps), before/after and narrow-invalidation regressions, and four browser cases. Publication and review gates remain."
+      "detail": "Inline-element dependency fix landed in #7265 with four browser cases and narrow invalidation tests. Remaining acceptance checks and production workaround removal stay open."
     },
     {
       "id": "C4",
