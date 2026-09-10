@@ -1075,6 +1075,13 @@ Key rewrite rules:
   already-rewritten symbol-less `*WithPattern` call encountered inside a
   processed branch — it stays in place rather than acquiring a lift around
   the rewritten call
+- a passthrough JSX expression whose reactive reads are all members of
+  array-callback elements or local opaque-origin bindings is left for the late
+  pattern-body pass, which lowers each member to `.key(...)` in place. This
+  includes local origins with an identity-preserving `.for(...)` chain and
+  members nested in conditional-helper JSX branches. A direct expression such
+  as `wishState[UI]` therefore depends on that key rather than a synthetic lift
+  over the entire wish state
 - non-compute contexts:
   - complex reactive expressions are wrapped via `computed(() => expr)` (later
     lowered to the lift-applied form)
@@ -1332,6 +1339,11 @@ Current-main behavior distinguishes three buckets for non-JSX authored sites:
    - this applies across non-JSX container kinds such as
      `variable-initializer`, `object-property`, `array-element`, and
      `return-expression`
+   - passthrough member, object, and array sites whose reactive reads are all
+     rooted in local opaque-origin bindings stay structural; the late
+     pattern-body pass lowers their member reads to `.key(...)`. Pattern
+     arguments such as `{ setup: wishState[UI] }` therefore retain a link to
+     the selected field rather than acquiring a lift over the whole opaque root
 2. **explicit compute callbacks**
    - `computed` / `action` / `lift` / `handler` callbacks remain the
      explicit reactive boundary

@@ -1856,6 +1856,7 @@ function dataUnavailableWishCell(
   const target = scope === undefined
     ? base
     : scopedCell(runtime, tx, base, scope);
+  target.setMetaRaw("schema", true, rawMetaWriteAuthorization);
   target.setRaw(marker);
   return target;
 }

@@ -10,7 +10,6 @@ import {
   isSyncing,
   lift,
   NAME,
-  observeAvailability,
   pattern,
   type PerSession,
   type ReadonlyCell,
@@ -569,16 +568,6 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, names }) => {
   const profileWish = wish<{ name: string; avatar: string }>({
     query: "#profile",
   });
-  const observedProfileSetupUI = observeAvailability(profileWish[UI]);
-  const profileSetupUI = computed(() => {
-    if (
-      hasError(observedProfileSetupUI) ||
-      isPending(observedProfileSetupUI) ||
-      isSyncing(observedProfileSetupUI) ||
-      hasSchemaMismatch(observedProfileSetupUI)
-    ) return <></>;
-    return observedProfileSetupUI;
-  });
   // A wish resolves after setup, so each of these stays a derivation. Reading
   // the fields once here would pin the composer to the empty profile the board
   // started with: the Start button never enables, and a topic filed through it
@@ -686,7 +675,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, names }) => {
                       noNavigate
                     />
                   )
-                  : <div>{profileSetupUI}</div>}
+                  : <div>{profileWish[UI]}</div>}
               </cf-hstack>
             </cf-hstack>
           </cf-vstack>

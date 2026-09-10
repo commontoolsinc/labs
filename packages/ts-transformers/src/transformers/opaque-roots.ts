@@ -138,6 +138,28 @@ export function isOpaqueOriginCall(
   );
 }
 
+/** Whether `root` names a local binding initialized from an opaque source. */
+export function isLocalOpaqueOriginBindingReference(
+  root: ts.Identifier,
+  context: TransformationContext,
+): boolean {
+  const original = ts.getOriginalNode(root);
+  const symbol = context.checker.getSymbolAtLocation(root) ??
+    (ts.isIdentifier(original)
+      ? context.checker.getSymbolAtLocation(original)
+      : undefined);
+  return symbol?.declarations?.some((declaration) =>
+    ts.isVariableDeclaration(declaration) && declaration.initializer !==
+      undefined &&
+    isOpaqueSourceExpression(
+      declaration.initializer,
+      new Set(),
+      new Set(),
+      context,
+    )
+  ) ?? false;
+}
+
 export function isOpaqueRootInfo(
   info: OpaqueAccessInfo,
   opaqueRoots: ReadonlySet<string>,

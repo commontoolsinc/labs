@@ -9,6 +9,7 @@ import { seedResultContainerWhenPullSettles } from "../src/builtins/list-result-
 import type { Cell } from "../src/cell.ts";
 import { Runtime, type ServerRunInfo } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { isDurableReadTx } from "../src/storage/reactivity-log.ts";
 
 // The seed is the list coordinators' recovery for a result container that was
 // never persisted: the resume reconcile defers on an undefined container and
@@ -304,6 +305,40 @@ describe("list-result-container-seed", () => {
         { actionId: "filter/resume-seed/of:stamped-seed", kind: "bookkeeping" },
         { actionId: "filter/resume-seed/of:stamped-seed", kind: "bookkeeping" },
       ]);
+      expect(valueOf(container)).toEqual([]);
+      expect(logger.warnings).toEqual([]);
+    });
+
+    it("reads through the durable view on a server-execution client", async () => {
+      await runtime.dispose({ closeStorage: false });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+        experimental: { serverExecution: true },
+      });
+      const container = newContainer("client-durable-read");
+      const openTransaction = runtime.edit.bind(runtime);
+      let durableAtCommit = false;
+      (runtime as any).edit = () => {
+        const tx = openTransaction();
+        const commit = tx.commit.bind(tx);
+        (tx as any).commit = () => {
+          durableAtCommit = isDurableReadTx(tx);
+          return commit();
+        };
+        return tx;
+      };
+
+      await seedResultContainerWhenPullSettles(
+        runtime,
+        container,
+        () => true,
+        Promise.resolve(),
+        logger,
+        "map/resume-seed/of:client-durable-read",
+      );
+
+      expect(durableAtCommit).toBe(true);
       expect(valueOf(container)).toEqual([]);
       expect(logger.warnings).toEqual([]);
     });

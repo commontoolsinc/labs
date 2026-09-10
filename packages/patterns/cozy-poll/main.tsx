@@ -405,16 +405,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const observedProfileAvatar = observeAvailability(
       profileAvatarWish.result,
     );
-    const observedProfileSetupUI = observeAvailability(profileWish[UI]);
-    const profileSetupUI = computed(() => {
-      if (
-        hasError(observedProfileSetupUI) ||
-        isPending(observedProfileSetupUI) ||
-        isSyncing(observedProfileSetupUI) ||
-        hasSchemaMismatch(observedProfileSetupUI)
-      ) return <></>;
-      return observedProfileSetupUI ?? <></>;
-    });
     const profileName = computed(() => {
       if (
         hasError(observedProfileName) || isPending(observedProfileName) ||
@@ -657,7 +647,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         /* Built-in profile UI: create a profile when there is
                           none, pick between existing profiles otherwise. */
                       }
-                      <div>{profileSetupUI}</div>
+                      <div>{profileWish[UI]}</div>
                       <cf-button
                         onClick={boundJoin}
                         disabled={computed(() => !hasProfile)}

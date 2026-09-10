@@ -12,7 +12,6 @@ import {
   isSyncing,
   lift,
   NAME,
-  observeAvailability,
   pattern,
   type PerSession,
   type ReadonlyCell,
@@ -1384,16 +1383,6 @@ export default pattern<TopicInput, TopicOutput>(
     const profileWish = wish<{ name: string; avatar: string }>({
       query: "#profile",
     });
-    const observedProfileSetupUI = observeAvailability(profileWish[UI]);
-    const profileSetupUI = computed(() => {
-      if (
-        hasError(observedProfileSetupUI) ||
-        isPending(observedProfileSetupUI) ||
-        isSyncing(observedProfileSetupUI) ||
-        hasSchemaMismatch(observedProfileSetupUI)
-      ) return <></>;
-      return observedProfileSetupUI;
-    });
     // A wish resolves after setup, so each of these stays a derivation. Reading
     // the fields once here would pin the page to the empty profile the topic
     // opened with: the composer's controls never enable, and a comment or edit
@@ -1827,7 +1816,7 @@ export default pattern<TopicInput, TopicOutput>(
                       noNavigate
                     />
                   )
-                  : <div>{profileSetupUI}</div>}
+                  : <div>{profileWish[UI]}</div>}
               </cf-hstack>
             </cf-hstack>
           </cf-vstack>

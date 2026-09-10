@@ -1,12 +1,7 @@
 import {
   computed,
   DID,
-  hasError,
-  hasSchemaMismatch,
-  isPending,
-  isSyncing,
   NAME,
-  observeAvailability,
   pattern,
   UI,
   VNode,
@@ -31,15 +26,6 @@ export default pattern<Record<string, never>>((_) => {
       return result;
     }),
   });
-  const observedWishUI = observeAvailability(wishResult[UI]);
-  const wishUI = computed(() => {
-    if (
-      hasError(observedWishUI) || isPending(observedWishUI) ||
-      isSyncing(observedWishUI) || hasSchemaMismatch(observedWishUI)
-    ) return <></>;
-    return observedWishUI ?? <></>;
-  });
-
   return {
     [NAME]: "Wish tester",
     [UI]: (
@@ -50,7 +36,7 @@ export default pattern<Record<string, never>>((_) => {
         <hr />
         <cf-textarea $value={wishText} />
         <hr />
-        {wishUI}
+        {wishResult[UI]}
       </div>
     ),
   };

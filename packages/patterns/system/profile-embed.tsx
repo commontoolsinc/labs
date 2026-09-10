@@ -7,7 +7,6 @@ import {
   isPending,
   isSyncing,
   NAME,
-  observeAvailability,
   pattern,
   resultOf,
   Stream,
@@ -143,37 +142,21 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
   // a completed missing-profile error; pending rendering is handled by the
   // renderer's normal continuity behavior.
   const profileWish = wish<ProfileResult>({ query: "#profile" });
-  const observedProfileSetupUI = observeAvailability(profileWish[UI]);
-  const profileSetupUI = computed(() => {
-    if (
-      hasError(observedProfileSetupUI) ||
-      isPending(observedProfileSetupUI) ||
-      isSyncing(observedProfileSetupUI) ||
-      hasSchemaMismatch(observedProfileSetupUI)
-    ) return <></>;
-    return observedProfileSetupUI;
-  });
-  const profileState = computed(() => {
+  const {
+    name: profileName,
+    avatar: profileAvatar,
+    bio: profileBio,
+    setName: setProfileName,
+    setAvatar: setProfileAvatar,
+    setBio: setProfileBio,
+  } = resultOf(profileWish.result);
+  const hasProfile = computed(() => {
     const state = profileWish.result;
-    if (
+    return !(
       hasError(state) || isPending(state) || isSyncing(state) ||
       hasSchemaMismatch(state)
-    ) {
-      return {
-        available: false,
-        profile: {
-          name: "",
-          avatar: "",
-          bio: "",
-          setName: undefined,
-          setAvatar: undefined,
-          setBio: undefined,
-        },
-      };
-    }
-    return { available: true, profile: resultOf(state) };
+    );
   });
-  const profile = profileState.profile;
 
   // Transient local drafts backing the amend inputs. Not a second source of
   // truth — seeded from the live values on entering edit mode, cleared/written
@@ -184,18 +167,15 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
   // View toggle: presentation by default, amend form when the owner opts in.
   const editing = new Writable<boolean>(false).for("editing");
 
-  const hasProfile = computed(() => profileState.available);
   const isEditing = computed(() => editing.get() === true);
-  const showEditForm = computed(() => profileState.available && editing.get());
-  const showPresentation = computed(() =>
-    profileState.available && !editing.get()
-  );
+  const showEditForm = computed(() => hasProfile && editing.get());
+  const showPresentation = computed(() => hasProfile && !editing.get());
 
-  const bio = computed(() => trimmed(profile.bio as string));
-  const hasBio = computed(() => trimmed(profile.bio as string).length > 0);
+  const bio = computed(() => trimmed(profileBio as string));
+  const hasBio = computed(() => trimmed(profileBio as string).length > 0);
 
   const displayName = computed(() => {
-    const name = trimmed(profile.name as string);
+    const name = trimmed(profileName as string);
     return name.length > 0 ? name : "Profile";
   });
 
@@ -215,7 +195,7 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
             hasProfile,
             null,
             <div data-ui-region="profile-embed-fallback">
-              {profileSetupUI}
+              {profileWish[UI]}
             </div>,
           )}
 
@@ -229,7 +209,7 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
               <cf-profile-badge
                 id="profile-embed-badge"
                 variant="hero"
-                $profile={profile}
+                $profile={resultOf(profileWish.result)}
                 size="xl"
                 noNavigate
               />
@@ -258,9 +238,9 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
                     nameDraft,
                     avatarDraft,
                     bioDraft,
-                    currentName: profile.name,
-                    currentAvatar: profile.avatar,
-                    currentBio: profile.bio,
+                    currentName: profileName,
+                    currentAvatar: profileAvatar,
+                    currentBio: profileBio,
                   })}
                 >
                   Edit profile
@@ -285,7 +265,7 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
                     size="sm"
                     onClick={saveName({
                       draft: nameDraft,
-                      setName: profile.setName,
+                      setName: setProfileName,
                     })}
                   >
                     Save name
@@ -304,7 +284,7 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
                     size="sm"
                     onClick={saveAvatar({
                       draft: avatarDraft,
-                      setAvatar: profile.setAvatar,
+                      setAvatar: setProfileAvatar,
                     })}
                   >
                     Save avatar
@@ -324,7 +304,7 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
                     size="sm"
                     onClick={saveBio({
                       draft: bioDraft,
-                      setBio: profile.setBio,
+                      setBio: setProfileBio,
                     })}
                   >
                     Save bio

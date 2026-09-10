@@ -422,8 +422,9 @@ describe("wish built-in", () => {
 
     const missingResultCell = result.key("missing");
     const missingResult = missingResultCell.get();
-    const unavailableResult = missingResultCell.key("result").resolveAsCell()
-      .getRaw();
+    const unavailableResultCell = missingResultCell.key("result")
+      .resolveAsCell();
+    const unavailableResult = unavailableResultCell.getRaw();
     expect(
       isDataUnavailable(unavailableResult) &&
         unavailableResult.reason === "error",
@@ -434,6 +435,7 @@ describe("wish built-in", () => {
     ) {
       expect(unavailableResult.error.message).toMatch(/no query/);
     }
+    expect(unavailableResultCell.getMetaRaw("schema")).toBe(true);
     // Retained only for old compiled graphs; absent from the public WishState.
     expect(missingResult?.error).toMatch(/no query/);
   });
