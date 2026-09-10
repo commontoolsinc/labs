@@ -112,15 +112,15 @@ Deno.test({
 
       // Collect all mismatches before failing
       const mismatches: string[] = [];
-      function check(
+      const check = (
         label: string,
         actual: number | undefined,
         expected: number,
-      ) {
+      ) => {
         if (actual !== expected) {
           mismatches.push(`${label}: actual=${actual}, expected=${expected}`);
         }
-      }
+      };
 
       // struct stat
       check("STAT_SIZE", values.get("stat_size"), p.STAT_SIZE);
