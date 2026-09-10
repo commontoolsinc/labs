@@ -1,3 +1,11 @@
+/**
+ * Compatibility preflight collects issues without moving the source pointer,
+ * restaging inputs, or saving candidate artifacts. Stored-value validation is
+ * shared with setup, while enforcement runs inside the apply transaction. These
+ * cases compare the verdicts and check that a refused preflight leaves the piece
+ * intact.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { spy } from "@std/testing/mock";
@@ -353,6 +361,8 @@ describe("setsrc compatibility preflight", () => {
     await piece.checkPattern(incompatibleProgram());
     await runtime.idle();
 
+    // The source pointer is the caller's invariant, so assert it directly
+    // rather than inferring it from the rendered result.
     expect(getPatternIdentityRef(piece.getCell())).toEqual(refBefore);
     expect(JSON.stringify(piece.getCell().getAsQueryResult())).toBe(before);
 

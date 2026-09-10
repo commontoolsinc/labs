@@ -230,6 +230,7 @@ export {
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
   SEALING_RECEIPT_REFUSAL,
+  SEALING_SOURCE_UPDATE_REFUSAL,
   setPatternRepository,
   setPatternSource,
   setPieceReconciliation,

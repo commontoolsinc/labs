@@ -623,19 +623,23 @@ state may be reused by later operations. Normal storage reads can demand
 materialization by an active server executor; preflight does not freeze the
 space or suppress other actors' writes.
 
-Durable source loads register only field-integrity-authenticated lists;
-synchronous source verification within setup retains transaction reads without
-registering authority from staged metadata; integrity-valid compiled-cache loads
-register lists from their root-authenticated documents. Registration and
-transitive closure are scoped by the space carrying that attestation. Each
-transaction snapshots the resulting per-space maps, and `writeAuthorizedBy`
-consults only the map for the target document's space. It may then match the
-live writer's module hash directly or through that space's snapshot, while its
-binding path must still match exactly. Delegation metadata loaded from another
-space grants no authority. Source and compiled closure loaders reject a cache
-graph containing any cross-space import link, so a child document's local
-attestation cannot be flattened into the root's space. Source-file spelling is
-diagnostic at verification because it is resolver-dependent; a rename still
+Asynchronous source and compiled closure loads register authority only when the
+transaction carries no uncommitted writes (`tx.hasWrites()` is false). Source
+loads register only field-integrity-authenticated lists; integrity-valid
+compiled-cache loads register lists from their root-authenticated documents.
+Loads in a transaction with writes still return the verified closure but do not
+publish its delegation metadata ahead of a commit verdict. Synchronous source
+verification within setup retains transaction reads without registering authority.
+
+Registration and transitive closure are scoped by the space carrying that
+attestation. Each transaction snapshots the resulting per-space maps, and
+`writeAuthorizedBy` consults only the map for the target document's space. It may
+then match the live writer's module hash directly or through that space's
+snapshot, while its binding path must still match exactly. Delegation metadata
+loaded from another space grants no authority. Source and compiled closure loaders
+reject a cache graph containing any cross-space import link, so a child document's
+local attestation cannot be flattened into the root's space. Source-file spelling
+is diagnostic at verification because it is resolver-dependent; a rename still
 receives no delegation because old and new modules no longer match by canonical
 authored filename. Ambiguous canonical filenames and unauthenticated metadata
 fail closed by receiving no delegation. If a runtime-version miss recompiles

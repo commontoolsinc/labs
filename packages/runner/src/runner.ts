@@ -1102,14 +1102,19 @@ export interface RunSyncedCommitResult<R> {
 }
 
 /**
- * Why a receipt is refused on a runtime that seals rather than commits. One
- * string because the refusal is raised twice — once as a fast answer, once
- * against the transaction the receipt would have described — and a caller
- * matching on it should not have to know which one it caught.
+ * Why a committed setup receipt is unavailable while sealing into a wave.
+ * Entry and transaction checks share this message so callers can identify the
+ * refusal regardless of when the seal destination was installed.
  */
 export const SEALING_RECEIPT_REFUSAL =
   "a committed pattern setup receipt is unavailable while sealing into a " +
   "wave, whose acceptance a later withdrawal can undo";
+
+/** Why a withdrawable wave cannot publish source-update authority. */
+export const SEALING_SOURCE_UPDATE_REFUSAL =
+  "source update authority requires a durable setup commit and cannot be " +
+  "published while sealing into a wave, whose acceptance a later withdrawal " +
+  "can undo";
 
 /**
  * Reports work which failed after storage accepted a pattern setup.
@@ -6077,17 +6082,18 @@ export class Runner {
     } else {
       const outcome = await this.#runtime.editWithRetry(
         (tx) => {
-          // Asked here rather than only at the entry point, because a seal
-          // destination can be installed while the synchronization above is in
-          // flight, and because `editWithRetry` builds a fresh transaction per
-          // retry. The receipt describes THIS transaction, so the condition
-          // that decides whether it can describe one has to hold for the
-          // transaction, not for the moment the call started.
+          // Receipts and source-update authority require this transaction's
+          // durable acceptance. Check each attempt because a seal destination
+          // can be installed during synchronization or between retries.
           if (
             (requireCommit || sourceUpdate !== undefined) &&
             this.#runtime.sealDestinationInstalled
           ) {
-            throw new Error(SEALING_RECEIPT_REFUSAL);
+            throw new Error(
+              requireCommit
+                ? SEALING_RECEIPT_REFUSAL
+                : SEALING_SOURCE_UPDATE_REFUSAL,
+            );
           }
           // runSynced's own setup tx (async surface, e.g. compileAndRun's
           // continuation on a served run): no scheduler run around it;

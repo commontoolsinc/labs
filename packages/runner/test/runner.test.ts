@@ -38,6 +38,7 @@ import {
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
   SEALING_RECEIPT_REFUSAL,
+  SEALING_SOURCE_UPDATE_REFUSAL,
 } from "../src/runner.ts";
 import {
   type ICommitNotification,
@@ -2147,6 +2148,58 @@ describe("setup/start", () => {
       expect(sealed).toEqual([]);
     } finally {
       mutableCell.sync = originalSync;
+      serving.clearSealDestination();
+      await serving.dispose();
+      await servingStorage.close();
+    }
+  });
+
+  it("runSynced refuses source-update authority while sealing without requesting a receipt", async () => {
+    const servingStorage = StorageManager.emulate({ as: signer });
+    const serving = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: servingStorage,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    try {
+      const resultCell = serving.getCell(
+        space,
+        "source authority while sealing",
+      );
+      const initial = await compileReceiptPattern(serving, "v1");
+      const candidate = await compileReceiptPattern(serving, "v2");
+      await serving.runSynced(resultCell, initial, {});
+      const before = receiptSourceSnapshot(serving, resultCell);
+      const transition = await receiptSourceTransition(serving, resultCell);
+      const sealed: IExtendedStorageTransaction[] = [];
+      serving.installSealDestination({
+        seal: (tx: IExtendedStorageTransaction) => {
+          sealed.push(tx);
+          return tx.commit();
+        },
+      });
+
+      await expect(serving.runSynced(resultCell, candidate, {}, {
+        expectedPatternIdentity: before.pattern,
+        pieceSourceTransition: transition,
+      })).rejects.toThrow(SEALING_SOURCE_UPDATE_REFUSAL);
+      expect(sealed).toEqual([]);
+      expect(receiptSourceSnapshot(serving, resultCell)).toEqual(before);
+      expect(resultCell.get()).toEqual({ marker: "v1" });
+      const successor = serving.patternManager.getArtifactEntryRef(candidate)!;
+      const tx = serving.edit();
+      try {
+        expect(
+          tx.getCfcState().moduleDelegations.get(space)?.get(
+            successor.identity,
+          ),
+        )
+          .toBeUndefined();
+      } finally {
+        tx.abort();
+      }
+    } finally {
       serving.clearSealDestination();
       await serving.dispose();
       await servingStorage.close();
