@@ -1,0 +1,25 @@
+{
+  "root": "/Users/berni/.codex/artifacts/server-execution-topics-2026-09-09",
+  "files": {
+    "runs/sidecar-baseline-e529-01/results.json": "bad179fd34924c45db5ff8da9a647496faca768751f6abd784b324d39e4456ad",
+    "runs/sidecar-baseline-e529-01/manifest.json": "d784f67abfee5d39059bf1a00d4b79be7f6e33a328ba817ee58a05d8fb526724",
+    "runs/sidecar-baseline-e529-01/regression-red.stdout.log": "6c1e3970dc7edc97b719e26af70aaa86ca3552660cd0310f22d7939546150371",
+    "runs/sidecar-baseline-e529-01/profile-source.stderr.log": "ffc2095db4e04384c9c7958aa432df06b6e15fc9dc64de0258604a1b03ebbe0c",
+    "runs/sidecar-baseline-e529-01/sidecar-source-probe.ts.txt": "cb4cd070f208a7423e7a71729478bd570cb7a55fa9e617c27b64eb616b53b137",
+    "runs/sidecar-baseline-e529-01/regression-red.stderr.log": "81462220940261620e123ad33f5244fad9ccba47ee93bcea3fddb7ec8d42815a",
+    "runs/sidecar-baseline-e529-01/regression.patch": "c871790c887517e1f334bff4974b5a2d3706776f7bc217d5f76500cec2ce0b30",
+    "runs/sidecar-baseline-e529-01/profile-source.stdout.log": "ee68ad7dd26157d955c107be63766aeb8962ed8687e8141ef40657f4e82fb7a3",
+    "runs/sidecar-candidate-01/results.json": "e1715fbb3c5d96337f5109eecd17f192afd982cb572f7dcad7b2d13b8274dbeb",
+    "runs/sidecar-candidate-01/manifest.json": "09c090abb7215d127a6fb30fe1db6b31bb3e8f45ec56f46fc7f92442b60df80e",
+    "runs/sidecar-candidate-01/candidate.patch": "248edfc03f42ecef4a83208b7d37231e0fc1ea7795757419f9d0dc9913a4ac36",
+    "runs/sidecar-candidate-01/profile-source.stderr.log": "ee981b960a8ae4c880ded3478f21628f828b8d196dc3e430c1f1214be13c2128",
+    "runs/sidecar-candidate-01/sidecar-source-probe.ts.txt": "cb4cd070f208a7423e7a71729478bd570cb7a55fa9e617c27b64eb616b53b137",
+    "runs/sidecar-candidate-01/profile-source.stdout.log": "5ba448a9ceabfd8f2b404909f83ffcc91eb0b6cb094b2a73da6aa3e52b2ed04c",
+    "validation/sidecar-focused-06.log": "851e5c3ef935404204b683eb91b52bb70ad108f7b271f0544c4f7f39cd1e65bc",
+    "validation/sidecar-source-final-07.log": "444920272d40c9f4e94b74d872a76b33dbd804db765c79a2d05f99ca591b6f24",
+    "validation/sidecar-admission-red-02.log": "44bf71dc259b87e6c97e94d4ddde5261ad649e99a6c2e649220c27697d6d87a6",
+    "tools/verify-sidecar-baseline-e529.py": "95b953e659cebeec748d9b9ead58fb1e62685d67d7d931509239dcef445db9a4",
+    "tools/verify-sidecar-candidate-01.py": "818d9a9504007d4ab1e48f4def74e823d7c66fd9f53a2a80d2703c483864b57f"
+  },
+  "retrieval": "Paths are relative to the durable root. Verify each original capture SHA-256 before reuse. Compact results, normalized manifests, exact candidate/regression patches and the probe are in this PR; full process logs and original controllers are retained at this root."
+}
