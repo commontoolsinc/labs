@@ -12,31 +12,32 @@ measure through `deno task integration --port-offset=NNN`, uninstrumented
 workloads, byte-identical across arms, adjacent runs, counters over
 latencies, no latency quoted above load ~5, causation by ablation.
 
-Main carries no executor (no `packages/runner/src/executor/`, no
-`serverPrimaryExecution` in `packages/memory/v2.ts`) — but it DOES
-carry the certificate/observation surface, and it is BIGGER than an
-earlier draft of this paragraph claimed (~10 source files). Measured
-2026-08-02: **~25 source files across FIVE packages** —
-`ts-transformers` (4: `core/transformers.ts`, `schema-injection.ts`,
-`lift-applied-strategy.ts`, `capability-analysis.ts`), `runner` (13),
-`memory` (4), `state-inspector` (3), `cli` (1) — plus **~110 golden
-fixtures** under `packages/ts-transformers/test/fixtures/`, whose
-regeneration is a required step of the change rather than a
-follow-up. The surface has TWO identifiers, not one:
-`completeSchedulerScopeSummary` and `completeActionScopeSummary`; an
-inventory greping only the first undercounts it. Alongside it,
-`persistentSchedulerState` (OFF by default) persists full-JSON
-`scheduler_observation` payloads. Phase 1 is therefore partly a
-REDUCTION OF MAIN — delete that surface, replace the observation
-tables with the v2 basis index — and partly a build. The spec §5
-deletion list is enforced by deleting on main and *not rebuilding*,
-with the survival test as the gate on anything that feels needed.
+The executor and its two execution postures are implemented in the current
+repository. The first-party default is OFF; explicit `true` selects ON.
+OW28's fresh served `compileAndRun` completion path remains missing, so the
+Phase 7 ordered gates are not all satisfied. The coverage register tracks
+that port and its independently scoped cache/instance/supersession follow-ups.
+The initial stack inventory and stage records are historical evidence, not
+an inventory of current main.
 
-## Coordination state (2026-09-02) — read this first
+## Coordination state — read this first
 
 The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
+
+**Current work:** restore OW28 on current main and prove fresh compilation
+through a real serving host, including durable completion, child execution,
+recovery, supersession, and demanded instances. The preserved #5968 branch
+is an implementation input, not a landed feature. The
+[coverage register](../specs/server-side-execution/verification-coverage.md#current-status)
+records the current dispositions; the
+[coverage status audit](../history/plans/server-execution-v2/optimize/coverage-status-audit-2026-09-09.md)
+records the omission evidence and the bounded status investigation.
+The first-party default and flip records belong to the
+[`serverExecution` registry](../development/EXPERIMENTAL_OPTIONS.md#serverexecution).
+The ON soak is paused. A renewed ON rollout requires the ordered gates,
+including OW28; the flip record's earlier all-gates-met claim is insufficient.
 
 **Delta 2026-09-03 (the ROLLBACK): the first-party default returned to OFF
 via the rollback PR (#6840) — the first data-only flip:
@@ -64,9 +65,8 @@ when appropriate.**
 **Delta 2026-08-28, last updated 2026-08-29 (the FLIP PR —
 [#6535](https://github.com/commontoolsinc/labs/pull/6535), now MERGED; the
 soak started at its merge): `SERVER_EXECUTION_DEFAULT_ENABLED` →
-`true`, with every ordered gate met on main at the base (22c93b540 —
-rebased onto it 2026-08-29, from e16780fca and originally 4e02f75c4;
-the gate claims re-verified at each new base): the
+`true`. This is the flip's execution record; it does not discharge the
+missing OW28 port. Its recorded checks included the
 ON-skip registry EMPTY across all four suites (the ruled-3b-close lift,
 #6528), OW31's ruled posture BUILT, OW45–OW53 CLOSED, and the OW38(ii)
 bar RULED met ("topics numbers are fine", 2026-08-24).** The 2026-08-29
@@ -508,12 +508,14 @@ client-start class, its reds recorded BEFORE this recovery landed —
 it lifts on its own gate evidence at the merged head).
 
 **Delta 2026-08-23: OW45 arm-B server-ensure STAGE 1 BUILT —
-the space-root ensure (existence + freshness, no start) runs at the
+the space-root ensure runs at the
 SpaceServer's activation as a lease-guarded, single-flight owed step —
 non-blocking at activation, DEADLINE-BOUNDED in the first cycle
 (rootEnsureDeadlineMs, default 30 s: a wedged fetch must never hold a
-tenure's lease — the build review's F2); the client is behaviorally
-UNCHANGED.** The
+tenure's lease — the build review's F2).** Its current obligation is
+root existence only: `ensureSpaceRootPattern` returns an existing root without
+following its source. Source following belongs to the opener under
+piece-source-lifecycle.md and serving-loop.md §3e. The
 design of record is PR #6209
 (`docs/history/plans/server-execution-v2/optimize/ow45-armb-server-ensure-design.md`,
 owner-green-lit 2026-08-23); the build report with the four
@@ -710,32 +712,12 @@ dossier, the design-pass state, the process rules — is the frozen
 with the evidence files beside it; the owed rows are the register's
 (`verification-coverage.md` §3, the 2026-08-18 coordination delta).
 
-**The train — 26 PRs, all OPEN, none merged; one linear stack (each
-PR's base is the previous branch; the three stage-C siblings are the
-one parallel fan), merge-base with `origin/main`
-`30fdbb92f` (#5786; the handoff's `9d6c9fe00` is an earlier merge point
-on the same branch); stacked PRs get NO CI, every green is a local
-run:** A #5339 → B #5349 → C.1 #5356 → C.2 #5367 → C.3 #5369 → D #5371 →
-E #5374 → F #5439 → G #5461 → Phase 2 #5522 → P2-F #5789 → Phase 3
-#5612 → Phase 4 #5613 → Phase 5 #5837 → Phase 6 #5841 → Phase 7 #5849
-(`a73147f75`; flip-ready landed DARK, the constant `false`) → fan-out A
-#5903 (`ea74739f2`) → fan-out B #5924 (`fb2292a24`) → three stage-C
-siblings off fan-out B, to be STACKED (order the stacker's; all three
-append at the end of the register's §3): OW28 #5968
-(`463ea3887`), lunch #5969 (`eb64d8694`), the tuning trio #5991
-(`b54bf5215`); this docs PR #6009 (`claude/server-exec-v2-stage-c-docs`)
-rides the tuning tip; the DESIGN-BUILD TRAIN rides the docs tip, in its
-FINAL stack order as of 2026-08-19: design #6017 (`461b01822`) → W1 (d′)
-#6029 @ `963ff600e`
-([ledger](https://github.com/commontoolsinc/labs/pull/6029#issuecomment-5347677089))
-→ W2 (e) #6039 @ `ac30dd233`
-([ledger](https://github.com/commontoolsinc/labs/pull/6039#issuecomment-5347134576);
-includes W2.1, the cascade-echo fix) → W3 (α) #6043 @ `42674af15`
-([ledger](https://github.com/commontoolsinc/labs/pull/6043#issuecomment-5348564970)).
-All three builds independently reviewed + fixed + ledgered; the
-2026-08-19 re-stack moved W2 onto W1 and W3 onto W2 (register: W2's
-OW41 renumbered OW42, W1 keeps OW41; every green a LOCAL run — stacked
-PRs get no CI). The full per-PR table is the closeout's §1.
+The stack's branch topology and local validation record are preserved in the
+[stage-C closeout](../history/plans/server-execution-v2/stage-c-closeout.md).
+The integrated serving stack is on main. OW28's sibling implementation is
+still a restoration input at #5968 (`463ea3887`); closing that PR did not
+land its compile outbox path or its real-host tests. The current owed work is
+the register's OW28 row, not an unmerged stack to merge wholesale.
 
 **The owner's landing posture (2026-08-18, verbatim intent):** *"get
 confidence that we're on the right track, then merge everything to main
@@ -747,10 +729,11 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
 
 **Stage C outcomes:**
 
-- **OW28 (#5968) — DONE**: compile-and-run served as an outbox effect;
-  self-review + the coordinator-round independent review (the PR's
-  ledger comment; supersession wedge + fan-out cardinality-2 wedge fixed
-  as `463ea3887`; three owed rows `OW28-*` minted on that branch).
+- **OW28 — OPEN**: restore the served compile outbox and completion path on
+  current main. #5968 (`463ea3887`) contains the implementation and reviews
+  to reconcile; its source is not present on main. The three `OW28-*`
+  follow-up rows are recorded in the coverage register and retain their own
+  scope and verification requirements.
 - **The lunch gate (#5969) — RE-CHARACTERIZED, skip STAYS**: not
   `nowTick` timing (refuted; two positive pins) but a served-handler
   DOUBLE DISPATCH of one durable event (2–5× per click) plus a late
@@ -1518,9 +1501,10 @@ Stages, one PR each except C, which is a three-PR train (below):
       (OW10), both dischargeable stage-D bounds discharged (delegated
       foreign admission; read-only-space read sets folding into
       withdrawals), and toolshed wiring so the ON CI arm actually
-      serves. Server-side hot-swap verified end to end; the updater's
-      network CHECK half against a fully-local store is the flagged
-      residual.
+      serves. Server-side hot-swap is verified end to end. Explicit opens
+      follow source origins under piece-source-lifecycle.md, including served
+      wish-sidecar opens. Tenure activation owes root existence, not a general
+      network source-check.
 - [x] **G — effectful + outbox**: serve `fetch*`, `generate*`,
       `sqlite*` behind request-hash memoization; the outbox; egress
       performed only here (effect authority per README §3.8; quota
@@ -1660,17 +1644,15 @@ W):
       serving-loop.md §7) + the flag-gated shadow-flip notification
       in `confirmPending`, with the own-echo and seq-0 exemptions
       pinned both arms (verification-coverage.md's Phase-2 delta).
-- [x] The pattern-updater CHECK-half bring-up verification (the
-      network source-check the unit fixture cannot serve — the
-      stage-F flagged residual in `executor-serving-loop.test.ts`):
-      verify it in the integration environment's `sx2-serving-loop`
-      surface, not a unit fixture. DONE with stage P2-F (2026-08-13):
-      the surface (`packages/patterns/integration/
-      sx2-serving-loop.test.ts`) is UN-SKIPPED — the demand-cycle
-      terminal state removed the starvation fork it reproduced
-      (verification-coverage.md's closed OW19 row) — and its
-      updater-posture gate runs in CI's ON arm. A full stale-pointer
-      roll-forward journey stays the named follow-up.
+- [x] Source-check ownership is settled by piece-source-lifecycle.md and
+      serving-loop.md §3e: the opener follows a piece's origin, and the server
+      ensures root existence and reacts to accepted pointer changes. The
+      tenure-wide source-probe obligation is superseded (OW18). Served wish
+      sidecars follow their origins through explicit runtime opens. Current root
+      coverage is `executor-space-root-ensure.test.ts`, including leaving an
+      existing root's source alone across reactivation. Source-lifecycle and
+      hot-swap coverage remain separate from the serving-loop's propagation
+      and amplification gate.
 
 **Follow-on stage (APPROVED — owner nod, 2026-08-07; its own PR
 after this phase's, the way stage C's train was cut):**
@@ -2102,10 +2084,12 @@ Tasks:
       set ACCEPTED 2026-08-18, the (d′) sentence in serving-loop.md
       §1); the design BUILD is under way — W0 RAN 2026-08-19 (PROCEED
       (d′)), W1/W2 launched (the "Coordination state" block above)*; (3)
-      OW28 — compile-and-run as an outbox effect kind + completion-class
-      writeback — *DONE on #5968 (`463ea3887`, stage C; instantiation in
-      the derivation, the completion re-arms — a recorded refinement;
-      reviewed twice, fixed; its `OW28-*` owed rows ride that branch)*;
+      OW28 — compile-and-run as an outbox effect kind + stamped completion
+      writeback — **OPEN**. Restore the port on current main, reconcile the
+      preserved #5968 implementation with current contracts, and prove the
+      durable child/result/pending journey through a real host. The
+      `OW28-*` follow-ups are recorded in the register; this ordered gate
+      remains unmet until the port and its regression coverage land;
       (4) the HONEST propagation benchmark (criterion below)
       once the two-user family works — *MEASURED TWICE (stage C, rows in
       the table below): NOT MET — first at the fan-out B tip (ON could
@@ -2232,7 +2216,7 @@ exercised at the time.*
 | runtime-client package integration | DEFAULT at the run's date (OFF) | 45 steps GREEN |
 | runtime-client package integration | explicit ON, UNIFORM (the worker declares ON) | 43 steps GREEN + 2 STEP entries ignored loudly (CT-1606 PerUser header render 3/3 red; single-navigateTo dispatch 1/3 red — OW33) |
 | `counter` | full ON | 1 red / 3 green in the build's runs (OW30's controller write-destination race — intermittent); green in the review's run; server exhausts 2/5 waves with no client loop |
-| `topics-navigation` | full ON | RED fast (`missing required property myName`, OW30 class) — ON-skip-listed (and, since the fixer, actually skipped) |
+| `topics-navigation` | full ON | The initial `myName` failure is an execution record. Stream sibling validation is fixed (OW30), and the barriered capture lifts the Topics skip (OW33). OW60's missing client echo remains separate. |
 | `cfc-group-chat-demo-two-browsers` (the Phase-2 gate + the benchmark harness) | full ON — HEAD 2/2 and the unmodified Phase-6 BASE 1/1 (review); **fan-out stage B: 3/3 fresh-store, ON-built binary (2026-08-17)** | Phase 7: RED (300 s stall; the OW32 client loop, 40–56 k action runs / 5 min). **Fan-out stage B: GREEN 3/3 (1m08s / 1m21s / 1m23s), every step in seconds; client action runs 401–586 per browser; zero non-settling; serving loop waves 48–58, derivedCommits = waves, watermarkLag ≤ 12; UN-SKIPPED** |
 | lunch (`lunch-poll-vote`) | full ON — HEAD 2/2 (review); **fan-out stage B: 2 fresh-store runs on the final binary (2026-08-17)** | Phase 7: RED (the identity-less served `#profile` wish + the OW32 loop). **Fan-out stage B: BIMODAL 1/2 — run 4 GREEN 2m28s (login 1.6 s, runtimes idle 1.0 s, joins 12–640 ms, votes and merges in seconds); run 5 RED at "both browsers see 2 love it (merge)" — both vote events consequenced with no error, one vote's served `castVote` no-op'd (`nowTick` null in the actor's run); stays ON-skip-listed with that residual named** |
 | the deployed-topology binaries the presets flip (`background-piece-service`, CLI, cf-harness, `PiecesController` hosts) | ON | NO gate exercised them ON at the flip-ready landing (review finding 8) — recorded as the flip PR's own obligation. **DISCHARGED by the flip PR (2026-08-28)**: bg-piece-service + cf-harness get the `deployed-topology-gate` job (the real binary starts/serves and asserts its posture log line; the fabric-session factory resolves ON by adoption and serves one piece flow — both red-first against forced-OFF), the CLI's gate is the probed `cli-integration-test` lanes (`cf` adopts the server's published posture), and `PiecesController` hosts ride the default package/pattern lanes (sx2-scale's controllers; the pieces-controller helper) |
