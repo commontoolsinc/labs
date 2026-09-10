@@ -66,7 +66,7 @@ type LinuxLib = Deno.DynamicLibrary<typeof LINUX_SYMBOLS>;
 // Everything from `st_size` on sits in the same place on both.
 
 /** Where the members that move sit, and how long the struct is. */
-const STAT_BY_ARCH = {
+export const STAT_BY_ARCH = {
   x86_64: { size: 144, nlink: 16, nlinkBytes: 8, mode: 24, uid: 28, gid: 32 },
   aarch64: { size: 128, nlink: 20, nlinkBytes: 4, mode: 16, uid: 24, gid: 28 },
 } as const;
@@ -82,24 +82,33 @@ const STAT_SIZE = STAT_LAYOUT.size;
 const STAT_ST_SIZE_OFFSET = 48;
 const STAT_ST_MTIM_OFFSET = 88;
 
-function writeStat(buf: ArrayBuffer, opts: StatOpts): void {
+/** Fill a `struct stat` as `stat` places the members that move. */
+export function writeStatWith(
+  stat: typeof STAT_LAYOUT,
+  buf: ArrayBuffer,
+  opts: StatOpts,
+): void {
   const view = new DataView(buf);
   new Uint8Array(buf).fill(0);
   view.setBigUint64(8, opts.ino, true); // st_ino @ 8
-  if (STAT_LAYOUT.nlinkBytes === 8) {
-    view.setBigUint64(STAT_LAYOUT.nlink, BigInt(opts.nlink), true);
+  if (stat.nlinkBytes === 8) {
+    view.setBigUint64(stat.nlink, BigInt(opts.nlink), true);
   } else {
-    view.setUint32(STAT_LAYOUT.nlink, opts.nlink, true);
+    view.setUint32(stat.nlink, opts.nlink, true);
   }
-  view.setUint32(STAT_LAYOUT.mode, opts.mode, true);
-  view.setUint32(STAT_LAYOUT.uid, opts.uid ?? 0, true);
-  view.setUint32(STAT_LAYOUT.gid, opts.gid ?? 0, true);
+  view.setUint32(stat.mode, opts.mode, true);
+  view.setUint32(stat.uid, opts.uid ?? 0, true);
+  view.setUint32(stat.gid, opts.gid ?? 0, true);
   view.setBigInt64(STAT_ST_SIZE_OFFSET, BigInt(opts.size), true);
   const { sec, nsec } = msToTimespec(opts.mtime);
   for (const secOffset of [72, 88, 104]) { // st_atim/st_mtim/st_ctim
     view.setBigInt64(secOffset, sec, true);
     view.setBigInt64(secOffset + 8, nsec, true);
   }
+}
+
+function writeStat(buf: ArrayBuffer, opts: StatOpts): void {
+  writeStatWith(STAT_LAYOUT, buf, opts);
 }
 
 //
