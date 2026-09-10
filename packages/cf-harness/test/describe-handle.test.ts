@@ -33,7 +33,11 @@ import type {
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
 import { responsesBodyFromChatFixture } from "./support/responses-fixture.ts";
-import { describeHandleTool } from "../src/tools/describe-handle.ts";
+import {
+  DESCRIBE_HANDLE_DATABASE_MARKER_SCHEMA,
+  describeHandleTool,
+} from "../src/tools/describe-handle.ts";
+import { unboundedSchemaPosition } from "../src/schema-read-bound.ts";
 import { runPatternTool } from "../src/tools/run-pattern.ts";
 import type { RunPatternToolSuccessOutput } from "../src/tools/run-pattern.ts";
 import type { HarnessFabricSession } from "../src/fabric-session.ts";
@@ -1087,6 +1091,38 @@ describe("describe_handle", () => {
 
         expect(output.hasSchema).toBe(true);
         expect(output.database).toBeUndefined();
+      });
+
+      describe("the shape an arbitrary referent is read at", () => {
+        // This tool is asked about every reference a model holds, and deciding
+        // whether one is a database is the one place it reads a value. So what
+        // that read is bounded by is the contract, and these pin it: the
+        // marker schema itself, and the referent that is not a database.
+
+        it("returns no unbounded position for the database marker schema", () => {
+          expect(
+            unboundedSchemaPosition(DESCRIBE_HANDLE_DATABASE_MARKER_SCHEMA),
+          ).toBeUndefined();
+        });
+
+        it("reports no database for a referent whose value carries no `id`", async () => {
+          const ref = await seedUndeclaredCell({
+            pieceRegistry: { entries: [{ name: "a" }, { name: "b" }] },
+            mentionable: true,
+          });
+          const minted = await mintAddressHandle(
+            createHarnessHandleTable("run-describe"),
+            ref,
+          );
+
+          const output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+
+          expect(output.known).toBe(true);
+          expect(output.database).toBeUndefined();
+        });
       });
     });
   });

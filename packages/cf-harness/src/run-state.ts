@@ -11,7 +11,7 @@ import {
   type HarnessCfcModelContext,
   type HarnessCfcModelContextObservationInput,
 } from "./contracts/cfc-model-context.ts";
-import type { HarnessCellLabels } from "./contracts/cell-labels.ts";
+import type { HarnessCellLabelsSummary } from "./contracts/cell-labels.ts";
 import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
@@ -187,14 +187,13 @@ export interface HarnessRunState {
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
 
   /**
-   * The per-cell CFC labels the run's space holds for the cells it touched.
-   * Every other artifact a run writes is the run's own record of itself; this
-   * one is read out of the space, and it is the only place a reader working
-   * from the tree can learn what a cell is labelled.
+   * What the run's space holds for the cells it touched, as findings rather
+   * than as the labels themselves. Every other artifact a run writes is the
+   * run's own record of itself; this one is read out of the space, and the
+   * snapshot file it names is the only place a reader working from the tree
+   * can learn what a cell is labelled.
    */
-  cellLabels?: HarnessCellLabels;
-
-  cellLabelsPath?: string;
+  cellLabels?: HarnessCellLabelsSummary;
   handleTable?: HarnessHandleTable;
   docsCorpus?: HarnessDocsCorpusRecord;
   skillsRoot?: HarnessSkillsRootRecord;
@@ -256,8 +255,7 @@ export interface CreateHarnessRunStateOptions {
   policyTracePath?: string;
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
-  cellLabels?: HarnessCellLabels;
-  cellLabelsPath?: string;
+  cellLabels?: HarnessCellLabelsSummary;
   handleTable?: HarnessHandleTable;
   docsCorpus?: HarnessDocsCorpusRecord;
   skillsRoot?: HarnessSkillsRootRecord;
@@ -373,9 +371,6 @@ export const createHarnessRunState = (
       : {}),
     ...(options.cellLabels !== undefined
       ? { cellLabels: structuredClone(options.cellLabels) }
-      : {}),
-    ...(options.cellLabelsPath !== undefined
-      ? { cellLabelsPath: options.cellLabelsPath }
       : {}),
     ...(options.handleTable !== undefined
       ? { handleTable: structuredClone(options.handleTable) }

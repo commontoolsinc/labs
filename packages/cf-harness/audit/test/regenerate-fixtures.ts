@@ -30,7 +30,10 @@ import {
   createFileSystemHarnessArtifactStore,
   readHarnessRunState,
 } from "../../src/artifacts.ts";
-import type { HarnessCellLabels } from "../../src/contracts/cell-labels.ts";
+import {
+  type HarnessCellLabels,
+  harnessCellLabelsSummary,
+} from "../../src/contracts/cell-labels.ts";
 import { CfHarnessEngine } from "../../src/engine.ts";
 import {
   createHarnessHandleTable,
@@ -309,7 +312,7 @@ export const regenerateFixtures = async (
     await store.persistRunState(
       patchHarnessRunState(
         state,
-        { cellLabels, cellLabelsPath },
+        { cellLabels: harnessCellLabelsSummary(cellLabels, cellLabelsPath) },
         state.updatedAt,
       ),
     );

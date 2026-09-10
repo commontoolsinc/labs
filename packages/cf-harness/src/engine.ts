@@ -38,6 +38,7 @@ import {
 } from "./docs-corpus/corpus.ts";
 import type { HarnessExploreQueryRunner } from "./docs-corpus/explore.ts";
 import type { HarnessToolContext } from "./tools/types.ts";
+import { harnessCellLabelsSummary } from "./contracts/cell-labels.ts";
 import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
 import {
   createHarnessCfcInvocationContext,
@@ -1759,7 +1760,13 @@ export class CfHarnessEngine {
       const cellLabelsPath = await this.artifactStore?.persistCellLabels?.(
         cellLabels,
       );
-      return patchHarnessRunState(state, { cellLabels, cellLabelsPath }, now);
+      // The records go to the file and the findings to the state. A run's
+      // state is rewritten whole whenever anything about the run advances, so
+      // the records there would cost the snapshot's size at every one of those
+      // writes; the summary is the same size whatever the space holds.
+      return patchHarnessRunState(state, {
+        cellLabels: harnessCellLabelsSummary(cellLabels, cellLabelsPath),
+      }, now);
     } catch (error) {
       return appendHarnessFailureRecord(
         state,
