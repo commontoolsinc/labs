@@ -204,10 +204,11 @@ The console's port is the one place the offset does not reach: it defaults to
 8135 whatever the instance's offset, because that is the port Weaver pairs with.
 The daemon's proxy and the console read the same inputs in the same order —
 `defaults.harness_console_port` in `pieces.json`, then a
-`CF_HARNESS_CONSOLE_PORT` inherited from the launching shell, then 8135 — so
-**recording a port in `pieces.json` moves both.** That is what to do for a
-second instance on a machine that already has a console: the port is not derived
-from the offset, so two instances left at the default contend for one.
+`CF_HARNESS_CONSOLE_PORT` inherited from the launching shell, then 8135, with
+`--port` above all three — so **recording a port in `pieces.json` moves both.**
+That is what to do for a second instance on a machine that already has a
+console: the port is not derived from the offset, so two instances left at the
+default contend for one.
 
 The inherited variable is the one to check when the route reaches nothing. A
 daemon started from a shell that exported the console's own variable proxies

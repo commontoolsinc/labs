@@ -149,6 +149,19 @@ export interface ConsoleLaunchRecords {
  */
 export interface ConsoleLaunchOptions {
   port?: number;
+  /**
+   * What the launching shell already held. Ranked BELOW what a loom instance
+   * records: an exported variable is a fact about the shell, and an instance
+   * that has written down its own identity, space, toolshed or store has said
+   * something more specific than the ambient one. Ranking them the other way
+   * makes a console read a store the instance does not use while reporting the
+   * value as though someone chose it.
+   */
+  inheritedIdentity?: string;
+  inheritedSpace?: string;
+  inheritedToolshedUrl?: string;
+  inheritedStore?: string;
+  inheritedPort?: number;
   consoleDir?: string;
   identity?: string;
   space?: string;
@@ -285,6 +298,7 @@ export const resolveConsoleLaunchPlan = (
   const required = (
     named: string | undefined,
     recorded: { value: string; source: string } | undefined,
+    inherited: string | undefined,
     what: string,
     flag: string,
     variable: string,
@@ -294,6 +308,9 @@ export const resolveConsoleLaunchPlan = (
     }
     if (recorded !== undefined) {
       return recorded;
+    }
+    if (inherited !== undefined) {
+      return { value: inherited, source: `\`${variable}\`, inherited` };
     }
     throw new Error(
       `no ${what}: set \`${flag}\` or \`${variable}\`` +
@@ -306,6 +323,7 @@ export const resolveConsoleLaunchPlan = (
   const identity = required(
     options.identity,
     fromPieces(defaults, "identity"),
+    options.inheritedIdentity,
     "identity keyfile, which the console signs every write with",
     "--fabric-identity",
     "CF_HARNESS_FABRIC_IDENTITY` or `CF_IDENTITY",
@@ -313,6 +331,7 @@ export const resolveConsoleLaunchPlan = (
   const space = required(
     options.space,
     fromPieces(defaults, "local_space"),
+    options.inheritedSpace,
     "space, which the console writes its pieces into",
     "--fabric-space",
     "CF_HARNESS_FABRIC_SPACE` or `CF_SPACE",
@@ -320,6 +339,7 @@ export const resolveConsoleLaunchPlan = (
   const toolshedUrl = required(
     options.toolshedUrl,
     fromPieces(objectField(defaults, "server_urls"), "toolshed"),
+    options.inheritedToolshedUrl,
     "toolshed URL, which is the fabric the console runs against",
     "--fabric-api-url",
     "CF_HARNESS_FABRIC_API_URL",
@@ -338,6 +358,7 @@ export const resolveConsoleLaunchPlan = (
         value: instance.toolshedStoreDir,
         source: `\`loom toolshed-store-dir ${instance.id}\``,
       },
+    options.inheritedStore,
     "store, which is where the console reads the labels a run wrote",
     "--store",
     "MEMORY_DIR",
@@ -398,7 +419,8 @@ export const resolveConsoleLaunchPlan = (
   // the port Weaver pairs with. Reading the same inputs the same way is what
   // makes recording a port in one place move both sides.
   const recordedPort = numericField(defaults, "harness_console_port");
-  const port = options.port ?? recordedPort ?? WEAVER_PAIRING_PORT;
+  const port = options.port ?? recordedPort ?? options.inheritedPort ??
+    WEAVER_PAIRING_PORT;
   const consoleDir = options.consoleDir ??
     (instance === undefined
       ? `.cf-harness-console-${port}`
@@ -424,6 +446,8 @@ export const resolveConsoleLaunchPlan = (
         ? NAMED
         : recordedPort !== undefined && instanceSource !== undefined
         ? instanceSource
+        : options.inheritedPort !== undefined
+        ? "`CF_HARNESS_CONSOLE_PORT`, inherited"
         : `${LAUNCHER_DEFAULT} (the port Weaver pairs with)`,
     },
     {
@@ -742,10 +766,10 @@ export const prepareConsoleLaunch = async (
   // `cf` CLI's, which a person who has ever run `cf` has set. Reading both is
   // what stops a value that is plainly present from reading as absent; the
   // console's own name wins, being the one that names this surface.
-  const identity = flag("fabric-identity") ??
-    nonEmpty(env.CF_HARNESS_FABRIC_IDENTITY) ?? nonEmpty(env.CF_IDENTITY);
-  const space = flag("fabric-space") ??
-    nonEmpty(env.CF_HARNESS_FABRIC_SPACE) ?? nonEmpty(env.CF_SPACE);
+  const inheritedIdentity = nonEmpty(env.CF_HARNESS_FABRIC_IDENTITY) ??
+    nonEmpty(env.CF_IDENTITY);
+  const inheritedSpace = nonEmpty(env.CF_HARNESS_FABRIC_SPACE) ??
+    nonEmpty(env.CF_SPACE);
 
   // Not configurable: the sandbox runs `docker`, so a launcher reading the
   // runtime table from anything else would print directories the runs never
@@ -761,20 +785,34 @@ export const prepareConsoleLaunch = async (
       ? { dockerRuntimesUnreadable: docker.unreadable }
       : {}),
   }, {
-    ...identity !== undefined ? { identity } : {},
-    ...space !== undefined ? { space } : {},
-    ...(flag("fabric-api-url") ?? nonEmpty(env.CF_HARNESS_FABRIC_API_URL)) !==
-        undefined
-      ? {
-        toolshedUrl: (flag("fabric-api-url") ??
-          nonEmpty(env.CF_HARNESS_FABRIC_API_URL))!,
-      }
-      : {},
-    ...(flag("store") ?? nonEmpty(env.MEMORY_DIR)) !== undefined
-      ? { store: (flag("store") ?? nonEmpty(env.MEMORY_DIR))! }
-      : {},
+    ...(flag("fabric-identity") !== undefined
+      ? { identity: flag("fabric-identity")! }
+      : {}),
+    ...(inheritedIdentity !== undefined ? { inheritedIdentity } : {}),
+    ...(flag("fabric-space") !== undefined
+      ? { space: flag("fabric-space")! }
+      : {}),
+    ...(inheritedSpace !== undefined ? { inheritedSpace } : {}),
+    ...(flag("fabric-api-url") !== undefined
+      ? { toolshedUrl: flag("fabric-api-url")! }
+      : {}),
+    ...(nonEmpty(env.CF_HARNESS_FABRIC_API_URL) !== undefined
+      ? { inheritedToolshedUrl: nonEmpty(env.CF_HARNESS_FABRIC_API_URL)! }
+      : {}),
+    ...(flag("store") !== undefined ? { store: flag("store")! } : {}),
+    ...(nonEmpty(env.MEMORY_DIR) !== undefined
+      ? { inheritedStore: nonEmpty(env.MEMORY_DIR)! }
+      : {}),
     ...(flag("port") !== undefined
       ? { port: positiveInteger(flag("port")!, "--port") }
+      : {}),
+    ...(nonEmpty(env.CF_HARNESS_CONSOLE_PORT) !== undefined
+      ? {
+        inheritedPort: positiveInteger(
+          nonEmpty(env.CF_HARNESS_CONSOLE_PORT)!,
+          "CF_HARNESS_CONSOLE_PORT",
+        ),
+      }
       : {}),
     ...(flag("console-dir") !== undefined
       ? { consoleDir: flag("console-dir")! }

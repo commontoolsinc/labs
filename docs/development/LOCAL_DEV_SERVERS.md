@@ -29,10 +29,18 @@ that fabric — the toolshed URL and store from this script's own values, the
 sandbox's sidecar directories from Docker's runtime registration — and prints
 every value beside the record that decided it, so a wrong one names where to fix
 it. Two values it cannot derive: set `CF_IDENTITY` to an identity keyfile and
-`CF_SPACE` to a space name (the console's own `CF_HARNESS_FABRIC_IDENTITY` and
-`CF_HARNESS_FABRIC_SPACE` name the same two and win over them). Under loom there is no need — loom exports
-`LOOM_INSTANCE_ID`, and the console reads the identity and space off that
-instance's `pieces.json`.
+`CF_SPACE` to a space name, or the console's own `CF_HARNESS_FABRIC_IDENTITY`
+and `CF_HARNESS_FABRIC_SPACE`, which name the same two and win over them. Under
+loom there is no need — loom exports `LOOM_INSTANCE_ID`, and the console reads
+the identity and space off that instance's `pieces.json`.
+
+Each value the console needs is settled the same way: what the command line
+named, then what the instance recorded, then what the shell exported, then an
+error naming the flag and the variable that supply it. **A loom instance's
+record outranks the environment**, so a shell that happens to export
+`MEMORY_DIR` or `CF_IDENTITY` cannot quietly send the console to another
+instance's store or sign with another key. The printout says which of the three
+decided each value.
 
 The console is a surface on the fabric rather than part of it. It needs Docker
 and a connected model provider, and when it cannot start — either of those

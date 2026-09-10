@@ -420,9 +420,9 @@ capabilities, policy, and, once a run has started, its own `artifactRoot`. A
 need a run's artifacts use the session's root when it is present and the
 top-level root as the console-wide fallback.
 
-Status is read directly, with no preceding request: page. The top-level fields
-are present even before the console has any sessions, so an unattended client
-can check the route contract before starting a model turn.
+Status is read directly, with no preceding request. The top-level fields are
+present even before the console has any sessions, so an unattended client can
+check the route contract before starting a model turn.
 
 ### Policy route
 

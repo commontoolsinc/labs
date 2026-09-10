@@ -615,6 +615,67 @@ describe("launch", () => {
       ).rejects.toThrow("daemon is not running");
     });
 
+    it("ranks an instance's record above what the shell exported", async () => {
+      // An exported variable is a fact about the shell; an instance that wrote
+      // down its own store has said something more specific. Ranking them the
+      // other way reads a store the instance does not use, and reports it as
+      // though someone chose it.
+
+      const { plan } = await prepareConsoleLaunch(
+        ["--instance", "loom"],
+        {
+          HOME: "/home/dev",
+          MEMORY_DIR: "/somewhere/else/",
+          CF_IDENTITY: "/keys/ambient.key",
+          CF_SPACE: "ambient-space",
+          CF_HARNESS_FABRIC_API_URL: "http://localhost:9999",
+        },
+        io(),
+      );
+
+      expect(plan.environment.MEMORY_DIR).toBe("/store/68239506e79d/memory/");
+      expect(plan.environment.CF_HARNESS_FABRIC_IDENTITY).toBe(
+        "/keys/instance.key",
+      );
+      expect(plan.environment.CF_HARNESS_FABRIC_SPACE).toBe("ben-loom-dev-6");
+      expect(plan.environment.CF_HARNESS_FABRIC_API_URL).toBe(
+        "http://localhost:8001",
+      );
+    });
+
+    it("returns the port the shell exported when no instance records one", async () => {
+      // The precedence loom's proxy resolves its target with, so the console
+      // binds the port the proxy is looking for.
+
+      const { plan } = await prepareConsoleLaunch(
+        ["--instance", "loom"],
+        { HOME: "/home/dev", CF_HARNESS_CONSOLE_PORT: "8140" },
+        io(),
+      );
+
+      expect(plan.environment.CF_HARNESS_CONSOLE_PORT).toBe("8140");
+    });
+
+    it("returns a recorded port over the one the shell exported", async () => {
+      const { plan } = await prepareConsoleLaunch(
+        ["--instance", "loom"],
+        { HOME: "/home/dev", CF_HARNESS_CONSOLE_PORT: "8140" },
+        io({
+          readTextFile: () =>
+            Promise.resolve(JSON.stringify({
+              defaults: {
+                identity: "/keys/instance.key",
+                local_space: "ben-loom-dev-6",
+                server_urls: { toolshed: "http://localhost:8001" },
+                harness_console_port: 8136,
+              },
+            })),
+        }),
+      );
+
+      expect(plan.environment.CF_HARNESS_CONSOLE_PORT).toBe("8136");
+    });
+
     it("reads the console's own environment names before the `cf` CLI's", async () => {
       const { plan } = await prepareConsoleLaunch(
         ["--fabric-api-url", "http://localhost:8000", "--store", "/s"],

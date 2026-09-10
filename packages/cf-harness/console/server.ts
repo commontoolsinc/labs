@@ -1384,8 +1384,8 @@ export class ConsoleServer {
    * The page holds no key and reaches no other host: it names a function from
    * `INDEX_FUNCTIONS` and this composes the request, so what the index sees is
    * the operator's own identity and nothing the page could have addressed
-   * elsewhere. The route sits under `/api/`, so the `Host`, `Origin` and token
-   * gates have already refused everything that is not this server's own page.
+   * elsewhere. The route sits under `/api/`, so the `Host` gate has already
+   * refused a request that addressed this server by another name.
    */
   async #indexCall(request: Request): Promise<Response> {
     const factory = this.#patternIndexClientFactory;

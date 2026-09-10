@@ -125,6 +125,13 @@ INSPECT_PORT=${INSPECT_PORT:-$((BASE_INSPECTOR_PORT + PORT_OFFSET))}
 # `/harness-console/*` proxy resolves the same way, so a fabric that needs
 # another one names it and both sides read it from the same place.
 CONSOLE_PORT=${CF_HARNESS_CONSOLE_PORT:-8135}
+# Read as decimal. Shell arithmetic takes a leading zero for octal, so an
+# environment that spells the port `010080` would compare as 4160 and slip past
+# the blocked-port check below. A value that is not a number at all is left as
+# it is: the launcher refuses it by name, which says more than this could.
+if [[ "$CONSOLE_PORT" =~ ^[0-9]+$ ]]; then
+    CONSOLE_PORT=$((10#$CONSOLE_PORT))
+fi
 
 require_reachable_port "shell" "$SHELL_PORT"
 require_reachable_port "toolshed" "$TOOLSHED_PORT"
