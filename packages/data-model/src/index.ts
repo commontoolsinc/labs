@@ -1,5 +1,3 @@
-// Re-export everything from `interface.ts`, which declares the types and the
-// base class.
 export {
   type CompactDebugStringOptions,
   type DebugValueOptions,
