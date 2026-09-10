@@ -73,6 +73,21 @@ describe("PiecesController.entityIdExists", () => {
     expect(asked).toEqual([computed]);
   });
 
+  it("asks about a schema document's `cid:` id as it was given", async () => {
+    // Not every id in a space is a piece's. `packages/fuse` names an entity
+    // directory after whatever id the space holds — a `cid:` schema document
+    // among them — and reads that name back into this lookup, where an
+    // `exists === false` tears the projection down. So an id in another
+    // subject's scheme has to reach the index as itself: schemed again it
+    // would name nothing, and the space would report a document it holds as
+    // absent.
+    const schemaDocument = `cid:${HASH}`;
+    const { pieces, asked } = indexHolding([schemaDocument]);
+
+    expect(await pieces.entityIdExists(schemaDocument)).toBe(true);
+    expect(asked).toEqual([schemaDocument]);
+  });
+
   it("returns `undefined` where the space provider offers no lookup", async () => {
     const runtime = {
       userIdentityDID: "did:key:home",

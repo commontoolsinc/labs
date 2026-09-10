@@ -141,6 +141,27 @@ export function hashStringForEntityAddress(address: string): string {
 }
 
 /**
+ * How a bare tagged hash is written: a tag, a colon, and the hash in unpadded
+ * base64url, which is `FabricHash`'s `<tag>:<base64urlHash>` form. The hash
+ * may be empty, because that parser takes an empty one, and this matches what
+ * it takes so that the two read one string the same way.
+ *
+ * The colon is what carries the weight. Every id that names its own subject
+ * puts a second one in — `of:fid1:…`, `computed:fid1:…`, the `cid:fid1:…` of a
+ * schema document, `did:key:…` — and a `data:` URI holds a comma its payload
+ * cannot spell, so none of them matches this and none is taken for a hash.
+ *
+ * The tag is any run of non-colon characters rather than a list of the tags
+ * that exist, and the cost of that is bounded on the side that can be lived
+ * with. A tag this failed to recognize would be looked up as written, and the
+ * index would answer about the id it does not hold; taking another subject's
+ * id for a hash would build a different id and report a document that IS there
+ * as absent. So the reading errs toward hash, and what is not shaped like one
+ * is left alone.
+ */
+const BARE_TAGGED_HASH = /^[^:]+:[A-Za-z0-9_-]*$/;
+
+/**
  * The id string naming the entity `address` addresses, accepting the same two
  * spellings of an unkinded entity {@link hashStringForEntityAddress} takes:
  * the `of:`-schemed URI, or the bare tagged hash (`fid1:<hash>`) under it.
@@ -150,20 +171,29 @@ export function hashStringForEntityAddress(address: string): string {
  * id a document is stored and looked up under, so an index keyed on the id
  * answers about the entity the caller named however they wrote it.
  *
- * An address already carrying an entity scheme is already an id and comes back
- * unchanged, a kinded one included: `computed:fid1:<hash>` names an entity of
- * its own, so scheming it again would name nothing and stripping it would name
- * that entity's `of:` sibling.
+ * The bare hash is the one form that is an address without being an id, so it
+ * is the only form this schemes ({@link BARE_TAGGED_HASH} says how one is
+ * written). Everything else is already an id and comes back untouched: an
+ * `of:` URI, a kinded `computed:` id, and an id in a scheme belonging to some
+ * other subject — a `cid:` schema document, a `data:` URI — alike.
  *
- * What follows the scheme is not parsed and no address is refused. An address
- * no `FabricHash` could spell is schemed like any other, and the id that comes
- * back names an entity nothing holds — which is what a lookup then reports,
- * rather than a caller asking about a string having to catch a throw.
+ * Passing those through is the whole of what makes this safe to put in front
+ * of a lookup. Scheming an id that already had one builds a *different* id,
+ * one nothing holds, and the lookup then answers a confident `false` about a
+ * document that is there — which is worse than any answer about a string that
+ * names nothing, because a caller acts on it. `packages/fuse` reads entity
+ * directory names into this seam, and the ids it reads are every kind the
+ * space holds rather than pieces alone.
+ *
+ * A string shaped like a hash under a tag nobody has minted is schemed like
+ * `fid1` is, and that is a decision rather than an oversight: `entityIdFrom`
+ * (`create-ref.ts`) reads such a string as a tagged hash too, so a lookup and
+ * a read name one document rather than two.
  */
 export function idStringForEntityAddress(address: string): string {
-  return hasEntityUriScheme(address)
-    ? address
-    : `${uriSchemeForEntityKind(undefined)}:${address}`;
+  return BARE_TAGGED_HASH.test(address)
+    ? `${uriSchemeForEntityKind(undefined)}:${address}`
+    : address;
 }
 
 const KNOWN_ENTITY_KINDS: ReadonlySet<string> = new Set(["computed"]);
