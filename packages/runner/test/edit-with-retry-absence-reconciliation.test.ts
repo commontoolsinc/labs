@@ -669,8 +669,19 @@ describe("editWithRetry absence reconciliation", () => {
         storageManager: smB,
       });
       const txB = runtimeB.edit();
-      runtimeB.getCell(space, "provider-level-doc", valueSchema, txB).get();
-      runtimeB.getCell(space, "provider-level-absent", valueSchema, txB).get();
+      const presentAddress = toMemorySpaceAddress(
+        runtimeB.getCell(space, "provider-level-doc", valueSchema, txB)
+          .getAsNormalizedFullLink(),
+      );
+      const absentAddress = toMemorySpaceAddress(
+        runtimeB.getCell(space, "provider-level-absent", valueSchema, txB)
+          .getAsNormalizedFullLink(),
+      );
+
+      // Recording the reads loads neither document, so reconciliation is
+      // what fetches them.
+      txB.read(presentAddress, { trackReadWithoutLoad: true });
+      txB.read(absentAddress, { trackReadWithoutLoad: true });
 
       const provider = smB.open(space);
       expect(provider.loadUnexaminedAbsences).toBeDefined();
@@ -688,6 +699,14 @@ describe("editWithRetry absence reconciliation", () => {
       )).did();
       runtimeB.getCell(otherSpace, "unrelated-write", valueSchema, txB)
         .set({ value: 1 });
+      // The provider counts the documents this replica lacks at the moment
+      // it is asked. The count below rests on `provider-level-doc` being
+      // one of them, which holds once everything the replica owes has
+      // synchronized.
+      await smB.synced();
+      expect(
+        provider.replica.getDocument(presentAddress.id, presentAddress.scope),
+      ).toBeUndefined();
       // Of the two cold reads, exactly one document turns out to exist; the
       // other's absence is examined and stays a sound claim.
       expect(await provider.loadUnexaminedAbsences!(txB.tx)).toBe(1);
