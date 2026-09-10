@@ -217,48 +217,70 @@ landed.
 
 ### Stage 1. One plan per node
 
-- [ ] Add `#nodePlan` and route `#bindNodeIO`, `#buildRawNodeInputs`, the
-      passthrough node, and `#instantiatePatternNode` through it. The pattern
-      node keeps its two binds (the value bind with the manifest, the
-      identity bind without) inside the plan; the plan exposes both.
-- [ ] Route `presyncInputs` through the plan with the event folded in, so a
-      handler's dispatch pre-sync and its start pre-sync derive from one
-      place.
-- [ ] Test: for each node kind, the plan's `reads` and `writes` equal what the
-      instantiation path subscribed the action with before the change. The
-      existing instantiation and scheduler suites are the regression net;
-      this stage changes no behavior.
+- [x] Add `#nodePlan` and route `#bindNodeIO`, `#buildRawNodeInputs`, the
+      passthrough node, and `#instantiatePatternNode` through it
+      (`0d4a8717e0`). The pattern node's binder, `#bindPatternNode`, holds
+      both binds and is what the owned-cell walk derives a child's result
+      cell from, so the walk now also takes the branch where the outputs
+      already name the child's result cell.
+- [x] `presyncInputs` builds the same inputs document the plan does, with
+      the event in its slot, and syncs it under the module schema (stage 2).
+- [x] Test: `node-plan.test.ts` pins one plan per node kind and that the
+      pattern node's plan derives the result cell its instantiation
+      registered. The full runner suite was the regression net: 1404 files
+      green.
 
 Exit: no binding call outside `#nodePlan` except `sendValueToBinding`, which
 writes rather than plans.
 
 ### Stage 2. The resume pre-sync syncs the plans
 
-- [ ] Fix `#collectLinkedCellSyncs` to combine the reader's sub-schema with
-      the link's the way `combineSchemaForLink` does. Test, red first: an
-      immutable cell holding a link that carries a wide schema, synced under
-      a narrow one, pulls the narrow selection.
-- [ ] Replace the node walk in `#syncCellsForRunningPatternInner` with one
-      `sync()` per node plan under its `readSchema`, and `presyncInputs`
-      with the same call over the inputs and the event.
-- [ ] Name each plan's outputs under the output binding's schema, the child
-      result cell included.
-- [ ] Delete `#syncArgumentLinkTargets`, `LINK_HOPS`, `ArgumentLinkRoot`,
-      `narrowChildSchema`, `isReferenceOnlySchema`, `syncAllMentionedCells`,
-      and the whole-argument root. Keep the schema-less naming of the
-      argument document. `syncStoredSetupArgument` keeps its argument sync
-      and drops its raw scan.
-- [ ] Test, red first: a pattern whose authored argument type declares a link
-      no lift body reads. Under the current walk the target is pulled; after
-      this stage it stays cold, and the piece's first runs commit without
-      conflict. `resume-argument-link-target-presync.test.ts` is the file.
-- [ ] Test: a lift body that reads through three stored documents finds the
-      third local, which the two-hop walk never delivered.
+- [x] Fix `#collectLinkedCellSyncs` to combine the reader's sub-schema with
+      the link's the way `combineSchemaForLink` does (`2d6a434cfd`, red
+      first in `data-uri-sync.test.ts`).
+- [x] Replace the node walk in `#syncCellsForRunningPatternInner` with one
+      `sync()` per node plan under its read schema (`#cellsNodePlanReads`),
+      and `presyncInputs` with the same call over the inputs and the event.
+      A served event's identity now travels through the data-URI sync, so
+      the storage manager names the actor's instances there as it does for
+      a stored document.
+- [x] Name each plan's outputs under the output binding's schema, the child
+      result cell included. Until stage 3 recurses into children, a pattern
+      node's inputs are also synced under the child's authored argument
+      schema, so a child's reads through the parent's argument stay warm
+      in the meantime.
+- [x] Delete `#syncArgumentLinkTargets`, `LINK_HOPS`, `ArgumentLinkRoot`,
+      `narrowChildSchema`, `isReferenceOnlySchema`, and the whole-argument
+      root, and `sync-argument-link-targets.test.ts` with them. The
+      argument document is named root-only: the `argument` meta link
+      carries the pattern's authored schema, so a cell built from the link
+      as it stands pulls everything the authored type reaches.
+      `syncStoredSetupArgument` keeps its root-only argument sync and drops
+      its raw scan. `syncAllMentionedCells` stays until stage 3's stand-in
+      replaces it, since it is what a fresh `runSynced` has.
+- [x] Test, red first: a pattern whose authored argument type declares a link
+      no lift body reads stays cold after the resume, and the first runs
+      commit without conflict (`resume-node-plan-presync.test.ts`).
+- [x] Test: a lift body that reads through three stored documents finds the
+      third local. This one was green before the change too: the input
+      link's direct sync already handed the server the declared chain, and
+      only the client-side walk was capped.
 - [ ] Test: the `defaultProfile` shape, a container in the piece's space
       linking to a document in another space. The first run's read kicks the
       load, the run re-runs once when it lands, and no commit conflicts.
-- [ ] Test: a handler whose argument holds a cell handle finds the handle's
-      document local at dispatch without the handle collection.
+- [x] Test: a handler whose argument holds a cell handle finds the handle's
+      document local at dispatch without the handle collection
+      (`resume-node-plan-presync.test.ts`).
+- [x] Two serving-loop races the leaner pre-sync exposed, fixed on the way
+      (`executor-space-server.test.ts`'s argument-doc demand case went from
+      one failure in four to none in twenty). A demand naming an argument or
+      derived document resolves to its owning piece root before the piece
+      starts (`ensurePieceRunningVerdict`'s `onOwningRoot`), since the start
+      releases the actions' first runs. And the arrival re-arm now re-arms a
+      node that ran with no demander reachable, the wave-level fallback:
+      such a node has no fan-out record and no known scope, so its next run
+      is the probe for the arriving principal. Both are pinned in
+      `ensure-piece-running.test.ts` and `executor-run-supply.test.ts`.
 - [ ] Measure on the topics board and the default app: `resumeCellSync`
       count and the link-target sync total from the runner timing stats,
       before and after, and the count of `piece-start-commit-recovering`
