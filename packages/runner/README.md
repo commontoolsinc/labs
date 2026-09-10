@@ -835,6 +835,20 @@ The Runtime coordinates several core services:
 All services receive the Runtime instance as a dependency, enabling proper
 isolation and testability without global state.
 
+`PatternManager.compileOrGetPattern()` snapshots its program input before
+starting compilation. Its in-memory cache and concurrent-request deduplication
+use that complete program content: source files, entry point and export,
+retained source roots, and attached data-file names. Query-result views with
+identical content share a compiled pattern across cell addresses. Changing a
+program's content selects the cache entry for that content and compiles it on a
+miss. Changes to the caller's input after a request begins do not change the
+program being compiled. Requests with and without a space use separate cache
+entries, so a source-only result cannot satisfy a durable compile. With CFC
+enforcement, concurrent requests targeting different spaces register source and
+compiled closure replication into each requested space. Those writes participate
+in the runtime's durability barrier. With CFC disabled, compilation still uses
+the requested space for fabric imports but does not replicate closures.
+
 ## Contributing
 
 See the project's main contribution guide for details on development workflow,

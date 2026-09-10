@@ -170,7 +170,6 @@ export class GraphQueryWalk {
       options.schemaTracker,
       identity,
       true,
-      undefined,
       // Record a value-link dead-end with the caller (see `onMissedDoc`
       // above for the contract and why it is not the schema tracker).
       // Same-space only: a foreign-space target can never ride this
@@ -194,14 +193,6 @@ export class GraphQueryWalk {
             : this.#keyOverrides.get(referrerKey) ?? referrerKey,
         );
       },
-      undefined,
-      undefined,
-      // A document this walk loads is delivered under the selector that
-      // reached it, with the schema document its `cfc` envelope names —
-      // which a reader of a labeled document checks its reads against —
-      // and no other metadata target: those links are data on the
-      // document, and a caller that wants a target names it.
-      false,
     );
     this.#memo = options.memo ?? createSchemaMemo();
     this.stats = options.stats ?? createGraphQueryWalkStats();
