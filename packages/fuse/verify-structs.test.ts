@@ -132,6 +132,17 @@ Deno.test({
       p.STAT_ST_MTIM_OFFSET,
     );
 
+    // The members writeStat places before st_size, which sit differently on
+    // each architecture. Nothing else in this file varies that way, so these
+    // are what a run on one architecture confirms and a run on the other
+    // cannot.
+    const stat = linux.STAT_LAYOUT;
+    check("st_nlink", values.get("stat_st_nlink"), stat.nlink);
+    check("st_nlink width", values.get("stat_st_nlink_bytes"), stat.nlinkBytes);
+    check("st_mode", values.get("stat_st_mode"), stat.mode);
+    check("st_uid", values.get("stat_st_uid"), stat.uid);
+    check("st_gid", values.get("stat_st_gid"), stat.gid);
+
     // fuse_entry_param
     check(
       "ENTRY_PARAM_SIZE",
