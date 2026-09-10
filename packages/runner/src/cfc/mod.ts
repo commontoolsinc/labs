@@ -254,6 +254,10 @@ export type {
   CfcPrepareInstrumentation,
   StoredCfcEnvelope,
 } from "./prepare.ts";
+export {
+  reportCfcDenial,
+  resetCfcDenialAnnouncements,
+} from "./denial-report.ts";
 export { cfcMetadataPresent, readStoredCfcMetadata } from "./metadata.ts";
 export { assertSerializableReferenceScope } from "./reference-scope.ts";
 export { cfcSchemaMergeIssue } from "./schema-merge.ts";

@@ -28,10 +28,13 @@ import {
 import { parseManifest, serializeManifest } from "./manifest.ts";
 import type { Suite } from "../test-topology/suite.ts";
 import {
+  costSeconds,
   daysBetween,
   emptyState,
   flakeRate,
   type IdentityState,
+  sealDay,
+  value,
 } from "./score.ts";
 import {
   COST_WINDOW_DAYS,
@@ -813,17 +816,29 @@ describe("what buildManifest() does with the states it is given", () => {
     expect(manifest.entries[0]!.repeats).toBe(FLAKE_MIN_EXECUTIONS);
   });
 
-  it("holds a share that is not zero above the precision it records", () => {
-    // One disagreement among enough runs that the share rounds to
-    // nothing. Zero is what says a test has never been seen to disagree,
-    // so the execution count would read this as a test that never has.
+  it("records a share as measured, however small it is", () => {
+    // One disagreement among a hundred thousand runs. Zero is what says
+    // a test has never been seen to disagree, and the execution count
+    // steps at it, so a share written to a few places would read this as
+    // a test that never has and run it once.
     const state = emptyState();
     state.runsByDay["2026-08-20"] = 100_000;
     state.failuresByDay["2026-08-20"] = 1;
     state.flakesByDay["2026-08-20"] = 1;
     const entry = built(new Map([[KEY, state]])).entries[0]!;
-    expect(entry.flakeRate).toBeGreaterThan(0);
+    expect(entry.flakeRate).toBe(1 / 100_000);
     expect(entry.repeats).toBe(FLAKE_MIN_EXECUTIONS);
+  });
+
+  it("records a cost and a score as measured", () => {
+    // Both are compared against thresholds, and a lane's budget is a sum
+    // of costs, so what is written is what was worked out.
+    const state = emptyState();
+    state.runsByDay["2026-08-20"] = 3;
+    sealDay(state, "2026-08-20", [37, 41, 43]);
+    const entry = built(new Map([[KEY, state]])).entries[0]!;
+    expect(entry.cost).toBe(costSeconds(state, "2026-08-20"));
+    expect(entry.score).toBe(value(entry.inputs, "2026-08-20"));
   });
 
   it("carries the counts the share was taken from", () => {
