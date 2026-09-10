@@ -28,6 +28,7 @@ BG_UPDATER=false
 # daemon's toolshed recovery through here at whatever labs commit it vendors,
 # so a refusal is an instance whose toolshed never comes back.
 PASSTHROUGH_ARGS=()
+CF_HARNESS=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --clear-cache)
@@ -44,6 +45,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --watch)
             WATCH=true
+            shift
+            ;;
+        --cf-harness)
+            CF_HARNESS=true
             shift
             ;;
         --bg-updater)
@@ -126,8 +131,11 @@ echo "Stopping local dev servers..."
 # The forwarded flags reach the stop as well as the start, so `--cf-harness`
 # cycles the console with the pair rather than leaving the old one holding its
 # port against the new one.
-./scripts/stop-local-dev.sh --shell-port "$SHELL_PORT" \
-    --toolshed-port "$TOOLSHED_PORT" "${PASSTHROUGH_ARGS[@]}"
+STOP_ARGS=(--shell-port "$SHELL_PORT" --toolshed-port "$TOOLSHED_PORT")
+if [[ "$CF_HARNESS" == "true" ]]; then
+    STOP_ARGS+=(--cf-harness)
+fi
+./scripts/stop-local-dev.sh "${STOP_ARGS[@]}" "${PASSTHROUGH_ARGS[@]}"
 
 CACHE_DIR="packages/toolshed/cache"
 
@@ -160,6 +168,9 @@ if [[ "$WATCH" == "true" ]]; then
 fi
 if [[ "$BG_UPDATER" == "true" ]]; then
     START_ARGS="$START_ARGS --bg-updater"
+fi
+if [[ "$CF_HARNESS" == "true" ]]; then
+    START_ARGS="$START_ARGS --cf-harness"
 fi
 if [[ "$INSPECT" == "true" ]]; then
     if [[ "$INSPECT_BRK" == "true" ]]; then
