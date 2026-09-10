@@ -75,7 +75,7 @@ describe("read-stats", () => {
         });
       }
 
-      it("counts repeated array length descriptor reads", async () => {
+      it("counts repeated array length reads directly and through descriptors", async () => {
         const write = runtime.edit();
         const cell = runtime.getCell<{ n: number }[]>(
           space,
@@ -96,6 +96,8 @@ describe("read-stats", () => {
           );
         const finish = startReadStats(tx);
         try {
+          expect(view.length).toBe(1);
+          expect(view.length).toBe(1);
           expect(Object.getOwnPropertyDescriptor(view, "length")?.value).toBe(
             1,
           );
@@ -105,7 +107,7 @@ describe("read-stats", () => {
         } finally {
           const reads = finish(0);
           tx.abort();
-          expect(reads.proxyAccesses).toBe(2);
+          expect(reads.proxyAccesses).toBe(4);
         }
       });
 
@@ -136,6 +138,37 @@ describe("read-stats", () => {
         } finally {
           expect(finish(0).proxyAccesses).toBe(6);
           tx.abort();
+        }
+      });
+
+      it("counts repeated property descriptor reads", async () => {
+        const write = runtime.edit();
+        const cell = runtime.getCell<{ n: number }[]>(
+          space,
+          "rows",
+          schema,
+          write,
+        );
+        cell.set([{ n: 7 }]);
+        await write.commit();
+        const tx = runtime.edit();
+        tx.markLazyMaterialize();
+        const view = schema
+          ? cell.withTx(tx).get()
+          : createQueryResultProxy<{ n: number }[]>(
+            runtime,
+            tx,
+            cell.getAsNormalizedFullLink(),
+          );
+        const row = view[0];
+        const finish = startReadStats(tx);
+        try {
+          expect(Object.getOwnPropertyDescriptor(row, "n")?.value).toBe(7);
+          expect(Object.getOwnPropertyDescriptor(row, "n")?.value).toBe(7);
+        } finally {
+          const reads = finish(0);
+          tx.abort();
+          expect(reads.proxyAccesses).toBe(2);
         }
       });
     });
@@ -343,6 +376,91 @@ describe("read-stats", () => {
       const reads = finish(0);
       tx.abort();
       expect(reads.linkResolutions).toBe(1);
+    }
+  });
+
+  it("counts link traversal when eagerly materializing a linked value", async () => {
+    const write = runtime.edit();
+    const target = runtime.getCell<number>(space, "target", undefined, write);
+    target.set(7);
+    const holder = runtime.getCell<{ n: number }>(
+      space,
+      "holder",
+      undefined,
+      write,
+    );
+    holder.key("n").set(target);
+    await write.commit();
+    const tx = runtime.edit();
+    const finish = startReadStats(tx);
+    try {
+      expect(
+        holder.withTx(tx).asSchema<{ n: number }>({
+          type: "object",
+          properties: { n: { type: "number" } },
+        }).get(),
+      ).toEqual({ n: 7 });
+    } finally {
+      const reads = finish(0);
+      tx.abort();
+      expect(reads.linkResolutions).toBe(1);
+    }
+  });
+
+  it("counts the stored link followed by lazy cell handle materialization", async () => {
+    const write = runtime.edit();
+    const target = runtime.getCell<number>(space, "target", undefined, write);
+    target.set(7);
+    const holder = runtime.getCell<{ n: number }>(
+      space,
+      "holder",
+      undefined,
+      write,
+    );
+    holder.key("n").set(target);
+    await write.commit();
+    const tx = runtime.edit();
+    tx.markLazyMaterialize();
+    const finish = startReadStats(tx);
+    try {
+      const view = holder.withTx(tx).asSchema<{ n: Cell<number> }>({
+        type: "object",
+        properties: { n: { type: "number", asCell: ["cell"] } },
+      }).get();
+      expect(view.n.getAsNormalizedFullLink().id).toBe(
+        target.getAsNormalizedFullLink().id,
+      );
+    } finally {
+      const reads = finish(0);
+      tx.abort();
+      expect(reads.linkResolutions).toBe(2);
+    }
+  });
+
+  it("rejects duplicate accounting without resetting an active measurement", async () => {
+    const write = runtime.edit();
+    const cell = runtime.getCell<{ n: number }>(
+      space,
+      "value",
+      undefined,
+      write,
+    );
+    cell.set({ n: 7 });
+    await write.commit();
+    const tx = runtime.edit();
+    const view = cell.withTx(tx).get();
+    const finish = startReadStats(tx);
+    try {
+      expect(view.n).toBe(7);
+      expect(() => startReadStats(tx)).toThrow(
+        "Read accounting is already active for this transaction",
+      );
+      expect(view.n).toBe(7);
+    } finally {
+      const reads = finish(0);
+      tx.abort();
+      expect(reads.proxyAccesses).toBe(2);
+      expect(readStatsActive).toBe(false);
     }
   });
 
