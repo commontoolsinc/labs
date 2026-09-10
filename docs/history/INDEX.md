@@ -144,6 +144,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Investigations, journals, and working notes
 
+- [Pattern read accounting: first-batch baseline](development/performance/2026-09-pattern-read-accounting.md) — 2026-09-10: transaction-scoped read counters, generic reduction update costs, headless lunch-poll attribution, and instrumentation overhead measurements.
+
 - [issue-6964-investigation-2026-09-09.md](packages/cli/issue-6964-investigation-2026-09-09.md) — source-preflight store-write investigation on current main: new refused and compatible candidates persist artifacts without starting or changing the piece, fresh-runtime repeats add nothing, and CLI help plus clone-rehearsal guidance still need correction; includes an isolated CLI-library probe.
 - [Issue #6964: a refused check can publish module update authority](packages/cli/issue-6964-authority-follow-up-2026-09-09.md) — Follow-up proving persisted and registered predecessor delegation from a refused check using matching authored filenames (2026-09-09).
 - [issue-6965-investigation-2026-09-08.md](packages/cli/issue-6965-investigation-2026-09-08.md) — forced links to undeclared inputs reproduce silent writes and inconsistent reads; the array refusal is isolated to fresh-replica preflight, while actual source update and update-before-bind controls succeed on a minimal compiled-pattern fixture.

@@ -4,6 +4,7 @@ import {
 } from "@commonfabric/data-model";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { readStatsActive, recordProxyAccess } from "./read-stats.ts";
 import { isStreamValue } from "./builder/types.ts";
 import { type BackToCellInternals, toCell } from "./back-to-cell.ts";
 import { resolveLinkTracingDereferences } from "./link-resolution.ts";
@@ -484,6 +485,7 @@ function createViewProxy<T>(
         // with no `then`; every other property still refuses.
         if (prop === "then" && pinned && !isReadable(viewTx)) return undefined;
         if (Array.isArray(value) && prop === "length") {
+          if (readStatsActive) recordProxyAccess(viewTx);
           const current = readTx().readValueOrThrow(link) as typeof value;
           return Array.isArray(current) ? current.length : 0;
         }
@@ -512,6 +514,7 @@ function createViewProxy<T>(
                       path: [...link.path, "length"],
                     }) as number;
                     if (index < length) {
+                      if (readStatsActive) recordProxyAccess(viewTx);
                       const result = {
                         value: createViewProxy(
                           runtime,
@@ -579,6 +582,7 @@ function createViewProxy<T>(
                   if (!(i in current)) {
                     continue;
                   }
+                  if (readStatsActive) recordProxyAccess(viewTx);
                   copy[i] = createViewProxy(
                     runtime,
                     childViewTx(),
@@ -626,6 +630,7 @@ function createViewProxy<T>(
           return Reflect.get(value, prop);
         }
 
+        if (readStatsActive) recordProxyAccess(viewTx);
         return createViewProxy(
           runtime,
           childViewTx(),
@@ -690,6 +695,7 @@ function createViewProxy<T>(
     getOwnPropertyDescriptor: (target, prop) =>
       atEpoch(() => {
         if (Array.isArray(target) && prop === "length") {
+          if (readStatsActive) recordProxyAccess(viewTx);
           // Read the array fully (not SHAPE_READ) so the length descriptor tracks
           // element add/remove, matching the `length` get trap above. [review: ubik2]
           const current = readTx().readValueOrThrow(link);
@@ -734,6 +740,7 @@ function createViewProxy<T>(
           (isObjectOrArray(current) || Array.isArray(current)) &&
           Object.hasOwn(current, prop)
         ) {
+          if (readStatsActive) recordProxyAccess(viewTx);
           return {
             configurable: true,
             enumerable: true,

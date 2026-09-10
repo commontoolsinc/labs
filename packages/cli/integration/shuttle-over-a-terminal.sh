@@ -258,6 +258,10 @@ set label '"pointed at"'
 set settings/note '"written once and never again"'
 link /slugs/first/label /slugs/second/label#argument
 edit
+cd /pieces
+ls
+cd %1
+pwd
 LINES
 EDITOR="$EDITOR_SCRIPT" python3 "$DRIVER" "$SCRIPT" "$TRANSCRIPT" -- \
   $CF sh $ARGS >/dev/null
@@ -442,7 +446,7 @@ lacks "names no facet" "$GET_HELP" "--help is not read as a path"
 # step 2 took its stored one — over a connection this session never had, so a
 # write that reached only the running piece and never committed fails there. It
 # reads each cell once, at the end, so which write a reading is evidence for is
-# a question per cell: step 26 names that write beside each of its checks, and
+# a question per cell: step 27 names that write beside each of its checks, and
 # the writes it cannot speak for rest on the shell's own read on the line after
 # each.
 AFTER() { $CF cell get --quiet --cell "$1" "$2" $ARGS 2>/dev/null; }
@@ -454,7 +458,7 @@ check '"a written place"' "$(said 23 "get label")" \
   "the shell serves the value it just wrote"
 # `label` is written five times below, so a reading of it at the end says the
 # last write landed and nothing about the four before it. This one goes to a
-# path nothing else in the session touches, which is what lets step 26 speak
+# path nothing else in the session touches, which is what lets step 27 speak
 # about a particular write rather than about whichever write reached a cell
 # last.
 check "Wrote \`settings/note\` on \`$FIRST\`." \
@@ -529,7 +533,7 @@ step "22. call runs the callable, and what it did is there afterwards"
 # the call settled rather than that it was accepted — a call the fabric took
 # and never ran would say the second and not the first. What the handler did
 # is a separate reading, and this is the only one that takes it: step 23 empties
-# `items` and refills it, so the array step 26 reads ends at `["jam"]` whether
+# `items` and refills it, so the array step 27 reads ends at `["jam"]` whether
 # or not this call's `milk` ever committed.
 CALLED=$(said 31 "call . addItem '{\"text\":\"milk\"}'")
 contains '"status": "settled"' "$CALLED" "the call settled"
@@ -590,8 +594,8 @@ check '"garble me"' "$(said 44 "get label")" \
 # there is nothing typed to lose. The editor never runs: had it run, this
 # fixture would have saved `"edited in the editor"` over the piece and the
 # line would have come back as a receipt or as the seam's refusal, neither of
-# which is this sentence. It is typed last, after everything that moves, which
-# is what leaves shuttle standing on the piece for it.
+# which is this sentence. Every line before it that moves leaves shuttle
+# standing on the piece, which is what makes its absent operand name one.
 check 'A write onto a whole piece is refused. `link` is what writes a reference.' \
   "$(said 50 "edit")" "edit turns down a whole piece in the sentence set gives it"
 
@@ -610,7 +614,35 @@ contains "\`/slugs/second/label#argument\` selects a piece's arguments cell" \
   "$(said 49 "link /slugs/first/label /slugs/second/label#argument")" \
   "the target endpoint does not take the argument-cell suffix"
 
-step "26. What the fabric holds, read from outside the session that wrote it"
+step "26. The pieces facet numbers rows cd takes, and shows what each piece is called"
+# The composition no unit case reaches, because each half of it is stubbed out
+# where the other is under test: a listing mints a row, `%n` expands to what
+# that row printed, and `cd` moves onto the piece the row named. The spelling
+# is the piece's own id, which carries no `of:` scheme — so what is asserted
+# here is that the facet and the mover read one spelling between them.
+check "shuttle /pieces/ @space> " "$(prompt 51 "cd /pieces")" \
+  "cd into the piece facet moves the prompt onto it"
+LISTED=$(said 52 "ls")
+contains "$FIRST" "$LISTED" "the facet lists the first deployed piece"
+contains "$SECOND" "$LISTED" "the facet lists the second deployed piece"
+# The fixture names itself, so a facet that showed no name would show none
+# here either. What the row is called is beside the handle rather than in
+# place of it, the handle being what the next line hands back.
+contains "<Shuttle place>" "$LISTED" "a listed piece shows the name it carries"
+# The row `%1` named, read off the listing rather than assumed: whichever
+# piece the registry lists first is the one the next line has to land on, and
+# reading it here is what makes the check about the two agreeing.
+ROW=$(printf '%s' "$LISTED" | sed -n '1s/^ *%1 \([^ ]*\).*/\1/p')
+if [ -z "$ROW" ]; then
+  bad "the listing's first row printed no operand for the next line to reach"
+else
+  check "" "$(said 53 "cd %1")" "cd %1 is not refused on the row ls printed"
+  check "shuttle $ROW @space> " "$(prompt 53 "cd %1")" \
+    "cd %1 lands on the piece the first row named"
+  contains "$ROW" "$(said 54 "pwd")" "pwd names the piece the row named"
+fi
+
+step "27. What the fabric holds, read from outside the session that wrote it"
 # The half no transcript can make: every reading is taken over a connection
 # this session never had, after the shell has gone, so a write that reached
 # only the running piece and never committed fails here and nowhere above.

@@ -79,6 +79,7 @@ export {
   type EntityId,
   entityIdFrom,
   getEntityId,
+  idStringForEntityAddress,
 } from "./create-ref.ts";
 export type { CellResult as QueryResult } from "./query-result-proxy.ts";
 export type {
@@ -314,6 +315,7 @@ export {
 } from "./cfc.ts";
 export type { Mutable } from "@commonfabric/utils/types";
 export {
+  type ActionReadStats,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   type RuntimeTelemetryMarker,
