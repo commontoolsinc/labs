@@ -595,8 +595,9 @@ transaction shape, and a transaction outside the blind-write family —
 including its verifier reads — keeps naming every layer, unless it
 carries the durable-read mark below; `speculation-overlay.test.ts`
 pins the export, the scoping, the verify-durable consistency, the
-content-addressed exemption, and the durable-read mark on a direct
-transaction, a piece start, and a list result-container recovery seed.
+content-addressed exemption, and the durable-read mark on a direct transaction
+and a piece start. `list-result-container-seed.test.ts` pins the same mark on a
+list result-container recovery seed.
 
 ### The durable-read mark and the bookkeeping that needs it
 
