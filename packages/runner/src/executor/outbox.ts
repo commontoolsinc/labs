@@ -45,6 +45,7 @@ import type { PostCommitSideEffect } from "../cfc/types.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { WaveRunContext } from "./wave.ts";
 import type { ServingLoopStats } from "./stats.ts";
+import { RUNNER_ACCEPTANCE_EFFECT_KIND } from "./runner-acceptance.ts";
 
 const logger = getLogger("space-outbox", { enabled: true, level: "warn" });
 
@@ -84,12 +85,11 @@ export type OutboxBudgetPolicy = {
   now?: () => number;
 };
 
-/** Local (non-egress) effect kinds exempt from the budget gate — an
- * implementation choice FLAGGED in the Phase-6 PR: the spec names the
- * budget's targets by example ("outstanding LLM calls, egress rate"),
- * and sqlite-query is the one shipped effect kind with no network
- * egress. */
-const LOCAL_EFFECT_KINDS = new Set(["sqlite-query"]);
+/** Local database work and runner acceptance callbacks consume no egress. */
+const LOCAL_EFFECT_KINDS = new Set([
+  "sqlite-query",
+  RUNNER_ACCEPTANCE_EFFECT_KIND,
+]);
 
 export class SpaceOutbox {
   readonly #stats: ServingLoopStats;
@@ -338,12 +338,13 @@ export class SpaceOutbox {
   /**
    * Admit one wave's sealed effect batches — called by the wave cycle
    * AFTER the wave commit step returned (post-commit; §3). Deduped per
-   * effect id against in-flight work (§4). The effects fire regardless
-   * of their contribution's per-doc disposition: a withdrawn
-   * contribution's action re-runs and re-enqueues (deduped here), and
-   * every completion write is hash-guarded against CURRENT inputs, so
-   * a superseded request's writeback is inert — at-least-once, the
-   * ruled posture (§4, §6 step 3). Batches of an ABANDONED wave are
+   * effect id against in-flight work (§4). Effects are invoked regardless
+   * of their contribution's per-doc disposition; each effect checks any
+   * required contribution acceptance before doing work. A withdrawn
+   * contribution's action re-runs and re-enqueues (deduped here). Each
+   * completion checks current request state, so a superseded request's
+   * writeback is inert — at-least-once, the ruled posture (§4, §6 step 3).
+   * Batches of an ABANDONED wave are
    * never admitted (the space parks and its runtime dies — the
    * crash-equivalent path, covered by memo re-miss).
    */
@@ -362,8 +363,11 @@ export class SpaceOutbox {
           // result cells" was false — the cells are per-node).
           continue;
         }
-        this.#stats.outbox.queued += 1;
-        this.#stats.memo.misses += 1;
+        const countsAsRequest = effect.kind !== RUNNER_ACCEPTANCE_EFFECT_KIND;
+        if (countsAsRequest) {
+          this.#stats.outbox.queued += 1;
+          this.#stats.memo.misses += 1;
+        }
         if (batch.context !== undefined) {
           this.#carriage.set(key, batch.context);
         }
@@ -385,10 +389,10 @@ export class SpaceOutbox {
             this.#retireBarriers.delete(key);
             this.#inflight.delete(key);
             this.#carriage.delete(key);
-            this.#stats.memo.inflight = this.#inflight.size;
+            if (countsAsRequest) this.#stats.memo.inflight -= 1;
           });
         this.#inflight.set(key, retirement);
-        this.#stats.memo.inflight = this.#inflight.size;
+        if (countsAsRequest) this.#stats.memo.inflight += 1;
       }
     }
   }
@@ -417,6 +421,7 @@ export class SpaceOutbox {
     effect: PostCommitSideEffect,
     tx: IExtendedStorageTransaction,
   ): Promise<void> {
+    const countsAsRequest = effect.kind !== RUNNER_ACCEPTANCE_EFFECT_KIND;
     // Capture the builtin's tracked work during the SYNCHRONOUS prefix
     // of the flush only: fetch/llm callbacks start their network work
     // and register it via trackAsyncWork before returning; sqlite's
@@ -429,7 +434,7 @@ export class SpaceOutbox {
       flushResult = effect.flush(tx) as Promise<void> | void;
     } catch (error) {
       this.#capturing = undefined;
-      this.#stats.outbox.failed += 1;
+      if (countsAsRequest) this.#stats.outbox.failed += 1;
       logger.warn("effect-flush-failed", () => [
         `effect ${key} flush threw`,
         error,
@@ -446,16 +451,16 @@ export class SpaceOutbox {
         // failures commit error-shaped RESULTS instead and never reject
         // (§4's failure rule), so a rejection here is the runtime path
         // breaking, not the request failing.
-        this.#stats.outbox.failed += 1;
+        if (countsAsRequest) this.#stats.outbox.failed += 1;
         logger.warn("effect-work-failed", () => [
           `effect ${key} async work rejected`,
           (rejected as PromiseRejectedResult).reason,
         ]);
         return;
       }
-      this.#stats.outbox.completed += 1;
+      if (countsAsRequest) this.#stats.outbox.completed += 1;
     } catch (error) {
-      this.#stats.outbox.failed += 1;
+      if (countsAsRequest) this.#stats.outbox.failed += 1;
       logger.warn("effect-flush-failed", () => [
         `effect ${key} flush rejected`,
         error,

@@ -191,16 +191,32 @@ describe("piece input paths", () => {
     }, { title: "Topic" });
     const input = await piece.input.getCell();
     const provider = storage.open(pieces.getSpace());
-    const originalReconciliation = provider.loadUnexaminedAbsences;
+    const originalAbsences = provider.unexaminedAbsences;
+    const originalPresentCount = provider.presentCount;
+    const originalPendingLoadGeneration = storage.pendingLoadGeneration.bind(
+      storage,
+    );
+    const originalLoadsSettled = storage.loadsSettled.bind(storage);
     const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<number>();
+    const release = Promise.withResolvers<void>();
+    // Hold the edit's first attempt in its absence-reconciliation wait on a
+    // fabricated in-flight load, then have it find the document present so
+    // the attempt re-runs against the metadata replaced meanwhile.
     let first = true;
-    provider.loadUnexaminedAbsences = () => {
-      if (!first) return 0;
+    provider.unexaminedAbsences = () => [{
+      space: pieces.getSpace(),
+      id: "of:forced-reconciliation",
+      scope: "space",
+    }];
+    storage.pendingLoadGeneration = () => 1;
+    storage.loadsSettled = () => {
+      if (!first) return Promise.resolve();
       first = false;
       entered.resolve();
       return release.promise;
     };
+    let rounds = 0;
+    provider.presentCount = () => (++rounds === 1 ? 1 : 0);
     let calls = 0;
     const update = piece.input.edit(() => {
       calls++;
@@ -226,14 +242,17 @@ describe("piece input paths", () => {
         );
       });
       expect(replaced.error).toBeUndefined();
-      release.resolve(1);
+      release.resolve();
       await refusal;
       expect(calls).toBe(1);
       expect(input.getRaw()).toEqual({ title: "Topic" });
       expect(await piece.input.get()).toEqual({});
     } finally {
-      release.resolve(1);
-      provider.loadUnexaminedAbsences = originalReconciliation;
+      release.resolve();
+      provider.unexaminedAbsences = originalAbsences;
+      provider.presentCount = originalPresentCount;
+      storage.pendingLoadGeneration = originalPendingLoadGeneration;
+      storage.loadsSettled = originalLoadsSettled;
       await refusal;
     }
   });

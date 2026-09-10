@@ -32,6 +32,10 @@ import type {
   MemorySpace,
 } from "../src/storage/interface.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
+import {
+  abandonRunnerAcceptanceEffects,
+  RUNNER_ACCEPTANCE_EFFECT_KIND,
+} from "../src/executor/runner-acceptance.ts";
 import { SpaceOutbox } from "../src/executor/outbox.ts";
 import { emptyServingLoopStats } from "../src/executor/stats.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
@@ -157,6 +161,49 @@ describe("Phase 6 outbox budgets (serving-loop.md §5)", () => {
     expect(stats.outbox.budgetDeferrals).toBe(0);
     for (const entry of held) entry.release();
     await outbox.settle();
+  });
+
+  it("publishes distinct local runner callbacks while network dispatch is blocked", async () => {
+    const { outbox, stats } = newBudgetOutbox({ maxOutstandingEffects: 0 });
+    const started: string[] = [];
+    const held = ["first", "second"].map((name) =>
+      heldEffect(name, RUNNER_ACCEPTANCE_EFFECT_KIND, started)
+    );
+    outbox.admitSealedEffects([{
+      tx: {} as IExtendedStorageTransaction,
+      effects: held.map((entry) => entry.effect),
+      context: undefined,
+    }]);
+    expect(started).toEqual(["first", "second"]);
+    expect(outbox.outstandingCount).toBe(0);
+    expect(stats.outbox.budgetDeferrals).toBe(0);
+    expect(stats.outbox.queued).toBe(0);
+    expect(stats.memo.misses).toBe(0);
+    expect(stats.memo.inflight).toBe(0);
+    for (const entry of held) entry.release();
+    await outbox.settle();
+    expect(stats.outbox.completed).toBe(0);
+    expect(stats.outbox.failed).toBe(0);
+    expect(stats.memo.inflight).toBe(0);
+  });
+
+  it("abandons local runner callbacks without abandoning network effects", () => {
+    const abandoned: string[] = [];
+    abandonRunnerAcceptanceEffects([
+      {
+        id: "local",
+        kind: RUNNER_ACCEPTANCE_EFFECT_KIND,
+        flush: () => {},
+        abandon: () => abandoned.push("local"),
+      },
+      {
+        id: "network",
+        kind: "fetchTest-start",
+        flush: () => {},
+        abandon: () => abandoned.push("network"),
+      },
+    ], "The serving wave was withdrawn");
+    expect(abandoned).toEqual(["local"]);
   });
 
   it("paces network dispatches by the egress token bucket", async () => {

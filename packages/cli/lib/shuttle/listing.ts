@@ -109,6 +109,17 @@ export interface ListingRow {
    */
   readonly operand?: string;
 
+  /**
+   * What the row calls itself, where the read found it a name of its own, and
+   * absent where it found none.
+   *
+   * It is what the fabric holds rather than anything to type: a piece carries
+   * a name and no address is made of it, so it is written beside the operand
+   * rather than in place of one. What reaches the row is the operand, whether
+   * a line prints it or a `%n` walks it.
+   */
+  readonly ownName?: string;
+
   /** What the read said is wrong with what the name points at. */
   readonly error?: string;
 }
@@ -224,12 +235,13 @@ export async function listPlace(
  * one is printed quoted and a name never opens with it. The name column
  * therefore opens with `<` exactly where the row has no name.
  *
- * Everything else on a line — the row with no operand, a callable's
- * annotation, a row's error, and the bound — is written as a marker. Those
- * brackets delimit for a reader and not for a parser: a payload may hold an
- * angle bracket of its own and nothing escapes it. Nothing parses a listed
- * line, and a form that could be parsed is a second output form rather than a
- * rule for this one (`docs/plans/shuttle/futures.md`).
+ * Everything else on a line — the row with no operand, the name a row calls
+ * itself by, a callable's annotation, a row's error, and the bound — is
+ * written as a marker. Those brackets delimit for a reader and not for a
+ * parser: a payload may hold an angle bracket of its own and nothing escapes
+ * it. Nothing parses a listed line, and a form that could be parsed is a
+ * second output form rather than a rule for this one
+ * (`docs/plans/shuttle/futures.md`).
  *
  * The bound comes back beside the rows rather than among them, because it is
  * not one of them: a page cuts rows and always shows the bound, and `--limit`
@@ -293,6 +305,11 @@ export function handleFor(number: number): string {
  * The two facets read different things and are written out one arm each rather
  * than chosen from a table, so that a facet added to {@link FACETS} fails to
  * compile here instead of silently taking the other one's read.
+ *
+ * A piece stands as its id and carries the name it holds beside it, where
+ * `listPieces` read one. The id is what the row is called in the facet and
+ * what `cd` takes back to it; the name is what the piece calls itself, and
+ * costs nothing to show, that read having already fetched it.
  */
 async function listFacet(
   config: SpaceConfig,
@@ -308,7 +325,9 @@ async function listFacet(
         loadPieces,
       });
       return {
-        rows: slugs.map((row) => rowFor(place, row.slug, "slug", row.error)),
+        rows: slugs.map((row) =>
+          rowFor(place, row.slug, "slug", { error: row.error })
+        ),
         bound: SLUG_INDEX_BOUND,
       };
     }
@@ -317,7 +336,12 @@ async function listFacet(
         loadPieces,
       });
       return {
-        rows: pieces.map((row) => rowFor(place, row.id, "piece", row.error)),
+        rows: pieces.map((row) =>
+          rowFor(place, row.id, "piece", {
+            ownName: row.name,
+            error: row.error,
+          })
+        ),
       };
     }
   }
@@ -397,20 +421,27 @@ function kindOf(value: unknown): RowKind {
 
 /**
  * Helper for {@link listPlace}, which is the row `name` stands as at `place`,
- * being a `kind` and carrying `error` where the read reported one against it.
+ * being a `kind` and carrying whatever else the read `found` against it: the
+ * name the row calls itself by, and what went wrong where something did.
+ *
+ * The two arrive in one argument because they are one thing to a caller — the
+ * part of a row a read supplies rather than the place — and because two bare
+ * strings at the end of a call are two a caller can hand over the wrong way
+ * round with nothing to say so.
  */
 function rowFor(
   place: Place,
   name: string,
   kind: RowKind,
-  error?: string,
+  found: { readonly ownName?: string; readonly error?: string } = {},
 ): ListingRow {
   const operand = operandForChild(place, name);
   return {
     name,
     kind,
     ...(operand === undefined ? {} : { operand }),
-    ...(error === undefined ? {} : { error }),
+    ...(found.ownName === undefined ? {} : { ownName: found.ownName }),
+    ...(found.error === undefined ? {} : { error: found.error }),
   };
 }
 
@@ -439,6 +470,14 @@ const ANNOTATED = {
 /**
  * Helper for {@link listingLines}, which is the line `row` prints as, without
  * the number {@link numbered} puts in front of it.
+ *
+ * A row's own name is written as a marker, which is what keeps it off the
+ * column a reader types back: a name the fabric holds is not an address, and
+ * one printed where the operand goes would offer a spelling no verb takes. It
+ * goes through {@link oneLine} for the reason an error's text does — it is a
+ * value a read served rather than a name this module made — so a name holding
+ * a break stays one row, and one holding a character a terminal acts on prints
+ * as the glyph naming it.
  */
 function lineFor(row: ListingRow): string {
   const annotation: string | undefined = ANNOTATED[row.kind];
@@ -446,6 +485,7 @@ function lineFor(row: ListingRow): string {
     row.operand === undefined
       ? marker(noOperandFor(row.name))
       : quoteToken(row.operand),
+    ...(row.ownName === undefined ? [] : [marker(oneLine(row.ownName))]),
     ...(annotation === undefined ? [] : [marker(annotation)]),
     ...(row.error === undefined
       ? []

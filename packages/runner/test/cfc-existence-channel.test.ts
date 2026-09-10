@@ -1041,7 +1041,10 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
       expect((await tx.commit()).ok).toBeDefined();
     };
     await overwrite({ copied: false });
-    const first = JSON.stringify(entriesOf(outId));
+    const firstEntries = entriesOf(outId);
+    // The frozen existence entry is there to re-derive.
+    expect(firstEntries.map((e) => e.observes)).toEqual(["shape"]);
+    const first = JSON.stringify(firstEntries);
     await overwrite({ copied: 3 });
     expect(JSON.stringify(entriesOf(outId))).toEqual(first);
   });

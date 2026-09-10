@@ -17,6 +17,10 @@ Add a line for each new document to the index below.
 
 ## Writes, storage, and sync
 
+- [`collection-aggregates.md`](collection-aggregates.md) — named incremental
+  aggregates, their numeric contracts, public type surface, and update costs
+- [`read-accounting.md`](read-accounting.md) — opt-in reactive action read
+  counters, execution boundaries, and per-step pattern-test reports
 - [`collaborative-fields.md`](collaborative-fields.md) — operation-based fields,
   CodeMirror's opt-in editor path, retained cursors and reset behavior, and
   offline inspection
@@ -110,6 +114,9 @@ Add a line for each new document to the index below.
 
 - [`logger-internals.md`](logger-internals.md) — the TypeScript side of the
   structured logging system: creating a logger, severity, timing, and flags
+- [`cfc-denial-reporting.md`](cfc-denial-reporting.md) — how each Contextual
+  Flow Control gate says what it turned away, what may be said at warning level
+  and what reaches only debug, and how often a gate reports
 - [`llm-testing.md`](llm-testing.md) — testing patterns and server routes that
   call a language model, covering the test-environment guard, the mocks, and
   the conversation fixtures

@@ -474,6 +474,19 @@ nothing has been recorded twice with no unit.
 A run folding into an empty aggregate has nothing to compare against, and
 says neither.
 
+## What the run on the default branch does with a flaky test
+
+A test whose flake share is above `FLAKE_EXCLUSION_RATE` is not selected
+for a change. Where it may be run without its neighbours, the run on the
+default branch runs it as many times as its share asks for and does not
+fail for it, so it goes on being measured while it is out of changes, and
+a green run of the default branch can carry a failure of one of these
+tests and still deploy. `explain <identity>` says of any test whether the
+newest manifest withholds it and how many runs it is given. The lanes are
+what carry this, so it describes what lands with them rather than what runs
+today, and the reasoning behind each part is in [the
+plan](../plans/pull-request-test-selection.md#an-excluded-test-still-runs-on-main).
+
 ## What the wall shows
 
 Two tiles read the newest manifest. The flake tile reports how many tests
@@ -533,7 +546,7 @@ A commit whose subject names a number that is not a pull request gets
 nothing. An issue takes comments the same way a pull request does, so
 the number is looked up before anything is written.
 
-The comment carries up to six notes, and it carries a note only when the
+The comment carries up to seven notes, and it carries a note only when the
 run found something the pull request's own run could not have found for
 itself.
 
@@ -590,6 +603,15 @@ itself.
   every test in the missing part look new — which passed and failed at
   this one commit, across the repeats a lane runs, across shards and
   across attempts.
+- **A test too flaky for a change that failed every one of its runs at
+  this commit and passed every one at the parent.** Those failures do not
+  fail the run, so the lane's job summary is the only other place they
+  appear, and nobody reads the summary of a run that passed. It says the
+  test is one the store has seen disagreeing with itself, that the run
+  stayed green, and that one bad runner produces the same record, since
+  every run of a test at a commit shares a lane. The
+  extra runs are what make the observation possible, so this note is
+  silent until they land.
 - **A rename that discarded history**, with the number of catches it
   would bring back and the line to append to
   `tasks/test-identity-aliases.jsonl`. Four things have to hold: the

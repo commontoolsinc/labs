@@ -68,6 +68,28 @@ export function unwrapExpression(expr: ts.Expression): ts.Expression {
 }
 
 /**
+ * The expression with directly nested parentheses removed and every other
+ * transparent wrapper kept.
+ *
+ * The deliberately narrow companion to {@link unwrapExpression} for a caller
+ * that rebuilds emitted code around the expression rather than classifying
+ * it. Parentheses never change the type the checker reports, so removing them
+ * removes only noise in the printed output. Every other wrapper can change it
+ * — `as` and `<T>x` assert a type, `satisfies` shapes what a literal infers
+ * as, `!` drops the nullable arms — and the schema stages read operand types
+ * at the argument positions such a caller builds, so a wrapper stripped there
+ * is a schema changed: a ternary branch reading `state.note!` keeps a
+ * non-nullable operand schema only while the assertion stays in the tree.
+ */
+export function unwrapParentheses(expr: ts.Expression): ts.Expression {
+  let current = expr;
+  while (ts.isParenthesizedExpression(current)) {
+    current = current.expression;
+  }
+  return current;
+}
+
+/**
  * The outermost expression that still denotes the same value as `expr`: `expr`
  * itself when nothing wraps it, otherwise the last transparent wrapper stacked
  * around it.

@@ -812,9 +812,8 @@ short-link format:
 ```
 
 This is not the form used by current piece metadata fields such as `pattern`,
-`argument`, `internal`, and `result`; those fields use sigil links, and current
-metadata traversal follows `cfc`, `result`, `pattern`, `argument`, and
-`internal`.
+`argument`, `internal`, and `result`; those fields use sigil links, and
+traversal follows `cfc` alone (5.3.2 Metadata / Provenance Resolution).
 
 ### 5.10.2 Link Resolution
 
@@ -826,9 +825,10 @@ Given a sigil link, the traverser:
 4. Applies `path` on the target and continues traversal with narrowed schema
    context (see 5.3.4 Schema Narrowing).
 
-Current metadata traversal handles the top-level metadata fields described in
-5.3.2. Source short-links are a separate compatibility shape and should not be
-used as the example format for piece metadata ownership links.
+The top-level metadata fields described in 5.3.2 are delivered as data on
+the document that carries them, and only `cfc` is followed. Source short-links
+are a separate compatibility shape and should not be used as the example format
+for piece metadata ownership links.
 
 ### 5.10.3 Entity ID References
 

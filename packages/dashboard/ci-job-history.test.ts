@@ -3648,31 +3648,43 @@ Deno.test("selected-run metadata keeps only the most recent Gantt selection", as
   }
 });
 
-Deno.test("CI Gantt retains a bounded set of completed progress records", async () => {
-  const directory = await Deno.makeTempDir({
-    prefix: "ci-gantt-progress-limit-test-",
+const GANTT_PROGRESS_RUN_BASE = 40_000;
+
+// Starts one Gantt collection more than the progress-record cap holds. Each
+// selects a run of its own and each fails at its jobs request, so every record
+// reaches a terminal phase. `hold` names the runs whose metadata request waits
+// at the gate `release` opens, and `started` resolves once every collection
+// has reached its metadata request.
+async function overfillGanttProgressRecords(
+  prefix: string,
+  hold: (runId: number) => boolean,
+  body: (collection: {
+    collector: RateLimitedCiJobHistoryCollector;
+    ids: string[];
+    results: Promise<GanttSelection>[];
+    release: () => void;
+    started: Promise<void>;
+  }) => Promise<void>,
+): Promise<void> {
+  const directory = await Deno.makeTempDir({ prefix });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
   });
-  let releaseMetadata!: () => void;
-  const metadataGate = new Promise<void>((resolve) => {
-    releaseMetadata = resolve;
-  });
-  let metadataStarted = 0;
-  let markAllMetadataStarted!: () => void;
-  const allMetadataStarted = new Promise<void>((resolve) => {
-    markAllMetadataStarted = resolve;
+  let reached = 0;
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
   });
   const collector = new RateLimitedCiJobHistoryCollector(
     new CiJobHistoryStore(`${directory}/history.json`),
     async <T>(path: string): Promise<T> => {
       const metadata = path.match(/\/actions\/runs\/(\d+)\/attempts\/1$/);
       if (metadata) {
-        const id = Number(metadata[1]);
-        metadataStarted++;
-        if (metadataStarted === PROGRESS_RECORD_MAX + 1) {
-          markAllMetadataStarted();
-        }
-        await metadataGate;
-        return workflowRun(id, NOW, {
+        const runId = Number(metadata[1]);
+        if (++reached === PROGRESS_RECORD_MAX + 1) markStarted();
+        if (hold(runId)) await gate;
+        return workflowRun(runId, NOW, {
           head_sha: HEAD_SHA,
           path: `.github/workflows/${CI_WORKFLOW}`,
         }) as T;
@@ -3696,37 +3708,70 @@ Deno.test("CI Gantt retains a bounded set of completed progress records", async 
           limit: 1,
           mainOnly: true,
           headSha: HEAD_SHA,
-          selectedRuns: [{ runId: 40_000 + index, runAttempt: 1 }],
+          selectedRuns: [{
+            runId: GANTT_PROGRESS_RUN_BASE + index,
+            runAttempt: 1,
+          }],
         },
         NOW,
       );
       ids.push(refresh.progress.id);
       results.push(refresh.result);
     }
-    await allMetadataStarted;
-    assertEquals(collector.progress(ids[0])?.phase, "discovering");
-    assertEquals(collector.progress(ids.at(-1)!)?.phase, "discovering");
-    releaseMetadata();
-    const outcomes = await Promise.allSettled(results);
-    assert(outcomes.every((outcome) => outcome.status === "rejected"));
-    // One record over the cap is dropped, and only a record that has reached a
-    // terminal phase can be the one dropped. The newest is always kept.
-    //
-    // Which one is dropped is not fixed. Trimming takes the first terminal
-    // record in insertion order, so it depends on the order these collections
-    // finish, and they finish in the order their file reads and GitHub
-    // responses complete rather than the order they started.
-    const retained = ids.filter((id) => collector.progress(id) !== null);
-    assertEquals(retained.length, PROGRESS_RECORD_MAX);
-    assert(retained.every((id) => collector.progress(id)?.phase === "error"));
-    assertEquals(collector.progress(ids.at(-1)!)?.phase, "error");
+    await body({ collector, ids, results, release, started });
   } finally {
-    releaseMetadata();
+    release();
     await Promise.allSettled(results);
     console.error = originalError;
     await Deno.remove(directory, { recursive: true });
   }
-});
+}
+
+Deno.test("CI Gantt retains a bounded set of completed progress records", () =>
+  overfillGanttProgressRecords(
+    "ci-gantt-progress-limit-test-",
+    () => true,
+    async ({ collector, ids, results, release, started }) => {
+      await started;
+      assertEquals(collector.progress(ids[0])?.phase, "discovering");
+      assertEquals(collector.progress(ids.at(-1)!)?.phase, "discovering");
+      release();
+      const outcomes = await Promise.allSettled(results);
+      assert(outcomes.every((outcome) => outcome.status === "rejected"));
+      // One record over the cap is dropped, and only a record that has reached
+      // a terminal phase can be the one dropped. The newest is always kept.
+      //
+      // Which one is dropped is not fixed. Trimming takes the first terminal
+      // record in insertion order, so it depends on the order these
+      // collections finish, and they finish in the order their file reads and
+      // GitHub responses complete rather than the order they started.
+      const retained = ids.filter((id) => collector.progress(id) !== null);
+      assertEquals(retained.length, PROGRESS_RECORD_MAX);
+      assert(retained.every((id) => collector.progress(id)?.phase === "error"));
+      assertEquals(collector.progress(ids.at(-1)!)?.phase, "error");
+    },
+  ));
+
+Deno.test("CI Gantt trimming spares the progress record handed out last", () =>
+  overfillGanttProgressRecords(
+    "ci-gantt-progress-newest-test-",
+    // Holding every collection but the newest makes the newest the first to
+    // fail, and so the only record trimming has to choose from when an older
+    // collection fails after it.
+    (runId) => runId !== GANTT_PROGRESS_RUN_BASE + PROGRESS_RECORD_MAX,
+    async ({ collector, ids, results, release }) => {
+      const newest = ids.at(-1)!;
+      await assertRejects(() => results.at(-1)!, Error, "jobs unavailable");
+      assertEquals(collector.progress(newest)?.phase, "error");
+      release();
+      await Promise.allSettled(results);
+      // The newest record is exempt, so the set comes down to the cap by
+      // dropping one of the collections that failed after it.
+      assertEquals(collector.progress(newest)?.phase, "error");
+      const retained = ids.filter((id) => collector.progress(id) !== null);
+      assertEquals(retained.length, PROGRESS_RECORD_MAX);
+    },
+  ));
 
 Deno.test("a selected-run Gantt repairs cached responses with no drawable jobs", async () => {
   const directory = await Deno.makeTempDir({

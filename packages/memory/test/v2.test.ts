@@ -138,6 +138,7 @@ describe("memory v2 flags", () => {
 
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: false,
+      stableExpressionResultIds: true,
       commitPreconditions: false,
       applyOp: true,
       operationCodecs: ["codemirror-changeset@1"],
@@ -160,6 +161,7 @@ describe("memory v2 flags", () => {
 
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: true,
+      stableExpressionResultIds: true,
       commitPreconditions: true,
       applyOp: true,
       operationCodecs: ["codemirror-changeset@1"],
@@ -184,6 +186,7 @@ describe("memory v2 flags", () => {
     assert(compatibleMemoryProtocolFlags(
       {
         modernCellRep: true,
+        stableExpressionResultIds: true,
         commitPreconditions: true,
         applyOp: true,
         syncSchemaTableV2: true,
@@ -198,6 +201,7 @@ describe("memory v2 flags", () => {
       },
       {
         modernCellRep: true,
+        stableExpressionResultIds: true,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -221,6 +225,7 @@ describe("parseMemoryProtocolFlags", () => {
   it("accepts the modernCellRep key", () => {
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: true }), {
       modernCellRep: true,
+      stableExpressionResultIds: false,
       commitPreconditions: false,
       applyOp: false,
       syncSchemaTableV2: false,
@@ -235,6 +240,7 @@ describe("parseMemoryProtocolFlags", () => {
     });
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       modernCellRep: false,
+      stableExpressionResultIds: false,
       commitPreconditions: false,
       applyOp: false,
       syncSchemaTableV2: false,
@@ -256,6 +262,7 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
+        stableExpressionResultIds: false,
         commitPreconditions: true,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -296,6 +303,7 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
+        stableExpressionResultIds: false,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: true,
@@ -316,6 +324,7 @@ describe("parseMemoryProtocolFlags", () => {
       parseMemoryProtocolFlags({ messageCompressionV1: true }),
       {
         modernCellRep: false,
+        stableExpressionResultIds: false,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -338,6 +347,7 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
+        stableExpressionResultIds: false,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -368,6 +378,7 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
+        stableExpressionResultIds: false,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -391,6 +402,7 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
+        stableExpressionResultIds: false,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -411,6 +423,7 @@ describe("parseMemoryProtocolFlags", () => {
       parseMemoryProtocolFlags({ entityIdListing: true }),
       {
         modernCellRep: false,
+        stableExpressionResultIds: false,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -435,6 +448,7 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
+        stableExpressionResultIds: false,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -484,6 +498,7 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(
       parseMemoryProtocolFlags({
         modernCellRep: true,
+        stableExpressionResultIds: false,
         commitPreconditions: "true",
       }),
       null,
