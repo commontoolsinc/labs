@@ -877,6 +877,57 @@ export interface IDerivable<T> {
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
   ): Reactive<S[]>;
+  /** Counts array members, or members whose predicate is truthy. Empty input returns zero. */
+  count(
+    this: IsThisObject,
+    predicate?: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
+    ) => FactoryInput<boolean>,
+  ): Reactive<number>;
+  /** Counts a per-element predicate pattern's truthy results. */
+  countWithPattern(
+    this: IsThisObject,
+    op: PatternFactory<T extends Array<infer U> ? U : T, boolean>,
+    params: Record<string, any>,
+  ): Reactive<number>;
+  /** Sums numeric members exactly and rounds once to binary64. Empty input returns positive zero. */
+  sum(this: IsThisObject): Reactive<number>;
+  /** Selects the smallest number. Empty input returns positive infinity; NaN propagates. */
+  min(this: IsThisObject): Reactive<number>;
+  /** Selects the largest number. Empty input returns negative infinity; NaN propagates. */
+  max(this: IsThisObject): Reactive<number>;
+  /** Selects an element by numeric score, breaking ties by stable identity. Empty input returns undefined. */
+  minBy(
+    this: IsThisObject,
+    score: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
+    ) => FactoryInput<number>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined>;
+  /** Selects an element using a per-element score pattern. */
+  minByWithPattern(
+    this: IsThisObject,
+    op: PatternFactory<T extends Array<infer U> ? U : T, number>,
+    params: Record<string, any>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined>;
+  /** Selects an element by numeric score, breaking ties by stable identity. Empty input returns undefined. */
+  maxBy(
+    this: IsThisObject,
+    score: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
+    ) => FactoryInput<number>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined>;
+  /** Selects an element using a per-element score pattern. */
+  maxByWithPattern(
+    this: IsThisObject,
+    op: PatternFactory<T extends Array<infer U> ? U : T, number>,
+    params: Record<string, any>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined>;
   reduce<S>(
     this: IsThisObject,
     fn: (

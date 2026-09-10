@@ -2,8 +2,8 @@
 
 A pattern author can write a derivation that reads a thousand documents. The
 single-runtime pattern test runner exposes that work through per-action read
-counts, while the collection algebra and opt-in test budgets remain the next
-steps. This plan gives expensive collection operations an incremental form and
+counts. Named aggregates maintain linked single-row updates incrementally;
+keyed collection operations and opt-in test budgets remain the next steps. This plan gives expensive collection operations an incremental form and
 makes their cost visible before they ship.
 
 It is deliberately not a proposal to hand execution planning to the compiler.
@@ -19,12 +19,14 @@ Mark a parent checkbox complete only after all of its child checks pass.
 
 ## Implementation priority
 
-The first implementation batch delivers A1 and A2 and establishes generic
-`reduce` baselines at 10, 100, and 1,000 elements. The next priority is B3's
-contracts and named aggregates, so their update costs can be compared with
-those baselines before building `groupBy` and `keyBy`. Each comparison must
-include initialization, one-element updates, scheduler runs, and total read
-work across the graph; benchmarks must include aggregate maintenance and commits.
+A1 and A2 provide read accounting and generic `reduce` baselines. B3 provides
+named aggregates on explicit Cell/Writable array inputs, with contracts in
+[collection aggregates](../features/collection-aggregates.md). The
+[aggregate comparison](../history/development/performance/2026-09-incremental-aggregates.md)
+covers initialization, single-row updates, scheduler runs, and total read work
+at 10, 100, and 1,000 elements. Timings include maintenance and commits and
+record the startup cost and machine-load limitations alongside update savings.
+B2's `groupBy` and `keyBy` are the next collection-algebra priority.
 
 A0's specified headless command is measured, but it does not reproduce the
 reported 74-vote deployed workload. Keep the deployed figures unconfirmed until
@@ -273,16 +275,16 @@ reconciliation; follow their keying rules rather than inventing new ones.
       `filter((a) => !current.some((b) => b === a))` is a set difference written
       as a quadratic scan, and appears several times. Keep this stage as the next collection-algebra priority after the initial
       aggregate comparison.
-- [ ] **B3. Named aggregates, not a general incremental `reduce`.** A survey of
+- [x] **B3. Named aggregates, not a general incremental `reduce`.** A survey of
       the authored patterns finds 33 `reduce` call sites, of which the large
       majority are a sum, and the rest an average (a sum over a count), an
       argmax, or a group-into-counts. Ship those directly rather than a general
       incremental fold:
 
-      - [ ] `count`, with an optional predicate. The color tallies in
+      - [x] `count`, with an optional predicate. The color tallies in
             `tallyOptions` are counts written as a filter followed by a length.
-      - [ ] `sum`.
-      - [ ] `min` and `max`, with `minBy` and `maxBy` returning the element.
+      - [x] `sum`.
+      - [x] `min` and `max`, with `minBy` and `maxBy` returning the element.
 
       Each is a commutative monoid over its idealized domain, so each is
       maintained as a bag of partial aggregates keyed by the element identity
@@ -298,15 +300,15 @@ reconciliation; follow their keying rules rather than inventing new ones.
       would then see different totals. Settle a determinism contract before
       implementation:
 
-      - [ ] **Combine order.** Fix an order that depends only on the current
+      - [x] **Combine order.** Fix an order that depends only on the current
             collection, not on how it was reached. Element identity already
             gives a stable sort key. Alternatively adopt a summation that is
             order-independent to the precision reported, and say which.
-      - [ ] **Ties in `minBy` and `maxBy`.** Two elements comparing equal need a
+      - [x] **Ties in `minBy` and `maxBy`.** Two elements comparing equal need a
             rule that is not "whichever the tree reached first".
-      - [ ] **Empty input.** What each aggregate yields over no elements, and
+      - [x] **Empty input.** What each aggregate yields over no elements, and
             whether `minBy` over nothing is undefined or an error.
-      - [ ] **Non-finite values.** NaN and the infinities, in both the summing
+      - [x] **Non-finite values.** NaN and the infinities, in both the summing
             and the comparing aggregates.
 
       The test that proves it is a history test, not a value test: build the same
