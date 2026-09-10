@@ -3110,6 +3110,10 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
           op: "set",
           id: "of:doc:1",
           value: { value: { version: 1 } },
+        }, {
+          op: "set",
+          id: "of:doc:2",
+          value: { value: { version: 1 } },
         }],
       },
     }));
@@ -3130,6 +3134,10 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
           op: "set",
           id: "of:doc:1",
           value: { value: { version: 3 } },
+        }, {
+          op: "set",
+          id: "of:doc:2",
+          value: { value: { version: 3 } },
         }],
       },
     }));
@@ -3144,11 +3152,18 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
       commit: {
         localSeq: 3,
         reads: {
-          confirmed: [{
-            id: "of:doc:1",
-            path: [],
-            seq: 1,
-          }],
+          confirmed: [
+            {
+              id: "of:doc:1",
+              path: [],
+              seq: 1,
+            },
+            {
+              id: "of:doc:2",
+              path: [],
+              seq: 1,
+            },
+          ],
           pending: [],
         },
         operations: [{
@@ -3163,9 +3178,14 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
     assertEquals(rejected.requestId, "tx-3");
     assertEquals(rejected.error, {
       name: "ConflictError",
-      message: "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
+      message:
+        "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2; " +
+        "stale confirmed read: of:doc:2 at seq 1 conflicted with seq 2",
       retryAfterSeq: 2,
-      conflict: { of: "of:doc:1", scope: "space" },
+      conflicts: [
+        { of: "of:doc:1", scope: "space", seq: 1, conflictSeq: 2 },
+        { of: "of:doc:2", scope: "space", seq: 1, conflictSeq: 2 },
+      ],
     });
     assertEquals(messages.length, 0);
 
@@ -3402,7 +3422,7 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
       name: "ConflictError",
       message: "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
       retryAfterSeq: 2,
-      conflict: { of: "of:doc:1", scope: "space" },
+      conflicts: [{ of: "of:doc:1", scope: "space", seq: 1, conflictSeq: 2 }],
     });
     assertEquals(messages.length, 0);
 

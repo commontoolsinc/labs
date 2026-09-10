@@ -150,6 +150,7 @@ import {
 } from "./storage/reactivity-log.ts";
 import { isRetryableCommitRejection } from "./storage/rejection.ts";
 import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
+import { entityNameKey } from "./scheduler/keys.ts";
 import { toURI } from "./uri-utils.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
@@ -2827,10 +2828,10 @@ export class Runtime {
    * this replica never READ does not arrive with it — and a conflicted blind
    * WRITE means exactly that (the compile-cache write-back rewrites derived
    * docs a cold replica has never seen; a piece start's basis names computed
-   * docs the serving side was materializing). So the named doc is pulled
-   * in the conflict's scope too, and the retry's write carries its true
-   * version instead of re-asserting seq 0. Errors without scope use the
-   * default space instance.
+   * docs the serving side was materializing). So every document named by the
+   * rejection is pulled concurrently in its scope, and the retry's writes
+   * carry their true versions instead of re-asserting seq 0. Entries without
+   * scope use the default space instance.
    *
    * Every step is best-effort by design: this resolves rather than throws,
    * because the retry's commit — not this readiness — is what decides.
@@ -2869,25 +2870,53 @@ export class Runtime {
       }
     }
     if (teardownSignal?.aborted) return;
-    const conflict = (error as {
+    const rejection = error as {
       conflict?: { space?: MemorySpace; of?: string; scope?: CellScope };
-    })?.conflict;
-    if (
-      conflict?.space !== undefined &&
-      typeof conflict.of === "string" &&
-      conflict.of !== "of:unknown"
-    ) {
+      conflicts?: Array<{
+        space?: MemorySpace;
+        of?: string;
+        scope?: CellScope;
+      }>;
+    };
+    const conflicts = Array.isArray(rejection?.conflicts) &&
+        rejection.conflicts.length > 0
+      ? rejection.conflicts
+      : rejection?.conflict === undefined
+      ? []
+      : [rejection.conflict];
+    const pulls: Promise<unknown>[] = [];
+    const seen = new Set<string>();
+    for (const conflict of conflicts) {
+      if (
+        conflict.space === undefined ||
+        typeof conflict.of !== "string" ||
+        conflict.of === "of:unknown"
+      ) {
+        continue;
+      }
+      const key = entityNameKey({
+        space: conflict.space,
+        id: conflict.of as URI,
+        scope: conflict.scope,
+      });
+      if (seen.has(key)) continue;
+      seen.add(key);
       try {
-        await waitUnlessTeardown(
-          this.storageManager.open(conflict.space).sync(
-            conflict.of as unknown as URI,
-            { path: [], schema: false },
-            conflict.scope,
-          ),
+        pulls.push(
+          Promise.resolve(
+            this.storageManager.open(conflict.space).sync(
+              conflict.of as unknown as URI,
+              { path: [], schema: false },
+              conflict.scope,
+            ),
+          ).catch(() => undefined),
         );
       } catch {
-        // Pull failed — the retry's commit decides.
+        // A synchronous pull failure leaves the retry's commit to decide.
       }
+    }
+    if (pulls.length > 0) {
+      await waitUnlessTeardown(Promise.all(pulls));
     }
   }
 

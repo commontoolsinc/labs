@@ -53,7 +53,6 @@ import {
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
-  type V2Error,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
@@ -8256,13 +8255,38 @@ const toRejectedError = (
   ) {
     const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
     const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
-    // Structured wire errors preserve scope alongside identity. In-process
-    // engine errors expose the same fields directly; older peers name only
-    // the entity in the diagnostic and retain default-scope recovery.
-    const details = (error as { conflict?: V2Error["conflict"] })?.conflict;
-    const staleReadOf = details?.of ?? (error as { of?: unknown })?.of ??
-      message.match(/stale confirmed read: (\S+) at seq/)?.[1];
-    const scope = details?.scope ?? (error as { scope?: unknown })?.scope;
+    // Scoped descriptors cross current protocol boundaries structurally.
+    // Message-only errors retain default-scope recovery for every named read.
+    const toConflicts = (details: unknown): IConflictError["conflict"][] => {
+      const { of, scope } = (details ?? {}) as {
+        of?: unknown;
+        scope?: unknown;
+      };
+      return typeof of === "string"
+        ? [{
+          space,
+          the: DOCUMENT_MIME,
+          of: of as Entity,
+          ...(isCellScope(scope) ? { scope } : {}),
+        }]
+        : [];
+    };
+    const structuredConflicts = (error as { conflicts?: unknown })?.conflicts;
+    let conflicts = Array.isArray(structuredConflicts)
+      ? structuredConflicts.flatMap(toConflicts)
+      : [];
+    if (conflicts.length === 0) {
+      conflicts = toConflicts((error as { conflict?: unknown })?.conflict);
+    }
+    if (conflicts.length === 0) {
+      conflicts = toConflicts(error);
+    }
+    if (conflicts.length === 0) {
+      conflicts = Array.from(
+        message.matchAll(/stale confirmed read: (\S+) at seq/g),
+        (match) => toConflicts({ of: match[1] })[0],
+      );
+    }
     const firstOperation = commit.operations?.[0];
     const firstOperationId = firstOperation && "id" in firstOperation
       ? firstOperation.id
@@ -8271,17 +8295,14 @@ const toRejectedError = (
       name: "ConflictError",
       message,
       transaction: commit,
-      // Conflict descriptor: for stale-read conflicts `of` is authoritative
-      // (the memory engine names the conflicted entity structurally), so a
-      // retrier can pull exactly that doc before re-running. `the` remains a
-      // placeholder.
-      conflict: {
+      // The singular descriptor remains the first conflict for consumers of
+      // the legacy interface. `the` remains a placeholder.
+      conflict: conflicts[0] ?? {
         space,
         the: DOCUMENT_MIME,
-        of: ((typeof staleReadOf === "string" ? staleReadOf : undefined) ??
-          firstOperationId ?? "of:unknown") as Entity,
-        ...(isCellScope(scope) ? { scope } : {}),
+        of: (firstOperationId ?? "of:unknown") as Entity,
       },
+      ...(conflicts.length > 0 ? { conflicts } : {}),
     };
     // retryAfterSeq is carried for diagnostics; retry gating is by caughtUpLocalSeq
     // (readyToRetry), and downstream only uses retryAfterSeq's presence to mark

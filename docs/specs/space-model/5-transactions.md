@@ -196,7 +196,7 @@ outcome:
 
 | Class | Why a re-run can converge |
 | --- | --- |
-| `ConflictError` | Stale basis from upstream. The retry first awaits the conflict's `readyToRetry` catch-up gate, then pulls the doc in the scope the conflict names. Errors without scope retain the default space-scoped pull. |
+| `ConflictError` | Stale basis from upstream. The retry first awaits the conflict's `readyToRetry` catch-up gate, then pulls every document in the scope named by the conflict list. Repeated addresses share one pull; entries without scope retain the default space-scoped pull. |
 | `StorageTransactionInconsistent` | Stale basis on this replica — a value read during the transaction changed locally; re-reading resolves it. |
 | `ConnectionError`, `InvalidMessageError` | Liveness failure: the commit never reached a verdict, and the memory client re-establishes the link on its own (a transport close schedules `reconnect()`; a `transact` issued while disconnected queues and calls `restoreConnection()`), so a retry can land the identical write. `InvalidMessageError` is collateral — an undecodable frame makes the client reject every in-flight request, including commits it says nothing about. |
 | `StorageTransactionAborted` | The attempt was discarded before storage, and a re-run is a genuinely new attempt that costs no round-trip. Producers: the callback called `tx.abort()`; a prepared CFC transaction's inputs drifted before the verdict (`cfc-prepared-digest-mismatch`, and the `invalidateCfc` drift reasons such as `read-after-prepare`); or a CFC refusal that is not wholly a verdict (`cfc-refusal-not-a-verdict`) — prepare could not evaluate an input it needed, or a resolution failed. Those clear on a fresh attempt once the input is there. |

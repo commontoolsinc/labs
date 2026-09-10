@@ -411,8 +411,13 @@ interface ConflictError extends Error {
    * reaching this seq reflects the winning write.
    */
   retryAfterSeq: number;
-  /** Present when a confirmed read names the conflicting scoped entity. */
-  conflict?: { of: string; scope: "space" | "user" | "session" };
+  /** Every stale confirmed read, including a single-read conflict. */
+  conflicts?: Array<{
+    of: string;
+    scope: "space" | "user" | "session";
+    seq: number;
+    conflictSeq: number;
+  }>;
 }
 ```
 
@@ -423,11 +428,14 @@ hide them — and the next sync frame delivers the watched documents as ordinary
 upserts. Repair therefore arrives as a consistent cut over the
 session's watched view, with every document the frame links to delivered in the
 same cut. A dirty address outside that view does not gain a watch through dirty
-marking alone. For stale confirmed reads, the error's `conflict` address
-preserves the entity ID and scope so a retry helper can explicitly sync the
-conflicting instance. The scope resolves under the rejected session's identity.
-Older responses can omit this address; their diagnostic identifies the entity
-but does not preserve its scope.
+marking alone. Confirmed-read validation collects every stale read before
+rejecting. The error's `conflicts` array preserves each entity ID, scope, read
+sequence, and conflicting sequence, including when only one read is stale. A
+retry helper can explicitly sync all conflicting instances before retrying;
+repeated reads of one instance require only one pull. Each scope resolves under
+the rejected session's identity. Older responses can omit this array; their
+diagnostic identifies entities but does not preserve their scopes. The runner
+also exposes the first descriptor as `conflict` for existing consumers.
 
 ## 3.7 Server-Side Commit Processing
 

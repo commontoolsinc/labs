@@ -13,7 +13,7 @@ import {
 
 describe("v2-conflict-scope", () => {
   for (const scope of ["space", "user", "session"] as const) {
-    it(`returns the conflicting ${scope} instance when another scope shares its ID`, async () => {
+    it(`returns every conflicting instance including ${scope} when scopes share an ID`, async () => {
       const server = new Server({
         store: new URL("memory://conflict-scope"),
         subscriptionRefreshDelayMs: "manual",
@@ -38,6 +38,9 @@ describe("v2-conflict-scope", () => {
           })),
         });
         const otherScope = scope === "space" ? "user" : "space";
+        const thirdScope = scopes.find((candidate) =>
+          candidate !== scope && candidate !== otherScope
+        )!;
         await expect(session.transact({
           localSeq: 2,
           reads: {
@@ -51,6 +54,11 @@ describe("v2-conflict-scope", () => {
               scope,
               path: toDocumentPath(["value"]),
               seq: 0,
+            }, {
+              id: "of:shared-id",
+              scope: thirdScope,
+              path: toDocumentPath(["value"]),
+              seq: 0,
             }],
             pending: [],
           },
@@ -61,7 +69,15 @@ describe("v2-conflict-scope", () => {
           }],
         })).rejects.toMatchObject({
           name: "ConflictError",
-          conflict: { of: "of:shared-id", scope },
+          conflicts: [
+            { of: "of:shared-id", scope, seq: 0, conflictSeq: seeded.seq },
+            {
+              of: "of:shared-id",
+              scope: thirdScope,
+              seq: 0,
+              conflictSeq: seeded.seq,
+            },
+          ],
           retryAfterSeq: seeded.seq,
         });
       } finally {

@@ -4045,9 +4045,10 @@ export class Server {
           }
           if (
             error instanceof Engine.ConflictError &&
-            error.of !== undefined && error.scope !== undefined
+            error.conflicts !== undefined &&
+            error.conflicts.length > 0
           ) {
-            responseError.conflict = { of: error.of, scope: error.scope };
+            responseError.conflicts = [...error.conflicts];
           }
           span.recordException(
             error instanceof Error ? error : new Error(messageText),

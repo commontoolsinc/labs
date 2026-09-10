@@ -1155,6 +1155,13 @@ Deno.test("memory v2 client readyToRetry waits for caught-up local sequence", as
       readyToRetry?: () => Promise<void>;
     }).readyToRetry;
     assertExists(readyToRetry);
+    assertEquals(
+      (error as Error & { conflicts?: unknown }).conflicts,
+      [
+        { of: "of:doc:1", scope: "space", seq: 0, conflictSeq: 1 },
+        { of: "of:doc:2", scope: "space", seq: 0, conflictSeq: 2 },
+      ],
+    );
 
     let ready = false;
     const readyPromise = readyToRetry().then(() => {
@@ -1944,6 +1951,10 @@ class ConflictReadyTransport implements Transport {
             name: "ConflictError",
             message: "conflict",
             retryAfterSeq: 2,
+            conflicts: [
+              { of: "of:doc:1", scope: "space", seq: 0, conflictSeq: 1 },
+              { of: "of:doc:2", scope: "space", seq: 0, conflictSeq: 2 },
+            ],
           },
         });
         return Promise.resolve();

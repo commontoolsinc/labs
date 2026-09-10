@@ -1276,12 +1276,10 @@ Deno.test("memory v2 engine conflicts are scoped by declared scope", async () =>
   }
 });
 
-Deno.test("memory v2 engine: stale-read ConflictError carries the conflicted entity structurally and in the message", async () => {
-  // CT-1824 contract: a stale-read ConflictError must name the conflicted
-  // entity structurally (of/scope/seq/conflictSeq) and in the message with
-  // this exact shape. The wire response preserves the scoped address; older
-  // peers rely on the diagnostic parsed by runner storage/v2.ts's
-  // toRejectedError. Both surfaces support conflict recovery for blind writes.
+Deno.test("memory v2 engine: stale-read ConflictError carries every conflicted entity structurally and in the message", async () => {
+  // A stale-read ConflictError names every conflicted entity structurally and
+  // in the message. The message is also a compatibility surface for transports
+  // that retain only standard Error fields.
 
   const { engine, path } = await createEngine();
   const sessionId = "session:alice";
@@ -1298,6 +1296,10 @@ Deno.test("memory v2 engine: stale-read ConflictError carries the conflicted ent
           op: "set",
           id: "entity:stale-named",
           value: toEntityDocument({ v: 1 }),
+        }, {
+          op: "set",
+          id: "entity:also-stale",
+          value: toEntityDocument({ v: 1 }),
         }],
       },
     });
@@ -1311,6 +1313,10 @@ Deno.test("memory v2 engine: stale-read ConflictError carries the conflicted ent
           op: "set",
           id: "entity:stale-named",
           value: toEntityDocument({ v: 2 }),
+        }, {
+          op: "set",
+          id: "entity:also-stale",
+          value: toEntityDocument({ v: 2 }),
         }],
       },
     });
@@ -1323,11 +1329,18 @@ Deno.test("memory v2 engine: stale-read ConflictError carries the conflicted ent
           commit: {
             localSeq: 3,
             reads: {
-              confirmed: [{
-                id: "entity:stale-named",
-                path: toDocumentPath(["value"]),
-                seq: 1,
-              }],
+              confirmed: [
+                {
+                  id: "entity:stale-named",
+                  path: toDocumentPath(["value"]),
+                  seq: 1,
+                },
+                {
+                  id: "entity:also-stale",
+                  path: toDocumentPath(["value"]),
+                  seq: 1,
+                },
+              ],
               pending: [],
             },
             operations: [{
@@ -1343,14 +1356,19 @@ Deno.test("memory v2 engine: stale-read ConflictError carries the conflicted ent
     assertEquals(error.scope, "space");
     assertEquals(error.seq, 1);
     assertEquals(error.conflictSeq, 2);
-    assertMatch(
-      error.message,
-      /^stale confirmed read: \S+ at seq \d+ conflicted with seq \d+$/,
-    );
-    // The exact parse the runner client performs on the wire-crossed message.
     assertEquals(
-      error.message.match(/stale confirmed read: (\S+) at seq/)?.[1],
-      "entity:stale-named",
+      error.conflicts,
+      [
+        { of: "entity:stale-named", scope: "space", seq: 1, conflictSeq: 2 },
+        { of: "entity:also-stale", scope: "space", seq: 1, conflictSeq: 2 },
+      ],
+    );
+    assertEquals(
+      Array.from(
+        error.message.matchAll(/stale confirmed read: (\S+) at seq/g),
+        (match) => match[1],
+      ),
+      ["entity:stale-named", "entity:also-stale"],
     );
   } finally {
     close(engine);

@@ -1054,8 +1054,13 @@ interface ConflictError extends Error {
   name: "ConflictError";
   /** Server head seq at rejection time (§3.6.4). */
   retryAfterSeq: number;
-  /** Present when a confirmed read names the conflicting scoped entity. */
-  conflict?: { of: string; scope: "space" | "user" | "session" };
+  /** Every stale confirmed read, including a single-read conflict. */
+  conflicts?: Array<{
+    of: string;
+    scope: "space" | "user" | "session";
+    seq: number;
+    conflictSeq: number;
+  }>;
 }
 
 interface TransactionError extends Error {
