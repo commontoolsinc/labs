@@ -1,3 +1,4 @@
+import type { JSONSchema } from "@commonfabric/api";
 import {
   cloneIfNecessary,
   fabricFromNativeValue,
@@ -48,6 +49,7 @@ import {
   type BrowserWorkerPresetParams,
   type Cancel,
   type Cell,
+  ContextualFlowControl,
   convertCellsToLinks,
   encodeSqliteParams,
   entityIdFrom,
@@ -2159,10 +2161,20 @@ export class RuntimeProcessor {
   }
 
   /**
-   * Handles a `PieceGetRequest`. Resolves a redirect here rather than through
-   * the runner's slug resolution, which `handleSlugResolve()` uses. Do not copy
-   * the bare `parseLink()` below into a new caller: a slug cell can be written
-   * by a foreign client over the memory protocol, and `parseSlugRedirect()` in
+   * Handles a `PieceGetRequest`. The answer is an address — a cell carrying
+   * the schema it is read under — so what this loads is what deciding the
+   * address takes: the requested document, and behind a redirect the document
+   * the redirect lands in, whose metadata says whether it is a piece and what
+   * result schema a cell inside it takes. Serving a slug document, the server
+   * resolves the redirect through the links on its path, which is the floor
+   * for an address a redirect answers. Nothing here reads the target's value,
+   * so whatever that value reaches stays cold until a caller subscribes to
+   * the cell it was handed.
+   *
+   * Resolves a redirect here rather than through the runner's slug
+   * resolution, which `handleSlugResolve()` uses. Do not copy the bare
+   * `parseLink()` below into a new caller: a slug cell can be written by a
+   * foreign client over the memory protocol, and `parseSlugRedirect()` in
    * `packages/runner/src/slug-resolution.ts` exists to fold the `TypeError` a
    * sigil-shaped payload with broken internals throws into a typed refusal.
    * These are one walk with two implementations, and this is the copy to
@@ -2185,6 +2197,8 @@ export class RuntimeProcessor {
       undefined,
       request.scope,
     );
+    // Schema-less, so the sync asks for the document and nothing its value
+    // reaches.
     await requestedCell.sync();
     const redirect = parseLink(
       requestedCell.getRaw(),
@@ -2196,27 +2210,38 @@ export class RuntimeProcessor {
         space: redirect.space ?? cc.getSpace(),
         scope: redirect.scope ?? "space",
       });
-      await target.sync();
       const targetLink = target.getAsNormalizedFullLink();
-      const hasPattern = getPatternIdentityRef(target) !== undefined ||
-        target.getMetaRaw("pattern") !== undefined;
-      if (!hasPattern || targetLink.path.length > 0) {
-        const pieceCell = hasPattern && targetLink.path.length > 0
-          ? target.asSchemaFromLinks()
-          : target;
-        await pieceCell.pull();
-        return {
-          piece: createPieceRef(pieceCell),
-        };
+      // The document the redirect lands in, at its root. Whether it is a
+      // piece, and the result schema a cell inside it takes, are its
+      // metadata; a sync at the redirect's own path would instead have the
+      // server resolve every link along that path.
+      const landing = targetLink.path.length === 0
+        ? target
+        : this.#runtime.getCellFromLink({
+          id: targetLink.id,
+          space: targetLink.space,
+          scope: targetLink.scope,
+          path: [],
+        });
+      await landing.sync();
+      const hasPattern = getPatternIdentityRef(landing) !== undefined ||
+        landing.getMetaRaw("pattern") !== undefined;
+      if (!hasPattern) {
+        return { piece: createPieceRef(target) };
       }
-
-      const cell = await cc.getPieceCell(
-        target,
-        request.runIt ?? false,
-      );
-      return {
-        piece: createPieceRef(cell),
-      };
+      if (targetLink.path.length > 0) {
+        // A cell inside a piece is read under the piece's result schema at
+        // its path, as `getPieceCell()` reads a piece cell reached with one.
+        const resultSchema = landing.getMetaRaw("schema") as
+          | JSONSchema
+          | undefined;
+        const cell = resultSchema === undefined ? target : target.asSchema(
+          ContextualFlowControl.schemaAtPath(resultSchema, targetLink.path),
+        );
+        return { piece: createPieceRef(cell) };
+      }
+      const cell = await cc.getPieceCell(landing, request.runIt ?? false);
+      return { piece: createPieceRef(cell) };
     }
 
     const cell = await cc.getPieceCell(
