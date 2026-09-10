@@ -47,6 +47,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
+import { readStatsActive, recordProxyAccess } from "./read-stats.ts";
 import { toCell } from "./back-to-cell.ts";
 import { type Cell, createCell } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
@@ -768,6 +769,7 @@ function createObjectView(
   // callback: a reader walking a large value touches this per property, and a
   // callback would allocate a closure each time.
   const childOrAbsent = (key: string): unknown => {
+    if (readStatsActive) recordProxyAccess(tx);
     if (!tx.hasWrites()) return resolveChild(key);
     const previous = tx.enterReadEpoch(epoch);
     try {
@@ -885,6 +887,7 @@ function createArrayView(
   // into the instant this view describes, and skips the step entirely until the
   // transaction has written. See the note there for why it is entered by hand.
   const element = (index: number): unknown => {
+    if (readStatsActive) recordProxyAccess(tx);
     if (!tx.hasWrites()) return resolveElement(index);
     const previous = tx.enterReadEpoch(epoch);
     try {
@@ -924,7 +927,10 @@ function createArrayView(
   return new Proxy(new Array(value.length), {
     get: (_target, prop, receiver) => {
       if (prop === "then" && tx.status().status !== "ready") return undefined;
-      if (prop === "length") return value.length;
+      if (prop === "length") {
+        if (readStatsActive) recordProxyAccess(tx);
+        return value.length;
+      }
       if (typeof prop === "symbol") {
         if (prop === toCell) {
           return (): Cell<unknown> =>
@@ -961,6 +967,7 @@ function createArrayView(
     },
     getOwnPropertyDescriptor: (target, prop) => {
       if (prop === "length") {
+        if (readStatsActive) recordProxyAccess(tx);
         return Object.getOwnPropertyDescriptor(target, "length");
       }
       if (typeof prop === "symbol" || !isArrayIndexPropertyName(prop)) {

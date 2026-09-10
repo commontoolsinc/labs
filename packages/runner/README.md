@@ -16,6 +16,39 @@ persistence.
 - **Dependency Injection**: No singleton patterns - all services are injected
   through a central Runtime instance
 
+## Action read accounting
+
+`runtime.scheduler.setReadStatsEnabled(true)` enables transaction-scoped read
+accounting for subsequent scheduler action runs. It is disabled by default.
+`getActionStats(action)` exposes cumulative `reads` and `lastRunReads`;
+`scheduler.run.complete` telemetry carries the per-run counts and authored
+source location. Cumulative counts include only runs measured while enabled.
+
+Proxy accesses include lazy schema views and query result proxies, including
+elements materialized by array methods and iterators. Link resolutions count
+stored-link traversal attempts through the resolver and schema traversal; a memo
+hit performs no hop. Missing-target reads count, and a fast-path read followed
+by a general-traversal fallback counts twice: the metric measures traversal
+work, not distinct logical links. Document identity comes from the transaction's
+replica records, so spaces and scope instances stay distinct. Dependencies count
+the deep and shallow scheduling read addresses separately, compacted by the
+scheduler's ordinary rules, at the end of action execution before commit
+preparation. A fanned-out node reports each executed instance separately; this
+count is not the union subscription retained for all instances.
+
+When no collector is active, read sites check one shared boolean and perform no
+counter lookup or allocation. While any collector is active in the same isolate,
+unmeasured transactions also perform a lookup but do not accumulate counts.
+Active collectors are keyed by the underlying transaction, so overlapping
+runtimes do not attribute reads to each other. The `read-stats.bench.ts`
+benchmark measures enabled versus disabled read-hook accounting over a reduction
+of 1,000 linked rows. It excludes scheduler dependency compaction and commit
+preparation.
+
+Use access counts and run counts to test collection-size scaling after a
+single-element edit. Pair them with runtime benchmarks: these counters measure
+reactive read work, not the cost of arithmetic or maintaining an aggregate tree.
+
 ## Architecture
 
 The Runner has been refactored to eliminate singleton patterns in favor of
