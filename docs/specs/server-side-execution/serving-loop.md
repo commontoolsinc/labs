@@ -276,6 +276,15 @@ derived consequences are fully committed. Persisted in the space (one
 well-known doc, updated in the same transaction as derived commits — never
 its own commit).
 
+An event whose sidecar synchronization fails or whose replica view does not
+hold its stored `(eventId, seq)` has not entered the scheduler. A quiet scheduler
+therefore cannot establish coverage for it. The drain retains the earliest such
+sequence across cycles, clamping both input-head and quiescent-tail advancement
+below it. A fresh scan re-evaluates this floor; ending the serving tenure clears
+it. This composes with the foreign-write shadow floor and does not wait for
+sealed-write durability. [Event visibility](events.md#2-lifecycle-end-to-end)
+defines the ordered publication/response barrier before deferral.
+
 ```
 on activate(space):
   acquire lease (else park)
@@ -1293,6 +1302,15 @@ escalate.
 
 ## 7. Counters (implement with the loop, not after)
 
+`events.visibilityBarriers` counts ordered publication/response attempts for
+lagging event views. `visibilityRecoveries` counts matching identities after
+those attempts, and `visibilityDeferrals` counts scans that still stop at a
+mismatched identity. `deferredRescansArmed` and `deferredRescansFired` count
+scheduled backstops and callbacks that ran during an active tenure, across all
+transient drain outcomes. An armed timer can be unnecessary if input wakes the
+drain first; these counters do not equate each deferral with an elapsed timer
+interval or each cycle with a durable commit.
+
 Exposed via the existing `/api/health/stats` shape, replacing v1's pool
 block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
 supersededWrites, authoredSeen, effectAcks, derivedCommits,
@@ -1308,7 +1326,9 @@ demandRootLeaves, notCurrentRearms, demandPasses, demandPassMs,
 pushGrowthWakes, watchWakes, warmWakes}, settle: {series, dropped},
 settleAdvances: {count, lastDelta, series, dropped}, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent,
-drainInFlightSkips, lt1LeftoversPurged, lt1LateSealsRefused,
+drainInFlightSkips, visibilityBarriers, visibilityRecoveries,
+visibilityDeferrals, deferredRescansArmed, deferredRescansFired,
+lt1LeftoversPurged, lt1LateSealsRefused,
 orphanDeliveriesRefused, handlerNotRunDeferrals, loadParkDeferrals,
 loadParkFailures,
 deliveryDeferralsActive, deliveryFailuresActive,
@@ -1339,10 +1359,12 @@ terminalization, no per-cycle churn — and a commit touching one of
 the load's observed docs RE-ARMS it (the retry is settle-gated so it
 reads the re-arming commit's applied state); the demanded-structure
 load pass itself runs UNDER §3's flush deadline (single-flighted
-across cycles), so a slow ensure throttles nothing; `watermarkClamped` counts waves whose W
-advance was actually clamped below the input batch head by the
-Phase-2 settle input barrier — inbound foreign novelty still
-shadowed by a parked own write; the clamp is honesty, not failure,
+across cycles), so a slow ensure throttles nothing; `watermarkClamped` counts
+non-exhausted cycles whose foreign-write shadow floor is below an input batch
+head above W. An event-visibility floor can constrain the same cycle, so the
+counter does not isolate the marginal effect of the shadow floor. The shadow
+clamp covers inbound foreign novelty still hidden by a parked own write; it
+is honesty, not failure,
 and lifts by itself; `unstampedSealRefusals` counts write-carrying
 transactions refused at the seal by §3d's unstamped refusal —
 structurally ZERO when every server-side commit path declares its

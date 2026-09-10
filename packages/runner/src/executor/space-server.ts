@@ -832,6 +832,12 @@ export class SpaceServer implements TransactionSealDestination {
    * EVENT_PREQUEUE_STUCK_AFTER. */
   #preQueueDeferralStreaks = new Map<string, number>();
 
+  /**
+   * Earliest entry whose unavailable replica view stopped the last event scan.
+   * It limits watermark coverage until a fresh scan can dispatch that entry.
+   */
+  #eventVisibilityFloor: number | undefined;
+
   /** Set when a LOAD-PARK deferral — or a handler-not-run withdrawal
    * (review-6459 F1, the same §2 obligation) — fires while a drain pass
    * is running (verification-coverage.md's OW45 residue member). The
@@ -2453,9 +2459,11 @@ export class SpaceServer implements TransactionSealDestination {
    * the events.md §5 DROP and clears the park criterion). */
   #armDeferredRescan(): void {
     if (this.#deferredRescanTimer !== undefined) return;
+    this.#options.stats.events.deferredRescansArmed += 1;
     this.#deferredRescanTimer = setTimeout(() => {
       this.#deferredRescanTimer = undefined;
       if (!this.#active) return;
+      this.#options.stats.events.deferredRescansFired += 1;
       this.#eventScanOwed = true;
       this.#feedArrived?.resolve();
     }, EVENT_DEFERRAL_REARM_MS);
@@ -2966,11 +2974,13 @@ export class SpaceServer implements TransactionSealDestination {
    *   predicate) → the dropped-event notice `{status, reason}` +
    *   consequenced.
    *
-   * Returns the number of events queued (the re-arm belt keys on it).
+   * Returns the number of events queued (the re-arm belt keys on it), or
+   * undefined when the serving tenure ends during a visibility wait.
    */
-  async #drainStreamEvents(runtime: Runtime): Promise<number> {
+  async #drainStreamEvents(runtime: Runtime): Promise<number | undefined> {
     if (!this.#eventScanOwed) return 0;
     this.#eventScanOwed = false;
+    this.#eventVisibilityFloor = undefined;
     const { engine, space } = this.#options;
     const pendingDocs = Engine.selectPendingStreamEventDocs(engine);
     if (pendingDocs.length === 0) return 0;
@@ -3004,6 +3014,7 @@ export class SpaceServer implements TransactionSealDestination {
       string,
       { stored: StreamEventsDocValue["entries"] } | "sync-failed"
     >();
+    let visibilityFlushed = false;
     for (const { doc, entry } of ordered) {
       let sidecar = sidecars.get(doc.id);
       if (sidecar === undefined) {
@@ -3014,12 +3025,14 @@ export class SpaceServer implements TransactionSealDestination {
             scope: "space",
             path: [],
           }).sync();
+          if (!this.#active || this.#runtime !== runtime) return undefined;
           sidecar = {
             stored: ((Engine.read(engine, { id: doc.id })?.value ??
               {}) as StreamEventsDocValue).entries ?? [],
           };
           this.#preQueueDeferralStreaks.delete(doc.id);
         } catch (error) {
+          if (!this.#active || this.#runtime !== runtime) return undefined;
           logger.warn("event-sidecar-sync-failed", () => [
             `sidecar sync for ${doc.id} failed; its events — and every ` +
             "later-arrived event behind them — defer to the next wave",
@@ -3033,6 +3046,7 @@ export class SpaceServer implements TransactionSealDestination {
         // Deferral is a BARRIER, not a skip: everything at or behind
         // this entry's arrival position waits with it, or a later
         // arrival's consequence lands ahead of an earlier one.
+        this.#eventVisibilityFloor = entry.seq ?? 1;
         this.#notePreQueueDeferral(
           doc.id,
           () => `sidecar ${doc.id} (sync failing)`,
@@ -3040,18 +3054,13 @@ export class SpaceServer implements TransactionSealDestination {
         this.#armDeferredRescan();
         break;
       }
-      const stored = sidecar.stored ?? [];
+      let stored = sidecar.stored ?? [];
       {
-        const index = stored.findIndex((candidate) =>
+        let index = stored.findIndex((candidate) =>
           candidate?.eventId === entry.eventId &&
           candidate?.seq === entry.seq
         );
-        if (index < 0) continue;
-        const streamEntry = {
-          sidecarId: doc.id,
-          index,
-          seq: entry.seq ?? 0,
-        };
+        if (index < 0 || stored[index].consequenced === true) continue;
         // The mark every arm below writes (the handler tx's, the
         // skip/error/drop notices') is INDEX-ADDRESSED against the
         // REPLICA view: verify the view holds this entry at this index
@@ -3063,15 +3072,57 @@ export class SpaceServer implements TransactionSealDestination {
         // ghost `{consequenced: true}` at that index and left the real
         // entry unconsequenced (re-drained, re-skipped, ghost twice).
         {
-          const viewEntry = runtime.getCellFromLink<
-            { eventId?: string } | undefined
-          >({
-            space,
-            id: doc.id as never,
-            scope: "space",
-            path: ["entries", String(index)],
-          }).get();
-          if (viewEntry?.eventId !== entry.eventId) {
+          const readViewEntry = () =>
+            runtime.getCellFromLink<
+              { eventId?: string; seq?: number } | undefined
+            >({
+              space,
+              id: doc.id as never,
+              scope: "space",
+              path: ["entries", String(index)],
+            }).get();
+          const matches = (value: ReturnType<typeof readViewEntry>) =>
+            value?.eventId === entry.eventId && value?.seq === entry.seq;
+          let viewEntry = readViewEntry();
+          const provider = runtime.storageManager.open(space);
+          if (
+            !matches(viewEntry) && !visibilityFlushed &&
+            provider.pullToServerHead !== undefined
+          ) {
+            visibilityFlushed = true;
+            this.#options.stats.events.visibilityBarriers += 1;
+            try {
+              // Admission precedes loopback delivery. Publish this space's
+              // queued frames, then use their ordered response boundary to
+              // await application. Pending wave writes need not promote here.
+              await this.#options.server.flushSessions([space]);
+              if (!this.#active || this.#runtime !== runtime) return undefined;
+              await provider.pullToServerHead();
+            } catch (error) {
+              if (!this.#active || this.#runtime !== runtime) return undefined;
+              logger.warn("event-visibility-sync-failed", () => [
+                `Could not synchronize event ${entry.eventId}'s replica view`,
+                error,
+              ]);
+            }
+            if (!this.#active || this.#runtime !== runtime) return undefined;
+            // Compaction or another consequence can change the stored index
+            // during the response. Re-find the same immutable entry identity.
+            stored = ((Engine.read(engine, { id: doc.id })?.value ??
+              {}) as StreamEventsDocValue).entries ?? [];
+            sidecar.stored = stored;
+            index = stored.findIndex((candidate) =>
+              candidate?.eventId === entry.eventId &&
+              candidate?.seq === entry.seq
+            );
+            if (index < 0 || stored[index].consequenced === true) continue;
+            viewEntry = readViewEntry();
+            if (matches(viewEntry)) {
+              this.#options.stats.events.visibilityRecoveries += 1;
+            }
+          }
+          if (!matches(viewEntry)) {
+            this.#options.stats.events.visibilityDeferrals += 1;
             logger.warn("event-view-lag", () => [
               `drain deferring ${entry.eventId}: replica view holds ` +
               `${
@@ -3082,6 +3133,7 @@ export class SpaceServer implements TransactionSealDestination {
             // The same barrier as above: the deferred entry's
             // still-catching-up view must not let later arrivals run
             // ahead of it.
+            this.#eventVisibilityFloor = entry.seq ?? 1;
             this.#notePreQueueDeferral(
               entry.eventId,
               () => `event ${entry.eventId} (replica view lagging)`,
@@ -3091,6 +3143,11 @@ export class SpaceServer implements TransactionSealDestination {
           }
           this.#preQueueDeferralStreaks.delete(entry.eventId);
         }
+        const streamEntry = {
+          sidecarId: doc.id,
+          index,
+          seq: entry.seq ?? 0,
+        };
         // Only a NUMERIC-seq consequenced twin skips this entry
         // (round-2 thread T12): a seq-less consequenced entry (the
         // stage-G interim shape, legacy stores only — admission stamps
@@ -4495,6 +4552,7 @@ export class SpaceServer implements TransactionSealDestination {
     const drainStart = performance.now();
     const drainedEvents = await this.#drainStreamEvents(runtime);
     timing.time(drainStart, "executor", "wave", "drain");
+    if (drainedEvents === undefined) return;
     this.#retireAckedEffects(runtime);
 
     // Settle to quiescence under the flush deadline: idle() is the wave
@@ -4656,14 +4714,19 @@ export class SpaceServer implements TransactionSealDestination {
     // the woken wave derives over the foreign value, and W catches up.
     const shadowFloor = runtime.storageManager
       .open(this.#options.space).replica.unappliedForeignSeqFloor?.();
-    const inputVisibleHead = shadowFloor === undefined
+    const shadowVisibleHead = shadowFloor === undefined
       ? batchHead
       : Math.min(batchHead, shadowFloor - 1);
+    // A settled scheduler has not processed an entry the drain could not
+    // queue. Its later frame application alone cannot establish coverage.
+    const inputVisibleHead = this.#eventVisibilityFloor === undefined
+      ? shadowVisibleHead
+      : Math.min(shadowVisibleHead, this.#eventVisibilityFloor - 1);
     const inputAdvanceTo = exhausted
       ? this.#watermark
       : Math.max(this.#watermark, inputVisibleHead);
     if (
-      !exhausted && inputVisibleHead < batchHead &&
+      !exhausted && shadowVisibleHead < batchHead &&
       batchHead > this.#watermark
     ) {
       // Counted whenever the floor held W below an OTHERWISE-ADVANCING
@@ -4721,7 +4784,8 @@ export class SpaceServer implements TransactionSealDestination {
       !exhausted && this.#settleAdvanceOwed &&
       !haveContributions && !havePendingEffects &&
       this.#feed.length === 0 && this.#pendingWaveSeals === 0 &&
-      !this.#eventScanOwed && !this.#effectsRetirementOwed
+      !this.#eventScanOwed && this.#eventVisibilityFloor === undefined &&
+      !this.#effectsRetirementOwed
     ) {
       const base = Math.max(this.#watermark, inputAdvanceTo);
       let tail = base;
@@ -5266,6 +5330,7 @@ export class SpaceServer implements TransactionSealDestination {
     this.#feedArrived?.resolve();
     // The drain's in-flight copies die with the scheduler queue below.
     this.#drainInFlight.clear();
+    this.#eventVisibilityFloor = undefined;
     for (const timer of this.#deliveryFailureWakeTimers.values()) {
       clearTimeout(timer);
     }
