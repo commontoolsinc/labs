@@ -1064,6 +1064,15 @@ narrower paths beside it. The lift is then applied to the whole object and
 re-runs for any field of it, where it could have been applied to the one field
 the body reads.
 
+The set has one deliberately narrow reader on the way out. When the rewriter
+synthesizes an `ifElse`/`when`/`unless` call, `unwrapParentheses` tidies the
+operands placed in the call, and the probe recognizing a zero-arg inline IIFE
+callee reads through the same function: parentheses alone come off. Every
+other transparent wrapper can carry a type, and schema injection still reads
+operand types at those argument positions, so `as`, `<T>x`, `satisfies`, and
+`!` stay on the operands — a ternary branch reading `state.note!` keeps a
+non-nullable operand schema because the assertion stays in the tree.
+
 Key rewrite rules:
 
 - `a && b`: lowers to `when(condition, value)` only in pattern context
