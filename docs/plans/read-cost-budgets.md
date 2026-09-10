@@ -1,8 +1,8 @@
 # Pattern-test read budgets
 
-Status: A3 locally implemented and validated; publication and landing pending.
-The authoring surface and
-measurement boundaries are documented in the
+Status: A3 implemented and validated in
+[PR #7257](https://github.com/commontoolsinc/labs/pull/7257); CI and review
+pending. The authoring surface and measurement boundaries are documented in the
 [read-accounting contract](../features/read-accounting.md#pattern-test-budgets).
 This plan tracks acceptance in the
 [computation-cost sequence](pattern-computation-cost-implementation.md).
@@ -40,10 +40,10 @@ Assertion work belongs to its own step. Skipped steps execute no operation; any
 unrelated work observed in their interval must remain visible.
 
 Use `runtime.settled(Infinity)` at budget boundaries so a fixed round count
-cannot silently end measurement early. Do not add sleeps or polling.
-Unbudgeted tests keep their existing demand and settlement
-behavior. A budget does not itself demand a subject's UI: tests must declare a
-render step or opt into continuous UI demand for that workload.
+cannot silently end measurement early. Do not add sleeps or polling. Unbudgeted
+tests keep their existing demand and settlement behavior. A budget does not
+itself demand a subject's UI: tests must declare a render step or opt into
+continuous UI demand for that workload.
 
 Measure every participating runtime locally. The initial implementation may
 support single-runtime tests only, provided multi-user declarations fail
@@ -68,11 +68,11 @@ preserve ownership, and diagnostic idempotency rechecks stay excluded.
 
 Document cardinality remains a body diagnostic. The collector retains document
 objects independently of storage logs, while attempt completion publishes only
-proxy and hop counters.
-These counters can be checkpointed at body completion while remaining active
-through commit preparation. Do not count storage-server CPU or network traffic as local proxy
-accesses. Explicitly describe any maintenance work outside these boundaries
-before naming the resulting report a whole-step cost.
+proxy and hop counters. These counters can be checkpointed at body completion
+while remaining active through commit preparation. Do not count storage-server
+CPU or network traffic as local proxy accesses. Explicitly describe any
+maintenance work outside these boundaries before naming the resulting report a
+whole-step cost.
 
 Relevant seams to examine and cover:
 

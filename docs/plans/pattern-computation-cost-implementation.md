@@ -1,10 +1,10 @@
 # Pattern computation cost: implementation sequence
 
-Status: A1/A2 instrumentation shipped in #7246; worker control shipped in
-#7256. The controlled A0 fixture and accounting regressions are in #7241.
-A3 budget enforcement is locally implemented against the shipped counters,
-with full runner validation and targeted CLI regression coverage complete.
-Publication, CI, and Cubic review remain before landing.
+Status: A1/A2 instrumentation shipped in #7246; worker control shipped in #7256.
+The controlled A0 fixture and accounting regressions are in #7241. A3 budget
+enforcement is in [PR #7257](https://github.com/commontoolsinc/labs/pull/7257),
+with full runner validation, targeted CLI regressions, and antagonistic review
+complete. CI and Cubic review remain before landing.
 
 This tracker executes the design in
 [PR #7155](https://github.com/commontoolsinc/labs/pull/7155), reviewed at commit
@@ -88,9 +88,9 @@ replacement advice requires a shipped replacement.
       are the initial boundary; event dispatch and commit work must be added
       before claiming whole-step budget coverage.
   - [x] Define proxy access events, actual link crossings, distinct documents
-        identified by replica document object, and registered dependencies. Specify
-        repeated reads, missing values, enumeration, shallow reads, and memo
-        hits. A read activity is not interchangeable with a proxy access.
+        identified by replica document object, and registered dependencies.
+        Specify repeated reads, missing values, enumeration, shallow reads, and
+        memo hits. A read activity is not interchangeable with a proxy access.
   - [x] Define per-run ownership, cumulative totals, and per-step aggregation.
         Distinguish a union of documents across a step from a sum of per-run
         cardinalities. Define failure, restart, idempotency verification, nested
@@ -138,8 +138,8 @@ durations are used as performance evidence.
 ## 3–4. Defend and calibrate measurements: A3–A5
 
 - [ ] **A3 — Add opt-in pattern-test budgets.** The
-      [budget contract](read-cost-budgets.md) defines the surface,
-      execution coverage, and pass/fail demo.
+      [budget contract](read-cost-budgets.md) defines the surface, execution
+      coverage, and pass/fail demo.
   - [x] Define the test declaration and diagnostics for per-action-run and
         per-step-through-settle limits, with separate initialization limits.
   - [x] Include every execution in a step, including builtins, coordinators,
