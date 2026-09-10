@@ -784,13 +784,11 @@ function schemaSubsetIssue(
   if (pairIsActive(source, target, context)) return undefined;
   markPairActive(source, target, context);
   try {
-    // A semantic extension is a fact about the node as a whole, compared for
-    // exact equality, so it is judged here, once, whatever spelling the
-    // node's alternatives take. The fragments an expansion produces below
-    // carry none of these keys ({@link schemaAlternatives}): a fragment that
-    // did carry one would meet a fragment that does not — an `anyOf` node's
-    // base holds the extension while its branches hold the types — and the
-    // one-sided key would read as a change the node never made.
+    // Semantic extensions describe the whole node and are compared here
+    // before its alternatives expand. `schemaAlternatives` omits the parent
+    // node's extensions from the fragments so a branch carrying only a type
+    // is not mistaken for a node that removed an extension. Extensions
+    // declared on branch and descendant nodes remain part of their proofs.
     //
     // The `ifc` extension is compared for exact equality except for a
     // `writeAuthorizedBy` writer claim's volatile identity — its content hash
@@ -908,7 +906,7 @@ const DEFAULT_STABLE_SCHEMA_KEYS = new Set([
   // Four of the five `SEMANTIC_EXTENSION_KEYS` say how a value is delivered,
   // stored, or written, not what shape it has, so a default inserted beneath
   // one cannot falsify it. A change to the marker itself is still refused by
-  // the exact comparison in `objectSubsetIssue`. `ifc` is left out on
+  // the exact comparison in `schemaSubsetIssue`. `ifc` is left out on
   // purpose: a label is policy the write-authority comparison reasons about
   // (`comparableIfc`), and whether a materialized default satisfies a
   // labeled node's floor is that comparison's question, not this one's, so
@@ -1505,11 +1503,10 @@ function schemaMayProduceType(
 }
 
 /**
- * The alternatives a node states, each a conjunction of fragments, after the
- * caller has judged the node's own keywords ({@link NODE_LEVEL_KEYWORDS}). No
- * fragment carries those keywords — the single fragment of a node that states
- * one thing included — so the branch proofs concern value constraints alone.
- * Descendant schemas keep their defaults and extensions.
+ * Returns a conjunction of fragments for each alternative after the caller
+ * checks the node's own keywords ({@link NODE_LEVEL_KEYWORDS}). Fragments omit
+ * the parent node's default and extensions, including for a single-type node.
+ * Branch and descendant schemas retain their own defaults and extensions.
  */
 function schemaAlternatives(schema: SchemaObject): JSONSchema[][] {
   const fragment = withoutNodeLevelKeywords(schema);
@@ -1528,7 +1525,7 @@ function schemaAlternatives(schema: SchemaObject): JSONSchema[][] {
  * {@link schemaSubsetIssue} judges once at the node before it expands the
  * node's alternatives: the `default`, checked for validity or for change
  * there, and the semantic extensions, compared for exact equality there. A
- * fragment entering a branch proof carries none of them.
+ * fragment entering a branch proof omits the parent node's occurrences.
  */
 const NODE_LEVEL_KEYWORDS: ReadonlySet<string> = new Set([
   "default",
@@ -1536,9 +1533,9 @@ const NODE_LEVEL_KEYWORDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The schema without its node-level keywords; the same object when it has
- * none. Copies with {@link keep}, so a `__proto__` key read off the wire lands
- * as an own property the way it does everywhere else in this comparison.
+ * Returns the schema without its node-level keywords, or the same object when
+ * it has none. Copies with {@link keep}, so a `__proto__` key read off the wire
+ * remains an own property.
  */
 function withoutNodeLevelKeywords(schema: SchemaObject): SchemaObject {
   const keys = Object.keys(schema);
