@@ -21,10 +21,11 @@ import {
   isValidFabricValueLayer,
 } from "./validity-check.ts";
 import {
+  type FabricValueTag,
+  type PrimitiveValueTag,
   tagFromFabricValue,
   tagFromFabricValueElseNull,
   VALUE_TAGS,
-  type ValueTag,
 } from "./value-tags.ts";
 import { toCompactDebugString } from "./value-debug.ts";
 
@@ -294,7 +295,7 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
    */
   visitPrimitive(
     value: Primitive | FabricPrimitive,
-    type: ValueTag,
+    type: PrimitiveValueTag,
   ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /**
@@ -366,7 +367,7 @@ export abstract class BaseValueVisitor<
   /** @inheritDoc */
   abstract visitPrimitive(
     value: Primitive | FabricPrimitive,
-    type: ValueTag,
+    type: PrimitiveValueTag,
   ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /** @inheritDoc */
@@ -457,7 +458,7 @@ export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
   /** @inheritDoc */
   visitPrimitive(
     _value: Primitive | FabricPrimitive,
-    _type: ValueTag,
+    _type: PrimitiveValueTag,
   ): LeafVisitorResult<DomainExtra, ResultType> {
     return undefined;
   }
@@ -809,7 +810,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * type-checking style indicated by the top-level `visit*()` call on this
    * instance.
    */
-  #tagFromValueElseNull(value: DomainFor<DomainExtra>): ValueTag | null {
+  #tagFromValueElseNull(value: DomainFor<DomainExtra>): FabricValueTag | null {
     if (this.#assumeValid) {
       return tagFromFabricValueElseNull(value as FabricValue);
     } else if (this.#deepTypeCheck) {
