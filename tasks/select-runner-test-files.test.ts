@@ -1,6 +1,5 @@
 import { assertEquals } from "@std/assert";
 import { expect } from "@std/expect";
-import { toFileUrl } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 import {
   listRunnerTests,
@@ -29,7 +28,7 @@ describe("listRunnerTests", () => {
         `${directory}/event.test.ts`,
         `${directory}/alias.test.ts`,
       );
-      const files = await listRunnerTests(toFileUrl(`${directory}/`));
+      const files = await listRunnerTests(directory);
       const expected = [
         "event.test.ts",
         "executor/event.test.ts",

@@ -518,6 +518,9 @@ export type ServingLoopStats = {
      * cap or an egress-rate token. Growth under load is the budget
      * WORKING (the runaway degrades its own space), not a failure. */
     budgetDeferrals: number;
+
+    /** Completions that wrote nothing because their request was superseded. */
+    superseded: number;
   };
   lease: { held: number; lost: number };
 
@@ -636,7 +639,13 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     dropped: 0,
   },
   memo: { hits: 0, misses: 0, inflight: 0 },
-  outbox: { queued: 0, completed: 0, failed: 0, budgetDeferrals: 0 },
+  outbox: {
+    queued: 0,
+    completed: 0,
+    failed: 0,
+    budgetDeferrals: 0,
+    superseded: 0,
+  },
   lease: { held: 0, lost: 0 },
   rootEnsure: {
     runs: 0,

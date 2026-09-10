@@ -84,7 +84,7 @@ import {
 } from "../link-types.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { entityKey } from "../scheduler/keys.ts";
-import { normalizeCellScope } from "../scope.ts";
+import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
@@ -303,7 +303,7 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
 
 /**
  * Identity of one data-URI pull: the URI, the schema it was read against, the
- * path into it, and where it lives.
+ * path into it, where it lives, and the identity resolving its linked cells.
  *
  * The result is a hash rather than those parts joined together. A data URI
  * carries its whole value in its id, so the id is the one part that varies
@@ -316,6 +316,7 @@ export function dataURISyncKey(identity: {
   path: readonly string[];
   space: MemorySpace;
   scope: CellScope | undefined;
+  scopeKeyIdentity?: ScopeKeyIdentity;
 }): string {
   return hashStringOf([
     identity.id,
@@ -323,6 +324,7 @@ export function dataURISyncKey(identity: {
     [...identity.path],
     identity.space,
     normalizeCellScope(identity.scope),
+    identity.scopeKeyIdentity,
   ]);
 }
 
@@ -2227,7 +2229,14 @@ export class StorageManager implements IStorageManager {
     }
 
     if (hasDataUriScheme(id)) {
-      return this.#syncDataURICell(cell, space, id, schema, scope);
+      return this.#syncDataURICell(
+        cell,
+        space,
+        id,
+        schema,
+        scope,
+        { ...(options?.scopeKeyIdentity ?? this.scopeKeyIdentity()) },
+      );
     }
 
     const provider = this.open(space);
@@ -2356,7 +2365,12 @@ export class StorageManager implements IStorageManager {
    * resolved error counted as the load's failure and logged.
    */
   #trackPendingProviderSync(
-    address: { space: MemorySpace; scope: CellScope; id: URI },
+    address: {
+      space: MemorySpace;
+      scope: CellScope;
+      id: URI;
+      scopeKey?: ScopeKey;
+    },
     start: () => Promise<Result<Unit, Error>>,
   ): Promise<Result<Unit, Error>> {
     const releaseLoad = this.#registerPendingLoad(address);
@@ -2407,6 +2421,7 @@ export class StorageManager implements IStorageManager {
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
+    identity: ScopeKeyIdentity,
   ): Promise<Cell<T>> {
     const cacheKey = dataURISyncKey({
       id,
@@ -2414,10 +2429,18 @@ export class StorageManager implements IStorageManager {
       path: cell.path.map(String),
       space,
       scope,
+      scopeKeyIdentity: identity,
     });
     let work = this.#dataURISyncs.get(cacheKey);
     if (work === undefined) {
-      work = this.#syncDataURILinkTargets(cell, space, id, schema, scope);
+      work = this.#syncDataURILinkTargets(
+        cell,
+        space,
+        id,
+        schema,
+        scope,
+        identity,
+      );
       this.#dataURISyncs.set(cacheKey, work);
     }
     await work;
@@ -2430,6 +2453,7 @@ export class StorageManager implements IStorageManager {
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
+    identity: ScopeKeyIdentity,
   ): Promise<void> {
     let value: unknown = valueFromDataUri(id);
     for (const segment of [...cell.path.map(String)]) {
@@ -2452,6 +2476,7 @@ export class StorageManager implements IStorageManager {
       schema,
       promises,
       new Set(),
+      identity,
     );
     if (promises.length > 0) {
       await Promise.all(promises);
@@ -2469,6 +2494,7 @@ export class StorageManager implements IStorageManager {
     schema: JSONSchema | undefined,
     promises: Promise<unknown>[],
     seen: Set<unknown>,
+    identity?: ScopeKeyIdentity,
   ): void {
     if (value === null || value === undefined || seen.has(value)) {
       return;
@@ -2485,14 +2511,25 @@ export class StorageManager implements IStorageManager {
         const scope = normalizeCellScope(
           link.scope as CellScope | undefined,
         );
+        const instance = this.#foreignInstanceKey(scope, identity);
         promises.push(
           this.#trackPendingProviderSync(
-            { space, scope, id: link.id },
+            {
+              space,
+              scope,
+              id: link.id,
+              ...(instance !== undefined ? { scopeKey: instance } : {}),
+            },
             () =>
-              this.open(space).sync(link.id!, {
-                path: link.path.map((segment) => segment.toString()),
-                schema: link.schema ?? schema ?? false,
-              }, scope),
+              this.open(space).sync(
+                link.id!,
+                {
+                  path: link.path.map((segment) => segment.toString()),
+                  schema: link.schema ?? schema ?? false,
+                },
+                scope,
+                instance,
+              ),
           ),
         );
       }
@@ -2511,6 +2548,7 @@ export class StorageManager implements IStorageManager {
           itemSchema,
           promises,
           seen,
+          identity,
         );
       }
       return;
@@ -2538,6 +2576,7 @@ export class StorageManager implements IStorageManager {
           childSchema,
           promises,
           seen,
+          identity,
         );
       }
     }
@@ -8194,12 +8233,38 @@ const toRejectedError = (
   ) {
     const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
     const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
-    // The conflicted entity: structured field when the error is in-process;
-    // parsed from the message when it crossed the wire (Error fields do not
-    // survive serialization, the message does — its format is owned by
-    // memory/v2/engine.ts's ConflictError construction).
-    const staleReadOf = (error as { of?: unknown })?.of ??
-      message.match(/stale confirmed read: (\S+) at seq/)?.[1];
+    // Scoped descriptors cross current protocol boundaries structurally.
+    // Message-only errors retain default-scope recovery for every named read.
+    const toConflicts = (details: unknown): IConflictError["conflict"][] => {
+      const { of, scope } = (details ?? {}) as {
+        of?: unknown;
+        scope?: unknown;
+      };
+      return typeof of === "string"
+        ? [{
+          space,
+          the: DOCUMENT_MIME,
+          of: of as Entity,
+          ...(isCellScope(scope) ? { scope } : {}),
+        }]
+        : [];
+    };
+    const structuredConflicts = (error as { conflicts?: unknown })?.conflicts;
+    let conflicts = Array.isArray(structuredConflicts)
+      ? structuredConflicts.flatMap(toConflicts)
+      : [];
+    if (conflicts.length === 0) {
+      conflicts = toConflicts((error as { conflict?: unknown })?.conflict);
+    }
+    if (conflicts.length === 0) {
+      conflicts = toConflicts(error);
+    }
+    if (conflicts.length === 0) {
+      conflicts = Array.from(
+        message.matchAll(/stale confirmed read: (\S+) at seq/g),
+        (match) => toConflicts({ of: match[1] })[0],
+      );
+    }
     const firstOperation = commit.operations?.[0];
     const firstOperationId = firstOperation && "id" in firstOperation
       ? firstOperation.id
@@ -8208,16 +8273,14 @@ const toRejectedError = (
       name: "ConflictError",
       message,
       transaction: commit,
-      // Conflict descriptor: for stale-read conflicts `of` is authoritative
-      // (the memory engine names the conflicted entity structurally), so a
-      // retrier can pull exactly that doc before re-running. `the` remains a
-      // placeholder.
-      conflict: {
+      // The singular descriptor remains the first conflict for consumers of
+      // the legacy interface. `the` remains a placeholder.
+      conflict: conflicts[0] ?? {
         space,
         the: DOCUMENT_MIME,
-        of: ((typeof staleReadOf === "string" ? staleReadOf : undefined) ??
-          firstOperationId ?? "of:unknown") as Entity,
+        of: (firstOperationId ?? "of:unknown") as Entity,
       },
+      ...(conflicts.length > 0 ? { conflicts } : {}),
     };
     // retryAfterSeq is carried for diagnostics; retry gating is by caughtUpLocalSeq
     // (readyToRetry), and downstream only uses retryAfterSeq's presence to mark

@@ -15,15 +15,15 @@ mapping pass is due.
 The first-party default is OFF and the ON soak is paused. The
 [`serverExecution` registry](../../development/EXPERIMENTAL_OPTIONS.md#serverexecution)
 owns the current default and flip records. A renewed ON rollout must satisfy
-the plan's ordered gates, including the still-open OW28 served compilation
-port; earlier gate-completion claims do not establish that port exists.
+the plan's ordered gates. OW28 tracks served compilation and its scoped child
+execution coverage; implementing that path does not discharge the other gates.
 
 The status corrections in this register are bounded to the rows below:
 
 | Row | Current disposition |
 | --- | --- |
 | OW18 / OW45 source freshness | Tenure activation ensures root existence; explicit opens follow source, including served wish-sidecar opens. |
-| OW28 | Open: no served compile outbox/completion path or real-host completion regression test. |
+| OW28 | Closed: accepted compile effects, child execution, restart, supersession, and independently reactive user/session program selection have direct coverage. |
 | OW28-createRef | Closed: the compile cache snapshots program content, separates compilation with and without a space, and persists shared compiles into each requested space when CFC is enforced. |
 | OW28-supersession-family / OW28-instance-family | Investigation follow-ups; reproduce current residuals and reconcile the instance family with OW53. |
 | OW30 | Stream sibling validation is fixed; the non-Stream counter/container observation remains unresolved. |
@@ -583,12 +583,9 @@ client does not; this PR):
   handler run diverts — the same suite now asserts that posture),
   unstamped/binding writes untouched, egress effect kinds dropped
   with `navigateTo` enacting (the egress rule), `compile-and-run`
-  gated at the builtin — the gate's true interim scope is wider than
-  "not speculable": it suppresses fresh compiles for EVERY flag-ON
-  non-wave run and the serving side refuses the writebacks, so fresh
-  compile-and-run is INERT ON-arm until the serving port (stage G's
-  out-of-scope note) lands; both-arms pins in
-  `packages/runner/test/compile-and-run.test.ts` (the review's m5) —
+  observing committed results on clients while the serving runtime owns
+  compilation and child setup (OW28; `executor-compile-and-run.test.ts`
+  and `builtins/compile-and-run-served.test.ts`) —
   retirement on watermark coverage of the entry's read basis + acked
   origins via success-shaped `superseded` withdrawals that cascade
   nothing. Pinned in
@@ -1793,15 +1790,15 @@ sentence, coverage below):
   (runner), the pattern updater's transition writes, wish's
   interval tick / error-UI / sidecar-run / ready writes, and the
   fetch / fetchProgram / llmDialog teardown claims-release txs.
+  OW28's compile-and-run completion writes also carry their declared context.
   NOT stamped, per existing rulings: llm partial-stream writes
   (partials never become commits — the serving posture UNDER THE
   FLAG now SKIPS the write before minting a tx, the same ruled
   outcome the refusal produced, keeping the new counter clean; the
   2026-08-13 round scoped the skip to `serverExecution === true` —
   posture alone had dropped OFF-arm partials, an unrecorded OFF-arm
-  delta, review thread r3756175835),
-  compile-and-run's async writebacks (stage-G deferral, documented
-  in-file), and llm-dialog's pin/unpin/updateArgument/invoke
+  delta, review thread r3756175835), and llm-dialog's
+  pin/unpin/updateArgument/invoke
   tool-call writes (ruled completion-/handler-class — Phase-3
   territory). Coverage: impl-gate, red-first —
   `packages/runner/test/executor-serving-loop.test.ts` ("lands a
@@ -2578,32 +2575,37 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
 
 **Phase 7 (the flip): rows opened by the flip's own gates, 2026-08-15:**
 
-- OW28 — OPEN: the `compile-and-run` serving port (builtins.md §3).
-  A flag-ON non-wave run sets `pending=true` and returns before launching a
-  fresh compile. A wave-stamped server run launches the floating compiler
-  promise, but the asynchronous `editWithRetry` writebacks and `runSynced`
-  child launch have no completion stamp. The wave destination refuses
-  unstamped transactions, so a fresh served compile has no durable completion
-  path. Local optimistic values after a refused write are not evidence of
-  durable `pending`, `result`, or `error` state.
+- OW28 — CLOSED: the `compile-and-run` serving port (builtins.md §3).
+  Compilation is an accepted outbox effect. The request snapshots the resolved
+  program, passes the CFC sink ceiling, and uses the requesting user or session
+  instance in its effect key. Completion checks the accepted request marker
+  under that same identity and records compilation readiness; the next
+  derivation stages child setup and the resolved marker together. Clients
+  observe durable outcomes without launching compilation.
 
-  `compile-and-run.test.ts` covers the launch gate with a never-resolving
-  compiler stub (zero launches without a wave, one with a wave); it does not
-  prove a served child becomes usable. The missing regression must exercise
-  a real ExecutorHost through compiler completion, durable result/pending
-  state, child execution, failure, recovery, supersession, and demanded
-  instances. The port must put compilation on the post-wave outbox and stamp
-  completion writeback, with child instantiation inside the served graph's
-  transaction discipline. The ON client reads through the served result.
+  Scoped children retain their deterministic document identity. One piece
+  registration owns a node group per canonical program, and instances selecting
+  the same program share its nodes. Static child setup and passthrough bindings
+  initialize in each actor's transaction while the group retains each child
+  once. Selection reads participate in dependencies and basis tracking.
+  Program changes, clearing, handlers, resume, and parent release preserve the
+  other instances' selected implementations. Keyless
+  pointers remain transaction-local until accepted wave settlement. Local-only
+  changes enroll their read dependencies even when all storage writes are
+  no-ops; selective withdrawal cannot publish a pointer from a withdrawn basis.
 
-  Restoration input: [PR #5968](https://github.com/commontoolsinc/labs/pull/5968),
-  preserved at `463ea3887b64459fbf58b5d208764e42198daa25`, contains a port and
-  tests that require reconciliation with the current runtime. The
-  [coverage status audit](../../history/plans/server-execution-v2/optimize/coverage-status-audit-2026-09-09.md)
-  establishes that the integration squash and inspected main omit those
-  changes despite the PR's closing claim. A closed sibling PR does not
-  discharge this row. Trigger: third in the plan's ordered flip gates;
-  required before a renewed ON rollout.
+  `executor-compile-and-run.test.ts` exercises a real ExecutorHost through
+  compiler completion, failure, attached data files, restart, A→B→A
+  supersession, and independently reactive user and session instances.
+  `builtins/compile-and-run-served.test.ts` covers client observation, CFC
+  refusal, abandoned and withdrawn requests, cache recovery, and superseded
+  completion, including a completion overtaken by a subsequently withdrawn
+  request. Explicit clears work with empty or retained attachment lists;
+  partial source hydration preserves the accepted request. The runner's
+  scoped-program and keyless-selection tests cover setup rejection, clear
+  withdrawal, parent ownership, and keyless swaps;
+  `scheduler/guarded-event-handlers.test.ts` covers dispatch selection and
+  registration replacement. The family follow-ups below retain their own scope.
 - OW28-createRef — CLOSED: program-value hashing at the compile-cache boundary.
   `PatternManager.compileOrGetPattern` snapshots the complete resolved program
   with `snapshotQueryResult` and uses that same detached value for its key and
@@ -2632,18 +2634,26 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   or release the superseded effect. Trigger: the next served LLM supersession
   scenario. This is an investigation obligation, not a confirmed-current
   claim that every LLM or fetch builtin wedges.
-- OW28-instance-family — INVESTIGATE with OW53's residuals: `effectTargetKey`
-  includes the target document and scope name but accepts no principal/session
-  instance. The preserved OW28 branch reports collapsed completions for two
-  demanders and service-instance hash-guard reads for a narrowed request.
-  OW53 closes SQLite's served acting-identity/clearance fixes and separately
-  names non-SQLite unstamped hash-guard reads, non-clearance instance keys,
-  and the provider READ partition. Those residuals are the current scope;
-  do not reopen the fixed SQLite cases. Owed: live one- and two-demander
-  regressions for narrowed requests, plus a reactive child case to establish
-  whether the runtime child registry also collapses demanded instances.
-  Reconcile any confirmed family fix with OW53 rather than counting the same
-  obligation twice. No new multi-demander reproduction is claimed here.
+- OW28-instance-family — INVESTIGATE with OW53's residuals:
+  `effectTargetKey` accepts an explicit resolution identity. Served
+  `compileAndRun` supplies it, and its completion reads and child selection
+  use the same user or session instance. The other builtin callers retain
+  their scope-name keys unless they explicitly supply that identity. OW53
+  closes SQLite's served acting-identity/clearance fixes and separately names
+  non-SQLite unstamped hash-guard reads, non-clearance instance keys, and the
+  provider READ partition. Owed: one- and two-demander regressions for those
+  narrowed requests, without reopening fixed SQLite cases or counting the
+  compile regression twice.
+
+  A separate child-input residual remains: passing an uninitialized
+  `PerUser<Writable<Default<0>>>` value into a child can give both users the
+  same space-scoped writable handle. It also occurs with an ordinary nested
+  child without `compileAndRun`. Explicitly initializing each user's input
+  through the parent's schema produces separate user-scoped handles. The
+  served compile handler regression initializes those inputs; it establishes
+  program selection, not correct scope creation for an uninitialized default.
+  Owed: preserve the declared scope when that default writable handle is
+  materialized, with a two-user child-handler regression.
 - OW29 — space-root demanders + demand-arrival re-runs (the reverted
   Phase-7 extension recorded under OW17): a client whose only watch is
   the space-scoped piece root supplies NO identity to the run supply,
@@ -3398,8 +3408,8 @@ findings; the OWNER RULING — the flip lands DARK):
 The current rollout posture is the
 [`serverExecution` registry](../../development/EXPERIMENTAL_OPTIONS.md#serverexecution):
 first-party default OFF, ON soak paused. The following flip record describes
-#6535's changes, not a current gate verdict. OW28 remains an unmet ordered gate
-and must be implemented and verified before a renewed ON rollout.
+#6535's changes, not a current gate verdict. OW28's direct acceptance coverage
+is recorded above; the plan's gate dispositions govern a renewed ON rollout.
 
 **Flip record — PR #6535.** Its ON-skip registry and topology checks do not
 exercise fresh served `compileAndRun` completion. Its merge therefore does not
@@ -4053,10 +4063,9 @@ supply; OW29/OW32/OW34 closed):
   evidence beside it is
   [`docs/history/plans/server-execution-v2/stage-c-closeout.md`](../../history/plans/server-execution-v2/stage-c-closeout.md)
   (the two benchmarks, the attribution, the three stage-C review
-  reports, the fan-out design + panel). OW28 remains open: its preserved
-  #5968 branch supplies restoration inputs, and its three follow-ups are
-  recorded beside OW28 above. The sibling branch's existence is not a landing
-  guarantee. The lunch double-dispatch work is tracked by OW35; the frozen
+  reports, the fan-out design + panel). OW28's implementation and acceptance
+  work, with its independently scoped follow-ups, are recorded above.
+  The lunch double-dispatch work is tracked by OW35; the frozen
   closeout carries the stage-C branch and review record.
   - **OW35 — the served-handler DOUBLE-DISPATCH parity gap: (α) + the
     cross-producer invariant sentence — RULED 2026-08-18 (owner:

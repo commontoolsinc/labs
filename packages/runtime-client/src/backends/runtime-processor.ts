@@ -194,6 +194,7 @@ import {
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
   type SetMemoryMessageCompressionRequest,
+  type SetReadStatsEnabledRequest,
   type SetSettleStatsEnabledRequest,
   type SetTelemetryEnabledRequest,
   type SettleStatsHistoryResponse,
@@ -2591,6 +2592,11 @@ export class RuntimeProcessor {
     this.#runtime.scheduler.setEventPreflightTelemetryEnabled(request.enabled);
   }
 
+  /** Sets body accounting independently of telemetry transport. */
+  setReadStatsEnabled(request: SetReadStatsEnabledRequest): void {
+    this.#runtime.scheduler.setReadStatsEnabled(request.enabled);
+  }
+
   /** Changes memory-message compression for every remote storage session. */
   async setMemoryMessageCompression(
     request: SetMemoryMessageCompressionRequest,
@@ -2916,6 +2922,8 @@ export class RuntimeProcessor {
         return this.setLoggerEnabled(request);
       case RequestType.SetTelemetryEnabled:
         return this.setTelemetryEnabled(request);
+      case RequestType.SetReadStatsEnabled:
+        return this.setReadStatsEnabled(request);
       case RequestType.SetMemoryMessageCompression:
         return await this.setMemoryMessageCompression(request);
       case RequestType.ResetLoggerBaselines:

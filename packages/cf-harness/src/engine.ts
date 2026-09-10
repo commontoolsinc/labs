@@ -110,9 +110,9 @@ import {
   type HarnessPatternIndexClientFactory,
 } from "./pattern-index/client.ts";
 import {
-  createPatternIndexPublicationLedger,
-  type PatternIndexPublicationLedger,
-} from "./pattern-index/publish-ledger.ts";
+  createPatternIndexLedger,
+  type PatternIndexLedger,
+} from "./pattern-index/ledger.ts";
 import {
   cacheHarnessSkillsShAcquisitionClientFactory,
   createHarnessSkillsShAcquisitionClientFactory,
@@ -512,7 +512,7 @@ export class CfHarnessEngine {
     HarnessSkillsShAcquisitionClientFactory;
   #docsCorpus?: Promise<HarnessDocsCorpus>;
   #exploreQueryRunner?: HarnessExploreQueryRunner;
-  #patternIndexPublications?: PatternIndexPublicationLedger;
+  #patternIndexLedger?: PatternIndexLedger;
   readonly #taskText?: string;
   readonly #inputCells: readonly HarnessInputCellSpec[];
   readonly #patternRefs: readonly HarnessPatternRefSpec[];
@@ -1046,22 +1046,25 @@ export class CfHarnessEngine {
    * duplicates were being produced at. Created on first use and only when the
    * run can reach an index at all.
    */
-  get patternIndexPublications(): PatternIndexPublicationLedger | undefined {
+  get patternIndexLedger(): PatternIndexLedger | undefined {
     const factory = this.#patternIndexClientFactory;
     if (factory === undefined) return undefined;
-    this.#patternIndexPublications ??= createPatternIndexPublicationLedger(
+    this.#patternIndexLedger ??= createPatternIndexLedger(
       factory,
     );
-    return this.#patternIndexPublications;
+    return this.#patternIndexLedger;
   }
 
   /**
-   * Sends everything this session's ledger still holds. Called once, when the
-   * session's prompt loop finishes; a session that never reaches it publishes
-   * nothing, which `publish-ledger.ts` states as the cost it is.
+   * Sends everything this session's ledger still holds and waits for every
+   * write it has made. Called once, when the session's prompt loop finishes.
+   * A session that never reaches it keeps whatever the ledger already sent —
+   * a displaced iteration, a dependency, a report — and loses the entries
+   * still held, which `ledger.ts` states as the cost it is, along with
+   * whichever writes were in flight.
    */
-  async flushPatternIndexPublications(): Promise<void> {
-    await this.#patternIndexPublications?.flush();
+  async flushPatternIndexLedger(): Promise<void> {
+    await this.#patternIndexLedger?.flush();
   }
 
   /**
@@ -2239,7 +2242,7 @@ export class CfHarnessEngine {
           getPatternIndexClient: this.#patternIndexClientFactory,
           patternIndexPublishEnabled: this.patternIndexPublishEnabled,
           patternIndexPublishDiscoverable: this.patternIndexPublishDiscoverable,
-          patternIndexPublications: this.patternIndexPublications,
+          patternIndexLedger: this.patternIndexLedger,
         }
         : {}),
       ...(this.docsCorpusAvailable
