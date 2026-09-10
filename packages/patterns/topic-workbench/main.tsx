@@ -159,6 +159,9 @@ export interface WorkbenchOutput {
   relatedSessions: SessionRow[];
   recentSessions: SessionRow[];
   spawnCommand: string;
+  /** The prompt as it will be sent: the person's words, then the topic's
+   * context and links. */
+  kickoff: string;
   spawnPrompt: PerSession<Writable<string>>;
   spawnRoot: PerSession<Writable<string>>;
   /** Attach a session by provider identity. Idempotent. */
@@ -302,6 +305,36 @@ const defaultPromptOf = lift((
     : `Work on ${name}, "${title}".`;
 });
 
+/** The prompt a session actually starts from: the person's own words first,
+ * then the topic's context, then the links. The person's words are never
+ * replaced; an empty box falls back to the default sentence. */
+const kickoffOf = lift((
+  { prompt, defaultPrompt, shortName, title, body, links }: {
+    prompt: string;
+    defaultPrompt: string;
+    shortName: string;
+    title: string;
+    body: string;
+    links: TopicLinkView[];
+  },
+): string => {
+  const head = prompt.trim() || defaultPrompt;
+  if (!title.trim()) return head;
+  const name = shortName ? `Topic #${shortName}` : "The topic";
+  const opening = snippet(body, 400);
+  const context = opening
+    ? `${name}, "${title}". Its living document begins: ${opening}`
+    : `${name}, "${title}".`;
+  const urls = links.filter((l) => l.kind === "pr" && l.url).map((l) =>
+    `- ${l.label ? `${l.label}: ` : ""}${l.url}`
+  );
+  return [
+    head,
+    `Context:\n- ${context}`,
+    ...(urls.length ? [`Links:\n${urls.join("\n")}`] : []),
+  ].join("\n\n");
+});
+
 const shellQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
 
 /** The command to paste until the connector can start a session itself. */
@@ -367,7 +400,9 @@ const useDefaultPrompt = handler<void, {
   spawnPrompt: Writable<string>;
   defaultPrompt: string;
 }>((_, { spawnPrompt, defaultPrompt }) => {
-  spawnPrompt.set(defaultPrompt);
+  // Add to what the person typed; never replace it.
+  const current = spawnPrompt.get().trim();
+  spawnPrompt.set(current ? `${current}\n\n${defaultPrompt}` : defaultPrompt);
 });
 
 const pickRoot = handler<void, {
@@ -399,17 +434,24 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
     const links = presentLinksOf({ links: topic?.links });
     const checkoutOptions = checkoutOptionsOf({ index: sessions });
     const defaultPrompt = defaultPromptOf({ shortName, title, body });
-    const spawnCommand = spawnCommandOf({
-      root: spawnRoot,
+    const kickoff = kickoffOf({
       prompt: spawnPrompt,
+      defaultPrompt,
+      shortName,
+      title,
+      body,
+      links,
     });
+    const spawnCommand = spawnCommandOf({ root: spawnRoot, prompt: kickoff });
 
     const hasAttached = attachedSessions.length > 0;
     const hasRelated = relatedSessions.length > 0;
     const hasRecent = recentSessions.length > 0;
     const hasLinks = links.length > 0;
     const hasIndex = computed(() => rows.length > 0);
-    const hasPrompt = computed(() => spawnPrompt.get().trim().length > 0);
+    const hasPrompt = computed(() =>
+      spawnPrompt.get().trim().length > 0 || hasTopic
+    );
 
     // --- Verbs (headless; a skill inside a session can attach itself) ---
 
@@ -682,9 +724,10 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
                 <cf-vstack gap="2">
                   <cf-heading level={5}>Start a session</cf-heading>
                   <cf-text variant="caption" tone="muted">
-                    Until the connector can start a session itself, this
-                    composes the command to run. The session appears above on
-                    the connector's next collection; attach it then.
+                    Your words go first; the topic's context and links follow
+                    automatically. Until the connector can start a session
+                    itself, this composes the command to run. The session
+                    appears above on the next collection; attach it then.
                   </cf-text>
                   <cf-hstack gap="2" align="end">
                     <cf-field label="Prompt" style="flex: 1;">
@@ -698,7 +741,7 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
                       variant="ghost"
                       onClick={useDefaultPrompt({ spawnPrompt, defaultPrompt })}
                     >
-                      Use the topic
+                      Add the topic's words
                     </cf-button>
                   </cf-hstack>
                   <cf-hstack gap="2" align="end">
@@ -708,13 +751,26 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
                   </cf-hstack>
                   {hasPrompt
                     ? (
-                      <cf-text
-                        block
-                        data-spawn-command=""
-                        style="font-family: ui-monospace, monospace; white-space: pre-wrap; word-break: break-all;"
-                      >
-                        {spawnCommand}
-                      </cf-text>
+                      <cf-vstack gap="2">
+                        <cf-field label="Kickoff prompt, as it will be sent">
+                          <cf-text
+                            block
+                            data-kickoff=""
+                            style="font-family: ui-monospace, monospace; font-size: 0.85em; white-space: pre-wrap;"
+                          >
+                            {kickoff}
+                          </cf-text>
+                        </cf-field>
+                        <cf-field label="Command">
+                          <cf-text
+                            block
+                            data-spawn-command=""
+                            style="font-family: ui-monospace, monospace; font-size: 0.85em; white-space: pre-wrap; word-break: break-all;"
+                          >
+                            {spawnCommand}
+                          </cf-text>
+                        </cf-field>
+                      </cf-vstack>
                     )
                     : null}
                 </cf-vstack>
@@ -728,6 +784,7 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
       relatedSessions,
       recentSessions,
       spawnCommand,
+      kickoff,
       spawnPrompt,
       spawnRoot,
       attach,
