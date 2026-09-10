@@ -51,7 +51,7 @@ general piece origin model is described in `../piece-source-lifecycle.md`.
 
 ## Last Updated
 
-2026-07-22
+2026-09-09
 
 ## Motivation
 

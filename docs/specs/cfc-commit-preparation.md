@@ -108,7 +108,7 @@ consults no `cid:` document on any of its three channels:
 - a trigger read naming one is skipped by `forEachFlowObservation`, on top of
   the same filter applied when trigger reads are recorded;
 - a link written into a labeled document that names a `cid:` source records
-  no link-write policy input (`recordLinkWrite`), so the link-label
+  no link-write policy input (`recordLinkWritePolicyInput`), so the link-label
   derivation never asks a `cid:` document for metadata it cannot carry. The
   compile cache's records link their code this way, to
   [code documents](content-addressed-schemas.md#code-documents) staged

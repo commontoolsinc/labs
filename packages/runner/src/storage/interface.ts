@@ -237,7 +237,7 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * answers false otherwise; false stages, which is always the safe
    * direction.
    */
-  isSchemaDocPersisted?(space: MemorySpace, hash: string): boolean;
+  isContentAddressedDocPersisted?(space: MemorySpace, hash: string): boolean;
 
   /**
    * Observer of FIRST opens per space (server-execution v2 Phase 4): the
@@ -1339,11 +1339,11 @@ export interface IStorageTransaction {
   getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
 
   /**
-   * The manager's `isSchemaDocPersisted`, reachable from the transaction
-   * (the staging scan runs inside one). Optional the same way; absent
-   * means never elide.
+   * The manager's `isContentAddressedDocPersisted`, reachable from the
+   * transaction (the staging scan runs inside one). Optional the same
+   * way; absent means never elide.
    */
-  isSchemaDocPersisted?(space: MemorySpace, hash: string): boolean;
+  isContentAddressedDocPersisted?(space: MemorySpace, hash: string): boolean;
 
   /**
    * Optional read details for the given space: the values this transaction
@@ -1622,16 +1622,16 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   stageSchemaDocClosure(space: MemorySpace, rootHash: string): void;
 
   /**
-   * Stages the content-addressed document holding `code` into this
+   * Stages the content-addressed document holding `value` into this
    * transaction and returns its id: `cid:` plus the general content hash
-   * of the string. The document is the string and nothing else, so no
+   * of the value. The document is the value and nothing else, so no
    * closure follows it; the write is blind and idempotent, deduped per
    * transaction, and elided when the space's server already holds the
    * document. Required for the same reason as `stageSchemaDocClosure`:
    * the dedupe and the elision cannot be bypassed by a caller writing
    * the document itself.
    */
-  stageCodeDocument(space: MemorySpace, code: string): URI;
+  stageContentAddressedDocument(space: MemorySpace, value: FabricValue): URI;
 
   tx: IStorageTransaction;
 

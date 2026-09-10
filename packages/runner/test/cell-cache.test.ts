@@ -33,6 +33,7 @@ import {
 } from "../src/compilation-cache/cell-cache.ts";
 import { parseLink } from "../src/link-utils.ts";
 import type { URI } from "../src/sigil-types.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { observeCacheWriteBacks } from "./support/telemetry-observers.ts";
 
@@ -2648,11 +2649,16 @@ describe("cell-cache: code documents forged below the commit boundary", () => {
     await server?.close();
   });
 
+  // Rewrites the stored document holding `code` to hold `forged` instead,
+  // then syncs it into the READER's replica and returns a transaction there
+  // that has read the forged string back — so what the loaders below refuse
+  // is a document that is present and holds the wrong content, never one
+  // that is absent.
   const forgeCodeDocument = async (
     code: string,
     forged: string,
-  ): Promise<void> => {
-    const id = `cid:${taggedHashStringOf(code)}`;
+  ): Promise<IExtendedStorageTransaction> => {
+    const id = `cid:${taggedHashStringOf(code)}` as URI;
     const engine = await server.engineForSpace(space);
     engine.database.prepare(
       `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
@@ -2660,6 +2666,13 @@ describe("cell-cache: code documents forged below the commit boundary", () => {
     engine.database.prepare(
       `UPDATE head SET seq = seq + 1 WHERE id = :id`,
     ).run({ id });
+    const synced = await smB.open(space).sync(id, { path: [], schema: false });
+    expect(synced.error).toBeUndefined();
+    const rtx = rtB.edit();
+    expect(
+      rtx.readOrThrow({ space, id, type: "application/json", path: [] }),
+    ).toEqual({ value: forged });
+    return rtx;
   };
 
   it("leaves a source record out of the closure when its code document holds other content", async () => {
@@ -2669,9 +2682,11 @@ describe("cell-cache: code documents forged below the commit boundary", () => {
     expect((await wtx.commit()).error).toBeUndefined();
     await smA.synced();
     const entry = modules.find((m) => m.identity === entryIdentity)!;
-    await forgeCodeDocument(entry.source, `${entry.source}\n// tampered`);
+    const rtx = await forgeCodeDocument(
+      entry.source,
+      `${entry.source}\n// tampered`,
+    );
 
-    const rtx = rtB.edit();
     const loaded = await loadSourceClosure(rtB, space, entryIdentity, rtx);
     rtx.abort?.();
 
@@ -2693,9 +2708,8 @@ describe("cell-cache: code documents forged below the commit boundary", () => {
     expect((await wtx.commit()).error).toBeUndefined();
     await smA.synced();
     const entry = modules.find((m) => m.identity === entryIdentity)!;
-    await forgeCodeDocument(entry.js, `${entry.js} /* tampered */`);
+    const rtx = await forgeCodeDocument(entry.js, `${entry.js} /* tampered */`);
 
-    const rtx = rtB.edit();
     const loaded = await loadCompiledClosure(
       rtB,
       space,

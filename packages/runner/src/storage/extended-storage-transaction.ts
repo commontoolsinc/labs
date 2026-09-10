@@ -2193,12 +2193,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #ensuredSchemaDocs = new Set<string>();
 
   /**
-   * `"<space>|<hash>"` pairs of code documents this transaction has
-   * already staged, kept apart from the schema-document set because the
-   * two namespaces never share a hash but do share the reason for the
-   * dedupe: a repeat write would invalidate a prepared CFC digest.
+   * `"<space>|<hash>"` pairs of content-addressed documents this
+   * transaction has already staged by value, kept apart from the
+   * schema-document set because the two never share a hash but do share
+   * the reason for the dedupe: a repeat write would invalidate a prepared
+   * CFC digest.
    */
-  #stagedCodeDocs = new Set<string>();
+  #stagedContentAddressedDocs = new Set<string>();
 
   /**
    * The write-side delivery guarantee of content-addressed schemas
@@ -2298,7 +2299,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       const key = `${space}|${hash}`;
       if (this.#ensuredSchemaDocs.has(key)) continue;
       this.#ensuredSchemaDocs.add(key);
-      if (this.tx.isSchemaDocPersisted?.(space, hash) === true) continue;
+      if (this.tx.isContentAddressedDocPersisted?.(space, hash) === true) {
+        continue;
+      }
       const document = lookupSchemaDocument(hash);
       if (document === undefined) {
         logger.warn(
@@ -2324,23 +2327,25 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   /**
-   * Like {@link stageSchemaDocClosure}, except the document is a bare
-   * string with no closure behind it and the caller supplies the content
-   * rather than a hash: the id is derived here, so a code document can
-   * never be installed under a hash its content does not produce. Elision
-   * is server-confirmed only, for the reason the schema staging gives.
+   * Like {@link stageSchemaDocClosure}, except the document is the value
+   * itself with no closure behind it and the caller supplies the content
+   * rather than a hash: the id is derived here, so a document can never
+   * be installed under a hash its content does not produce. Elision is
+   * server-confirmed only, for the reason the schema staging gives.
    */
-  stageCodeDocument(space: MemorySpace, code: string): URI {
-    const hash = taggedHashStringOf(code);
+  stageContentAddressedDocument(space: MemorySpace, value: FabricValue): URI {
+    const hash = taggedHashStringOf(value);
     const id = `cid:${hash}` as URI;
     const key = `${space}|${hash}`;
-    if (this.#stagedCodeDocs.has(key)) return id;
-    this.#stagedCodeDocs.add(key);
-    if (this.tx.isSchemaDocPersisted?.(space, hash) === true) return id;
+    if (this.#stagedContentAddressedDocs.has(key)) return id;
+    this.#stagedContentAddressedDocs.add(key);
+    if (this.tx.isContentAddressedDocPersisted?.(space, hash) === true) {
+      return id;
+    }
     this.#runPrivilegedSystemWrite(() => {
       this.writeOrThrow(
         { space, id, type: "application/json", path: [] },
-        { value: code },
+        { value },
       );
     });
     return id;
@@ -3470,8 +3475,8 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.#wrapped.stageSchemaDocClosure(space, rootHash);
   }
 
-  stageCodeDocument(space: MemorySpace, code: string): URI {
-    return this.#wrapped.stageCodeDocument(space, code);
+  stageContentAddressedDocument(space: MemorySpace, value: FabricValue): URI {
+    return this.#wrapped.stageContentAddressedDocument(space, value);
   }
 
   setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {

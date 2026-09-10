@@ -797,7 +797,7 @@ function codeLink(
   code: string,
   tx: IExtendedStorageTransaction,
 ): SigilLink {
-  const id = tx.stageCodeDocument(space, code);
+  const id = tx.stageContentAddressedDocument(space, code);
   return createSigilLinkFromParsedLink({ id, path: [], space });
 }
 

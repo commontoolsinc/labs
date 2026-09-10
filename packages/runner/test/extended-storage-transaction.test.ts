@@ -54,28 +54,37 @@ describe("extended-storage-transaction", () => {
     return { tx, cell: runtime.getCell(space, cause, SCHEMA, tx) };
   };
 
-  describe("code document staging", () => {
+  describe("content-addressed document staging", () => {
     const code = "export const staged = 1;";
     const codeId = `cid:${taggedHashStringOf(code)}`;
     const stagedIds = (tx: IExtendedStorageTransaction): string[] =>
       [...(tx.getWriteDetails?.(space) ?? [])].map((write) => write.address.id);
 
-    it("stages a code document once however often a transaction asks", () => {
+    it("stages a document once however often a transaction asks", () => {
       const tx = runtime.edit();
-      expect(tx.stageCodeDocument(space, code)).toBe(codeId);
-      expect(tx.stageCodeDocument(space, code)).toBe(codeId);
+      expect(tx.stageContentAddressedDocument(space, code)).toBe(codeId);
+      expect(tx.stageContentAddressedDocument(space, code)).toBe(codeId);
       expect(stagedIds(tx).filter((id) => id === codeId)).toHaveLength(1);
       tx.abort?.();
     });
 
-    it("elides a code document the server already holds", async () => {
+    it("names a document by the general content hash of any value", () => {
+      const value = { kind: "blob", bytes: [1, 2, 3] };
+      const tx = runtime.edit();
+      expect(tx.stageContentAddressedDocument(space, value)).toBe(
+        `cid:${taggedHashStringOf(value)}`,
+      );
+      tx.abort?.();
+    });
+
+    it("elides a document the server already holds", async () => {
       const install = runtime.edit();
-      install.stageCodeDocument(space, code);
+      install.stageContentAddressedDocument(space, code);
       expect((await install.commit()).error).toBeUndefined();
       await storageManager.synced();
 
       const tx = runtime.edit();
-      expect(tx.stageCodeDocument(space, code)).toBe(codeId);
+      expect(tx.stageContentAddressedDocument(space, code)).toBe(codeId);
       expect(stagedIds(tx)).not.toContain(codeId);
       tx.abort?.();
     });
@@ -83,7 +92,7 @@ describe("extended-storage-transaction", () => {
     it("stages through a wrapping transaction into the one it wraps", () => {
       const tx = runtime.edit();
       const wrapped = createNonReactiveTransaction(tx);
-      expect(wrapped.stageCodeDocument(space, code)).toBe(codeId);
+      expect(wrapped.stageContentAddressedDocument(space, code)).toBe(codeId);
       expect(stagedIds(tx)).toContain(codeId);
       tx.abort?.();
     });

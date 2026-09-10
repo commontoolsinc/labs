@@ -123,7 +123,7 @@ content the `cid:` namespace holds, and the larger.
   record that links to it, and the document says nothing about where its
   text came from.
 - **Write**: the same idempotent blind write as a schema document, through
-  the transaction's `stageCodeDocument`, which derives the id from the
+  the transaction's `stageContentAddressedDocument`, which derives the id from the
   content it is handed, so a code document can never be installed under a
   hash its content does not produce. The record that links to it is written
   in the same transaction.
