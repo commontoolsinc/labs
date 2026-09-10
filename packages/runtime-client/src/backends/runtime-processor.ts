@@ -59,6 +59,7 @@ import {
   type IOperationStorageCapability,
   isCell,
   isCellResult,
+  isLoopbackHostname,
   markDurableReadTx,
   normalizeSpaceHost,
   PatternCoverageCollector,
@@ -910,6 +911,14 @@ export class RuntimeProcessor {
    * each space that contains only an HTTP or HTTPS origin. Fire-and-forget:
    * resolution hints are an enhancement, never a boot dependency.
    *
+   * One entry is read rather than registered. A loopback origin names the
+   * toolshed as the machine that wrote the row sees it, so it is no route for a
+   * page that reached the toolshed by another name — and a browser refuses the
+   * `ws://` socket it implies from an `https` page. When the entry is loopback
+   * and this runtime's `apiUrl` is not, the space stays on `apiUrl`, and the
+   * row retires any earlier row for that space. A page that did reach loopback
+   * registers it as usual.
+   *
    * ORDERING CONTRACT for embedders: push a newly learned hint through the
    * RegisterSpaceHost IPC before relying on that space, and proceed only when
    * registration succeeds. The first hint can replace a provisional
@@ -953,6 +962,29 @@ export class RuntimeProcessor {
                   `[RuntimeProcessor] Ignoring invalid site-table entry for ${entry.did}:`,
                   error.message,
                 );
+                continue;
+              }
+              // A loopback entry names the toolshed from the machine that
+              // wrote it, so a page served from anywhere else cannot reach it
+              // — and a browser on an https page refuses the ws:// socket it
+              // implies. Leave those spaces on the URL this runtime already
+              // reached its toolshed at.
+              if (
+                isLoopbackHostname(host.hostname) &&
+                !isLoopbackHostname(this.#runtime.apiUrl.hostname)
+              ) {
+                const key = `${entry.did}|${host.toString()}`;
+                if (!this.#siteTableWarned.has(key)) {
+                  this.#siteTableWarned.add(key);
+                  console.debug(
+                    `[RuntimeProcessor] Ignoring loopback site-table entry for ${entry.did} ` +
+                      `(${host.toString()}); using ${this.#runtime.apiUrl.toString()}`,
+                  );
+                }
+                // The table is last-row-wins, so this row also retires an
+                // earlier non-loopback row for the same space: the space has
+                // since moved to the writer's own toolshed.
+                latestEntries.delete(entry.did);
                 continue;
               }
               latestEntries.set(entry.did, {
