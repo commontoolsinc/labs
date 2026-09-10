@@ -185,6 +185,30 @@ SpaceServer outbox ──(e)──► network; results re-enter via (a)
   rows, they are not pushed to any subscriber (protocol.md §3), and
   admission never reads them (protocol.md §7). "On the storage
   protocol" must not be read as "on the wire".
+  READS take this plane too by default: the serving runtime's home
+  session watches its roots under their selectors, and the memory
+  server's schema walk delivers the closure. Under the store
+  read-through posture (`SpaceServerPolicy.storeReadThrough`;
+  `SERVER_EXECUTION_STORE_READ_THROUGH=true` in the toolshed bootstrap,
+  default OFF) the home space's reads leave the session instead: a
+  document the replica does not hold is read synchronously from the
+  engine on first access, a `sync()` resolves from the engine with no
+  watch registered, and the feed's admitted commits (plane (d)) re-read
+  the documents the replica holds — so the runtime walks the schema
+  once, over what it actually reads, and the memory server never walks
+  it for the serving session at all. The one chase the read-through
+  keeps is the frame validator's delivery guarantee: the `cid:` schema
+  documents a read document's link positions reference are read with
+  it, to a fixpoint, exactly as a session's frame carries them. Reads
+  run at the engine's head, as delivered frames do; writes and
+  foreign-space reads stay on the session. Two things a session frame
+  does and this posture does not: the lapsed-lease delivery filter
+  (protocol.md §3's withholding of scoped instances from a former
+  holder, re-delivered on the reacquire notice) is not consulted, so a
+  write inside a lapse is readable at once; and a read of an absent
+  address leaves a confirmed absence in the replica where a session
+  would have left nothing. Counted: `storeReads`, `storeRefreshes`
+  (§7).
 - **(b) memory server → ExecutorHost**, in-process: the
   admission-hook activation feed — an authored admission into a
   space with no live lease NOTIFIES the host, and activation then
@@ -1294,7 +1318,7 @@ block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
 supersededWrites, authoredSeen, effectAcks, derivedCommits,
 structureLoadFailures, structureLoadDeferred, structureLoadStuck,
 structureLoadTerminal,
-structureLoadRearmed, watermarkClamped,
+structureLoadRearmed, watermarkClamped, storeReads, storeRefreshes,
 unstampedSealRefusals, foreignWriteRefusals, foreignEngineFailures,
 warmRequests,
 watermarkLag, demandArrivals, undemandedNarrowingRuns, earlyEmitRefusals,
@@ -1339,7 +1363,10 @@ across cycles), so a slow ensure throttles nothing; `watermarkClamped` counts wa
 advance was actually clamped below the input batch head by the
 Phase-2 settle input barrier — inbound foreign novelty still
 shadowed by a parked own write; the clamp is honesty, not failure,
-and lifts by itself; `unstampedSealRefusals` counts write-carrying
+and lifts by itself; `storeReads` counts the engine reads the store
+read-through posture (§1 plane (a)) performed for serving replicas and
+`storeRefreshes` the held documents it re-read off the feed, both zero
+while the posture is off; `unstampedSealRefusals` counts write-carrying
 transactions refused at the seal by §3d's unstamped refusal —
 structurally ZERO when every server-side commit path declares its
 run context, so any non-zero count names an undeclared commit path,

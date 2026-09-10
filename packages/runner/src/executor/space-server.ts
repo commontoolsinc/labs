@@ -109,6 +109,7 @@ import {
   waveRunContextOf,
   type WaveWriteAnnotation,
 } from "./wave.ts";
+import { engineReadThrough } from "./engine-read-through.ts";
 import { EngineWaveCommitSink } from "./engine-wave-sink.ts";
 import { readWatermarkSeq, watermarkDocLink } from "./watermark.ts";
 import {
@@ -250,6 +251,19 @@ export type SpaceServerPolicy = {
   failureParkBackoffBaseMs?: number;
 
   failureParkBackoffMaxMs?: number;
+
+  /**
+   * Serve the serving runtime's HOME-space reads straight from the
+   * engine: a document the replica does not hold is read synchronously
+   * on first access, a `sync()` resolves from the engine without a
+   * session watch, and the feed's admitted commits refresh the
+   * documents the replica holds (`IStorageManager.installStoreReadThrough`
+   * and `integrateStoreWrites`). Off, every load rides the loopback
+   * session and the memory server's schema walk delivers the closure.
+   * Foreign-space reads stay on the session either way. The toolshed
+   * bootstrap reads SERVER_EXECUTION_STORE_READ_THROUGH.
+   */
+  storeReadThrough?: boolean;
 };
 
 export type SpaceServerOptions = {
@@ -974,6 +988,18 @@ export class SpaceServer implements TransactionSealDestination {
     }
     this.#runtime = runtime;
     this.#disposeRuntime = dispose;
+    if (this.#options.policy?.storeReadThrough === true) {
+      // Installed before anything reads: the tenure's first read is a
+      // miss, and a miss served from the engine is the whole point.
+      runtime.storageManager.installStoreReadThrough?.(
+        space,
+        engineReadThrough(engine, {
+          onRead: () => {
+            this.#options.stats.storeReads += 1;
+          },
+        }),
+      );
+    }
     // MINOR-2: the fresh runtime's demand-root counters start at 0.
     this.#lastFoldedDemandEnters = 0;
     this.#lastFoldedDemandLeaves = 0;
@@ -2807,9 +2833,13 @@ export class SpaceServer implements TransactionSealDestination {
    * (serving-loop.md §3). Authored records count toward §7's
    * authoredSeen. Dirtiness itself travels the scheduler's existing
    * path: the loopback session's subscriptions deliver the commits'
-   * doc changes, and storage notifications mark the graph dirty. */
+   * doc changes, and storage notifications mark the graph dirty — or,
+   * under the store read-through posture, each record's writes are
+   * re-read into the replica here (`#refreshHeldDocuments()`) and the
+   * same notifications follow. */
   #drainFeed(): { batchHead: number } {
     for (const record of this.#feed) {
+      this.#refreshHeldDocuments(record);
       // LATE records (stage P2-F, the sx2 unskip's flake diagnosis):
       // the feed has two in-process producers — the admission hook's
       // notify (async, after the transact's engine apply) and the
@@ -2937,6 +2967,36 @@ export class SpaceServer implements TransactionSealDestination {
     }
     this.#feed = [];
     return { batchHead: this.#coverageHead };
+  }
+
+  /**
+   * Helper for `#drainFeed()`, which under the store read-through
+   * posture re-reads the documents one admitted commit wrote, for those
+   * the serving replica holds, so its scheduler sees the change a session
+   * watch would otherwise have delivered. The loop's own derived commits
+   * are skipped: the replica confirmed those at its seal, and re-reading
+   * them would only cost the engine a read per written document.
+   */
+  #refreshHeldDocuments(record: AdmittedCommitNotice): void {
+    if (this.#options.policy?.storeReadThrough !== true) return;
+    const runtime = this.#runtime;
+    if (runtime === undefined) return;
+    if (record.class === "derived" && record.holder === this.#holder) return;
+    try {
+      this.#options.stats.storeRefreshes +=
+        runtime.storageManager.integrateStoreWrites?.(
+          this.#options.space,
+          record.writes,
+        ) ?? 0;
+    } catch (error) {
+      // A failed refresh leaves the held documents where they were; the
+      // next commit touching them, or the next tenure, reads them again.
+      logger.error("store-refresh-failed", () => [
+        `space ${this.#options.space}: refreshing held documents for ` +
+        `commit ${record.seq} failed`,
+        error,
+      ]);
+    }
   }
 
   /**

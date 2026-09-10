@@ -1708,8 +1708,9 @@ export class Server {
   }
 
   /**
-   * The engine opener a test may supply, and the timer-driven refresh pass
-   * and the per-space publication lock, which a test drives directly.
+   * The engine opener a test may supply, the timer-driven refresh pass
+   * and the per-space publication lock, which a test drives directly, and
+   * the registry's live sessions of one space, which a test inspects.
    */
   get accessForTestingOnly(): {
     engineOpener: EngineOpener | undefined;
@@ -1718,6 +1719,7 @@ export class Server {
       space: string,
       run: () => Promise<T>,
     ): Promise<T>;
+    sessionsForSpace(space: string): SessionState[];
   } {
     // deno-lint-ignore no-this-alias
     const outerThis = this;
@@ -1731,6 +1733,7 @@ export class Server {
       flushScheduledSessions: () => this.#flushScheduledSessions(),
       withSpacePublicationLock: (space, run) =>
         this.#withSpacePublicationLock(space, run),
+      sessionsForSpace: (space) => this.#sessions.sessionsForSpace(space),
     };
   }
 

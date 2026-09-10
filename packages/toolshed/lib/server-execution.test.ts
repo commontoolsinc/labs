@@ -102,6 +102,40 @@ describe("serverExecutionPolicyFromEnv", () => {
     expect(warnings[0]).toContain("SERVER_EXECUTION_FLUSH_DEADLINE_MS");
     expect(warnings[1]).toContain("SERVER_EXECUTION_EGRESS_RATE_PER_S");
   });
+
+  it("turns the store read-through on for the literal true only; garbage leaves it off with a warning", () => {
+    const warnings: string[] = [];
+    expect(
+      serverExecutionPolicyFromEnv(
+        envOf({
+          SERVER_EXECUTION_STORE_READ_THROUGH: "true",
+          SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS: "0",
+        }),
+        (m) => warnings.push(m),
+      ),
+    ).toEqual({ storeReadThrough: true });
+    expect(
+      serverExecutionPolicyFromEnv(
+        envOf({
+          SERVER_EXECUTION_STORE_READ_THROUGH: "false",
+          SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS: "0",
+        }),
+        (m) => warnings.push(m),
+      ),
+    ).toEqual({});
+    expect(warnings).toEqual([]);
+    expect(
+      serverExecutionPolicyFromEnv(
+        envOf({
+          SERVER_EXECUTION_STORE_READ_THROUGH: "yes",
+          SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS: "0",
+        }),
+        (m) => warnings.push(m),
+      ),
+    ).toEqual({});
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("SERVER_EXECUTION_STORE_READ_THROUGH");
+  });
 });
 
 describe("startServerExecutionHost OFF witness", () => {

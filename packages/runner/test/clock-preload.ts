@@ -36,6 +36,9 @@ installFakeClock({
     // they arm — a semantics change, not a speedup. The test waits on
     // watermark/subscription edges with bounded timeouts.
     "executor-serving-loop",
+    // The engine read-through suite drives the same live ExecutorHost
+    // under the same wall-clock policies.
+    "engine-read-through",
     // Same wall-clock pacing, same machinery (the SpaceServer's renew
     // interval and flush deadline), one level down: the stage-G
     // recovery-seam tests drive a real SpaceServer directly.

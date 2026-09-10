@@ -38,6 +38,7 @@ import {
   type EventAttentionResolveResult,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
+  isScopeKey,
   type OperationFieldQuery,
   type OperationFieldSnapshot,
   type PatchOp,
@@ -47,6 +48,7 @@ import {
   type ScopeKeyIdentity,
   type SessionHolding,
   type SessionSync,
+  type SessionSyncUpsert,
   type SqliteDbRef,
   type SqliteOperation,
   type SqliteParamsWire,
@@ -113,6 +115,7 @@ import {
   State,
   StorageNotification,
   StorageTransactionRejected,
+  StoreReadThrough,
   toReplicaLoadFailureError,
   TransactionCommitOptions,
   Unit,
@@ -922,6 +925,12 @@ export class StorageManager implements IStorageManager {
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
 
+  /** The store read-throughs installed per space (see
+   * IStorageManager.installStoreReadThrough); a provider resolves its
+   * replica's through this map, so a replica built after the install and
+   * a replacement replica both see it. */
+  readonly #storeReadThroughs = new Map<MemorySpace, StoreReadThrough>();
+
   /**
    * Schema-registry retention lease: held for the manager's open lifetime,
    * released on close (idempotent), re-acquired when a closed manager is reused
@@ -1455,6 +1464,22 @@ export class StorageManager implements IStorageManager {
       false;
   }
 
+  /** @inheritDoc */
+  installStoreReadThrough(space: MemorySpace, read: StoreReadThrough): void {
+    this.#storeReadThroughs.set(space, read);
+  }
+
+  /** @inheritDoc */
+  integrateStoreWrites(
+    space: MemorySpace,
+    writes: readonly { id: string; scopeKey: ScopeKey }[],
+  ): number {
+    // Already-open replicas only, like isSchemaDocPersisted: a space this
+    // manager has not opened holds nothing to refresh.
+    return this.#providers.get(space)?.replica.integrateStoreWrites(writes) ??
+      0;
+  }
+
   open(space: MemorySpace): IStorageProvider {
     // A manager reused after close() starts a new session; retention
     // follows it.
@@ -1478,6 +1503,7 @@ export class StorageManager implements IStorageManager {
         // providers refuse (see Options.servingHomeSpace).
         refuseForeignScopedReads: this.#servingHomeSpace !== undefined &&
           this.#servingHomeSpace !== space,
+        storeReadThrough: () => this.#storeReadThroughs.get(space),
         routeState,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
           ? (routeGeneration, routeSignal) =>
@@ -2615,6 +2641,12 @@ type ProviderOptions = {
    * the silent-empty-instance trap. Space-scope foreign reads (the
    * §2b free-read row) are unaffected. */
   refuseForeignScopedReads?: boolean;
+
+  /** The manager's store read-through for this space, resolved at each
+   * use so an install after the replica was built still takes effect
+   * (see IStorageManager.installStoreReadThrough). Absent or resolving
+   * to `undefined`: every load goes over the session. */
+  storeReadThrough?: () => StoreReadThrough | undefined;
 };
 
 type SpaceReplicaOptions = Omit<ProviderOptions, "createSession"> & {
@@ -3251,6 +3283,19 @@ export class SpaceReplica
   );
   #watchedIds = new Set<string>();
 
+  /** The store read-through this replica serves misses from (see
+   * ProviderOptions.storeReadThrough). */
+  readonly #storeReadThrough: () => StoreReadThrough | undefined;
+
+  /**
+   * Depth of read-through integrations in progress. A read-through
+   * integrates through `#applySessionSync()`, whose differential checkout
+   * snapshots the touched documents through `get()`; a nonzero depth
+   * keeps that snapshot from reading the store a second time for the
+   * document being integrated.
+   */
+  #readThroughDepth = 0;
+
   /**
    * The last `SessionSync` snapshot _absorbed_ for each watched key — its
    * address as the frame named it and the seq and deletedness it carried — kept
@@ -3460,6 +3505,7 @@ export class SpaceReplica
     this.#eventAppendQueueStore = options.eventAppendQueueStore;
     this.#eventAppendPacing = options.eventAppendPacing;
     this.#refuseForeignScopedReads = options.refuseForeignScopedReads === true;
+    this.#storeReadThrough = options.storeReadThrough ?? (() => undefined);
     // Eager queue init (LT9; verdict blocker, 2026-08-12): a dead
     // predecessor replica's intents in the manager-shared store must
     // discharge WITHOUT waiting for a fresh fire. The constructor's
@@ -3622,12 +3668,43 @@ export class SpaceReplica
   }
 
   get(entry: IMemoryAddress): Revision<State> | undefined {
+    this.#readThroughOnMiss(
+      entry.id as URI,
+      entry.scope,
+      undefined,
+      entry.scopeKey,
+    );
     return this.#getState(
       entry.id as URI,
       entry.scope,
       undefined,
       entry.scopeKey,
     );
+  }
+
+  /**
+   * Re-reads every listed instance this replica holds a record for
+   * through the installed store read-through and integrates the results
+   * as one inbound frame (see IStorageManager.integrateStoreWrites).
+   * Returns how many were refreshed. An instance the replica has never
+   * read is left alone: nothing depends on it, and its first read serves
+   * it from the store anyway.
+   */
+  integrateStoreWrites(
+    writes: readonly { id: string; scopeKey: ScopeKey }[],
+  ): number {
+    const read = this.#storeReadThrough();
+    if (read === undefined || writes.length === 0) return 0;
+    const upserts: SessionSyncUpsert[] = [];
+    for (const write of writes) {
+      const id = write.id as URI;
+      if (!this.#docs.has(docKey(id, write.scopeKey))) continue;
+      const upsert = read({ id, scopeKey: write.scopeKey });
+      if (upsert !== undefined) upserts.push(upsert);
+    }
+    if (upserts.length === 0) return 0;
+    this.#integrateReadThrough(upserts, "integrate");
+    return upserts.length;
   }
 
   async sync(
@@ -4175,6 +4252,7 @@ export class SpaceReplica
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined {
+    this.#readThroughOnMiss(uri, scope, identity);
     return this.#visibleDocument(uri, scope, identity);
   }
 
@@ -4189,6 +4267,7 @@ export class SpaceReplica
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined {
+    this.#readThroughOnMiss(uri, scope, identity);
     const record = this.#docs.get(
       docKey(uri, this.instanceKey(scope, identity)),
     );
@@ -4615,6 +4694,16 @@ export class SpaceReplica
     entries: [WatchAddress, SchemaPathSelector | undefined][],
   ): Promise<Result<Unit, PullError>> {
     if (entries.length === 0) {
+      return { ok: {} };
+    }
+    // A store read-through answers the pull in place: the roots are read
+    // from the store, and no watch reaches the session — the documents a
+    // selector's schema would have crossed to are read on first access
+    // instead, and a later commit touching a held document reaches the
+    // replica through `integrateStoreWrites()`.
+    const readThrough = this.#storeReadThrough();
+    if (readThrough !== undefined) {
+      this.#pullFromStore(readThrough, entries);
       return { ok: {} };
     }
     // The owed session remount, consumed BEFORE the watch-selector tracker
@@ -7999,6 +8088,140 @@ export class SpaceReplica
       return undefined;
     }
     return transactionValueForVersion(visible.version);
+  }
+
+  /**
+   * Helper for the read entry points, which serves an instance this
+   * replica holds no record for from the store read-through, when one is
+   * installed. A record already present — confirmed content, a pending
+   * own write, or a store absence read earlier — is left as it is:
+   * `integrateStoreWrites()` is what moves a held record. A scope the
+   * identity cannot resolve keys by name, which no store address
+   * matches, so it is not served here either.
+   */
+  #readThroughOnMiss(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+    explicit?: ScopeKey,
+  ): void {
+    if (this.#readThroughDepth > 0) return;
+    const read = this.#storeReadThrough();
+    if (read === undefined) return;
+    const instance = this.instanceKey(scope, identity, explicit);
+    if (this.#docs.has(docKey(id, instance)) || !isScopeKey(instance)) {
+      return;
+    }
+    const upsert = read({ id, scopeKey: instance });
+    if (upsert === undefined) return;
+    this.#integrateReadThrough([upsert], "integrate");
+  }
+
+  /**
+   * Helper for `pull()`, which reads every entry's root from the store
+   * read-through and integrates the results as one frame. The frame is
+   * a `pull` when any root was not held before, the notification a first
+   * load owes its subscribers; otherwise an `integrate`, which notifies
+   * only what changed, as a covered selector's re-sync does.
+   */
+  #pullFromStore(
+    read: StoreReadThrough,
+    entries: [WatchAddress, SchemaPathSelector | undefined][],
+  ): void {
+    const upserts: SessionSyncUpsert[] = [];
+    let firstLoad = false;
+    for (const [address] of entries) {
+      const id = address.id as URI;
+      const instance = this.instanceKey(
+        address.scope,
+        undefined,
+        address.scopeKey,
+      );
+      if (!isScopeKey(instance)) continue;
+      if (!this.#docs.has(docKey(id, instance))) firstLoad = true;
+      const upsert = read({ id, scopeKey: instance });
+      if (upsert !== undefined) upserts.push(upsert);
+    }
+    if (upserts.length === 0) return;
+    this.#integrateReadThrough(upserts, firstLoad ? "pull" : "integrate");
+  }
+
+  /**
+   * Helper for the read-through paths, which integrates store reads as an
+   * inbound frame through the ordinary session-sync apply step, so the
+   * confirmed records, the delivered set, the shadow bookkeeping, and the
+   * change notifications all take exactly the shape a pushed frame gives
+   * them.
+   */
+  #integrateReadThrough(
+    upserts: SessionSyncUpsert[],
+    type: "pull" | "integrate",
+  ): void {
+    const read = this.#storeReadThrough();
+    const frame = read === undefined
+      ? upserts
+      : this.#withSchemaDependencies(read, upserts);
+    const seqs = frame.map((upsert) => upsert.seq);
+    this.#readThroughDepth += 1;
+    try {
+      this.#applySessionSync({
+        type: "sync",
+        fromSeq: Math.min(...seqs),
+        toSeq: Math.max(...seqs),
+        upserts: frame,
+        removes: [],
+      }, type);
+    } finally {
+      this.#readThroughDepth -= 1;
+    }
+  }
+
+  /**
+   * Helper for `#integrateReadThrough()`, which completes a frame of store
+   * reads with the schema documents they reference: every `cid:` hash in a
+   * document's link positions, and in a schema document's own refs, that
+   * this replica does not already hold verified is read from the store
+   * and added to the frame, to a fixpoint. The delivery guarantee the
+   * frame validator enforces is that a document's refs resolve within
+   * the delivered set; a session's server walks those references for
+   * it, and this is the same chase for a frame read directly.
+   */
+  #withSchemaDependencies(
+    read: StoreReadThrough,
+    upserts: SessionSyncUpsert[],
+  ): SessionSyncUpsert[] {
+    const frame = [...upserts];
+    const inFrame = new Set(frame.map((upsert) => upsert.id));
+    for (let index = 0; index < frame.length; index++) {
+      const upsert = frame[index]!;
+      if (upsert.deleted === true || !isObjectNotArray(upsert.doc)) continue;
+      const hashes = new Set<string>();
+      if (upsert.id.startsWith("cid:")) {
+        const value = (upsert.doc as { value?: unknown }).value;
+        if (isSubschema(value)) {
+          for (const hash of collectExternalSchemaRefHashes(value)) {
+            hashes.add(hash);
+          }
+        }
+      } else {
+        mapLinkSchemas(upsert.doc as FabricValue, (schema) => {
+          for (
+            const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
+          ) {
+            hashes.add(hash);
+          }
+          return schema;
+        });
+      }
+      for (const hash of hashes) {
+        const id = `cid:${hash}` as URI;
+        if (inFrame.has(id) || this.isSchemaDocPersisted(hash)) continue;
+        inFrame.add(id);
+        const dependency = read({ id, scopeKey: "space" as ScopeKey });
+        if (dependency !== undefined) frame.push(dependency);
+      }
+    }
+    return frame;
   }
 
   #getState(
