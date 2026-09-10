@@ -474,12 +474,6 @@ export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
  * Visitor which handles all containers by requesting that the engine iterate
  * over their contents. This class leaves all non-container `visit*()` methods
  * `abstract`.
- *
- * Because this class will cause `FabricContainer`s to be deconstructed into
- * `FabricValue`s -- including `string`s for `FabricPlainObject` keys and
- * general `FabricValue`s for array contents and both elements of map-like
- * mappings -- `FabricValue` must be compatible with the `Domain` of instances.
- * This is enforced by the class.
  */
 export abstract class ContainerIteratingVisitor<
   DomainExtra = never,
