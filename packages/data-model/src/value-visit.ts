@@ -54,7 +54,7 @@ export type IterateArrayForm<DomainExtra> = {
  * indicates the contents of the container as `[key, value]` pairs (similar to
  * the return value from `Map.entries()` or `Object.entries()`), and by
  * returning this, the engine will iterate over the contents, calling
- * `ValueVisitor.visitMapContentsItem()` on each key and value in the mappings.
+ * `ValueVisitor.visitMapContentsItem()` on each key-value pair in the mappings.
  *
  * **Note:** The visit calls per-mapping are specifically in key-then-value
  * order, and if the result of visiting a key is a `mainResult`, then that ends
