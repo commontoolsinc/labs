@@ -81,9 +81,15 @@ export type MainResultForm<ResultType> = {
  * iterate over container contents. By returning this form, a visitor indicates
  * that the value should be visited by the engine, recursively, such that it is
  * known by the engine to be an element of the container which is being iterated
- * over.
+ * over. The two `boolean` properties indicate which of the keys and/or values
+ * is to be recursed over. `doKey` is ignored in a context where there is no
+ * key.
  */
-export type RecurseForm = { type: "recurse" };
+export type RecurseForm = {
+  type: "recurse";
+  doKey: boolean;
+  doValue: boolean;
+};
 
 /**
  * A `replace` form. `value` is a value that is to be used in place of the value
@@ -104,13 +110,36 @@ export type ReplaceForm<DomainExtra> = {
 export type VisitSubtypeForm = { type: "visitSubtype" };
 
 /**
- * Standard instance of `RecurseForm`.
+ * Standard instance of `RecurseForm` for recursing over keys and values. This
+ * is only meaningful for recursing over mappings.
  *
  * The `DO_` prefix is intended to make it clear at use sites that it is telling
  * the visitor engine to "do" something.
  */
-export const DO_RECURSE: RecurseForm = Object.freeze(
-  { type: "recurse" } as const,
+export const DO_RECURSE_KEY_VALUE: RecurseForm = Object.freeze(
+  { type: "recurse", doKey: true, doValue: true } as const,
+);
+
+/**
+ * Standard instance of `RecurseForm` for recursing over keys only. This is only
+ * meaningful for recursing over mappings.
+ *
+ * The `DO_` prefix is intended to make it clear at use sites that it is telling
+ * the visitor engine to "do" something.
+ */
+export const DO_RECURSE_KEY: RecurseForm = Object.freeze(
+  { type: "recurse", doKey: true, doValue: false } as const,
+);
+
+/**
+ * Standard instance of `RecurseForm` for recursing over values only. This
+ * includes array elements and mapping values.
+ *
+ * The `DO_` prefix is intended to make it clear at use sites that it is telling
+ * the visitor engine to "do" something.
+ */
+export const DO_RECURSE_VALUE: RecurseForm = Object.freeze(
+  { type: "recurse", doKey: false, doValue: true } as const,
 );
 
 /**
@@ -700,9 +729,11 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
               return result;
             }
             case "recurse": {
-              const recurseResult = this.#visitValue(item);
-              if (recurseResult?.type === "mainResult") {
-                return recurseResult;
+              if (result.doValue) {
+                const recurseResult = this.#visitValue(item);
+                if (recurseResult?.type === "mainResult") {
+                  return recurseResult;
+                }
               }
             }
           }
@@ -737,14 +768,18 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
               return result;
             }
             case "recurse": {
-              const keyResult = this.#visitValue(key);
-              if (keyResult?.type === "mainResult") {
-                return keyResult;
+              if (result.doKey) {
+                const keyResult = this.#visitValue(key);
+                if (keyResult?.type === "mainResult") {
+                  return keyResult;
+                }
               }
 
-              const itemResult = this.#visitValue(item);
-              if (itemResult?.type === "mainResult") {
-                return itemResult;
+              if (result.doValue) {
+                const itemResult = this.#visitValue(item);
+                if (itemResult?.type === "mainResult") {
+                  return itemResult;
+                }
               }
             }
           }
