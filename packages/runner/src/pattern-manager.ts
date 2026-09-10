@@ -34,6 +34,7 @@ import {
   ROOT_LINK_SPECIFIER,
   type SourceDoc,
   sourceDocKey,
+  stageModuleDelegations,
   WRITE_TARGET_EDGE_SYNC_SCHEMA,
   writeSourceAndCompiledDocs,
   writeSourceDocs,
@@ -93,6 +94,21 @@ export type CompileCacheWriter = (
   moduleDelegations?: ModuleDelegationMap,
   delegated?: WritebackDelegation,
 ) => Promise<void>;
+
+declare const preparedSourceUpdateBrand: unique symbol;
+
+/** Verified, operation-local authority for an atomic source transition. */
+export interface PreparedSourceUpdate {
+  readonly [preparedSourceUpdateBrand]: true;
+}
+
+type SourceUpdatePreparation = {
+  space: MemorySpace;
+  previousEntryIdentity: string;
+  entryIdentity: string;
+  runtimeVersion: string | undefined;
+  delegations: ModuleDelegationMap;
+};
 
 const logger = getLogger("pattern-manager");
 
@@ -405,6 +421,14 @@ function programCompilationKey(
 
 export class PatternManager {
   #runtime: Runtime;
+
+  readonly #sourceUpdates = new WeakMap<
+    PreparedSourceUpdate,
+    SourceUpdatePreparation
+  >();
+
+  /** Cold previews whose next ordinary load must repair the durable cache. */
+  readonly #unpersistedPatternRecoveries = new Set<string>();
 
   /**
    * Maps each storage slot written during this `PatternManager` session to its
@@ -782,10 +806,6 @@ export class PatternManager {
       opts: { runtimeVersion: string },
       moduleDelegations?: ModuleDelegationMap,
     ): Promise<boolean>;
-    loadPreviousSourceClosure(
-      space: MemorySpace,
-      entryIdentity: string,
-    ): Promise<Map<string, SourceDoc>>;
     persistCompileCacheTracked(
       space: MemorySpace,
       modules: CacheableModule[],
@@ -837,8 +857,6 @@ export class PatternManager {
           opts,
           moduleDelegations,
         ),
-      loadPreviousSourceClosure: (space, entryIdentity) =>
-        this.#loadPreviousSourceClosure(space, entryIdentity),
       persistCompileCacheTracked: (
         space,
         modules,
@@ -1512,28 +1530,107 @@ export class PatternManager {
     }
   }
 
-  async #loadPreviousSourceClosure(
+  /**
+   * Derive proposed authority from two verified durable source closures. The
+   * proposal belongs to this update and remains absent from ordinary transactions.
+   */
+  async prepareSourceUpdate(
     space: MemorySpace,
+    previousEntryIdentity: string,
     entryIdentity: string,
-  ): Promise<Map<string, SourceDoc>> {
+  ): Promise<PreparedSourceUpdate> {
     const tx = this.#runtime.edit();
     try {
-      const closure = await loadVerifiedSourceClosure(
+      const previous = await loadVerifiedSourceClosure(
+        this.#runtime,
+        space,
+        previousEntryIdentity,
+        tx,
+      );
+      const candidate = await loadVerifiedSourceClosure(
         this.#runtime,
         space,
         entryIdentity,
         tx,
       );
-      if (!closure?.has(entryIdentity)) {
+      if (
+        !previous?.has(previousEntryIdentity) || !candidate?.has(entryIdentity)
+      ) {
         throw new Error(
-          `cannot authorize module update from ${entryIdentity}: ` +
-            "verified source closure is unavailable",
+          "cannot authorize source update without verified source closures",
         );
       }
-      return closure;
+      const runtimeVersion = moduleByteCacheRuntimeVersion(
+        await getCompileCacheRuntimeVersion(),
+        { patternCoverage: this.#patternCoverageFor() !== undefined },
+      );
+      const prepared = Object.freeze({}) as PreparedSourceUpdate;
+      this.#sourceUpdates.set(prepared, {
+        space,
+        previousEntryIdentity,
+        entryIdentity,
+        runtimeVersion,
+        delegations: deriveModuleDelegations(
+          previous,
+          [...candidate].map(([identity, doc]) => ({
+            identity,
+            filename: doc.filename,
+          })),
+        ),
+      });
+      return prepared;
     } finally {
-      tx.abort?.("setsrc predecessor source load complete");
+      tx.abort("source update preparation complete");
     }
+  }
+
+  /** Verified proposed authority used when pinning the setup transaction. */
+  sourceUpdateDelegations(prepared: PreparedSourceUpdate): {
+    space: MemorySpace;
+    delegations: ModuleDelegationMap;
+  } {
+    const proposal = this.#sourceUpdates.get(prepared);
+    if (proposal === undefined) {
+      throw new Error("unrecognized source update preparation");
+    }
+    return {
+      space: proposal.space,
+      delegations: new Map(
+        [...proposal.delegations].map((
+          [identity, predecessors],
+        ) => [identity, new Set(predecessors)]),
+      ),
+    };
+  }
+
+  /** Stage the proposal with its matching source transition and register on commit. */
+  stageSourceUpdate(
+    prepared: PreparedSourceUpdate,
+    space: MemorySpace,
+    previousEntryIdentity: string,
+    entryIdentity: string,
+    tx: IExtendedStorageTransaction,
+  ): void {
+    const proposal = this.#sourceUpdates.get(prepared);
+    if (
+      proposal === undefined || proposal.space !== space ||
+      proposal.previousEntryIdentity !== previousEntryIdentity ||
+      proposal.entryIdentity !== entryIdentity
+    ) {
+      throw new Error(
+        "source update preparation does not match the transition",
+      );
+    }
+    const committed = stageModuleDelegations(
+      this.#runtime,
+      space,
+      proposal.delegations,
+      proposal.runtimeVersion,
+      tx,
+    );
+    tx.addVerdictCallback((_tx, result) => {
+      if (result.ok) this.#runtime.registerModuleDelegations(space, committed);
+    });
   }
 
   async compilePattern(
@@ -1549,10 +1646,8 @@ export class PatternManager {
       // compile (warm-by-identity or cold). Lets the caller persist it (e.g.
       // into pattern metadata) so subsequent loads can take the fast path.
       onEntryIdentity?: (entryIdentity: string) => void;
-      // `piece setsrc` predecessor. Its verified recursive source closure is
-      // matched to the emitted module set by canonical filename, producing the
-      // per-module update-authority delegations persisted with the successor.
-      previousEntryIdentity?: string;
+      // Preview compilation reuses verified bytes without publishing artifacts.
+      persist?: boolean;
     },
   ): Promise<Pattern> {
     let program: RuntimeProgram;
@@ -1672,8 +1767,9 @@ export class PatternManager {
    * ESM compile + evaluate backed by the content-addressed cell cache in
    * `cacheCtx.space`. On a warm full hit the per-module compiled bodies are
    * reused (no TypeScript compile / transformer pipeline / SES re-verify); on a
-   * miss the program is compiled and its modules are written back (source +
-   * integrity-stamped compiled docs) on a fresh transaction before returning.
+   * miss the program is compiled. Ordinary compilation persists source and
+   * integrity-stamped compiled docs before returning; `persist: false` prepares
+   * an in-memory candidate whose artifacts require saving before use in storage.
    */
   async #compileViaCellCache(
     program: RuntimeProgram,
@@ -1682,17 +1778,11 @@ export class PatternManager {
       tx?: IExtendedStorageTransaction;
       knownEntryIdentity?: string;
       onEntryIdentity?: (entryIdentity: string) => void;
-      previousEntryIdentity?: string;
+      persist?: boolean;
     },
   ): Promise<Pattern> {
     const harness = this.#runtime.harness;
     const { space } = cacheCtx;
-    const previousSourceDocs = cacheCtx.previousEntryIdentity === undefined
-      ? undefined
-      : await this.#loadPreviousSourceClosure(
-        space,
-        cacheCtx.previousEntryIdentity,
-      );
     const patternCoverage = this.#patternCoverageFor();
     // The instrumented compile is a distinct cached variant: the coverage suffix
     // keeps its compiled bytes from colliding with an ordinary compile of the
@@ -1713,14 +1803,13 @@ export class PatternManager {
             ...(patternCoverage ? { patternCoverage } : {}),
           },
         );
-      const moduleDelegations = previousSourceDocs === undefined
-        ? new Map<string, ReadonlySet<string>>()
-        : deriveModuleDelegations(previousSourceDocs, modules);
-      await this.#persistSourceCacheTracked(
+      if (cacheCtx.persist !== false) {
+        await this.#persistSourceCacheTracked(space, modules, entryIdentity);
+      }
+      this.#recordDeferredCacheRepair(
         space,
         modules,
-        entryIdentity,
-        moduleDelegations,
+        cacheCtx.persist === false,
       );
       cacheCtx.onEntryIdentity?.(entryIdentity);
       // Yield ahead of the synchronous SES evaluation (see compilePattern).
@@ -1741,7 +1830,7 @@ export class PatternManager {
     // entirely. Falls through to the compile path on any miss/incompleteness
     // (evaluateCachedModules re-verifies the graph, so an incomplete closure
     // throws and we recompile).
-    if (cacheCtx.knownEntryIdentity && previousSourceDocs === undefined) {
+    if (cacheCtx.knownEntryIdentity) {
       const byIdentity = await this.#tryWarmLoadByIdentity(
         cacheCtx.knownEntryIdentity,
         space,
@@ -1884,9 +1973,6 @@ export class PatternManager {
       readTx.abort?.("compile-cache read complete");
     }
     const { id, graph, mainSpecifier, entryIdentity, modules } = compiled;
-    const moduleDelegations = previousSourceDocs === undefined
-      ? new Map<string, ReadonlySet<string>>()
-      : deriveModuleDelegations(previousSourceDocs, modules);
     cacheCtx.onEntryIdentity?.(entryIdentity);
 
     // Populate the process byte cache with this program's module bytes (freshly
@@ -1913,12 +1999,11 @@ export class PatternManager {
     } else {
       this.#esmCacheStats[compiledBodiesServed ? "hits" : "misses"]++;
     }
-    if (!warmHit || moduleDelegations.size > 0) {
+    if (cacheCtx.persist !== false && !warmHit) {
       // Persist the module set into this space. AWAITED (identity E4): refs-only
-      // pattern JSON makes artifact persistence part of the compilation
-      // contract — a cell can only carry a `$patternRef` after compilePattern
-      // returned, so completing the write here guarantees every persisted ref
-      // has a durable closure behind it (no race against session end). This
+      // pattern JSON makes artifact persistence part of ordinary compilation.
+      // Preview callers explicitly skip persistence and cannot use the returned
+      // artifact as a durable source until an ordinary compile saves it. This
       // covers BOTH a cold compile AND a process-byte-cache hit: in the latter
       // the transform-and-emit step was skipped, but this space's persisted
       // cache may be empty (e.g. a fresh space), and the by-identity reload path
@@ -1930,11 +2015,28 @@ export class PatternManager {
         modules,
         entryIdentity,
         cacheOpts,
-        moduleDelegations,
       );
     }
 
+    this.#recordDeferredCacheRepair(
+      space,
+      modules,
+      cacheCtx.persist === false && !warmHit,
+    );
     return this.#patternFromEvaluation(result, program, entryIdentity);
+  }
+
+  /** Track every indexed module whose preview deferred a durable cache repair. */
+  #recordDeferredCacheRepair(
+    space: MemorySpace,
+    modules: readonly Pick<CacheableModule, "identity">[],
+    deferred: boolean,
+  ): void {
+    for (const { identity } of modules) {
+      const key = compileCacheRecoveryKey(space, identity);
+      if (deferred) this.#unpersistedPatternRecoveries.add(key);
+      else this.#unpersistedPatternRecoveries.delete(key);
+    }
   }
 
   /**
@@ -2073,11 +2175,13 @@ export class PatternManager {
     entryIdentity: string,
     symbol: string,
     space: MemorySpace,
+    options: { repairCache?: boolean } = {},
   ): Promise<Pattern | undefined> {
     const recoveryKey = compileCacheRecoveryKey(space, entryIdentity);
-    const retryFailedRecovery = this.#failedCompileCacheRecoveries.has(
-      recoveryKey,
-    );
+    const retryFailedRecovery =
+      this.#failedCompileCacheRecoveries.has(recoveryKey) ||
+      (options.repairCache !== false &&
+        this.#unpersistedPatternRecoveries.has(recoveryKey));
     // In-memory artifact index: the pattern may already be live this session —
     // an evaluated ESM artifact, or a hand-built pattern given a synthetic
     // pointer via `associatePatternIdentity`. This path is independent of the
@@ -2130,14 +2234,16 @@ export class PatternManager {
       return undefined;
     }
     // Single-flight the expensive tail (see `#inProgressByIdentityLoads`).
-    const pending = this.#inProgressByIdentityLoads.get(key);
+    const loadKey = options.repairCache === false ? `${key}\0preview` : key;
+    const pending = this.#inProgressByIdentityLoads.get(loadKey);
     if (pending === undefined) {
       const load = this.#loadPatternByIdentityFromStorage(
         entryIdentity,
         symbol,
         space,
-      ).finally(() => this.#inProgressByIdentityLoads.delete(key));
-      this.#inProgressByIdentityLoads.set(key, load);
+        options,
+      ).finally(() => this.#inProgressByIdentityLoads.delete(loadKey));
+      this.#inProgressByIdentityLoads.set(loadKey, load);
       return await load;
     }
     // Follower: the leader's evaluation indexes every symbol of the closure,
@@ -2151,7 +2257,12 @@ export class PatternManager {
     // attempt — the same load it would have run without dedup. Each pass
     // consumes a settled leader, so the recursion is bounded by the number of
     // concurrent callers.
-    return await this.loadPatternByIdentity(entryIdentity, symbol, space);
+    return await this.loadPatternByIdentity(
+      entryIdentity,
+      symbol,
+      space,
+      options,
+    );
   }
 
   /**
@@ -2163,6 +2274,7 @@ export class PatternManager {
     entryIdentity: string,
     symbol: string,
     space: MemorySpace,
+    options: { repairCache?: boolean } = {},
   ): Promise<Pattern | undefined> {
     const harness = this.#runtime.harness;
     const patternCoverage = this.#patternCoverageFor();
@@ -2174,7 +2286,13 @@ export class PatternManager {
       { patternCoverage: patternCoverage !== undefined },
     );
     if (runtimeVersion === undefined) {
-      return await this.#tryColdLoadByIdentity(entryIdentity, symbol, space);
+      return await this.#tryColdLoadByIdentity(
+        entryIdentity,
+        symbol,
+        space,
+        undefined,
+        options,
+      );
     }
     const cacheOpts = { runtimeVersion };
 
@@ -2206,6 +2324,7 @@ export class PatternManager {
         symbol,
         space,
         cacheOpts,
+        options,
       );
     }
 
@@ -2264,6 +2383,9 @@ export class PatternManager {
       this.#failedCompileCacheRecoveries.delete(
         compileCacheRecoveryKey(space, entryIdentity),
       );
+      this.#unpersistedPatternRecoveries.delete(
+        compileCacheRecoveryKey(space, entryIdentity),
+      );
       this.#esmCacheStats.byIdentityHits++;
       return pattern;
     } catch (error) {
@@ -2277,6 +2399,7 @@ export class PatternManager {
         symbol,
         space,
         cacheOpts,
+        options,
       );
     }
   }
@@ -2311,6 +2434,7 @@ export class PatternManager {
     symbol: string,
     space: MemorySpace,
     cacheOpts?: { runtimeVersion: string },
+    options: { repairCache?: boolean } = {},
   ): Promise<Pattern | undefined> {
     const harness = this.#runtime.harness;
     const readTx = this.#runtime.edit();
@@ -2391,7 +2515,14 @@ export class PatternManager {
         },
       );
       const pattern = this.#patternFromMain(result, symbol, entryIdentity);
-      if (cacheOpts !== undefined) {
+      if (cacheOpts === undefined || options.repairCache === false) {
+        this.#recordDeferredCacheRepair(
+          space,
+          compiled.modules,
+          cacheOpts !== undefined,
+        );
+      }
+      if (cacheOpts !== undefined && options.repairCache !== false) {
         const recoveryKey = compileCacheRecoveryKey(space, entryIdentity);
         const repair = this.#persistCompileCacheTracked(
           space,
@@ -2401,6 +2532,7 @@ export class PatternManager {
           moduleDelegations,
         ).then(() => {
           this.#failedCompileCacheRecoveries.delete(recoveryKey);
+          this.#recordDeferredCacheRepair(space, compiled.modules, false);
         }).catch((error) => {
           this.#failedCompileCacheRecoveries.add(recoveryKey);
           logger.warn("load-pattern-by-identity-writeback-failed", () => [

@@ -47,6 +47,14 @@ These string-level steps run in `transformCfDirective()`
 (`src/core/cf-helpers.ts`) before any AST transformer, because symbol binding
 happens before the transformer pipeline runs.
 
+TypeScript's subsequent JSX emit uses `__cfHelpers.h` for elements and
+`__cfHelpers.h.fragment` for fragment tags
+(`packages/js-compiler/typescript/options.ts`). Both resolve through the
+reserved helper binding, so authored locals and parameters named `h` retain
+their ordinary meaning inside JSX-producing scopes. The forwarding `h()`
+function remains available for explicit calls and keeps the helper import
+live during binding.
+
 Legacy stored-envelope compatibility is deliberately separate from
 `transformCfDirective()` (#4574, CT-1838):
 
