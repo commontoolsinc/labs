@@ -1,11 +1,11 @@
 {
-  "updated": "2026-09-10T18:26:50.106029+00:00",
+  "updated": "2026-09-10T20:12:08.881332+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7241",
-  "head": "3839d504e1",
-  "activity": "Three real CLI budget demos are visible below. A3 runtime review findings are fixed; broader tests are running. #7241 coverage repair is verified locally. Publishing that checkpoint awaits approval.",
-  "review": "Automatic approval review rejected pushing the coverage fix and dashboard changes to commontoolsinc/labs without explicit authorization for that payload and destination. Q5 requests it. Local implementation continues. #7241 also retains an open Cubic fan-out finding despite its tested fix.",
+  "head": "fe1434a27d",
+  "activity": "Publishing the approved coverage fix and five-demo dashboard checkpoint to PR #7241. A3 is locally committed as f37d25f6d6; A4 worker accounting control is locally committed as bbd0ac8907. The on-screen scaling benchmark remains in progress.",
+  "review": "Push authorized by Mike. Latest-revision CI and Cubic review must complete before merging; the earlier Cubic fan-out finding remains open despite its tested fix.",
   "checks": [
     "Current fixes: runner accounting regression 20 steps passed",
     "Current fixes: CLI render-demand regression 13 steps passed",
@@ -21,7 +21,16 @@
     "#7241 coverage repair: initialization/action/assertion/settle report test passes; missing line verified executed twice",
     "A3 API package: 27 tests / five steps pass",
     "A3 full CLI package: 1,819 pass; the same two pre-existing color-mode failures",
-    "A3 runtime: 26 focused accounting steps pass; CLI budget harness: eight cases pass"
+    "A3 runtime: 26 focused accounting steps pass; CLI budget harness: eight cases pass",
+    "A3 repository type check passed all 46 groups before the latest CLI review fixes; focused checks cover those fixes",
+    "A3 generated public types are current; static package tests pass, including browser tests",
+    "A3 CLI review: uncapped settlement, multi-user override rejection, and functional error preservation fixed; ten harness cases pass",
+    "Final A3 runner suite: 1,403 passed / 8,678 steps / zero failures",
+    "Final A3 CLI suite: 1,819 passed / 2,899 steps; same two baseline color-mode failures",
+    "Final A3 repository type checks, formatting, lint, 597 documentation blocks, package-cycle and conflict checks pass",
+    "Final A3 antagonistic review: no outstanding blockers after five substantive findings were fixed",
+    "A4 worker diagnostic control: enable/disable verified through client request routing against a real runtime",
+    "A4 runtime-client full suite: 30 tests / 650 steps passed, zero failures"
   ],
   "stages": [
     {
@@ -45,14 +54,14 @@
     {
       "id": "A3",
       "title": "Read budgets and whole-step coverage",
-      "status": "active",
-      "detail": "Working CLI budgets and three recorded demos. Antagonistic runtime findings fixed; 26 accounting steps and eight budget harness cases pass. Full runner validation and remaining contract checks in progress."
+      "status": "review",
+      "detail": "Locally verified and committed as f37d25f6d6. Full runner: 1,403 tests / 8,678 steps pass. Twelve budget harness cases pass. Publication and Cubic review remain pending."
     },
     {
       "id": "A4",
       "title": "Read-side benchmark",
-      "status": "todo",
-      "detail": "Measure a vote with its tally demanded across collection sizes."
+      "status": "active",
+      "detail": "Worker accounting control implemented in isolated worktree; full runtime-client suite passes 30 tests / 650 steps. On-screen vote workload and scaling benchmark remain to build."
     },
     {
       "id": "A5",
@@ -189,9 +198,9 @@
     {
       "id": "Q5",
       "title": "Push coverage fix and dashboard checkpoint to GitHub?",
-      "status": "Approval pending",
-      "proposal": "Approve pushing the validated local checkpoint to the existing branch for PR #7241 in commontoolsinc/labs. Automatic approval review rejected the push for missing explicit payload/destination authorization.",
-      "blocks": "Publishing this checkpoint; local implementation and tests continue."
+      "status": "Approved",
+      "proposal": "Mike authorized pushing the coverage fix and dashboard checkpoint to the existing PR #7241 branch in commontoolsinc/labs.",
+      "blocks": "None."
     }
   ],
   "milestones": [
@@ -202,8 +211,8 @@
     },
     {
       "title": "See budget failures",
-      "state": "Planned \u00b7 A3",
-      "detail": "Demonstrate an inexpensive edit passing and an expensive computation failing with a useful diagnostic."
+      "state": "Available \u00b7 A3",
+      "detail": "Five real CLI recordings below show passing budgets, initialization failure, many cheap derivations exceeding a total, and one expensive body exceeding its per-run limit."
     },
     {
       "title": "See remote updates",
