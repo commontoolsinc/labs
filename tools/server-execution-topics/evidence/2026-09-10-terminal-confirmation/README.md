@@ -59,10 +59,11 @@ cancelled settle span fails the existing serving-loop timing-count assertion.
 The before and after controls pass. The timing test observes the actual logger
 completion event after teardown; it retains all original count assertions.
 
-`final-source.json` records the final source hashes. Its only difference from
-the recorded candidate patch is an explicit `undefined` initializer in the
-existing timing test, required by lint; production bytes match the pair and both
-baked builds.
+`final-source.json` identifies the reviewed source. `candidate.patch` and the
+original pair remain a record of the initial implementation. The review
+follow-up adds tenure cancellation while a structure loader is awaiting pattern
+resolution; its separate patch and red/green outputs preserve that distinction.
+The original baked runs do not validate this additional behavior.
 
 ## Baked integration controls
 
@@ -99,3 +100,39 @@ validation logs, and the campaign ledger are retained under
 portable files here replay the final controls without that machine. Quiet
 three-pair latency verification remains outstanding. The separate historical
 #7193 loader change has not had its marginal performance effect isolated.
+
+## Replay helper contract
+
+`recorded-source/run-arm.ts.txt` preserves the helper that captured the original
+integration runs. Those OFF workloads explicitly set the client flag to `false`;
+they establish OFF behavior, but do not establish client default resolution. The
+top-level replay helper selects the lane's exact environment for both setup and
+workload children with `clearEnv`, so a parent process's flag cannot leak into
+the default lane. It rejects failed HTTP responses before reading metadata or
+statistics. Full child environments are never written to manifests; only the
+selected workload settings are recorded.
+
+`integration-builds.json` uses paths relative to the checkout and retains the
+original capture locations in `recorded-source/integration-builds.json`.
+Generated binaries remain external artifacts. Each mutation row carries its
+expected exit; the named assertion in its full output establishes why it failed.
+
+The review controls live in `review-followup/`. Apply `review-followup.patch` to
+its recorded base for the cancellation regression. For the red arm, apply only
+the test-file hunk; the active-tenure case passes and the parked case must fail
+because `runtime.start()` was called once. The green arm applies the whole
+patch. Both use real compiled, durably stored patterns and the fake clock. The
+existing successor-tenure and sync-failure controls remain enabled.
+
+Run `python3 review-followup/verify-replay.py.txt . OUTPUT.json` from this
+evidence directory to replay the 16 source-fragment controls. They execute real
+child processes to check environment inheritance and synthetic HTTP responses to
+check statistics rejection. They are harness controls, not pattern workloads.
+
+The follow-up baked OFF/ON runs each pass seven suites and 27 steps using the
+cancellation patch. Their matrix records deliberately conflicting parent flags:
+ON for the default OFF run and OFF for the opposite ON run. Child posture
+remains correct. The default client flag is absent; the opposite flag is `true`.
+These fresh-store correctness runs are ineligible for latency claims. Build
+commands, source hashes and binary hashes are in
+`review-followup/integration-builds.json`.

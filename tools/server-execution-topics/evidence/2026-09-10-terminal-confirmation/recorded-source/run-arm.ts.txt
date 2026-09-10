@@ -37,26 +37,6 @@ const lane = serverExecutionCiLane(role);
 const capability: CapabilityId = role === "default"
   ? "toolshed-baked"
   : "toolshed-baked-opposite";
-/** Builds a complete child environment with the lane's exact flag posture. */
-function executionEnvironment(
-  overrides: Record<string, string> = {},
-): Record<string, string> {
-  const env = { ...Deno.env.toObject(), ...overrides };
-  if (lane.experimentalValue === undefined) {
-    delete env.EXPERIMENTAL_SERVER_EXECUTION;
-  } else env.EXPERIMENTAL_SERVER_EXECUTION = lane.experimentalValue;
-  return env;
-}
-
-/** Reads an endpoint only when its HTTP response succeeded. */
-async function readJson(url: string): Promise<Record<string, unknown>> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Fetching ${url} failed with status ${response.status}.`);
-  }
-  return await response.json();
-}
-
 const commands: { command: string; args: readonly string[]; cwd: string }[] =
   [];
 
@@ -70,8 +50,7 @@ const exec: Exec = async (command, commandArgs, options = {}) => {
   const result = await new Deno.Command(command, {
     args: [...commandArgs],
     cwd,
-    env: executionEnvironment(options.env),
-    clearEnv: true,
+    env: options.env,
     stdout: "piped",
     stderr: "piped",
   }).output();
@@ -110,9 +89,7 @@ const flags = Object.fromEntries(
     ["CF_TIMING_MEASURES", "CF_MEMORY_FRAME_LOG", "CF_PROF_CPU"].includes(key)
   ),
 );
-if (lane.experimentalValue === undefined) {
-  delete flags.EXPERIMENTAL_SERVER_EXECUTION;
-} else flags.EXPERIMENTAL_SERVER_EXECUTION = lane.experimentalValue;
+flags.EXPERIMENTAL_SERVER_EXECUTION = String(lane.enabled);
 const cpuModel = Deno.build.os === "darwin"
   ? (await exec("/usr/sbin/sysctl", ["-n", "machdep.cpu.brand_string"])).trim()
   : Deno.build.os === "linux"
@@ -181,8 +158,9 @@ try {
     exec,
   });
   const endpoint = opened.envFor([capability]);
-  const meta = await readJson(`${endpoint.API_URL}/api/meta`);
-  const before = await readJson(`${endpoint.API_URL}/api/health/stats`);
+  const meta = await (await fetch(`${endpoint.API_URL}/api/meta`)).json();
+  const before = await (await fetch(`${endpoint.API_URL}/api/health/stats`))
+    .json();
   assertServerExecutionCiPosture(role, meta, before);
   if (meta.gitSha !== head) {
     throw new Error(
@@ -219,8 +197,7 @@ try {
   const result = await new Deno.Command(Deno.execPath(), {
     args,
     cwd: root,
-    env: executionEnvironment(env),
-    clearEnv: true,
+    env,
     stdout: "piped",
     stderr: "piped",
   }).output();
@@ -229,7 +206,8 @@ try {
   sampleLoad();
   await Deno.writeFile(join(runDir, "workload.stdout"), result.stdout);
   await Deno.writeFile(join(runDir, "workload.stderr"), result.stderr);
-  const after = await readJson(`${endpoint.API_URL}/api/health/stats`);
+  const after = await (await fetch(`${endpoint.API_URL}/api/health/stats`))
+    .json();
   await Deno.writeTextFile(
     join(runDir, "stats-after.json"),
     JSON.stringify(after),

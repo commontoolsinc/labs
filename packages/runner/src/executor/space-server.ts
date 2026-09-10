@@ -542,6 +542,9 @@ export class SpaceServer implements TransactionSealDestination {
    * its wave keeps running and later cycles join it. */
   #structureLoadPass: Promise<void> | undefined;
 
+  /** Cancellation boundary for structure work owned by this tenure. */
+  readonly #structureLoadAbort = new AbortController();
+
   /** Documents changed by admissions during the active structure attempt. */
   #structureLoadChangedDocs: Set<string> | undefined;
 
@@ -4325,7 +4328,7 @@ export class SpaceServer implements TransactionSealDestination {
       id: root.id as never,
       scope: scope as never,
       path: [],
-    }, { propagateErrors: true });
+    }, { propagateErrors: true, signal: this.#structureLoadAbort.signal });
     if (
       verdict.started || scope === "space" ||
       verdict.reason !== "no-pattern-meta"
@@ -4337,7 +4340,7 @@ export class SpaceServer implements TransactionSealDestination {
       id: root.id as never,
       scope: "space",
       path: [],
-    }, { propagateErrors: true });
+    }, { propagateErrors: true, signal: this.#structureLoadAbort.signal });
     // Merge observed docs: the re-arm must watch both instances' reads.
     for (const id of verdict.observedDocIds) {
       if (!spaceVerdict.observedDocIds.includes(id)) {
@@ -5342,6 +5345,7 @@ export class SpaceServer implements TransactionSealDestination {
     if (!this.#active) return;
     this.#active = false;
     this.#parkRequested = true;
+    this.#structureLoadAbort.abort();
     this.#options.stats.activeSpaces = Math.max(
       0,
       this.#options.stats.activeSpaces - 1,

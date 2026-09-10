@@ -1369,7 +1369,9 @@ input. A shadowed retry waits for the replica's shadow-flip signal, allowing
 the wave to commit the sealed writes that make its input visible. The load pass
 runs under §3's flush deadline and is single-flighted across cycles of one
 tenure. Demand departure drops terminal decisions; a new tenure starts its own
-pass, and completion from a parked tenure cannot publish a terminal decision.
+pass. Park cancels structure loading at its next asynchronous boundary, before
+any subsequent piece start. Completion from a parked tenure cannot publish a
+terminal decision; park does not wait for unresolved pattern loading.
 `watermarkClamped` counts
 non-exhausted cycles whose foreign-write shadow floor is below an input batch
 head above W. An event-visibility floor can constrain the same cycle, so the

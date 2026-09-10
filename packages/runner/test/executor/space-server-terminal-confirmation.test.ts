@@ -187,6 +187,93 @@ describe("SpaceServer", () => {
         }
       });
 
+      for (const parkDuringLoad of [false, true]) {
+        it(`${parkDuringLoad ? "cancels" : "starts"} a resolved piece ${parkDuringLoad ? "after park" : "during its tenure"}`, async () => {
+          const fixture = await openFixture();
+          const publications: Promise<void>[] = [];
+          server.setServerExecutionObserver({
+            commitAdmitted: () => publications.push(server.idle()),
+          });
+          const creatorManager = EmulatedStorageManager.connectTo(server, {
+            as: owner,
+          });
+          const creator = new Runtime({
+            apiUrl: new URL(import.meta.url),
+            storageManager: creatorManager,
+            experimental: { serverExecution: true },
+          });
+          const release = Promise.withResolvers<void>();
+          try {
+            const compiled = await creator.patternManager.compilePattern({
+              main: "/main.tsx",
+              files: [{
+                name: "/main.tsx",
+                contents:
+                  "import { pattern } from 'commonfabric'; export default pattern(() => ({ total: 10 }));",
+              }],
+            }, { space });
+            const root = creator.getCellFromLink({
+              space,
+              id: ids[2],
+              scope: "space",
+              path: [],
+            });
+            await settle(root.sync());
+            const tx = creator.edit();
+            creator.run(tx, compiled, {}, root);
+            expect((await settle(tx.commit())).error).toBeUndefined();
+            await settle(creator.storageManager.synced());
+            await Promise.all(publications);
+            server.setServerExecutionObserver({
+              commitAdmitted: (notice) => fixture.serving.enqueueCommit(notice),
+            });
+            const ref = creator.patternManager.getArtifactEntryRef(compiled)!;
+            const load = fixture.runtime.patternManager.loadPatternByIdentity
+              .bind(fixture.runtime.patternManager);
+            let held = 0;
+            fixture.runtime.patternManager.loadPatternByIdentity = async (
+              ...args
+            ) => {
+              const pattern = await load(...args);
+              if (args[0] === ref.identity && held === 0) {
+                expect(pattern).toBeDefined();
+                held++;
+                await release.promise;
+              }
+              return pattern;
+            };
+            const start = fixture.runtime.start.bind(fixture.runtime);
+            let starts = 0;
+            fixture.runtime.start = async (cell) => {
+              starts++;
+              return await start(cell);
+            };
+            expect(await settle(fixture.serving.activate())).toBe(true);
+            expect(held).toBe(1);
+            expect(starts).toBe(0);
+            if (parkDuringLoad) {
+              await settle(fixture.serving.park("pattern-resolution"));
+            }
+            release.resolve();
+            await clock.settle();
+            expect(starts).toBe(parkDuringLoad ? 0 : 1);
+            const servingRoot = fixture.runtime.getCellFromLink({
+              space,
+              id: ids[2],
+              scope: "space",
+              path: [],
+            });
+            expect(fixture.runtime.runner.pieceGraphIsInstalled(servingRoot))
+              .toBe(!parkDuringLoad);
+            expect(fixture.stats.structureLoadFailures).toBe(0);
+          } finally {
+            release.resolve();
+            await settle(creator.dispose());
+            await settle(creatorManager.close());
+          }
+        });
+      }
+
       for (const scope of ["space", "user"] as const) {
         it(`confirms a cold ${scope} chain using only its traversed addresses`, async () => {
           const fixture = await openFixture(scope);
