@@ -64,7 +64,7 @@ Status legend:
 | 21 | Per-(stream,handler) FIFO with W4 backlog cap 256, last-wins collapse, chained onCommit | `scheduler/events.ts:272-321`, `scheduler/constants.ts:39` | README §3.8 (backpressure hook only) | GAP |
 | 22 | Event for a not-running piece: FIFO slot reserved, piece auto-started | `scheduler/events.ts:331-395`, `ensure-piece-running.ts:97-175` | serving-loop §1, §3 (demand-driven pull; the event is the demand) | RULED |
 | 23 | Preflight: `populateDependencies`, recompute dirty inputs on demand before dispatch, load-park (CT-1795) | `scheduler/events.ts:503-708` | serving-loop §3, events §2 (cited as the freshness rule) | COVERED |
-| 24 | `presyncInputs` await before dispatch | `scheduler/types.ts:60-68`, `scheduler/events.ts:907-917` | none (moot server-side) | CHANGED |
+| 24 | `presyncInputs` await before dispatch; guarded streams select the actor's implementation for preflight and recheck before execution | `scheduler/types.ts`, `scheduler/events.ts` | builtins §3 | COVERED |
 | 25 | Handler dispatch: immediate tx, `dispatchedEventId/Time`, commit not awaited | `scheduler/events.ts:929-949`, `1071-1086` | events §2; serving-loop §3d | CHANGED |
 | 26 | Exactly-once handling: create-only receipt cell keyed by durable event id, `receipt-exists` / `origin-committed` preconditions (`commitPreconditions` flag), receipt-race loser drops | `runner.ts:4759-4817`, cause `runner.ts:5168-5171`, race `scheduler/events.ts:1173-1189` | events §4 (eventWatermark) | CHANGED |
 | 27 | Speculation lineage: events/pieces launched by an uncommitted tx are dropped/stopped on origin failure; cross-space descendants park until origin commit | `scheduler/lineage.ts:18-126`, `scheduler/events.ts:717-737` | speculation §1-2 (client), serving-loop §3d (server) | CHANGED |
@@ -87,9 +87,9 @@ Status legend:
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
-| 37 | Lift/computed returning reactives: `patternFromFrame`, result-pattern cache keyed by result doc, changed pattern re-`run` into the same cell, unchanged is a no-op, stop on commit failure | `runner.ts:5027-5140` (`5061`, `5094-5120`) | none by name | GAP |
+| 37 | Lift/computed returning reactives: `patternFromFrame`, content-hash memo per result document and instance, changed pattern run into the same cell, scoped program groups shared by selecting instances | `runner.ts` (`#writeJavaScriptActionResult`, `#startScopedPrograms`) | builtins §3 | COVERED |
 | 38 | Handler returning reactives: result pattern run under the handler tx with receipt ownership; navigateTo-bearing results deferred to post-commit start | `runner.ts:4750-4923` (`4819-4847`), one-shot pull `runner.ts:4992-5025` | events §2 (consequences), builtins §3/§4 | GAP |
-| 39 | `compileAndRun`: async compile off the action, result piece via `runSynced`, `pieceCreatedCallback` | `builtins/compile-and-run.ts:31-266` (`211-261`) | builtins §3 | CHANGED |
+| 39 | `compileAndRun`: accepted outbox compilation, stamped readiness completion, child setup in a derivation, client observation and creation callback | `builtins/compile-and-run.ts` | builtins §3 | COVERED; OW28 owns acceptance validation |
 
 ### 1f. Pattern-source updates
 
@@ -337,9 +337,12 @@ store locality assumption broke — stop and check.
 **N37/N38 (result-as-pattern).** The runner instantiates pieces from
 *computation results*: any lift/handler returning reactives becomes a
 `patternFromFrame` pattern run into a deterministic result cell. For
-lifts, updates re-instantiate in place when the serialized pattern
-changes (`resultPatternCache` compare, `runner.ts:5094-5120`) —
-unchanged results are no-ops, and a failed commit stops the child.
+lifts, a canonical content hash of the flattened builder artifacts identifies
+the result pattern. `resultPatternCache` memoizes that hash per result document
+and resolved instance. A changed pattern runs into the same result cell;
+unchanged results reuse it. Scoped serving instances share a node group when
+they select the same program. Failed setup releases its own work without
+stopping another instance's child.
 For handlers, the child run is owned by the handler tx (receipt
 ownership, N26) and navigateTo-bearing results defer starting until
 the tx commits (`runner.ts:4826-4847`) so the target is durable.
@@ -352,23 +355,21 @@ no-children rule) — registrations are not writes
 (`runner.ts:4906-4908`); ids derive from cause so the speculative
 child converges with the authoritative one by identity, and
 speculation §2 now carries the lifecycle + retirement line; (b) the
-lift-result re-instantiate happens inside a served wave — its writes
-are wave writes, fine, but the JSON-stringify compare is the *memo*;
-name it so nobody adds a second one; (c) the navigateTo deferral
+lift-result setup happens inside a served wave, and its content-hash memo
+remains specific to the selecting instance; (c) the navigateTo deferral
 becomes moot under §3.7
 (intent lands in the wave's derived commit; the client enacts) —
 delete the deferral in the ON arm rather than porting it.
 
-**N39 (compileAndRun).** Matches builtins §3 (compile off the loop —
-today via floating promise `compile-and-run.ts:211-247`; v2 moves the
-async to the outbox). Two client hooks need placement:
-`pieceCreatedCallback` (`compile-and-run.ts:261`, `runtime.ts:630`)
-and the in-memory-only request dedupe (`previousCallHash`,
-`compile-and-run.ts:153-158` — unlike llm there is no durable
-requestHash today, so restart re-compiles; harmless but
-counter-visible). Recommended: derive "piece created" from data (the
-result cell), drop the callback server-side; adopt the §4 memo shape
-for the compile request.
+**N39 (compileAndRun).** The serving path follows builtins §3: the outbox
+compiles a detached program after the issuing contribution is accepted.
+Completion checks the instance's request marker and records readiness;
+a derivation stages child setup and the resolved marker together. Current
+source reads carry completion labels. Superseded completion releases its local
+issuance marker, allowing a withdrawn replacement to reissue. Pending requests
+recover through the target space's compile cache. Clients observe committed
+outcomes and invoke `pieceCreatedCallback` when the successful child appears.
+The OFF path uses its local compile promise and `runSynced`.
 
 **N40/N41 (pattern updates — who triggers under v2).** The two halves
 have different owners. FOLLOWING a source origin belongs to whoever

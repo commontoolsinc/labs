@@ -11,6 +11,7 @@ const files = new Map([
   ["/74-votes.png", ["74-votes.png", "image/png"]],
   ["/296-votes.png", ["296-votes.png", "image/png"]],
   ["/1184-votes.png", ["1184-votes.png", "image/png"]],
+  ["/mapped-cross-space.png", ["mapped-cross-space.png", "image/png"]],
 ]);
 const watcher = Deno.watchFs(import.meta.dirname!);
 const server = Deno.serve(

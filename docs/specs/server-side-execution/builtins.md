@@ -96,6 +96,46 @@ toolshed — reuse that path. Async work stays on the post-commit outbox
 (the v1 lesson that ported: never block the loop on compilation).
 Instantiated pieces join the space's graph and are served like any other.
 
+The request snapshots the resolved program, including attached data files,
+and passes the `compileAndRun` sink ceiling before the outbox releases the
+compiler. Dispatch also waits for the issuing contribution's acceptance;
+a selectively withdrawn contribution launches no compile. Completion carries
+the issuing instance's identity and checks the request hash in its memo cell.
+The memo keeps a fixed shape: the request hash and a `pending`, `compiled`, or
+`resolved` phase. Each transition updates that state without deleting fields
+that a concurrently accepted completion may already have replaced.
+Completion reads current source inputs for CFC labels without using those
+values to select the request. A superseded completion writes no result and
+releases its process-local issuance marker, so a withdrawn replacement can
+reissue. A successful compilation records readiness; the derivation stages
+child setup and resolves the request together. After restart, an unresolved
+request reissues through the compile cache in the child's space before consuming a
+process-cached artifact.
+
+An empty main name and empty source-file list clear the request even when an
+attachment list is present. Incomplete source hydration preserves the accepted
+request. The full program, including attachments, remains the memo-key basis.
+
+A deterministic scoped child may select different programs in different
+instances. Its piece registration owns one node group per canonical program
+identity; instances selecting the same program share that group. Each group
+reads the current instance's program selection before executing. These reads
+participate in dependency tracking and the commit basis. Static child setup
+and passthrough bindings initialize separately in each instance's transaction;
+the parent group retains each child once. A pointer coordinator observes
+selection changes and restores the required groups on
+resume. Clearing one instance clears its selection, and replacing it retires
+the old group only after accepted replacement and only when no other
+instance or pending setup selects it. Handler streams select the actor's
+implementation during dependency preflight and again at dispatch.
+
+Keyless pointer publication and program-group retirement wait for both the
+transaction's acceptance and its deferred local callback. A local state change
+with no storage writes still contributes its read dependencies to the wave, so
+withdrawing a dependency also withdraws that change. These callbacks consume
+neither network budgets nor builtin request metrics. Publishing a keyless
+pointer wakes its coordinator and the installed guarded actions.
+
 Result-as-pattern instantiation — a lift or handler RETURNING a
 pattern, instantiated into a deterministic result cell — is a RUNNER
 path distinct from `compile-and-run` (no compilation step), and it runs

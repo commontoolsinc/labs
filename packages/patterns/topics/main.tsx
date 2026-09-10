@@ -261,6 +261,9 @@ export function mentionListsOf<M>(
  * topic appears once, which is every test a board can set up. Handing this
  * function a duplicated list is what tells the two apart.
  *
+ * Mention membership is checked before source identity: a source with no
+ * matching mention contributes no edge and needs no identity comparison.
+ *
  * `equals` resolves BOTH sides before comparing, so it answers "do these name
  * the same document" whether each side arrived as a cell or as the raw link a
  * read left behind. A method call on the value would depend on which it is.
@@ -271,8 +274,8 @@ export function mentionedBy<T extends object>(
   mentions: readonly (readonly (object | undefined)[] | undefined)[],
 ): T[] {
   return list.filter((other, from) =>
-    !equals(other, topic) &&
-    mentions[from]?.some((mention) => equals(mention, topic))
+    mentions[from]?.some((mention) => equals(mention, topic)) &&
+    !equals(other, topic)
   );
 }
 
@@ -290,11 +293,9 @@ export function mentionedBy<T extends object>(
  * thread, verbs, or rendered UI. It reads the shape of the graph and nothing
  * else.
  *
- * Matching is a linear scan of `.equals` rather than a lookup keyed by id, and
- * that is the point rather than a concession: a cell reference is the identity,
- * so there is no id to key by and none has to be minted, kept in step, or
- * migrated when a piece moves. At board scale the scan is O(topics × mentions)
- * comparisons of already-resolved links, which is nothing.
+ * Matching uses `equals` so aliases and scoped references keep their canonical
+ * identity semantics. The scan runs over plain arrays and compares source
+ * identity only after finding a matching mention.
  *
  * Each row is addressed by the topic it describes — `Writable.for(topic)` — so
  * a row keeps its identity wherever it sits in the array and however the board
@@ -320,18 +321,17 @@ const crossrefTable = lift(
     // element read through the reactive array resolves a link every time, so
     // reading it there costs a link resolution per topic per topic.
     const list = Array.from(sources);
-    // Each topic's mention list, read once, for the same reason.
-    const mentions = mentionListsOf(list);
+    // Materialize each mention array once; scanning a reactive array resolves
+    // its elements again for every destination topic.
+    const mentions = mentionListsOf(list).map((refs) =>
+      refs === undefined ? undefined : Array.from(refs)
+    );
     list.forEach((topic) => {
       // An entry with nothing behind it yet (mid-sync) has no identity to
       // address a row by, and `Writable.for(undefined)` is not a cause. It gets
       // no row rather than a junk one — the lookup is by identity, not by
       // position, so a shorter table costs nothing.
       if (!topic) return;
-      // A linear scan, deliberately. A cell reference is the identity, so there
-      // is no id to key a map by — and nothing to mint, keep in step, or
-      // migrate when a piece moves. At board scale this is a few hundred
-      // comparisons of already-resolved links.
       const inbound = mentionedBy(topic, list, mentions);
       // Addressed by the topic it describes, so a row keeps its identity
       // wherever it sits and however the board is reordered. That is what lets

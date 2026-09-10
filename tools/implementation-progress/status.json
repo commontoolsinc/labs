@@ -1,10 +1,10 @@
 {
-  "updated": "2026-09-10T22:10:37.773752+00:00",
+  "updated": "2026-09-10T23:26:20.057645+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7241",
-  "activity": "Merged #7261 browser benchmark. C1 initial probes are in #7265. A stronger nested-swatch fixture reproduces missing rendered children despite an updated outer-row title; investigating demand and rendering before choosing a repair.",
-  "review": "Merged #7241, #7256, and #7261. Dashboard #7264 and C1 probes #7265 are in review. Budget #7257 needs Cubic review after its rebase; permission to request that review remains pending.",
+  "activity": "Four synthetic remote-row browser cases pass, including cross-space profiles. Read-budget integration is being reconciled with newly landed main changes. B3 named aggregates landed in #7259.",
+  "review": "Antagonistic reviews are clean for the C1 candidate fix and resolved budget merge. Normal follow-up pushes have resumed Cubic review on #7257; latest code/checkpoint reviews remain landing gates. #7264 is completing review and CI.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
@@ -34,7 +34,7 @@
       "id": "A3",
       "title": "Read budgets and whole-step coverage",
       "status": "review",
-      "detail": "Six Cubic findings fixed and validated in #7257. Fresh review required after rebasing onto merged #7241; CI running."
+      "detail": "Six initial findings fixed. Current-main integration passes 1,417 runner tests / 8,843 steps plus new guard accounting and selector-failure regressions. Fresh publication, CI, and review remain."
     },
     {
       "id": "A4",
@@ -52,7 +52,7 @@
       "id": "C1",
       "title": "Multi-replica reproductions",
       "status": "active",
-      "detail": "Initial linked-profile probes in #7265 pass. A stronger nested-map fixture reproduces missing swatches while its outer-row title updates. Valid transformed mapWithPattern expression confirmed by antagonistic review; cause and cold cross-space behavior remain under investigation."
+      "detail": "Four synthetic browser cases pass: nested filters and mapped swatches, with same-space and cross-space profiles, remote colors, profile-only edits, membership additions, and ranking. Cold-materialization verification, removal, and reconnect cases remain."
     },
     {
       "id": "B1",
@@ -69,14 +69,14 @@
     {
       "id": "B3",
       "title": "Deterministic aggregates",
-      "status": "todo",
-      "detail": "Count, sum, min/max, minBy/maxBy; no inverse subtraction."
+      "status": "done",
+      "detail": "Named aggregates landed in #7259 with numeric and identity contracts, cold-resume regressions, and measured comparisons. Index and keyed-lookup contracts are the next collection-operator work."
     },
     {
       "id": "B4",
       "title": "Operator documentation",
-      "status": "todo",
-      "detail": "Publish contracts and executable examples with each operator."
+      "status": "active",
+      "detail": "Aggregate contracts, examples, public types, and measured complexity are included in #7259. Index and join documentation remains pending."
     },
     {
       "id": "C2",
@@ -87,8 +87,8 @@
     {
       "id": "C3",
       "title": "Remote row invalidation",
-      "status": "todo",
-      "detail": "Guard affected-row updates and stable identity."
+      "status": "active",
+      "detail": "Inline-element dependency fix passes the full runner suite (1,411 tests / 8,764 steps), before/after and narrow-invalidation regressions, and four browser cases. Publication and review gates remain."
     },
     {
       "id": "C4",
@@ -149,9 +149,9 @@
     {
       "id": "Q1",
       "title": "Where should the dashboard live?",
-      "proposal": "Local browser page backed by checked-in status; Markdown tracker remains the acceptance checklist.",
-      "blocks": "Dashboard hosting choice only; implementation continues.",
-      "status": "Awaiting answer"
+      "proposal": "Keep the dashboard local as it is.",
+      "blocks": "None.",
+      "status": "Approved"
     },
     {
       "id": "Q2",
@@ -163,16 +163,16 @@
     {
       "id": "Q3",
       "title": "Any priority, deadline, or environment constraints?",
-      "proposal": "Follow the plan sequence, emphasizing observable demos.",
-      "blocks": "No current work.",
-      "status": "Awaiting answer"
+      "proposal": "No constraints at this time.",
+      "blocks": "None.",
+      "status": "Answered"
     },
     {
       "id": "Q4",
       "title": "Which deployed lunch-poll board should anchor A5/B6?",
-      "proposal": "Provide its URL or space/piece identifier. Continue on the local controlled fixture meanwhile.",
-      "blocks": "Deployed comparison only; local implementation and demos continue.",
-      "status": "Awaiting answer"
+      "proposal": "Do not touch the live poll until coordinated with Mike. Continue synthetic local workloads.",
+      "blocks": "Live poll access only.",
+      "status": "Coordination required"
     },
     {
       "id": "Q5",
@@ -184,9 +184,9 @@
     {
       "id": "Q6",
       "title": "May I post signed code-review replies?",
-      "proposal": "Reply in implementation PR review threads, including asking Cubic to acknowledge already-fixed findings. Explicit permission is required by the session communication rule.",
-      "blocks": "Review-thread communication only; other implementation work continues.",
-      "status": "Awaiting answer"
+      "proposal": "Signed implementation review replies and fresh Cubic review requests are authorized.",
+      "blocks": "None.",
+      "status": "Approved"
     }
   ],
   "milestones": [
