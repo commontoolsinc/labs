@@ -87,6 +87,7 @@ import { entityKey } from "../scheduler/keys.ts";
 import { normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
+import { combineOptionalSchema } from "../traverse.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import {
@@ -2459,8 +2460,10 @@ export class StorageManager implements IStorageManager {
 
   /**
    * Walks `value` for cell links and pushes a pending provider sync of each
-   * linked document onto `promises`, under the schema that the link's place
-   * in `schema` selects. `seen` holds the objects already walked.
+   * linked document onto `promises`, under the schema a read at the link's
+   * place in `schema` would cross it with: the reader's sub-schema, which the
+   * link's own schema cannot widen (`combineSchemaForLink`). `seen` holds
+   * the objects already walked.
    */
   #collectLinkedCellSyncs(
     value: unknown,
@@ -2490,7 +2493,7 @@ export class StorageManager implements IStorageManager {
             () =>
               this.open(space).sync(link.id!, {
                 path: link.path.map((segment) => segment.toString()),
-                schema: link.schema ?? schema ?? false,
+                schema: combineOptionalSchema(schema, link.schema) ?? false,
               }, scope),
           ),
         );
