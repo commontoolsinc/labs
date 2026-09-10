@@ -24,7 +24,7 @@ The status corrections in this register are bounded to the rows below:
 | --- | --- |
 | OW18 / OW45 source freshness | Tenure activation ensures root existence; explicit opens follow source, including served wish-sidecar opens. |
 | OW28 | Open: no served compile outbox/completion path or real-host completion regression test. |
-| OW28-createRef | Open: distinct schema-backed program values can collide in the compile cache, including under OFF. |
+| OW28-createRef | Closed: the compile cache snapshots program content, separates source-only evaluation from persistent compilation, and persists shared compiles into each requested space. |
 | OW28-supersession-family / OW28-instance-family | Investigation follow-ups; reproduce current residuals and reconcile the instance family with OW53. |
 | OW30 | Stream sibling validation is fixed; the non-Stream counter/container observation remains unresolved. |
 | OW31 residual (vii) | Read-triggered remount is implemented; automatic replay of the entire watch set remains separate. |
@@ -2597,16 +2597,21 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   changes despite the PR's closing claim. A closed sibling PR does not
   discharge this row. Trigger: third in the plan's ordered flip gates;
   required before a renewed ON rollout.
-- OW28-createRef — OPEN: program-value hashing at the compile-cache boundary.
-  `PatternManager.compileOrGetPattern` keys `createRef({ src: program })`.
-  With a schema-backed query-result proxy, different nested source contents
-  can select the same cached Pattern in a warm process. A controlled probe
-  through the real cache method compiles A only for proxy values A then B;
-  plain-object A/B controls compile separately. This applies under OFF,
-  independently of OW28's serving port. Owed: normalize the resolved program
-  at the cache boundary using the canonical value machinery and add a
-  regression proving a same-cell program edit selects the new contents.
-  Trigger: a warm-process same-node program edit, including a code editor.
+- OW28-createRef — CLOSED: program-value hashing at the compile-cache boundary.
+  `PatternManager.compileOrGetPattern` snapshots the complete resolved program
+  with `snapshotQueryResult` and uses that same detached value for its key and
+  compiler input. Source-only evaluation and persistent compilation use
+  separate cache entries. Concurrent persistent requests share compilation
+  across spaces and register closure replication into every requested space;
+  replicated data files retain their compiled-cache data marker.
+
+  `pattern-manager.test.ts` proves that a same-cell program edit selects the new
+  contents, identical content shares a result across addresses, and a delayed
+  compile retains the program's source and options. `compile-cache-space-aware.test.ts`
+  proves a fresh runtime loads a follower space's piece and attached data
+  from the compiled cache, with recompilation refused, for persistent and
+  source-only pending/cached leaders. This cache boundary is shared by OFF and
+  the served compiler; closing it does not discharge OW28's serving port.
 - OW28-supersession-family — INVESTIGATE: LLM completion abandonment when
   inputs change A→B→A during A's in-flight effect. The preserved OW28 branch
   reports that run-counter cancellation abandons a completion to which the

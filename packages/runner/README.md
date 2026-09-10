@@ -842,7 +842,11 @@ retained source roots, and attached data-file names. Query-result views with
 identical content share a compiled pattern across cell addresses. Changing a
 program's content selects the cache entry for that content and compiles it on a
 miss. Changes to the caller's input after a request begins do not change the
-program being compiled.
+program being compiled. When concurrent requests target different spaces, the
+shared compile registers source and compiled closure replication into each
+requested space. Those writes participate in the runtime's durability barrier.
+Source-only requests and requests that name a persistence space use separate
+cache entries, so a source-only result cannot satisfy a durable compile.
 
 ## Contributing
 

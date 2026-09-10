@@ -377,6 +377,32 @@ type ParkedReplication = {
   delegated: WritebackDelegation | undefined;
 };
 
+/** A shared compilation and the spaces requesting its durable closure. */
+type ProgramCompilation = {
+  /** Compile and initial persistence completion shared by all callers. */
+  readonly promise: Promise<Pattern>;
+
+  /** Spaces whose closures are registered for replication on completion. */
+  readonly spaces: Set<MemorySpace>;
+};
+
+/**
+ * Helper for the program caches, which hashes a detached program in its
+ * compilation context. Source-only evaluation and persistent compilation use
+ * separate entries because only the latter produces a durable closure.
+ */
+function programCompilationKey(
+  program: RuntimeProgram,
+  space?: MemorySpace,
+): string {
+  return toURI(
+    createRef(
+      { src: program, persistent: space !== undefined },
+      "pattern source",
+    ),
+  );
+}
+
 export class PatternManager {
   #runtime: Runtime;
 
@@ -409,15 +435,8 @@ export class PatternManager {
    */
   #failedCompileCacheRecoveries = new Set<string>();
 
-  /**
-   * Single-flight dedup and in-memory result cache for `compileOrGetPattern()`,
-   * keyed by a content hash of the program (_not_ a cell id, _not_ the retired
-   * `patternId`) so identical source returns one shared, already-compiled
-   * pattern instance. The hash is computed with `createRef()` purely as a
-   * stable digest function — no `pattern:` cell is ever minted. Bounded FIFO to
-   * cap memory.
-   */
-  readonly #inProgressCompilations = new Map<string, Promise<Pattern>>();
+  /** Compilations in progress, keyed by program content and persistence context. */
+  readonly #inProgressCompilations = new Map<string, ProgramCompilation>();
 
   /**
    * Single-flight dedup for the expensive tail of `loadPatternByIdentity()`
@@ -754,7 +773,7 @@ export class PatternManager {
       string,
       Promise<Pattern | undefined>
     >;
-    readonly inProgressCompilations: Map<string, Promise<Pattern>>;
+    readonly inProgressCompilations: Map<string, ProgramCompilation>;
     maxEvaluatedModuleCacheSize: number;
     readonly modulesByIdentity: Map<string, { exports: Exports }>;
     readonly persistedCompileCacheClosures: Map<string, string>;
@@ -918,7 +937,10 @@ export class PatternManager {
    */
   async pendingPatternWorkSettled(): Promise<void> {
     await Promise.allSettled([
-      ...this.#inProgressCompilations.values(),
+      ...Array.from(
+        this.#inProgressCompilations.values(),
+        ({ promise }) => promise,
+      ),
       ...this.#inProgressByIdentityLoads.values(),
       ...this.#compileCacheWrites,
     ]);
@@ -1382,7 +1404,10 @@ export class PatternManager {
       // `#parkedFailedReplications` and the register's RULING block), so
       // the short-circuit stays exactly as cheap and mask-free as
       // designed while no rescueable interleaving is lost.
-      const inFlightCompilations = [...this.#inProgressCompilations.values()];
+      const inFlightCompilations = Array.from(
+        this.#inProgressCompilations.values(),
+        ({ promise }) => promise,
+      );
       const inFlightLoads = [...this.#inProgressByIdentityLoads.values()];
       if (inFlightCompilations.length > 0 || inFlightLoads.length > 0) {
         logger.warn("closure-replication-await-inflight", () => [
@@ -1432,6 +1457,7 @@ export class PatternManager {
         filename: doc.filename,
         source: doc.code,
         js: compiled?.code ?? "",
+        ...(compiled?.kind === "data" ? { isData: true } : {}),
         ...(compiled?.sourceMap !== undefined
           ? { sourceMap: compiled.sourceMap }
           : {}),
@@ -3126,14 +3152,15 @@ export class PatternManager {
 
   /**
    * Compiles a pattern from source, or returns a cached/in-flight result.
-   * Snapshots the program at entry and deduplicates by that content, including
-   * when the input is a query-result view.
+   * Snapshots the program at entry and deduplicates by its content and
+   * persistence context, including when the input is a query-result view.
    *
    * @param input - Source code string or RuntimeProgram to compile
    * @param space - When provided, routes the ESM compile through the
    *   content-addressed cell cache in this space (CT-1623): cold compiles write
    *   their module set back, and subsequent loads of the same source skip the TS
-   *   compile. Without it (e.g. tests), compilation is uncached as before.
+   *   compile. Without it, compilation evaluates without writing a durable
+   *   compiled closure.
    * @returns The compiled pattern (from cache, in-flight compilation, or new)
    */
   compileOrGetPattern(
@@ -3154,10 +3181,8 @@ export class PatternManager {
     // and the asynchronous compiler consume the same program snapshot.
     program = snapshotQueryResult(program);
 
-    // Content-hash key (createRef as a pure digest, NOT a cell id). Identical
-    // source returns the same compiled instance; concurrent compiles share one
-    // evaluation.
-    const dedupeKey = toURI(createRef({ src: program }, "pattern source"));
+    // Identical programs in the same persistence context share one evaluation.
+    const dedupeKey = programCompilationKey(program, space);
 
     const cached = this.#compiledByContent.get(dedupeKey);
     if (cached) {
@@ -3177,8 +3202,12 @@ export class PatternManager {
     }
 
     const inProgress = this.#inProgressCompilations.get(dedupeKey);
-    if (inProgress) return inProgress;
+    if (inProgress) {
+      if (space) inProgress.spaces.add(space);
+      return inProgress.promise;
+    }
 
+    const spaces = new Set(space ? [space] : []);
     // Pass the cell-cache context when a space is available so nested/dynamic
     // compiles benefit from the cache too.
     const compilationPromise = this.compilePattern(
@@ -3187,6 +3216,14 @@ export class PatternManager {
     )
       .then((pattern) => {
         this.#compiledByContent.set(dedupeKey, { pattern, space });
+        // Register follower persistence before the shared promise resolves.
+        // Replications remain independently tracked: their supplier waits must
+        // be able to await this compile without forming a cycle.
+        if (space) {
+          for (const targetSpace of spaces) {
+            this.replicatePatternToSpace(pattern, targetSpace, space);
+          }
+        }
         while (this.#compiledByContent.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
           const oldest = this.#compiledByContent.keys().next().value;
           if (oldest === undefined) break;
@@ -3198,7 +3235,10 @@ export class PatternManager {
         this.#inProgressCompilations.delete(dedupeKey);
       });
 
-    this.#inProgressCompilations.set(dedupeKey, compilationPromise);
+    this.#inProgressCompilations.set(dedupeKey, {
+      promise: compilationPromise,
+      spaces,
+    });
     return compilationPromise;
   }
 

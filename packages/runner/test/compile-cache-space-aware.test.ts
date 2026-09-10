@@ -103,4 +103,105 @@ describe("compileOrGetPattern persists the closure per requested space", () => {
       await rt1.dispose();
     }
   });
+
+  for (
+    const leader of ["persistent", "source-only pending", "source-only cached"]
+  ) {
+    it(`reloads attached data from the compiled cache after a ${leader} leader`, async () => {
+      const rt1 = newRuntime();
+      const rt2 = newRuntime();
+      const release = Promise.withResolvers<void>();
+      try {
+        const program: RuntimeProgram = {
+          main: "/main.tsx",
+          files: [
+            {
+              name: "/main.tsx",
+              contents: [
+                "import { dataFile, pattern } from 'commonfabric';",
+                "const data = JSON.parse(dataFile('./data.json'));",
+                "export default pattern(() => ({ label: data.label }));",
+              ].join("\n"),
+            },
+            { name: "/data.json", contents: '{"label":"hello"}' },
+          ],
+          dataFiles: ["/data.json"],
+        };
+        const sourceA = rt1.getCell<RuntimeProgram>(spaceA, "source", {
+          type: "object",
+          additionalProperties: true,
+        });
+        const sourceB = rt1.getCell<RuntimeProgram>(spaceB, "source", {
+          type: "object",
+          additionalProperties: true,
+        });
+        await Promise.all([sourceA.sync(), sourceB.sync()]);
+        await rt1.editWithRetry((tx) => sourceA.withTx(tx).set(program));
+        await rt1.editWithRetry((tx) => sourceB.withTx(tx).set(program));
+        expect(sourceA.get()).toEqual(program);
+        expect(sourceB.get()).toEqual(program);
+
+        const compilePattern = rt1.patternManager.compilePattern.bind(
+          rt1.patternManager,
+        );
+        let compileCount = 0;
+        rt1.patternManager.compilePattern = async (program, context) => {
+          compileCount++;
+          await release.promise;
+          return await compilePattern(program, context);
+        };
+        const compilationA = rt1.patternManager.compileOrGetPattern(
+          sourceA.get(),
+          leader === "persistent" ? spaceA : undefined,
+        );
+        if (leader === "source-only cached") {
+          release.resolve();
+          await compilationA;
+        }
+        const compilationB = rt1.patternManager.compileOrGetPattern(
+          sourceB.get(),
+          spaceB,
+        );
+        release.resolve();
+        const [patternA, patternB] = await Promise.all([
+          compilationA,
+          compilationB,
+        ]);
+        if (leader === "persistent") {
+          expect(compileCount).toBe(1);
+          expect(patternB).toBe(patternA);
+        }
+
+        const resultCell = rt1.getCell<{ label: string }>(
+          spaceB,
+          "concurrent-compile piece",
+        );
+        await resultCell.sync();
+        await rt1.editWithRetry((tx) => {
+          rt1.run(tx, patternB, {}, resultCell.withTx(tx));
+        });
+        await resultCell.pull();
+        await rt1.idle();
+        await rt1.patternManager.flushCompileCacheWrites();
+        await storageManager.synced();
+
+        rt2.harness.compileResolvedToRecordGraph = () => {
+          throw new Error(
+            "A persisted closure must reload without recompiling",
+          );
+        };
+        const reloaded = rt2.getCellFromLink(
+          resultCell.getAsNormalizedFullLink(),
+        );
+        await reloaded.sync();
+        expect(await rt2.start(reloaded)).toBe(true);
+        await reloaded.pull();
+        expect(reloaded.key("label").get()).toBe("hello");
+      } finally {
+        release.resolve();
+        await rt2.dispose();
+        await rt1.dispose();
+      }
+    });
+  }
 });
