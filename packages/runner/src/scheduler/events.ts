@@ -1629,12 +1629,9 @@ export async function dispatchQueuedEvent(state: {
     const requeued = requeueForRetry(step.attempts, step.deadline, step.runAt);
     requeued.retryReadinessPending = true;
     await readiness;
-    // Dropped while waiting (a failed origin) — nothing left to wake.
-    if (
-      requeued.finalOutcomeNotified || !state.eventQueue.includes(requeued)
-    ) {
-      return;
-    }
+    // An event a failed origin dropped while it waited is already out of
+    // the queue and settled; clearing the mark and the tick below are
+    // no-ops for it, and the drop chokepoint tolerates a second drop.
     delete requeued.retryReadinessPending;
     if (teardown.aborted) {
       // The runtime stopped minting write work while the event waited, so
@@ -2137,7 +2134,13 @@ export async function dispatchQueuedEvent(state: {
         }
       }
       if (telemetryFailure !== undefined) {
-        throw telemetryFailure.error;
+        // Surfaced once the requeue has settled, so a failed telemetry
+        // submission never detaches a pending retry from the tracked chain.
+        const failure = telemetryFailure.error;
+        if (requeue === undefined) throw failure;
+        return requeue.then(() => {
+          throw failure;
+        });
       }
       return requeue;
     };

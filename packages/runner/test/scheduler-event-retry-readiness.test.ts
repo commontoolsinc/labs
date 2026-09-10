@@ -359,6 +359,57 @@ describe("scheduler event retry readiness", () => {
     }
   });
 
+  it("keeps a retry on the pending-commit barrier when its telemetry submission throws", async () => {
+    // The commit's telemetry marker is submitted between the rejection and
+    // the requeue, and a submission that throws is surfaced through the
+    // tracked chain. It has to surface after the requeue settles: thrown
+    // ahead of it, the chain would reject at once and the barrier would
+    // release with the retry still parked.
+    const events: string[] = [];
+    const piece = buildCounterPiece(
+      runtime,
+      tx,
+      "readiness-telemetry-root",
+      events,
+    );
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    const gate = Promise.withResolvers<void>();
+    const gateAwaited = Promise.withResolvers<void>();
+    const injector = refuseFirstEventCommit(
+      runtime,
+      staleReadRefusal(piece.documentId, () => {
+        gateAwaited.resolve();
+        return gate.promise;
+      }),
+    );
+    const submit = runtime.telemetry.submit.bind(runtime.telemetry);
+    runtime.telemetry.submit = (marker) => {
+      if (marker.type === "scheduler.event.commit") {
+        throw new Error("telemetry sink refused the marker");
+      }
+      submit(marker);
+    };
+    try {
+      piece.queueAdd(3, "evt:readiness-telemetry:0:readiness-telemetry-root");
+      await gateAwaited.promise;
+
+      await clock.tick(pastEveryBackoffStep);
+      expect(runtime.storageManager.hasPendingCommits()).toBe(true);
+      expect(piece.invocations()).toBe(1);
+
+      gate.resolve();
+      await runtime.scheduler.idleWithPendingCommits();
+
+      expect(piece.total()).toBe(3);
+    } finally {
+      runtime.telemetry.submit = submit;
+      injector.restore();
+    }
+  });
+
   it("drops the retry when the runtime closes its storage during the wait", async () => {
     // A runtime of this case's own, since disposing it closes its storage.
     // Closing tears down writes before anything is drained, so the wait
@@ -368,36 +419,44 @@ describe("scheduler event retry readiness", () => {
     const own = createSchedulerTestRuntime(import.meta.url, {
       commitBackpressure: backoff,
     });
-    const events: string[] = [];
-    const piece = buildCounterPiece(
-      own.runtime,
-      own.tx,
-      "readiness-teardown-root",
-      events,
-    );
-    await own.tx.commit();
-    await own.runtime.idle();
+    let disposed = false;
+    try {
+      const events: string[] = [];
+      const piece = buildCounterPiece(
+        own.runtime,
+        own.tx,
+        "readiness-teardown-root",
+        events,
+      );
+      await own.tx.commit();
+      await own.runtime.idle();
 
-    const gate = Promise.withResolvers<void>();
-    const gateAwaited = Promise.withResolvers<void>();
-    refuseFirstEventCommit(
-      own.runtime,
-      staleReadRefusal(piece.documentId, () => {
-        events.push("readiness-awaited");
-        gateAwaited.resolve();
-        return gate.promise;
-      }),
-    );
-    piece.queueAdd(
-      3,
-      "evt:readiness-teardown:0:readiness-teardown-root",
-      (tx) => events.push(`callback:${tx.status().status}`),
-    );
-    await gateAwaited.promise;
+      const gate = Promise.withResolvers<void>();
+      const gateAwaited = Promise.withResolvers<void>();
+      refuseFirstEventCommit(
+        own.runtime,
+        staleReadRefusal(piece.documentId, () => {
+          events.push("readiness-awaited");
+          gateAwaited.resolve();
+          return gate.promise;
+        }),
+      );
+      piece.queueAdd(
+        3,
+        "evt:readiness-teardown:0:readiness-teardown-root",
+        (tx) => events.push(`callback:${tx.status().status}`),
+      );
+      await gateAwaited.promise;
 
-    await own.runtime.dispose();
+      disposed = true;
+      await own.runtime.dispose();
 
-    expect(events).toEqual(["run:3", "readiness-awaited", "callback:error"]);
-    expect(piece.invocations()).toBe(1);
+      expect(events).toEqual(["run:3", "readiness-awaited", "callback:error"]);
+      expect(piece.invocations()).toBe(1);
+    } finally {
+      // The disposal under test is the cleanup; a failure ahead of it still
+      // releases the runtime and the storage it owns.
+      if (!disposed) await own.runtime.dispose();
+    }
   });
 });
