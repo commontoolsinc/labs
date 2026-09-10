@@ -773,19 +773,14 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
       switch (result?.type) {
         case "iterateArray":
-        case "iterateMap": {
-          return this.#adjustIterateForm(origValue, value, result);
+        case "iterateMap":
+        case "visitSubtype": {
+          return this.#adjustResultForm(origValue, value, result);
         }
 
         case "replace": {
           value = result.value;
           break;
-        }
-
-        case "visitSubtype": {
-          return (origValue === value)
-            ? result
-            : { type: "visitSubtypeOf", value: value };
         }
 
         default: {
@@ -886,7 +881,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       switch (result?.type) {
         case "iterateArray":
         case "iterateMap": {
-          return this.#adjustIterateForm(origValue, value, result);
+          return this.#adjustResultForm(origValue, value, result);
         }
 
         case "replace": {
@@ -924,10 +919,10 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   }
 
   /**
-   * Adjusts an `iterateArray` or `iterateMap` form if necessary, if it is meant
-   * to represent iteration over a replacement value.
+   * Adjusts an `iterateArray`, `iterateMap`, or `visitSubtype` form if
+   * necessary, if it is meant to represent action on a replacement value.
    */
-  #adjustIterateForm(
+  #adjustResultForm(
     origValue: DomainFor<DomainExtra>,
     finalValue: DomainFor<DomainExtra>,
     result:
@@ -937,7 +932,35 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
     | IterateArrayForm<DomainExtra>
     | IterateArrayOfForm<DomainExtra>
     | IterateMapForm<DomainExtra>
-    | IterateMapOfForm<DomainExtra> {
+    | IterateMapOfForm<DomainExtra>;
+  #adjustResultForm(
+    origValue: DomainFor<DomainExtra>,
+    finalValue: DomainFor<DomainExtra>,
+    result:
+      | IterateArrayForm<DomainExtra>
+      | IterateMapForm<DomainExtra>
+      | VisitSubtypeForm,
+  ):
+    | IterateArrayForm<DomainExtra>
+    | IterateArrayOfForm<DomainExtra>
+    | IterateMapForm<DomainExtra>
+    | IterateMapOfForm<DomainExtra>
+    | VisitSubtypeForm
+    | VisitSubtypeOfForm<DomainExtra>
+  #adjustResultForm(
+    origValue: DomainFor<DomainExtra>,
+    finalValue: DomainFor<DomainExtra>,
+    result:
+      | IterateArrayForm<DomainExtra>
+      | IterateMapForm<DomainExtra>
+      | VisitSubtypeForm,
+  ):
+    | IterateArrayForm<DomainExtra>
+    | IterateArrayOfForm<DomainExtra>
+    | IterateMapForm<DomainExtra>
+    | IterateMapOfForm<DomainExtra>
+    | VisitSubtypeForm
+    | VisitSubtypeOfForm<DomainExtra> {
     // On the use of `Object.is()`: Even though it's unlikely to be done in
     // practice, this class _does_ let a visitor treat a number as a container,
     // so this choice of comparison is the most correct option.
@@ -959,6 +982,13 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
           type: "iterateMapOf",
           value: finalValue,
           mappings: result.mappings,
+        };
+      }
+
+      case "visitSubtype": {
+        return {
+          type: "visitSubtypeOf",
+          value: finalValue,
         };
       }
     }
