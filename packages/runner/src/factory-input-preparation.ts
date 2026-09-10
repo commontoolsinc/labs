@@ -125,23 +125,33 @@ function resolveFactoryDiscoverySchema(
 function canFactoryBranchMatch(
   branch: JSONSchema,
   value: unknown,
+  root: JSONSchema,
 ): boolean {
-  if (!canBranchMatch(branch, value)) return false;
-  if (!isObjectNotArray(branch) || isSigilLink(value)) return true;
+  const resolvedBranch = resolveFactoryDiscoverySchema(branch, root) ?? branch;
+  if (!canBranchMatch(resolvedBranch, value)) return false;
+  if (!isObjectNotArray(resolvedBranch) || isSigilLink(value)) return true;
 
-  if ("const" in branch && !deepEqual(branch.const, value)) return false;
   if (
-    Array.isArray(branch.enum) &&
-    !branch.enum.some((candidate) => deepEqual(candidate, value))
+    "const" in resolvedBranch && !deepEqual(resolvedBranch.const, value)
+  ) {
+    return false;
+  }
+  if (
+    Array.isArray(resolvedBranch.enum) &&
+    !resolvedBranch.enum.some((candidate) => deepEqual(candidate, value))
   ) {
     return false;
   }
 
-  if (isObjectNotArray(value) && isObjectNotArray(branch.properties)) {
-    for (const [key, childSchema] of Object.entries(branch.properties)) {
+  if (
+    isObjectNotArray(value) && isObjectNotArray(resolvedBranch.properties)
+  ) {
+    for (
+      const [key, childSchema] of Object.entries(resolvedBranch.properties)
+    ) {
       if (
         key in value &&
-        !canFactoryBranchMatch(childSchema, value[key])
+        !canFactoryBranchMatch(childSchema, value[key], root)
       ) {
         return false;
       }
@@ -367,7 +377,11 @@ export function materializeScheduledFactoryInputs(
         const resolvedBranch = resolvedSchemaFor(branch);
         if (
           compound !== "allOf" && resolvedBranch !== undefined &&
-          !canFactoryBranchMatch(resolvedBranch, result)
+          !canFactoryBranchMatch(
+            resolvedBranch,
+            result,
+            fullSchema ?? resolvedBranch,
+          )
         ) {
           continue;
         }

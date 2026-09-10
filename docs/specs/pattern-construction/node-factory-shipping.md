@@ -1441,7 +1441,11 @@ If one semantic position can hold multiple exact contracts, its
 schema contains ordered alternatives rather than dropping or broadening any
 contract. Scheduled preparation selects exactly one matching `oneOf`/`anyOf`
 factory alternative by kind and normalized public schemas; it never
-double-materializes one value through sibling contracts. Factory discovery
+double-materializes one value through sibling contracts. Branch matching and
+factory discovery resolve property-level local references against the enclosing
+schema document, including its `$defs`; schema fragments are never treated as
+standalone documents or allowed to emit spurious unresolved-reference warnings.
+Factory discovery
 through recursive schemas treats an in-progress cycle result as provisional,
 so mutual recursion cannot memoize a false negative before a later branch finds
 the factory leaf. Schema generation also keeps each carried public contract in

@@ -725,6 +725,64 @@ describe("scheduled Factory@1 input materialization", () => {
     }
   });
 
+  it("resolves union property refs against the enclosing schema", () => {
+    const selected = selectFactory("module", space, true);
+    const unionSchema = {
+      type: "object",
+      properties: {
+        selection: {
+          oneOf: [
+            {
+              type: "object",
+              properties: {
+                kind: { const: "plain" },
+                value: { type: "string" },
+              },
+              required: ["kind", "value"],
+            },
+            { $ref: "#/$defs/FactorySelection" },
+          ],
+        },
+      },
+      required: ["selection"],
+      $defs: {
+        FactoryKind: { const: "factory" },
+        FactorySelection: {
+          type: "object",
+          properties: {
+            kind: { $ref: "#/$defs/FactoryKind" },
+            factory: { asFactory: CONTRACTS.module },
+          },
+          required: ["kind", "factory"],
+        },
+      },
+    } as const satisfies JSONSchema;
+    const input = {
+      selection: { kind: "factory", factory: selected.shell },
+    };
+    const warningCount = () => getLoggerCountsBreakdown().cfc?.cfc?.warn ?? 0;
+    const before = warningCount();
+    const tx = runtime.edit();
+    try {
+      const inputsCell = runtime.getCell<unknown>(
+        space,
+        "referenced-discriminator-factory-union-input",
+        unionSchema,
+        tx,
+      );
+      const prepared = materializeScheduledFactoryInputs(
+        input,
+        unionSchema,
+        { runtime, tx, inputsCell },
+      ) as typeof input;
+
+      expect(prepared.selection.factory).toBe(selected.live);
+      expect(warningCount()).toBe(before);
+    } finally {
+      tx.abort(new Error("test cleanup"));
+    }
+  });
+
   for (const kind of FACTORY_KINDS) {
     it(`materializes a warm ${kind} factory in lift input`, async () => {
       const selected = selectFactory(kind, space, true);
