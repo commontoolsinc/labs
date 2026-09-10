@@ -1116,6 +1116,18 @@ export class Runtime {
     return this.storageManager.scopeKeyIdentity();
   }
 
+  /**
+   * Fires once this runtime stops minting write work, at the point in
+   * `dispose()` where retries would otherwise re-run against a storage that
+   * is closing. A commit retry that waits on
+   * {@link awaitCommitRetryReadiness} passes it so the wait returns at
+   * teardown, and reads it afterwards to decide against re-running; the
+   * barrier `editWithRetry` observes.
+   */
+  get writeTeardownSignal(): AbortSignal {
+    return this.#writeTeardown.signal;
+  }
+
   /** Cache of resolved PatternFactory.inSpace("name") space DIDs. */
   readonly #spaceNameToDid = new Map<string, MemorySpace>();
   /** The genesisAcl each name was first resolved with, so an identical

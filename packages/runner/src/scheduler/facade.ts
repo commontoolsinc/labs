@@ -1053,12 +1053,14 @@ export class Scheduler {
         // gate. Wait for the wake timer to re-schedule the queue and re-check.
         this.#idlePromises.push(park);
       } else if (
-        this.#hasPendingLineageHeadEvent() || this.#hasLoadParkedHeadEvent()
+        this.#hasPendingLineageHeadEvent() || this.#hasLoadParkedHeadEvent() ||
+        this.#eventQueue[0]?.retryReadinessPending === true
       ) {
         // A cross-space lineage head has no timer — its origin commit callback
         // is the wake source; a load-parked head wakes on load completion or
-        // drops on an explicit load failure. Either way idle must stay open
-        // until the callback re-queues execution.
+        // drops on an explicit load failure; a head requeued by a stale-basis
+        // retry wakes once the retry's readiness resolves. Either way idle
+        // must stay open until the callback re-queues execution.
         this.#idlePromises.push(park);
       } else if (!this.#scheduled) {
         if (this.#hasRunnablePullWork()) {
