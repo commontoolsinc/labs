@@ -45,7 +45,7 @@ export type DomainFor<DomainExtra> = FabricValue | DomainExtra;
  */
 export type IterateArrayForm<DomainExtra> = {
   type: "iterateArray";
-  value: readonly DomainFor<DomainExtra>[];
+  values: readonly DomainFor<DomainExtra>[];
 };
 
 /**
@@ -58,7 +58,7 @@ export type IterateArrayForm<DomainExtra> = {
  */
 export type IterateMapForm<DomainExtra> = {
   type: "iterateMap";
-  value: readonly [DomainFor<DomainExtra>, DomainFor<DomainExtra>][];
+  mappings: readonly [DomainFor<DomainExtra>, DomainFor<DomainExtra>][];
 };
 
 /**
@@ -128,7 +128,7 @@ export const DO_VISIT_SUBTYPE: VisitSubtypeForm = Object.freeze(
 export function doIterateArray<DomainExtra>(
   values: readonly DomainFor<DomainExtra>[],
 ): IterateArrayForm<DomainExtra> {
-  return { type: "iterateArray", value: values };
+  return { type: "iterateArray", values };
 }
 
 /**
@@ -140,7 +140,7 @@ export function doIterateArray<DomainExtra>(
 export function doIterateMap<DomainExtra>(
   mappings: readonly [DomainFor<DomainExtra>, DomainFor<DomainExtra>][],
 ): IterateMapForm<DomainExtra> {
-  return { type: "iterateMap", value: mappings };
+  return { type: "iterateMap", mappings };
 }
 
 //
@@ -629,7 +629,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
     switch (result.type) {
       case "iterateArray": {
-        return this.#subvisitArray(value, result.value);
+        return this.#subvisitArray(value, result.values);
       }
 
       case "mainResult": {
@@ -637,7 +637,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       }
 
       case "iterateMap": {
-        return this.#subvisitMap(value, result.value);
+        return this.#subvisitMap(value, result.mappings);
       }
     }
   }
