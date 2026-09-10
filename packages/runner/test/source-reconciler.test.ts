@@ -1378,17 +1378,36 @@ describe("piece source reconciliation", () => {
     });
 
     it("isolates retained source containers from compiler-owned inputs", async () => {
-      const identity = await identityFor(source("v1"));
+      const dataFiles = ["/attached.txt"];
+      const sourceRoots = ["/retained.ts"];
+      const attached = [
+        { name: dataFiles[0], contents: "attached source data" },
+        { name: sourceRoots[0], contents: "export const retained = true;" },
+      ];
+      const files = new Map(
+        [...parentProgram(source("v1")).files, ...attached].map((
+          file,
+        ) => [file.name, file.contents]),
+      );
+      const identity = await resolveEntryIdentity(
+        PARENT_PATH,
+        (name) => Promise.resolve(files.get(name)!),
+        { dataFiles, sourceRoots },
+      );
       let downloads = 0;
       createRuntime(servingFetch(() => identity, () => source("v1"), (url) => {
         if (!url.searchParams.has("identity")) downloads++;
       }));
       const resolve = runtime.harness.resolve.bind(runtime.harness);
-      runtime.harness.resolve = async (...args) => ({
-        ...await resolve(...args),
-        dataFiles: [],
-        sourceRoots: [],
-      });
+      runtime.harness.resolve = async (...args) => {
+        const program = await resolve(...args);
+        return {
+          ...program,
+          files: [...program.files, ...attached],
+          dataFiles: [...dataFiles],
+          sourceRoots: [...sourceRoots],
+        };
+      };
       const compile = runtime.patternManager.compilePattern.bind(
         runtime.patternManager,
       );
@@ -1401,8 +1420,8 @@ describe("piece source reconciliation", () => {
         expect(args[0].files.map((file) => file.contents)).toContain(
           source("v1"),
         );
-        expect(args[0].dataFiles).toEqual([]);
-        expect(args[0].sourceRoots).toEqual([]);
+        expect(args[0].dataFiles).toEqual(dataFiles);
+        expect(args[0].sourceRoots).toEqual(sourceRoots);
         const pattern = await compile(...args);
         args[0].files[0].contents = "changed by compiler owner";
         args[0].files.pop();
@@ -1417,6 +1436,11 @@ describe("piece source reconciliation", () => {
           .toBeDefined();
         expect(calls).toBe(2);
         expect(downloads).toBe(2);
+        const stored = await runtime.patternManager
+          .getPatternSourceProgramByIdentity(identity, signer.did());
+        expect(stored?.dataFiles).toEqual(dataFiles);
+        expect(stored?.sourceRoots).toEqual(sourceRoots);
+        expect(stored?.files).toEqual(expect.arrayContaining(attached));
       } finally {
         runtime.harness.resolve = resolve;
         runtime.patternManager.compilePattern = compile;

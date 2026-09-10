@@ -32,46 +32,47 @@ const identity = await route.identity("system/profile-create.tsx");
 for (const enabled of [false, true]) {
   const manager = EmulatedStorageManager.emulate({ as: signer });
   const requests: { pathname: string; identity: boolean; bytes: number }[] = [];
-  const runtime = new Runtime({
-    apiUrl: new URL("http://toolshed.test"),
-    storageManager: manager,
-    experimental: { serverExecution: enabled },
-    servingPosture: enabled,
-    fetch: async (input) => {
-      const url = new URL(
-        input instanceof Request ? input.url : String(input),
-      );
-      const response = await route.serve(new Request(url)) ??
-        new Response("not found", { status: 404 });
-      requests.push({
-        pathname: url.pathname,
-        identity: url.searchParams.has("identity"),
-        bytes: (await response.clone().arrayBuffer()).byteLength,
-      });
-      return response;
-    },
-  });
-  expect(runtime.experimental.serverExecution).toBe(enabled);
-  expect(runtime.servingPosture).toBe(enabled);
-  console.error(
-    JSON.stringify({
-      phase: "posture",
-      serverExecution: runtime.experimental.serverExecution,
-      servingPosture: runtime.servingPosture,
-      memory: "fresh emulated store",
-      shell: null,
-    }),
-  );
-  const compile = runtime.patternManager.compilePattern.bind(
-    runtime.patternManager,
-  );
-  let compilationCalls = 0;
-  runtime.patternManager.compilePattern = (...args) => {
-    compilationCalls += 1;
-    return compile(...args);
-  };
-  const rows = [];
+  let runtime: Runtime | undefined;
   try {
+    runtime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager: manager,
+      experimental: { serverExecution: enabled },
+      servingPosture: enabled,
+      fetch: async (input) => {
+        const url = new URL(
+          input instanceof Request ? input.url : String(input),
+        );
+        const response = await route.serve(new Request(url)) ??
+          new Response("not found", { status: 404 });
+        requests.push({
+          pathname: url.pathname,
+          identity: url.searchParams.has("identity"),
+          bytes: (await response.clone().arrayBuffer()).byteLength,
+        });
+        return response;
+      },
+    });
+    expect(runtime.experimental.serverExecution).toBe(enabled);
+    expect(runtime.servingPosture).toBe(enabled);
+    console.error(
+      JSON.stringify({
+        phase: "posture",
+        serverExecution: runtime.experimental.serverExecution,
+        servingPosture: runtime.servingPosture,
+        memory: "fresh emulated store",
+        shell: null,
+      }),
+    );
+    const compile = runtime.patternManager.compilePattern.bind(
+      runtime.patternManager,
+    );
+    let compilationCalls = 0;
+    runtime.patternManager.compilePattern = (...args) => {
+      compilationCalls += 1;
+      return compile(...args);
+    };
+    const rows = [];
     for (
       const [index, space] of [
         signer.did(),
@@ -108,10 +109,14 @@ for (const enabled of [false, true]) {
         durableClosurePresent: true,
       });
     }
-    console.log(JSON.stringify({ enabled, rows }));
-  } finally {
     await runtime.sourceReconciler.idle();
     await runtime.patternManager.flushCompileCacheWrites();
-    await runtime.dispose();
+    console.log(JSON.stringify({ enabled, rows }));
+  } finally {
+    try {
+      await runtime?.dispose();
+    } finally {
+      await manager.close();
+    }
   }
 }
