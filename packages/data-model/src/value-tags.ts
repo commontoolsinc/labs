@@ -15,6 +15,7 @@ import {
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
+  type FabricValueLayer,
 } from "./interface.ts";
 import { isFabricArray, isFabricPlainObject } from "./type-check.ts";
 import { toCompactDebugString } from "./value-debug.ts";
@@ -152,11 +153,13 @@ export function jsTagFromValue(value: unknown): JsTypeValueTag | "object" {
 }
 
 /**
- * Maps a presumed valid `FabricValue` to its tag. This `throw`s if it
- * determines that the given value cannot possibly be valid. To be clear, this
- * function does not go out of its way to make a validity determination.
+ * Maps a presumed valid `FabricValue` to its tag, based on a shallow evaluation
+ * of its type. This `throw`s if it determines that the given value cannot
+ * possibly be valid.
  */
-export function tagFromFabricValue(value: FabricValue): ValueTag {
+export function tagFromFabricValue(value: FabricValueLayer): ValueTag;
+export function tagFromFabricValue(value: FabricValue): ValueTag;
+export function tagFromFabricValue(value: FabricValueLayer): ValueTag {
   const result = tagFromFabricValueElseNull(value);
 
   if (result !== null) {
@@ -168,13 +171,22 @@ export function tagFromFabricValue(value: FabricValue): ValueTag {
 }
 
 /**
- * Maps a presumed valid `FabricValue` to its tag. This returns `null` if it
- * determines that the given value cannot possibly be valid. To be clear, this
- * function does not go out of its way to make a validity determination.
+ * Maps a presumed valid `FabricValue` to its tag, based on a shallow evaluation
+ * of its type. This returns `null` if it determines that the given value cannot
+ * possibly be valid. To be clear, this function does not go out of its way to
+ * make a validity determination.
  */
+export function tagFromFabricValueElseNull(value: FabricValueLayer): ValueTag;
+export function tagFromFabricValueElseNull(value: FabricValue): ValueTag;
 export function tagFromFabricValueElseNull(
-  value: FabricValue,
+  value: FabricValue | FabricValueLayer,
 ): ValueTag | null {
+  // Note: A `FabricValueLayer` isn't necessarily a `FabricValue`. However, all
+  // the type checks called only operate at a layer level, and so this lie is
+  // moot. TODO(danfuzz): Update the called predicates so they actually accept
+  // `FabricValueLayer` per their type declarations.
+  const fabVal = value as FabricValue;
+
   const jsType = jsTagFromValue(value);
 
   if (jsType === VALUE_TAGS.function) {
@@ -184,9 +196,9 @@ export function tagFromFabricValueElseNull(
     return jsType;
   }
 
-  if (isFabricArray(value)) {
+  if (isFabricArray(fabVal)) {
     return VALUE_TAGS.Array;
-  } else if (isFabricPlainObject(value)) {
+  } else if (isFabricPlainObject(fabVal)) {
     return VALUE_TAGS.Object;
   } else if (value instanceof FabricPrimitive) {
     return tagFromFabricPrimitiveElseNull(value);
