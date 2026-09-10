@@ -154,14 +154,17 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
     commit: ClientCommit,
     step: number,
   ) => {
-    const naive = naiveAdmit(history, session.sessionId, commit);
+    const naive = naiveAdmit(history, session.sessionId, commit, values);
     let engineSeq: number | null = null;
+    let elidedOpIndexes: readonly number[] = [];
     try {
-      engineSeq = applyCommit(engine, {
+      const verdict = applyCommit(engine, {
         sessionId: session.sessionId,
         principal: session.principal,
         commit,
-      }).seq;
+      });
+      engineSeq = verdict.seq;
+      elidedOpIndexes = verdict.elidedOpIndexes ?? [];
     } catch (error) {
       if (!(error instanceof ConflictError)) throw error;
     }
@@ -172,7 +175,13 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
       );
     }
     if (engineSeq !== null) {
-      naiveRecord(history, session.sessionId, commit, engineSeq);
+      naiveRecord(
+        history,
+        session.sessionId,
+        commit,
+        engineSeq,
+        elidedOpIndexes,
+      );
       naiveApply(values, commit.operations);
       accepted.push({ seq: engineSeq, sessionId: session.sessionId, commit });
       headSeq = engineSeq;

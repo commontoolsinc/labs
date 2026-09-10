@@ -292,6 +292,36 @@ with seq > read.seq
 The validation model is path-aware and seq-based. A later write to an unrelated
 path on the same entity does not invalidate the read.
 
+An **identity commit** is exempt from this rule and from the staleness half of
+§3.6.3. It is a commit whose every operation leaves its document as the space
+already holds it. The server proves that only once a staleness check has
+refused the commit, since the proof reads stored documents and, for a patch,
+reconstructs one at the reader's basis; a commit that validates pays nothing
+for it, and one refused for an unresolved or rejected dependency is not a
+candidate. The proof, per operation:
+
+- a `set` whose value equals the stored document;
+- a `patch` that, replayed on the document as the commit's read of that
+  document saw it (the confirmed read's `seq`, or the resolution of the
+  highest own layer a pending read names; the stored document itself when the
+  commit did not read it), yields the stored document, and that replayed on
+  the stored document leaves it unchanged. The second condition is for the
+  writer's replica, which re-folds the patch over whatever confirmed base it
+  holds when the accept arrives: a patch idempotent on the durable value
+  lands on that value from any base between the read and the head, where a
+  positional splice replayed over a base already carrying its elements would
+  duplicate them.
+
+Applying such a commit changes nothing, so no read it recorded can have led it
+to a wrong write, and refusing it would only make the writer re-derive the
+value the space already holds. Every operation of an identity commit elides
+(§3.7.1 step 5). The exemption covers staleness only: a pending read naming an
+unresolved or rejected layer still refuses the commit (§3.6.3), so a commit the
+client has cascade-dropped is never accepted (`09-invariants.md`, INV-6). A
+commit touching a space's ACL document is never an identity commit: INV-12 and
+INV-13 define its admission, and a losing genesis is refused rather than
+recorded twice.
+
 ### 3.6.2 Write-Footprint Overlap
 
 Validation is based on overlap, not just entity identity.
@@ -435,8 +465,9 @@ in the commit log.
 4. Append a `commit` row containing the original payload and resolution data.
 5. Append one `revision` row per operation in the transaction — except an
    operation proven to change nothing (an identical re-`set` of a
-   content-addressed document), which appends no revision and is reported
-   in the verdict's elided operation indexes.
+   content-addressed document, or every operation of an identity commit,
+   §3.6.1), which appends no revision and is reported in the verdict's
+   elided operation indexes.
 6. Update `head` pointers for touched entities (an elided operation touches
    nothing).
 7. Materialize or refresh snapshots as needed.
@@ -596,12 +627,17 @@ The server applies a transaction atomically:
   update per operation that changes state
 - or none of them do
 
-An identical re-`set` of a content-addressed document is a semantic no-op
-the engine proves before applying: it produces no revision, no head update,
-and no dirty mark, while the commit row and the space sequence still
-advance and the verdict names the elided operation indexes. There is no
-partial visibility of a committed transaction — a no-op is exact by proof,
-not a torn apply.
+An identical re-`set` of a content-addressed document, and every operation of
+an identity commit (§3.6.1), is a semantic no-op the engine proves before
+applying: it produces no revision, no head update, and no dirty mark, while
+the commit row and the space sequence still advance and the verdict names the
+elided operation indexes. There is no partial visibility of a committed
+transaction — a no-op is exact by proof, not a torn apply. A client that
+promotes its own accepted write to the commit's seq therefore holds a basis
+for the document above its per-document head; the basis is truthful, because
+the proof established that the document's content at that seq is what the
+client holds, and validation scans revisions above a basis rather than
+comparing it to a head.
 
 ## 3.11 Branch-Aware Commits
 
