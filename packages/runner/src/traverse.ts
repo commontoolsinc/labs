@@ -37,6 +37,7 @@ import {
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { StagedMap } from "@commonfabric/utils/staged-map";
 
 import { getLogger } from "../../utils/src/logger.ts";
 // TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
@@ -993,6 +994,25 @@ export class MapSet<K, V> {
     throw new Error("MapSet structural copy requires matching hashing modes");
   }
 
+  /** Stages per-key containers while retaining the canonical value identity. */
+  protected stageStateFrom(other: MapSet<K, V>): {
+    commit: () => void;
+    changedKeys: () => Iterable<K>;
+  } {
+    const staged = other.#hashMap !== undefined
+      ? new StagedMap(other.#hashMap, (values) => new Map(values))
+      : new StagedMap(other.#setMap!, (values) => new Set(values));
+    if (other.#hashMap !== undefined) {
+      this.#hashMap = staged as StagedMap<K, Map<string, V>>;
+    } else {
+      this.#setMap = staged as StagedMap<K, Set<V>>;
+    }
+    return {
+      commit: () => staged.commit(),
+      changedKeys: () => staged.changedKeys(),
+    };
+  }
+
   /**
    * iterable
    */
@@ -1089,8 +1109,8 @@ export class MapSetStringToPathSelectors extends MapSet<
   /**
    * A structural copy: per-key container copies of the base map and the
    * permissive index. Cloning through `add()` would re-hash every selector
-   * and re-derive the index; this keeps a full-state clone (`extend`
-   * staging) at plain container-copy cost.
+   * and re-derive the index. Independent evaluation-cache states use these
+   * copies; temporary additive evaluation uses `stage()`.
    */
   clone(): MapSetStringToPathSelectors {
     const cloned = new MapSetStringToPathSelectors(this.isHashing());
@@ -1099,6 +1119,33 @@ export class MapSetStringToPathSelectors extends MapSet<
       cloned.#trueSchemaIndex.set(key, new Set(values));
     }
     return cloned;
+  }
+
+  /**
+   * Stages selector changes for synchronous evaluation under exclusive access
+   * to this tracker. Discard on failure; commit only after all evaluation
+   * succeeds. Neither the stage nor its mutable containers may escape.
+   */
+  stage(): {
+    value: MapSetStringToPathSelectors;
+    commit: () => void;
+    changedKeys: () => Iterable<string>;
+  } {
+    const value = new MapSetStringToPathSelectors(this.isHashing());
+    const entries = value.stageStateFrom(this);
+    const index = new StagedMap(
+      this.#trueSchemaIndex,
+      (values) => new Set(values),
+    );
+    value.#trueSchemaIndex = index;
+    return {
+      value,
+      commit: () => {
+        entries.commit();
+        index.commit();
+      },
+      changedKeys: entries.changedKeys,
+    };
   }
 }
 

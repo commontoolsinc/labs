@@ -1,0 +1,16 @@
+[
+  {
+    "role": "default",
+    "path": "/Users/berni/.codex/artifacts/server-execution-topics-2026-09-09/runs/watch-integration-default-04/stats-after.json",
+    "bytes": 493439,
+    "sha256": "7ddb87b523fa27eaee09bde7b95cb850bb00379f8308a0b6c4605cd842b0e363",
+    "description": "Complete unmodified end statistics, including per-settle series and timing records; copied without interpretation from the local test server."
+  },
+  {
+    "role": "opposite",
+    "path": "/Users/berni/.codex/artifacts/server-execution-topics-2026-09-09/runs/watch-integration-opposite-04/stats-after.json",
+    "bytes": 1902975,
+    "sha256": "99ccbf73761051206fe29c7d036702d1ec33e3d2a55a8e8c16dbaacaa060e520",
+    "description": "Complete unmodified end statistics, including per-settle series and timing records; copied without interpretation from the local test server."
+  }
+]
