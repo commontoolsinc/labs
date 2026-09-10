@@ -2701,9 +2701,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     preconditions: readonly CommitPrecondition[] | undefined,
   ): Result<Unit, IStorageTransactionInconsistent> {
     const branch = this.#branches.get(space);
-    if (branch === undefined) {
-      return { ok: {} };
-    }
+    if (branch === undefined) return { ok: {} };
     const result = this.#validateBranch(
       space,
       branch,
@@ -2739,23 +2737,19 @@ export class V2StorageTransaction implements IStorageTransaction {
    * The bound is the `commitPreconditions` flag. With it off, the commit
    * carries only its `entity-value-hash` pins — an `entity-absent` pin is
    * filtered out before the wire and the server never evaluates it — so
-   * only the pins that survive that filter earn the exemption.
+   * only the pins that survive that filter earn the exemption. Naming the
+   * exempt kinds rather than the ineligible ones is what keeps a kind added
+   * later from being exempted before anyone decides it should be.
    */
   #serverJudgedDocuments(
     preconditions: readonly CommitPrecondition[] | undefined,
   ): ReadonlySet<string> {
     const judged = new Set<string>();
-    if (preconditions === undefined) {
-      return judged;
-    }
     const absencePinsActive = getCommitPreconditionsConfig() === true;
-    for (const precondition of preconditions) {
-      if (
-        precondition.kind === "origin-committed" ||
-        (precondition.kind === "entity-absent" && !absencePinsActive)
-      ) {
-        continue;
-      }
+    for (const precondition of preconditions ?? []) {
+      const pinned = precondition.kind === "entity-value-hash" ||
+        (precondition.kind === "entity-absent" && absencePinsActive);
+      if (!pinned) continue;
       judged.add(
         this.#docKey({
           id: precondition.id as URI,
@@ -3185,9 +3179,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   validateReplicaRoutes(): Result<Unit, IStorageTransactionInconsistent> {
     for (const [space, branch] of this.#branches) {
       const route = this.#validateReplicaRoute(space, branch);
-      if (route.error) {
-        return route;
-      }
+      if (route.error) return route;
     }
     return { ok: {} };
   }
@@ -3197,13 +3189,9 @@ export class V2StorageTransaction implements IStorageTransaction {
     branch: SpaceBranch,
   ): Result<Unit, IStorageTransactionInconsistent> {
     const currentReplica = this.#storage.open(space).replica;
-    if (currentReplica === branch.replica) {
-      return { ok: {} };
-    }
+    if (currentReplica === branch.replica) return { ok: {} };
     const firstDocument = branch.docs.values().next().value;
-    if (firstDocument === undefined) {
-      return { ok: {} };
-    }
+    if (firstDocument === undefined) return { ok: {} };
     const { address, value: expected } = firstDocument.initial;
     const actual = toTransactionDocumentValue(
       isDurableReadTx(this) &&
@@ -3262,9 +3250,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     serverJudged?: ReadonlySet<string>,
   ): Result<Unit, IStorageTransactionInconsistent> {
     const route = this.#validateReplicaRoute(space, branch);
-    if (route.error) {
-      return route;
-    }
+    if (route.error) return route;
     for (const [key, doc] of branch.docs) {
       if (!doc.validated || serverJudged?.has(key)) {
         continue;

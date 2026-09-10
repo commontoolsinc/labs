@@ -239,6 +239,26 @@ describe("commit read basis", () => {
       expect(committed.error?.name).toBe("PreconditionFailedError");
     });
 
+    it("re-checks a later space whose only pin names no document", async () => {
+      // An `origin-committed` pin claims nothing about any document, so it
+      // exempts none of them from the re-check.
+      const tx = await openTwoSpaceTx();
+      tx.tx.addCommitPrecondition!(spaceY, {
+        kind: "origin-committed",
+        originLocalSeq: 1,
+      });
+      const replica = storageB.open(space).replica;
+      const commitNative = replica.commitNative!.bind(replica);
+      replica.commitNative = async (native, source, options) => {
+        await landInB();
+        return commitNative(native, source, options);
+      };
+
+      rtB.prepareTxForCommit(tx);
+      const committed = await tx.commit({ resolveAt: "verdict" });
+      expect(committed.error?.name).toBe("StorageTransactionInconsistent");
+    });
+
     it("re-checks the later space's documents before sealing it", async () => {
       const tx = await openTwoSpaceTx();
       const sealed: string[] = [];
