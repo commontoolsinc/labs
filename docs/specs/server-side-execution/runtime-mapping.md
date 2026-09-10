@@ -95,7 +95,7 @@ Status legend:
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
-| 40 | Following a piece's source origin: origin resolution, identity lookup, verified closure compile, schema-compat gate, pointer write | `source-reconciler.ts`, called from `packages/piece/src/ops/pieces-controller.ts` when a piece is opened | serving-loop.md §3e | N/A server-side (a serving tenure opens no piece, so it follows no origin; the SWAP half it does own is row 41) |
+| 40 | Following a piece's source origin: origin resolution, identity lookup, verified closure compile, schema-compat gate, pointer write | `source-reconciler.ts`, called by `packages/piece/src/ops/pieces-controller.ts` and `builtins/wish.ts` on explicit piece opens | serving-loop.md §3e | Opener-owned: ON clients open ordinary pieces; the serving wish builtin opens its runtime-supplied sidecars. Root ensuring does not follow source. The SWAP half is row 41. |
 | 41 | `patternIdentity` watcher: live hot-swap of running pieces on pointer change (setup, teardown, reinstantiate); unloadable-pointer roll-forward (CT-1923) | `runner.ts:2331-2513` (`2375-2512`, `2340-2379`, `2418-2490`) | serving-loop.md §3e | COVERED (stage F: the swap runs in the SpaceServer — a pointer write is ordinary authored input; the swap's setup write stamps the `bookkeeping` kind; end-to-end test in `executor-serving-loop.test.ts`) |
 | 42 | Piece source lifecycle records (revisions, transitions, provenance) | `runner.ts:623-748`, `6578-6903` | none (authored data; rides along) | COVERED |
 
@@ -372,7 +372,10 @@ for the compile request.
 
 **N40/N41 (pattern updates — who triggers under v2).** The two halves
 have different owners. FOLLOWING a source origin belongs to whoever
-OPENS a piece, which is a client; a serving tenure opens none. The live
+explicitly OPENS a piece. ON clients open ordinary pieces, while the serving
+wish builtin opens its runtime-supplied sidecars through `openSidecarSurface`;
+existing sidecars reconcile their origins on that open. Tenure activation
+ensures root existence without following its source. The live
 hot-swap via the `patternIdentity` meta sink, including teardown +
 reinstantiation and the unloadable-pointer roll-forward, belongs to
 whichever runtime is running the piece. Under v2 pieces run only in the
@@ -459,15 +462,20 @@ row weighed (session-scoped derivations as client-speculation-only,
 scoped state reclassified authored-adjacent) are rejected — scoped
 derived state stays derived and server-committed, keeping today's
 reload persistence. The persisted-state context ladder (row 60)
-stays tripwired. The Phase 0 review continues (README §6 Q7, was
-ledger L10). The 2026-08-02 scout pass verified scopes.md's anchors
+stays tripwired. The Phase 0 review is complete apart from the
+session-data GC design (README §6, was ledger L10): the run-supply
+half — a narrowed node runs once per demanding principal,
+materialized on demand — was RULED 2026-08-16 and landed by fan-out
+stages A and B (scopes.md §2; verification-coverage.md OW17, CLOSED as
+a row with its flagged residuals owed there).
+The 2026-08-02 scout pass verified scopes.md's anchors
 and recorded in scopes.md §7 the five assumptions of main's scope
 machinery that a SpaceServer breaks (M1–M5: per-identity scope
 discovery; scope-NAME in-memory keying; no all-principals write
 path; scope-NAME wake keys; no session-data GC); scopes.md §8 lists
-what the review still owes (after the batch-4 closures: basis-index
-DDL authoring + session-data GC design); row 57's identity
-remainder is RESOLVED (N57, R-Q6b).
+what the review still owes — the session-data GC design, the
+basis-index DDL having been authored in serving-loop.md §3b; row
+57's identity remainder is RESOLVED (N57, R-Q6b).
 
 **N57 (identity/authority) — RESOLVED 2026-08-02 (R-Q6b).** Today
 one runtime = one `userIdentityDID` (`runtime.ts:669`) and all
