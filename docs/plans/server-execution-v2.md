@@ -14,9 +14,9 @@ latencies, no latency quoted above load ~5, causation by ablation.
 
 The executor and its two execution postures are implemented in the current
 repository. The first-party default is OFF; explicit `true` selects ON.
-OW28's fresh served `compileAndRun` completion path remains missing, so the
-Phase 7 ordered gates are not all satisfied. The coverage register tracks
-that port and its independently scoped cache/instance/supersession follow-ups.
+OW28's served `compileAndRun` path and scoped child lifecycle have direct
+acceptance coverage. The Phase 7 ordered gates are not all satisfied. The
+coverage register tracks that work and its independently scoped follow-ups.
 The initial stack inventory and stage records are historical evidence, not
 an inventory of current main.
 
@@ -26,18 +26,19 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
-**Current work:** restore OW28 on current main and prove fresh compilation
-through a real serving host, including durable completion, child execution,
-recovery, supersession, and demanded instances. The preserved #5968 branch
-is an implementation input, not a landed feature. The
+**Current work:** satisfy the remaining Phase 7 ordered gates, including the
+honest propagation benchmark, and investigate the separately scoped builtin
+follow-ups. OW28 covers fresh compilation through a real serving host,
+durable completion, child execution, recovery, supersession, and demanded
+instances. The
 [coverage register](../specs/server-side-execution/verification-coverage.md#current-status)
 records the current dispositions; the
 [coverage status audit](../history/plans/server-execution-v2/optimize/coverage-status-audit-2026-09-09.md)
 records the omission evidence and the bounded status investigation.
 The first-party default and flip records belong to the
 [`serverExecution` registry](../development/EXPERIMENTAL_OPTIONS.md#serverexecution).
-The ON soak is paused. A renewed ON rollout requires the ordered gates,
-including OW28; the flip record's earlier all-gates-met claim is insufficient.
+The ON soak is paused. A renewed ON rollout requires the remaining ordered
+gates; the flip record's earlier all-gates-met claim is insufficient.
 
 **Delta 2026-09-03 (the ROLLBACK): the first-party default returned to OFF
 via the rollback PR (#6840) — the first data-only flip:
@@ -65,8 +66,8 @@ when appropriate.**
 **Delta 2026-08-28, last updated 2026-08-29 (the FLIP PR —
 [#6535](https://github.com/commontoolsinc/labs/pull/6535), now MERGED; the
 soak started at its merge): `SERVER_EXECUTION_DEFAULT_ENABLED` →
-`true`. This is the flip's execution record; it does not discharge the
-missing OW28 port. Its recorded checks included the
+`true`. This is the flip's execution record; it does not establish the current
+OW28 gate verdict. Its recorded checks included the
 ON-skip registry EMPTY across all four suites (the ruled-3b-close lift,
 #6528), OW31's ruled posture BUILT, OW45–OW53 CLOSED, and the OW38(ii)
 bar RULED met ("topics numbers are fine", 2026-08-24).** The 2026-08-29
@@ -714,10 +715,9 @@ with the evidence files beside it; the owed rows are the register's
 
 The stack's branch topology and local validation record are preserved in the
 [stage-C closeout](../history/plans/server-execution-v2/stage-c-closeout.md).
-The integrated serving stack is on main. OW28's sibling implementation is
-still a restoration input at #5968 (`463ea3887`); closing that PR did not
-land its compile outbox path or its real-host tests. The current owed work is
-the register's OW28 row, not an unmerged stack to merge wholesale.
+The integrated serving stack includes the compile outbox and completion path.
+The current acceptance work and independent follow-ups are the register's
+OW28 rows.
 
 **The owner's landing posture (2026-08-18, verbatim intent):** *"get
 confidence that we're on the right track, then merge everything to main
@@ -729,11 +729,24 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
 
 **Stage C outcomes:**
 
-- **OW28 — OPEN**: restore the served compile outbox and completion path on
-  current main. #5968 (`463ea3887`) contains the implementation and reviews
-  to reconcile; its source is not present on main. The three `OW28-*`
-  follow-up rows are recorded in the coverage register and retain their own
-  scope and verification requirements.
+- **OW28 — CLOSED**: served compilation uses the accepted outbox and
+  completion path described in `builtins.md` §3. Compilation readiness and
+  child setup are separate transactions; setup resolves the request inside
+  the serving graph. The coverage register owns the acceptance cases and
+  the remaining family investigations.
+
+  A deterministic scoped child owns one shared piece registration with node
+  groups keyed by canonical program identity. Instances selecting the same
+  program share a group; the stored selection is a dependency and basis read
+  before authored work. User and session identity also keys setup evidence
+  and keyless pointers. Handler dispatch, wave withdrawal, parent release,
+  and restart must preserve the selected program of every other instance.
+
+  Acceptance covers independently reactive user and session inputs,
+  divergence and rejoining with graph-sharing assertions, clear and restart,
+  accepted and withdrawn setup, and handler dispatch. Closing OW28 does not
+  close its other-builtin or default-writable-handle follow-ups, or authorize
+  an ON rollout without the remaining ordered gates.
 - **The lunch gate (#5969) — RE-CHARACTERIZED, skip STAYS**: not
   `nowTick` timing (refuted; two positive pins) but a served-handler
   DOUBLE DISPATCH of one durable event (2–5× per click) plus a late
@@ -1605,20 +1618,10 @@ Tasks:
       speculative run's egress effect kinds are OWNED AND DROPPED at
       the destination (memo hits keep reading through; misses render
       pending), `navigateTo` stays enactable (reversible),
-      `compile-and-run` is gated at the BUILTIN (its floating compile
-      launch cannot be intercepted at the destination), and that gate's
-      true interim scope is wider than "not speculable": it suppresses
-      fresh compiles for EVERY flag-ON non-wave run — client
-      derivation, F10 handler runs, imperative flows — and the serving
-      side refuses the writebacks until the compile-and-run serving
-      port (stage G's out-of-scope note) lands, so fresh
-      compile-and-run is INERT in the ON arm everywhere until that
-      port (memo'd results still read through; the gate's both-arms
-      pins live in `packages/runner/test/compile-and-run.test.ts`) —
-      THAT PORT LANDED in stage C (#5968, 2026-08-17/18: the compile as
-      an outbox effect, the completion re-arms, the derivation
-      instantiates in-run; the client reads through for every outcome;
-      see the "Coordination state" block above);
+      `compile-and-run` clients observe committed results. The serving
+      runtime compiles through the accepted outbox, records completion
+      readiness, and instantiates the child in a derivation. Its acceptance
+      coverage is the register's OW28 row;
       result-as-pattern children ride the derivation run's overlay
       writes.
 - [x] UI bindings untouched: authored writes under existing ACL + CAS
@@ -2085,11 +2088,9 @@ Tasks:
       §1); the design BUILD is under way — W0 RAN 2026-08-19 (PROCEED
       (d′)), W1/W2 launched (the "Coordination state" block above)*; (3)
       OW28 — compile-and-run as an outbox effect kind + stamped completion
-      writeback — **OPEN**. Restore the port on current main, reconcile the
-      preserved #5968 implementation with current contracts, and prove the
-      durable child/result/pending journey through a real host. The
-      `OW28-*` follow-ups are recorded in the register; this ordered gate
-      remains unmet until the port and its regression coverage land;
+      writeback — **CLOSED**. The durable child/result/pending journey and
+      scoped lifecycle are covered through a real host. The independently
+      scoped `OW28-*` follow-ups are recorded in the register;
       (4) the HONEST propagation benchmark (criterion below)
       once the two-user family works — *MEASURED TWICE (stage C, rows in
       the table below): NOT MET — first at the fan-out B tip (ON could
