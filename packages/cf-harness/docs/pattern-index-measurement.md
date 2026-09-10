@@ -132,12 +132,12 @@ remains a non-fatal `unchecked` reading.
 refuses the whole batch before the first task when the console is something
 else. See [The cell spec](#the-cell-spec).
 
-The runner loads the console page to pick up the token cookie every `/api` route
-is gated on. Before reading the index or starting a paid model turn, it requires
-`/api/status` to carry an absolute top-level `artifactRoot` and a `sessions`
-array, and — when a cell spec was named — the console's `/api/policy` to satisfy
-every field of it. It then reads the index and runs each task in its own
-session. It waits on the console's own `turn_completed`, `turn_failed` or
+The runner asks `/api/health` first, which is what distinguishes a console from
+nothing listening. Before reading the index or starting a paid model turn, it
+requires `/api/status` to carry an absolute top-level `artifactRoot` and a
+`sessions` array, and — when a cell spec was named — the console's `/api/policy`
+to satisfy every field of it. It then reads the index and runs each task in its
+own session. It waits on the console's own `turn_completed`, `turn_failed` or
 `turn_canceled` event, read off the server-sent event stream, and on nothing
 else. There is no timeout: a turn that hangs is a batch that hangs, which an
 operator can see and release with a `POST /api/cancel`, rather than a bound that

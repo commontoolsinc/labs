@@ -559,6 +559,13 @@ export class Client {
       const helloOk = parseHelloOk(message);
       if (helloOk !== null) {
         const expectedFlags = getMemoryProtocolFlags();
+        if (!helloOk.flags.stableExpressionResultIds) {
+          this.#helloPending.reject(permanentProtocolError(
+            "The memory server does not enforce stable expression result " +
+              "identities. Update the server before connecting this runtime.",
+          ));
+          return;
+        }
         if (!compatibleMemoryProtocolFlags(helloOk.flags, expectedFlags)) {
           // A data-model wire-contract mismatch: this client and server cannot
           // talk at all, and no retry changes that. Mark it permanent so a
