@@ -6615,6 +6615,16 @@ export class SpaceReplica
     // carries its own `meta.seq`). Shared by the per-read loop below and the blind
     // write's structural precondition so the two emission sites stay in lockstep.
     //
+    // Both the layers and the confirmed seq are read from the replica as the
+    // commit is built, not from the transaction's own snapshot of the doc,
+    // and a frame can land between the two. What the transaction owes this
+    // site (03-commit-model.md §3.3.4) is its commit-time claim check,
+    // passed before its reads are built: `claim()` in
+    // transaction/attestation.ts re-reads every doc the transaction
+    // snapshotted from this replica, and a differing value rejects the
+    // transaction locally as `StorageTransactionInconsistent`. So the
+    // content the transaction read is the content at the basis named here.
+    //
     // `excludeSpeculativeLayers` (verification-coverage.md OW47, the client
     // own-write durability seam): the blind write's structural read passes
     // true, and its named layers then skip the client's own SPECULATIVE

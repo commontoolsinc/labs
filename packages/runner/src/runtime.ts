@@ -3105,14 +3105,14 @@ export class Runtime {
     // locally is the same convergence, minus the wire: each round consumes
     // a retry from the same budget a rejection would.
     //
-    // Two gates on the wait. Budget: letting the documents land without
-    // re-running would let the commit export their REAL seqs under a
-    // traversal that read them as absent — an accepted commit derived from
-    // an absence that was never there — so with no budget to re-run, the
-    // honest move is the unexamined claim itself, judged by the server as
-    // before. Synchrony: a transaction with nothing in flight commits on the
-    // same synchronous path as ever, which the commit-gated runner start
-    // depends on.
+    // Two gates on the wait. Budget: a document that lands and turns out to
+    // exist fails the transaction's commit-time claim check (the snapshot
+    // read it as absent, and the replica now holds it), so with no budget to
+    // re-run, the wait can only turn the server's verdict into a local
+    // rejection; the unexamined claim goes to the server, judged as before.
+    // Synchrony: a transaction with nothing in flight commits on the same
+    // synchronous path as ever, which the commit-gated runner start depends
+    // on.
     const reconciliation = maxRetries > 0
       ? this.#awaitUnexaminedAbsences(tx)
       : 0;
