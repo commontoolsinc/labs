@@ -118,6 +118,14 @@ const _schemaWishOverload: MustBeTrue<
   SchemaWishOverloadAcceptsFactoryInput
 > = true;
 
+function assertFactoryCallBoundaries(
+  factory: PatternFactory<{ query: string }, unknown>,
+) {
+  factory({ query: "weather" });
+  // @ts-expect-error .curry is transformer-only and absent from the public API.
+  factory.curry({});
+}
+
 Deno.test("FactoryInput accepts reactive cell handles in factory bindings", () => {
   assertEquals(
     [
@@ -129,7 +137,8 @@ Deno.test("FactoryInput accepts reactive cell handles in factory bindings", () =
       _wrongRoomBinding,
       _schemaPatternOverload,
       _schemaWishOverload,
+      typeof assertFactoryCallBoundaries,
     ],
-    ["object", true, true, true, true, true, true, true],
+    ["object", true, true, true, true, true, true, true, "function"],
   );
 });
