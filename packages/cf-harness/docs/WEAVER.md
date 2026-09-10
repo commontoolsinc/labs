@@ -37,11 +37,18 @@ works at all, so they are worth knowing by name:
 - **The store**, which `loom toolshed-store-dir <instance>` prints. Loom keys it
   by the labs commit it vendors, so the value changes under an operator on every
   `loom update`. A console pointed at a superseded store starts cleanly and
-  reads the space as empty.
-- **The `runsc-cfc` sidecar directories**, which the Docker runtime registration
-  names in `--cfc-result-dir` and `--cfc-invocation-context-dir`. The harness
-  asks only that they are named, so a console pointed anywhere else starts
-  cleanly and denies every observation of the run.
+  reads the space as empty. It is printed as a `file://` URL, which is what the
+  toolshed reads `MEMORY_DIR` as; the console reads that variable as a directory
+  to walk, so it is given the plain path. A `file://` URL there walks nothing
+  and the console reads another store's cells as this space's.
+- **The `runsc-cfc` sidecar directories**, which are not loom's at all: the
+  Docker runtime registration names them in `--cfc-result-dir` and
+  `--cfc-invocation-context-dir`, and `docker info` reports what the running
+  daemon actually loaded. The harness asks only that they are named, so a
+  console pointed anywhere else starts cleanly and denies every observation of
+  the run. Fix a wrong one where the runtime is registered, then restart Docker
+  so the daemon reloads it — an edited `daemon.json` it has not read is not what
+  `docker info` reports, and the registration in force is the one that counts.
 
 The rest — the identity key at `defaults.identity`, the space at
 `defaults.local_space`, and the toolshed URL at `defaults.server_urls.toolshed`
@@ -65,11 +72,13 @@ deno task --cwd packages/cf-harness console:loom \
   --skills-registry-url <registry URL>
 ```
 
-It resolves the identity, the space, the toolshed URL, the store and the two
-sidecar directories from the instance's own records, prints every value with the
-record that decided it, and serves on 8135 — the port Weaver's harness console
-setting and loom's proxy both address. Read the printout before opening Weaver:
-a value that is wrong names the file to fix it in.
+It resolves the identity, the space and the toolshed URL from the instance's
+`pieces.json`, the store from `loom toolshed-store-dir`, and the two sidecar
+directories from the `runsc-cfc` registration `docker info` reports. It prints
+every value beside the record that decided it, and serves on 8135 — the port
+Weaver's harness console setting and loom's proxy both address. Read the
+printout before opening Weaver: a value that is wrong names where to fix it, and
+the three sources are three different places.
 
 Everything the launcher cannot derive is a flag, and its absence is an error
 naming it rather than a default nobody chose. A pattern index and a skills
@@ -147,11 +156,29 @@ the loom host:
 | The harness console                      | `https://<host>.ts.net/harness-console/*` | the daemon, which proxies to the console on 8135 |
 | A pattern's runtime                      | `https://<host>.ts.net:8000/`             | the toolshed                                     |
 
+**Those two port numbers belong to an instance at no port offset. An instance at
+an offset serves its own.** Its daemon and toolshed sit at the base port plus
+the offset, and the ports in the serve entries, in the preflight below, and in
+every URL here are that instance's — `defaults.server_urls` in its `pieces.json`
+is what says which. An instance at offset 1 runs its daemon on 9901 and its
+toolshed on 8001, and a route left on 9900 and 8000 fronts nothing it owns. Read
+the ports off `pieces.json` before serving anything, never from this table.
+
 The console needs no serve entry of its own: loom's daemon reverse-proxies
 `/harness-console/*` to the loopback address the console binds, rewriting the
 `Host` header the console's own gate insists on. Weaver derives that URL from
 the loom base it resolved, so its harness console setting is left blank for a
 remote loom and holds `http://127.0.0.1:8135` for a local one.
+
+The console's port is the one place the offset does not reach: the daemon
+proxies to 8135 whatever the instance's offset, because that is the port Weaver
+pairs with. Three things decide it, in order — `defaults.harness_console_port`
+in `pieces.json`, then a `CF_HARNESS_CONSOLE_PORT` the daemon itself inherited,
+then 8135. The middle one is the one to check when the route reaches nothing: a
+daemon started from a shell that exported the console's own variable proxies
+wherever that shell said, which is not what `pieces.json` records. Move the
+console with `--port` and record the new port in `pieces.json`, so the daemon
+and the launcher agree from one place.
 
 **The toolshed's own port is required, and its absence is silent.** Loom rebases
 the loopback URLs in `/config` onto the host the request arrived at and keeps

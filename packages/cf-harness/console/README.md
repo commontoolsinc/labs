@@ -61,12 +61,14 @@ deno task --cwd packages/cf-harness console:loom --instance <instance> \
   --pattern-index-url <index URL> --skills-registry-url <registry URL>
 ```
 
-That task reads the identity, the space, the toolshed URL, the store and the two
-`runsc-cfc` sidecar directories off the instance's own records, prints every
-value with the record that decided it, and serves on the port Weaver pairs with.
-Arguments after `--` reach this server untouched, so every flag in the tables
-below is reachable through it. [`../docs/WEAVER.md`](../docs/WEAVER.md) is the
-operator procedure it belongs to, including the tailnet topology and the
+That task reads the identity, the space and the toolshed URL off the instance's
+`pieces.json`, the store off `loom toolshed-store-dir`, and the two `runsc-cfc`
+sidecar directories off the runtime registration `docker info` reports — so a
+sidecar path is fixed where Docker registers the runtime, not in loom. It prints
+every value with the record that decided it, and serves on the port Weaver pairs
+with. Arguments after `--` reach this server untouched, so every flag in the
+tables below is reachable through it. [`../docs/WEAVER.md`](../docs/WEAVER.md)
+is the operator procedure it belongs to, including the tailnet topology and the
 pre-demo preflight.
 
 Against a toolshed of your own, the environment below is what `console:loom`

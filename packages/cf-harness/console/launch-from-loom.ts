@@ -27,6 +27,7 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { join } from "@std/path";
 
+import { registeredCfcSidecarHostDirs } from "../src/sandbox/docker-runsc.ts";
 import { startConsoleServer } from "./server.ts";
 
 /** The port Weaver's harness-console setting and loom's proxy both address. */
@@ -34,13 +35,6 @@ export const WEAVER_PAIRING_PORT = 8135;
 
 /** The Docker runtime whose registration sites the CFC sidecar transports. */
 const RUNSC_CFC_RUNTIME = "runsc-cfc";
-
-/**
- * The prefix Docker Desktop's macOS VM writes in front of a host path in its
- * daemon configuration. The runtime registration records the path as the VM
- * addresses it; the harness writes the same directories from the host.
- */
-const DOCKER_DESKTOP_HOST_PREFIX = "/host_mnt";
 
 /**
  * Proxy variables reach the console as ambient environment and break it two
@@ -55,6 +49,32 @@ const PROXY_VARIABLES = [
   "https_proxy",
   "ALL_PROXY",
   "all_proxy",
+] as const;
+
+/**
+ * Every variable the launcher decides. A value it resolves is set; a value it
+ * resolves to nothing is removed, because the printed report is a claim about
+ * what the console runs under and an inherited variable the report does not
+ * mention would make that claim untrue. `CF_HARNESS_SPACE_DB` is here without
+ * being set: it names a store file directly, so an inherited one would silently
+ * displace the store the report attributes to loom. Pass `-- --space-db <path>`
+ * to name one, where it is a decision on the command line rather than ambient.
+ */
+export const LAUNCHER_OWNED_VARIABLES = [
+  "CF_HARNESS_CONSOLE_PORT",
+  "CF_HARNESS_CONSOLE_DIR",
+  "CF_HARNESS_FABRIC_API_URL",
+  "CF_HARNESS_FABRIC_IDENTITY",
+  "CF_HARNESS_FABRIC_SPACE",
+  "CF_HARNESS_FABRIC_CFC_POSTURE",
+  "CF_HARNESS_FABRIC_CFC_FLOW_LABELS",
+  "CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE",
+  "CF_HARNESS_RUNSC_CFC_RESULT_DIR",
+  "CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR",
+  "CF_HARNESS_PATTERN_INDEX_URL",
+  "CF_HARNESS_SKILLS_REGISTRY_URL",
+  "CF_HARNESS_SPACE_DB",
+  "MEMORY_DIR",
 ] as const;
 
 /**
@@ -84,12 +104,14 @@ export interface LoomInstanceRecords {
    */
   toolshedStoreDir: string;
   /**
-   * The Docker daemon configuration registering the sandbox runtime, when one
-   * exists on this host.
+   * The runtime table `docker info --format '{{json .Runtimes}}'` reported, or
+   * `undefined` when it could not be read. The running daemon's table rather
+   * than the configuration on disk: an edited `daemon.json` the daemon has not
+   * reloaded names directories nothing writes.
    */
-  dockerDaemonJson?: string;
-  /** The absolute path `dockerDaemonJson` was read from, for error text. */
-  dockerDaemonJsonPath: string;
+  dockerRuntimes?: unknown;
+  /** Why `dockerRuntimes` is absent, for error text. */
+  dockerRuntimesUnreadable?: string;
 }
 
 /** What an operator names themselves, over what the records decide. */
@@ -156,71 +178,17 @@ const objectField = (
 };
 
 /**
- * The host path a `runsc-cfc` runtime argument names. Docker Desktop's macOS
- * VM records `/host_mnt/Users/…` for the host's `/Users/…`; a host that
- * registers the runtime directly records the host path already.
+ * The plain filesystem path a store value names.
+ *
+ * `loom toolshed-store-dir` prints a `file://` URL, because the toolshed reads
+ * `MEMORY_DIR` through `new URL()`. Inside this process nothing does: the space
+ * store reader treats `MEMORY_DIR` as a directory to walk, and a `file://` URL
+ * is not one — it walks nothing, falls through to its other candidate roots,
+ * and reads a different store's cells as though they were this space's. So the
+ * console is given the path, and the toolshed keeps the URL loom launched it
+ * with.
  */
-const hostPathFromDockerRuntimeArgument = (value: string): string =>
-  value.startsWith(`${DOCKER_DESKTOP_HOST_PREFIX}/`)
-    ? value.slice(DOCKER_DESKTOP_HOST_PREFIX.length)
-    : value;
-
-const runtimeArgumentValue = (
-  args: readonly unknown[],
-  name: string,
-): string | undefined => {
-  const prefix = `--${name}=`;
-  for (const entry of args) {
-    if (typeof entry === "string" && entry.startsWith(prefix)) {
-      return nonEmpty(entry.slice(prefix.length));
-    }
-  }
-  return undefined;
-};
-
-/**
- * The two sidecar directories the registered `runsc-cfc` runtime writes and
- * reads, as host paths, or `undefined` when this host registers no such
- * runtime or the registration names neither directory.
- */
-export const runscCfcSidecarDirectories = (
-  dockerDaemonJson: string | undefined,
-  dockerDaemonJsonPath: string,
-): { resultDir?: string; invocationContextDir?: string } => {
-  if (dockerDaemonJson === undefined) {
-    return {};
-  }
-  const daemon = parseJsonRecord(dockerDaemonJson, dockerDaemonJsonPath);
-  const runtime = objectField(
-    objectField(daemon, "runtimes"),
-    RUNSC_CFC_RUNTIME,
-  );
-  const args = Array.isArray(runtime.runtimeArgs) ? runtime.runtimeArgs : [];
-  const resultDir = runtimeArgumentValue(args, "cfc-result-dir");
-  const invocationContextDir = runtimeArgumentValue(
-    args,
-    "cfc-invocation-context-dir",
-  );
-  return {
-    ...(resultDir !== undefined
-      ? { resultDir: hostPathFromDockerRuntimeArgument(resultDir) }
-      : {}),
-    ...(invocationContextDir !== undefined
-      ? {
-        invocationContextDir: hostPathFromDockerRuntimeArgument(
-          invocationContextDir,
-        ),
-      }
-      : {}),
-  };
-};
-
-/**
- * The plain path a `MEMORY_DIR` value names. `loom toolshed-store-dir` prints
- * a `file://` URL because that is what the toolshed takes; the console's own
- * store reader takes either, and the printout is for a person.
- */
-const storeDirectoryDisplayPath = (memoryDir: string): string => {
+const storeDirectoryPath = (memoryDir: string): string => {
   try {
     return decodeURIComponent(new URL(memoryDir).pathname);
   } catch {
@@ -279,16 +247,17 @@ export const resolveLoomLaunchPlan = (
     );
   }
 
-  const sidecars = runscCfcSidecarDirectories(
-    records.dockerDaemonJson,
-    records.dockerDaemonJsonPath,
-  );
+  const sidecars = registeredCfcSidecarHostDirs({
+    runtimeName: RUNSC_CFC_RUNTIME,
+    runtimes: records.dockerRuntimes,
+  });
+  const registrationSource = records.dockerRuntimesUnreadable ??
+    `no \`${RUNSC_CFC_RUNTIME}\` runtime \`docker info\` reports names it`;
   const cfcResultDir = options.cfcResultDir ?? sidecars.resultDir;
   if (cfcResultDir === undefined) {
     throw new Error(
-      `no \`${RUNSC_CFC_RUNTIME}\` runtime in ` +
-        `\`${records.dockerDaemonJsonPath}\` names ` +
-        `\`--cfc-result-dir\`; set \`--cfc-result-dir\` to the directory ` +
+      `no directory is registered for \`--cfc-result-dir\`: ` +
+        `${registrationSource}; set \`--cfc-result-dir\` to the directory ` +
         `the runtime writes its result sidecars to`,
     );
   }
@@ -296,14 +265,29 @@ export const resolveLoomLaunchPlan = (
     sidecars.invocationContextDir;
   if (cfcInvocationContextDir === undefined) {
     throw new Error(
-      `no \`${RUNSC_CFC_RUNTIME}\` runtime in ` +
-        `\`${records.dockerDaemonJsonPath}\` names ` +
-        `\`--cfc-invocation-context-dir\`; set ` +
-        `\`--cfc-invocation-context-dir\` to the directory the runtime reads ` +
-        `invocation contexts from`,
+      `no directory is registered for ` +
+        `\`--cfc-invocation-context-dir\`: ${registrationSource}; set ` +
+        `\`--cfc-invocation-context-dir\` to the directory the runtime ` +
+        `reads invocation contexts from`,
     );
   }
 
+  if (
+    options.patternIndexUrl !== undefined && options.noPatternIndex === true
+  ) {
+    throw new Error(
+      "`--pattern-index-url` and `--no-pattern-index` contradict each other; " +
+        "name an index or waive it, not both",
+    );
+  }
+  if (
+    options.skillsRegistryUrl !== undefined && options.noSkillsRegistry === true
+  ) {
+    throw new Error(
+      "`--skills-registry-url` and `--no-skills-registry` contradict each " +
+        "other; name a registry or waive it, not both",
+    );
+  }
   if (
     options.patternIndexUrl === undefined && options.noPatternIndex !== true
   ) {
@@ -356,21 +340,21 @@ export const resolveLoomLaunchPlan = (
     { name: "toolshed", value: toolshedUrl, source: instanceSource },
     {
       name: "store",
-      value: storeDirectoryDisplayPath(memoryDir),
+      value: storeDirectoryPath(memoryDir),
       source: `\`loom toolshed-store-dir ${instance}\``,
     },
     {
       name: "cfc results",
       value: cfcResultDir,
       source: options.cfcResultDir === undefined
-        ? `\`${RUNSC_CFC_RUNTIME}\` in \`${records.dockerDaemonJsonPath}\``
+        ? `\`${RUNSC_CFC_RUNTIME}\` as \`docker info\` reports it`
         : named,
     },
     {
       name: "cfc contexts",
       value: cfcInvocationContextDir,
       source: options.cfcInvocationContextDir === undefined
-        ? `\`${RUNSC_CFC_RUNTIME}\` in \`${records.dockerDaemonJsonPath}\``
+        ? `\`${RUNSC_CFC_RUNTIME}\` as \`docker info\` reports it`
         : named,
     },
     {
@@ -410,7 +394,7 @@ export const resolveLoomLaunchPlan = (
     CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE: enforcementMode,
     CF_HARNESS_RUNSC_CFC_RESULT_DIR: cfcResultDir,
     CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR: cfcInvocationContextDir,
-    MEMORY_DIR: memoryDir,
+    MEMORY_DIR: storeDirectoryPath(memoryDir),
     ...(options.patternIndexUrl !== undefined
       ? { CF_HARNESS_PATTERN_INDEX_URL: options.patternIndexUrl }
       : {}),
@@ -451,28 +435,6 @@ const loomDataDirectory = (env: Record<string, string | undefined>): string => {
     );
   }
   return join(home, ".local", "share", "loom");
-};
-
-/**
- * Where Docker keeps the daemon configuration that registers a runtime. Docker
- * Desktop writes the per-user file; a host running the engine directly keeps
- * `/etc/docker/daemon.json`, which `--docker-daemon-json` names.
- */
-const dockerConfigDirectory = (
-  env: Record<string, string | undefined>,
-): string => {
-  const configured = nonEmpty(env.DOCKER_CONFIG);
-  if (configured !== undefined) {
-    return configured;
-  }
-  const home = nonEmpty(env.HOME);
-  if (home === undefined) {
-    throw new Error(
-      "neither `DOCKER_CONFIG` nor `HOME` is set, so Docker's daemon " +
-        "configuration cannot be located; set `--docker-daemon-json`",
-    );
-  }
-  return join(home, ".docker");
 };
 
 const readOptionalFile = async (path: string): Promise<string | undefined> => {
@@ -518,6 +480,47 @@ const readToolshedStoreDir = async (
   return new TextDecoder().decode(output.stdout).trim();
 };
 
+/**
+ * The runtime table `docker info` reports, or the reason it could not be read.
+ * The running daemon's table rather than `daemon.json`: a configuration file
+ * the daemon has not reloaded names directories nothing writes.
+ */
+const readDockerRuntimes = async (
+  dockerBinary: string,
+): Promise<{ runtimes?: unknown; unreadable?: string }> => {
+  let output: Deno.CommandOutput;
+  try {
+    output = await new Deno.Command(dockerBinary, {
+      args: ["info", "--format", "{{json .Runtimes}}"],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+  } catch (error) {
+    return {
+      unreadable: `\`${dockerBinary} info\` could not be run: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+  if (!output.success) {
+    return {
+      unreadable: `\`${dockerBinary} info\` exited ${output.code}: ${
+        new TextDecoder().decode(output.stderr).trim()
+      }`,
+    };
+  }
+  try {
+    return { runtimes: JSON.parse(new TextDecoder().decode(output.stdout)) };
+  } catch (error) {
+    return {
+      unreadable: `\`${dockerBinary} info\` reported a runtime table that ` +
+        `does not parse: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+    };
+  }
+};
+
 const positiveInteger = (value: string, flag: string): number => {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
@@ -547,7 +550,7 @@ export const launchConsoleFromLoom = async (
       "fabric-cfc-posture",
       "fabric-cfc-flow-labels",
       "fabric-cfc-enforcement-mode",
-      "docker-daemon-json",
+      "docker-bin",
     ],
     boolean: ["no-pattern-index", "no-skills-registry"],
     "--": true,
@@ -571,16 +574,20 @@ export const launchConsoleFromLoom = async (
         `running instance with \`--instance\``,
     );
   }
-  const dockerDaemonJsonPath = flag("docker-daemon-json") ??
-    join(dockerConfigDirectory(env), "daemon.json");
-  const dockerDaemonJson = await readOptionalFile(dockerDaemonJsonPath);
+  const dockerBinary = flag("docker-bin") ?? nonEmpty(env.CF_HARNESS_DOCKER) ??
+    "docker";
+  const docker = await readDockerRuntimes(dockerBinary);
 
   const plan = resolveLoomLaunchPlan({
     piecesJson,
     piecesJsonPath,
     toolshedStoreDir: await readToolshedStoreDir(loomBinary, instance),
-    ...(dockerDaemonJson !== undefined ? { dockerDaemonJson } : {}),
-    dockerDaemonJsonPath,
+    ...(docker.runtimes !== undefined
+      ? { dockerRuntimes: docker.runtimes }
+      : {}),
+    ...(docker.unreadable !== undefined
+      ? { dockerRuntimesUnreadable: docker.unreadable }
+      : {}),
   }, {
     instance,
     ...(flag("port") !== undefined
@@ -619,7 +626,7 @@ export const launchConsoleFromLoom = async (
     console.log(line);
   }
 
-  for (const variable of PROXY_VARIABLES) {
+  for (const variable of [...PROXY_VARIABLES, ...LAUNCHER_OWNED_VARIABLES]) {
     Deno.env.delete(variable);
   }
   for (const [name, value] of Object.entries(plan.environment)) {

@@ -2,10 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  LAUNCHER_OWNED_VARIABLES,
   type LoomInstanceRecords,
   loomLaunchReport,
   resolveLoomLaunchPlan,
-  runscCfcSidecarDirectories,
   WEAVER_PAIRING_PORT,
 } from "../../console/launch-from-loom.ts";
 
@@ -17,25 +17,22 @@ const PIECES_JSON = JSON.stringify({
   },
 });
 
-const DOCKER_DAEMON_JSON = JSON.stringify({
-  runtimes: {
-    "runsc-cfc": {
-      path: "/host_mnt/store/runsc-cfc/runsc",
-      runtimeArgs: [
-        "--cfc",
-        "--cfc-result-dir=/host_mnt/store/runsc-cfc/sidecars/results",
-        "--cfc-invocation-context-dir=/host_mnt/store/runsc-cfc/sidecars/ctx",
-      ],
-    },
+const DOCKER_RUNTIMES = {
+  "runsc-cfc": {
+    path: "/host_mnt/store/runsc-cfc/runsc",
+    runtimeArgs: [
+      "--cfc",
+      "--cfc-result-dir=/host_mnt/store/runsc-cfc/sidecars/results",
+      "--cfc-invocation-context-dir=/host_mnt/store/runsc-cfc/sidecars/ctx",
+    ],
   },
-});
+};
 
 const RECORDS: LoomInstanceRecords = {
   piecesJson: PIECES_JSON,
   piecesJsonPath: "/loom/instances/loom/pieces.json",
   toolshedStoreDir: "file:///loom/instances/loom/toolshed-store/68239506e79d/",
-  dockerDaemonJson: DOCKER_DAEMON_JSON,
-  dockerDaemonJsonPath: "/home/.docker/daemon.json",
+  dockerRuntimes: DOCKER_RUNTIMES,
 };
 
 const OPTIONS = {
@@ -65,12 +62,25 @@ describe("launch-from-loom", () => {
       );
     });
 
-    it("returns the store `loom toolshed-store-dir` printed as `MEMORY_DIR`", () => {
+    it("returns the store as a path rather than the `file://` URL loom printed", () => {
+      // The space store reader walks `MEMORY_DIR` as a directory. Handed a
+      // `file://` URL it walks nothing, falls through to its other candidate
+      // roots, and reads another store's cells as this space's.
+
       const plan = resolveLoomLaunchPlan(RECORDS, OPTIONS);
 
       expect(plan.environment.MEMORY_DIR).toBe(
-        "file:///loom/instances/loom/toolshed-store/68239506e79d/",
+        "/loom/instances/loom/toolshed-store/68239506e79d/",
       );
+    });
+
+    it("returns a store loom printed as a plain path unchanged", () => {
+      const plan = resolveLoomLaunchPlan(
+        { ...RECORDS, toolshedStoreDir: "/loom/store/memory/" },
+        OPTIONS,
+      );
+
+      expect(plan.environment.MEMORY_DIR).toBe("/loom/store/memory/");
     });
 
     it("returns the sidecar directories the registered runtime names, as host paths", () => {
@@ -184,28 +194,89 @@ describe("launch-from-loom", () => {
     });
 
     it("throws naming `--cfc-result-dir` when no runtime registration names it", () => {
-      const { dockerDaemonJson: _omitted, ...withoutDocker } = RECORDS;
+      const { dockerRuntimes: _omitted, ...withoutDocker } = RECORDS;
 
       expect(() => resolveLoomLaunchPlan(withoutDocker, OPTIONS)).toThrow(
         "`--cfc-result-dir`",
       );
     });
 
+    it("throws carrying the reason the runtime table could not be read", () => {
+      const { dockerRuntimes: _omitted, ...withoutDocker } = RECORDS;
+
+      expect(() =>
+        resolveLoomLaunchPlan({
+          ...withoutDocker,
+          dockerRuntimesUnreadable:
+            "`docker info` exited 1: daemon is not running",
+        }, OPTIONS)
+      ).toThrow("daemon is not running");
+    });
+
+    it("returns the sidecar directories a separate-token registration names", () => {
+      const plan = resolveLoomLaunchPlan({
+        ...RECORDS,
+        dockerRuntimes: {
+          "runsc-cfc": {
+            runtimeArgs: [
+              "-cfc-result-dir",
+              "/store/results",
+              "--cfc-invocation-context-dir",
+              "/store/ctx",
+            ],
+          },
+        },
+      }, OPTIONS);
+
+      expect(plan.environment.CF_HARNESS_RUNSC_CFC_RESULT_DIR).toBe(
+        "/store/results",
+      );
+      expect(plan.environment.CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR)
+        .toBe("/store/ctx");
+    });
+
+    it("returns the last directory a registration names for a flag twice", () => {
+      const plan = resolveLoomLaunchPlan({
+        ...RECORDS,
+        dockerRuntimes: {
+          "runsc-cfc": {
+            runtimeArgs: [
+              "--cfc-result-dir=/store/first",
+              "--cfc-invocation-context-dir=/store/ctx",
+              "--cfc-result-dir=/store/last",
+            ],
+          },
+        },
+      }, OPTIONS);
+
+      expect(plan.environment.CF_HARNESS_RUNSC_CFC_RESULT_DIR).toBe(
+        "/store/last",
+      );
+    });
+
     it("throws naming `--cfc-invocation-context-dir` when the registration omits it", () => {
       const records: LoomInstanceRecords = {
         ...RECORDS,
-        dockerDaemonJson: JSON.stringify({
-          runtimes: {
-            "runsc-cfc": {
-              runtimeArgs: ["--cfc-result-dir=/store/results"],
-            },
-          },
-        }),
+        dockerRuntimes: {
+          "runsc-cfc": { runtimeArgs: ["--cfc-result-dir=/store/results"] },
+        },
       };
 
       expect(() => resolveLoomLaunchPlan(records, OPTIONS)).toThrow(
         "`--cfc-invocation-context-dir`",
       );
+    });
+
+    it("throws when an index is both named and waived", () => {
+      expect(() =>
+        resolveLoomLaunchPlan(RECORDS, { ...OPTIONS, noPatternIndex: true })
+      ).toThrow("contradict each other");
+    });
+
+    it("throws when a skills registry is both named and waived", () => {
+      expect(() =>
+        resolveLoomLaunchPlan(RECORDS, { ...OPTIONS, noSkillsRegistry: true })
+      ).toThrow("contradict each other");
     });
 
     it("throws naming `--pattern-index-url` when no index is named or waived", () => {
@@ -217,6 +288,25 @@ describe("launch-from-loom", () => {
       ).toThrow("`--pattern-index-url`");
     });
 
+    it("returns only variables `LAUNCHER_OWNED_VARIABLES` names", () => {
+      // The launcher clears every owned variable before applying the resolved
+      // ones, so a key it can set that is missing from that list would survive
+      // from the operator's shell and contradict the printed report.
+
+      const waived = resolveLoomLaunchPlan(RECORDS, {
+        instance: "loom",
+        noPatternIndex: true,
+        noSkillsRegistry: true,
+      });
+      const named = resolveLoomLaunchPlan(RECORDS, OPTIONS);
+
+      for (const plan of [waived, named]) {
+        for (const key of Object.keys(plan.environment)) {
+          expect(LAUNCHER_OWNED_VARIABLES).toContain(key);
+        }
+      }
+    });
+
     it("throws naming `--skills-registry-url` when no registry is named or waived", () => {
       expect(() =>
         resolveLoomLaunchPlan(RECORDS, {
@@ -224,43 +314,6 @@ describe("launch-from-loom", () => {
           patternIndexUrl: "https://index.example",
         })
       ).toThrow("`--skills-registry-url`");
-    });
-  });
-
-  describe("runscCfcSidecarDirectories()", () => {
-    it("returns nothing when the host registers no `runsc-cfc` runtime", () => {
-      expect(
-        runscCfcSidecarDirectories(
-          JSON.stringify({ runtimes: { runc: {} } }),
-          "/home/.docker/daemon.json",
-        ),
-      ).toEqual({});
-    });
-
-    it("returns a path a host-registered runtime names unchanged", () => {
-      expect(
-        runscCfcSidecarDirectories(
-          JSON.stringify({
-            runtimes: {
-              "runsc-cfc": {
-                runtimeArgs: [
-                  "--cfc-result-dir=/var/lib/runsc-cfc/results",
-                  "--cfc-invocation-context-dir=/var/lib/runsc-cfc/ctx",
-                ],
-              },
-            },
-          }),
-          "/etc/docker/daemon.json",
-        ),
-      ).toEqual({
-        resultDir: "/var/lib/runsc-cfc/results",
-        invocationContextDir: "/var/lib/runsc-cfc/ctx",
-      });
-    });
-
-    it("throws naming the file when it does not parse", () => {
-      expect(() => runscCfcSidecarDirectories("{", "/home/.docker/daemon.json"))
-        .toThrow("/home/.docker/daemon.json");
     });
   });
 
