@@ -11,12 +11,10 @@ import {
   entityUriSchemePrefix,
   hasEntityUriScheme,
   hashStringForEntityAddress,
-  idStringForEntityAddress,
   isEntityKind,
   stripEntityUriScheme,
   uriSchemeForEntityKind,
 } from "../src/entity-kind.ts";
-import { toURI } from "../src/uri-utils.ts";
 
 describe("entity-kind", () => {
   const base = hashOf({ probe: "entity-kind" });
@@ -139,105 +137,6 @@ describe("entity-kind", () => {
         "future:fid1:abc",
       );
       expect(hashStringForEntityAddress("")).toBe("");
-    });
-  });
-
-  describe("idStringForEntityAddress()", () => {
-    it("returns the same id string for a bare hash and its `of:` URI", () => {
-      expect(idStringForEntityAddress("fid1:abc")).toBe("of:fid1:abc");
-      expect(idStringForEntityAddress("of:fid1:abc")).toBe("of:fid1:abc");
-    });
-
-    it("returns a kinded id unchanged", () => {
-      expect(idStringForEntityAddress("computed:fid1:abc")).toBe(
-        "computed:fid1:abc",
-      );
-    });
-
-    it("returns an id under every entity URI scheme unchanged", () => {
-      // Driven by the scheme list so a kind added there is left alone without
-      // a further edit here. An id already carrying one of these schemes is
-      // already an id, and scheming it again would name nothing.
-      for (const scheme of ENTITY_URI_SCHEMES) {
-        expect(idStringForEntityAddress(`${scheme}:fid1:abc`)).toBe(
-          `${scheme}:fid1:abc`,
-        );
-      }
-    });
-
-    it("returns an id in another subject's scheme unchanged", () => {
-      // The schemes this module knows are the entity kinds, and they are not
-      // every scheme an id can carry. A `cid:` schema document and a `data:`
-      // URI are ids in their own right, so scheming one builds a different id
-      // that nothing holds — and a lookup then reports a document that is
-      // there as absent, which is what `packages/fuse` reads entity directory
-      // names into.
-
-      expect(idStringForEntityAddress("cid:fid1:abc")).toBe("cid:fid1:abc");
-      expect(idStringForEntityAddress("data:application/json,{}")).toBe(
-        "data:application/json,{}",
-      );
-      expect(idStringForEntityAddress("did:key:z6MkExample")).toBe(
-        "did:key:z6MkExample",
-      );
-      expect(idStringForEntityAddress("future:fid1:abc")).toBe(
-        "future:fid1:abc",
-      );
-    });
-
-    it("returns a string that is no address at all unchanged", () => {
-      expect(idStringForEntityAddress("my-board")).toBe("my-board");
-      expect(idStringForEntityAddress("")).toBe("");
-    });
-
-    it("schemes exactly what `FabricHash` reads back as a bare tagged hash", () => {
-      // The rule is written here as a shape and owned there as a parser, so
-      // this is what stops the two drifting: for each address, what this
-      // schemes and what that parser calls a bare tagged hash agree. A hash
-      // reads back as itself, and everything the parser refuses or would
-      // respell — a second colon, a padded or non-base64url payload — is left
-      // as it stands.
-      //
-      // The table exhibits the forms in circulation rather than closing the
-      // set: it says the two agree on these, not on every string. What it
-      // does close is that a change to either side has to move both.
-
-      const addresses = [
-        base.toString(),
-        `of:${base.toString()}`,
-        `computed:${base.toString()}`,
-        `cid:${base.toString()}`,
-        "data:application/json,{}",
-        "did:key:z6MkExample",
-        "fid1:abc",
-        "fid1:AA==",
-        "fid1:a b",
-        "fid1:",
-        "unminted-tag:abc",
-        "my-board",
-        "",
-      ];
-      for (const address of addresses) {
-        let bare: boolean;
-        try {
-          bare = FabricHash.fromString(address).taggedHashString === address;
-        } catch {
-          bare = false;
-        }
-        expect({ address, id: idStringForEntityAddress(address) }).toEqual({
-          address,
-          id: bare ? `of:${address}` : address,
-        });
-      }
-    });
-
-    it("returns the id `toURI()` builds from the same address", () => {
-      // The two agree on the spelling a document is stored under, which is
-      // what makes a lookup keyed on that id answer about the entity a read
-      // through `entityIdFrom()` would reach.
-      const address = base.toString();
-      expect(idStringForEntityAddress(address)).toBe(toURI(base));
-      expect(idStringForEntityAddress(`of:${address}`)).toBe(toURI(base));
     });
   });
 });

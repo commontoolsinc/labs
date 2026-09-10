@@ -30,6 +30,7 @@ import {
   getPatternSetupIdentityRef,
   getPatternSource,
   getPieceSourceSnapshot,
+  idStringForEntityAddress,
   isCell,
   isLink,
   isStoredArgumentSchemaRefusal,
@@ -65,10 +66,7 @@ import type {
   CfcWriteFloorMode,
 } from "@commonfabric/runner/cfc";
 import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
-import {
-  hashStringForEntityAddress,
-  idStringForEntityAddress,
-} from "@commonfabric/runner/entity-kind";
+import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 import {
   type NameSchema,
   nameSchema,
