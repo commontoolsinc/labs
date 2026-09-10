@@ -32,6 +32,7 @@ import {
   type IdentityState,
   type Observation,
   parseContext,
+  readCostsForward,
   sampleDuration,
   scoreInputs,
   sealDay,
@@ -208,13 +209,15 @@ export function parseAggregate(text: string): AggregateState | undefined {
       state.unclaimed.every((key) => typeof key === "string")
     ? state.unclaimed as string[]
     : undefined;
+  const states = state.states as Record<string, IdentityState>;
+  for (const identity of Object.values(states)) readCostsForward(identity);
   return {
     schema: MANIFEST_SCHEMA_VERSION,
     day: state.day,
     folded: state.folded as string[],
     context: serializeContext(parseContext(state.context)),
     compacted,
-    states: state.states as Record<string, IdentityState>,
+    states,
     ...(unclaimed === undefined ? {} : { unclaimed }),
   };
 }
@@ -261,7 +264,7 @@ export interface ReadReport {
   /** Where each identity in it runs, by identity key. */
   surfaces: Map<string, Surface>;
 
-  /** Every measured duration, by identity key and then by day. */
+  /** Every passing duration, by identity key and then by day. */
   durations: Map<string, Map<string, number[]>>;
 }
 
@@ -315,7 +318,11 @@ export function readReport(
         source: where.source,
         place: where.place,
       });
-      if (record.outcome === "skip") continue;
+      // A cost predicts what a lane will spend running this test again,
+      // and only a passing execution measures that. A failure ended where
+      // the failure was reached, and one a wait's safety net stopped
+      // reports that net's bound.
+      if (record.outcome !== "pass") continue;
       let byDay = durations.get(key);
       if (byDay === undefined) {
         byDay = new Map();

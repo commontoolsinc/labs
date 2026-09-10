@@ -12,11 +12,13 @@ import {
   flakeCounts,
   flakeRate,
   foldObservations,
+  mergeSamples,
   type Observation,
   parseContext,
-  percentile90,
+  readCostsForward,
   sampledPercentile90,
   sampleDuration,
+  samplesOf,
   scoreInputs,
   sealDay,
   serializeContext,
@@ -508,33 +510,55 @@ describe("score", () => {
   describe("cost", () => {
     it("combines a day read across two runs without double counting", () => {
       // A day arrives over as many runs as it takes, so sealing combines
-      // rather than replaces — and nothing else writes a day's cost, or
+      // rather than replaces — and nothing else writes a day's sample, or
       // the combination would fold a running value into itself.
       const state = emptyState();
-      sealDay(state, "2026-08-20", [100, 100, 900]);
-      const first = state.costByDay["2026-08-20"]!;
-      sealDay(state, "2026-08-20", [200]);
+      sealDay(state, "2026-08-20", samplesOf([100, 100, 900]));
+      const first = state.costByDay["2026-08-20"]!.count;
+      sealDay(state, "2026-08-20", samplesOf([200]));
       const both = state.costByDay["2026-08-20"]!;
-      expect(both.count).toBe(first.count + 1);
-      expect(both.p90).toBe(Math.max(first.p90, 200));
+      expect(both.count).toBe(first + 1);
+      expect(both.slowest).toEqual([100, 100, 200, 900]);
     });
 
-    it("takes the ninetieth percentile by nearest rank", () => {
-      expect(percentile90([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])).toBe(9);
-      expect(percentile90([5])).toBe(5);
-      expect(percentile90([])).toBe(0);
+    it("reads a day the same whatever runs it arrived over", () => {
+      // The day is one population; which run carried which part of it is
+      // an accident of when objects reached the store.
+      const whole = Array.from({ length: 40 }, (_, i) => (i + 1) * 10);
+      const once = emptyState();
+      sealDay(once, "2026-08-20", samplesOf(whole));
+      const split = emptyState();
+      const cuts = [0, 7, 9, 31, whole.length];
+      for (let part = 1; part < cuts.length; part++) {
+        sealDay(
+          split,
+          "2026-08-20",
+          samplesOf(whole.slice(cuts[part - 1], cuts[part])),
+        );
+      }
+      expect(costSeconds(split, "2026-08-20"))
+        .toBe(costSeconds(once, "2026-08-20"));
+    });
+
+    it("does not let one execution sealed alone stand for its day", () => {
+      // The batch a slow execution arrives in can hold nothing else, and
+      // a percentile of that batch would be that execution.
+      const state = emptyState();
+      sealDay(state, "2026-08-20", samplesOf(Array(45).fill(50)));
+      sealDay(state, "2026-08-20", samplesOf([300_000]));
+      expect(costSeconds(state, "2026-08-20")).toBe(0.05);
     });
 
     it("reports the worst day inside the window, in seconds", () => {
       const state = emptyState();
-      sealDay(state, "2026-08-20", [100, 200, 4000]);
-      sealDay(state, "2026-08-19", [100, 100, 100]);
+      sealDay(state, "2026-08-20", samplesOf([100, 200, 4000]));
+      sealDay(state, "2026-08-19", samplesOf([100, 100, 100]));
       expect(costSeconds(state, "2026-08-20")).toBe(4);
     });
 
     it("forgets a day past the window", () => {
       const state = emptyState();
-      sealDay(state, "2026-08-01", [9000]);
+      sealDay(state, "2026-08-01", samplesOf([9000]));
       expect(costSeconds(state, "2026-08-20")).toBe(0);
     });
   });
@@ -544,7 +568,7 @@ describe("score", () => {
       const state = emptyState();
       state.runsByDay["2026-01-01"] = 1;
       state.runsByDay["2026-08-20"] = 1;
-      sealDay(state, "2026-01-01", [10]);
+      sealDay(state, "2026-01-01", samplesOf([10]));
       trimWindows(state, "2026-08-20");
       expect(Object.keys(state.runsByDay)).toEqual(["2026-08-20"]);
       expect(Object.keys(state.costByDay)).toEqual([]);
@@ -559,6 +583,16 @@ describe("score", () => {
     });
   });
 });
+
+/**
+ * The ninetieth percentile of a list, by nearest rank, over the whole list
+ * rather than a bounded sample of it.
+ */
+function percentile90(values: readonly number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.max(0, Math.ceil(0.9 * sorted.length) - 1)]!;
+}
 
 function dayBefore(day: string, ago: number): string {
   const stamp = Date.parse(`${day}T00:00:00Z`) - ago * 86_400_000;
@@ -629,13 +663,75 @@ describe("a day's bounded sample of its slowest runs", () => {
   });
 });
 
+describe("mergeSamples()", () => {
+  it("keeps the slowest of the union and the count of both", () => {
+    const a = samplesOf([10, 40]);
+    const b = samplesOf([20, 30]);
+    expect(mergeSamples(a, b)).toEqual({ slowest: [10, 20, 30, 40], count: 4 });
+  });
+
+  it("keeps what accumulating the whole would have kept", () => {
+    const whole = Array.from({ length: 3 * COST_SAMPLE_CAP }, (_, i) => i + 1);
+    const at = COST_SAMPLE_CAP + 7;
+    const merged = mergeSamples(
+      samplesOf(whole.slice(0, at)),
+      samplesOf(whole.slice(at)),
+    );
+    expect(merged).toEqual(samplesOf(whole));
+  });
+
+  it("leaves both sides as they were", () => {
+    const a = samplesOf([10, 40]);
+    const b = samplesOf([20]);
+    mergeSamples(a, b);
+    expect(a).toEqual({ slowest: [10, 40], count: 2 });
+    expect(b).toEqual({ slowest: [20], count: 1 });
+  });
+});
+
 describe("sealDay()", () => {
   it("writes nothing for a day with no runs in it", () => {
     const state = emptyState();
-    sealDay(state, "2026-08-20", []);
+    sealDay(state, "2026-08-20", samplesOf([]));
     expect(state.costByDay["2026-08-20"]).toBeUndefined();
     sealDay(state, "2026-08-20", { count: 0, slowest: [] });
     expect(state.costByDay["2026-08-20"]).toBeUndefined();
+  });
+
+  it("keeps the sample it was handed out of the state it wrote", () => {
+    const state = emptyState();
+    const batch = samplesOf([10, 20]);
+    sealDay(state, "2026-08-20", batch);
+    sampleDuration(batch, 900);
+    expect(state.costByDay["2026-08-20"]).toEqual({
+      slowest: [10, 20],
+      count: 2,
+    });
+  });
+});
+
+describe("readCostsForward()", () => {
+  it("reads a day carrying a percentile as a day of that one sample", () => {
+    const state = emptyState();
+    // The shape a state written before the samples were kept carries.
+    (state.costByDay as Record<string, unknown>)["2026-08-20"] = {
+      p90: 4000,
+      count: 45,
+    };
+    readCostsForward(state);
+    expect(state.costByDay["2026-08-20"]).toEqual({
+      slowest: [4000],
+      count: 45,
+    });
+    expect(costSeconds(state, "2026-08-20")).toBe(4);
+  });
+
+  it("leaves a day that already carries its samples alone", () => {
+    const state = emptyState();
+    sealDay(state, "2026-08-20", samplesOf([10, 20, 900]));
+    const kept = state.costByDay["2026-08-20"];
+    readCostsForward(state);
+    expect(state.costByDay["2026-08-20"]).toBe(kept);
   });
 });
 

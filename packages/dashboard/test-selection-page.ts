@@ -45,6 +45,9 @@ import {
 /** The fragment the flaky tests tile links to. */
 export const FLAKY_SECTION_ID = "flaky";
 
+/** The fragment the selection tile links to once a test is past the bound. */
+export const UNSCHEDULABLE_SECTION_ID = "unschedulable";
+
 /** Where the page lives, and what both tiles link to. */
 export const TEST_SELECTION_PATH = "/test-selection";
 
@@ -275,6 +278,7 @@ export function testSelectionPage(
   ${
       testSection({
         heading: "Too long for any lane",
+        id: UNSCHEDULABLE_SECTION_ID,
         lead:
           "One execution costs more than a whole lane's budget, so no packing can place them.",
         measure: "cost",
