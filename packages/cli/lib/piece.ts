@@ -2434,12 +2434,12 @@ const VERB_PROPERTY_KEYS: readonly string[] = [
  * self-contained. A property written as a reference resolves to its
  * definition, with the property's own keys merged over it; the keys that
  * describe the verb rather than its event are then dropped. The event's active
- * definition scope is attached and cut to the definitions the event reaches,
- * including references nested inside an inline event. So a
- * `Stream<void>` verb serves an empty object schema rather than a stream
- * marker with the verb's prose hung on it, and a referenced event serves its
- * definition alone. A reference that does not resolve serves `true`: the
- * surface cannot invent structure.
+ * definition scope is attached and cut to the definitions the event reaches
+ * within it. Nested scopes retain `$defs: {}` when pruning removes all their
+ * definitions, preserving the scope boundary. A `Stream<void>` verb serves an
+ * empty object schema rather than a stream marker with the verb's prose hung
+ * on it, and a referenced event serves its definition alone. A reference that
+ * does not resolve serves `true`: the surface cannot invent structure.
  */
 function declaredVerbInput(
   property: Record<string, unknown>,
@@ -2454,6 +2454,8 @@ function declaredVerbInput(
       !VERB_PROPERTY_KEYS.includes(key)
     ),
   ) as JSONSchema & object;
+  // `resolveCfcSchemaRefs` already carries the target's effective `$defs` onto
+  // the resolved view; `root` supplies the inherited scope for inline events.
   const eventRoot = cfcSchemaChildRoot(event, root);
   return pruneCfcSchemaDefinitions({
     ...event,

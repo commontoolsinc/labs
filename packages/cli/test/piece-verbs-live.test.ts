@@ -205,20 +205,20 @@ describe("listPieceCallables against a live piece", () => {
         main: "/main.tsx",
         files: [{
           name: "/main.tsx",
-          contents: `
-            import { action, cell, pattern, Stream } from "commonfabric";
-
-            interface Author { name: string }
-            interface Out { add: Stream<{ author: Author }> }
-
-            export default pattern<Record<string, never>, Out>(() => {
-              const names = cell<string[]>([]);
-              const add = action((event: { author: Author }) => {
-                names.push(event.author.name);
-              });
-              return { add };
-            });
-          `,
+          contents: [
+            'import { action, cell, pattern, Stream } from "commonfabric";',
+            "",
+            "interface Author { name: string }",
+            "interface Out { add: Stream<{ author: Author }> }",
+            "",
+            "export default pattern<Record<string, never>, Out>(() => {",
+            "  const names = cell<string[]>([]);",
+            "  const add = action((event: { author: Author }) => {",
+            "    names.push(event.author.name);",
+            "  });",
+            "  return { add };",
+            "});",
+          ].join("\n"),
         }],
       },
       "piece-verbs-live-inline-event",
