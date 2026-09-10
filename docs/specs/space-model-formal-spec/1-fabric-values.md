@@ -198,21 +198,21 @@ them and a walk stops there (Section 8.6).
 >   boundaries (Sections 4.9, 6, and 5). Symbol-keyed *properties* on plain
 >   objects are a separate matter — see Section 1.5 (Plain Containers /
 >   Objects).
-> - `function` — Functions are opaque closures with no portable representation.
->   They are explicitly **not** representable as `FabricValue`s, eliciting a
->   thrown error from `fabricFromNativeValue()` and a `false` return value from
->   `isValidFabricConvertibleValue()`. (`FabricInstance`s are not functions in
->   this sense — they are class instances whose encoding is handled by their
->   class's `[CODEC]`.)
+> - `function` — Ordinary functions are opaque closures with no portable
+>   representation. They are explicitly **not** representable as
+>   `FabricValue`s, eliciting a thrown error from `fabricFromNativeValue()` and
+>   a `false` return value from `isValidFabricConvertibleValue()`.
+>   (`FabricInstance`s are not functions in this sense — they are class
+>   instances whose encoding is handled by their class's `[CODEC]`.)
 >
-> A proposed, deliberately narrow exception adds a `FabricFactory` arm for
+> A deliberately narrow exception admits a `FabricFactory` arm for
 > builder-created factories and codec-decoded factory shells admitted to the
 > internal data-model brand table. The function itself is the `FabricValue` and
 > encodes through `Factory@1`; there is no non-callable wrapper class. This
 > data-type brand does not grant executable trust, which is established
 > separately by resolving a content-addressed builder artifact. The exception is
-> not automatic under the current protocol: it requires branded-function
-> dispatch before generic function rejection, plus factory-state handling in
+> is not automatic for a callable: it requires branded-function dispatch
+> before generic function rejection, plus factory-state handling in
 > conversion, freezing, cloning, equality, hashing, and traversal. Every
 > unbranded function remains rejected. See [First-Class Encodable
 > Factories](../pattern-construction/node-factory-shipping.md).
@@ -220,8 +220,8 @@ them and a walk stops there (Section 8.6).
 > Of the two JS primitive types whose `typeof` results (`"symbol"` and
 > `"function"`) describe non-data values, `symbol` has a corresponding
 > `FabricValue` arm (with the runtime interned-vs-unique restriction above) and
-> `"function"` does not **in the current model**. The proposal above adds only
-> the branded `FabricFactory` function arm. All other `typeof` results
+> `"function"` has only the branded `FabricFactory` function arm. All other
+> `typeof` results
 > (`"undefined"`, `"boolean"`, `"number"`, `"string"`, `"bigint"`, `"object"`)
 > have unconditional `FabricValue` arms.
 
@@ -3863,6 +3863,12 @@ export function fabricFromNativeValue(
 > it alone. A `FabricPrimitive` subclass that reports no tag of its own is
 > tagged as its parent, which is a defect in that subclass rather than one the
 > dispatch guards against.
+
+> The fabric-side `tagFromFabricValue()` and
+> `tagFromFabricValueElseNull()` dispatches use the narrower
+> `FABRIC_VALUE_TAGS` vocabulary. They return the distinct `"FabricFactory"`
+> tag for an admitted factory before the generic function rejection; every
+> other callable remains outside `FabricValue`.
 
 > **Implementation: centralized shallow-clone utility.** The conversion
 > functions use a centralized `cloneIfNecessary()` utility (in

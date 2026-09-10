@@ -204,6 +204,17 @@ type SinkOptions = {
   subscribeBeforeInitial?: boolean;
 
   /**
+   * Run the initial callback inside a caller-owned setup transaction. This is
+   * runner-only wiring for effects whose first generation must be atomic with
+   * the graph that installs them; later callbacks receive their scheduler run
+   * transaction through the callback's third argument.
+   */
+  initialTx?: IExtendedStorageTransaction;
+
+  /** Observe the scheduler action backing this sink before its initial run. */
+  onActionRegistered?: (action: Action) => void;
+
+  /**
    * Read the cell's display CFC label as part of the sink's tracked read set
    * and pass it to the callback as a second argument. Reading it on the sink's
    * transaction makes the cfc-metadata path a reactive dependency, so a
@@ -516,6 +527,7 @@ declare module "@commonfabric/api" {
       callback: (
         value: Readonly<T>,
         cfcLabel?: CfcLabelView | undefined,
+        tx?: IExtendedStorageTransaction,
       ) => Cancel | undefined | void,
       options?: SinkOptions,
     ): Cancel;
@@ -3035,6 +3047,7 @@ export class CellImpl<T extends FabricValue>
     callback: (
       value: Readonly<T>,
       cfcLabel?: CfcLabelView | undefined,
+      tx?: IExtendedStorageTransaction,
     ) => Cancel | undefined | void,
     options: SinkOptions = {},
   ): Cancel {
@@ -3875,6 +3888,7 @@ function subscribeToReferencedDocs<T>(
   callback: (
     value: T,
     cfcLabel?: CfcLabelView | undefined,
+    tx?: IExtendedStorageTransaction,
   ) => Cancel | undefined | void,
   runtime: Runtime,
   ref: CellViewRef,
@@ -3908,9 +3922,10 @@ function subscribeToReferencedDocs<T>(
     action: (tx) => {
       if (isCancel(sink.cleanup)) sink.cleanup();
       const { value, cfcLabel } = readSinkValue(tx);
-      sink.cleanup = callback(value, cfcLabel);
+      sink.cleanup = callback(value, cfcLabel, tx);
     },
   };
+  options.onActionRegistered?.(sink.action);
   return sinkHelper(
     sink,
     runtime,
@@ -3968,14 +3983,38 @@ function sinkHelper(
       subscriptionOptions,
     );
 
-    const initialTx = runtime.edit();
+    const initialTx = options.initialTx ?? runtime.edit();
+    const logBeforeInitial = txToReactivityLog(initialTx);
+    const readCountBeforeInitial = logBeforeInitial.reads.length;
+    const shallowReadCountBeforeInitial = logBeforeInitial.shallowReads.length;
+    const writeCountBeforeInitial = logBeforeInitial.writes.length;
     runtime.scheduler.withExecutingAction(
       sink.action,
       () => sink.action(initialTx),
     );
-    const initialLog = txToReactivityLog(initialTx);
-    runtime.prepareTxForCommit(initialTx);
-    void initialTx.commit();
+    const logAfterInitial = txToReactivityLog(initialTx);
+    // A caller-owned setup transaction can already contain the enclosing
+    // pattern's reads and writes. Keep the dependencies collected before the
+    // callback, then add only activity introduced by this sink's initial run;
+    // attributing the whole setup transaction to the sink makes unrelated
+    // setup writes spuriously invalidate it.
+    const initialLog = options.initialTx === undefined ? logAfterInitial : {
+      reads: [
+        ...dependencyLog.reads,
+        ...logAfterInitial.reads.slice(readCountBeforeInitial),
+      ],
+      shallowReads: [
+        ...dependencyLog.shallowReads,
+        ...logAfterInitial.shallowReads.slice(
+          shallowReadCountBeforeInitial,
+        ),
+      ],
+      writes: logAfterInitial.writes.slice(writeCountBeforeInitial),
+    };
+    if (options.initialTx === undefined) {
+      runtime.prepareTxForCommit(initialTx);
+      void initialTx.commit();
+    }
     runtime.scheduler.resubscribe(
       sink.action,
       initialLog,

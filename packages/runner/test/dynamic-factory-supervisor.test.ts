@@ -6,6 +6,7 @@ import {
   sealFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
 import { Identity } from "@commonfabric/identity";
+import { resolveScopeKey } from "@commonfabric/memory/v2";
 
 import { setDurableArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
 import type {
@@ -13,10 +14,20 @@ import type {
   JSONSchema,
   Reactive,
 } from "../src/builder/types.ts";
+import {
+  stampWaveRunContext,
+  WaveAccumulator,
+  waveRunContextOf,
+} from "../src/executor/wave.ts";
 import type { FactoryContract } from "../src/factory-materialization.ts";
-import { Runtime } from "../src/runtime.ts";
+import { Runtime, type ServerRunInfo } from "../src/runtime.ts";
+import type { Action } from "../src/scheduler.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import type { SpaceReplica } from "../src/storage/v2.ts";
+import type {
+  IExtendedStorageTransaction,
+  TransactionSealDestination,
+} from "../src/storage/interface.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -40,6 +51,12 @@ const RESULT_SCHEMA = {
 
 const MODULE_CONTRACT = {
   kind: "module",
+  argumentSchema: ARGUMENT_SCHEMA,
+  resultSchema: RESULT_SCHEMA,
+} as const satisfies FactoryContract;
+
+const PATTERN_CONTRACT = {
+  kind: "pattern",
   argumentSchema: ARGUMENT_SCHEMA,
   resultSchema: RESULT_SCHEMA,
 } as const satisfies FactoryContract;
@@ -72,6 +89,49 @@ type Execution = {
 
 function refKey(identity: string, symbol: string): string {
   return `${identity}#${symbol}`;
+}
+
+function createServingHarness(
+  storageManager = StorageManager.emulate({ as: signer }),
+) {
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+    servingPosture: true,
+    experimental: { serverExecution: true },
+  });
+  const commonfabric = createTrustedBuilder(runtime).commonfabric;
+  const invokeFactory = (commonfabric as unknown as {
+    __cfHelpers: { invokeFactory: InvokeFactory };
+  }).__cfHelpers.invokeFactory;
+  const warmArtifacts = new Map<string, unknown>();
+  runtime.patternManager.artifactFromIdentitySync = (identity, symbol) =>
+    warmArtifacts.get(refKey(identity, symbol));
+  runtime.patternManager.isArtifactAvailableInSpace = (identity) =>
+    Object.values(REFS).some((ref) => ref.identity === identity);
+  return {
+    commonfabric,
+    invokeFactory,
+    runtime,
+    storageManager,
+    warmArtifacts,
+  };
+}
+
+function stampServingRun(
+  tx: IExtendedStorageTransaction,
+  info: ServerRunInfo,
+): void {
+  stampWaveRunContext(tx, {
+    actionId: info.actionId,
+    kind: info.kind,
+    ...(info.scopeKeyIdentity === undefined
+      ? {}
+      : { scopeKeyIdentity: info.scopeKeyIdentity }),
+    ...(info.actionScopeKey === undefined
+      ? {}
+      : { actionScopeKey: info.actionScopeKey }),
+  });
 }
 
 async function within<T>(
@@ -229,94 +289,468 @@ describe("dynamic Factory@1 supervisor", () => {
   });
 
   it("cancels a child whose setup commit is refused", async () => {
+    const serving = createServingHarness();
     const executions: Execution[] = [];
-    const { factoryA, factoryB } = makeFactories(executions);
-    warmArtifacts.set(refKey(REFS.a.identity, REFS.a.symbol), factoryA);
-    warmArtifacts.set(refKey(REFS.b.identity, REFS.b.symbol), factoryB);
     const diagnostic = Promise.withResolvers<Error>();
-    runtime.scheduler.onError((error) => diagnostic.resolve(error));
-    const originalEdit = runtime.edit.bind(runtime);
-    const originalArtifactFromIdentitySync = runtime.patternManager
-      .artifactFromIdentitySync.bind(runtime.patternManager);
-    let intercepted = false;
-    let refuseNextEdit = false;
+    serving.runtime.scheduler.onError((error) => diagnostic.resolve(error));
+    let selectorTx: IExtendedStorageTransaction | undefined;
+    let refuseNextSetup = true;
+    let refused = false;
 
     try {
-      const selector = runtime.getCell<unknown>(
+      const makeSelected = (factory: "A" | "B", factor: number) => {
+        const compute = serving.commonfabric.lift(
+          (value: number) => {
+            executions.push({ factory, value });
+            return value * factor;
+          },
+          { type: "number" },
+          { type: "number" },
+        );
+        return serving.commonfabric.pattern(
+          ({ value }: { value: number }) => ({ result: compute(value) }),
+          ARGUMENT_SCHEMA,
+          RESULT_SCHEMA,
+        );
+      };
+      const factoryA = makeSelected("A", 10);
+      const factoryB = makeSelected("B", 100);
+      setDurableArtifactEntryRef(factoryA, REFS.a);
+      setDurableArtifactEntryRef(factoryB, REFS.b);
+      serving.warmArtifacts.set(
+        refKey(REFS.a.identity, REFS.a.symbol),
+        factoryA,
+      );
+      serving.warmArtifacts.set(
+        refKey(REFS.b.identity, REFS.b.symbol),
+        factoryB,
+      );
+      const outer = serving.commonfabric.pattern<
+        { factory: unknown; value: number },
+        { result: number }
+      >(
+        ({ factory, value }) =>
+          serving.invokeFactory<{ value: number }, { result: number }>(
+            factory,
+            { value },
+            PATTERN_CONTRACT,
+          ),
+        {
+          type: "object",
+          properties: {
+            factory: { asFactory: PATTERN_CONTRACT },
+            value: { type: "number" },
+          },
+          required: ["factory", "value"],
+          additionalProperties: false,
+        },
+        RESULT_SCHEMA,
+      );
+      const setupTx = serving.runtime.edit();
+      const selector = serving.runtime.getCell<unknown>(
         space,
         "dynamic-factory-refused-setup-selector",
         undefined,
-        tx,
+        setupTx,
       );
-      const resultCell = runtime.getCell<{ result: number }>(
+      const resultCell = serving.runtime.getCell<{ result: number }>(
         space,
         "dynamic-factory-refused-setup-result",
         RESULT_SCHEMA,
-        tx,
+        setupTx,
       );
-      const result = runtime.run(
-        tx,
-        outerPattern(),
+      const result = serving.runtime.run(
+        setupTx,
+        outer,
         { factory: selector, value: 6 },
         resultCell,
       );
-      await commitAndRenew();
-      await runtime.scheduler.idleWithPendingCommits();
+      serving.runtime.prepareTxForCommit(setupTx);
+      expect((await setupTx.commit()).error).toBeUndefined();
+      await serving.runtime.idle();
 
-      selector.withTx(tx).set(createFactoryShell(sealFactoryState(factoryA)));
-      runtime.prepareTxForCommit(tx);
-      runtime.patternManager.artifactFromIdentitySync = (identity, symbol) => {
-        const artifact = originalArtifactFromIdentitySync(identity, symbol);
-        if (identity === REFS.a.identity && symbol === REFS.a.symbol) {
-          refuseNextEdit = true;
-        }
-        return artifact;
-      };
-      runtime.edit = ((...args: Parameters<typeof originalEdit>) => {
-        const childTx = originalEdit(...args);
-        const refuseThisCommit = refuseNextEdit;
-        refuseNextEdit = false;
-        const originalCommit = childTx.commit.bind(childTx);
-        childTx.commit = ((
-          ...commitArgs: Parameters<typeof originalCommit>
-        ) => {
-          if (intercepted || !refuseThisCommit) {
-            return originalCommit(...commitArgs);
+      serving.runtime.installSealDestination({
+        seal: (sealedTx) => {
+          const isSelectedSetup = sealedTx !== selectorTx &&
+            (sealedTx.getReactivityLog?.().writes.length ?? 0) > 0;
+          if (refuseNextSetup && isSelectedSetup) {
+            refuseNextSetup = false;
+            refused = true;
+            const refusal = {
+              name: "StorageTransactionAborted" as const,
+              message: "refused dynamic child setup",
+              reason: new Error("test refusal"),
+            };
+            return Promise.resolve({ error: refusal });
           }
-          intercepted = true;
-          const refusal = {
-            name: "CfcCommitRefusalError" as const,
-            message: "refused dynamic child setup",
-            reasons: ["test refusal"],
-            refusals: [],
-          };
-          expect(childTx.abort(refusal).error).toBeUndefined();
-          return Promise.resolve({ error: refusal as never });
-        }) as typeof childTx.commit;
-        return childTx;
-      }) as typeof runtime.edit;
-      expect((await tx.commit()).error).toBeUndefined();
+          return sealedTx.tx.commit();
+        },
+      }, { runStamper: stampServingRun });
+
+      selectorTx = serving.runtime.edit();
+      serving.runtime.stampServerRun(selectorTx, {
+        actionId: "test/dynamic-factory-refused-selector-a",
+        kind: "bookkeeping",
+      });
+      selector.withTx(selectorTx).set(
+        createFactoryShell(sealFactoryState(factoryA)),
+      );
+      expect((await selectorTx.commit()).error).toBeUndefined();
 
       expect(
         (await within(diagnostic.promise, "dynamic child setup refusal"))
           .message,
       ).toContain("refused dynamic child setup");
-      await runtime.scheduler.idleWithPendingCommits();
-      expect(intercepted).toBe(true);
+      await serving.runtime.scheduler.idleWithPendingCommits();
+      expect(refused).toBe(true);
       expect(executions).toEqual([]);
       expect(result.key("result").get()).toBeUndefined();
 
-      runtime.edit = originalEdit;
-      tx = runtime.edit();
-      selector.withTx(tx).set(createFactoryShell(sealFactoryState(factoryB)));
-      await commitAndRenew();
+      selectorTx = serving.runtime.edit();
+      serving.runtime.stampServerRun(selectorTx, {
+        actionId: "test/dynamic-factory-refused-selector-b",
+        kind: "bookkeeping",
+      });
+      selector.withTx(selectorTx).set(
+        createFactoryShell(sealFactoryState(factoryB)),
+      );
+      expect((await selectorTx.commit()).error).toBeUndefined();
       expect(await within(result.pull(), "replacement after setup refusal"))
         .toEqual({ result: 600 });
       expect(executions).toEqual([{ factory: "B", value: 6 }]);
     } finally {
-      runtime.edit = originalEdit;
-      runtime.patternManager.artifactFromIdentitySync =
-        originalArtifactFromIdentitySync;
+      serving.runtime.clearSealDestination();
+      await serving.runtime.dispose();
+      await serving.storageManager.close();
+    }
+  });
+
+  it("commits a stamped dynamic child setup through a strict serving seal destination", async () => {
+    const serving = createServingHarness();
+    let selectorTx: IExtendedStorageTransaction | undefined;
+    const childSetupSeal = Promise.withResolvers<{
+      context: ReturnType<typeof waveRunContextOf>;
+      error?: unknown;
+    }>();
+    try {
+      const selected = serving.commonfabric.pattern(
+        ({ value }: { value: number }) => ({ result: value }),
+        ARGUMENT_SCHEMA,
+        RESULT_SCHEMA,
+      );
+      setDurableArtifactEntryRef(selected, REFS.a);
+      serving.warmArtifacts.set(
+        refKey(REFS.a.identity, REFS.a.symbol),
+        selected,
+      );
+      const outer = serving.commonfabric.pattern<
+        { factory: unknown; value: number },
+        { result: number }
+      >(
+        ({ factory, value }) =>
+          serving.invokeFactory<{ value: number }, { result: number }>(
+            factory,
+            { value },
+            PATTERN_CONTRACT,
+          ),
+        {
+          type: "object",
+          properties: {
+            factory: { asFactory: PATTERN_CONTRACT },
+            value: { type: "number" },
+          },
+          required: ["factory", "value"],
+          additionalProperties: false,
+        },
+        RESULT_SCHEMA,
+      );
+      const setupTx = serving.runtime.edit();
+      const selector = serving.runtime.getCell<unknown>(
+        space,
+        "dynamic-factory-serving-seal-selector",
+        undefined,
+        setupTx,
+      );
+      const resultCell = serving.runtime.getCell<{ result: number }>(
+        space,
+        "dynamic-factory-serving-seal-result",
+        RESULT_SCHEMA,
+        setupTx,
+      );
+      const result = serving.runtime.run(
+        setupTx,
+        outer,
+        { factory: selector, value: 4 },
+        resultCell,
+      );
+      serving.runtime.prepareTxForCommit(setupTx);
+      expect((await setupTx.commit()).error).toBeUndefined();
+      await serving.runtime.idle();
+
+      const strictDestination: TransactionSealDestination = {
+        seal: async (sealedTx) => {
+          const context = waveRunContextOf(sealedTx);
+          const carriesWrites =
+            (sealedTx.getReactivityLog?.().writes.length ?? 0) > 0;
+          const isChildSetup = carriesWrites && sealedTx !== selectorTx;
+          if (context === undefined && carriesWrites) {
+            const error = new Error(
+              "unstamped transaction refused by strict test destination",
+            );
+            if (isChildSetup) childSetupSeal.resolve({ context, error });
+            return Promise.reject(error);
+          }
+          const committed = await sealedTx.tx.commit();
+          if (isChildSetup) {
+            childSetupSeal.resolve({
+              context,
+              ...(committed.error === undefined
+                ? {}
+                : { error: committed.error }),
+            });
+          }
+          return committed;
+        },
+      };
+      serving.runtime.installSealDestination(strictDestination, {
+        runStamper: stampServingRun,
+      });
+
+      selectorTx = serving.runtime.edit();
+      serving.runtime.stampServerRun(selectorTx, {
+        actionId: "test/dynamic-factory-selector-write",
+        kind: "bookkeeping",
+      });
+      selector.withTx(selectorTx).set(
+        createFactoryShell(sealFactoryState(selected)),
+      );
+      expect((await selectorTx.commit()).error).toBeUndefined();
+
+      const childSeal = await childSetupSeal.promise;
+      expect(childSeal.context).toBeDefined();
+      expect(childSeal.error).toBeUndefined();
+      await serving.runtime.idle();
+      expect(await result.pull()).toEqual({ result: 4 });
+    } finally {
+      serving.runtime.clearSealDestination();
+      await serving.runtime.dispose();
+      await serving.storageManager.close();
+    }
+  });
+
+  it("keeps demanded per-user dynamic factory selections independent", async () => {
+    const alice = {
+      principal: "did:key:dynamic-factory-alice",
+      sessionId: "dynamic-factory-alice-session" as never,
+    };
+    const bob = {
+      principal: "did:key:dynamic-factory-bob",
+      sessionId: "dynamic-factory-bob-session" as never,
+    };
+    const serving = createServingHarness();
+    let wave: WaveAccumulator | undefined;
+    const executions: Execution[] = [];
+    const scopedResultSchema = {
+      type: "object",
+      properties: { result: { type: "number", scope: "user" } },
+      required: ["result"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+    const scopedModuleContract = {
+      kind: "module",
+      argumentSchema: ARGUMENT_SCHEMA,
+      resultSchema: scopedResultSchema,
+    } as const satisfies FactoryContract;
+    const baseA = serving.commonfabric.lift(
+      ({ value }: { value: number }) => {
+        executions.push({ factory: "A", value });
+        return { result: value * 10 };
+      },
+      ARGUMENT_SCHEMA,
+      scopedResultSchema,
+    );
+    const baseB = serving.commonfabric.lift(
+      ({ value }: { value: number }) => {
+        executions.push({ factory: "B", value });
+        return { result: value * 100 };
+      },
+      ARGUMENT_SCHEMA,
+      scopedResultSchema,
+    );
+    setDurableArtifactEntryRef(baseA, REFS.a);
+    setDurableArtifactEntryRef(baseB, REFS.b);
+    const factoryA = baseA.asScope("user");
+    const factoryB = baseB.asScope("user");
+    try {
+      serving.warmArtifacts.set(refKey(REFS.a.identity, REFS.a.symbol), baseA);
+      serving.warmArtifacts.set(refKey(REFS.b.identity, REFS.b.symbol), baseB);
+
+      const setupTx = serving.runtime.edit();
+      const selector = serving.runtime.getCell<unknown>(
+        space,
+        "dynamic-factory-demanded-selector",
+        undefined,
+        setupTx,
+        "user",
+      );
+      const value = serving.runtime.getCell<number>(
+        space,
+        "dynamic-factory-demanded-value",
+        { type: "number" },
+        setupTx,
+        "user",
+      );
+      const resultCell = serving.runtime.getCell<{ result: number }>(
+        space,
+        "dynamic-factory-demanded-result",
+        scopedResultSchema,
+        setupTx,
+      );
+      const result = serving.runtime.run(
+        setupTx,
+        (() => {
+          const outer = serving.commonfabric.pattern<
+            { factory: unknown; value: number },
+            { result: number }
+          >(
+            ({ factory, value }) =>
+              serving.invokeFactory<{ value: number }, { result: number }>(
+                factory,
+                { value },
+                scopedModuleContract,
+              ),
+            {
+              type: "object",
+              properties: {
+                factory: { asFactory: scopedModuleContract },
+                value: { type: "number" },
+              },
+              required: ["factory", "value"],
+              additionalProperties: false,
+            },
+            scopedResultSchema,
+          );
+          return outer;
+        })(),
+        { factory: selector, value },
+        resultCell,
+      );
+      serving.runtime.prepareTxForCommit(setupTx);
+      expect((await setupTx.commit()).error).toBeUndefined();
+      await serving.runtime.idle();
+
+      const selectorEffect = [
+        ...serving.runtime.scheduler.accessForTestingOnly.nodes.effects,
+      ].find((action) =>
+        action.name.startsWith("sink:") &&
+        action.name.endsWith("/value/factory")
+      );
+      expect(selectorEffect).toBeDefined();
+      const rootId = resultCell.getAsNormalizedFullLink().id;
+      expect(
+        (selectorEffect as Action & {
+          schedulerObservationIdentity?: { pieceRootId?: string };
+        }).schedulerObservationIdentity?.pieceRootId,
+      ).toBe(rootId);
+      const replica = serving.storageManager.open(space)
+        .replica as SpaceReplica;
+      replica.accessForTestingOnly.applySessionSync({
+        type: "sync",
+        fromSeq: 0,
+        toSeq: 4,
+        upserts: [
+          {
+            branch: "",
+            id: selector.getAsNormalizedFullLink().id,
+            scope: "user",
+            scopeKey: resolveScopeKey("user", alice),
+            seq: 1,
+            doc: {
+              value: createFactoryShell(sealFactoryState(factoryA)),
+            } as never,
+          },
+          {
+            branch: "",
+            id: value.getAsNormalizedFullLink().id,
+            scope: "user",
+            scopeKey: resolveScopeKey("user", alice),
+            seq: 2,
+            doc: { value: 2 },
+          },
+          {
+            branch: "",
+            id: selector.getAsNormalizedFullLink().id,
+            scope: "user",
+            scopeKey: resolveScopeKey("user", bob),
+            seq: 3,
+            doc: {
+              value: createFactoryShell(sealFactoryState(factoryB)),
+            } as never,
+          },
+          {
+            branch: "",
+            id: value.getAsNormalizedFullLink().id,
+            scope: "user",
+            scopeKey: resolveScopeKey("user", bob),
+            seq: 4,
+            doc: { value: 3 },
+          },
+        ],
+        removes: [],
+      }, "integrate");
+
+      wave = new WaveAccumulator({
+        space,
+        basisSeq: 0,
+        scopeKeyIdentity: serving.runtime.scopeKeyIdentity,
+        replicaFor: (targetSpace) =>
+          serving.storageManager.open(targetSpace).replica,
+      });
+      serving.runtime.installSealDestination(wave, {
+        runStamper: stampServingRun,
+        runDemanderResolver: (pieceRootIds) =>
+          pieceRootIds.includes(rootId) ? [alice, bob] : [],
+      });
+      serving.runtime.scheduler.invalidateAction(selectorEffect!);
+      await serving.runtime.idle();
+      const readFor = (
+        identity: typeof alice,
+      ): Readonly<{ result: number }> | undefined => {
+        const readTx = serving.runtime.readTx();
+        readTx.tx.scopeKeyIdentity = identity;
+        return result.withTx(readTx).get();
+      };
+      expect(readFor(alice)).toEqual({ result: 20 });
+      expect(readFor(bob)).toEqual({ result: 300 });
+
+      const aliceReplacement = serving.runtime.edit();
+      aliceReplacement.tx.scopeKeyIdentity = alice;
+      selector.withTx(aliceReplacement).set(
+        createFactoryShell(sealFactoryState(factoryB)),
+      );
+      serving.runtime.stampServerRun(aliceReplacement, {
+        actionId: "test/dynamic-factory-alice-selector-write",
+        kind: "bookkeeping",
+        scopeKeyIdentity: alice,
+        actionScopeKey: resolveScopeKey("user", alice),
+      });
+      serving.runtime.prepareTxForCommit(aliceReplacement);
+      expect((await aliceReplacement.commit()).error).toBeUndefined();
+      // A serving wave observes the next durable input revision only after
+      // this wave settles. Explicitly re-arm the coordinator here to exercise
+      // the per-instance replacement against the wave's speculative overlay.
+      serving.runtime.scheduler.invalidateAction(selectorEffect!);
+      await serving.runtime.idle();
+
+      expect(readFor(alice)).toEqual({ result: 200 });
+      expect(readFor(bob)).toEqual({ result: 300 });
+      expect(executions).toContainEqual({ factory: "B", value: 2 });
+    } finally {
+      serving.runtime.clearSealDestination();
+      wave?.abandon("per-user dynamic factory test complete");
+      await wave?.settled();
+      await serving.runtime.dispose();
+      await serving.storageManager.close();
     }
   });
 

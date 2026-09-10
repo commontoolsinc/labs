@@ -355,22 +355,14 @@ and modifier-derived factories retain that same root token through a
 `noteDerivedCopy`-equivalent side table; they never copy a temporarily missing
 ref by value.
 
-This requires a narrow extension to the current Fabric protocol. Today:
-
-- `FabricValue` has no function arm;
-- `[CODEC]` is class-side and lookup reads `value.constructor[CODEC]`;
-- codec lookup rejects `typeof value === "function"` before class dispatch;
-- native conversion only accepts functions through legacy `toJSON()`; and
-- clone, freeze, equality, and hashing treat functions as invalid or primitive
-  leaves.
-
-Consequently, attaching today's `[CODEC]` property alone is not automatic. The
-implementation adds a narrow `FabricFactory` arm plus one internal
+The Fabric protocol has a narrow `FabricFactory` function arm plus one internal
 `factoryStateOf(value)` / `tryFactoryState(value)` resolver. Conversion, JSON
 encoding, deep-freeze, clone, equality, hashing, schema validation, and builder
 traversal consult that resolver before their generic function branches. The
 JSON registry has a dedicated callable-factory codec slot; it does not classify
-`function` as an ordinary primitive type.
+`function` as an ordinary primitive type. Value-kind dispatch returns the
+distinct `FabricFactory` tag for admitted factories and continues to reject
+every other callable.
 
 `FactoryCodec.canEncode()` accepts only values admitted to the internal
 factory-state table. The brand is checked before legacy `toJSON()` conversion
@@ -1562,10 +1554,25 @@ A sink notification is only the invalidation signal: it may observe the link
 boundary while a cross-space target is arriving, so the supervisor always uses
 the explicit resolved-target reread as selection authority.
 
-The direct dynamic node is a switch-latest supervisor for one materialized
-child/action/handler. It owns that instance's cancellation scope, result-owned
-internal cells, and handler subscription. The factory binding is a reactive
-dependency. On a different canonical factory state, the supervisor:
+The direct dynamic node installs one runner-owned coordinator action. The
+coordinator is fan-out eligible under server execution: it derives the
+selector's narrowest resolved scope from the complete dereference chain, keys
+one supervisor instance by that scope and the scheduled run identity, and lets
+different demanded user or session instances coexist. Each instance is a
+switch-latest supervisor for one materialized child/action/handler and owns its
+own generation, cancellation scope, readiness, result-owned internal cells,
+and handler subscription. One demanded instance changing its factory cannot
+cancel another demanded instance's child.
+
+The coordinator's scheduled transaction is the consuming transaction. It
+contains the authoritative selector read and any warm child setup writes; the
+runner does not mint an unstamped child-setup transaction. The sink's first run
+may use the enclosing pattern's setup transaction so initial selection and
+child setup remain atomic with that graph. Its scheduler dependencies include
+the separately collected selector chain plus only the reads and writes added by
+that first run, never unrelated activity already present in the enclosing
+transaction. On a different canonical factory state, that scope instance's
+supervisor:
 
 1. increments a generation token and cancels the prior instance;
 2. fences late async writes/results from older generations;
@@ -1573,7 +1580,8 @@ dependency. On a different canonical factory state, the supervisor:
    the call site's output binding;
 4. resolves and validates the replacement, including artifact-source
    provenance and cross-space execution modifiers; and
-5. rereads the binding after any await and instantiates only the still-current
+5. after any await, invalidates the coordinator so a fresh scheduled
+   transaction rereads the binding and instantiates only the still-current
    replacement under the new generation.
 
 Selector invalidation is control-plane work and must not queue behind an
@@ -1582,10 +1590,11 @@ observes the exact resolved selector source at the storage-notification seam,
 rereads that source, and invalidates the old generation immediately. This fast
 lane grants no execution authority and runs no replacement code: normal
 transactional selection, CFC validation, materialization, and instantiation
-remain on the scheduled path. JavaScript promises are not forcibly settled;
-the canceled promise may finish later, but its transaction and subscriptions
-are generation-fenced and cannot commit. The replacement begins when the
-ordinary scheduler lane advances.
+remain on the scheduled path. The fast lane preempts only the scope instance
+named by the notification's resolved scope key. JavaScript promises are not
+forcibly settled; the canceled promise may finish later, but its transaction
+and subscriptions are generation-fenced and cannot commit. The replacement
+begins when the ordinary scheduler lane advances.
 Cancellation owns both an installed child registration and any deferred
 named-family start that has not installed one yet; a superseded deferred start
 cannot become live after the replacement has written its params.
@@ -1595,14 +1604,15 @@ through the normal synchronous speculative commit, and subsequent setup commits
 remain causally behind it, so an intervening reader waits for the new factory
 instead of restarting canceled code against the new params.
 
-The supervisor also owns the selected child's setup commit through final
-settlement. The graph may become locally visible through the ordinary
-synchronous speculative commit, but a commit refusal or serving-wave
+The supervisor also owns the coordinator transaction's selected-child setup
+through final settlement. The graph may become locally visible through the
+ordinary synchronous speculative commit, but a commit refusal or serving-wave
 withdrawal cancels that exact child generation, reports the failure through the
 runner's node diagnostic channel, and prevents its subscriptions from writing
 again. A settlement from an older generation cannot cancel or report against a
-newer child. The failed selection is not treated as an active same-state child;
-a later selector invalidation may create a fresh generation and retry it.
+newer child. Every scheduled action and handler below a selected pattern
+inherits the same generation guard, composed with any scoped program-selection
+guard, so a nested action cannot outlive the dynamic factory that admitted it.
 
 The same fence applies to the selected child's pattern-identity watcher. A
 queued initial or intermediate pointer notification verifies that it still
@@ -1610,25 +1620,23 @@ names the pointer stored at the stable output identity before swapping code; a
 late watcher callback cannot restore a superseded factory over the newer
 generation's params.
 
-Replaying the same canonical `Factory@1` state is a no-op while the selection
-has an active child or a still-valid readiness attempt. It is not a no-op after
-that selection's readiness attempt failed: a later selector notification,
-including a redirect retarget to the same canonical factory state, creates a
-fresh generation, rereads source provenance, and may retry. This applies to
-both artifact loading and named execution-space resolution. Source provenance
-is also part of the ownership of a pending readiness attempt: if a redirect
-retargets from source A to source B while preserving byte-equal canonical
-factory state, the supervisor starts B's readiness in a fresh generation
-immediately rather than waiting for A to settle. Replaying the same state
-through the same source chain remains a no-op. Any later completion or
+Replaying the same canonical `Factory@1` state through the same source chain is
+a no-op while the selection has an active child, a valid readiness attempt, or
+a failed readiness attempt. Source provenance is part of readiness ownership:
+if a redirect retargets from source A to source B while preserving byte-equal
+canonical factory state, the supervisor starts B's readiness in a fresh
+generation immediately, including when A already failed, rather than waiting
+for A to settle or treating B as the same failed attempt. This applies to both
+artifact loading and named execution-space resolution. Any later completion or
 rejection from A is fenced and cannot instantiate or report against B. More
 generally, if A is cold and B is selected before A finishes loading, A may
 populate the trusted artifact cache but can never instantiate; completion is
-fenced by owner and selection generation, and the resumed attempt rereads the
-binding. A deterministic missing/forged/wrong-kind/schema failure fails the
-current generation closed but a later valid selection may recover. A
-source-load or space-resolution rejection also fails the current preparation
-attempt; a later selector/input change begins a fresh one.
+fenced by owner and selection generation, and the resumed attempt invalidates
+the coordinator instead of instantiating from the async continuation. A
+deterministic missing/forged/wrong-kind/schema failure fails the current
+generation closed but a later valid selection may recover. A source-load or
+space-resolution rejection also fails the current preparation attempt; a later
+canonical selector change or source-chain retarget begins a fresh one.
 
 The stable output spot remains the cause/identity anchor, matching existing
 sub-pattern and list-builtin invariants. The binding and selected canonical

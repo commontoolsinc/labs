@@ -171,6 +171,7 @@ import {
   markDurableReadTx,
   schedulerDependencyRead,
 } from "./storage/reactivity-log.ts";
+import { normalizeCellScope, scopeRank } from "./scope.ts";
 import {
   isCfcEnforcementRejection,
   isConflictRejection,
@@ -1502,6 +1503,8 @@ type RunnerRunOptions = {
   awaitSyncBeforeInitialRun?: boolean;
   /** Reactive selector whose current Factory@1 state authorizes this graph. */
   factorySelectionLink?: NormalizedFullLink;
+  /** Generation guard inherited by a dynamically selected child pattern. */
+  implementationSelection?: ImplementationSelection;
   // The piece root that INSTANTIATED this piece (a nested pattern node's
   // parent, a result-as-pattern child's producing piece). Its actions'
   // demand roots (`SchedulerObservationIdentity.demandRootIds`) become the
@@ -4083,11 +4086,21 @@ export class Runner {
         return;
       }
       const selection: ImplementationSelection = {
-        key,
+        key: options.implementationSelection === undefined
+          ? key
+          : hashStringOf({
+            pattern: key,
+            parent: options.implementationSelection.key,
+          }),
         actions: new Set(),
         instanceInitializers: new Set(),
         matches: (runTx) => {
-          if (!active) return false;
+          if (
+            !active ||
+            options.implementationSelection?.matches(runTx) === false
+          ) {
+            return false;
+          }
           const selected = readSelection(runTx);
           return selected !== undefined && patternIdentityKey(selected) === key;
         },
@@ -4220,6 +4233,7 @@ export class Runner {
       // until the space has finished syncing, so consumers don't race the data.
       awaitSyncBeforeInitialRun?: boolean;
       factorySelectionLink?: NormalizedFullLink;
+      implementationSelection?: ImplementationSelection;
       // See RunnerRunOptions.parentPieceRootId.
       parentPieceRootId?: string;
     } = {},
@@ -4356,7 +4370,7 @@ export class Runner {
       // A boot snapshot belongs to exactly one pattern instantiation. A later
       // patternIdentity hot-swap must register fresh under the same durable
       // piece identity rather than replaying the old implementation's cache.
-      const schedulerRehydration = initialSchedulerRehydrationAvailable
+      const baseSchedulerRehydration = initialSchedulerRehydrationAvailable
         ? options.schedulerRehydration ?? this.#schedulerRehydrationOptions(
           resultCell,
           options.awaitSyncBeforeInitialRun,
@@ -4367,8 +4381,14 @@ export class Runner {
           undefined,
           options.parentPieceRootId,
         );
-      schedulerRehydration.implementationSelection = options.variantRegistration
-        ?.selection;
+      const schedulerRehydration: SchedulerRehydrationSubscriptionOptions = {
+        ...baseSchedulerRehydration,
+        ...(options.variantRegistration?.selection !== undefined
+          ? { implementationSelection: options.variantRegistration.selection }
+          : options.implementationSelection !== undefined
+          ? { implementationSelection: options.implementationSelection }
+          : {}),
+      };
       initialSchedulerRehydrationAvailable = false;
       try {
         for (const node of pattern.nodes) {
@@ -5469,6 +5489,7 @@ export class Runner {
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
       awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
       factorySelectionLink: options.factorySelectionLink,
+      implementationSelection: options.implementationSelection,
       parentPieceRootId: options.parentPieceRootId,
     });
     // Selection settlement owns scoped setup rollback. The shared group is
@@ -8765,7 +8786,7 @@ export class Runner {
    * folded into graph identity.
    */
   #instantiateDynamicFactoryNode(
-    _tx: IExtendedStorageTransaction,
+    tx: IExtendedStorageTransaction,
     moduleBinding: FabricValue,
     inputBindings: FabricExecValue,
     outputBindings: FabricExecValue,
@@ -8793,21 +8814,40 @@ export class Runner {
     }
     const bindingCell = this.#runtime.getCellFromLink<unknown>(bindingLink);
 
-    const owner = {};
+    type CurrentSelection = {
+      selection: unknown;
+      artifactSpace: MemorySpace;
+      sourceLink: NormalizedFullLink;
+      dereferenceSources: readonly NormalizedFullLink[];
+      cfcLabel: unknown;
+      identity: ScopeKeyIdentity;
+      selectorScope: CellScope;
+      instanceKey: ScopeKey;
+    };
+    type InstanceState = {
+      instanceKey: ScopeKey;
+      identity: ScopeKeyIdentity;
+      selectorScope: CellScope;
+      owner: object;
+      generation: number;
+      currentCanonical: unknown;
+      currentSelectionLabel: unknown;
+      hasSelection: boolean;
+      selectionGenerationActive: boolean;
+      selectionReadinessPending: boolean;
+      selectionReadinessFailed: boolean;
+      fastPreemptedSelection: boolean;
+      childCancel: Cancel | undefined;
+      selectionSourceLinks: readonly NormalizedFullLink[];
+      selectionGenerationSourceLinks: readonly NormalizedFullLink[];
+    };
+
     let active = true;
-    let generation = 0;
-    let currentCanonical: unknown = undefined;
-    let currentSelectionLabel: unknown = undefined;
-    let hasSelection = false;
-    let selectionGenerationActive = false;
-    let selectionReadinessPending = false;
-    let selectionReadinessFailed = false;
-    let fastPreemptedSelection = false;
-    let childCancel: Cancel | undefined;
     let sinkCancel: Cancel | undefined;
-    let selectionSourceLinks: readonly NormalizedFullLink[] = [];
-    let selectionGenerationSourceLinks: readonly NormalizedFullLink[] = [];
-    let fastSelectionQueued = false;
+    let coordinator: Action | undefined;
+    const instances = new Map<ScopeKey, InstanceState>();
+    const fastSelectionQueued = new Set<ScopeKey>();
+    let fastSelectionMicrotaskQueued = false;
     const resolvedExecutionSpaces = new Map<string, MemorySpace>();
     const callSiteLink = resultCell.getAsNormalizedFullLink();
     const anonymousExecutionSpaceName = "dynamic-factory:" + hashOf({
@@ -8827,14 +8867,9 @@ export class Runner {
     const sameCanonicalSelection = (left: unknown, right: unknown): boolean =>
       valueEqual(left as FabricValue, right as FabricValue);
 
-    const readCurrent = (): {
-      selection: unknown;
-      artifactSpace: MemorySpace;
-      sourceLink: NormalizedFullLink;
-      dereferenceSources: readonly NormalizedFullLink[];
-      cfcLabel: unknown;
-    } => {
-      const readTx = this.#runtime.readTx();
+    const readCurrent = (
+      readTx: IExtendedStorageTransaction,
+    ): CurrentSelection => {
       const resolution = resolveLinkTracingDereferences(
         this.#runtime,
         readTx,
@@ -8847,13 +8882,67 @@ export class Runner {
       } as NormalizedFullLink));
       const resolvedCell = this.#runtime.getCellFromLink<unknown>(resolved)
         .withTx(readTx);
+      const selectorScope = [
+        ...dereferenceSources.map((source) => normalizeCellScope(source.scope)),
+        normalizeCellScope(resolved.scope),
+      ].reduce((narrowest, candidate) =>
+        scopeRank(candidate) > scopeRank(narrowest) ? candidate : narrowest
+      );
+      const identity = readTx.tx.scopeKeyIdentity ??
+        this.#runtime.scopeKeyIdentity;
       return {
         selection: resolvedCell.getWithoutFactoryMaterialization(),
         artifactSpace: resolved.space,
         sourceLink: resolved,
         dereferenceSources,
         cfcLabel: cfcLabelViewForCell(bindingCell.withTx(readTx)),
+        identity,
+        selectorScope,
+        instanceKey: resolveScopeKey(selectorScope, identity),
       };
+    };
+
+    const readCurrentFor = (state: InstanceState): CurrentSelection => {
+      const readTx = this.#familyReadTx(state.identity);
+      return readCurrent(readTx);
+    };
+
+    const cancelInstance = (state: InstanceState): void => {
+      state.generation++;
+      state.childCancel?.();
+      state.childCancel = undefined;
+      state.selectionGenerationActive = false;
+      state.selectionReadinessPending = false;
+      state.selectionReadinessFailed = false;
+      state.fastPreemptedSelection = false;
+    };
+
+    const instanceFor = (current: CurrentSelection): InstanceState => {
+      let state = instances.get(current.instanceKey);
+      if (state !== undefined) {
+        state.identity = current.identity;
+        state.selectorScope = current.selectorScope;
+        return state;
+      }
+      state = {
+        instanceKey: current.instanceKey,
+        identity: current.identity,
+        selectorScope: current.selectorScope,
+        owner: {},
+        generation: 0,
+        currentCanonical: undefined,
+        currentSelectionLabel: undefined,
+        hasSelection: false,
+        selectionGenerationActive: false,
+        selectionReadinessPending: false,
+        selectionReadinessFailed: false,
+        fastPreemptedSelection: false,
+        childCancel: undefined,
+        selectionSourceLinks: [],
+        selectionGenerationSourceLinks: [],
+      };
+      instances.set(current.instanceKey, state);
+      return state;
     };
 
     const moduleFor = (
@@ -8894,31 +8983,32 @@ export class Runner {
     };
 
     const instantiateSelection = (
+      state: InstanceState,
       selection: unknown,
       artifactSpace: MemorySpace,
       selectedGeneration: number,
+      setupTx: IExtendedStorageTransaction,
     ): void => {
-      if (!active || selectedGeneration !== generation) return;
+      if (!active || selectedGeneration !== state.generation) return;
       const factory = materializeFactory(selection, {
         runtime: this.#runtime,
         artifactSpace,
         expected,
       });
-      if (!active || selectedGeneration !== generation) return;
+      if (!active || selectedGeneration !== state.generation) return;
 
       const [cancelChild, addChildCancel] = useCancelGroup();
-      childCancel = cancelChild;
-      const childTx = this.#runtime.edit();
+      state.childCancel = cancelChild;
       const failSetupIfCurrent = (error: unknown): void => {
         if (
-          !active || selectedGeneration !== generation ||
-          childCancel !== cancelChild
+          !active || selectedGeneration !== state.generation ||
+          state.childCancel !== cancelChild
         ) {
           return;
         }
         cancelChild();
-        childCancel = undefined;
-        selectionReadinessFailed = true;
+        state.childCancel = undefined;
+        state.selectionReadinessFailed = true;
         const diagnostic = error instanceof Error ? error : new Error(
           typeof (error as { message?: unknown })?.message === "string"
             ? (error as { message: string }).message
@@ -8929,47 +9019,69 @@ export class Runner {
           name: "dynamic-factory-setup",
         });
       };
+      const parentSelection = schedulerRehydration.implementationSelection;
+      const selectedCanonical = canonicalSelection(selection);
+      const implementationSelection: ImplementationSelection = {
+        key: hashStringOf({
+          callSite: callSiteLink,
+          instance: state.instanceKey,
+          generation: selectedGeneration,
+          selection: selectedCanonical,
+        }),
+        actions: new Set(),
+        instanceInitializers: new Set(),
+        matches: (runTx) => {
+          if (
+            !active || selectedGeneration !== state.generation ||
+            state.childCancel !== cancelChild ||
+            parentSelection?.matches(runTx) === false
+          ) {
+            return false;
+          }
+          const current = readCurrent(runTx);
+          return current.instanceKey === state.instanceKey &&
+            sameCanonicalSelection(
+              canonicalSelection(current.selection),
+              selectedCanonical,
+            );
+        },
+      };
       try {
-        // The selected code is data-dependent. Keep that selection read in the
-        // setup transaction, and thread the same link into scheduled
-        // action/event transactions below so reactive and CFC provenance are
-        // not severed by materialization.
-        bindingCell.withTx(childTx).getWithoutFactoryMaterialization();
         this.#instantiateNode(
-          childTx,
+          setupTx,
           moduleFor(factory, selection),
           inputBindings,
           outputBindings,
-          resultCell.withTx(childTx),
+          resultCell.withTx(setupTx),
           addChildCancel,
           pattern,
-          schedulerRehydration,
+          { ...schedulerRehydration, implementationSelection },
           undefined,
           undefined,
           bindingLink,
         );
-        this.#runtime.prepareTxForCommit(childTx);
-        void childTx.commit().then(async ({ error }) => {
+        setupTx.addCommitCallback(async (committed, { error }) => {
           if (error !== undefined) {
             failSetupIfCurrent(error);
             return;
           }
-          const settlement = waveSettlementOf(childTx);
+          const settlement = waveSettlementOf(committed) ??
+            waveSettlementOf(setupTx);
           if (settlement === undefined) return;
           const settled = await settlement;
           if (settled.error !== undefined) {
             failSetupIfCurrent(settled.error);
           }
-        }).catch(failSetupIfCurrent);
+        });
       } catch (error) {
         cancelChild();
-        childCancel = undefined;
-        if (childTx.status().status === "ready") childTx.abort(error as Error);
+        state.childCancel = undefined;
         throw error;
       }
     };
 
     const beginColdPreparation = (
+      state: InstanceState,
       selection: unknown,
       artifactSpace: MemorySpace,
       selectedGeneration: number,
@@ -8979,43 +9091,34 @@ export class Runner {
         artifactSpace,
         expected,
         fence: {
-          owner,
+          owner: state.owner,
           generation: selectedGeneration,
-          currentOwner: () => active ? owner : undefined,
-          currentGeneration: () => active ? generation : undefined,
-          currentSelection: () => readCurrent().selection,
+          currentOwner: () => active ? state.owner : undefined,
+          currentGeneration: () => active ? state.generation : undefined,
+          currentSelection: () => {
+            const current = readCurrentFor(state);
+            return current.instanceKey === state.instanceKey
+              ? current.selection
+              : undefined;
+          },
         },
       }).then(() => {
-        if (!active || generation !== selectedGeneration) return;
-        selectionReadinessPending = false;
-        selectionReadinessFailed = false;
-        // Cold readiness is only a cache transition. Reread the live binding
-        // and synchronously rematerialize that current value before execution.
-        const current = readCurrent();
-        if (
-          !sameCanonicalSelection(
-            canonicalSelection(current.selection),
-            currentCanonical,
-          )
-        ) {
-          return;
+        if (!active || state.generation !== selectedGeneration) return;
+        state.selectionReadinessPending = false;
+        state.selectionReadinessFailed = false;
+        if (coordinator !== undefined) {
+          this.#runtime.scheduler.invalidateAction(coordinator);
         }
-        activateSelection(
-          current.selection,
-          current.artifactSpace,
-          selectedGeneration,
-        );
       }).catch((error) => {
-        if (!active || generation !== selectedGeneration) return;
-        selectionReadinessPending = false;
+        if (!active || state.generation !== selectedGeneration) return;
+        state.selectionReadinessPending = false;
         if (error instanceof FactoryMaterializationSupersededError) {
           return;
         }
         // The canonical selection remains installed, but it has no active
-        // child. A later selector notification for the same Factory@1 state
-        // must therefore create a fresh generation instead of taking the
-        // active-child same-state no-op.
-        selectionReadinessFailed = true;
+        // child. A canonical change or source-chain retarget creates the next
+        // generation; replay through the same source remains a no-op.
+        state.selectionReadinessFailed = true;
         this.#runtime.scheduler.reportError(error, {
           name: "dynamic-factory-readiness",
         });
@@ -9029,37 +9132,26 @@ export class Runner {
     };
 
     const beginExecutionSpacePreparation = (
+      state: InstanceState,
       spaceName: string,
       selectedGeneration: number,
     ): void => {
       const task = this.#runtime.resolveSpaceName(spaceName).then(
         (resolvedSpace) => {
-          if (!active || generation !== selectedGeneration) return;
-          selectionReadinessPending = false;
+          if (!active || state.generation !== selectedGeneration) return;
+          state.selectionReadinessPending = false;
           resolvedExecutionSpaces.set(spaceName, resolvedSpace);
-          const current = readCurrent();
-          if (
-            !sameCanonicalSelection(
-              canonicalSelection(current.selection),
-              currentCanonical,
-            )
-          ) {
-            return;
+          if (coordinator !== undefined) {
+            this.#runtime.scheduler.invalidateAction(coordinator);
           }
-          activateSelection(
-            current.selection,
-            current.artifactSpace,
-            selectedGeneration,
-          );
         },
         (error) => {
-          if (!active || generation !== selectedGeneration) return;
-          selectionReadinessPending = false;
+          if (!active || state.generation !== selectedGeneration) return;
+          state.selectionReadinessPending = false;
           // Name resolution is readiness for the installed canonical
           // selection just like artifact loading. Keep the failed generation
-          // fenced, but let a later same-state selector notification create a
-          // fresh generation and retry the resolver.
-          selectionReadinessFailed = true;
+          // fenced; a canonical change or source-chain retarget may retry it.
+          state.selectionReadinessFailed = true;
           this.#runtime.scheduler.reportError(error, {
             name: "dynamic-factory-space-readiness",
           });
@@ -9071,30 +9163,40 @@ export class Runner {
     };
 
     const activateSelection = (
+      state: InstanceState,
       selection: unknown,
       artifactSpace: MemorySpace,
       selectedGeneration: number,
+      setupTx: IExtendedStorageTransaction,
     ): void => {
       try {
-        instantiateSelection(selection, artifactSpace, selectedGeneration);
+        instantiateSelection(
+          state,
+          selection,
+          artifactSpace,
+          selectedGeneration,
+          setupTx,
+        );
       } catch (error) {
         if (
           error instanceof FactoryArtifactUnavailableError ||
           error instanceof DynamicFactoryExecutionSpaceUnavailableError
         ) {
-          selectionReadinessPending = true;
+          state.selectionReadinessPending = true;
           // Publish the selector dependency before exposing deterministic
           // readiness gates; otherwise a replacement can land in that window.
           queueMicrotask(() => {
-            if (!active || generation !== selectedGeneration) return;
+            if (!active || state.generation !== selectedGeneration) return;
             if (error instanceof FactoryArtifactUnavailableError) {
               beginColdPreparation(
+                state,
                 selection,
                 artifactSpace,
                 selectedGeneration,
               );
             } else {
               beginExecutionSpacePreparation(
+                state,
                 error.spaceName,
                 selectedGeneration,
               );
@@ -9106,115 +9208,135 @@ export class Runner {
       }
     };
 
-    const select = (selection: unknown, cfcLabel?: unknown): void => {
+    const select = (
+      current: CurrentSelection,
+      setupTx: IExtendedStorageTransaction,
+    ): void => {
       if (!active) return;
+      const state = instanceFor(current);
+      const { selection, cfcLabel } = current;
       const canonical = canonicalSelection(selection);
+      const currentSourceLinks = [
+        ...current.dereferenceSources,
+        current.sourceLink,
+      ];
       if (
-        hasSelection && sameCanonicalSelection(canonical, currentCanonical) &&
-        deepEqual(cfcLabel, currentSelectionLabel)
+        state.hasSelection &&
+        sameCanonicalSelection(canonical, state.currentCanonical) &&
+        deepEqual(cfcLabel, state.currentSelectionLabel)
       ) {
-        let pendingSourceChanged = false;
-        if (selectionReadinessPending) {
-          const current = readCurrent();
-          const currentSourceLinks = [
-            ...current.dereferenceSources,
-            current.sourceLink,
-          ];
-          pendingSourceChanged = !deepEqual(
+        let readinessSourceChanged = false;
+        if (
+          state.selectionReadinessPending || state.selectionReadinessFailed
+        ) {
+          readinessSourceChanged = !deepEqual(
             currentSourceLinks,
-            selectionGenerationSourceLinks,
+            state.selectionGenerationSourceLinks,
           );
-          if (pendingSourceChanged) {
+          if (readinessSourceChanged) {
             // Canonical Factory@1 state alone is sufficient for the active
             // child no-op, but a pending readiness attempt is also owned by
             // the source chain that supplied its artifact space. Retargeting
             // that chain creates a fresh generation immediately so the old
             // async completion can be fenced.
-            selectionSourceLinks = currentSourceLinks;
-            selectionReadinessPending = false;
-            selectionReadinessFailed = false;
-            fastPreemptedSelection = false;
+            state.selectionSourceLinks = currentSourceLinks;
+            state.selectionReadinessPending = false;
+            state.selectionReadinessFailed = false;
+            state.fastPreemptedSelection = false;
           }
         }
-        if (!pendingSourceChanged) {
-          if (!fastPreemptedSelection && !selectionReadinessFailed) return;
-          fastPreemptedSelection = false;
-          if (selectionReadinessFailed) {
-            // Fall through to the ordinary replacement path below so the
-            // failed generation is fenced and current provenance is reread.
-            selectionReadinessFailed = false;
-          } else {
+        if (!readinessSourceChanged) {
+          if (
+            state.childCancel !== undefined &&
+            !state.fastPreemptedSelection &&
+            !state.selectionReadinessFailed
+          ) {
+            state.selectionSourceLinks = currentSourceLinks;
+            return;
+          }
+          if (state.selectionReadinessPending) return;
+          state.fastPreemptedSelection = false;
+          if (!state.selectionReadinessFailed) {
             if (selection === undefined) return;
-            const current = readCurrent();
-            selectionSourceLinks = [
-              ...current.dereferenceSources,
-              current.sourceLink,
-            ];
-            selectionGenerationSourceLinks = selectionSourceLinks;
+            state.selectionSourceLinks = currentSourceLinks;
+            state.selectionGenerationSourceLinks = currentSourceLinks;
             activateSelection(
+              state,
               selection,
               current.artifactSpace,
-              generation,
+              state.generation,
+              setupTx,
             );
             return;
           }
+          // A failed attempt is owned by the source chain that supplied it.
+          // Replaying equal state through that same chain is a no-op; a
+          // retarget above, or a different canonical selection below, creates
+          // the next retry generation.
+          return;
         }
       }
 
-      hasSelection = true;
-      currentCanonical = canonical;
-      currentSelectionLabel = cfcLabel;
-      selectionReadinessPending = false;
-      selectionReadinessFailed = false;
-      generation++;
-      const selectedGeneration = generation;
-      childCancel?.();
-      childCancel = undefined;
-      selectionGenerationActive = selection !== undefined;
+      state.hasSelection = true;
+      state.currentCanonical = canonical;
+      state.currentSelectionLabel = cfcLabel;
+      state.selectionReadinessPending = false;
+      state.selectionReadinessFailed = false;
+      state.generation++;
+      const selectedGeneration = state.generation;
+      state.childCancel?.();
+      state.childCancel = undefined;
+      state.selectionGenerationActive = selection !== undefined;
       if (selection === undefined) return;
 
-      const current = readCurrent();
-      selectionSourceLinks = [
-        ...current.dereferenceSources,
-        current.sourceLink,
-      ];
-      selectionGenerationSourceLinks = selectionSourceLinks;
-      activateSelection(selection, current.artifactSpace, selectedGeneration);
+      state.selectionSourceLinks = currentSourceLinks;
+      state.selectionGenerationSourceLinks = currentSourceLinks;
+      activateSelection(
+        state,
+        selection,
+        current.artifactSpace,
+        selectedGeneration,
+        setupTx,
+      );
     };
 
     const preemptSelection = (
+      state: InstanceState,
       selection: unknown,
       cfcLabel?: unknown,
     ): void => {
-      if (!active || !selectionGenerationActive) return;
+      if (!active || !state.selectionGenerationActive) return;
       const canonical = canonicalSelection(selection);
       if (
-        hasSelection && sameCanonicalSelection(canonical, currentCanonical) &&
-        deepEqual(cfcLabel, currentSelectionLabel)
+        state.hasSelection &&
+        sameCanonicalSelection(canonical, state.currentCanonical) &&
+        deepEqual(cfcLabel, state.currentSelectionLabel)
       ) {
         return;
       }
-      hasSelection = true;
-      currentCanonical = canonical;
-      currentSelectionLabel = cfcLabel;
-      selectionReadinessPending = false;
-      selectionReadinessFailed = false;
-      generation++;
-      childCancel?.();
-      childCancel = undefined;
-      selectionGenerationActive = selection !== undefined;
-      fastPreemptedSelection = true;
+      state.hasSelection = true;
+      state.currentCanonical = canonical;
+      state.currentSelectionLabel = cfcLabel;
+      state.selectionReadinessPending = false;
+      state.selectionReadinessFailed = false;
+      state.generation++;
+      state.childCancel?.();
+      state.childCancel = undefined;
+      state.selectionGenerationActive = selection !== undefined;
+      state.fastPreemptedSelection = true;
     };
 
     sinkCancel = bindingCell.sink(
-      (_selection, _cfcLabel) => {
+      (_selection, _cfcLabel, selectionTx) => {
+        if (selectionTx === undefined) {
+          throw new Error("Dynamic factory sink is missing its transaction");
+        }
         try {
           // The sink value can stop at a cross-space link while its
           // dependency walk is being established. Selection authority comes
           // from the explicit resolved-source reread, which also provides the
           // artifact space and complete CFC label view used by replacement.
-          const current = readCurrent();
-          select(current.selection, current.cfcLabel);
+          select(readCurrent(selectionTx), selectionTx);
         } catch (error) {
           // Cell.sink invokes once before installing its subscription. Keep the
           // supervisor alive across a preloaded invalid value so a later valid
@@ -9234,6 +9356,16 @@ export class Runner {
         includeCfcLabel: true,
         subscribeBeforeInitial: true,
         materializeFactories: false,
+        initialTx: tx,
+        onActionRegistered: (action) => {
+          coordinator = action;
+          if (schedulerRehydration.observationIdentity !== undefined) {
+            Object.assign(action, {
+              schedulerObservationIdentity:
+                schedulerRehydration.observationIdentity,
+            });
+          }
+        },
       },
     );
 
@@ -9246,39 +9378,67 @@ export class Runner {
     const fastSelectionSubscription: IStorageSubscription = {
       next: (notification) => {
         if (!active) return { done: true };
-        const touches = (link: NormalizedFullLink | undefined): boolean => {
+        const touches = (
+          state: InstanceState,
+          link: NormalizedFullLink | undefined,
+        ): boolean => {
           if (link === undefined || notification.space !== link.space) {
             return false;
           }
           if (notification.type === "reset") return true;
           if (!("changes" in notification)) return false;
-          return [...notification.changes].some((change) =>
-            change.address.id === link.id &&
-            (change.address.scope ?? "space") === (link.scope ?? "space")
-          );
+          return [...notification.changes].some((change) => {
+            if (
+              change.address.id !== link.id ||
+              normalizeCellScope(change.address.scope) !==
+                normalizeCellScope(link.scope)
+            ) {
+              return false;
+            }
+            return change.address.scopeKey === undefined ||
+              change.address.scopeKey ===
+                resolveScopeKey(normalizeCellScope(link.scope), state.identity);
+          });
         };
-        if (
-          !touches(bindingLink) &&
-          !selectionSourceLinks.some((link) => touches(link))
-        ) {
-          return { done: false };
+        for (const state of instances.values()) {
+          if (
+            touches(state, bindingLink) ||
+            state.selectionSourceLinks.some((link) => touches(state, link))
+          ) {
+            fastSelectionQueued.add(state.instanceKey);
+          }
         }
-        if (!fastSelectionQueued) {
-          fastSelectionQueued = true;
+        if (fastSelectionQueued.size > 0 && !fastSelectionMicrotaskQueued) {
+          fastSelectionMicrotaskQueued = true;
           queueMicrotask(() => {
-            fastSelectionQueued = false;
+            fastSelectionMicrotaskQueued = false;
             if (!active) return;
-            try {
-              const current = readCurrent();
-              selectionSourceLinks = [
-                ...current.dereferenceSources,
-                current.sourceLink,
-              ];
-              preemptSelection(current.selection, current.cfcLabel);
-            } catch (error) {
-              this.#runtime.scheduler.reportError(error, {
-                name: "dynamic-factory-fast-selection",
-              });
+            const queued = [...fastSelectionQueued];
+            fastSelectionQueued.clear();
+            for (const instanceKey of queued) {
+              const state = instances.get(instanceKey);
+              if (state === undefined) continue;
+              try {
+                const current = readCurrentFor(state);
+                state.selectionSourceLinks = [
+                  ...current.dereferenceSources,
+                  current.sourceLink,
+                ];
+                if (current.instanceKey !== state.instanceKey) {
+                  cancelInstance(state);
+                  instances.delete(state.instanceKey);
+                  continue;
+                }
+                preemptSelection(
+                  state,
+                  current.selection,
+                  current.cfcLabel,
+                );
+              } catch (error) {
+                this.#runtime.scheduler.reportError(error, {
+                  name: "dynamic-factory-fast-selection",
+                });
+              }
             }
           });
         }
@@ -9289,12 +9449,12 @@ export class Runner {
     addCancel(() => {
       if (!active) return;
       active = false;
-      generation++;
       this.#runtime.storageManager.unsubscribe?.(fastSelectionSubscription);
       sinkCancel?.();
       sinkCancel = undefined;
-      childCancel?.();
-      childCancel = undefined;
+      for (const state of instances.values()) cancelInstance(state);
+      instances.clear();
+      fastSelectionQueued.clear();
     });
   }
 
@@ -12390,6 +12550,7 @@ export class Runner {
           ...(factorySelectionLink === undefined
             ? {}
             : { factorySelectionLink }),
+          implementationSelection: schedulerRehydration.implementationSelection,
           parentPieceRootId: parentResultCell.getAsNormalizedFullLink().id,
         },
       );
