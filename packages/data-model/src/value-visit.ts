@@ -884,7 +884,7 @@ export function makeVisitFabricValueFunction<ResultType = FabricValue>(
  *   area of optimization.
  */
 export function visitValue<DomainExtra, ResultType>(
-  value: DomainFor<DomainExtra>,
+  value: NoInfer<DomainFor<DomainExtra>>,
   visitor: ValueVisitor<DomainExtra, ResultType>,
   deepTypeCheck: boolean = false,
 ): BaselineVisitResult<ResultType> {
