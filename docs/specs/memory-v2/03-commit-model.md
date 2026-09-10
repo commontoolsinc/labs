@@ -153,14 +153,36 @@ Read(entity, path):
 
 ### 3.3.4 Single-Snapshot Rule
 
-A transaction's reads and writes MUST be computed against a single stable local
-snapshot. While application code is building a transaction, incoming server sync
-frames are buffered rather than applied immediately. The client applies those
-buffered frames only after the transaction has been submitted or abandoned.
+A commit's read set MUST describe one coherent client view: confirmed bases
+from one integrated prefix of the space's history plus the session's own
+pending stack, never a mixture of states observed before and after unrelated
+incoming changes. This is what makes the submitted `reads.confirmed[].seq`
+values meaningful.
 
-This rule makes the submitted `reads.confirmed[].seq` values meaningful: they
-describe one coherent client view, not a mixture of states observed before and
-after unrelated incoming changes.
+A client satisfies the rule in either of two ways:
+
+- **Buffering.** While application code is building a transaction, incoming
+  server sync frames are held rather than applied, and applied only after the
+  transaction has been submitted or abandoned. The state the reads ran against
+  is then the state the commit is built from.
+- **Checking.** Frames apply as they arrive. The transaction holds each
+  document it reads as a snapshot taken at its first read of that document,
+  and at commit re-reads every snapshotted document from the local state the
+  read set is exported from, rejecting the transaction locally — before it
+  reaches the wire, for its caller to re-run — when any value differs from
+  its snapshot. The read set then names the seqs of the local state at build
+  time, and the check has established that every read's content is the
+  content at those seqs. The check has to be immediate: a transaction closed
+  as one commit per space builds each space's read set after awaiting the
+  earlier spaces' round trips, so it re-checks each later space's documents
+  right before building that space's read set.
+
+The runner takes the checking form: `claim()` in
+`packages/runner/src/storage/transaction/attestation.ts`, run by every commit
+path of `v2-transaction.ts`, and the local rejection is
+`StorageTransactionInconsistent`, which those paths' callers classify as
+retryable. The two forms are equivalent in what reaches the server; they
+differ in when a change under an open transaction is discovered.
 
 ## 3.4 Commit Structure
 
