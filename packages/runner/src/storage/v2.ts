@@ -2265,7 +2265,7 @@ export class StorageManager implements IStorageManager {
         )
       ) {
         if (
-          provider.replica.isSchemaDocPersisted(hash) &&
+          this.isSchemaDocPersisted(space, hash) &&
           lookupSchemaDocument(hash) !== undefined
         ) {
           continue;
