@@ -432,6 +432,36 @@ Deno.test("rejects incomplete or forged closures included in a commit", async ()
       "whose content does not hash to its id",
     );
 
+    // Content that verifies against its id but is not a schema cannot back
+    // a schema reference either: a code document's string is content the
+    // namespace holds, and no schema.
+    const code = "export const notASchema = true;";
+    const codeId = `cid:${taggedHashStringOf(code)}`;
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(2, {
+            operations: [
+              setOp(codeId, code),
+              setOp("of:code-as-schema-carrier", {
+                linked: {
+                  "/": {
+                    "link@1": {
+                      id: "of:code-as-schema-target",
+                      path: [],
+                      schema: { $ref: codeId },
+                    },
+                  },
+                },
+              }),
+            ],
+          }),
+        }),
+      ProtocolError,
+      "whose included content does not verify",
+    );
+
     // A patch's own values introduce requirements too.
     applyCommit(engine, {
       sessionId: "s:a",

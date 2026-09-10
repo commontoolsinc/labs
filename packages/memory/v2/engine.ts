@@ -5479,10 +5479,10 @@ const applyCommitTransaction = (
         ? (cidSetsInCommit.get(id) as { value?: unknown })?.value
         : undefined;
       if (included !== undefined) {
-        if (
-          !isSubschema(included) ||
-          internSchemaAsTaggedHashString(included as JSONSchema) !== hash
-        ) {
+        // The set already verified its content against its id; what a
+        // schema reference additionally requires is that the content be a
+        // schema at all — a code document's string, say, is not.
+        if (!isSubschema(included)) {
           throw new ProtocolError(
             `memory v2 commit references schema document ${id} whose included content does not verify`,
           );

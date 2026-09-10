@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { taggedHashStringOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
+import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -2599,5 +2600,111 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
     expect(source?.has(utilModule!.identity)).toBe(true);
     expect(compiledClosure.has(entryIdentity)).toBe(true);
     expect(compiledClosure.has(utilModule!.identity)).toBe(true);
+  });
+});
+
+describe("cell-cache: code documents forged below the commit boundary", () => {
+  // The commit boundary admits no code document whose string does not hash
+  // to its id, so a forgery reaches a store only out of band. These cases
+  // model that with direct database manipulation on the shared server and
+  // pin that a replica syncing the result refuses the record, on the source
+  // path and the compiled path alike.
+
+  let server: MemoryV2Server.Server;
+  let smA: EmulatedStorageManager;
+  let smB: EmulatedStorageManager;
+  let rtA: Runtime;
+  let rtB: Runtime;
+  const space = e2eSignerA.did();
+  const RTVER = "rt-forged-1";
+
+  beforeEach(() => {
+    server = newSharedServer();
+    smA = EmulatedStorageManager.connectTo(server, { as: e2eSignerA });
+    smB = EmulatedStorageManager.connectTo(server, { as: e2eSignerB });
+    rtA = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smA,
+      trustSnapshotProvider: () => ({
+        id: "forged-user-a",
+        actingPrincipal: e2eSignerA.did(),
+      }),
+    });
+    rtB = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smB,
+      trustSnapshotProvider: () => ({
+        id: "forged-user-b",
+        actingPrincipal: e2eSignerB.did(),
+      }),
+    });
+  });
+
+  afterEach(async () => {
+    await rtA?.dispose();
+    await rtB?.dispose();
+    await smA?.close();
+    await smB?.close();
+    await server?.close();
+  });
+
+  const forgeCodeDocument = async (
+    code: string,
+    forged: string,
+  ): Promise<void> => {
+    const id = `cid:${taggedHashStringOf(code)}`;
+    const engine = await server.engineForSpace(space);
+    engine.database.prepare(
+      `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
+    ).run({ data: encodeMemoryBoundary({ value: forged }), id });
+    engine.database.prepare(
+      `UPDATE head SET seq = seq + 1 WHERE id = :id`,
+    ).run({ id });
+  };
+
+  it("leaves a source record out of the closure when its code document holds other content", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const wtx = rtA.edit();
+    writeSourceDocs(rtA, space, modules, entryIdentity, wtx);
+    expect((await wtx.commit()).error).toBeUndefined();
+    await smA.synced();
+    const entry = modules.find((m) => m.identity === entryIdentity)!;
+    await forgeCodeDocument(entry.source, `${entry.source}\n// tampered`);
+
+    const rtx = rtB.edit();
+    const loaded = await loadSourceClosure(rtB, space, entryIdentity, rtx);
+    rtx.abort?.();
+
+    expect(loaded?.has(entryIdentity)).toBe(false);
+  });
+
+  it("treats a compiled record whose code document holds other content as a miss", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const wtx = rtA.edit();
+    writeCompiledDocs(
+      rtA,
+      space,
+      modules,
+      entryIdentity,
+      { runtimeVersion: RTVER },
+      wtx,
+    );
+    wtx.prepareCfc();
+    expect((await wtx.commit()).error).toBeUndefined();
+    await smA.synced();
+    const entry = modules.find((m) => m.identity === entryIdentity)!;
+    await forgeCodeDocument(entry.js, `${entry.js} /* tampered */`);
+
+    const rtx = rtB.edit();
+    const loaded = await loadCompiledClosure(
+      rtB,
+      space,
+      entryIdentity,
+      { runtimeVersion: RTVER },
+      rtx,
+    );
+    rtx.abort?.();
+
+    expect(loaded.size).toBe(0);
   });
 });

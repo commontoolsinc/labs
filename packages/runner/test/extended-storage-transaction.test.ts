@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
@@ -15,6 +16,7 @@ import {
   createNonReactiveTransaction,
   type ExtendedStorageTransaction,
 } from "../src/storage/extended-storage-transaction.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { RuntimeOwnedStores } from "../src/cfc/runtime-owned-stores.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
@@ -51,6 +53,41 @@ describe("extended-storage-transaction", () => {
     tx.markLazyMaterialize(true);
     return { tx, cell: runtime.getCell(space, cause, SCHEMA, tx) };
   };
+
+  describe("code document staging", () => {
+    const code = "export const staged = 1;";
+    const codeId = `cid:${taggedHashStringOf(code)}`;
+    const stagedIds = (tx: IExtendedStorageTransaction): string[] =>
+      [...(tx.getWriteDetails?.(space) ?? [])].map((write) => write.address.id);
+
+    it("stages a code document once however often a transaction asks", () => {
+      const tx = runtime.edit();
+      expect(tx.stageCodeDocument(space, code)).toBe(codeId);
+      expect(tx.stageCodeDocument(space, code)).toBe(codeId);
+      expect(stagedIds(tx).filter((id) => id === codeId)).toHaveLength(1);
+      tx.abort?.();
+    });
+
+    it("elides a code document the server already holds", async () => {
+      const install = runtime.edit();
+      install.stageCodeDocument(space, code);
+      expect((await install.commit()).error).toBeUndefined();
+      await storageManager.synced();
+
+      const tx = runtime.edit();
+      expect(tx.stageCodeDocument(space, code)).toBe(codeId);
+      expect(stagedIds(tx)).not.toContain(codeId);
+      tx.abort?.();
+    });
+
+    it("stages through a wrapping transaction into the one it wraps", () => {
+      const tx = runtime.edit();
+      const wrapped = createNonReactiveTransaction(tx);
+      expect(wrapped.stageCodeDocument(space, code)).toBe(codeId);
+      expect(stagedIds(tx)).toContain(codeId);
+      tx.abort?.();
+    });
+  });
 
   describe("the read-result cache across a batch write", () => {
     it("keeps its entries across a batch holding no writes", () => {
