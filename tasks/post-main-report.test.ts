@@ -464,10 +464,17 @@ describe("post-main-report", () => {
     }];
     const manifest = sampleManifest({
       entries: [
-        sampleEntry(kneads, { unit, flakeRate: 0.5, cost: 1 }),
+        sampleEntry(kneads, {
+          unit,
+          flakeRate: 0.5,
+          flakeEvidence: { flakes: 20, runs: 20 },
+          cost: 1,
+        }),
+        // No counts, as an entry from a manifest written before they
+        // were published has none.
         sampleEntry(proves, {
           unit,
-          flakeRate: 0.02,
+          flakeRate: 0.002,
           cost: 1,
           inputs: { catches: 3, sources: 2, churn: 0 },
         }),
@@ -482,9 +489,14 @@ describe("post-main-report", () => {
       expect(view.selected.has(testIdentityKey(proves))).toBe(true);
     });
 
-    it("carries the flake rate and the catches behind every entry", () => {
+    it("carries the flake counts and the catches behind every entry", () => {
       const view = manifestView(manifest, suites, new Set());
-      expect(view.flakeRates.get(testIdentityKey(kneads))).toBe(0.5);
+      expect(view.flakes.get(testIdentityKey(kneads)))
+        .toEqual({ flakes: 20, runs: 20 });
+      // An entry with no counts is still a key, since membership is what
+      // says the store has seen the test at all.
+      expect(view.flakes.has(testIdentityKey(proves))).toBe(true);
+      expect(view.flakes.get(testIdentityKey(proves))).toBeUndefined();
       expect(view.catches.get(testIdentityKey(proves))).toBe(3);
     });
 

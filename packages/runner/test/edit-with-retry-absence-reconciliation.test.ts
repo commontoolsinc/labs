@@ -755,8 +755,17 @@ describe("editWithRetry absence reconciliation", () => {
         valueSchema,
         txB,
       );
-      present.get();
-      absent.get();
+      const presentAddress = toMemorySpaceAddress(
+        present.getAsNormalizedFullLink(),
+      );
+      const absentAddress = toMemorySpaceAddress(
+        absent.getAsNormalizedFullLink(),
+      );
+
+      // Recording the reads loads neither document, so what the provider
+      // names below cannot depend on a load landing first.
+      txB.read(presentAddress, { trackReadWithoutLoad: true });
+      txB.read(absentAddress, { trackReadWithoutLoad: true });
 
       const provider = smB.open(space);
       expect(provider.unexaminedAbsences).toBeDefined();
@@ -774,20 +783,26 @@ describe("editWithRetry absence reconciliation", () => {
       )).did();
       runtimeB.getCell(otherSpace, "unrelated-write", valueSchema, txB)
         .set({ value: 1 });
+      // The provider names the documents this replica lacks at the moment
+      // it is asked. The list below rests on `provider-level-doc` being one
+      // of them, which holds once everything the replica owes has
+      // synchronized.
+      await smB.synced();
+      expect(
+        provider.replica.getDocument(presentAddress.id, presentAddress.scope),
+      ).toBeUndefined();
       const absences = provider.unexaminedAbsences!(txB.tx);
       expect(absences.map((absence) => absence.id).sort()).toEqual(
-        [
-          present.getAsNormalizedFullLink().id,
-          absent.getAsNormalizedFullLink().id,
-        ].sort(),
+        [presentAddress.id, absentAddress.id].sort(),
       );
       for (const absence of absences) {
         expect(absence.space).toBe(space);
         expect(absence.scopeKey).toBeUndefined();
       }
-      // The reads started the loads; once they land, exactly the document
+      expect(provider.presentCount!(absences)).toBe(0);
+      // Once the loads a read would have started land, exactly the document
       // that exists counts as present.
-      await smB.synced();
+      await Promise.all([smB.syncCell(present), smB.syncCell(absent)]);
       expect(provider.presentCount!(absences)).toBe(1);
       txB.abort("inspection only");
 
