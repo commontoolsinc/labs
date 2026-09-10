@@ -129,6 +129,30 @@ describe("commit read basis", () => {
     });
   });
 
+  describe("a document the commit pins create-only that lands before the commit", () => {
+    it("is left to the server, which refuses it as `PreconditionFailedError`", async () => {
+      // The pin is the stronger claim and the server answers it terminally,
+      // so the local check must not pre-empt it with a retryable rejection.
+      const shared = sharedCellOf(rtB);
+      await shared.sync();
+      const tx = rtB.edit();
+      expect(shared.withTx(tx).get()).toBeUndefined();
+      const link = shared.getAsNormalizedFullLink();
+      tx.tx.markCreateOnly!({
+        space: link.space,
+        id: link.id,
+        scope: link.scope,
+      });
+      shared.withTx(tx).set({ value: 5 });
+      await createSharedFromA();
+
+      rtB.prepareTxForCommit(tx);
+      const committed = await tx.commit({ resolveAt: "verdict" });
+      expect(committed.error?.name).toBe("PreconditionFailedError");
+      expect(isRetryableCommitRejection(committed.error)).toBe(false);
+    });
+  });
+
   describe("a document whose own pending layer is confirmed before the commit", () => {
     it("is accepted, since the transaction's view included that layer", async () => {
       // B's first commit writes the shared document; its layer is pending
