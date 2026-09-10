@@ -1436,6 +1436,39 @@ export type SessionSyncRemove = {
   scopeKey?: ScopeKey;
 };
 
+/** A document in one transaction's space, resolved under its session identity. */
+export type CommitRepairAddress = {
+  readonly branch: BranchName;
+  readonly id: EntityId;
+  readonly scope: CellScope;
+};
+
+/** An authoritative document version required by a transaction repair. */
+export type CommitRepairVersion = CommitRepairAddress & {
+  readonly seq: number;
+  readonly deleted?: true;
+};
+
+/**
+ * Complete document and schema requirements at one server cut. Values travel
+ * in ordinary upserts; receipt delivery alone does not establish readiness.
+ */
+export type CommitRepairReceipt = {
+  readonly localSeq: number;
+  readonly atSeq: number;
+  readonly documents: readonly CommitRepairVersion[];
+  readonly schemas: readonly CommitRepairVersion[];
+};
+
+/** A repair that cannot supply a complete, authoritative document basis. */
+export type CommitRepairFailure = {
+  readonly localSeq: number;
+  readonly reason:
+    | "unresolvable-address"
+    | "invalid-schema"
+    | "unsupported-dependency";
+};
+
 export type SessionSync = {
   type: "sync";
   fromSeq: number;
@@ -1444,6 +1477,12 @@ export type SessionSync = {
   upserts: SessionSyncUpsert[];
   removes: SessionSyncRemove[];
   operationFields?: OperationFieldDelivery[];
+
+  /** Complete receipts for sessions negotiating transaction repair. */
+  repairs?: CommitRepairReceipt[];
+
+  /** Per-repair failures; none of these identities has a successful receipt. */
+  repairFailures?: CommitRepairFailure[];
 };
 
 export type WatchSetResult = {
@@ -1702,6 +1741,9 @@ export type SessionAckRequest = {
   space: string;
   sessionId: SessionId;
   seenSeq: number;
+
+  /** Exact repair owners to release, independent of the acknowledged sequence. */
+  releaseRepairs?: number[];
 };
 
 export type EventAttentionResolveRequest = {
@@ -1746,6 +1788,9 @@ export type V2Error = {
   message: string;
   precondition?: string;
   retryAfterSeq?: number;
+
+  /** The rejected submission whose independent repair coverage was staged. */
+  repair?: { localSeq: number };
 
   /**
    * Present on an `AuthorizationError` that a fresh handshake can heal — the

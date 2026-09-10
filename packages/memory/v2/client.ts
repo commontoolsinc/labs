@@ -2294,7 +2294,9 @@ const isResponse = (message: unknown): message is ResponseMessage<unknown> => {
 
 const isEmptySync = (sync: SessionSync): boolean =>
   sync.upserts.length === 0 && sync.removes.length === 0 &&
-  (sync.operationFields?.length ?? 0) === 0;
+  (sync.operationFields?.length ?? 0) === 0 &&
+  (sync.repairs?.length ?? 0) === 0 &&
+  (sync.repairFailures?.length ?? 0) === 0;
 
 const isSessionRevokedError = (error: unknown): boolean =>
   error instanceof Error && error.name === "SessionRevokedError";

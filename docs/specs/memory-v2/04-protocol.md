@@ -1264,3 +1264,46 @@ view — so no frame stream to order against) also applies immediately.
 | Per-subscription routing                   | Watch-set union + session cache                           | Overlap is deduped at the session layer                   |
 | Re-subscribe each live query independently | Restore one watch set                                     | The client still restores interests after reconnect       |
 | Hash-centric semantic commit identity      | `(sessionId, localSeq)` before accept, `seq` after accept | UCAN envelope refs remain content-addressed               |
+
+## Transaction repair integration (inactive)
+
+Transaction repair is being implemented under
+[the transaction conflict repair plan](../../plans/transaction-conflict-repair.md).
+Session admission does not yet negotiate or instantiate repair coverage, so
+ordinary peers retain their existing behavior. The complete capability must not
+be advertised until reconnect declarations, replica validation, and ownership
+release are implemented together.
+
+The server integration defines these additions:
+
+- A conflict's `repair.localSeq` names its rejected submission.
+- A sync's `repairs` contains complete receipts. Each receipt names `localSeq`,
+  the global store cut `atSeq`, exact `documents`, and additional `schemas`.
+  Each required version contains `branch`, `id`, `scope`, `seq`, and optional
+  `deleted: true`. A never-created document has sequence 0 and is deleted; a
+  durable tombstone retains its stored sequence. Each branch is sampled at its
+  head at the captured global cut.
+- Values travel through ordinary `upserts`. Initial receipt delivery forces
+  every required document and schema snapshot, even when the server's graph
+  cache remembers sending it. Shared addresses appear once per frame.
+- `repairFailures` names each failed `localSeq` with an `unresolvable-address`,
+  `invalid-schema`, or `unsupported-dependency` reason. A failure contributes no
+  partial successful receipt. Additional terminal lifecycle failures belong to
+  the complete protocol before activation.
+- `session.ack.releaseRepairs` releases exact owners independently of `seenSeq`.
+  Release is idempotent and schedules cleanup without requiring another commit.
+  A session without enabled repair coverage rejects this field.
+
+A receipt is a requirement to verify after installing the authoritative bases,
+not proof that the receiving replica has installed them. The client and runner
+readiness gates remain to be implemented. Schema-table framing and watch-view
+forwarding preserve receipt and failure fields, including frames with no upserts
+or removes.
+
+The server keeps repair delivery state separate from graph delivery state.
+Repair ownership cannot be removed by replacing graph watches and does not
+create execution demand. Preparing a frame leaves repair delivery staged;
+successful transport send commits it. A failed send leaves the complete receipt
+and snapshots available for redelivery. Tests install the component through the
+internal session registry to exercise these paths while protocol activation is
+incomplete.
