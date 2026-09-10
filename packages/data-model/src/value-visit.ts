@@ -531,6 +531,24 @@ type VisitSubtypeOfForm<DomainExtra> = {
 };
 
 /**
+ * Similar to `VisitSubtypeOfForm`, but for `iterateArray`.
+ */
+type IterateArrayOfForm<DomainExtra> = {
+  type: "iterateArrayOf";
+  value: DomainFor<DomainExtra>;
+  elements: readonly DomainFor<DomainExtra>[];
+};
+
+/**
+ * Similar to `VisitSubtypeOfForm`, but for `iterateMap`.
+ */
+export type IterateMapOfForm<DomainExtra> = {
+  type: "iterateMapOf";
+  value: DomainFor<DomainExtra>;
+  mappings: readonly [DomainFor<DomainExtra>, DomainFor<DomainExtra>][];
+};
+
+/**
  * State of a visit currently in progress, along with most of the visit
  * execution machinery.
  */
@@ -632,12 +650,20 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         return this.#subvisitArray(value, result.elements);
       }
 
+      case "iterateArrayOf": {
+        return this.#subvisitArray(result.value, result.elements);
+      }
+
       case "mainResult": {
         return result;
       }
 
       case "iterateMap": {
         return this.#subvisitMap(value, result.mappings);
+      }
+
+      case "iterateMapOf": {
+        return this.#subvisitMap(result.value, result.mappings);
       }
     }
   }
@@ -769,10 +795,13 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    */
   #visitResolvingSubtype(
     value: DomainFor<DomainExtra>,
-  ): Exclude<
-    LeafVisitorResult<DomainExtra, ResultType>,
-    ReplaceForm<DomainExtra>
-  > {
+  ):
+    | IterateArrayOfForm<DomainExtra>
+    | IterateMapOfForm<DomainExtra>
+    | Exclude<
+      LeafVisitorResult<DomainExtra, ResultType>,
+      ReplaceForm<DomainExtra>
+    > {
     const vis = this.#visitor;
 
     for (;;) {
