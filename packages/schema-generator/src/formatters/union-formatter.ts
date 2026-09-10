@@ -370,6 +370,13 @@ export class UnionFormatter implements TypeFormatter {
         nonDefaultNodes,
         context.typeChecker,
       );
+      if (defaultEntry.entry.defaultValue === undefined) {
+        reportUnresolvedDefault(
+          context,
+          defaultEntry.entry.defaultTypeNode,
+          "DeepDefault",
+        );
+      }
       return this.#applyDeepDefaultToSchema(
         this.#combineUnionSchemas(schemas, context),
         defaultEntry.entry.defaultValue,

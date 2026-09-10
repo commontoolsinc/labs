@@ -185,4 +185,49 @@ describe("default-empty-record-schema", () => {
     expect(warnings).toHaveLength(4);
     expect(warnings.map((warning) => warning.line)).toEqual([5, 6, 7, 8]);
   });
+
+  it("warns for unresolved DeepDefault values and preserves complete ones", async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `/// <cts-enable />
+      import { DeepDefault, pattern, Writable } from "commonfabric";
+      interface Config { nested: { label: string; values: unknown[] }; }
+      interface Input {
+        object: Writable<Config | DeepDefault<{ nested: { label: string } }>>;
+        tuple: Writable<Config | DeepDefault<{ nested: { values: [0, string] } }>>;
+        complete: Writable<Config | DeepDefault<{ nested: { values: [null, false, 0, ""] } }>>;
+      }
+      export default pattern<Input>((state) => ({
+        object: state.object,
+        tuple: state.tuple,
+        complete: state.complete,
+      }));
+      `,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+    const { input } = patternSchemas(parseModule(output));
+    const schemas = input.properties as Record<string, Record<string, unknown>>;
+
+    for (const name of ["object", "tuple"]) {
+      expect(schemas[name]).not.toHaveProperty("default");
+    }
+    expect(schemas.complete).toHaveProperty("default", {
+      nested: { values: [null, false, 0, ""] },
+    });
+    const warnings = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "schema-default:unresolved"
+    );
+    expect(warnings).toHaveLength(2);
+    expect(warnings.map((warning) => warning.line)).toEqual([6, 7]);
+    expect(
+      warnings.every((warning) =>
+        warning.severity === "warning" &&
+        warning.message.includes("DeepDefault<>")
+      ),
+    ).toBe(true);
+  });
 });

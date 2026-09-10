@@ -897,10 +897,11 @@ report these through the same collector (deduplicated via §2.2's
 `markDiagnosticReported` channel):
 
 - **Warning** `schema-default:unresolved` (`schema-generator.ts`) — the
-  schema generator cannot recover a `Default<>` value after trying the node,
-  type, and applicable brand-payload routes. That annotation supplies no schema
-  default; compilation continues. The warning points to the default value
-  type when it belongs to the current file, otherwise to the local schema use.
+  schema generator cannot recover a `Default<>` or `DeepDefault<>` value after
+  trying the node, type, and applicable brand-payload routes. That annotation
+  supplies no schema default; compilation continues. The warning points to the
+  default value type when it belongs to the current file, otherwise to the local
+  schema use.
   Repeated reports for that source range collapse to one. See §7 of the
   schema-generator mapping spec and `test/default-empty-record-schema.test.ts`.
 - **Error** `pattern-context:receiver-method-call`

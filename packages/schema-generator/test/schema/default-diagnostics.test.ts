@@ -10,6 +10,43 @@ import {
 import { asObjectSchema, getTypeFromCode, getTypeFromFiles } from "../utils.ts";
 
 describe("default diagnostics", () => {
+  describe("DeepDefault", () => {
+    for (
+      const payload of [
+        '{ nested: { label: string }; known: "yes" }',
+        '{ nested: { values: [0, string] }; known: "yes" }',
+      ]
+    ) {
+      it(`warns when ${payload} cannot be fully extracted`, async () => {
+        const { type, checker, typeNode } = await getTypeFromCode(
+          `interface DeepDefault<V> {}
+           interface Config {
+             known: string;
+             nested: { label: string; values: unknown[] };
+           }
+           type Root = Config | DeepDefault<${payload}>;`,
+          "Root",
+        );
+        const diagnostics: SchemaGenerationDiagnostic[] = [];
+        const schema = asObjectSchema(
+          new SchemaGenerator().generateSchema(type, checker, typeNode, {
+            onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+          }),
+        );
+
+        expect(schema).not.toHaveProperty("default");
+        expect(schema).not.toHaveProperty("properties");
+        expect(diagnostics).toHaveLength(1);
+        expect(diagnostics[0]).toMatchObject({
+          severity: "warning",
+          type: "schema-default:unresolved",
+        });
+        expect(diagnostics[0]?.message).toContain("DeepDefault<>");
+        expect(diagnostics[0]?.node).toBeDefined();
+      });
+    }
+  });
+
   for (const form of ["union member", "two arguments"]) {
     for (
       const [valueType, payload] of [

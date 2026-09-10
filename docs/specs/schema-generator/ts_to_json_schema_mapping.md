@@ -501,7 +501,8 @@ not take the alias path. (Contrast §11: CFC detection has no source check.)
    literal default. Tested: brand-payload-defaults.test.ts and
    schema/default-diagnostics.test.ts.
 
-After the applicable extraction routes return no value, the generator reports
+After the applicable extraction routes for `Default<>` or `DeepDefault<>`
+return no value, the generator reports
 **Warning** `schema-default:unresolved` and attaches no default for that
 annotation. `SchemaGenerationOptions.onDiagnostic` receives the message and the
 authored node when available; without a callback the generator logs the warning.
@@ -522,8 +523,10 @@ throw.
   `Default`'s T as a branch (`isDefaultCoveredByUnion`).
 - An object default that would *widen* an existing object member **throws**,
   pointing at `DeepDefault`.
-- `DeepDefault<V>` requires an object target and object default (else
-  **throws**), then applies nested per-property defaults, resolving
+- `DeepDefault<V>` requires an object target and an object default type (else
+  **throws**). An unrecoverable object value emits `schema-default:unresolved`
+  with `DeepDefault<>` in the message and attaches no defaults. A recovered value
+  applies nested per-property defaults, resolving
   through local `$refs` and single-object-candidate `anyOf`s; unknown keys
   **throw**.
 - Expanded empty-array arms (`[]`/`never[]`) riding along expanded

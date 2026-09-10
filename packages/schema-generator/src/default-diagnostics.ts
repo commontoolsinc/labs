@@ -14,12 +14,13 @@ const logger = getLogger("schema-generator.default");
 export function reportUnresolvedDefault(
   context: GenerationContext,
   node: ts.Node | undefined = context.typeNode,
+  wrapper: "Default" | "DeepDefault" = "Default",
 ): void {
   const diagnostic: SchemaGenerationDiagnostic = {
     severity: "warning",
     type: "schema-default:unresolved",
     message:
-      "Cannot extract a value for Default<>; this annotation supplies no schema default. " +
+      `Cannot extract a value for ${wrapper}<>; this annotation supplies no schema default. ` +
       "Use a literal value type, an empty-object type, or typeof a constant " +
       "with a literal initializer.",
     ...(node && { node }),
