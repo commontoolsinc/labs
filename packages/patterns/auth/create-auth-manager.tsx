@@ -23,6 +23,7 @@ import {
   isSyncing,
   lift,
   navigateTo,
+  observeAvailability,
   pattern,
   resultOf,
   type Stream,
@@ -365,7 +366,16 @@ const AuthManagerBasePattern = pattern<AuthManagerBaseInput, AuthManagerOutput>(
     const nowCell = wish<number>({ query: "#now/1" });
     const nowCellValue = resultOf(nowCell.result);
 
-    const pickerUI = computed(() => wishResult[UI] ?? <></>);
+    // WishState[UI] is a legacy plain VNode boundary that can still carry
+    // propagated unavailability. Keep this compatibility cast local so the
+    // surrounding auth UI can continue rendering its loading state.
+    const observedPickerUI = observeAvailability(wishResult[UI]);
+    const pickerUI = computed(() =>
+      isPending(observedPickerUI) || hasError(observedPickerUI) ||
+        isSyncing(observedPickerUI) || hasSchemaMismatch(observedPickerUI)
+        ? <></>
+        : observedPickerUI ?? <></>
+    );
     const authState = deriveAuthState({
       descriptor,
       piece: authPiece,

@@ -8,7 +8,6 @@ import {
   isPending,
   isSyncing,
   NAME,
-  observeAvailability,
   pattern,
   resultOf,
   UI,
@@ -28,6 +27,8 @@ export type SvgDiagramOutput = {
   topic: string;
   diagram: string;
   pending: boolean;
+  availability: string;
+  error: string;
 };
 
 // ===== Pattern =====
@@ -54,18 +55,53 @@ const SvgDiagram = pattern<SvgDiagramInput, SvgDiagramOutput>(
       prompt,
       context,
     });
-    const observedResponse = observeAvailability(responseRequest);
     const responseState = computed(() => {
-      if (isPending(observedResponse)) {
-        return { response: "", pending: true };
+      if (!topic) {
+        return {
+          response: "",
+          pending: false,
+          availability: "ready",
+          error: "",
+        };
       }
-      if (
-        hasError(observedResponse) || isSyncing(observedResponse) ||
-        hasSchemaMismatch(observedResponse)
-      ) {
-        return { response: "", pending: false };
+      if (isPending(responseRequest)) {
+        return {
+          response: "",
+          pending: true,
+          availability: "pending",
+          error: "",
+        };
       }
-      return { response: resultOf(observedResponse), pending: false };
+      if (hasError(responseRequest)) {
+        return {
+          response: "",
+          pending: false,
+          availability: "error",
+          error: responseRequest.error.message,
+        };
+      }
+      if (isSyncing(responseRequest)) {
+        return {
+          response: "",
+          pending: false,
+          availability: "syncing",
+          error: "Waiting for synchronized data.",
+        };
+      }
+      if (hasSchemaMismatch(responseRequest)) {
+        return {
+          response: "",
+          pending: false,
+          availability: "schema-mismatch",
+          error: "The generated diagram did not match the expected format.",
+        };
+      }
+      return {
+        response: resultOf(responseRequest),
+        pending: false,
+        availability: "ready",
+        error: "",
+      };
     });
 
     return {
@@ -84,7 +120,13 @@ const SvgDiagram = pattern<SvgDiagramInput, SvgDiagramOutput>(
               <div style="color: var(--cf-theme-color-text-secondary);">
                 <cf-loader show-elapsed /> Generating diagram...
               </div>,
-              <cf-svg content={responseState.response} />,
+              ifElse(
+                responseState.error,
+                <div role="alert" style="color: var(--cf-theme-color-error);">
+                  {responseState.error}
+                </div>,
+                <cf-svg content={responseState.response} />,
+              ),
             )}
           </cf-vstack>
         </cf-screen>
@@ -92,6 +134,8 @@ const SvgDiagram = pattern<SvgDiagramInput, SvgDiagramOutput>(
       topic,
       diagram: responseState.response,
       pending: responseState.pending,
+      availability: responseState.availability,
+      error: responseState.error,
     };
   },
 );

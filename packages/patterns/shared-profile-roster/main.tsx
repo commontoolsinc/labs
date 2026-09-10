@@ -106,23 +106,27 @@ export type JoinEvent = Record<PropertyKey, never>;
 const join = handler<JoinEvent, {
   roster: RosterCell;
   viewer: ViewerCell;
-  // May be undefined until the viewer's `#profile` wish resolves; guarded below.
-  profile: ParticipantProfileCell | undefined;
+  profile: ParticipantProfileCell;
+  profileAvailable: boolean;
   name: string;
   avatar: string;
-}>((_event, { roster, viewer, profile, name, avatar }) => {
+}>((_event, { roster, viewer, profile, profileAvailable, name, avatar }) => {
   const trimmed = (name ?? "").trim();
   if (!trimmed) return; // No resolved profile name yet — nothing to contribute.
-  if (!profile) return; // No resolved profile cell — no stable identity yet.
+  if (!profileAvailable) return;
+  const availableProfile = profile.resolveAsCell();
+  if (availableProfile.get() === undefined) return;
 
   // Idempotent: don't re-add this viewer. Compare by profile-cell identity so a
   // viewer who later renames themselves still counts as already-joined, and so
   // two distinct users who happen to share a display name don't block each other.
   const participants = roster.key("participants");
-  const already = participants.get().some((p) => equals(p.profile, profile));
+  const already = participants.get().some((p) =>
+    equals(p.profile, availableProfile)
+  );
   if (!already) {
     participants.push({
-      profile,
+      profile: availableProfile,
       name: trimmed,
       avatar: (avatar ?? "").trim(),
       joinedAt: Date.now(),
@@ -163,6 +167,7 @@ export default pattern<RosterDemoInput, RosterDemoOutput>(
     const observedProfileAvatar = observeAvailability(
       profileAvatarWish.result,
     );
+    const observedProfile = observeAvailability(profileWish.result);
 
     const myName = computed(() => {
       if (
@@ -180,23 +185,21 @@ export default pattern<RosterDemoInput, RosterDemoOutput>(
       ) return "";
       return resultOf(observedProfileAvatar);
     });
-    const unavailableProfile = new Writable<{ name?: string; avatar?: string }>(
-      {},
-    );
+    const myProfile = computed(() => {
+      if (
+        hasError(observedProfile) || isPending(observedProfile) ||
+        isSyncing(observedProfile) || hasSchemaMismatch(observedProfile)
+      ) return {};
+      return resultOf(observedProfile);
+    });
     const profileAvailable = computed(() =>
-      !hasError(profileWish.result) && !isPending(profileWish.result) &&
-      !isSyncing(profileWish.result) && !hasSchemaMismatch(profileWish.result)
+      !hasError(observedProfile) && !isPending(observedProfile) &&
+      !isSyncing(observedProfile) && !hasSchemaMismatch(observedProfile)
     );
-    // The live profile cell — passed to the join handler as the identity key.
-    const myProfile = hasError(profileWish.result) ||
-        isPending(profileWish.result) || isSyncing(profileWish.result) ||
-        hasSchemaMismatch(profileWish.result)
-      ? unavailableProfile
-      : resultOf(profileWish.result);
-    const currentProfileBadge = computed(() =>
-      profileAvailable && myProfile
-        ? <cf-profile-badge $profile={myProfile} size="md" />
-        : <></>
+    // Keep the badge in static JSX. A VNode-producing computed that captures
+    // the unavailable profile path is blocked before its fallback can run.
+    const currentProfileBadge = (
+      <cf-profile-badge $profile={myProfile} size="md" />
     );
 
     const participants = roster.participants;
@@ -212,6 +215,7 @@ export default pattern<RosterDemoInput, RosterDemoOutput>(
       roster,
       viewer,
       profile: myProfile,
+      profileAvailable,
       name: myName,
       avatar: myAvatar,
     });

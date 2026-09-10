@@ -33,11 +33,15 @@ export default pattern<Input>(({ title }) => {
   const topic = new Writable("");
 
   const profile = wish<string>({ query: "#learnedSummary" });
-  const profileText = computed(() => {
-    if (
-      hasError(profile.result) || isPending(profile.result) ||
-      isSyncing(profile.result) || hasSchemaMismatch(profile.result)
-    ) return "";
+  const profileText = resultOf(profile.result);
+  const profileDisplay = computed(() => {
+    if (isPending(profile.result) || isSyncing(profile.result)) {
+      return "Loading profile context…";
+    }
+    if (hasError(profile.result)) return "Profile context is unavailable.";
+    if (hasSchemaMismatch(profile.result)) {
+      return "Profile context has an unexpected format.";
+    }
     return resultOf(profile.result);
   });
 
@@ -53,32 +57,57 @@ Write content personalized to the user when appropriate.`;
     system: systemPrompt,
     prompt: topic,
   });
-  const usableResult = resultOf(resultRequest);
-  const result = computed(() => {
-    if (
-      hasError(resultRequest) || isPending(resultRequest) ||
-      isSyncing(resultRequest) || hasSchemaMismatch(resultRequest)
-    ) return "";
-    return usableResult;
+  const resultState = computed(() => {
+    if (!topic) {
+      return { response: "", availability: "ready", error: "" };
+    }
+    if (isPending(resultRequest)) {
+      return { response: "", availability: "pending", error: "" };
+    }
+    if (hasError(resultRequest)) {
+      return {
+        response: "",
+        availability: "error",
+        error: resultRequest.error.message,
+      };
+    }
+    if (isSyncing(resultRequest)) {
+      return { response: "", availability: "syncing", error: "" };
+    }
+    if (hasSchemaMismatch(resultRequest)) {
+      return {
+        response: "",
+        availability: "schema-mismatch",
+        error: "The generated text has an unexpected format.",
+      };
+    }
+    return {
+      response: resultOf(resultRequest),
+      availability: "ready",
+      error: "",
+    };
   });
   const resultUI = computed(() => {
-    if (isPending(resultRequest)) {
+    if (!topic) return null;
+    if (resultState.availability === "pending") {
       return (
         <div style="margin-top: 16px;">
           <cf-loader show-elapsed /> Generating personalized content...
         </div>
       );
     }
-    if (
-      hasError(resultRequest) || isSyncing(resultRequest) ||
-      hasSchemaMismatch(resultRequest)
-    ) return null;
-    return usableResult
+    if (resultState.availability === "syncing") {
+      return <div role="status">Waiting for synchronized data.</div>;
+    }
+    if (resultState.error) {
+      return <div role="alert">{resultState.error}</div>;
+    }
+    return resultState.response
       ? (
         <div style="margin-top: 16px;">
           <h3>Generated Text:</h3>
           <div style="white-space: pre-wrap; padding: 12px; background: #f9f9f9; border-radius: 4px; line-height: 1.6;">
-            {usableResult}
+            {resultState.response}
           </div>
         </div>
       )
@@ -93,7 +122,7 @@ Write content personalized to the user when appropriate.`;
 
         <cf-card>
           <h4 style="margin-top: 0;">Profile Context:</h4>
-          <pre>{profileText}</pre>
+          <pre>{profileDisplay}</pre>
         </cf-card>
 
         <div>
@@ -120,6 +149,8 @@ Write content personalized to the user when appropriate.`;
       </div>
     ),
     topic,
-    response: result,
+    response: resultState.response,
+    availability: resultState.availability,
+    error: resultState.error,
   };
 });

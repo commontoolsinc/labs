@@ -13,6 +13,7 @@
 import {
   action,
   assert,
+  equals,
   FS,
   handler,
   NAME,
@@ -25,7 +26,7 @@ import {
   Writable,
 } from "commonfabric";
 import { findNode, propsOf } from "../test/vnode-helpers.ts";
-import Note, { bareMentionId, handleNewBacklink } from "./note.tsx";
+import Note, { bareMentionId } from "./note.tsx";
 import Notebook from "./notebook.tsx";
 import {
   type MentionablePiece,
@@ -60,6 +61,16 @@ const editorHasReferences = (subject: { [UI]: unknown }): boolean => {
     (node) => propsOf(node)?.["onbacklink-create"] !== undefined,
   );
   return propsOf(editor)?.["$references"] !== undefined;
+};
+
+const editorUsesBacklinkCreate = (subject: ReturnType<typeof Note>) => {
+  const editor = findNode(
+    subject[UI],
+    (node) => propsOf(node)?.["onbacklink-create"] !== undefined,
+  );
+  const editorStream = propsOf(editor)?.["onbacklink-create"];
+  return typeof editorStream === "object" && editorStream !== null &&
+    equals(editorStream, subject.createBacklink);
 };
 
 export default pattern(() => {
@@ -123,11 +134,6 @@ export default pattern(() => {
     title: "Backlink Target",
     content: "",
   });
-  const backlinkCreate = handleNewBacklink({
-    mentionable: new Writable<MentionablePiece[]>([]),
-    pieceRegistry,
-  });
-
   // ==========================================================================
   // Actions - Content Editing
   // ==========================================================================
@@ -200,7 +206,7 @@ export default pattern(() => {
   });
 
   const action_create_backlink = createBacklink({
-    stream: backlinkCreate,
+    stream: note.createBacklink,
     piece: backlinkTarget,
   });
 
@@ -213,6 +219,9 @@ export default pattern(() => {
   );
   const assert_editor_has_references = assert(
     () => editorHasReferences(note),
+  );
+  const assert_editor_uses_create_backlink = assert(
+    () => editorUsesBacklinkCreate(note),
   );
 
   const assert_initial_title = assert(() => note.title === "Test Note");
@@ -458,6 +467,7 @@ export default pattern(() => {
       // The editor is given the note's reference map, which is what selects
       // the reference form for mentions made from here.
       { assertion: assert_editor_has_references },
+      { assertion: assert_editor_uses_create_backlink },
 
       // === The filesystem projection ===
       { action: action_mention_in_projection },

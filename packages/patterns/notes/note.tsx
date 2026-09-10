@@ -107,6 +107,12 @@ export interface NoteOutput extends NotePiece {
   closeMenu: Stream<void>;
   startEditingTitle: Stream<void>;
   stopEditingTitle: Stream<void>;
+  createBacklink: Stream<{
+    detail: {
+      piece: Writable<MentionablePiece>;
+      navigate: boolean;
+    };
+  }>;
 }
 
 // ===== Module-scope handlers (reused with different bindings) =====
@@ -744,6 +750,7 @@ const Note = pattern<NoteInput, NoteOutput>(
       closeMenu,
       startEditingTitle,
       stopEditingTitle,
+      createBacklink,
     };
   },
 );

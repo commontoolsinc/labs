@@ -77,17 +77,19 @@ export type SendEvent = Record<PropertyKey, never>;
 const sendMessage = handler<SendEvent, {
   messages: MessagesCell;
   draft: DraftCell;
-  // May be undefined until the viewer's `#profile` wish resolves; guarded below.
-  profile: ChatProfileCell | undefined;
+  profile: ChatProfileCell;
+  profileAvailable: boolean;
   name: string;
   avatar: string;
-}>((_event, { messages, draft, profile, name, avatar }) => {
+}>((_event, { messages, draft, profile, profileAvailable, name, avatar }) => {
   const author = (name ?? "").trim();
   const body = (draft.get() ?? "").trim();
   if (!author || !body) return; // No profile yet, or empty message.
-  if (!profile) return; // No resolved profile cell — no first-class identity.
+  if (!profileAvailable) return;
+  const availableProfile = profile.resolveAsCell();
+  if (availableProfile.get() === undefined) return;
   messages.push({
-    authorProfile: profile,
+    authorProfile: availableProfile,
     author,
     avatar: (avatar ?? "").trim(),
     body,
@@ -128,6 +130,7 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
     const observedProfileAvatar = observeAvailability(
       profileAvatarWish.result,
     );
+    const observedProfile = observeAvailability(profileWish.result);
 
     const myName = computed(() => {
       if (
@@ -145,23 +148,22 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
       ) return "";
       return resultOf(observedProfileAvatar);
     });
-    const unavailableProfile = new Writable<{ name?: string; avatar?: string }>(
-      {},
-    );
-    const profileAvailable = computed(() =>
-      !hasError(profileWish.result) && !isPending(profileWish.result) &&
-      !isSyncing(profileWish.result) && !hasSchemaMismatch(profileWish.result)
-    );
-    // The live profile cell — stored on each message and passed to the badge.
-    const myProfile = hasError(profileWish.result) ||
-        isPending(profileWish.result) || isSyncing(profileWish.result) ||
-        hasSchemaMismatch(profileWish.result)
-      ? unavailableProfile
-      : resultOf(profileWish.result);
-    const currentProfileBadge = computed(() => {
-      if (!profileAvailable) return <></>;
-      return <cf-profile-badge $profile={myProfile} size="sm" />;
+    const myProfile = computed(() => {
+      if (
+        hasError(observedProfile) || isPending(observedProfile) ||
+        isSyncing(observedProfile) || hasSchemaMismatch(observedProfile)
+      ) return {};
+      return resultOf(observedProfile);
     });
+    const profileAvailable = computed(() =>
+      !hasError(observedProfile) && !isPending(observedProfile) &&
+      !isSyncing(observedProfile) && !hasSchemaMismatch(observedProfile)
+    );
+    // Keep the badge in static JSX. A VNode-producing computed that captures
+    // the unavailable profile path is blocked before its fallback can run.
+    const currentProfileBadge = (
+      <cf-profile-badge $profile={myProfile} size="sm" />
+    );
     // Gate the composer on BOTH the name (for the snapshot/label) AND the live
     // profile CELL the send handler requires. Keying only on `#profileName`
     // would enable Send in the window where the name resolves but the `#profile`
@@ -195,6 +197,7 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
       messages,
       draft,
       profile: myProfile,
+      profileAvailable,
       name: myName,
       avatar: myAvatar,
     });

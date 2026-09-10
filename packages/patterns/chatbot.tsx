@@ -22,6 +22,15 @@ import {
 } from "commonfabric";
 import { type MentionablePiece } from "./system/backlinks-index.tsx";
 
+const isStringRecord = (
+  value: unknown,
+): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+const modelDirectoryOrEmpty = (
+  value: unknown,
+): Record<string, unknown> => isStringRecord(value) ? value : {};
+
 const sendMessage = handler<
   {
     detail: {
@@ -199,7 +208,7 @@ export default pattern<ChatInput, ChatOutput>(
         isSyncing(observedModelDirectory) ||
         hasSchemaMismatch(observedModelDirectory)
       ) return {};
-      return resultOf(observedModelDirectory);
+      return modelDirectoryOrEmpty(resultOf(observedModelDirectory));
     });
     const items = computed(() => {
       const items = Object.keys(modelDirectory).map((key) => ({

@@ -12,13 +12,13 @@
  * Run: deno task cf test packages/patterns/system/default-app.test.tsx --root packages/patterns --verbose
  */
 import {
+  action,
   assert,
   handler,
   pattern,
   type Stream,
   TESTS,
   UI,
-  type VNode,
   Writable,
 } from "commonfabric";
 import { findElementByExactText, propsOf } from "../test/vnode-helpers.ts";
@@ -32,12 +32,6 @@ const addPiece = handler<void, {
 }>((_, { stream, piece }) => stream.send({ piece }));
 
 const piecesLengthOf = (pieceRegistry: unknown[]) => [...pieceRegistry].length;
-
-const clickFirstRemove = handler<void, { ui: VNode }>((_, { ui }) => {
-  const button = findElementByExactText(ui, "cf-button", "🗑️");
-  const onClick = propsOf(button)?.onClick;
-  (onClick as { send: (event: Record<string, never>) => void }).send({});
-});
 
 export default pattern(() => {
   const subject = DefaultApp();
@@ -63,7 +57,11 @@ export default pattern(() => {
     stream: subject.addPiece,
     piece: otherNote,
   });
-  const action_remove_first_note = clickFirstRemove({ ui: subject[UI] });
+  const action_remove_first_note = action(() => {
+    const button = findElementByExactText(subject[UI], "cf-button", "🗑️");
+    const onClick = propsOf(button)?.onClick;
+    (onClick as { send: (event: Record<string, never>) => void }).send({});
+  });
 
   const assert_starts_empty = assert(() =>
     piecesLengthOf(subject.pieceRegistry) === 0
