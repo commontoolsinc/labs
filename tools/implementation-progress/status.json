@@ -4,7 +4,7 @@
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7241",
   "activity": "Row invalidation fix #7265 merged after all 69 gates and clean reviews. A4 count-limit work exposed a separate union-branch schema-scope issue; its isolated fix passes focused tests.",
-  "review": "Antagonistic reviews are clean for the C1 candidate fix and resolved budget merge. Normal follow-up pushes have resumed Cubic review on #7257; latest code/checkpoint reviews remain landing gates. #7264 is completing review and CI.",
+  "review": "Latest Cubic and antagonistic reviews are clean for the dashboard. The merged #7265 tracker update is being revalidated before landing this checkpoint.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
