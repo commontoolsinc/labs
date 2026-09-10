@@ -134,10 +134,14 @@ content the `cid:` namespace holds, and the larger.
   string it resolves against the id the record's link names, so a document
   that reached a replica by another route holding other content is refused
   at load.
-- **Per space, by rule**: as for a schema document, it exists in every space
-  that references it, and a reference resolves only in the space it sits
-  in. A space can be unavailable, so a piece's code loads from the space
-  the piece lives in and never from another.
+- **Per space, by the writer**: the compile cache installs a code document
+  into the space of every record that links to it, in the same transaction
+  as the record, so a piece's code loads from the space the piece lives in
+  and no other space has to be reachable for it. That is a writer's
+  practice, not a reader's rule: a link that names a code document in
+  another space is a valid link, and a reader that follows one verifies
+  the resolved string against the linked id exactly as it does within a
+  space. No same-space guard applies on the read side.
 - **No envelope**: a code document carries no `cfc` metadata. It is a
   runtime surface outside labeling, like a schema document: immutable,
   named by its content, and excluded from schema write policy and the flow
@@ -684,15 +688,14 @@ playbook:
    measure, and only then consider an inline-below-N-bytes rule — a
    threshold changes document identity, so it must be part of the
    decomposition's versioned contract, not a tuning knob.
-2. **Server-side integrity enforcement.** Partially resolved: the commit
-   boundary rejects mutations of `cid:` documents and validates the
-   referenced schema closure (presence and content identity, transitively)
-   for every commit, one documented patch shape excepted. What remains
-   open is generic first-install
-   verification for `cid:` documents nothing references — the boundary
-   cannot name an unreferenced document's class, so a forged blob-or-other
-   install is still confined to its space and fails closed when first
-   referenced.
+2. **Server-side integrity enforcement.** Resolved for content: the commit
+   boundary rejects mutations of `cid:` documents, refuses every `cid:` set
+   whose content does not hash to its id — a first installation nothing
+   references included — and validates the referenced schema closure
+   (presence, transitively) for every commit. What remains is the one
+   documented patch shape: a reference introduced by a patch that edits
+   inside an existing link's schema escapes commit-time collection, and
+   read-side assembly is what catches it.
 3. **Fetch-once for immutable documents.** Every pull is a watch add, so
    schema documents permanently grow the session watch set even though they
    can never change. Quiet but not free; a fetch-without-subscribe

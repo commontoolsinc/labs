@@ -77,15 +77,25 @@ describe("extended-storage-transaction", () => {
       tx.abort?.();
     });
 
-    it("elides a document the server already holds", async () => {
+    it("elides a document the server already holds, whatever its value", async () => {
+      // A string, an array, and a number: the elision re-hashes the confirmed
+      // value, so it must recognize every kind of value the seam stages.
+      const values = [code, [1, "two", { three: 3 }], 42];
+      const ids = values.map((value) => `cid:${taggedHashStringOf(value)}`);
       const install = runtime.edit();
-      install.stageContentAddressedDocument(space, code);
+      for (const value of values) {
+        install.stageContentAddressedDocument(space, value);
+      }
       expect((await install.commit()).error).toBeUndefined();
       await storageManager.synced();
 
       const tx = runtime.edit();
-      expect(tx.stageContentAddressedDocument(space, code)).toBe(codeId);
-      expect(stagedIds(tx)).not.toContain(codeId);
+      values.forEach((value, index) => {
+        expect(tx.stageContentAddressedDocument(space, value)).toBe(
+          ids[index],
+        );
+      });
+      for (const id of ids) expect(stagedIds(tx)).not.toContain(id);
       tx.abort?.();
     });
 
