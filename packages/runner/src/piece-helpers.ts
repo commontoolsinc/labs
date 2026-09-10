@@ -354,7 +354,6 @@ export async function compileAndSavePattern(
   patternSrc: string | RuntimeProgram,
   options: {
     space: MemorySpace;
-    previousEntryIdentity?: string;
   },
 ): Promise<Pattern> {
   if (typeof patternSrc === "string") {
@@ -368,9 +367,6 @@ export async function compileAndSavePattern(
   // subsequent loads (CT-1623).
   const pattern = await runtime.patternManager.compilePattern(patternSrc, {
     space: options.space,
-    ...(options.previousEntryIdentity === undefined
-      ? {}
-      : { previousEntryIdentity: options.previousEntryIdentity }),
   });
   if (!pattern) {
     throw new Error("No default pattern found in the compiled exports.");

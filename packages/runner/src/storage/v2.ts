@@ -90,7 +90,7 @@ import {
 } from "../link-types.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { entityKey } from "../scheduler/keys.ts";
-import { normalizeCellScope } from "../scope.ts";
+import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
@@ -8446,12 +8446,38 @@ const toRejectedError = (
   ) {
     const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
     const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
-    // The conflicted entity: structured field when the error is in-process;
-    // parsed from the message when it crossed the wire (Error fields do not
-    // survive serialization, the message does — its format is owned by
-    // memory/v2/engine.ts's ConflictError construction).
-    const staleReadOf = (error as { of?: unknown })?.of ??
-      message.match(/stale confirmed read: (\S+) at seq/)?.[1];
+    // Scoped descriptors cross current protocol boundaries structurally.
+    // Message-only errors retain default-scope recovery for every named read.
+    const toConflicts = (details: unknown): IConflictError["conflict"][] => {
+      const { of, scope } = (details ?? {}) as {
+        of?: unknown;
+        scope?: unknown;
+      };
+      return typeof of === "string"
+        ? [{
+          space,
+          the: DOCUMENT_MIME,
+          of: of as Entity,
+          ...(isCellScope(scope) ? { scope } : {}),
+        }]
+        : [];
+    };
+    const structuredConflicts = (error as { conflicts?: unknown })?.conflicts;
+    let conflicts = Array.isArray(structuredConflicts)
+      ? structuredConflicts.flatMap(toConflicts)
+      : [];
+    if (conflicts.length === 0) {
+      conflicts = toConflicts((error as { conflict?: unknown })?.conflict);
+    }
+    if (conflicts.length === 0) {
+      conflicts = toConflicts(error);
+    }
+    if (conflicts.length === 0) {
+      conflicts = Array.from(
+        message.matchAll(/stale confirmed read: (\S+) at seq/g),
+        (match) => toConflicts({ of: match[1] })[0],
+      );
+    }
     const firstOperation = commit.operations?.[0];
     const firstOperationId = firstOperation && "id" in firstOperation
       ? firstOperation.id
@@ -8460,16 +8486,14 @@ const toRejectedError = (
       name: "ConflictError",
       message,
       transaction: commit,
-      // Conflict descriptor: for stale-read conflicts `of` is authoritative
-      // (the memory engine names the conflicted entity structurally), so a
-      // retrier can pull exactly that doc before re-running. `the` remains a
-      // placeholder.
-      conflict: {
+      // The singular descriptor remains the first conflict for consumers of
+      // the legacy interface. `the` remains a placeholder.
+      conflict: conflicts[0] ?? {
         space,
         the: DOCUMENT_MIME,
-        of: ((typeof staleReadOf === "string" ? staleReadOf : undefined) ??
-          firstOperationId ?? "of:unknown") as Entity,
+        of: (firstOperationId ?? "of:unknown") as Entity,
       },
+      ...(conflicts.length > 0 ? { conflicts } : {}),
     };
     // retryAfterSeq is carried for diagnostics; retry gating is by caughtUpLocalSeq
     // (readyToRetry), and downstream only uses retryAfterSeq's presence to mark

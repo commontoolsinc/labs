@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import { StaticCache } from "@commonfabric/static";
+import { transformCfDirective } from "@commonfabric/ts-transformers";
 
 import {
   CompilerError,
@@ -167,6 +168,58 @@ describe("TypeScriptCompiler", () => {
     ).toThrow(
       "Program conflicts with trusted Common Fabric type source 'commonfabric.d.ts'",
     );
+  });
+
+  describe("JSX factory binding", () => {
+    for (const extension of ["tsx", "jsx"]) {
+      it(`evaluates elements and fragments with local and parameter bindings named \`h\` in .${extension}`, async () => {
+        const name = `/main.${extension}`;
+        const compiler = new TypeScriptCompiler(types);
+        const source = `
+export function render() {
+  const h = [0, 1, 2];
+  return <div>{h.map((h) => <><span>{h}</span><br /></>)}</div>;
+}
+`;
+        const modules = await resolveAndCompileToModules(
+          compiler,
+          new InMemoryProgram(name, {
+            ...fabricTypeModules,
+            [name]: transformCfDirective(source, name),
+          }),
+          { runtimeModules: FABRIC_RUNTIME_MODULES },
+        );
+        const factory = Object.assign(
+          (name: string, props: unknown, ...children: unknown[]) => ({
+            name,
+            props,
+            children,
+          }),
+          { fragment: "fragment" },
+        );
+        const exports: { render?: () => unknown } = {};
+        new Function("exports", "require", modules.get(name)!.js)(
+          exports,
+          (specifier: string) => {
+            expect(specifier).toBe("commonfabric");
+            return { __cfHelpers: { h: factory } };
+          },
+        );
+
+        expect(exports.render!()).toEqual({
+          name: "div",
+          props: null,
+          children: [[0, 1, 2].map((value) => ({
+            name: "fragment",
+            props: null,
+            children: [
+              { name: "span", props: null, children: [value] },
+              { name: "br", props: null, children: [] },
+            ],
+          }))],
+        });
+      });
+    }
   });
 
   it("registers virtual environment types as default libraries", async () => {
@@ -568,11 +621,13 @@ declare namespace JSX {
   }
 }
 
-declare function h(
-  tag: string,
-  props: Record<string, unknown> | null,
-  ...children: unknown[]
-): unknown;
+declare const __cfHelpers: {
+  h(
+    tag: string,
+    props: Record<string, unknown> | null,
+    ...children: unknown[]
+  ): unknown;
+};
 
 class Counter {
   @tracked accessor count = 1;

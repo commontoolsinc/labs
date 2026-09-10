@@ -51,7 +51,6 @@ import {
   validateAndSanitizeStructuredResult,
 } from "../structured-result.ts";
 import type {
-  HarnessPatternIndexClientFactory,
   PatternIndexEventType,
   PatternIndexPublishRequest,
 } from "../pattern-index/client.ts";
@@ -493,31 +492,6 @@ export const sealedPositionLink = (
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
-
-/**
- * Reports what a run did with an indexed pattern, without letting the report
- * bear on the run. The index ranks on these events, so a failure to record
- * one costs ranking accuracy and nothing else — it is logged and dropped
- * rather than turned into a tool error for a pattern that ran. Resolves after
- * either path, so callers can preserve report order without awaiting it as part
- * of the run.
- */
-const recordPatternIndexEvent = async (
-  getClient: HarnessPatternIndexClientFactory,
-  patternId: string,
-  eventType: PatternIndexEventType,
-): Promise<void> => {
-  try {
-    const client = await getClient();
-    await client.recordEvent({ patternId, eventType });
-  } catch (error) {
-    console.error(
-      `run_pattern could not record the ${eventType} event for pattern index entry "${patternId}": ${
-        errorMessage(error)
-      }`,
-    );
-  }
-};
 
 /**
  * The entry path `compileAndSavePattern` wraps bare source under. Written out
@@ -1020,11 +994,18 @@ export const runPatternTool: HarnessToolDefinition<
     if (sourceText === undefined && patternId === undefined) {
       return errorOutput("error", RUN_PATTERN_NO_PROGRAM_MESSAGE);
     }
-    // The run's index client, held once: which of the index paths below run
-    // is decided by the call and by whether the run has an index at all, and
-    // both questions are settled here rather than at each of them.
+    // The run's index client and its ledger, held once: which of the index
+    // paths below run is decided by the call and by whether the run has an
+    // index at all, and both questions are settled here rather than at each of
+    // them. A run configured for an index has both, so a `patternId` without
+    // either is refused here rather than reaching a path that would drop what
+    // it had to say.
     const getPatternIndexClient = context.getPatternIndexClient;
-    if (patternId !== undefined && getPatternIndexClient === undefined) {
+    const patternIndexLedger = context.patternIndexLedger;
+    if (
+      patternId !== undefined &&
+      (getPatternIndexClient === undefined || patternIndexLedger === undefined)
+    ) {
       return errorOutput(
         "error",
         "run_pattern patternId requires a pattern index; configure --pattern-index-url, or pass sourceText instead",
@@ -1367,26 +1348,17 @@ export const runPatternTool: HarnessToolDefinition<
     // built without an instantiation recorder asks nothing.
     const instantiationStart = session.instantiations?.sequence() ?? 0;
 
-    let patternIndexEventTail: Promise<void> | undefined;
-
     /**
      * Reports this invocation's outcome to the index, when the pattern came
      * from there. A cancelled run reports nothing: it neither succeeded nor
-     * failed, and the index ranks on what a pattern did. Reports start in call
-     * order without being awaited by the run, so a terminal event cannot
-     * overtake `instantiated`.
+     * failed, and the index ranks on what a pattern did. The report goes to
+     * the session's ledger, which sends it in call order without the run
+     * awaiting it and holds the session's one wait for it — the run is over
+     * long before the process is.
      */
     const recordOutcome = (eventType: PatternIndexEventType): void => {
-      if (patternId !== undefined && getPatternIndexClient !== undefined) {
-        const record = () =>
-          recordPatternIndexEvent(
-            getPatternIndexClient,
-            patternId,
-            eventType,
-          );
-        patternIndexEventTail = patternIndexEventTail === undefined
-          ? record()
-          : patternIndexEventTail.then(record);
+      if (patternId !== undefined) {
+        patternIndexLedger?.record(patternId, eventType);
       }
     };
 
@@ -1970,11 +1942,10 @@ export const runPatternTool: HarnessToolDefinition<
     // spelled twice because the type cannot say they arrive together. There is
     // deliberately no second publish path: one that skipped the ledger would
     // put back the per-iteration duplicates the ledger exists to prevent.
-    const publications = context.patternIndexPublications;
     if (
       patternId === undefined &&
       getPatternIndexClient !== undefined &&
-      publications !== undefined &&
+      patternIndexLedger !== undefined &&
       context.patternIndexPublishEnabled === true &&
       description !== undefined && description !== ""
     ) {
@@ -2056,7 +2027,7 @@ export const runPatternTool: HarnessToolDefinition<
               }
               : { discoverable: true }),
           };
-          publications.stage(request);
+          patternIndexLedger.stage(request);
         }
       }
     }

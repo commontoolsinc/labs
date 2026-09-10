@@ -485,16 +485,43 @@ interface ConflictError extends Error {
    * reaching this seq reflects the winning write.
    */
   retryAfterSeq: number;
+  /** First stale confirmed read per branch, entity, and scope. */
+  conflicts?: Array<{
+    of: string;
+    scope: "space" | "user" | "session";
+    /** Absent for the default branch. */
+    branch?: string;
+    seq: number;
+    conflictSeq: number;
+  }>;
 }
 ```
 
 The rejection carries no document values. Instead the server marks the commit's
 write targets and both read sets (`reads.confirmed` and `reads.pending`) dirty
 for the session — origin-less, so the session's own echo suppression does not
-hide them — and the next sync frame delivers the current documents for all of
-them as ordinary upserts. Repair therefore arrives as a consistent cut over the
-session's watched view — covering stale read dependencies as well as write
-targets, with every document the frame links to delivered in the same cut.
+hide them — and the next sync frame delivers the watched documents as ordinary
+upserts. Repair therefore arrives as a consistent cut over the session's watched
+view, with every document the frame links to delivered in the same cut. A dirty
+address outside that view does not gain a watch through dirty marking alone.
+Confirmed-read validation reports each stale branch, entity, and scope once. Its
+first stale read supplies the diagnostic read sequence and conflicting sequence;
+subsequent reads of that instance skip the staleness scan. Every read still
+validates its branch and resolves its scope. An unknown branch or unresolvable
+scope takes precedence over any stale reads already found. The `conflicts` array
+includes an entry even when only one instance is stale. Non-default branches are
+named in the descriptor; an absent `branch` means the default branch, regardless
+of the commit's target branch. A client can query each conflicting branch,
+entity, and scope before retrying. The runner emits default-branch reads and its
+retry helper repairs those instances; cross-branch clients use the memory
+protocol's branch-aware queries. Each scope resolves under the rejected session's
+identity. Older responses can omit this array; their diagnostic identifies
+entities but does not preserve their scopes. The runner also exposes the first
+descriptor as `conflict` for existing consumers. The diagnostic previews up to
+three distinct entity IDs and counts the remaining IDs. Each entity's clause
+uses its first reported instance's sequences; other scopes or branches of that
+entity share the clause. The structured array remains complete regardless of
+the diagnostic's length.
 
 ## 3.7 Server-Side Commit Processing
 

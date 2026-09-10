@@ -1100,6 +1100,15 @@ interface ConflictError extends Error {
   name: "ConflictError";
   /** Server head seq at rejection time (§3.6.4). */
   retryAfterSeq: number;
+  /** First stale confirmed read per branch, entity, and scope. */
+  conflicts?: Array<{
+    of: string;
+    scope: "space" | "user" | "session";
+    /** Absent for the default branch. */
+    branch?: string;
+    seq: number;
+    conflictSeq: number;
+  }>;
 }
 
 interface TransactionError extends Error {

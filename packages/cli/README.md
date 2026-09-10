@@ -472,12 +472,21 @@ written.
 
 Run `cf piece setsrc --check` before every source update to a piece whose state
 matters. It compiles the complete candidate package, compares it with the exact
-piece named on the command line, leaves that piece unchanged, and exits nonzero
-on refusal. Candidate compilation does persist unattached, content-addressed
-module and source documents in the space; it does not move the piece's source
-pointer, restage its arguments, or create a source revision. The target, entry,
-root, export, test, data-file, and repository flags on the check must match the
-apply.
+piece named on the command line, and exits nonzero on refusal. The check issues
+no storage writes: candidate compilation and current-source recovery reuse
+verified caches without persisting artifacts or repairs. It creates no module
+update delegation. The target, entry, root, export, test, data-file, and
+repository flags on the check must match the apply.
+
+Reads still use the normal storage synchronization path. On a deployment with
+server execution, those reads can demand server-side materialization; other
+clients and background work can also change the space while a check runs.
+Preflight does not provide a frozen storage snapshot.
+
+Apply persists compilation artifacts before setup. It commits new module update
+authority atomically with the source pointer and revision; a refused setup
+publishes no proposed authority. Successful source updates require an owned,
+durable setup transaction.
 
 Preflight uses setup's stored-argument validation: optional fields holding
 `undefined` count as absent, and unreadable linked values defer to reactive
