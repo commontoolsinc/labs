@@ -744,6 +744,23 @@ describe("readCostsForward()", () => {
     expect(costSeconds(state, "2026-08-20")).toBe(30);
   });
 
+  it("reads a day whose stored figures are not numbers as empty", () => {
+    // The read of one such day ends that day rather than the state it
+    // sits in, which the aggregate reports rather than throwing over.
+    for (
+      const stored of [{ p90: 4000 }, { p90: 4000, count: 2.5 }, {
+        p90: 4000,
+        count: -1,
+      }, { p90: "slow", count: 45 }]
+    ) {
+      const state = emptyState();
+      (state.costByDay as Record<string, unknown>)["2026-08-20"] = stored;
+      readCostsForward(state);
+      expect(state.costByDay["2026-08-20"]).toEqual({ slowest: [], count: 0 });
+      expect(costSeconds(state, "2026-08-20")).toBe(0);
+    }
+  });
+
   it("reads a state carrying no days at all as carrying none", () => {
     // The aggregate reports a state it cannot read rather than throwing
     // partway through one.

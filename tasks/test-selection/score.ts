@@ -738,10 +738,17 @@ export function readCostsForward(state: IdentityState): void {
   const read: Record<string, DaySamples | StoredPercentile> = days;
   for (const [day, held] of Object.entries(read)) {
     if ("slowest" in held) continue;
-    days[day] = {
-      slowest: new Array(Math.min(held.count, COST_SAMPLE_CAP)).fill(held.p90),
-      count: held.count,
-    };
+    // A day whose stored figures are not numbers is read as a day with
+    // nothing in it, which is what a day this cannot make sense of is
+    // worth. Ending the read of the whole state is not.
+    days[day] = Number.isInteger(held.count) && held.count > 0 &&
+        Number.isFinite(held.p90)
+      ? {
+        slowest: new Array(Math.min(held.count, COST_SAMPLE_CAP))
+          .fill(held.p90),
+        count: held.count,
+      }
+      : emptySamples();
   }
 }
 
