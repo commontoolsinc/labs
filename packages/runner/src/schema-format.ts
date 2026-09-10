@@ -207,6 +207,22 @@ function schemaToTypeStringInner(
 
   const s = schema as Record<string, unknown>;
 
+  // A sqlite-branded position renders as the handle type a pattern author
+  // writes at it. What the schema there states is the handle's readable
+  // descriptor `{ id, tables, rev }`, hoisted into `$defs` under the brand's
+  // own name, so both the shape and that name describe something no pattern
+  // declares. Answered before the `$ref` hop below, which would resolve the
+  // descriptor and never see the brand beside it.
+  const sqliteBrand = ContextualFlowControl.getAsCellValues(schema).find(
+    (entry) => ContextualFlowControl.getAsCellKind(entry) === "sqlite",
+  );
+  if (sqliteBrand !== undefined) {
+    return applyScopeWrapper(
+      ContextualFlowControl.getAsCellScope(sqliteBrand),
+      "SqliteDb",
+    );
+  }
+
   // Handle $ref - resolve from definitions
   if (schema.$ref && typeof schema.$ref === "string") {
     const refPath = s.$ref as string;

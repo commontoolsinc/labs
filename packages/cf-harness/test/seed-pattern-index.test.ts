@@ -9,14 +9,17 @@ import {
 } from "@commonfabric/runner";
 import { StorageManager } from "../../runner/src/storage/cache.deno.ts";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
+import type { PatternIndexPublishRequest } from "../src/pattern-index/client.ts";
 import {
   compileAtom,
   defaultSeedIo,
   denoFmtCheck,
   durableEntryIdentity,
   fabricSeedDeps,
+  GENERATIONS_FILE,
   main,
   parseArguments,
+  parseGenerations,
   publishRequestFor,
   requiredSetting,
   resolveSettings,
@@ -24,16 +27,22 @@ import {
   SEED_DIRECTORY,
   type SeedDeps,
   seedDepsFrom,
+  type SeedGenerations,
   type SeedIo,
   seedMetadataFromSource,
   seedSourcePaths,
   SeedUsageError,
+  serializeGenerations,
   USAGE,
+  withGeneration,
 } from "../scripts/seed-pattern-index.ts";
 
 const REPO_ROOT = fromFileUrl(new URL("../../..", import.meta.url));
 
 const withDoc = (doc: string) => `${doc}\nexport const X = 1;\n`;
+
+/** A record holding no atom, for a case that is not about supersession. */
+const EMPTY_GENERATIONS: SeedGenerations = { note: "a note", atoms: {} };
 
 describe("seed-pattern-index", () => {
   describe("seedMetadataFromSource()", () => {
@@ -176,6 +185,7 @@ describe("seed-pattern-index", () => {
         "mailbox-month-headers.tsx",
         "option-picker.tsx",
         "sortable-table.tsx",
+        "source-row-count.tsx",
       ]);
     });
   });
@@ -280,6 +290,118 @@ describe("seed-pattern-index", () => {
     });
   });
 
+  describe("parseGenerations()", () => {
+    it("answers the record a well-formed file holds", () => {
+      const record = parseGenerations(
+        "record.json",
+        '{"note":"a note","atoms":{"counter":["one","two"]}}',
+      );
+      expect(record.note).toBe("a note");
+      expect(record.atoms.counter).toEqual(["one", "two"]);
+    });
+
+    //
+    // Refusals
+    //
+    // A chain the run cannot read is a chain a new generation would be
+    // published without, so each of these stops the run instead.
+    //
+
+    it("names the file that is not JSON", () => {
+      expect(() => parseGenerations("record.json", "{"))
+        .toThrow(/record\.json is not JSON/);
+    });
+
+    it("refuses a document that is not a {note, atoms} record", () => {
+      expect(() => parseGenerations("record.json", '{"atoms":{}}'))
+        .toThrow(/holds no \{note, atoms\} record/);
+    });
+
+    it("refuses an atom recorded as something other than identities", () => {
+      expect(() =>
+        parseGenerations(
+          "record.json",
+          '{"note":"n","atoms":{"counter":"one"}}',
+        )
+      ).toThrow(/records counter as something other than/);
+    });
+
+    it("refuses an atom recorded under an empty chain", () => {
+      expect(() =>
+        parseGenerations("record.json", '{"note":"n","atoms":{"counter":[]}}')
+      ).toThrow(/records counter as something other than/);
+    });
+  });
+
+  describe("withGeneration()", () => {
+    const record: SeedGenerations = {
+      note: "a note",
+      atoms: { counter: ["one"] },
+    };
+
+    it("appends an identity the chain does not end with", () => {
+      expect(withGeneration(record, "counter", "two").atoms.counter)
+        .toEqual(["one", "two"]);
+    });
+
+    it("starts a chain for an atom the record does not hold", () => {
+      expect(withGeneration(record, "dice-roller", "two").atoms["dice-roller"])
+        .toEqual(["two"]);
+    });
+
+    it("answers the record itself when the chain already ends there", () => {
+      expect(withGeneration(record, "counter", "one")).toBe(record);
+    });
+  });
+
+  describe("serializeGenerations()", () => {
+    it("writes the atoms in name order, and ends with a newline", () => {
+      const text = serializeGenerations({
+        note: "a note",
+        atoms: { counter: ["one"], "amount-ledger": ["two"] },
+      });
+      expect(text.endsWith("\n")).toBe(true);
+      expect(text.indexOf("amount-ledger")).toBeLessThan(
+        text.indexOf("counter"),
+      );
+    });
+
+    it("round-trips a record through the parser", () => {
+      const record: SeedGenerations = {
+        note: "a note",
+        atoms: { counter: ["one", "two"] },
+      };
+      expect(parseGenerations("record.json", serializeGenerations(record)))
+        .toEqual(record);
+    });
+  });
+
+  describe("the recorded generations", () => {
+    it("names only atoms the seed publishes", async () => {
+      // A chain under a name no atom carries is one no seeding will ever
+      // extend, and the identity it names is what a reader would take for the
+      // current generation of something. An atom with no chain is the ordinary
+      // case of one the index does not hold yet.
+
+      const record = parseGenerations(
+        GENERATIONS_FILE,
+        await Deno.readTextFile(join(REPO_ROOT, GENERATIONS_FILE)),
+      );
+      const paths = await seedSourcePaths(join(REPO_ROOT, SEED_DIRECTORY));
+      const names = paths.map((path) =>
+        (path.split("/").pop() ?? "").replace(/\.tsx$/, "")
+      );
+      expect(Object.keys(record.atoms).filter((name) => !names.includes(name)))
+        .toEqual([]);
+    });
+
+    it("is written as the seeder writes it", async () => {
+      const text = await Deno.readTextFile(join(REPO_ROOT, GENERATIONS_FILE));
+      expect(serializeGenerations(parseGenerations(GENERATIONS_FILE, text)))
+        .toBe(text);
+    });
+  });
+
   describe("runSeed()", () => {
     const directory = join(REPO_ROOT, SEED_DIRECTORY);
 
@@ -290,7 +412,16 @@ describe("seed-pattern-index", () => {
       compiled: string[];
       lines: string[];
       errors: string[];
+
+      /** Every record `writeGenerations` was handed, in the order it was. */
+      written: SeedGenerations[];
     }
+
+    /** A record naming one prior generation of `counter` and nothing else. */
+    const priorCounter: SeedGenerations = {
+      note: "a note",
+      atoms: { counter: ["counter-first"] },
+    };
 
     const recorder = (
       overrides: Partial<SeedDeps> = {},
@@ -300,6 +431,7 @@ describe("seed-pattern-index", () => {
       const compiled: string[] = [];
       const lines: string[] = [];
       const errors: string[] = [];
+      const written: SeedGenerations[] = [];
       const deps: SeedDeps = {
         compile: (path) => {
           compiled.push(path);
@@ -325,11 +457,17 @@ describe("seed-pattern-index", () => {
           return Promise.resolve();
         },
         checkFormatting: () => Promise.resolve([]),
+        readGenerations: () =>
+          Promise.resolve({ note: "a note", atoms: {} } as SeedGenerations),
+        writeGenerations: (generations) => {
+          written.push(generations);
+          return Promise.resolve();
+        },
         log: (line) => lines.push(line),
         logError: (line) => errors.push(line),
         ...overrides,
       };
-      return { deps, published, recorded, compiled, lines, errors };
+      return { deps, published, recorded, compiled, lines, errors, written };
     };
 
     it("publishes every atom and records a created event for each", async () => {
@@ -339,16 +477,16 @@ describe("seed-pattern-index", () => {
         r.deps,
       );
       expect(code).toBe(0);
-      expect(r.published.length).toBe(8);
+      expect(r.published.length).toBe(9);
       expect(r.recorded).toEqual(r.published);
-      expect(r.lines.at(-1)).toContain("8 published, 0 already held");
+      expect(r.lines.at(-1)).toContain("9 published, 0 already held");
     });
 
     it("publishes nothing in a dry run, having compiled everything", async () => {
       const r = recorder();
       const code = await runSeed({ dryRun: true, only: [], directory }, r.deps);
       expect(code).toBe(0);
-      expect(r.compiled.length).toBe(8);
+      expect(r.compiled.length).toBe(9);
       expect(r.published).toEqual([]);
       expect(r.recorded).toEqual([]);
       expect(r.lines.at(-1)).toContain("nothing published");
@@ -384,7 +522,7 @@ describe("seed-pattern-index", () => {
       );
       expect(code).toBe(0);
       expect(r.recorded).toEqual([]);
-      expect(r.lines.at(-1)).toContain("0 published, 8 already held");
+      expect(r.lines.at(-1)).toContain("0 published, 9 already held");
     });
 
     it("publishes nothing when an atom compiles to no durable identity", async () => {
@@ -407,6 +545,94 @@ describe("seed-pattern-index", () => {
       expect(code).toBe(1);
       expect(r.published).toEqual([]);
       expect(r.errors.join("\n")).toContain("no durable content-addressed");
+    });
+
+    /** A recorder whose publish also keeps the requests it was handed. */
+    const requestRecorder = (
+      generations: SeedGenerations,
+      created = true,
+    ): { recorder: Recorder; requests: PatternIndexPublishRequest[] } => {
+      const requests: PatternIndexPublishRequest[] = [];
+      return {
+        recorder: recorder({
+          readGenerations: () => Promise.resolve(generations),
+          publish: (request) => {
+            requests.push(request);
+            return Promise.resolve({ patternId: request.patternId, created });
+          },
+        }),
+        requests,
+      };
+    };
+
+    it("names the recorded generation as what a new identity supersedes", async () => {
+      const { recorder: r, requests } = requestRecorder(priorCounter);
+
+      await runSeed({ dryRun: false, only: ["counter"], directory }, r.deps);
+
+      expect(requests[0].priorPatternId).toBe("counter-first");
+    });
+
+    it("names no prior generation for an atom the record does not hold", async () => {
+      const { recorder: r, requests } = requestRecorder(priorCounter);
+
+      await runSeed(
+        { dryRun: false, only: ["dice-roller"], directory },
+        r.deps,
+      );
+
+      expect(requests[0].priorPatternId).toBeUndefined();
+    });
+
+    it("names no prior generation for the identity already recorded", async () => {
+      // The same source compiles to the same identity, so a re-run of an atom
+      // nothing changed would otherwise publish it as superseding itself.
+
+      const { recorder: r, requests } = requestRecorder({
+        note: "a note",
+        atoms: { counter: ["id-for-counter.tsx"] },
+      }, false);
+
+      await runSeed({ dryRun: false, only: ["counter"], directory }, r.deps);
+
+      expect(requests[0].priorPatternId).toBeUndefined();
+      expect(r.written).toEqual([]);
+    });
+
+    it("appends what it published to the record", async () => {
+      const r = recorder({
+        readGenerations: () => Promise.resolve(priorCounter),
+      });
+
+      await runSeed({ dryRun: false, only: ["counter"], directory }, r.deps);
+
+      expect(r.written.length).toBe(1);
+      expect(r.written[0].atoms.counter).toEqual([
+        "counter-first",
+        "id-for-counter.tsx",
+      ]);
+      expect(r.lines.join("\n")).toContain(GENERATIONS_FILE);
+    });
+
+    it("leaves the record alone in a dry run", async () => {
+      const r = recorder({
+        readGenerations: () => Promise.resolve(priorCounter),
+      });
+
+      await runSeed({ dryRun: true, only: ["counter"], directory }, r.deps);
+
+      expect(r.written).toEqual([]);
+    });
+
+    it("stops on a record it cannot read, having compiled nothing", async () => {
+      const r = recorder({
+        readGenerations: () => Promise.reject(new Error("record is broken")),
+      });
+
+      await expect(
+        runSeed({ dryRun: true, only: [], directory }, r.deps),
+      ).rejects.toThrow("record is broken");
+      expect(r.compiled).toEqual([]);
     });
 
     it("refuses a selection that matches no atom", async () => {
@@ -544,6 +770,8 @@ describe("seed-pattern-index", () => {
                 });
               },
               recordCreated: () => Promise.resolve(),
+              readGenerations: () => Promise.resolve(EMPTY_GENERATIONS),
+              writeGenerations: () => Promise.resolve(),
               checkFormatting: () => Promise.resolve([]),
               log,
               logError,
@@ -556,7 +784,7 @@ describe("seed-pattern-index", () => {
     it("seeds every atom and answers success", async () => {
       const h = io();
       expect(await main([], h.io)).toBe(0);
-      expect(h.published.length).toBe(8);
+      expect(h.published.length).toBe(9);
     });
 
     it("publishes nothing on a dry run", async () => {
@@ -616,6 +844,9 @@ describe("seed-pattern-index", () => {
             publish: () => Promise.reject(new Error("must not publish")),
             recordCreated: () => Promise.reject(new Error("must not record")),
             checkFormatting: () => Promise.resolve([]),
+            readGenerations: () => Promise.resolve(EMPTY_GENERATIONS),
+            writeGenerations: () =>
+              Promise.reject(new Error("must not record generations")),
             log,
             logError,
           }),
@@ -670,6 +901,8 @@ describe("seed-pattern-index", () => {
           });
         },
         recordCreated: () => Promise.resolve(),
+        readGenerations: () => Promise.resolve(EMPTY_GENERATIONS),
+        writeGenerations: () => Promise.resolve(),
         checkFormatting: (paths) => Promise.resolve([paths[0]]),
         log: () => {},
         logError: (line) => errors.push(line),
@@ -704,6 +937,8 @@ describe("seed-pattern-index", () => {
           });
         },
         recordCreated: () => Promise.resolve(),
+        readGenerations: () => Promise.resolve(EMPTY_GENERATIONS),
+        writeGenerations: () => Promise.resolve(),
         checkFormatting: () => Promise.resolve([]),
         log: () => {},
         logError: () => {},
@@ -797,7 +1032,7 @@ describe("seed-pattern-index", () => {
           runtime: {} as never,
           space: "did:key:zTest" as never,
           getClient: c.get,
-          patternsRoot: "/repo/packages/patterns",
+          repoRoot: "/repo",
           log: (line: string) => lines.push(line),
           logError: () => {},
         }),
@@ -852,7 +1087,7 @@ describe("seed-pattern-index", () => {
       let clientArgs: unknown[] = [];
       const deps = await fabricSeedDeps(
         settings,
-        "/repo/packages/patterns",
+        "/repo",
         () => {},
         () => {},
         ((config: unknown) => {
@@ -887,7 +1122,7 @@ describe("seed-pattern-index", () => {
       await expect(
         fabricSeedDeps(
           { ...settings, identityKeyPath: "/keys/definitely-absent.pkcs8" },
-          "/repo/packages/patterns",
+          "/repo",
           () => {},
           () => {},
         ),
