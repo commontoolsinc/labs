@@ -57,6 +57,7 @@ import type {
 import { parsePointer, pathsOverlap } from "../../../memory/v2/path.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { normalizeCellScope, scopeRank } from "../scope.ts";
+import { getTransactionReadActivities } from "../storage/transaction-inspection.ts";
 
 const logger = getLogger("wave-accumulator", {
   enabled: true,
@@ -345,10 +346,17 @@ const waveSettlements = new WeakMap<
   Promise<Result<Unit, StorageTransactionRejected>>
 >();
 
+const requiresWaveAcceptance = new WeakSet<IStorageTransaction>();
+
+/** Enrolls local state changes in wave acceptance even without storage writes. */
+export function requireWaveAcceptance(tx: IExtendedStorageTransaction): void {
+  requiresWaveAcceptance.add(tx.tx);
+}
+
 /** The sealed tx's wave settlement: resolves ok when every sealed space
- * PROMOTED (the wave commit accepted the contribution), error when any
+ * promoted or its opted-in local state change was accepted, error when any
  * withdrew (conflict drop, requeue, abort, abandon). Undefined for a tx
- * that did not seal into a wave (the OFF arm) or sealed nothing. */
+ * outside a wave or with neither sealed writes nor opted-in local state. */
 export function waveSettlementOf(
   tx: IExtendedStorageTransaction,
 ): Promise<Result<Unit, StorageTransactionRejected>> | undefined {
@@ -567,6 +575,12 @@ interface WaveContribution {
    * spaces) — over-dropping a derivation is sound, committing one
    * derived from withdrawn state is not (§3d). */
   readOnlyReadKeys: Set<string>;
+
+  /** Verdict for an opted-in local state change with no replica writes. */
+  emptySettlement?: {
+    promise: Promise<Result<Unit, StorageTransactionRejected>>;
+    resolve: (result: Result<Unit, StorageTransactionRejected>) => void;
+  };
 
   /** Cross-space event appends this run emitted (serving-loop.md §5,
    * FP1): folded into the home batch's durable rows iff the
@@ -1120,7 +1134,17 @@ export class WaveAccumulator
       // result write have run.
       discoveredScope,
     };
+    const localAcceptance = requiresWaveAcceptance.has(inner);
     try {
+      // Closing releases the transaction's activity; local-only consequences
+      // need its read identities after the storage no-op has closed.
+      const localReads = localAcceptance
+        ? [...getTransactionReadActivities(tx)].map(({ space, id, scope }) => ({
+          space,
+          id,
+          scope,
+        }))
+        : [];
       const result = await inner.sealInto(this);
       const assembly = this.#assembly;
       if (result.error) {
@@ -1133,11 +1157,12 @@ export class WaveAccumulator
         }
         return result;
       }
-      // A transaction with nothing to seal (read-only, or all-no-op)
-      // AND no staged appends contributes nothing — same as commit's
-      // empty-transaction fast path — and needs no run context: the §3d
-      // refusal below guards CONSEQUENCES entering the wave (writes and
-      // staged appends alike), and a serving runtime's read probes
+      // A transaction with nothing to seal (read-only, or all-no-op),
+      // no staged appends, and no opted-in local state contributes nothing,
+      // like commit's empty-transaction fast path, and needs no run context:
+      // the §3d
+      // refusal below guards consequences entering the wave (writes,
+      // staged appends, and local state), and a serving runtime's read probes
       // (piece structure loads, pattern-identity reads) commit nothing.
       // A tx that sealed NOTHING but STAGED APPENDS — the Phase-3
       // pure-forwarding handler, whose only consequence is a
@@ -1148,7 +1173,10 @@ export class WaveAccumulator
       // contribution), and dropping the entry here lost the appends
       // silently.
       const pendingAppends = this.#pendingAppendsByTx.get(tx) ?? [];
-      if (assembly.spaces.length === 0 && pendingAppends.length === 0) {
+      if (
+        assembly.spaces.length === 0 && pendingAppends.length === 0 &&
+        !localAcceptance
+      ) {
         return result;
       }
       if (context === undefined) {
@@ -1178,12 +1206,23 @@ export class WaveAccumulator
             "(serving-loop.md §3d, RULED 2026-08-05)",
         );
       }
+      const emptySettlement = assembly.spaces.length === 0 && localAcceptance
+        ? Promise.withResolvers<Result<Unit, StorageTransactionRejected>>()
+        : undefined;
+      if (emptySettlement !== undefined) {
+        // A storage no-op has no sealSpaceReads handoff. Its local state
+        // change still depends on the same reads as a written contribution.
+        for (const read of localReads) {
+          this.sealSpaceReads(read.space, [read]);
+        }
+      }
       this.#sealedTxs.add(tx);
       this.#contributions.push({
         index: this.#contributions.length,
         context,
         spaces: assembly.spaces,
         readOnlyReadKeys: assembly.readOnlyReadKeys,
+        ...(emptySettlement === undefined ? {} : { emptySettlement }),
         // Copied: a (refused) post-seal enqueue must not be able to
         // mutate the sealed contribution through the shared array.
         outboundAppends: [...pendingAppends],
@@ -1191,7 +1230,7 @@ export class WaveAccumulator
       });
       waveSettlements.set(
         tx,
-        Promise.all(
+        emptySettlement?.promise ?? Promise.all(
           assembly.spaces.map((space) => space.sealed.settled),
         ).then((settled) =>
           settled.find((outcome) => outcome.error !== undefined) ?? { ok: {} }
@@ -1343,9 +1382,12 @@ export class WaveAccumulator
   async settled(): Promise<void> {
     await Promise.all(
       this.#contributions.flatMap((contribution) =>
-        contribution.spaces.map((space) =>
-          space.sealed.settled.then(() => undefined, () => undefined)
-        )
+        [
+          ...contribution.spaces.map((space) => space.sealed.settled),
+          ...(contribution.emptySettlement === undefined
+            ? []
+            : [contribution.emptySettlement.promise]),
+        ].map((settlement) => settlement.then(() => undefined, () => undefined))
       ),
     );
   }
@@ -1518,6 +1560,14 @@ export class WaveAccumulator
     message: string,
     cause?: "contribution-dropped" | "wave-abandoned",
   ): void {
+    contribution.emptySettlement?.resolve({
+      error: {
+        name: "StoreError",
+        message,
+        cause: new Error(message),
+        ...(cause === undefined ? {} : { waveWithdrawalCause: cause }),
+      },
+    });
     for (const space of contribution.spaces) {
       space.resolveVerdict({
         withdrawn: { message, ...(cause !== undefined ? { cause } : {}) },
@@ -3014,6 +3064,7 @@ export class WaveAccumulator
         continue;
       }
       outcome.dispositions[idx] = { kind: "committed" };
+      contribution.emptySettlement?.resolve({ ok: {} });
       if (
         context.kind === "event-handler" && context.eventId !== undefined &&
         // One entry per EVENT: Phase 4's served navigateTo makes an
