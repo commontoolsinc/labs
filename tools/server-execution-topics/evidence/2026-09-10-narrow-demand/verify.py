@@ -32,6 +32,14 @@ for entry in manifest["artifactFiles"]:
     verified[path] = data
 
 if args.extract is not None:
+    if not args.extract.is_absolute():
+        raise ValueError("Extraction destination must be an absolute path")
+    checkout = next(
+        (parent for parent in root.parents if (parent / ".git").exists()), None
+    )
+    destination_root = args.extract.resolve()
+    if checkout is not None and destination_root.is_relative_to(checkout):
+        raise ValueError("Extraction destination must be outside the checkout")
     args.extract.mkdir(parents=True, exist_ok=False)
     for path, data in verified.items():
         destination = args.extract / path

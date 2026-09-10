@@ -20,7 +20,7 @@ python3 tools/server-execution-topics/evidence/2026-09-10-narrow-demand/verify.p
 
 `artifactRoot` names the default directory relative to this evidence directory
 for consumers that unpack the bundle themselves. The verifier requires an
-explicit destination to keep generated source snapshots outside the checkout.
+absolute destination outside its checkout and refuses an existing directory.
 
 For replay, restore the run manifest's workload head, then its recorded source
 snapshots and patch. Use that manifest's commands and environment, replacing
