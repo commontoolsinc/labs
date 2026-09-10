@@ -10,6 +10,7 @@ import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
 import {
   canResolveScopeKey,
   type CommitPrecondition,
+  getCommitPreconditionsConfig,
   type PatchOp,
   resolveScopeKey,
   type ScopeKey,
@@ -2642,7 +2643,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       // read set is built inside the call below, from its replica as it is
       // now, so the check runs again for this space right here.
       if (i > 0) {
-        const revalidation = this.#revalidateLaterSpace(space, i);
+        const revalidation = this.#revalidateLaterSpace(
+          space,
+          i,
+          native.preconditions,
+        );
         if (revalidation.error) {
           return revalidation;
         }
@@ -2685,19 +2690,25 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   /**
    * Helper for the per-space close loops, which re-runs the claim check
-   * for `space`, the `index`th space to close, and logs a failure the way
+   * for `space`, the `index`th space to close, over the documents its
+   * `preconditions` leave to it, and logs a failure the way
    * a later space's rejected close is logged: the earlier spaces stay
    * closed, and this one and the rest are left unclosed.
    */
   #revalidateLaterSpace(
     space: MemorySpace,
     index: number,
+    preconditions: readonly CommitPrecondition[] | undefined,
   ): Result<Unit, IStorageTransactionInconsistent> {
     const branch = this.#branches.get(space);
     if (branch === undefined) {
       return { ok: {} };
     }
-    const result = this.#validateBranch(space, branch);
+    const result = this.#validateBranch(
+      space,
+      branch,
+      this.#serverJudgedDocuments(preconditions),
+    );
     if (result.error) {
       multiSpaceCommitLogger.error(
         "multi-space-commit-stale",
@@ -2708,6 +2719,53 @@ export class V2StorageTransaction implements IStorageTransaction {
       );
     }
     return result;
+  }
+
+  /**
+   * Helper for {@link #revalidateLaterSpace}, which names the documents
+   * `preconditions` pins — this space's commit as it will be sent, so both
+   * the pins a caller attached and the create-only marks it carries — for
+   * the server to evaluate against durable state before applying
+   * anything.
+   *
+   * Such a document needs no local claim check, and must not get one: an
+   * `entity-absent` pin fails as `PreconditionFailedError`, which callers
+   * treat as decided on the committed data's own merits rather than as a
+   * basis a re-run repairs, so a local retryable rejection in its place
+   * turns a settled outcome into a retry. Skipping loses no soundness,
+   * because each pin is the stronger claim: a commit naming a document that
+   * exists, or whose value no longer hashes to the pinned one, is refused
+   * outright.
+   *
+   * The bound is the `commitPreconditions` flag. With it off, the commit
+   * carries only its `entity-value-hash` pins — an `entity-absent` pin is
+   * filtered out before the wire and the server never evaluates it — so
+   * only the pins that survive that filter earn the exemption.
+   */
+  #serverJudgedDocuments(
+    preconditions: readonly CommitPrecondition[] | undefined,
+  ): ReadonlySet<string> {
+    const judged = new Set<string>();
+    if (preconditions === undefined) {
+      return judged;
+    }
+    const absencePinsActive = getCommitPreconditionsConfig() === true;
+    for (const precondition of preconditions) {
+      if (
+        precondition.kind === "origin-committed" ||
+        (precondition.kind === "entity-absent" && !absencePinsActive)
+      ) {
+        continue;
+      }
+      judged.add(
+        this.#docKey({
+          id: precondition.id as URI,
+          type: DOCUMENT_MIME,
+          scope: precondition.scope,
+        }),
+      );
+    }
+    return judged;
   }
 
   /**
@@ -2823,7 +2881,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       // set inside the call below, after the earlier spaces' handoffs were
       // awaited.
       if (i > 0) {
-        const revalidation = this.#revalidateLaterSpace(space, i);
+        const revalidation = this.#revalidateLaterSpace(
+          space,
+          i,
+          native.preconditions,
+        );
         if (revalidation.error) {
           return revalidation;
         }
@@ -3185,22 +3247,23 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   /**
-   * Like `#validate()`, except over one space. A transaction closed as
-   * one commit per space runs this for each space after the first, right
-   * before that space's read set is built, because the earlier spaces'
-   * round trips are awaited in between and a frame can change this space's
-   * documents while they are.
+   * Like `#validate()`, except over one space, and skipping the documents
+   * `serverJudged` names. A transaction closed as one commit per space runs
+   * this for each space after the first, right before that space's read set
+   * is built, because the earlier spaces' round trips are awaited in
+   * between and a frame can change this space's documents while they are.
    */
   #validateBranch(
     space: MemorySpace,
     branch: SpaceBranch,
+    serverJudged?: ReadonlySet<string>,
   ): Result<Unit, IStorageTransactionInconsistent> {
     const route = this.#validateReplicaRoute(space, branch);
     if (route.error) {
       return route;
     }
-    for (const doc of branch.docs.values()) {
-      if (!doc.validated) {
+    for (const [key, doc] of branch.docs) {
+      if (!doc.validated || serverJudged?.has(key)) {
         continue;
       }
       const result = claim(

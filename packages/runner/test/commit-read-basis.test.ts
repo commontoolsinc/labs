@@ -216,6 +216,29 @@ describe("commit read basis", () => {
         .toBeUndefined();
     });
 
+    it("leaves a document the commit pins create-only for the server to judge", async () => {
+      // The pin is the stronger claim and the server answers it terminally,
+      // so the local check must not pre-empt it with a retryable rejection.
+      const tx = await openTwoSpaceTx();
+      const link = sharedYOf(rtB).getAsNormalizedFullLink();
+      tx.tx.markCreateOnly!({
+        space: link.space,
+        id: link.id,
+        scope: link.scope,
+      });
+      sharedYOf(rtB).withTx(tx).set({ value: 9 });
+      const replica = storageB.open(space).replica;
+      const commitNative = replica.commitNative!.bind(replica);
+      replica.commitNative = async (native, source, options) => {
+        await landInB();
+        return commitNative(native, source, options);
+      };
+
+      rtB.prepareTxForCommit(tx);
+      const committed = await tx.commit({ resolveAt: "verdict" });
+      expect(committed.error?.name).toBe("PreconditionFailedError");
+    });
+
     it("re-checks the later space's documents before sealing it", async () => {
       const tx = await openTwoSpaceTx();
       const sealed: string[] = [];
