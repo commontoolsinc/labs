@@ -104,14 +104,36 @@ Read(entity, path):
 
 ### 3.3.4 Single-Snapshot Rule
 
-A transaction's reads and writes MUST be computed against a single stable local
-snapshot. While application code is building a transaction, incoming server sync
-frames are buffered rather than applied immediately. The client applies those
-buffered frames only after the transaction has been submitted or abandoned.
+A commit's read set MUST describe one coherent client view: confirmed bases
+from one integrated prefix of the space's history plus the session's own
+pending stack, never a mixture of states observed before and after unrelated
+incoming changes. This is what makes the submitted `reads.confirmed[].seq`
+values meaningful.
 
-This rule makes the submitted `reads.confirmed[].seq` values meaningful: they
-describe one coherent client view, not a mixture of states observed before and
-after unrelated incoming changes.
+A client satisfies the rule in either of two ways:
+
+- **Buffering.** While application code is building a transaction, incoming
+  server sync frames are held rather than applied, and applied only after the
+  transaction has been submitted or abandoned. The state the reads ran against
+  is then the state the commit is built from.
+- **Checking.** Frames apply as they arrive. The transaction holds each
+  document it reads as a snapshot taken at its first read of that document,
+  and at commit re-reads every snapshotted document from the local state the
+  read set is exported from, rejecting the transaction locally — before it
+  reaches the wire, for its caller to re-run — when any value differs from
+  its snapshot. The read set then names the seqs of the local state at build
+  time, and the check has established that every read's content is the
+  content at those seqs. The check has to be immediate: a transaction closed
+  as one commit per space builds each space's read set after awaiting the
+  earlier spaces' round trips, so it re-checks each later space's documents
+  right before building that space's read set.
+
+The runner takes the checking form: `claim()` in
+`packages/runner/src/storage/transaction/attestation.ts`, run by every commit
+path of `v2-transaction.ts`, and the local rejection is
+`StorageTransactionInconsistent`, which those paths' callers classify as
+retryable. The two forms are equivalent in what reaches the server; they
+differ in when a change under an open transaction is discovered.
 
 ## 3.4 Commit Structure
 
@@ -441,16 +463,43 @@ interface ConflictError extends Error {
    * reaching this seq reflects the winning write.
    */
   retryAfterSeq: number;
+  /** First stale confirmed read per branch, entity, and scope. */
+  conflicts?: Array<{
+    of: string;
+    scope: "space" | "user" | "session";
+    /** Absent for the default branch. */
+    branch?: string;
+    seq: number;
+    conflictSeq: number;
+  }>;
 }
 ```
 
 The rejection carries no document values. Instead the server marks the commit's
 write targets and both read sets (`reads.confirmed` and `reads.pending`) dirty
 for the session — origin-less, so the session's own echo suppression does not
-hide them — and the next sync frame delivers the current documents for all of
-them as ordinary upserts. Repair therefore arrives as a consistent cut over the
-session's watched view — covering stale read dependencies as well as write
-targets, with every document the frame links to delivered in the same cut.
+hide them — and the next sync frame delivers the watched documents as ordinary
+upserts. Repair therefore arrives as a consistent cut over the session's watched
+view, with every document the frame links to delivered in the same cut. A dirty
+address outside that view does not gain a watch through dirty marking alone.
+Confirmed-read validation reports each stale branch, entity, and scope once. Its
+first stale read supplies the diagnostic read sequence and conflicting sequence;
+subsequent reads of that instance skip the staleness scan. Every read still
+validates its branch and resolves its scope. An unknown branch or unresolvable
+scope takes precedence over any stale reads already found. The `conflicts` array
+includes an entry even when only one instance is stale. Non-default branches are
+named in the descriptor; an absent `branch` means the default branch, regardless
+of the commit's target branch. A client can query each conflicting branch,
+entity, and scope before retrying. The runner emits default-branch reads and its
+retry helper repairs those instances; cross-branch clients use the memory
+protocol's branch-aware queries. Each scope resolves under the rejected session's
+identity. Older responses can omit this array; their diagnostic identifies
+entities but does not preserve their scopes. The runner also exposes the first
+descriptor as `conflict` for existing consumers. The diagnostic previews up to
+three distinct entity IDs and counts the remaining IDs. Each entity's clause
+uses its first reported instance's sequences; other scopes or branches of that
+entity share the clause. The structured array remains complete regardless of
+the diagnostic's length.
 
 ## 3.7 Server-Side Commit Processing
 

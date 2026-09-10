@@ -9,6 +9,7 @@ export { Runtime } from "./runtime.ts";
 export {
   fabricAuthorityMatchesSpaceHost,
   type FabricSpaceHostOptions,
+  isLoopbackHostname,
   normalizeSpaceHost,
   spaceHostFromFabricAuthority,
   SpaceHostValidationError,
@@ -78,6 +79,7 @@ export {
   type EntityId,
   entityIdFrom,
   getEntityId,
+  idStringForEntityAddress,
 } from "./create-ref.ts";
 export type { CellResult as QueryResult } from "./query-result-proxy.ts";
 export type {
@@ -230,6 +232,7 @@ export {
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
   SEALING_RECEIPT_REFUSAL,
+  SEALING_SOURCE_UPDATE_REFUSAL,
   setPatternRepository,
   setPatternSource,
   setPieceReconciliation,

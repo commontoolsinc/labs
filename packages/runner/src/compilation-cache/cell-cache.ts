@@ -191,9 +191,11 @@ const validDelegatedModuleIdentities = (
  * Each successor inherits both its direct predecessor and that predecessor's
  * cumulative delegation list, preserving update chains across a cold reload.
  */
-export function deriveModuleDelegations(
+export function deriveModuleDelegations<
+  Module extends Pick<CacheableModule, "identity" | "filename">,
+>(
   previous: ReadonlyMap<string, SourceDoc>,
-  next: readonly CacheableModule[],
+  next: readonly Module[],
 ): Map<string, ReadonlySet<string>> {
   const previousByName = new Map<
     string,
@@ -799,11 +801,10 @@ function withCompileCacheBuiltin<T>(
  * not a traversal edge — so this schema pulls exactly the doc plus its edge
  * element docs and stops. A schema-less `sync()` normalizes to the rejecting
  * selector and delivers only the root, leaving the element docs unknown to
- * the replica — then the re-write touches them blind and the engine reveals
- * the conflicts one per commit attempt (the CT-1824 loop; the write-back's
- * retry budget converges it, one round per edge doc). With the element docs
- * client-known up front, the re-write diffs against true state and commits
- * on the first attempt. Recursion is deliberately omitted: the write-target
+ * the replica — then the re-write touches them blind and needs a rejected
+ * commit plus conflict repair. With the element docs client-known up front,
+ * the re-write diffs against true state and commits on the first attempt.
+ * Recursion is deliberately omitted: the write-target
  * pre-sync enumerates every module doc itself, so each doc only needs its
  * own edges — nothing beyond the write set loads (the lazy-by-default
  * posture for code docs is untouched).
@@ -1016,8 +1017,6 @@ export function readLoadedSourceClosure(
 }
 
 function verifyLoadedSourceClosure(
-  runtime: Runtime,
-  space: MemorySpace,
   entryIdentity: string,
   closure: Map<string, SourceDoc> | undefined,
   runtimeFingerprint: string,
@@ -1048,10 +1047,6 @@ function verifyLoadedSourceClosure(
     ]);
     return undefined;
   }
-  runtime.registerModuleDelegations(
-    space,
-    moduleDelegationsFromDocs(closure),
-  );
   return closure;
 }
 
@@ -1076,8 +1071,6 @@ export function readVerifiedSourceClosure(
   runtimeFingerprint = "",
 ): Map<string, SourceDoc> | undefined {
   return verifyLoadedSourceClosure(
-    runtime,
-    space,
     entryIdentity,
     readLoadedSourceClosure(runtime, space, entryIdentity, tx),
     runtimeFingerprint,
@@ -1107,13 +1100,20 @@ export async function loadVerifiedSourceClosure(
   // scans, recompiles) — this is the shared entry those flows funnel through,
   // so load the deferred compiler stack here, once.
   await prepareSourceClosureVerification();
-  return verifyLoadedSourceClosure(
-    runtime,
-    space,
+  const verified = verifyLoadedSourceClosure(
     entryIdentity,
     closure,
     runtimeFingerprint,
   );
+  // A transaction with writes may expose staged grants. Only a read of durable
+  // metadata can publish authority independently of the transaction's verdict.
+  if (verified !== undefined && !tx.hasWrites()) {
+    runtime.registerModuleDelegations(
+      space,
+      moduleDelegationsFromDocs(verified),
+    );
+  }
+  return verified;
 }
 
 //
@@ -1318,7 +1318,7 @@ function cellCarriesIntegrity(
 function effectiveModuleDelegationsForWrite(
   runtime: Runtime,
   space: MemorySpace,
-  modules: readonly CacheableModule[],
+  modules: readonly Pick<CacheableModule, "identity">[],
   tx: IExtendedStorageTransaction,
   requested: ModuleDelegationMap,
   targets: {
@@ -1381,6 +1381,67 @@ function effectiveModuleDelegationsForWrite(
       effective.set(module.identity, new Set(delegated));
     }
   }
+  return effective;
+}
+
+/**
+ * Stage a source update's delegation union on its durable artifacts. The source
+ * transition owns this transaction; the returned union becomes runtime authority
+ * only after that transaction commits. Compiled bodies stay in bounded cache
+ * writes while these field updates share the source pointer's atomic boundary.
+ */
+export function stageModuleDelegations(
+  runtime: Runtime,
+  space: MemorySpace,
+  requested: ModuleDelegationMap,
+  runtimeVersion: string | undefined,
+  tx: IExtendedStorageTransaction,
+): ModuleDelegationMap {
+  const modules = [...requested.keys()].map((identity) => ({ identity }));
+  const effective = effectiveModuleDelegationsForWrite(
+    runtime,
+    space,
+    modules,
+    tx,
+    requested,
+    { source: true, compiledRuntimeVersion: runtimeVersion },
+  );
+  withCompileCacheBuiltin(tx, () => {
+    for (const [identity, predecessors] of effective) {
+      const source = runtime.getCell<StoredSourceDoc>(
+        space,
+        sourceDocKey(identity),
+        undefined,
+        tx,
+      );
+      if (source.get()?.identity !== identity) {
+        throw new Error(`source update artifact ${identity} is unavailable`);
+      }
+      source.asSchema(sourceDocWriteSchema()).key("delegatedModuleIdentities")
+        .set([...predecessors]);
+      if (runtimeVersion !== undefined) {
+        const compiled = runtime.getCell<StoredCompiledDoc>(
+          space,
+          compiledDocKey(runtimeVersion, identity),
+          undefined,
+          tx,
+        );
+        // Source-only recovery is valid; a compiled record, when present, must
+        // retain the compiler's attestation before its metadata can be extended.
+        if (compiled.get() !== undefined) {
+          if (!cellCarriesIntegrity(compiled, COMPILED_INTEGRITY_ATOM, tx)) {
+            throw new Error(
+              `compiled source update artifact ${identity} is untrusted`,
+            );
+          }
+          compiled.asSchema(compiledDocWriteSchema()).key(
+            "delegatedModuleIdentities",
+          )
+            .set([...predecessors]);
+        }
+      }
+    }
+  });
   return effective;
 }
 
@@ -1822,6 +1883,8 @@ export async function loadCompiledClosure(
       imports,
     });
   }
-  runtime.registerModuleDelegations(space, moduleDelegationsFromDocs(out));
+  if (!tx.hasWrites()) {
+    runtime.registerModuleDelegations(space, moduleDelegationsFromDocs(out));
+  }
   return out;
 }

@@ -33,8 +33,11 @@ release safe to adopt is the release gate below, which is exactly why this
 exemption is confined to origins this deployment serves.
 
 No kind of piece has a path of its own, and nothing follows an origin on behalf
-of a piece nobody opened: a serving tenure owes a space the existence of its
-root and nothing more. The executed root milestone map and the corrections found
+of a piece nobody opened. Tenure activation ensures the root exists without
+following its source. The serving wish builtin explicitly opens its
+runtime-supplied sidecars, so those origins are followed on the serving runtime;
+ON clients reference the served sidecars. The executed root milestone map and
+the corrections found
 during that implementation are archived at
 [`docs/history/specs/pattern-imports/system-pattern-updates-implementation-plan.md`](../../history/specs/pattern-imports/system-pattern-updates-implementation-plan.md).
 

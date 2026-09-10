@@ -384,13 +384,20 @@ Checked by: the differential harness (engine `read` versus naive fold);
 > stack, never a mixture of states observed across an integration boundary
 > (`03-commit-model.md` §3.3.4).
 
-Layer: client (sync-frame buffering while a transaction builds).
+Layer: client, in either of the forms `03-commit-model.md` §3.3.4 admits:
+sync-frame buffering while a transaction builds, or the runner's commit-time
+claim check, which re-reads every document the transaction snapshotted from
+the state the read set is built from and rejects the transaction locally when
+a value differs.
 
-Soundness direction: MAY buffer integration longer than necessary; MUST NOT
-let a transaction observe two prefixes.
+Soundness direction: MAY reject a transaction whose reads are in fact coherent
+(a local rejection costs a re-run); MUST NOT export a read set that mixes two
+prefixes.
 
-Checked by: no dedicated checker (the durable-history oracle would surface a
-resulting incoherent acceptance as an INV-1 hit).
+Checked by: `packages/runner/test/commit-read-basis.test.ts` for the claim
+check (a document that lands under an open transaction rejects the commit
+locally); the durable-history oracle would surface a resulting incoherent
+acceptance as an INV-1 hit.
 
 ### INV-11 — Idempotent replay
 

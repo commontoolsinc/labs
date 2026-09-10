@@ -780,6 +780,7 @@ class Connection {
   #ready = false;
   #closed = false;
   #syncSchemaTable = false;
+  #stableExpressionResultIds = false;
   #sessions = new Map<string, SessionHandle>();
   #sessionOpenChallenge: SessionOpenChallengeState | null = null;
   #receiving: Promise<void> = Promise.resolve();
@@ -807,6 +808,11 @@ class Connection {
     const sendStart = performance.now();
     this.#sendRaw(prepared);
     timing.time(sendStart, "memory", "response", "sendRaw");
+  }
+
+  /** Whether the peer declared the expression result identity contract. */
+  get stableExpressionResultIds(): boolean {
+    return this.#stableExpressionResultIds;
   }
 
   hasSession(space: string, sessionId: string): boolean {
@@ -1054,6 +1060,8 @@ class Connection {
       }
       const clientFlags = parseMemoryProtocolFlags(parsed.flags);
       const serverFlags = parseMemoryProtocolFlags(response.flags);
+      this.#stableExpressionResultIds =
+        clientFlags?.stableExpressionResultIds === true;
       this.#syncSchemaTable = clientFlags?.syncSchemaTableV2 === true &&
         serverFlags?.syncSchemaTableV2 === true;
       this.#ready = true;
@@ -3129,6 +3137,18 @@ export class Server {
   ): Promise<ResponseMessage<SessionOpenResult>> {
     try {
       const authContext = connection.sessionOpenAuthContext(message);
+      // Refuse at session admission: reconnecting peers understand this verdict
+      // as terminal for the session and discard its pending commits and watches.
+      if (!connection.stableExpressionResultIds) {
+        return respondTypedError<SessionOpenResult>(
+          message.requestId,
+          toError(
+            "SessionRevokedError",
+            "This runtime uses incompatible expression result identities. " +
+              "Reload the browser tab or update the CLI checkout.",
+          ),
+        );
+      }
       const principal = await this.options.authorizeSessionOpen(
         message,
         authContext,
@@ -4042,6 +4062,13 @@ export class Server {
           );
           if (retryAfterSeq !== undefined) {
             responseError.retryAfterSeq = retryAfterSeq;
+          }
+          if (
+            error instanceof Engine.ConflictError &&
+            error.conflicts !== undefined &&
+            error.conflicts.length > 0
+          ) {
+            responseError.conflicts = [...error.conflicts];
           }
           span.recordException(
             error instanceof Error ? error : new Error(messageText),

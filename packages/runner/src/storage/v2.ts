@@ -84,7 +84,7 @@ import {
 } from "../link-types.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { entityKey } from "../scheduler/keys.ts";
-import { normalizeCellScope } from "../scope.ts";
+import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
@@ -6503,6 +6503,16 @@ export class SpaceReplica
     // carries its own `meta.seq`). Shared by the per-read loop below and the blind
     // write's structural precondition so the two emission sites stay in lockstep.
     //
+    // Both the layers and the confirmed seq are read from the replica as the
+    // commit is built, not from the transaction's own snapshot of the doc,
+    // and a frame can land between the two. What the transaction owes this
+    // site (03-commit-model.md §3.3.4) is its commit-time claim check,
+    // passed before its reads are built: `claim()` in
+    // transaction/attestation.ts re-reads every doc the transaction
+    // snapshotted from this replica, and a differing value rejects the
+    // transaction locally as `StorageTransactionInconsistent`. So the
+    // content the transaction read is the content at the basis named here.
+    //
     // `excludeSpeculativeLayers` (verification-coverage.md OW47, the client
     // own-write durability seam): the blind write's structural read passes
     // true, and its named layers then skip the client's own SPECULATIVE
@@ -8184,12 +8194,38 @@ const toRejectedError = (
   ) {
     const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
     const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
-    // The conflicted entity: structured field when the error is in-process;
-    // parsed from the message when it crossed the wire (Error fields do not
-    // survive serialization, the message does — its format is owned by
-    // memory/v2/engine.ts's ConflictError construction).
-    const staleReadOf = (error as { of?: unknown })?.of ??
-      message.match(/stale confirmed read: (\S+) at seq/)?.[1];
+    // Scoped descriptors cross current protocol boundaries structurally.
+    // Message-only errors retain default-scope recovery for every named read.
+    const toConflicts = (details: unknown): IConflictError["conflict"][] => {
+      const { of, scope } = (details ?? {}) as {
+        of?: unknown;
+        scope?: unknown;
+      };
+      return typeof of === "string"
+        ? [{
+          space,
+          the: DOCUMENT_MIME,
+          of: of as Entity,
+          ...(isCellScope(scope) ? { scope } : {}),
+        }]
+        : [];
+    };
+    const structuredConflicts = (error as { conflicts?: unknown })?.conflicts;
+    let conflicts = Array.isArray(structuredConflicts)
+      ? structuredConflicts.flatMap(toConflicts)
+      : [];
+    if (conflicts.length === 0) {
+      conflicts = toConflicts((error as { conflict?: unknown })?.conflict);
+    }
+    if (conflicts.length === 0) {
+      conflicts = toConflicts(error);
+    }
+    if (conflicts.length === 0) {
+      conflicts = Array.from(
+        message.matchAll(/stale confirmed read: (\S+) at seq/g),
+        (match) => toConflicts({ of: match[1] })[0],
+      );
+    }
     const firstOperation = commit.operations?.[0];
     const firstOperationId = firstOperation && "id" in firstOperation
       ? firstOperation.id
@@ -8198,16 +8234,14 @@ const toRejectedError = (
       name: "ConflictError",
       message,
       transaction: commit,
-      // Conflict descriptor: for stale-read conflicts `of` is authoritative
-      // (the memory engine names the conflicted entity structurally), so a
-      // retrier can pull exactly that doc before re-running. `the` remains a
-      // placeholder.
-      conflict: {
+      // The singular descriptor remains the first conflict for consumers of
+      // the legacy interface. `the` remains a placeholder.
+      conflict: conflicts[0] ?? {
         space,
         the: DOCUMENT_MIME,
-        of: ((typeof staleReadOf === "string" ? staleReadOf : undefined) ??
-          firstOperationId ?? "of:unknown") as Entity,
+        of: (firstOperationId ?? "of:unknown") as Entity,
       },
+      ...(conflicts.length > 0 ? { conflicts } : {}),
     };
     // retryAfterSeq is carried for diagnostics; retry gating is by caughtUpLocalSeq
     // (readyToRetry), and downstream only uses retryAfterSeq's presence to mark
