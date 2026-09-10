@@ -22,6 +22,7 @@ import {
   HARNESS_CELL_LABELS_TYPE,
   type HarnessCellLabelRecord,
   type HarnessCellLabels,
+  harnessCellLabelsSummary,
 } from "../../src/contracts/cell-labels.ts";
 import type { HarnessCfcInvocationContext } from "../../src/contracts/cfc-invocation-context.ts";
 import type { HarnessHandleEntry } from "../../src/contracts/handle-table.ts";
@@ -1050,7 +1051,8 @@ describe("seeded violations", () => {
         root.cellLabels = held === "both"
           ? { status: "present", path: root.cellLabels.path, value: labels }
           : { status: "absent", path: root.cellLabels.path };
-        (stateOf(root) as Mutable<HarnessRunState>).cellLabels = labels;
+        (stateOf(root) as Mutable<HarnessRunState>).cellLabels =
+          harnessCellLabelsSummary(labels, root.cellLabels.path);
       });
 
     /** A cell record carrying one labeled row behind the link at `result/0`. */
@@ -1168,11 +1170,13 @@ describe("seeded violations", () => {
       ).toEqual({ ...SESSION_CLEAN, [at("AUD-25")]: "not-applicable" });
     });
 
-    it("reads the snapshot off the run state when the artifact is gone", () => {
-      // A run records the snapshot in both places, so a tree that lost the
-      // file still answers. AUD-24 moves too and is right to: what became of
-      // the artifact is its subject, and this check's is what the snapshot
-      // says.
+    it("concludes nothing from a run state that names a snapshot whose artifact is gone", () => {
+      // The per-cell records live in the artifact and nowhere else: what a run
+      // keeps on its state is what the snapshot found about itself, and no
+      // count of cells says what any one of them was labelled. So this check
+      // has the artifact or it has nothing. AUD-24 reads the same tree as a
+      // read that happened and whose evidence is not here, which is its
+      // subject rather than this one's.
       expect(
         verdicts(
           withCellLabels([{
@@ -1180,7 +1184,11 @@ describe("seeded violations", () => {
             entries: [linkEntry(), labeledRowEntry()],
           }], "state-only"),
         ),
-      ).toEqual({ ...SESSION_CLEAN, [at("AUD-25")]: "pass" });
+      ).toEqual({
+        ...SESSION_CLEAN,
+        [at("AUD-24")]: "fail",
+        [at("AUD-25")]: "inconclusive",
+      });
     });
 
     it("cannot conclude anything when neither place holds a snapshot", () => {
@@ -1226,7 +1234,9 @@ describe("seeded violations", () => {
             CONFORMING_SESSION_POSTURE,
           ) as DeepMutable<HarnessFabricSessionCfcPosture>;
           const bare = {
-            ...(stateOf(root).cellLabels as HarnessCellLabels),
+            ...(root.cellLabels.status === "present"
+              ? root.cellLabels.value
+              : undefined as unknown as HarnessCellLabels),
           } as Mutable<HarnessCellLabels>;
           delete bare.unavailableDetail;
           delete bare.unavailableReason;
@@ -1236,7 +1246,10 @@ describe("seeded violations", () => {
             value: bare as HarnessCellLabels,
           };
           (stateOf(root) as Mutable<HarnessRunState>).cellLabels =
-            bare as HarnessCellLabels;
+            harnessCellLabelsSummary(
+              bare as HarnessCellLabels,
+              root.cellLabels.path,
+            );
         }),
         RUN_CHECKS,
       );

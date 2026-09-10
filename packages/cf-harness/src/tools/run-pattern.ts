@@ -45,6 +45,7 @@ import {
 } from "../fabric-observations.ts";
 import { defineOwnEntry } from "../handle-table.ts";
 import {
+  isDatabaseArgumentPosition,
   unboundedSchemaPosition,
   unboundedSchemaPositionMessage,
 } from "../schema-read-bound.ts";
@@ -1246,7 +1247,17 @@ export const runPatternTool: HarnessToolDefinition<
     // run and whether or not the caller asked for values, so a position that
     // schema leaves unbounded is unbounded work on this thread. Refused here:
     // after the compile that produced the schema, and before the read at it.
-    const resultPosition = unboundedSchemaPosition(pattern.resultSchema);
+    //
+    // The root position is the exception. A pattern declaring `object` for its
+    // whole result declares nothing about it, and what the read then returns
+    // is what the pattern itself computed — the rendering, and whatever it
+    // put beside it. A position INSIDE a declared shape is the other case: its
+    // author named a field and left its contents unbounded, and a field is
+    // where a reference into a graph the pattern does not own arrives. That is
+    // the shape that stalled this console, and it is the one refused.
+    const resultPosition = unboundedSchemaPosition(pattern.resultSchema, {
+      allowOpenRoot: true,
+    });
     if (resultPosition !== undefined) {
       return errorOutput(
         "error",
@@ -1372,9 +1383,21 @@ export const runPatternTool: HarnessToolDefinition<
       // What this input is read at decides how much of the space the read
       // touches, and an input naming a reference reaches whatever that
       // reference reaches. An unbounded position here is refused rather than
-      // read: a handle on a large piece graph read at an open object is work
-      // with no ceiling, and the pattern has not run yet.
-      const inputPosition = unboundedSchemaPosition(readSchema);
+      // read: a reference onto a large piece graph, read at an open object, is
+      // work with no ceiling, and the pattern has not run yet.
+      //
+      // A database position is the exception, and it is about what the read
+      // returns rather than about what the schema says. `SqliteDb` declares
+      // `additionalProperties: true` over the handle's own record — an id, a
+      // revision, and the table declarations — and that record is the whole of
+      // what reading the position yields; the rows stay in the database file,
+      // which nothing here opens. So the position is open and the read is
+      // bounded by the handle, and refusing it would refuse every pattern
+      // written against an injected store.
+      const inputPosition =
+        isDatabaseArgumentPosition(argumentSchemaForKey(key))
+          ? undefined
+          : unboundedSchemaPosition(readSchema);
       if (inputPosition !== undefined) {
         return errorOutput(
           "error",

@@ -2742,17 +2742,24 @@ describe("run-pattern", () => {
       expect(output.message).toContain("run_pattern resultSchema");
     });
 
-    it("returns an error naming the open position in the pattern's result schema", async () => {
+    it("returns an error naming an open field of the pattern's result schema", async () => {
+      // The result shape the stalling run declared: fields named, one of them
+      // the whole of whatever it holds.
       const spy = spyOnRunPersistent();
       const engine = createEngine();
       const result = await engine.invokeBuiltinTool("run_pattern", {
         sourceText: [
           "import { computed, pattern } from 'commonfabric';",
           "interface Input { n: number; }",
-          "// deno-lint-ignore no-explicit-any",
-          "interface Output { value: any; }",
+          "interface Output {",
+          "  displayName: string;",
+          "  mailDatabase: object;",
+          "  found: boolean;",
+          "}",
           "export default pattern<Input, Output>(({ n }) => ({",
-          "  value: computed(() => ({ n })),",
+          "  displayName: 'Mailbox',",
+          "  mailDatabase: computed(() => ({ n })),",
+          "  found: computed(() => n > 0),",
           "}));",
           "",
         ].join("\n"),
@@ -2761,8 +2768,29 @@ describe("run-pattern", () => {
       const output = result.output as RunPatternToolErrorOutput;
       expect(output.status).toBe("error");
       expect(output.message).toContain("the pattern's result schema");
+      expect(output.message).toContain("`/properties/mailDatabase`");
       expect(output.message).toContain("leaves an object open");
       expect(spy.calls).toBe(0);
+    });
+
+    it("runs a pattern that declares nothing about its result", async () => {
+      // A root naming no field declares nothing about the value, and what the
+      // read returns is what the pattern itself computed. That is a different
+      // claim from a named field left unbounded, and it is not refused.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: [
+          "import { computed, pattern } from 'commonfabric';",
+          "interface Input { n: number; }",
+          "export default pattern<Input, object>(({ n }) => ({",
+          "  doubled: computed(() => n * 2),",
+          "}));",
+          "",
+        ].join("\n"),
+        inputs: { n: 21 },
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
     });
 
     it("returns an error naming the input whose read position is open", async () => {

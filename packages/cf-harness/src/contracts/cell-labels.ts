@@ -277,3 +277,49 @@ export interface HarnessCellLabels {
 
   cells: readonly HarnessCellLabelRecord[];
 }
+
+/**
+ * A cell-label snapshot's findings about itself, without the per-cell records
+ * that carry the labels.
+ *
+ * This is what a run's own state holds. The records are the large part of a
+ * snapshot — one entry per cell the run touched, against a space whose piece
+ * graph decides how many that is — and a run's state is rewritten whole every
+ * time anything about the run advances, so carrying them there costs the
+ * snapshot's size once per write rather than once. The records live in the
+ * snapshot file that {@link HarnessCellLabelsSummary.cellsPath} names, and
+ * every reader of the labels themselves reads that file.
+ *
+ * What stays is what a reader needs in order to know whether to open it: the
+ * `status` distinction between "the space holds no label" and "nobody asked",
+ * the space that was read, and how many cells the snapshot covers.
+ */
+export interface HarnessCellLabelsSummary
+  extends Omit<HarnessCellLabels, "cells"> {
+  /** How many cells the snapshot holds a record for. */
+  cellCount: number;
+
+  /** How many of those records carry at least one label entry. */
+  labelledCellCount: number;
+
+  /**
+   * The snapshot file holding the records, when one was written. Absent where
+   * the run's artifact store does not persist one, in which case the findings
+   * here are the whole of what the run records about its labels.
+   */
+  cellsPath?: string;
+}
+
+/** The findings of `labels`, with its per-cell records left behind. */
+export const harnessCellLabelsSummary = (
+  labels: HarnessCellLabels,
+  cellsPath?: string,
+): HarnessCellLabelsSummary => {
+  const { cells, ...findings } = labels;
+  return {
+    ...findings,
+    cellCount: cells.length,
+    labelledCellCount: cells.filter((cell) => cell.entries.length > 0).length,
+    ...(cellsPath !== undefined ? { cellsPath } : {}),
+  };
+};

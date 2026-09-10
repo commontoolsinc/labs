@@ -120,12 +120,6 @@ const admitsObject = (schema: JSONSchemaObj): boolean => {
  */
 const isOpenObjectPosition = (node: SchemaNode): boolean => {
   const schema = node.schema;
-  if (schema === false) {
-    return false;
-  }
-  if (schema === true) {
-    return true;
-  }
   if (!isObjectNotArray(schema) || typeof schema.$ref === "string") {
     return false;
   }
@@ -239,6 +233,18 @@ const recursiveDefinitionName = (schema: JSONSchema): string | undefined => {
   return undefined;
 };
 
+/** How much of a schema {@link unboundedSchemaPosition} is asked about. */
+export interface UnboundedSchemaPositionOptions {
+  /**
+   * Leave the schema's own root position unreported, and report only a
+   * position within it. For a schema that describes what its author declared,
+   * the two are different claims: a root that names nothing declares nothing,
+   * while a position inside a declared shape is a field its author named and
+   * left unbounded. Positions under the root are reported either way.
+   */
+  readonly allowOpenRoot?: boolean;
+}
+
 /**
  * The first position of `schema` that does not bound the read it drives, or
  * `undefined` when every position does.
@@ -250,6 +256,7 @@ const recursiveDefinitionName = (schema: JSONSchema): string | undefined => {
  */
 export const unboundedSchemaPosition = (
   schema: JSONSchema | undefined,
+  options: UnboundedSchemaPositionOptions = {},
 ): UnboundedSchemaPosition | undefined => {
   if (schema === undefined) {
     return undefined;
@@ -274,10 +281,22 @@ export const unboundedSchemaPosition = (
   // `$defs` bodies are walked too: a definition no reference reaches drives no
   // read, but one that is reached is read at whatever shape it declares, and
   // the walk has no way to tell a reached body from an orphan.
-  const open = findSchema(schema, isOpenObjectPosition, {
-    includeDefs: true,
-    visitBooleans: true,
-  });
+  if (schema === true) {
+    return options.allowOpenRoot === true
+      ? undefined
+      : { pointer: "", reason: "open-object" };
+  }
+  // Booleans are left unvisited: `additionalProperties: true` is the openness
+  // of the object holding it rather than a position of its own, and reporting
+  // it as one would name the same fact at two pointers — and put the second
+  // outside whatever the caller allowed at the first.
+  const open = findSchema(
+    schema,
+    (node) =>
+      !(options.allowOpenRoot === true && node.path.length === 0) &&
+      isOpenObjectPosition(node),
+    { includeDefs: true },
+  );
   return open === undefined ? undefined : {
     pointer: pointerForPath(open.path),
     reason: "open-object",
@@ -301,4 +320,31 @@ export const unboundedSchemaPositionMessage = (
   return position.reason === "recursive-ref"
     ? `${label} is recursive ${at}: \`${position.ref}\` is reachable from itself, so reading at this schema follows a value's links for as deep as they go. Declare the depth you need as nested properties instead of referring back to the enclosing shape.`
     : `${label} leaves an object open ${at}: it admits keys it does not name, so reading at this schema descends every key the value carries and follows every link it reaches. Declare the properties you need — an \`object\` with no \`properties\` asks for the whole graph.`;
+};
+
+/**
+ * Whether `schema` declares a position holding a database handle.
+ *
+ * A `SqliteDb` position declares `additionalProperties: true` over the handle's
+ * own record, so it reads as an open object to
+ * {@link unboundedSchemaPosition} while the read it drives returns that record
+ * and nothing more — the rows stay in the database file. The `sqlite` cell kind
+ * is what tells this position from a `Cell<T>`, whose read is of `T`'s value
+ * and is as open as `T` is.
+ */
+export const isDatabaseArgumentPosition = (
+  schema: JSONSchema | undefined,
+): boolean => {
+  if (!isObjectNotArray(schema)) {
+    return false;
+  }
+  const asCell = (schema as { asCell?: unknown }).asCell;
+  if (!Array.isArray(asCell)) {
+    return false;
+  }
+  return asCell.some((entry) =>
+    entry === "sqlite" ||
+    (isObjectNotArray(entry) &&
+      (entry as { kind?: unknown }).kind === "sqlite")
+  );
 };

@@ -231,8 +231,11 @@ describe("interactive chat cell labels", () => {
           join(runRoot, "run-state.json"),
         );
         expect(state.status).toBe("completed");
-        expect(state.cellLabelsPath).toBe(join(runRoot, "cell-labels.json"));
+        expect(state.cellLabels?.cellsPath).toBe(
+          join(runRoot, "cell-labels.json"),
+        );
         const labels = await readCellLabels(runRoot);
+        expect(state.cellLabels?.cellCount).toBe(labels.cells.length);
         expect(labels.status).toBe("read");
         expect(labels.space?.dbPath).toBe(spaceDbPath);
         expect(labels.cells.map((cell) => cell.entityId)).toEqual([

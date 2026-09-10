@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import type { JSONSchema } from "@commonfabric/api";
 import {
+  isDatabaseArgumentPosition,
   unboundedSchemaPosition,
   unboundedSchemaPositionMessage,
 } from "../src/schema-read-bound.ts";
@@ -308,6 +309,102 @@ describe("schema-read-bound", () => {
         pointer: "/properties/a~1b~0c",
         reason: "open-object",
       });
+    });
+  });
+
+  describe("allowOpenRoot", () => {
+    // A root that names nothing declares nothing about the value, which is a
+    // different claim from a field its author named and left unbounded. A
+    // caller that can tell the two apart asks for the second alone.
+
+    it("returns `undefined` for a root that declares nothing", () => {
+      expect(
+        unboundedSchemaPosition({ type: "object" }, { allowOpenRoot: true }),
+      ).toBeUndefined();
+    });
+
+    it("returns `undefined` for a root opened by `additionalProperties: true`", () => {
+      // The same openness, written the other way: it is the root's own, so it
+      // is not reported again at the keyword that states it.
+      expect(
+        unboundedSchemaPosition({
+          type: "object",
+          additionalProperties: true,
+        }, { allowOpenRoot: true }),
+      ).toBeUndefined();
+    });
+
+    it("returns `undefined` for the `true` schema", () => {
+      expect(unboundedSchemaPosition(true, { allowOpenRoot: true }))
+        .toBeUndefined();
+    });
+
+    it("returns the position of an open field within a declared shape", () => {
+      // The shape that stalled the console: a result declaring its fields,
+      // one of which is the whole of whatever it holds.
+      expect(
+        unboundedSchemaPosition({
+          type: "object",
+          properties: {
+            displayName: { type: "string" },
+            mailDatabase: { type: "object" },
+            found: { type: "boolean" },
+          },
+        }, { allowOpenRoot: true }),
+      ).toEqual({
+        pointer: "/properties/mailDatabase",
+        reason: "open-object",
+      });
+    });
+
+    it("returns a recursive `$ref` whatever the root declares", () => {
+      // A cycle is unbounded wherever it sits, so allowing an open root does
+      // not allow one.
+      expect(
+        unboundedSchemaPosition({
+          type: "object",
+          properties: { piece: { $ref: "#/$defs/piece" } },
+          $defs: {
+            piece: {
+              type: "object",
+              properties: { next: { $ref: "#/$defs/piece" } },
+            },
+          },
+        }, { allowOpenRoot: true })?.reason,
+      ).toBe("recursive-ref");
+    });
+  });
+
+  describe("isDatabaseArgumentPosition()", () => {
+    it("returns `true` for a position declaring the `sqlite` cell kind", () => {
+      expect(isDatabaseArgumentPosition({
+        $ref: "#/$defs/SqliteDatabase",
+        asCell: ["sqlite"],
+      })).toBe(true);
+    });
+
+    it("returns `true` for the object form of the entry", () => {
+      expect(isDatabaseArgumentPosition({
+        $ref: "#/$defs/SqliteDatabase",
+        asCell: [{ kind: "sqlite", scope: "session" }],
+      })).toBe(true);
+    });
+
+    it("returns `false` for a plain cell position", () => {
+      // A `Cell<T>` reads back `T`'s value and is as open as `T` is, which is
+      // what keeps it gated while a database handle is not.
+      expect(isDatabaseArgumentPosition({
+        type: "object",
+        asCell: ["cell"],
+      })).toBe(false);
+    });
+
+    it("returns `false` for a position declaring no cell at all", () => {
+      expect(isDatabaseArgumentPosition({ type: "object" })).toBe(false);
+    });
+
+    it("returns `false` for no schema", () => {
+      expect(isDatabaseArgumentPosition(undefined)).toBe(false);
     });
   });
 

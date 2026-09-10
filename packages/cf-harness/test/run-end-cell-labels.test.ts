@@ -14,7 +14,12 @@ import {
   FileSystemHarnessArtifactStore,
   readHarnessRunState,
 } from "../src/artifacts.ts";
-import type { HarnessCellLabels } from "../src/contracts/cell-labels.ts";
+import {
+  HARNESS_CELL_LABELS_TYPE,
+  type HarnessCellLabelEntry,
+  type HarnessCellLabels,
+  harnessCellLabelsSummary,
+} from "../src/contracts/cell-labels.ts";
 import {
   CfHarnessEngine,
   type CreateHarnessEngineOptions,
@@ -32,6 +37,16 @@ import {
 
 /** A reference into the labelled cell, of the shape an input cell carries. */
 const LABELED_REF = `/${LABELED_CELL_ID}/value/secret`;
+
+/** One label entry, for the cases that only need a cell to carry any. */
+const LABELLED_ENTRY: HarnessCellLabelEntry = {
+  path: ["value", "secret"],
+  origin: "declared",
+  confidentiality: [
+    { type: "https://cfc.test/atom/email", name: "email" },
+  ],
+  integrity: [],
+};
 
 const withDirectory = async (
   body: (directory: string) => Promise<void>,
@@ -101,6 +116,52 @@ const exists = async (path: string): Promise<boolean> => {
 
 describe("run-end cell labels", () => {
   describe("completeRun()", () => {
+    it("keeps the per-cell records out of the run's own state", () => {
+      // A run's state is rewritten whole whenever anything about the run
+      // advances, so a record per cell the run touched would cost the
+      // snapshot's size at every one of those writes. The state carries the
+      // findings, whose size is fixed, and names the file holding the rest.
+      const labels: HarnessCellLabels = {
+        type: HARNESS_CELL_LABELS_TYPE,
+        version: 1,
+        generatedAt: "2026-09-10T00:00:00.000Z",
+        status: "read",
+        space: { configured: "a-space" },
+        cells: [
+          { entityId: "of:fid1:labelled", entries: [LABELLED_ENTRY] },
+          { entityId: "of:fid1:bare", entries: [] },
+        ],
+      };
+
+      const summary = harnessCellLabelsSummary(labels, "/runs/r/cells.json");
+
+      expect(Object.hasOwn(summary, "cells")).toBe(false);
+      expect(summary.cellCount).toBe(2);
+      expect(summary.labelledCellCount).toBe(1);
+      expect(summary.cellsPath).toBe("/runs/r/cells.json");
+      expect(summary.status).toBe("read");
+      expect(summary.space).toEqual({ configured: "a-space" });
+    });
+
+    it("omits `cellsPath` for a snapshot no store wrote", () => {
+      // With no file beside it, the findings are the whole of what the run
+      // records — which is what keeps the `read` against `unavailable`
+      // distinction alive on a store that persists no snapshot.
+      const summary = harnessCellLabelsSummary({
+        type: HARNESS_CELL_LABELS_TYPE,
+        version: 1,
+        generatedAt: "2026-09-10T00:00:00.000Z",
+        status: "unavailable",
+        unavailableReason: "space-not-found",
+        cells: [],
+      });
+
+      expect(summary.cellsPath).toBeUndefined();
+      expect(summary.status).toBe("unavailable");
+      expect(summary.unavailableReason).toBe("space-not-found");
+      expect(summary.cellCount).toBe(0);
+    });
+
     it("writes `cell-labels.json` beside the run, read from the space, and records it on the run's outcome", async () => {
       await withDirectory(async (directory) => {
         const runId = "run-completed";
@@ -113,11 +174,16 @@ describe("run-end cell labels", () => {
           join(runRoot, "run-state.json"),
         );
         expect(state.status).toBe("completed");
-        expect(state.cellLabelsPath).toBe(join(runRoot, "cell-labels.json"));
+        expect(state.cellLabels?.cellsPath).toBe(
+          join(runRoot, "cell-labels.json"),
+        );
         expect(state.cellLabels?.status).toBe("read");
         expect(state.failureRecords ?? []).toEqual([]);
         const labels = await readCellLabels(runRoot);
-        expect(labels).toEqual(state.cellLabels);
+        expect(state.cellLabels).toEqual(
+          harnessCellLabelsSummary(labels, join(runRoot, "cell-labels.json")),
+        );
+        expect(state.cellLabels?.cellCount).toBe(labels.cells.length);
         expect(labels.status).toBe("read");
         expect(labels.space).toEqual({
           configured: SPACE_DB_DID,
@@ -184,7 +250,6 @@ describe("run-end cell labels", () => {
         );
         expect(state.status).toBe("completed");
         expect(state.cellLabels).toBeUndefined();
-        expect(state.cellLabelsPath).toBeUndefined();
         expect(state.failureRecords ?? []).toEqual([]);
         expect(await exists(join(runRoot, "cell-labels.json"))).toBe(false);
       });
@@ -240,7 +305,6 @@ describe("run-end cell labels", () => {
         expect(state.status).toBe("completed");
         expect(state.terminalReason).toBe("assistant_completed");
         expect(state.cellLabels).toBeUndefined();
-        expect(state.cellLabelsPath).toBeUndefined();
         expect(state.failureRecords).toHaveLength(1);
         expect(state.failureRecords?.[0]).toMatchObject({
           kind: "harness_error",
@@ -267,7 +331,9 @@ describe("run-end cell labels", () => {
         expect(state.status).toBe("failed");
         expect(state.terminalReason).toBe("max_model_turns");
         expect(state.primaryFailure?.detail).toContain("out of turns");
-        expect(state.cellLabelsPath).toBe(join(runRoot, "cell-labels.json"));
+        expect(state.cellLabels?.cellsPath).toBe(
+          join(runRoot, "cell-labels.json"),
+        );
         expect(state.cellLabels?.status).toBe("read");
         const labels = await readCellLabels(runRoot);
         expect(labels.status).toBe("read");

@@ -1888,16 +1888,23 @@ const cellLabelsSnapshot: AuditCheck = {
       return notReadable("run-state.json", run.runState);
     }
     const state = runStateOf(run)!;
-    if (run.cellLabels.status === "present" || state.cellLabels !== undefined) {
+    if (run.cellLabels.status === "present") {
       return {
         verdict: "pass",
         message:
           "this run kept a snapshot of the labels its space carried; what it holds is not read here",
       };
     }
-    const attempted = state.failureRecords?.find((record) =>
-      record.source === "cell_labels"
-    );
+    // A run records what its snapshot found on its state and the records
+    // themselves in the artifact, so a state naming a snapshot with no
+    // artifact beside it is a read that happened and whose evidence is gone —
+    // the same finding a recorded failure reports, reached the other way.
+    const attempted = state.cellLabels !== undefined
+      ? {
+        detail:
+          `the run's state records a \`${state.cellLabels.status}\` snapshot over ${state.cellLabels.cellCount} cells, and the snapshot artifact is not here`,
+      }
+      : state.failureRecords?.find((record) => record.source === "cell_labels");
     const evidence: readonly CheckEvidence[] = [{
       artifact: "cell-labels.json",
       detail: cellLabelsRetentionDetail(run),
@@ -1925,17 +1932,16 @@ const cellLabelsSnapshot: AuditCheck = {
 //
 
 /**
- * The snapshot a run holds, from whichever of the two places carries it.
+ * The snapshot a run holds.
  *
- * A run writes the snapshot beside itself and records it on its state, so a
- * tree missing one of the two can still be read. {@link cellLabelsSnapshot}
- * accepts either as evidence that a snapshot was kept; this reads what the
- * snapshot SAYS, so it needs the value rather than the artifact's presence.
+ * The per-cell records live in the snapshot artifact and nowhere else: a run's
+ * state carries what the snapshot found about itself — its status, its space,
+ * how many cells it covers — and the records are the part whose size tracks
+ * the space. So a check reading what the snapshot SAYS ABOUT A CELL has the
+ * artifact or it has nothing, and the state's summary is not a substitute.
  */
 const cellLabelsOf = (run: RunEvidence): HarnessCellLabels | undefined =>
-  run.cellLabels.status === "present"
-    ? run.cellLabels.value
-    : runStateOf(run)?.cellLabels;
+  run.cellLabels.status === "present" ? run.cellLabels.value : undefined;
 
 /** One place a snapshot held a link, and the cell record it sat in. */
 interface FollowedLink {
@@ -2064,7 +2070,7 @@ const derivedCellLabels: AuditCheck = {
         }],
       };
     }
-    if (run.cellLabels.status !== "present" && state.cellLabels === undefined) {
+    if (run.cellLabels.status !== "present") {
       return notReadable("cell-labels.json", run.cellLabels);
     }
     const labels = cellLabelsOf(run)!;
