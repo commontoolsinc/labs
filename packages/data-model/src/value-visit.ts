@@ -21,7 +21,7 @@ import { tagFromFabricValue, VALUE_TAGS, type ValueTag } from "./value-tags.ts";
 import { toCompactDebugString } from "./value-debug.ts";
 
 //
-// Individual result forms
+// Individual result form types and associated definitions
 //
 
 /**
@@ -83,6 +83,50 @@ export type ReplaceForm<Domain> = { type: "replace"; value: Domain };
  * indicates that the engine should in fact do a subtype-based dispatch.
  */
 export type VisitSubtypeForm = { type: "visitSubtype"; value: true };
+
+/**
+ * Standard instance of `RecurseForm`.
+ *
+ * The `DO_` prefix is intended to make it clear at use sites that it is telling
+ * the visitor engine to "do" something.
+ */
+export const DO_RECURSE: RecurseForm = Object.freeze(
+  { type: "recurse", value: true } as const,
+);
+
+/**
+ * Standard instance of `VisitSubtypeForm`.
+ *
+ * The `DO_` prefix is intended to make it clear at use sites that it is telling
+ * the visitor engine to "do" something.
+ */
+export const DO_VISIT_SUBTYPE: VisitSubtypeForm = Object.freeze(
+  { type: "visitSubtype", value: true } as const,
+);
+
+/**
+ * Constructs an `arrayContents` form.
+ *
+ * The `do` prefix is intended to make it clear at use sites that it is telling
+ * the visitor engine to "do" something.
+ */
+export function doArrayContents<Domain>(
+  values: readonly Domain[],
+): ArrayContentsForm<Domain> {
+  return { type: "arrayContents", value: values };
+}
+
+/**
+ * Constructs a `mapContents` form.
+ *
+ * The `do` prefix is intended to make it clear at use sites that it is telling
+ * the visitor engine to "do" something.
+ */
+export function doMapContents<Domain>(
+  mappings: readonly [Domain, Domain][],
+): MapContentsForm<Domain> {
+  return { type: "mapContents", value: mappings };
+}
 
 //
 // `visit*()` method result union types
@@ -301,7 +345,9 @@ export abstract class BaseValueVisitor<Domain, ResultType>
   ): LeafVisitorResult<Domain, ResultType>;
 
   /** @inheritDoc */
-  abstract visitValue(value: Domain): DispatchingVisitorResult<Domain, ResultType>;
+  abstract visitValue(
+    value: Domain,
+  ): DispatchingVisitorResult<Domain, ResultType>;
 
   //
   // Instance members
