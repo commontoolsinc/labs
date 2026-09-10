@@ -411,10 +411,12 @@ interface ConflictError extends Error {
    * reaching this seq reflects the winning write.
    */
   retryAfterSeq: number;
-  /** First stale confirmed read per entity and scope, even for one conflict. */
+  /** First stale confirmed read per branch, entity, and scope. */
   conflicts?: Array<{
     of: string;
     scope: "space" | "user" | "session";
+    /** Absent for the default branch. */
+    branch?: string;
     seq: number;
     conflictSeq: number;
   }>;
@@ -428,14 +430,17 @@ hide them — and the next sync frame delivers the watched documents as ordinary
 upserts. Repair therefore arrives as a consistent cut over the session's watched
 view, with every document the frame links to delivered in the same cut. A dirty
 address outside that view does not gain a watch through dirty marking alone.
-Confirmed-read validation reports each stale entity and scope once. Its first
-stale read supplies the diagnostic read sequence and conflicting sequence;
+Confirmed-read validation reports each stale branch, entity, and scope once. Its
+first stale read supplies the diagnostic read sequence and conflicting sequence;
 subsequent reads of that instance skip the staleness scan. Every read still
 validates its branch and resolves its scope. An unknown branch or unresolvable
 scope takes precedence over any stale reads already found. The `conflicts` array
-includes an entry even when only one instance is stale. A retry helper can
-explicitly sync all conflicting instances before retrying; repeated reads of one
-instance require only one pull. Each scope resolves under the rejected session's
+includes an entry even when only one instance is stale. Non-default branches are
+named in the descriptor; an absent `branch` means the default branch, regardless
+of the commit's target branch. A client can query each conflicting branch,
+entity, and scope before retrying. The runner emits default-branch reads and its
+retry helper repairs those instances; cross-branch clients use the memory
+protocol's branch-aware queries. Each scope resolves under the rejected session's
 identity. Older responses can omit this array; their diagnostic identifies
 entities but does not preserve their scopes. The runner also exposes the first
 descriptor as `conflict` for existing consumers. The diagnostic previews up to

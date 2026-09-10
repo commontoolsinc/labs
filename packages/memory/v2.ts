@@ -1735,10 +1735,12 @@ export type V2Error = {
   precondition?: string;
   retryAfterSeq?: number;
 
-  /** First stale confirmed read per entity and scope, resolved by the session. */
+  /** First stale confirmed read per branch, entity, and session-resolved scope. */
   conflicts?: Array<{
     of: string;
     scope: CellScope;
+    /** Absent for the default branch. */
+    branch?: BranchName;
     seq: number;
     conflictSeq: number;
   }>;

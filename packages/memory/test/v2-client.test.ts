@@ -1159,7 +1159,13 @@ Deno.test("memory v2 client readyToRetry waits for caught-up local sequence", as
       (error as Error & { conflicts?: unknown }).conflicts,
       [
         { of: "of:doc:1", scope: "space", seq: 0, conflictSeq: 1 },
-        { of: "of:doc:2", scope: "space", seq: 0, conflictSeq: 2 },
+        {
+          of: "of:doc:2",
+          scope: "space",
+          branch: "feature",
+          seq: 0,
+          conflictSeq: 2,
+        },
       ],
     );
 
@@ -1953,7 +1959,13 @@ class ConflictReadyTransport implements Transport {
             retryAfterSeq: 2,
             conflicts: [
               { of: "of:doc:1", scope: "space", seq: 0, conflictSeq: 1 },
-              { of: "of:doc:2", scope: "space", seq: 0, conflictSeq: 2 },
+              {
+                of: "of:doc:2",
+                scope: "space",
+                branch: "feature",
+                seq: 0,
+                conflictSeq: 2,
+              },
             ],
           },
         });

@@ -3,11 +3,16 @@ import { toFileUrl } from "@std/path";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { spy } from "@std/testing/mock";
 
-import { type ConfirmedRead, toDocumentPath } from "../../v2.ts";
+import {
+  type ConfirmedRead,
+  DEFAULT_BRANCH,
+  toDocumentPath,
+} from "../../v2.ts";
 import {
   applyCommit,
   close,
   ConflictError,
+  createBranch,
   type Engine,
   open,
   ProtocolError,
@@ -100,6 +105,57 @@ describe("engine-conflicts", () => {
     expect(() => commitReads([read, { ...read, seq: 0 }])).toThrow(
       ConflictError,
     );
+  });
+
+  it("retains distinct branches while deduplicating repeated reads on each branch", () => {
+    createBranch(engine, "feature");
+    for (const [index, branch] of [DEFAULT_BRANCH, "feature"].entries()) {
+      applyCommit(engine, {
+        sessionId: "session:branch-updates",
+        commit: {
+          localSeq: index + 1,
+          branch,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: ids[0],
+            value: { value: { a: 10, b: 20 } },
+          }],
+        },
+      });
+    }
+    using scans = spy(engine.statements.selectSetDeleteConflict, "get");
+    let caught: unknown;
+    try {
+      commitReads(
+        ["feature", DEFAULT_BRANCH].flatMap((branch) =>
+          ["a", "b"].map((key) => ({
+            id: ids[0],
+            branch,
+            path: toDocumentPath(["value", key]),
+            seq: 1,
+          }))
+        ),
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ConflictError);
+    const error = caught as ConflictError;
+    expect(error.conflicts).toEqual([{
+      of: ids[0],
+      scope: "space",
+      branch: "feature",
+      seq: 1,
+      conflictSeq: 3,
+    }, {
+      of: ids[0],
+      scope: "space",
+      seq: 1,
+      conflictSeq: 2,
+    }]);
+    expect(error.branch).toBe("feature");
+    expect(scans.calls).toHaveLength(2);
   });
 
   it("keeps the first stale path's sequences and skips later patch scans", () => {

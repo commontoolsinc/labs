@@ -1024,10 +1024,12 @@ export type Engine = {
   stagedDocumentCache?: Map<string, DocumentCacheEntry>;
 };
 
-/** The first stale confirmed read of an entity in the session's declared scope. */
+/** The first stale confirmed read of an entity on a branch in a declared scope. */
 export type ConfirmedReadConflict = {
   of: string;
   scope: CellScope;
+  /** Absent for the default branch. */
+  branch?: BranchName;
   seq: number;
   conflictSeq: number;
 };
@@ -1038,6 +1040,7 @@ export class ConflictError extends Error {
 
   /** Scope of the entity whose confirmed read went stale, when one is named. */
   readonly scope?: CellScope;
+  readonly branch?: BranchName;
 
   readonly seq?: number;
   readonly conflictSeq?: number;
@@ -1052,6 +1055,7 @@ export class ConflictError extends Error {
       this.conflicts = [...conflicts];
       this.of = conflicts[0].of;
       this.scope = conflicts[0].scope;
+      this.branch = conflicts[0].branch;
       this.seq = conflicts[0].seq;
       this.conflictSeq = conflicts[0].conflictSeq;
     }
@@ -6171,17 +6175,17 @@ const validateConfirmedReads = (
   // against that writer identity, even when the read points at another branch.
   // Cross-branch reads inherit this same principal context.
   const conflicts: ConfirmedReadConflict[] = [];
-  const staleIdsByScope = new Map<CellScope, Set<EntityId>>();
+  const staleInstances = new Set<string>();
   for (const read of commit.reads.confirmed) {
     const readBranch = read.branch ?? branch;
     ensureReadableBranch(engine, readBranch);
     const scopeKey = resolveScopeKey(read.scope, scopeContext);
     const scope = read.scope ?? DEFAULT_SCOPE;
-    let staleIds = staleIdsByScope.get(scope);
+    const key = revisionKey(readBranch, read.id, scopeKey);
     // Further path scans cannot change a known-stale entity's recovery address.
     // Every read still validates its branch and scope before skipping the scan,
     // so invalid addresses take precedence over stale-read conflicts.
-    if (staleIds?.has(read.id)) continue;
+    if (staleInstances.has(key)) continue;
     const conflictSeq = findConflictSeq(
       engine,
       readBranch,
@@ -6192,14 +6196,11 @@ const validateConfirmedReads = (
       read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
-      if (staleIds === undefined) {
-        staleIds = new Set();
-        staleIdsByScope.set(scope, staleIds);
-      }
-      staleIds.add(read.id);
+      staleInstances.add(key);
       conflicts.push({
         of: read.id,
         scope,
+        ...(readBranch === DEFAULT_BRANCH ? {} : { branch: readBranch }),
         seq: read.seq,
         conflictSeq,
       });
