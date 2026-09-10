@@ -25,7 +25,6 @@
 
 import type { IFCLabel } from "@commonfabric/runner/cfc";
 import { isObjectNotArray } from "@commonfabric/utils/types";
-import { isOrClause } from "@commonfabric/runner/cfc";
 import { mergeConfidentialityOnlyLabels } from "./contracts/cfc-model-context.ts";
 import { inertLabelSnapshot } from "./ifc-label-shape.ts";
 
@@ -108,31 +107,36 @@ const readTaintRecord = (value: unknown): HarnessSandboxTaint | undefined => {
  * what it read — a clause pushed onto a returned label is a run recorded as
  * carrying something no invocation reported.
  *
- * Written out level by level rather than walked generically, because the
- * shape is known: the merge above produces a confidentiality-only label, so
- * this is a state, its label, that label's clause list, and the clauses in
- * it. Naming the levels is what lets the walk end at an atom on purpose
- * instead of by running out of containers.
+ * The walk has to be recursive, because a `CfcAtom` is `CfcJsonValue` — JSON
+ * all the way down, not a flat record. A Caveat's `source` and a
+ * PromptSlotBound's `renderRef` are the legal atoms that prove it: a freeze
+ * stopping at the atom object leaves those nested containers writable, and
+ * changing one changes the taint this hands out later.
+ *
+ * Deliberately a JSON freeze rather than `data-model`'s fabric-aware
+ * `deepFreeze`. What arrives here is plain JSON by construction — the merge
+ * clones it, and a label read from outside came through `inertLabelSnapshot`
+ * — so the fabric protocol that walk exists for has nothing to act on, and
+ * reaching it would mean exporting it from a package this one does not
+ * otherwise depend on. If a canonical JSON freeze is ever wanted, `utils` is
+ * its home, and this becomes a call.
  */
 const frozenTaint = (taint: HarnessSandboxTaint): HarnessSandboxTaint => {
   if (taint.kind === "known" && taint.label !== undefined) {
-    for (const clause of taint.label.confidentiality ?? []) {
-      // A clause is an atom, or a disjunction of them written `{ anyOf }`.
-      // The atoms are where the walk ends: an atom's own fields are the
-      // primitives the format defines, so there is no further container for a
-      // later hand to reach into.
-      if (isOrClause(clause)) {
-        for (const alternative of clause.anyOf) {
-          Object.freeze(alternative);
-        }
-        Object.freeze(clause.anyOf);
-      }
-      Object.freeze(clause);
-    }
-    Object.freeze(taint.label.confidentiality);
-    Object.freeze(taint.label);
+    freezeJson(taint.label);
   }
   return Object.freeze(taint);
+};
+
+/** Freezes plain JSON data through, container by container. */
+const freezeJson = (value: unknown): void => {
+  if (typeof value !== "object" || value === null || Object.isFrozen(value)) {
+    return;
+  }
+  Object.freeze(value);
+  for (const entry of Object.values(value)) {
+    freezeJson(entry);
+  }
 };
 
 const taints = new Map<string, HarnessSandboxTaint>();

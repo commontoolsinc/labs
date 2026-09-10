@@ -141,23 +141,29 @@ describe("inertLabelSnapshot()", () => {
     // whatever check runs first, then reports something else when the value
     // is read again. The answer is not to detect the lie — a proxy can trap
     // any read — but to read each thing ONCE, through descriptors, and copy
-    // as we go. The length is taken from its descriptor, so a `get` trap on
-    // it never runs and a second answer has nothing left to change.
-    let lengthReads = 0;
+    // as we go. Counting DESCRIPTOR reads is the only count that means
+    // anything here: this walk never reads a property directly, so a `get`
+    // trap would report zero however many times the length was consulted.
+    let lengthDescriptorReads = 0;
     const lying = new Proxy(["finance"], {
-      get(target, key, receiver) {
+      getOwnPropertyDescriptor(target, key) {
         if (key === "length") {
-          lengthReads += 1;
-          return lengthReads > 1 ? 0 : 1;
+          lengthDescriptorReads += 1;
+          return {
+            value: lengthDescriptorReads > 1 ? 0 : 1,
+            writable: true,
+            enumerable: false,
+            configurable: false,
+          };
         }
-        return Reflect.get(target, key, receiver);
+        return Reflect.getOwnPropertyDescriptor(target, key);
       },
     });
 
     expect(inertLabelSnapshot({ confidentiality: lying })).toEqual({
       confidentiality: ["finance"],
     });
-    expect(lengthReads).toBe(0);
+    expect(lengthDescriptorReads).toBe(1);
   });
 
   it("returns nothing when reading the source raises", () => {

@@ -77,42 +77,33 @@ const HIDDEN_ARRAY_MEMBER: HiddenKeyRule = (key) => key !== "length";
 const ARRAY_INDEX_LIMIT = 2 ** 32 - 1;
 
 /**
- * How many members an array says it has, or `undefined` when it will not say.
+ * What one container holds: its own enumerable DATA entries, and — for an
+ * array — how many members it says it has.
  *
- * A list's length is data about it that no walk over its keys recovers: a hole
- * leaves no key at all, so `[ , ]` and `[]` enumerate identically while the
- * first says it holds two members and the second none. Everything downstream
- * reads a clause by iterating it, and iterating the shorter copy is one
- * requirement fewer than the source states. Taken once, through the
- * descriptor, like every other value here — a `get` trap never sees it, and a
- * second answer has nothing left to change.
+ * ONE descriptor read per own key, this walk being the only one. Every later
+ * step uses what this returned, so a source that answers differently the
+ * second time cannot change what was copied. That is why the length comes
+ * back from here rather than from a reader of its own: a second
+ * `getOwnPropertyDescriptor` on `length` is a second answer, and the trap
+ * that gives it is the whole shape being guarded against.
+ *
+ * The length matters because no walk over the keys recovers it: a hole leaves
+ * no key at all, so `[ , ]` and `[]` enumerate identically while the first
+ * says it holds two members. An accessor is not data — reading it would run
+ * code, so its presence makes the container unreadable rather than invoked.
  */
-const inertArrayLength = (container: object): number | undefined => {
-  const descriptor = Object.getOwnPropertyDescriptor(container, "length");
-  if (descriptor === undefined || !("value" in descriptor)) {
-    return undefined;
-  }
-  const { value } = descriptor;
-  return typeof value === "number" && Number.isInteger(value) &&
-      value >= 0 && value < ARRAY_INDEX_LIMIT
-    ? value
-    : undefined;
-};
+interface InertContents {
+  readonly entries: readonly (readonly [string, unknown])[];
+  /** The `length` an array reported, absent when it reported nothing usable. */
+  readonly length?: number;
+}
 
-/**
- * The own enumerable DATA entries of a container, read once.
- *
- * Read once is the point. Every later step uses what this returned, so a
- * source that answers differently the second time — a proxy whose `length`
- * or `ownKeys` changes between reads — cannot change what was copied. An
- * accessor is not data: reading it would run code, so its presence makes the
- * container unreadable rather than being invoked.
- */
 const inertEntries = (
   container: object,
   hidden: HiddenKeyRule,
-): readonly (readonly [string, unknown])[] | undefined => {
+): InertContents | undefined => {
   const entries: (readonly [string, unknown])[] = [];
+  let length: number | undefined;
   for (const key of Reflect.ownKeys(container)) {
     if (typeof key !== "string") {
       return undefined;
@@ -125,6 +116,13 @@ const inertEntries = (
       if (hidden(key)) {
         return undefined;
       }
+      if (key === "length" && "value" in descriptor) {
+        const reported = descriptor.value;
+        length = typeof reported === "number" && Number.isInteger(reported) &&
+            reported >= 0 && reported < ARRAY_INDEX_LIMIT
+          ? reported
+          : undefined;
+      }
       continue;
     }
     if (!("value" in descriptor)) {
@@ -132,7 +130,7 @@ const inertEntries = (
     }
     entries.push([key, descriptor.value]);
   }
-  return entries;
+  return { entries, ...(length !== undefined ? { length } : {}) };
 };
 
 /** A primitive this can carry, or `undefined` when it is not one. */
@@ -188,19 +186,22 @@ const inertJsonCopy = (
       return undefined;
     }
     const isArray = Array.isArray(container);
-    const entries = inertEntries(
+    const contents = inertEntries(
       container,
       isArray ? HIDDEN_ARRAY_MEMBER : SKIP_HIDDEN,
     );
-    if (entries === undefined) {
+    if (contents === undefined) {
       return undefined;
     }
-    if (isArray && inertArrayLength(container) !== entries.length) {
+    // Exactly as many members as the list said it holds, from the length that
+    // same walk read. Dense assignment does the rest: together they make the
+    // copy the source's length or make there be no copy.
+    if (isArray && contents.length !== contents.entries.length) {
       return undefined;
     }
     open.add(container);
     return {
-      entries,
+      entries: contents.entries,
       target: Array.isArray(container) ? [] : {},
       source: container,
       depth: atDepth,
@@ -332,14 +333,14 @@ const readInertLabel = (
   if (!isObjectNotArray(value) || !isInertContainer(value)) {
     return undefined;
   }
-  const entries = inertEntries(value, HIDDEN_LABEL_CLAUSE);
-  if (entries === undefined) {
+  const contents = inertEntries(value, HIDDEN_LABEL_CLAUSE);
+  if (contents === undefined) {
     // An accessor on the label itself: reading it would run code, and it
     // could answer differently the next time.
     return undefined;
   }
   const snapshot: Record<string, unknown> = {};
-  for (const [key, entry] of entries) {
+  for (const [key, entry] of contents.entries) {
     if (key === "confidentiality" || key === "integrity") {
       if (!Array.isArray(entry)) {
         return undefined;

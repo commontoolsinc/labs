@@ -393,13 +393,16 @@ reported counts: a result the runtime synthesized because it could not read the
 sidecar is rendered as a denial carrying an empty label, shaped exactly like a
 public container, and only its recorded origin tells the two apart. An
 invocation that left no readable evidence poisons the run to `unknown` for the
-rest of it, with no recovery, because nothing later can establish what it did.
-Both sidecar transport directories are refused if their real path lies inside
-the workspace, any other writable mount, or the artifact root, and are held to
-being absolute before anything compares them — a container able to write its own
-result sidecar could name its own taint. What the harness cannot check from this
-side is whether the runtime is registered to read the directory named here; that
-residual belongs to the `runsc-cfc` registration.
+rest of it, with no recovery, because nothing later can establish what it did. A
+sandbox config built through `resolveDockerRunscSandboxConfig` refuses both
+sidecar transport directories if their real path lies inside the workspace, any
+other writable mount, or the artifact root, and holds them to being absolute
+before anything compares them — a container able to write its own result sidecar
+could name its own taint. The verdict reaches the launch it governs: every
+option is read once before it is checked, and the runtime launches from a frozen
+config of its own, so the mounts compared are the mounts bound. What the harness
+cannot check from this side is whether the runtime is registered to read the
+directory named here; that residual belongs to the `runsc-cfc` registration.
 
 Loom currently forces autonomous `cf-harness` runs to `observe` mode while
 trusted `runsc-cfc` observation metadata is not wired through every local tool
@@ -418,6 +421,12 @@ mode.
 - End-to-end runner-owned CFC mediation is incomplete in the current product
   integrations; enforcing modes therefore cannot yet replace their `observe`
   bridges.
+- The sidecar transport containment check lives in
+  `resolveDockerRunscSandboxConfig`, so a caller that constructs
+  `DockerRunscSandboxRuntime` with a hand-built config bypasses it. The
+  constructor copies and freezes what it is handed, which stops a checked config
+  being moved afterwards but does not check an unchecked one. Closing this means
+  validating at the constructor or admitting only a resolver-produced config.
 - Capability discovery does not prove that Docker, `runsc-cfc`, a browser lease,
   or another external dependency is healthy. Callers must perform dependency
   preflight for workflows that require them.

@@ -222,6 +222,34 @@ describe("a run's accumulated sandbox taint", () => {
     }
   });
 
+  it("freezes an atom's nested fields, in a clause and in a disjunction", () => {
+    // A `CfcAtom` is `CfcJsonValue` — JSON all the way down. A Caveat's
+    // `source` is the legal atom that proves it: a freeze stopping at the
+    // atom object leaves that container writable, and what a caller changes
+    // there is what this hands out next time.
+    withRun((runId) => {
+      const taint = joinSandboxTaint(runId, {
+        confidentiality: [
+          { type: "cfc/caveat", source: { of: ["finance"] } },
+          { anyOf: [{ type: "cfc/slot", renderRef: { path: ["a"] } }] },
+        ],
+      } as never);
+      if (taint.kind !== "known" || taint.label === undefined) {
+        throw new Error("expected the join to record a label");
+      }
+      const [caveat, disjunction] = taint.label.confidentiality as [
+        { source: { of: string[] } },
+        { anyOf: [{ renderRef: { path: string[] } }] },
+      ];
+
+      expect(Object.isFrozen(caveat.source)).toBe(true);
+      expect(Object.isFrozen(caveat.source.of)).toBe(true);
+      expect(() => caveat.source.of.push("health")).toThrow(TypeError);
+      expect(Object.isFrozen(disjunction.anyOf[0].renderRef)).toBe(true);
+      expect(Object.isFrozen(disjunction.anyOf[0].renderRef.path)).toBe(true);
+    });
+  });
+
   it("freezes a disjunction all the way to its alternatives", () => {
     // A clause can be an OR of atoms, so the list, the disjunction, its
     // alternatives array and each alternative are all containers a caller

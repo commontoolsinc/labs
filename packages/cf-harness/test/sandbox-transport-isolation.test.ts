@@ -39,14 +39,32 @@ describe("CFC sidecar transport isolation", () => {
     // Counted per option, the list-valued ones included: a second read of any
     // of them is a second chance for the caller's object to answer
     // differently, whether or not this particular one lets a path escape.
-    const reads: Record<string, number> = {};
-    const options = {
+    // EVERY option, not the three whose second read had a consequence: a
+    // count over a subset stays green while an uninstrumented option grows a
+    // second read, which is the invariant failing without the guard noticing.
+    // Mutually valid values, so the resolver runs to completion rather than
+    // stopping at the first refusal and leaving later options unread.
+    const values: Record<string, unknown> = {
+      dockerBinary: "/usr/bin/docker",
+      runtimeName: "runsc-cfc",
+      image: "cf-harness:test",
+      containerUser: "1000:1000",
+      workspaceHostPath: "/host/project",
+      workspaceMountPath: "/workspace",
+      shellPath: "/bin/sh",
+      dockerNetworkMode: "none",
+      additionalMounts: [],
+      extraDockerArgs: [],
       cfcResultDir: "/host/sidecars/results",
-    } as ResolveDockerRunscSandboxConfigOptions;
+      cfcInvocationContextDir: "/host/sidecars/context",
+      artifactRootHostPath: "/host/artifacts",
+    };
+    const reads: Record<string, number> = {};
+    const options = {} as ResolveDockerRunscSandboxConfigOptions;
     // Defined rather than spread: spreading an object of getters invokes them
     // at the spread and leaves plain data behind, so the count would be of
     // this test's own read and never of the resolver's.
-    const counted = (name: string, value: unknown) =>
+    for (const [name, value] of Object.entries(values)) {
       Object.defineProperty(options, name, {
         enumerable: true,
         get: () => {
@@ -54,17 +72,13 @@ describe("CFC sidecar transport isolation", () => {
           return value;
         },
       });
-    counted("workspaceHostPath", "/host/project");
-    counted("additionalMounts", []);
-    counted("extraDockerArgs", []);
+    }
 
     const config = resolveDockerRunscSandboxConfig(options);
 
-    expect(reads).toEqual({
-      workspaceHostPath: 1,
-      additionalMounts: 1,
-      extraDockerArgs: 1,
-    });
+    expect(reads).toEqual(
+      Object.fromEntries(Object.keys(values).map((name) => [name, 1])),
+    );
     expect(config.workspaceHostPath).toBe("/host/project");
     expect(config.cfcResultDir).toBe("/host/sidecars/results");
   });
