@@ -26,19 +26,21 @@ import { tagFromFabricValue, VALUE_TAGS, type ValueTag } from "./value-tags.ts";
  * will iterate over the contents, calling
  * `ValueVisitor.visitArrayContentsItem()` on each element.
  */
-export type ArrayContentsForm<Domain> =
-  { type: "arrayContents"; value: readonly Domain[] };
+export type ArrayContentsForm<Domain> = {
+  type: "arrayContents";
+  value: readonly Domain[];
+};
 
 /**
-  * Baseline possible results from arbitrary `visit*()` calls, defining the
-  * result cases common to all of these methods.
-  *
-  * See the included result types for details on what they mean. As for
-  * `undefined`, if a visitor returns it in the context of this type, it means
-  * that the visit of the given value was completed; the visitor ngine will not
-  * process it further, and there is no specific value to return from (this part
-  * of) the visit.
-  */
+ * Baseline possible results from arbitrary `visit*()` calls, defining the
+ * result cases common to all of these methods.
+ *
+ * See the included result types for details on what they mean. As for
+ * `undefined`, if a visitor returns it in the context of this type, it means
+ * that the visit of the given value was completed; the visitor ngine will not
+ * process it further, and there is no specific value to return from (this part
+ * of) the visit.
+ */
 export type BaselineVisitResult<ResultType> =
   | MainResultForm<ResultType>
   | undefined;
@@ -86,19 +88,23 @@ export type LeafVisitorResult<Domain, ResultType> =
  * visitor indicates that the `visit()` should end promptly (do no further
  * sub-visits), returning this value.
  */
-export type MainResultForm<ResultType> =
-  { type: "mainResult"; value: ResultType };
+export type MainResultForm<ResultType> = {
+  type: "mainResult";
+  value: ResultType;
+};
 
 /**
-  * A `mapContents` form. This is returned by visitor methods which wish to
-  * treat the value they received as a container of map-like contents. `value`
-  * indicates the contents of the container as `[key, value]` pairs (similar to
-  * the return value from `Map.entries()` or `Object.entries()`), and by
-  * returning this, the engine will iterate over the contents, calling
-  * `ValueVisitor.visitMapContentsItem()` on each element.
-  */
-export type MapContentsForm<Domain> =
-  { type: "mapContents"; value: readonly [Domain, Domain][] };
+ * A `mapContents` form. This is returned by visitor methods which wish to
+ * treat the value they received as a container of map-like contents. `value`
+ * indicates the contents of the container as `[key, value]` pairs (similar to
+ * the return value from `Map.entries()` or `Object.entries()`), and by
+ * returning this, the engine will iterate over the contents, calling
+ * `ValueVisitor.visitMapContentsItem()` on each element.
+ */
+export type MapContentsForm<Domain> = {
+  type: "mapContents";
+  value: readonly [Domain, Domain][];
+};
 
 /**
  * A `recurse` form. This is returned by visitor methods which are used to
@@ -301,7 +307,10 @@ class VisitInProgress<Domain, ResultType> {
    * Visits the items in an `arrayContents` result, recursing or returning as
    * directed by `ValueVisitor.visitArrayContentsItem()`.
    */
-  #subvisitArray(value: Domain, values: readonly Domain[]): BaselineVisitResult<ResultType> {
+  #subvisitArray(
+    value: Domain,
+    values: readonly Domain[],
+  ): BaselineVisitResult<ResultType> {
     const vis = this.#visitor;
 
     this.#stack.push(value);
