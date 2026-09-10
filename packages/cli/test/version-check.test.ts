@@ -1,10 +1,12 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { expect } from "@std/expect";
 import {
   addProcessUnloadListener,
   processExitCode,
   resetDeferredSkewNoteForTest,
   SKIP_VERSION_CHECK_ENV,
   startVersionCheck,
+  suppressDeferredSkewNote,
   versionMismatchWarning,
 } from "../lib/version-check.ts";
 import type { ShaRelation } from "../lib/build-info.ts";
@@ -41,10 +43,13 @@ Deno.test("versionMismatchWarning", async (t) => {
       serverBehindBy: 7,
     });
     assert(warning !== null);
-    assertStringIncludes(warning, "A possible cause");
+    expect(warning).toContain("Version context:");
     assertStringIncludes(warning, "newer than the server");
     assertStringIncludes(warning, "7 commit(s) behind");
-    assertStringIncludes(warning, "redeploy");
+    expect(warning).toContain(
+      "Commit distance alone does not establish incompatibility",
+    );
+    expect(warning).not.toMatch(/possible cause|redeploy|Restart/);
     assert(!warning.includes("OUTDATED"));
   });
 
@@ -254,6 +259,31 @@ Deno.test("startVersionCheck", async (t) => {
     unloadHandlers[0]!();
     assertEquals(warnings, []);
   });
+
+  await t.step(
+    "suppresses explained failures and can arm a later note",
+    async () => {
+      resetDeferredSkewNoteForTest();
+      const { warnings, unloadHandlers, exit, deps } = recordingDeps(
+        undefined,
+        {
+          checkoutDir: "/some/checkout/packages/cli/lib",
+          relation: { kind: "cli-ahead", serverBehindBy: 7 },
+        },
+      );
+      const check = startVersionCheck(deps);
+      await check.finish("bbb222", API);
+      suppressDeferredSkewNote();
+      exit.code = 1;
+      unloadHandlers[0]!();
+      expect(warnings).toEqual([]);
+
+      await check.finish("bbb222", API);
+      expect(unloadHandlers).toHaveLength(1);
+      unloadHandlers[0]!();
+      expect(warnings).toHaveLength(1);
+    },
+  );
 
   await t.step(
     "a second finish re-arms the note without a second hook",

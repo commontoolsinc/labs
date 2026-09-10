@@ -76,8 +76,11 @@ reports), so the check adds no request of its own.
 The warning is graded, because the two directions are different problems. A
 cf newer than its server is the normal local-dev state (the checkout moved
 on; the server kept running) and prints nothing on a command that succeeds —
-its note is held, and appears only when a command fails, as context naming
-how far behind the server is. A cf **older** than its server is the
+its note is held for failures, as context naming how far behind the server is.
+Commit distance alone does not establish incompatibility or explain a failure.
+`cf piece call` suppresses the held note for a confirmed unknown verb, a rejected
+payload, or argument validation that fails before dispatch. A cf **older** than
+its server is the
 dangerous direction — the server speaks a protocol this cf predates — and
 gets a loud OUTDATED warning immediately, success or not. Direction is proven by git ancestry in the checkout's
 history, so it is available to source runs whose history contains the

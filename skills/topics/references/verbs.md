@@ -1,9 +1,16 @@
-# Start from the deployed verbs
+# Discover the deployed contract
 
 Part of `skills/topics/SKILL.md`, which is the map. This is the detail on what
 the running board and its Topics accept.
 
-The running piece is authoritative. Orient before mutating it:
+The running piece is authoritative. Choose discovery by what you need:
+
+- To survey Topics, read the projected board `index` in
+  `skills/topics/references/reading.md`.
+- To discover a piece's readable fields and operations, use
+  `deno task cf piece describe --cell "$TOPICS_BOARD" --json`. It documents
+  fields; `cell get` reads their values.
+- To choose an operation to call, list the deployed verbs:
 
 ```bash
 deno task cf piece verbs --cell "$TOPICS_BOARD" --json
@@ -13,34 +20,35 @@ That listing includes the deployed pattern reference, callable prose, and input
 and output schemas. `deno task cf piece describe --cell "$TOPICS_BOARD" --json`
 returns a superset of it (the same verb rows plus name, purpose, state, and
 inputs) for the same bounded discovery load. Neither command starts the piece;
-the reason to default to `verbs` is payload, not time: the listing is the
-smaller document to hold in context, and it is complete for calling. Use
-`describe` when you need the piece-wide purpose, state, or input documentation.
-Use `deno task cf piece call --cell "$TOPICS_BOARD" <verb> --help --json` only
-after choosing a verb and when its generated flags or standalone help are
-useful; help is served through the dispatch path, which starts the addressed
-piece, so it is the most expensive of the three. Each command is an independent
-cold CLI process, so do not run all three by default.
+`verbs` has a smaller payload when only callable operations are needed. Its
+listing does not describe readable data: a board exposing only `addTopic` can
+still hold an index of many Topics. Use
+`deno task cf piece call --cell "$TOPICS_BOARD" <verb> --help --json` only after
+choosing a verb and when its generated flags or standalone help are useful; help
+is served through the dispatch path, which starts the addressed piece, so it is
+the most expensive of the three. Each command is an independent cold CLI
+process, so do not run all three by default.
 
-The deployment can be well behind the checkout the CLI runs from, and that gap
-explains board behavior that would otherwise read as a defect. Ask it which
-commit it serves before recording one:
+Estuary routinely trails the checkout the CLI runs from. The gap is expected;
+commit distance alone does not establish incompatibility or explain a failure.
+The CLI revision, server revision, and piece's pinned pattern reference are
+separate facts. `piece describe` and `piece verbs` read the contract from that
+pinned pattern; the server commit does not identify the board's pattern source.
+When investigating runtime compatibility, ask which commit the server serves:
 
 ```bash
 curl -fsS "$CF_API_URL/api/meta" | jq -r .gitSha
 ```
 
-Resolve that in the repository — `git log --oneline -1 <sha>`, and
-`git rev-list --count <sha>..upstream/main` for the distance — before concluding
-anything from a verb that behaves unlike the source in front of you. A gap of
-dozens of commits is ordinary, so which source is running is the first question,
-not the last.
+Resolve that in the repository with `git log --oneline -1 <sha>` when comparing
+server behavior against local runtime code. When comparing a verb's contract,
+use the piece's pinned pattern instead.
 
-Run `piece verbs --json` again after selecting a Topic, and use `describe` or
-per-verb help on demand. `piece verbs` lists contract verbs by default; `--all`
-additionally shows UI wrappers and deprecated verbs. The board's published Topic
-rows deliberately contain no verbs: take a row's address and call that Topic
-directly.
+Before calling a Topic's verb, discover that Topic's contract with `describe` or
+`verbs`; use per-verb help on demand. `piece verbs` lists contract verbs by
+default; `--all` additionally shows UI wrappers and deprecated verbs. The
+board's published Topic rows deliberately contain no verbs: take a row's address
+and call that Topic directly.
 
 The current declared contract is:
 

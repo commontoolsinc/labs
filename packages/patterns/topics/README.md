@@ -208,15 +208,17 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
 
 ## Headless / agent use
 
-Agents are first-class participants. Treat the running piece as authoritative:
-start with `cf piece verbs --piece <piece> --json`, which carries the deployed
-pattern reference and every verb's prose and schemas. Reach for
-`cf piece describe --piece <piece>` when piece-wide purpose, state, or input
-documentation is needed, and once a verb is chosen for its own page:
-`cf piece call --piece <piece> <verb> --help --json`. Each is its own cold CLI
-process, so the three are not a default preflight. The default verb listing is
-the contract surface; `--all` additionally shows UI wrappers and deprecated
-verbs. Against a deployed board piece:
+Agents are first-class participants. To survey Topics, read the projected board
+`index` as described below. To discover a piece's readable fields and
+operations, use `cf piece describe --cell <piece>`; `cf cell get` reads field
+values. To choose an operation to call, use
+`cf piece verbs --cell <piece> --json`, which carries the deployed pattern
+reference and every verb's prose and schemas. Treat that pinned pattern as
+authoritative for the contract. Once a verb is chosen, its own page is
+`cf piece call --cell <piece> <verb> --help --json`. Discovery and per-verb help
+run in separate cold CLI processes; choose the command relevant to the task. The
+default verb listing is the contract surface; `--all` additionally shows UI
+wrappers and deprecated verbs. Against a deployed board piece:
 
 ```bash
 # The read options follow the `--` marker, which closes the verb's own

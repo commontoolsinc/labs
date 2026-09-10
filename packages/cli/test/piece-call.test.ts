@@ -61,6 +61,7 @@ import {
   LinkValidationError,
   PieceResultProjectionError,
   PieceVerbReadError,
+  UnknownPieceVerbError,
 } from "../lib/piece.ts";
 import type { ExecutedPieceCallable } from "../lib/piece.ts";
 import { cf, stripAnsi } from "./utils.ts";
@@ -1982,6 +1983,63 @@ describe("forced-stream fallback dispatch", () => {
     expect(result.resolved.callableCell).toBe(harness.streamCell);
     expect(harness.sends).toEqual([{ note: "hi" }]);
     expect(harness.dataWrites).toEqual([]);
+  });
+
+  it("dispatches a cataloged verb whose stored schema lost the stream marker", async () => {
+    const harness = createFallbackHarness();
+    const reads: unknown[] = [];
+    const piece = {
+      ...harness.piece,
+      getPattern: (options: unknown) => {
+        reads.push(options);
+        return Promise.resolve({
+          resultSchema: {
+            type: "object",
+            properties: { hiddenPing: { asCell: ["stream"] } },
+          },
+        });
+      },
+    };
+    await executePieceCallable(config, "hiddenPing", ["--note", "hi"], {
+      loadPieces: () => Promise.resolve(harness.pieces as never),
+      loadPiece: () => Promise.resolve(piece as never),
+      isStdinTerminal: () => true,
+    });
+    expect(harness.sends).toEqual([{ note: "hi" }]);
+    expect(reads).toEqual([{ projectResult: false }]);
+  });
+
+  it("keeps the stream fallback usable when the pattern cannot be read", async () => {
+    const harness = createFallbackHarness();
+    const piece = {
+      ...harness.piece,
+      getPattern: () => Promise.reject(new Error("pattern unavailable")),
+    };
+    await executePieceCallable(config, "hiddenPing", ["--note", "hi"], {
+      loadPieces: () => Promise.resolve(harness.pieces as never),
+      loadPiece: () => Promise.resolve(piece as never),
+      isStdinTerminal: () => true,
+    });
+    expect(harness.sends).toEqual([{ note: "hi" }]);
+  });
+
+  it("refuses a stream cast against an available empty catalog", async () => {
+    const harness = createFallbackHarness();
+    const piece = {
+      ...harness.piece,
+      getPattern: () =>
+        Promise.resolve({ resultSchema: { type: "object", properties: {} } }),
+    };
+    const call = executePieceCallable(config, "hiddenPing", ["--note", "hi"], {
+      loadPieces: () => Promise.resolve(harness.pieces as never),
+      loadPiece: () => Promise.resolve(piece as never),
+      isStdinTerminal: () => true,
+    });
+    await expect(call).rejects.toThrow(UnknownPieceVerbError);
+    await expect(call).rejects.toThrow(
+      "Available verbs (including wrappers and deprecated verbs): none.",
+    );
+    expect(harness.sends).toEqual([]);
   });
 
   it("keeps the published payload schema for the command spec", async () => {
