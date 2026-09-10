@@ -715,18 +715,32 @@ export function sealDay(
   );
 }
 
+/** A day as an older state wrote it: the percentile rather than the samples. */
+interface StoredPercentile {
+  p90: number;
+  count: number;
+}
+
 /**
  * Reads a state's stored days forward. A day carrying a percentile and a
- * count is read as a day whose one sample is that percentile, which gives
- * the same cost back and leaves the window inside `COST_WINDOW_DAYS`.
+ * count is read as a day of that many executions standing at that
+ * percentile, capped the way any day's sample is capped. It gives the
+ * same cost back, and a later part of the same day merges into it
+ * against the whole day's weight: one execution standing for the day
+ * would be outweighed by the first part to arrive after it, which is
+ * how a day of slow runs would come to report a fast one.
  */
 export function readCostsForward(state: IdentityState): void {
-  for (const [day, stored] of Object.entries(state.costByDay)) {
-    const held = stored as Partial<DaySamples> & { p90?: unknown };
-    if (Array.isArray(held.slowest)) continue;
-    state.costByDay[day] = {
-      slowest: typeof held.p90 === "number" ? [held.p90] : [],
-      count: typeof held.count === "number" ? held.count : 0,
+  const days = state.costByDay ?? {};
+  state.costByDay = days;
+  // A stored day is one shape or the other, which the state's own
+  // declared type cannot say.
+  const read: Record<string, DaySamples | StoredPercentile> = days;
+  for (const [day, held] of Object.entries(read)) {
+    if ("slowest" in held) continue;
+    days[day] = {
+      slowest: new Array(Math.min(held.count, COST_SAMPLE_CAP)).fill(held.p90),
+      count: held.count,
     };
   }
 }

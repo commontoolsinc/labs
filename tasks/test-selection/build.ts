@@ -319,9 +319,9 @@ export function readReport(
         place: where.place,
       });
       // A cost predicts what a lane will spend running this test again,
-      // and only a passing execution measures that. A failure ended where
-      // the failure was reached, and one a wait's safety net stopped
-      // reports that net's bound.
+      // and only a passing execution measures that. A failure ended
+      // where the failure was reached, and where a wait's safety net
+      // ended it, its duration is that net's bound.
       if (record.outcome !== "pass") continue;
       let byDay = durations.get(key);
       if (byDay === undefined) {

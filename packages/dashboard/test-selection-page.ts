@@ -45,7 +45,7 @@ import {
 /** The fragment the flaky tests tile links to. */
 export const FLAKY_SECTION_ID = "flaky";
 
-/** The fragment the selection tile links to once a test is past the bound. */
+/** The fragment the tests no lane can hold are listed under. */
 export const UNSCHEDULABLE_SECTION_ID = "unschedulable";
 
 /** Where the page lives, and what both tiles link to. */

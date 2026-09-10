@@ -520,7 +520,7 @@ describe("build", () => {
         .toEqual([KEY]);
     });
 
-    it("reads a day carrying a percentile as a day of that one sample", () => {
+    it("gives back the cost a day carrying a percentile was giving", () => {
       // The shape a state written before the samples were kept carries.
       const aggregate = emptyAggregate("2026-08-20");
       const held = emptyState();
@@ -530,10 +530,7 @@ describe("build", () => {
       };
       aggregate.states[KEY] = held;
       const parsed = parseAggregate(JSON.stringify(aggregate))!;
-      expect(parsed.states[KEY]!.costByDay["2026-08-20"]).toEqual({
-        slowest: [4000],
-        count: 45,
-      });
+      expect(costSeconds(parsed.states[KEY]!, "2026-08-20")).toBe(4);
     });
 
     it("reads a malformed unplaced list as nothing to compare against", () => {

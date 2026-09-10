@@ -12,6 +12,7 @@ import {
   flakeCounts,
   flakeRate,
   foldObservations,
+  type IdentityState,
   mergeSamples,
   type Observation,
   parseContext,
@@ -711,19 +712,45 @@ describe("sealDay()", () => {
 });
 
 describe("readCostsForward()", () => {
-  it("reads a day carrying a percentile as a day of that one sample", () => {
+  /** The shape a state written before the samples were kept carries. */
+  const held = (p90: number, count: number): IdentityState => {
     const state = emptyState();
-    // The shape a state written before the samples were kept carries.
-    (state.costByDay as Record<string, unknown>)["2026-08-20"] = {
-      p90: 4000,
-      count: 45,
-    };
+    (state.costByDay as Record<string, unknown>)["2026-08-20"] = { p90, count };
+    return state;
+  };
+
+  it("gives back the cost a day carrying a percentile was giving", () => {
+    const state = held(4000, 45);
     readCostsForward(state);
-    expect(state.costByDay["2026-08-20"]).toEqual({
-      slowest: [4000],
-      count: 45,
-    });
     expect(costSeconds(state, "2026-08-20")).toBe(4);
+  });
+
+  it("gives it back for a day of more executions than are kept", () => {
+    const state = held(4000, 10 * COST_SAMPLE_CAP);
+    readCostsForward(state);
+    expect(state.costByDay["2026-08-20"]!.slowest.length)
+      .toBe(COST_SAMPLE_CAP);
+    expect(costSeconds(state, "2026-08-20")).toBe(4);
+  });
+
+  it("weighs such a day by its executions when the rest of it lands", () => {
+    // A day arrives over as many runs as it takes, so a day read forward
+    // is still open. One execution standing for the whole of it would be
+    // outweighed by the next part to arrive, and a day of slow runs
+    // would come to report a fast one.
+    const state = held(30_000, 45);
+    readCostsForward(state);
+    sealDay(state, "2026-08-20", samplesOf([10, 20]));
+    expect(costSeconds(state, "2026-08-20")).toBe(30);
+  });
+
+  it("reads a state carrying no days at all as carrying none", () => {
+    // The aggregate reports a state it cannot read rather than throwing
+    // partway through one.
+    const state = emptyState();
+    delete (state as { costByDay?: unknown }).costByDay;
+    readCostsForward(state);
+    expect(state.costByDay).toEqual({});
   });
 
   it("leaves a day that already carries its samples alone", () => {
