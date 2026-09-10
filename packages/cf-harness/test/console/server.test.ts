@@ -1419,6 +1419,34 @@ describe("console/server", () => {
     });
   });
 
+  describe("resolveConsoleConfig()", () => {
+    it("throws naming both ways to supply a fabric session when neither is given", async () => {
+      await expect(resolveConsoleConfig([], {}, "/console")).rejects.toThrow(
+        "a fabric session is required",
+      );
+    });
+
+    it("throws naming the flag for a port that is not a positive integer", async () => {
+      await expect(
+        resolveConsoleConfig(
+          ["--fabric-identity", "k", "--fabric-space", "s", "--port", "0"],
+          {},
+          "/console",
+        ),
+      ).rejects.toThrow("--port must be a positive integer");
+    });
+
+    it("throws naming the variable for a port the environment set wrongly", async () => {
+      await expect(
+        resolveConsoleConfig(
+          ["--fabric-identity", "k", "--fabric-space", "s"],
+          { CF_HARNESS_CONSOLE_PORT: "http" },
+          "/console",
+        ),
+      ).rejects.toThrow("CF_HARNESS_CONSOLE_PORT must be a positive integer");
+    });
+  });
+
   describe("POST /api/index/call", () => {
     /** Posts one proxied read at a server that has an index. */
     const call = async (
@@ -1428,6 +1456,30 @@ describe("console/server", () => {
       await indexed.server.handle(
         jsonRequest("/api/index/call", body),
       );
+
+    it("passes a `listEvents` read through with the pattern and limit it named", async () => {
+      const indexed = await indexServer([Response.json({ events: [] })]);
+
+      const response = await call(indexed, {
+        fn: "listEvents",
+        body: { patternId: "ss-2w4nQ8", limit: 5 },
+      });
+
+      expect(response.status).toBe(200);
+      expect(indexed.requests).toHaveLength(1);
+      const sent = `${indexed.requests[0].url} ${indexed.requests[0].body}`;
+      expect(sent).toContain("ss-2w4nQ8");
+      expect(sent).toContain("5");
+    });
+
+    it("passes a `listEvents` read naming neither a pattern nor a limit", async () => {
+      const indexed = await indexServer([Response.json({ events: [] })]);
+
+      const response = await call(indexed, { fn: "listEvents" });
+
+      expect(response.status).toBe(200);
+      expect(indexed.requests).toHaveLength(1);
+    });
 
     it("answers a host-side failure generically, never with its message", async () => {
       // A factory that cannot build its client throws host-side — an

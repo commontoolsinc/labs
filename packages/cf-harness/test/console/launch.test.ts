@@ -2,11 +2,18 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  type ConsoleLaunchIo,
   type ConsoleLaunchRecords,
   consoleLaunchReport,
   DEPLOYMENT_PATTERN_INDEX_URL,
   DEPLOYMENT_SKILLS_REGISTRY_URL,
+  launchConsole,
   LAUNCHER_OWNED_VARIABLES,
+  launchFailureMessage,
+  prepareConsoleLaunch,
+  readDockerRuntimes,
+  readOptionalFile,
+  readToolshedStoreDir,
   resolveConsoleLaunchPlan,
   WEAVER_PAIRING_PORT,
 } from "../../console/launch.ts";
@@ -63,6 +70,14 @@ const withPieces = (
   ...RECORDS,
   instance: { ...RECORDS.instance!, piecesJson: JSON.stringify({ defaults }) },
 });
+
+/** An executable that prints what the test wants the machine to say. */
+const fakeBinary = async (body: string): Promise<string> => {
+  const path = await Deno.makeTempFile({ prefix: "cf-launch-bin-" });
+  await Deno.writeTextFile(path, `#!/bin/sh\n${body}\n`);
+  await Deno.chmod(path, 0o755);
+  return path;
+};
 
 describe("launch", () => {
   describe("resolveConsoleLaunchPlan()", () => {
@@ -262,6 +277,24 @@ describe("launch", () => {
           OPTIONS,
         )
       ).toThrow("`--fabric-api-url`");
+    });
+
+    it("throws naming the file when `pieces.json` does not parse", () => {
+      expect(() =>
+        resolveConsoleLaunchPlan({
+          ...RECORDS,
+          instance: { ...RECORDS.instance!, piecesJson: "{" },
+        }, OPTIONS)
+      ).toThrow("/loom/instances/loom/pieces.json` is not valid JSON");
+    });
+
+    it("throws naming the file when `pieces.json` is not an object", () => {
+      expect(() =>
+        resolveConsoleLaunchPlan({
+          ...RECORDS,
+          instance: { ...RECORDS.instance!, piecesJson: "[1]" },
+        }, OPTIONS)
+      ).toThrow("does not hold a JSON object");
     });
 
     it("throws naming `--store` when loom printed none", () => {
@@ -473,6 +506,516 @@ describe("launch", () => {
           space: "did:key:z6Mk",
         })
       ).toThrow("rather than a DID");
+    });
+  });
+
+  // ----------------------------------------------------------------------
+  // Reading the machine
+  //
+  // `prepareConsoleLaunch` turns argv and the environment into a plan. Its
+  // three readings of the machine are handed in, so what these exercise is
+  // the argument and environment plumbing between them and the resolver.
+  // ----------------------------------------------------------------------
+
+  describe("prepareConsoleLaunch()", () => {
+    const io = (
+      overrides: Partial<ConsoleLaunchIo> = {},
+    ): ConsoleLaunchIo => ({
+      readTextFile: () => Promise.resolve(PIECES_JSON),
+      readToolshedStoreDir: () =>
+        Promise.resolve("file:///store/68239506e79d/memory/"),
+      readDockerRuntimes: () => Promise.resolve({ runtimes: DOCKER_RUNTIMES }),
+      ...overrides,
+    });
+
+    const NAMED_ARGS = [
+      "--fabric-identity",
+      "/keys/dev.key",
+      "--fabric-space",
+      "cf-harness-dev",
+      "--fabric-api-url",
+      "http://localhost:8000",
+      "--store",
+      "/checkout/cache/memory",
+    ];
+
+    it("returns a plan built from the flags it was given", async () => {
+      const { plan } = await prepareConsoleLaunch(NAMED_ARGS, {}, io());
+
+      expect(plan.environment.CF_HARNESS_FABRIC_IDENTITY).toBe("/keys/dev.key");
+      expect(plan.environment.CF_HARNESS_FABRIC_SPACE).toBe("cf-harness-dev");
+      expect(plan.environment.CF_HARNESS_FABRIC_API_URL).toBe(
+        "http://localhost:8000",
+      );
+      expect(plan.environment.MEMORY_DIR).toBe("/checkout/cache/memory");
+    });
+
+    it("returns the arguments after `--` for the console, and no others", async () => {
+      const { consoleArgs } = await prepareConsoleLaunch(
+        [...NAMED_ARGS, "--port", "8140", "--", "--host-mount", "name=c"],
+        {},
+        io(),
+      );
+
+      expect(consoleArgs).toEqual(["--host-mount", "name=c"]);
+    });
+
+    it("reads the identity and space off an instance when one is named", async () => {
+      const { plan } = await prepareConsoleLaunch(
+        ["--instance", "loom", "--fabric-api-url", "http://localhost:8001"],
+        { HOME: "/home/dev" },
+        io(),
+      );
+
+      expect(plan.environment.CF_HARNESS_FABRIC_SPACE).toBe("ben-loom-dev-6");
+      expect(plan.environment.CF_HARNESS_FABRIC_IDENTITY).toBe(
+        "/keys/instance.key",
+      );
+    });
+
+    it("returns the store as a path when loom printed a `file://` URL", async () => {
+      const { plan } = await prepareConsoleLaunch(
+        ["--instance", "loom"],
+        { HOME: "/home/dev" },
+        io(),
+      );
+
+      expect(plan.environment.MEMORY_DIR).toBe("/store/68239506e79d/memory/");
+    });
+
+    it("does not read an instance for an inherited `LOOM_INSTANCE_ID` alone", async () => {
+      // The console comes along because someone asked for it. An ambient
+      // variable is a fact about the process tree, not a request.
+
+      await expect(
+        prepareConsoleLaunch([], { LOOM_INSTANCE_ID: "loom" }, io()),
+      ).rejects.toThrow("`--fabric-identity`");
+    });
+
+    it("throws naming the instance whose `pieces.json` is not there", async () => {
+      await expect(
+        prepareConsoleLaunch(
+          ["--instance", "ghost"],
+          { HOME: "/home/dev" },
+          io({ readTextFile: () => Promise.resolve(undefined) }),
+        ),
+      ).rejects.toThrow("loom instance `ghost` has no");
+    });
+
+    it("carries the reason `docker info` could not be read into the error", async () => {
+      await expect(
+        prepareConsoleLaunch(
+          NAMED_ARGS,
+          {},
+          io({
+            readDockerRuntimes: () =>
+              Promise.resolve({ unreadable: "daemon is not running" }),
+          }),
+        ),
+      ).rejects.toThrow("daemon is not running");
+    });
+
+    it("reads the console's own environment names before the `cf` CLI's", async () => {
+      const { plan } = await prepareConsoleLaunch(
+        ["--fabric-api-url", "http://localhost:8000", "--store", "/s"],
+        {
+          CF_HARNESS_FABRIC_IDENTITY: "/keys/console.key",
+          CF_IDENTITY: "/keys/cf.key",
+          CF_HARNESS_FABRIC_SPACE: "console-space",
+          CF_SPACE: "cf-space",
+        },
+        io(),
+      );
+
+      expect(plan.environment.CF_HARNESS_FABRIC_IDENTITY).toBe(
+        "/keys/console.key",
+      );
+      expect(plan.environment.CF_HARNESS_FABRIC_SPACE).toBe("console-space");
+    });
+
+    it("falls back to the `cf` CLI's names when the console's are unset", async () => {
+      const { plan } = await prepareConsoleLaunch(
+        ["--fabric-api-url", "http://localhost:8000", "--store", "/s"],
+        { CF_IDENTITY: "/keys/cf.key", CF_SPACE: "cf-space" },
+        io(),
+      );
+
+      expect(plan.environment.CF_HARNESS_FABRIC_IDENTITY).toBe("/keys/cf.key");
+      expect(plan.environment.CF_HARNESS_FABRIC_SPACE).toBe("cf-space");
+    });
+
+    it("reads the toolshed URL and store from the environment the console names", async () => {
+      const { plan } = await prepareConsoleLaunch(
+        ["--fabric-identity", "/k", "--fabric-space", "s"],
+        {
+          CF_HARNESS_FABRIC_API_URL: "http://localhost:8300",
+          MEMORY_DIR: "file:///env/store/",
+        },
+        io(),
+      );
+
+      expect(plan.environment.CF_HARNESS_FABRIC_API_URL).toBe(
+        "http://localhost:8300",
+      );
+      expect(plan.environment.MEMORY_DIR).toBe("/env/store/");
+    });
+
+    it("returns every posture and registry flag it was given", async () => {
+      const { plan } = await prepareConsoleLaunch(
+        [
+          ...NAMED_ARGS,
+          "--console-dir",
+          "/consoles/one",
+          "--pattern-index-url",
+          "https://index.example",
+          "--skills-registry-url",
+          "https://skills.example",
+          "--cfc-result-dir",
+          "/r",
+          "--cfc-invocation-context-dir",
+          "/c",
+          "--fabric-cfc-posture",
+          "none",
+          "--fabric-cfc-flow-labels",
+          "observe",
+          "--fabric-cfc-enforcement-mode",
+          "observe",
+        ],
+        {},
+        io(),
+      );
+
+      expect(plan.environment.CF_HARNESS_CONSOLE_DIR).toBe("/consoles/one");
+      expect(plan.environment.CF_HARNESS_PATTERN_INDEX_URL).toBe(
+        "https://index.example",
+      );
+      expect(plan.environment.CF_HARNESS_SKILLS_REGISTRY_URL).toBe(
+        "https://skills.example",
+      );
+      expect(plan.environment.CF_HARNESS_RUNSC_CFC_RESULT_DIR).toBe("/r");
+      expect(plan.environment.CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR)
+        .toBe("/c");
+      expect(plan.environment.CF_HARNESS_FABRIC_CFC_POSTURE).toBe("none");
+      expect(plan.environment.CF_HARNESS_FABRIC_CFC_FLOW_LABELS).toBe(
+        "observe",
+      );
+      expect(plan.environment.CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE).toBe(
+        "observe",
+      );
+    });
+
+    it("leaves the registries out when both are waived", async () => {
+      const { plan } = await prepareConsoleLaunch(
+        [...NAMED_ARGS, "--no-pattern-index", "--no-skills-registry"],
+        {},
+        io(),
+      );
+
+      expect(plan.environment.CF_HARNESS_PATTERN_INDEX_URL).toBeUndefined();
+      expect(plan.environment.CF_HARNESS_SKILLS_REGISTRY_URL).toBeUndefined();
+    });
+
+    it("reads the machine itself when no readings are handed in", async () => {
+      // The default wiring: `docker info` is asked for real, and the launch
+      // still fails at the first value nothing supplies, whether or not this
+      // machine has Docker.
+
+      await expect(prepareConsoleLaunch([], {})).rejects.toThrow(
+        "`--fabric-identity`",
+      );
+    });
+
+    it("throws naming `--port` for a port that is not a positive integer", async () => {
+      await expect(
+        prepareConsoleLaunch([...NAMED_ARGS, "--port", "nope"], {}, io()),
+      ).rejects.toThrow("--port must be a positive integer");
+    });
+
+    it("throws for a flag whose value was eaten by looking like a flag", async () => {
+      // `--port -1` leaves the value empty, because `-1` parses as a flag of
+      // its own. Falling through to the default would ignore a port someone
+      // typed.
+
+      await expect(
+        prepareConsoleLaunch([...NAMED_ARGS, "--port", "-1"], {}, io()),
+      ).rejects.toThrow("`--port` was given no value");
+    });
+
+    it("returns the port for the `=` spelling a negative value needs", async () => {
+      await expect(
+        prepareConsoleLaunch([...NAMED_ARGS, "--port=-1"], {}, io()),
+      ).rejects.toThrow("--port must be a positive integer");
+    });
+
+    it("throws naming an instance directory it cannot locate", async () => {
+      await expect(
+        prepareConsoleLaunch(["--instance", "loom"], {}, io()),
+      ).rejects.toThrow("`XDG_DATA_HOME`");
+    });
+
+    it("reads an instance under `XDG_DATA_HOME` when it is set", async () => {
+      const read: string[] = [];
+      await prepareConsoleLaunch(
+        ["--instance", "loom"],
+        { XDG_DATA_HOME: "/data", HOME: "/home/dev" },
+        io({
+          readTextFile: (path) => {
+            read.push(path);
+            return Promise.resolve(PIECES_JSON);
+          },
+        }),
+      );
+
+      expect(read).toEqual(["/data/loom/instances/loom/pieces.json"]);
+    });
+  });
+
+  // ----------------------------------------------------------------------
+  // The three readings themselves
+  //
+  // Driven against real files and real child processes, because what they are
+  // for is the machine answering — a fake would only restate the code.
+  // ----------------------------------------------------------------------
+
+  describe("readOptionalFile()", () => {
+    it("returns the file's text", async () => {
+      const dir = await Deno.makeTempDir({ prefix: "cf-launch-read-" });
+      try {
+        await Deno.writeTextFile(`${dir}/pieces.json`, "{}");
+
+        expect(await readOptionalFile(`${dir}/pieces.json`)).toBe("{}");
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("returns `undefined` for a file that is not there", async () => {
+      const dir = await Deno.makeTempDir({ prefix: "cf-launch-read-" });
+      try {
+        expect(await readOptionalFile(`${dir}/absent.json`)).toBeUndefined();
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("throws for a path that cannot be read for another reason", async () => {
+      const dir = await Deno.makeTempDir({ prefix: "cf-launch-read-" });
+      try {
+        // A directory is not a missing file, so it must not read as absent.
+        await expect(readOptionalFile(dir)).rejects.toThrow();
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+  });
+
+  describe("readToolshedStoreDir()", () => {
+    it("returns what the command printed, trimmed", async () => {
+      const bin = await fakeBinary("printf 'file:///store/memory/\n'");
+      try {
+        expect(await readToolshedStoreDir(bin, "loom")).toBe(
+          "file:///store/memory/",
+        );
+      } finally {
+        await Deno.remove(bin);
+      }
+    });
+
+    it("throws carrying the command's own diagnostic when it fails", async () => {
+      const bin = await fakeBinary("echo 'no such instance' >&2; exit 3");
+      try {
+        await expect(readToolshedStoreDir(bin, "ghost")).rejects.toThrow(
+          "no such instance",
+        );
+      } finally {
+        await Deno.remove(bin);
+      }
+    });
+
+    it("throws naming `--loom-bin` when the command cannot be run", async () => {
+      await expect(
+        readToolshedStoreDir("/nonexistent/loom", "loom"),
+      ).rejects.toThrow("`--loom-bin`");
+    });
+  });
+
+  describe("readDockerRuntimes()", () => {
+    it("returns the runtime table the command printed", async () => {
+      const bin = await fakeBinary(
+        `printf '${JSON.stringify(DOCKER_RUNTIMES)}'`,
+      );
+      try {
+        const read = await readDockerRuntimes(bin);
+
+        expect(read.runtimes).toEqual(DOCKER_RUNTIMES);
+        expect(read.unreadable).toBeUndefined();
+      } finally {
+        await Deno.remove(bin);
+      }
+    });
+
+    it("returns the exit status and stderr when the command fails", async () => {
+      const bin = await fakeBinary("echo 'daemon not running' >&2; exit 1");
+      try {
+        const read = await readDockerRuntimes(bin);
+
+        expect(read.runtimes).toBeUndefined();
+        expect(read.unreadable).toContain("exited 1");
+        expect(read.unreadable).toContain("daemon not running");
+      } finally {
+        await Deno.remove(bin);
+      }
+    });
+
+    it("returns a reason when the table does not parse", async () => {
+      const bin = await fakeBinary("printf 'not json'");
+      try {
+        const read = await readDockerRuntimes(bin);
+
+        expect(read.runtimes).toBeUndefined();
+        expect(read.unreadable).toContain("does not parse");
+      } finally {
+        await Deno.remove(bin);
+      }
+    });
+
+    it("returns a reason when the command cannot be run at all", async () => {
+      const read = await readDockerRuntimes("/nonexistent/docker");
+
+      expect(read.runtimes).toBeUndefined();
+      expect(read.unreadable).toContain("could not be run");
+    });
+  });
+
+  describe("launchConsole()", () => {
+    const io: ConsoleLaunchIo = {
+      readTextFile: () => Promise.resolve(PIECES_JSON),
+      readToolshedStoreDir: () =>
+        Promise.resolve("file:///store/68239506e79d/memory/"),
+      readDockerRuntimes: () => Promise.resolve({ runtimes: DOCKER_RUNTIMES }),
+    };
+    const ARGS = [
+      "--fabric-identity",
+      "/keys/dev.key",
+      "--fabric-space",
+      "cf-harness-dev",
+      "--fabric-api-url",
+      "http://localhost:8000",
+      "--store",
+      "/checkout/cache/memory",
+      "--console-dir",
+      "/consoles/launched",
+    ];
+
+    /** Restores whatever the process held for the keys a launch decides. */
+    const withEnvironmentRestored = async (
+      body: () => Promise<void>,
+    ): Promise<void> => {
+      const before = new Map(
+        LAUNCHER_OWNED_VARIABLES.map((
+          name,
+        ) => [name, Deno.env.get(name)] as const),
+      );
+      try {
+        await body();
+      } finally {
+        for (const [name, value] of before) {
+          if (value === undefined) {
+            Deno.env.delete(name);
+          } else {
+            Deno.env.set(name, value);
+          }
+        }
+      }
+    };
+
+    it("serves under the environment it resolved", async () => {
+      await withEnvironmentRestored(async () => {
+        let served: string[] | undefined;
+        await launchConsole(
+          [...ARGS, "--", "--host-mount", "name=corpus"],
+          {},
+          (consoleArgs) => {
+            served = consoleArgs;
+            return Promise.resolve();
+          },
+          io,
+        );
+
+        expect(served).toEqual(["--host-mount", "name=corpus"]);
+        expect(Deno.env.get("CF_HARNESS_FABRIC_SPACE")).toBe("cf-harness-dev");
+        expect(Deno.env.get("CF_HARNESS_CONSOLE_DIR")).toBe(
+          "/consoles/launched",
+        );
+        expect(Deno.env.get("MEMORY_DIR")).toBe("/checkout/cache/memory");
+      });
+    });
+
+    it("clears an owned variable the resolved environment does not set", async () => {
+      await withEnvironmentRestored(async () => {
+        Deno.env.set("CF_HARNESS_PATTERN_INDEX_URL", "https://inherited.test");
+
+        await launchConsole(
+          [...ARGS, "--no-pattern-index"],
+          {},
+          () => Promise.resolve(),
+          io,
+        );
+
+        expect(Deno.env.get("CF_HARNESS_PATTERN_INDEX_URL")).toBeUndefined();
+      });
+    });
+
+    it("does not serve when the configuration cannot be resolved", async () => {
+      await withEnvironmentRestored(async () => {
+        let served = false;
+
+        await expect(
+          launchConsole([], {}, () => {
+            served = true;
+            return Promise.resolve();
+          }, io),
+        ).rejects.toThrow("`--fabric-identity`");
+        expect(served).toBe(false);
+      });
+    });
+  });
+
+  describe("the module run as a program", () => {
+    it("prints the launch's own message and exits 1 when it cannot start", async () => {
+      // The `import.meta.main` block, which an import never runs. With no
+      // fabric named it fails at the first value it cannot resolve, which is
+      // what an operator who forgot one sees.
+      const launcher = new URL("../../console/launch.ts", import.meta.url);
+      const run = await new Deno.Command(Deno.execPath(), {
+        args: ["run", "-A", launcher.pathname],
+        env: {
+          CF_IDENTITY: "",
+          CF_SPACE: "",
+          CF_HARNESS_FABRIC_IDENTITY: "",
+          CF_HARNESS_FABRIC_SPACE: "",
+        },
+        stdout: "piped",
+        stderr: "piped",
+      }).output();
+
+      expect(run.code).toBe(1);
+      const said = new TextDecoder().decode(run.stderr);
+      expect(said).toContain("`--fabric-identity`");
+      // The message is the whole of what they need; the stack is noise.
+      expect(said).not.toContain("launch.ts:");
+    });
+  });
+
+  describe("launchFailureMessage()", () => {
+    it("returns the error's message", () => {
+      expect(launchFailureMessage(new Error("no space named"))).toBe(
+        "no space named",
+      );
+    });
+
+    it("returns the string form of something thrown that is not an error", () => {
+      expect(launchFailureMessage("plain")).toBe("plain");
     });
   });
 

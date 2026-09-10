@@ -541,7 +541,9 @@ const loomDataDirectory = (env: Record<string, string | undefined>): string => {
   return join(home, ".local", "share", "loom");
 };
 
-const readOptionalFile = async (path: string): Promise<string | undefined> => {
+export const readOptionalFile = async (
+  path: string,
+): Promise<string | undefined> => {
   try {
     return await Deno.readTextFile(path);
   } catch (error) {
@@ -557,7 +559,7 @@ const readOptionalFile = async (path: string): Promise<string | undefined> => {
  * the store the instance's toolshed serves. A `loom` that exits nonzero is
  * reported with its own diagnostic, since it is the one that knows why.
  */
-const readToolshedStoreDir = async (
+export const readToolshedStoreDir = async (
   loomBinary: string,
   instance: string,
 ): Promise<string> => {
@@ -589,7 +591,7 @@ const readToolshedStoreDir = async (
  * The running daemon's table rather than `daemon.json`: a configuration file
  * the daemon has not reloaded names directories nothing writes.
  */
-const readDockerRuntimes = async (
+export const readDockerRuntimes = async (
   dockerBinary: string,
 ): Promise<{ runtimes?: unknown; unreadable?: string }> => {
   let output: Deno.CommandOutput;
@@ -634,13 +636,38 @@ const positiveInteger = (value: string, flag: string): number => {
 };
 
 /**
- * Reads what the fabric records, resolves the console's environment from it,
- * prints the account, and serves.
+ * The three readings a launch makes of the machine it runs on. Named as one
+ * interface because they are what separates deciding the console's
+ * configuration from finding out what the machine says: everything else in
+ * `prepareConsoleLaunch` is argument and environment, which a caller supplies.
  */
-export const launchConsole = async (
-  args: readonly string[] = Deno.args,
-  env: Record<string, string | undefined> = Deno.env.toObject(),
-): Promise<void> => {
+export interface ConsoleLaunchIo {
+  readTextFile: (path: string) => Promise<string | undefined>;
+  readToolshedStoreDir: (
+    loomBinary: string,
+    instance: string,
+  ) => Promise<string>;
+  readDockerRuntimes: () => Promise<
+    { runtimes?: unknown; unreadable?: string }
+  >;
+}
+
+const REAL_IO: ConsoleLaunchIo = {
+  readTextFile: readOptionalFile,
+  readToolshedStoreDir,
+  readDockerRuntimes: () => readDockerRuntimes(DEFAULT_DOCKER_BINARY),
+};
+
+/**
+ * Reads what the fabric records and resolves the console's environment from
+ * it, stopping short of serving: the plan, and the arguments after `--` that
+ * belong to the console rather than to this launcher.
+ */
+export const prepareConsoleLaunch = async (
+  args: readonly string[],
+  env: Record<string, string | undefined>,
+  io: ConsoleLaunchIo = REAL_IO,
+): Promise<{ plan: ConsoleLaunchPlan; consoleArgs: string[] }> => {
   const parsed = parseArgs([...args], {
     string: [
       "instance",
@@ -662,8 +689,24 @@ export const launchConsole = async (
     boolean: ["no-pattern-index", "no-skills-registry"],
     "--": true,
   });
-  const flag = (name: string): string | undefined =>
-    typeof parsed[name] === "string" ? nonEmpty(parsed[name]) : undefined;
+  // A flag present but empty is a value someone typed that did not survive
+  // parsing — `--port -1` leaves `port` empty, because `-1` reads as a flag of
+  // its own — so it is refused rather than falling through to the default the
+  // person was overriding.
+  const flag = (name: string): string | undefined => {
+    const value = parsed[name];
+    if (typeof value !== "string") {
+      return undefined;
+    }
+    const trimmed = nonEmpty(value);
+    if (trimmed === undefined) {
+      throw new Error(
+        `\`--${name}\` was given no value; a value starting with \`-\` needs ` +
+          `the \`--${name}=<value>\` spelling`,
+      );
+    }
+    return trimmed;
+  };
 
   // `--instance` alone opts into reading a loom instance's records. An
   // inherited `LOOM_INSTANCE_ID` does not: the console comes along because
@@ -679,7 +722,7 @@ export const launchConsole = async (
       instanceId,
       "pieces.json",
     );
-    const piecesJson = await readOptionalFile(piecesJsonPath);
+    const piecesJson = await io.readTextFile(piecesJsonPath);
     if (piecesJson === undefined) {
       throw new Error(
         `loom instance \`${instanceId}\` has no \`${piecesJsonPath}\`; name ` +
@@ -690,7 +733,7 @@ export const launchConsole = async (
       id: instanceId,
       piecesJson,
       piecesJsonPath,
-      toolshedStoreDir: await readToolshedStoreDir(loomBinary, instanceId),
+      toolshedStoreDir: await io.readToolshedStoreDir(loomBinary, instanceId),
     };
   }
 
@@ -707,7 +750,7 @@ export const launchConsole = async (
   // Not configurable: the sandbox runs `docker`, so a launcher reading the
   // runtime table from anything else would print directories the runs never
   // reach.
-  const docker = await readDockerRuntimes(DEFAULT_DOCKER_BINARY);
+  const docker = await io.readDockerRuntimes();
 
   const plan = resolveConsoleLaunchPlan({
     ...(instance !== undefined ? { instance } : {}),
@@ -761,6 +804,21 @@ export const launchConsole = async (
       : {}),
   });
 
+  return { plan, consoleArgs: (parsed["--"] ?? []).map(String) };
+};
+
+/**
+ * Reads what the fabric records, prints the account of what it resolved to,
+ * and serves under it.
+ */
+export const launchConsole = async (
+  args: readonly string[] = Deno.args,
+  env: Record<string, string | undefined> = Deno.env.toObject(),
+  serve: (consoleArgs: string[]) => Promise<void> = startConsoleServer,
+  io: ConsoleLaunchIo = REAL_IO,
+): Promise<void> => {
+  const { plan, consoleArgs } = await prepareConsoleLaunch(args, env, io);
+
   console.log("");
   for (const line of consoleLaunchReport(plan)) {
     console.log(line);
@@ -772,17 +830,24 @@ export const launchConsole = async (
   for (const [name, value] of Object.entries(plan.environment)) {
     Deno.env.set(name, value);
   }
-  await startConsoleServer((parsed["--"] ?? []).map(String));
+  await serve(consoleArgs);
 };
+
+/**
+ * What a launch that could not start says. A misconfigured launch is an
+ * operator's problem to fix and the message is the whole of what they need,
+ * so the stack behind it — which names this file rather than their mistake —
+ * is dropped.
+ */
+export const launchFailureMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
 
 // Running the file serves; importing it (the tests do) serves nothing.
 if (import.meta.main) {
   try {
     await launchConsole();
   } catch (error) {
-    // A misconfigured launch is an operator's problem to fix, and the message
-    // is the whole of what they need; the stack behind it is noise.
-    console.error(error instanceof Error ? error.message : String(error));
+    console.error(launchFailureMessage(error));
     Deno.exit(1);
   }
 }
