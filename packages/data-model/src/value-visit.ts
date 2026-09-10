@@ -30,6 +30,57 @@ export type ArrayContentsForm<Domain> =
   { type: "arrayContents"; value: readonly Domain[] };
 
 /**
+  * Baseline possible results from arbitrary `visit*()` calls, defining the
+  * result cases common to all of these methods.
+  *
+  * See the included result types for details on what they mean. As for
+  * `undefined`, if a visitor returns it in the context of this type, it means
+  * that the visit of the given value was completed; the visitor ngine will not
+  * process it further, and there is no specific value to return from (this part
+  * of) the visit.
+  */
+export type BaselineVisitResult<ResultType> =
+  | MainResultForm<ResultType>
+  | undefined;
+
+/**
+ * Possible results from a value-in-container visitor method, that is, methods
+ * which are called per container element as part of an iteration.
+ *
+ * See the included result types for details on what they mean.
+ */
+export type ContainerIterationResult<ResultType> =
+  | BaselineVisitResult<ResultType>
+  | RecurseForm;
+
+/**
+ * Possible results from a visitor method which covers two or more subtypes of
+ * value that the visitor engine can dispatch to.
+ *
+ * See the included result types for details on what they mean.
+ */
+export type GeneralVisitorResult<Domain, ResultType> =
+  | LeafVisitorResult<Domain, ResultType>
+  | VisitSubtypeForm;
+
+/**
+ * Possible results from a visitor method which accepts leaf (non-container)
+ * values when not _directly_ being the subject of an iteration.
+ *
+ * This is a "leaf" in the sense of visitor dispatch -- there is not a
+ * more-specific subtype-based visitor method to call -- but that said, the
+ * value being visited itself might or might not be a leaf in the sense of the
+ * graph structure of the value.
+ *
+ * See the included result types for details on what they mean.
+ */
+export type LeafVisitorResult<Domain, ResultType> =
+  | BaselineVisitResult<ResultType>
+  | ReplaceForm<Domain>
+  | ArrayContentsForm<Domain>
+  | MapContentsForm<Domain>;
+
+/**
  * A `mainResult` form. `value` is a value that is to be returned from the
  * original main (top-level) `visit()` call, and by returning this form, a
  * visitor indicates that the `visit()` should end promptly (do no further
@@ -72,57 +123,6 @@ export type ReplaceForm<Domain> = { type: "replace"; value: Domain };
  * indicates that the engine should in fact do a subtype-based dispatch.
  */
 export type VisitSubtypeForm = { type: "visitSubtype"; value: true };
-
-/**
- * Possible results from a visitor method which covers two or more subtypes of
- * value that the visitor engine can dispatch to.
- *
- * See the included result types for details on what they mean.
- */
-export type GeneralVisitorResult<Domain, ResultType> =
-  | LeafVisitorResult<Domain, ResultType>
-  | VisitSubtypeForm;
-
-/**
- * Possible results from a visitor method which accepts leaf (non-container)
- * values when not _directly_ being the subject of an iteration.
- *
- * This is a "leaf" in the sense of visitor dispatch -- there is not a
- * more-specific subtype-based visitor method to call -- but that said, the
- * value being visited itself might or might not be a leaf in the sense of the
- * graph structure of the value.
- *
- * See the included result types for details on what they mean.
- */
-export type LeafVisitorResult<Domain, ResultType> =
-  | BaselineVisitResult<ResultType>
-  | ReplaceForm<Domain>
-  | ArrayContentsForm<Domain>
-  | MapContentsForm<Domain>;
-
-/**
- * Possible results from a value-in-container visitor method, that is, methods
- * which are called per container element as part of an iteration.
- *
- * See the included result types for details on what they mean.
- */
-export type ContainerIterationResult<ResultType> =
-  | BaselineVisitResult<ResultType>
-  | RecurseForm;
-
-/**
- * Baseline possible results from arbitrary `visit*()` calls, defining the
- * result cases common to all of these methods.
- *
- * See the included result types for details on what they mean. As for
- * `undefined`, if a visitor returns it in the context of this type, it means
- * that the visit of the given value was completed; the visitor ngine will not
- * process it further, and there is no specific value to return from (this part
- * of) the visit.
- */
-export type BaselineVisitResult<ResultType> =
-  | MainResultForm<ResultType>
-  | undefined;
 
 /**
  * Interface for visit receivers.
