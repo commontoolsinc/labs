@@ -51,6 +51,7 @@ The client MUST declare its protocol version in the first WebSocket message:
   "protocol": "memory",
   "flags": {
     "modernCellRep": true,
+    "stableExpressionResultIds": true,
     "messageCompressionV1": true,
     "syncSchemaTableV2": true,
     "verdictCatchUpMarkers": true,
@@ -70,6 +71,7 @@ If the server accepts the protocol, it returns:
   "protocol": "memory",
   "flags": {
     "modernCellRep": true,
+    "stableExpressionResultIds": true,
     "messageCompressionV1": true,
     "syncSchemaTableV2": true,
     "verdictCatchUpMarkers": true,
@@ -91,6 +93,25 @@ If the server accepts the protocol, it returns:
 If the server does not support the requested version or the required data-model
 flags do not match what it implements, it returns a typed error response and
 does not mark the connection ready.
+
+`stableExpressionResultIds` declares the expression result identity contract:
+`ifElse`, `when`, and `unless` key their result stores on the owning piece and
+output spot. It is inherent to the build, and an absent marker means false.
+The server accepts a wire-compatible `hello` without this marker, but refuses
+every `session.open` on that connection with `SessionRevokedError`, before
+authorization, store opening, or session restoration. A reconnecting client
+treats this verdict as terminal for the session, dropping its pending commits
+and watches. Refusing at session admission uses that terminal path even in
+clients that retry server-rejected handshakes.
+
+A client requires the server to advertise the same marker in `hello.ok` and
+otherwise fails the connection permanently. This prevents a runtime from
+joining a server that admits incompatible expression writers. Browser tabs
+must reload and CLI clients must update to a build carrying the marker.
+Backend replacement must disconnect existing sockets so their next session
+open passes through admission; publishing shell assets alone does not apply
+the gate to workers already running in tabs. This changes admission, not the
+stored document format, and requires no document migration.
 
 `hello` and `hello.ok` are always ordinary memory text messages. When both
 peers advertise `messageCompressionV1`, either peer may send later messages as
@@ -368,9 +389,10 @@ Rules:
 ### 4.2.1 Client → Server: JSON Request Envelope
 
 The current wire protocol uses JSON message envelopes serialized at the wire
-boundary with the shared flag-dispatched value codec. The advertised `flags`
-reflect the active runtime/storage configuration and the connection MUST fail
-loudly if the client and server disagree. `session.open` currently carries the
+boundary with the shared flag-dispatched value codec. The `modernCellRep` flag
+MUST match between peers; optional capabilities govern accepted operations,
+and `stableExpressionResultIds` governs session admission as described above.
+`session.open` currently carries the
 only signed authorization material in this pass; `transact` carries just the
 semantic commit body. Per-commit signed UCAN envelopes remain deferred.
 
@@ -381,6 +403,7 @@ interface HelloMessage {
   protocol: "memory";
   flags: {
     modernCellRep: boolean;
+    stableExpressionResultIds?: boolean;
     messageCompressionV1?: boolean;
     syncSchemaTableV2?: boolean;
     entityIdListing?: boolean;
@@ -1153,8 +1176,10 @@ Clients MUST:
 
 - submit pending commits in increasing `localSeq` order per logical session
 - integrate `SessionSync` frames in increasing `toSeq` order
-- buffer incoming sync while building a transaction so one transaction observes
-  one stable snapshot
+- build each commit's read set from one stable snapshot
+  (`03-commit-model.md` §3.3.4): either buffer incoming sync while a
+  transaction builds, or verify at commit that every document the transaction
+  read still holds the value it read
 
 ### 4.11.2 Server-Side Ordering
 

@@ -32,6 +32,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { getLogger } from "@commonfabric/utils/logger";
 import type { FabricValue, JSONSchema } from "@commonfabric/api";
 import type { Signer, URI } from "@commonfabric/memory/interface";
 import {
@@ -696,6 +697,87 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     const reader = clientRuntime(readerSigner);
     const root = await resolveRootEventually(reader);
     expect(getPatternSource(root)).toBe(HOME_PATTERN_SOURCE);
+  });
+
+  it("skips demand loading after parking during a root source fetch", async () => {
+    // A source fetch can outlive its serving tenure. Resume it only after park
+    // has disposed the runtime, and observe the wave's next settle boundary.
+    await seedAcl({ [space]: "OWNER" });
+    const fetchStarted = Promise.withResolvers<void>();
+    const finishFetch = Promise.withResolvers<Response>();
+    const resumedWave = Promise.withResolvers<void>();
+    let demandReads = 0;
+    const facade = new Proxy(server, {
+      get(target, property, receiver) {
+        if (property === "demandedInstancesForSpace") {
+          return (
+            ...args: Parameters<typeof server.demandedInstancesForSpace>
+          ) => {
+            demandReads++;
+            return target.demandedInstancesForSpace(...args);
+          };
+        }
+        if (property === "idle") {
+          return async () => {
+            await target.idle();
+            resumedWave.resolve();
+          };
+        }
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const warningsBefore = getLogger("space-server")
+      .countsByKey["structure-load-pass-failed"]?.warn ?? 0;
+    const created = new SpaceServer({
+      space,
+      server: facade,
+      engine,
+      serviceIdentity: serviceSigner.did(),
+      createRuntime: () => {
+        const manager = EmulatedStorageManager.connectTo(server, {
+          as: serviceSigner,
+        });
+        const runtime = new Runtime({
+          apiUrl: new URL("http://toolshed.test"),
+          storageManager: manager,
+          fetch: () => {
+            fetchStarted.resolve();
+            return finishFetch.promise;
+          },
+          servingPosture: true,
+          experimental: { serverExecution: true },
+        });
+        return Promise.resolve({
+          runtime,
+          dispose: async () => {
+            await runtime.dispose();
+            await manager.close();
+          },
+        });
+      },
+      localSeqRef: sinkLocalSeq,
+      stats,
+      policy: { flushDeadlineMs: 2_000, idleParkMs: 600_000 },
+    });
+    spaceServer = created;
+    try {
+      expect(await created.activate()).toBe(true);
+      await fetchStarted.promise;
+      await created.park("source fetch interrupted");
+      await created.whenParked;
+      expect(created.active).toBe(false);
+      finishFetch.reject(new Error("source fetch interrupted"));
+      await resumedWave.promise;
+      expect(stats.rootEnsure.failures).toBe(1);
+      expect(demandReads).toBe(0);
+      expect(
+        getLogger("space-server").countsByKey["structure-load-pass-failed"]
+          ?.warn ?? 0,
+      ).toBe(warningsBefore);
+    } finally {
+      finishFetch.resolve(new Response(null, { status: 503 }));
+    }
   });
 
   it("a WEDGED ensure hits its deadline: counted failure, lease kept serving, no park (F2)", async () => {

@@ -4,6 +4,7 @@ import {
   cfcTransportReadinessFromDockerRuntimes,
   DEFAULT_DOCKER_RUNSC_IMAGE,
   DockerRunscSandboxRuntime,
+  registeredCfcSidecarHostDirs,
   resolveDefaultContainerUser,
   resolveDockerRunscSandboxConfig,
 } from "../src/sandbox/docker-runsc.ts";
@@ -1653,4 +1654,87 @@ Deno.test("DockerRunscSandboxRuntime reports the registered and configured paths
     "/host_mnt/host/invocations",
   );
   assertEquals(cfc?.invocationContextConfiguredPath, "/host/invocations");
+});
+
+Deno.test("registeredCfcSidecarHostDirs returns both directories as host paths", () => {
+  // Docker Desktop's VM reports `/host_mnt/…` for a path the host writes at
+  // without one, and the harness writes these directories from the host.
+  assertEquals(
+    registeredCfcSidecarHostDirs({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes([
+        "--cfc-result-dir=/host_mnt/store/results",
+        "--cfc-invocation-context-dir=/host_mnt/store/invocations",
+      ]),
+    }),
+    {
+      resultDir: "/store/results",
+      invocationContextDir: "/store/invocations",
+    },
+  );
+});
+
+Deno.test("registeredCfcSidecarHostDirs leaves a host-registered path alone", () => {
+  assertEquals(
+    registeredCfcSidecarHostDirs({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes(["--cfc-result-dir=/var/lib/results"]),
+    }),
+    { resultDir: "/var/lib/results" },
+  );
+});
+
+Deno.test("registeredCfcSidecarHostDirs returns nothing for a table it cannot read", () => {
+  // Each of these is a reading that failed, and a failed reading must not
+  // present as a registration — it is what the caller turns into a named
+  // error rather than a directory nothing writes.
+  assertEquals(
+    registeredCfcSidecarHostDirs({ runtimeName: "runsc-cfc", runtimes: null }),
+    {},
+    "no runtime table at all",
+  );
+  assertEquals(
+    registeredCfcSidecarHostDirs({
+      runtimeName: "runsc-cfc",
+      runtimes: [{ "runsc-cfc": {} }],
+    }),
+    {},
+    "a table that is an array",
+  );
+  assertEquals(
+    registeredCfcSidecarHostDirs({
+      runtimeName: "runsc-cfc",
+      runtimes: { runc: { path: "runc" } },
+    }),
+    {},
+    "no entry for this runtime",
+  );
+  assertEquals(
+    registeredCfcSidecarHostDirs({
+      runtimeName: "runsc-cfc",
+      runtimes: { "runsc-cfc": "not an object" },
+    }),
+    {},
+    "an entry that is not an object",
+  );
+  assertEquals(
+    registeredCfcSidecarHostDirs({
+      runtimeName: "runsc-cfc",
+      runtimes: { "runsc-cfc": { runtimeArgs: [7] } },
+    }),
+    {},
+    "arguments that are not strings",
+  );
+});
+
+Deno.test("registeredCfcSidecarHostDirs refuses a relative registered path", () => {
+  // runsc refuses a non-absolute `--cfc-*-dir`, so a relative one names
+  // nothing the runtime will write.
+  assertEquals(
+    registeredCfcSidecarHostDirs({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes(["--cfc-result-dir=relative/results"]),
+    }),
+    {},
+  );
 });

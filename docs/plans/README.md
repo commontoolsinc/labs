@@ -67,6 +67,15 @@ a record: archive it to `docs/history/plans/` following the procedure in
   resume and a fresh start name exactly what each lift, handler, builtin, and
   nested pattern reads under its transformer-narrowed schema, then holds each
   node's first run on the loads it named instead of on a space-wide timer.
+- [Making pattern computation cost declarable and visible](pattern-computation-cost.md)
+  pairs two repairs to the same gap: the collection algebra has incremental
+  `map`, `filter`, and `flatMap` but no `groupBy`, keyed lookup, join, or
+  incremental `reduce`, so a group-by is written as nested scans over a
+  reactive array; and a scheduler node records how often an action ran but not
+  how much it read, so the cost is invisible until somebody profiles. Carries
+  the access counter, the missing operators, the replication failures that
+  currently push authors off the incremental path, and the authoring guidance
+  that steers them into the expensive construct.
 - [Choosing which tests a pull request runs](pull-request-test-selection.md)
   replaces the sixty-seven pull-request jobs with five, each running a subset
   chosen from what the record store knows about which tests have caught real

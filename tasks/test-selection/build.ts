@@ -25,6 +25,7 @@ import {
   emptyContext,
   emptySamples,
   emptyState,
+  flakeCounts,
   flakeRate,
   type FoldContext,
   foldObservations,
@@ -55,10 +56,12 @@ import {
 import { ObservationSpool } from "./observation-spool.ts";
 import {
   COST_WINDOW_DAYS,
+  FLAKE_ANCHOR_EXECUTIONS,
+  FLAKE_ANCHOR_RATE,
   FLAKE_EXCLUSION_RATE,
-  FLAKE_REPEAT_RATES,
+  FLAKE_MIN_EXECUTIONS,
   LANE_PROLOGUE_SECONDS,
-  MAX_REPEATS,
+  MAX_EXECUTIONS,
 } from "./policy.ts";
 
 /** The publisher's rolling aggregate, as one stored object. */
@@ -453,14 +456,28 @@ export function locateSurfaces(
   return { placed, unplaced };
 }
 
-/** How many times a lane runs an identity, given how flaky it is. */
-export function repeatsFor(rate: number): number {
-  if (rate > FLAKE_EXCLUSION_RATE) return 1;
-  let repeats = 1;
-  for (const band of FLAKE_REPEAT_RATES) {
-    if (rate > band) repeats++;
-  }
-  return Math.min(repeats, MAX_REPEATS);
+/**
+ * How many times a lane runs an identity, given how flaky it is.
+ *
+ * A test that has never disagreed with itself runs once. Any rate at all
+ * puts it on the line through `FLAKE_MIN_EXECUTIONS` at a rate of
+ * nothing and `FLAKE_ANCHOR_EXECUTIONS` at `FLAKE_ANCHOR_RATE`, which
+ * carries on past that anchor until `MAX_EXECUTIONS` stops it.
+ *
+ * The line runs past `FLAKE_EXCLUSION_RATE` on purpose. A test that
+ * flaky is not selected, so the only way it reaches a lane is a change
+ * that edits it or that its suite maps onto its unit — which is very
+ * likely a fix, and the count is what makes it prove itself.
+ */
+export function executionsFor(rate: number): number {
+  if (rate <= 0) return 1;
+  const line = FLAKE_MIN_EXECUTIONS +
+    (FLAKE_ANCHOR_EXECUTIONS - FLAKE_MIN_EXECUTIONS) *
+      (rate / FLAKE_ANCHOR_RATE);
+  return Math.min(
+    MAX_EXECUTIONS,
+    Math.max(FLAKE_MIN_EXECUTIONS, Math.round(line)),
+  );
 }
 
 /** What a manifest is built from beyond the folded state. */
@@ -478,12 +495,6 @@ export interface BuildInput {
   commit: string;
   runs: number;
   calibration?: Partial<Calibration>;
-}
-
-/** A number with the digits past `places` dropped. */
-function round(value: number, places: number): number {
-  const scale = 10 ** places;
-  return Math.round(value * scale) / scale;
 }
 
 /**
@@ -510,22 +521,26 @@ export function buildManifest(input: BuildInput): Manifest {
     if (test === undefined) continue;
     const surface = input.surfaces.get(key) ?? recordSurface(test, undefined);
     const inputs = scoreInputs(state, input.today);
+    const evidence = flakeCounts(state, input.today);
+    // Every figure here is written as it was measured. Thresholds are
+    // compared against these, so a figure rounded on the way in decides
+    // at the rounding rather than at the threshold: a share rounded to
+    // four places reaches zero once a test has twenty thousand runs
+    // behind one disagreement, and zero is what the execution count
+    // steps at. Reading these is what rounds them, and a reader that
+    // shows one to a person rounds it there.
     const rate = flakeRate(state, input.today);
-    // Rounded because the digits past these are noise, and because a
-    // manifest carries one entry per identity: at twenty thousand of them
-    // the difference between a rounded float and a full one is megabytes.
-    inputs.catches = round(inputs.catches, 2);
-    inputs.churn = round(inputs.churn, 6);
     const ran = lastRun(state);
     entries.push({
       test,
       suite: surface.suite,
       unit: surface.unit,
-      cost: round(costSeconds(state, input.today), 3),
-      score: round(value(inputs, input.today), 4),
+      cost: costSeconds(state, input.today),
+      score: value(inputs, input.today),
       inputs,
-      flakeRate: round(rate, 4),
-      repeats: repeatsFor(rate),
+      flakeRate: rate,
+      flakeEvidence: evidence,
+      repeats: executionsFor(rate),
       ...(ran === undefined ? {} : { lastRun: ran }),
     });
     if (rate > FLAKE_EXCLUSION_RATE) {
