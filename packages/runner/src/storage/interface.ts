@@ -594,6 +594,17 @@ export interface IRemoteStorageProviderSettings {
   experimentalConcurrentWatchRefresh?: boolean;
 }
 
+/**
+ * A document a transaction read as absent that its replica never examined,
+ * addressed the way a pending load for it is keyed: `scopeKey` names a
+ * foreign instance a served run read, and is absent for the replica's own.
+ * See {@link IStorageProvider.unexaminedAbsences}.
+ */
+export type UnexaminedAbsence = Pick<
+  IMemorySpaceAddress,
+  "space" | "id" | "scope" | "scopeKey"
+>;
+
 export interface IStorageProvider {
   /**
    * Sync a value from storage. Use transactions to retrieve the value.
@@ -624,25 +635,31 @@ export interface IStorageProvider {
   synced(): Promise<void>;
 
   /**
-   * Load the documents `source` read as absent without this replica ever
-   * having examined them (no local record; session-scoped instances
-   * excluded, since a fresh session instance cannot exist server-side), and
-   * resolve with how many turned out to exist.
+   * The documents `source` read as absent without this replica ever having
+   * examined them: no local record, session-scoped instances excluded since
+   * a fresh session instance cannot exist server-side. Each is keyed the
+   * way a pending load for it is keyed, so a caller can wait for the loads
+   * already in flight for them.
    *
    * An unexamined absence becomes a `seq: 0` confirmed read in the
    * transaction's commit — the claim that no such document exists — which
-   * the server rejects whenever one does. `Runtime.editWithRetry` consults
-   * this before committing: a non-zero count means the transaction's reads
-   * ran against documents it did not hold, so the attempt is re-run locally
-   * against the now-loaded documents instead of being rejected on the wire.
-   * Returns `0` synchronously when the transaction holds no unexamined
-   * absences, so commit paths that are synchronous stay synchronous.
-   * Optional: a provider without it simply leaves that convergence to the
-   * server's rejection and the retry gate, exactly as before.
+   * the server rejects whenever one does. `Runtime.editWithRetry` takes this
+   * list before committing, waits for the loads in flight for them, and
+   * re-runs the attempt locally when {@link presentCount} then reports any
+   * as existing, instead of shipping a commit the server would reject.
+   * Optional: a provider without it leaves that convergence to the server's
+   * rejection and the retry gate.
    */
-  loadUnexaminedAbsences?(
+  unexaminedAbsences?(
     source: IStorageTransaction | undefined,
-  ): number | Promise<number>;
+  ): readonly UnexaminedAbsence[];
+
+  /**
+   * How many of `absences`, addresses {@link unexaminedAbsences} returned,
+   * this replica now holds with a confirmed revision. Optional alongside
+   * {@link unexaminedAbsences}.
+   */
+  presentCount?(absences: readonly UnexaminedAbsence[]): number;
 
   /** INBOUND settlement only (server-execution v2 stage F): outstanding
    * watch refreshes/pulls, EXCLUDING commit settlement AND update
@@ -1685,13 +1702,20 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * The dispatched handler's BODY did not run (the runner's stream-path
    * argument-did-not-resolve skip: `isValidArgument === false`, runner.ts).
    * Set by the runner on the skip; consumed by the scheduler's event
-   * finalize for mark/effects atomicity (events.md §4, RULED 2026-08-27):
-   * a SERVED dispatch's transaction carries the entry's pre-stamped
-   * `consequenced` mark, so sealing a skipped run would commit the mark
-   * with ZERO effects and permanently consume the event (the a04 1-op
-   * shape). The finalize withdraws the whole transaction instead — the
-   * entry stays pending-unconsequenced and the drain re-delivers it.
-   * Client/OFF dispatches carry no mark and keep the silent skip.
+   * finalize, which withdraws the whole transaction rather than sealing
+   * it and re-runs the handler (events.md §5). A SERVED dispatch's
+   * transaction carries the entry's pre-stamped `consequenced` mark, so
+   * sealing a skipped run would commit the mark with ZERO effects and
+   * permanently consume the event (the a04 1-op shape); the entry stays
+   * pending-unconsequenced and the drain re-delivers it. A client
+   * dispatch is requeued by the scheduler within its retry window, parked
+   * on the loads the run registered when any are in flight, and fails
+   * loudly once the window is spent or once its re-runs with nothing to
+   * park on reach `HANDLER_NOT_RUN_BACKOFF_LIMIT`; one that opted out of retrying is
+   * not re-run, and its callback sees the aborted transaction. Under
+   * events-down a client dispatch without a served carriage is the
+   * speculative echo of an entry the server re-drains, and its skip seals
+   * as an empty speculative commit.
    */
   dispatchedHandlerNotRun?: { reason: string };
 

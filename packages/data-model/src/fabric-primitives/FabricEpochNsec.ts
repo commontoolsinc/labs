@@ -53,7 +53,7 @@ export class FabricEpochNsec extends BaseFabricPrimitive
 
   /** @inheritDoc */
   get [VALUE_TAG](): FabricPrimitiveValueTag {
-    return FABRIC_PRIMITIVE_VALUE_TAGS.EpochNsec;
+    return FABRIC_PRIMITIVE_VALUE_TAGS.FabricEpochNsec;
   }
 
   /**

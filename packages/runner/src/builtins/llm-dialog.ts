@@ -213,7 +213,7 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
   return prepareSchemaForLLM(stripped);
 }
 
-// Tool-input fields the framework fills in (see applyAutoProvidedSandboxId).
+// Tool-input fields the framework fills through compiler-owned factory metadata.
 // They are removed from the model-facing schema so the model is never asked for
 // a value it cannot set — the runtime owns them.
 const FRAMEWORK_PROVIDED_TOOL_FIELDS: readonly string[] = ["sandboxId"];
@@ -2755,7 +2755,6 @@ export const llmToolExecutionHelpers = {
   toolAllowsObservedConfidentiality,
   effectiveObservationCeiling,
   stripFrameworkProvidedFields,
-  applyAutoProvidedSandboxId,
   toolInputRequiredIntegrityFailure,
 };
 
@@ -3097,68 +3096,6 @@ async function handleUpdateArgument(
       message: "Arguments updated. Pattern will re-execute automatically.",
     },
   };
-}
-
-/**
- * Auto-provides the `sandboxId` input for tools that declare it (the bash tool
- * and anything sharing its contract). The framework OWNS this field: a pattern
- * that declares `sandboxId` never chooses its value, and neither does the model.
- *
- * The value is the content-addressed entity id of the tool's own definition
- * cell. That id is unique to this pattern instance, constant for the life of the
- * instance, and the same for every call the instance makes — so repeated bash
- * calls reuse one persistent server-side sandbox, while two instances (or two
- * users) never land on the same one. The id comes from the instance's identity
- * rather than the clock or randomness.
- *
- * The server names sandboxes by this id (`/v1/sandboxes/<id>`), so any
- * caller-chosen value is a cross-instance leak vector: two patterns that pin the
- * same id would share a sandbox, and a pattern could name another instance's (or
- * another user's). A pattern that pre-fills `sandboxId` through patternTool's
- * extraParams is rejected outright — a chosen value can never take effect, so
- * silently dropping it would hide an authoring mistake; this throws instead. A
- * model-supplied value (untrusted, not an authoring mistake) is overwritten. If
- * the pattern declares `sandboxId` but no stable id can be derived, this also
- * throws rather than fall through to an empty, shared name.
- */
-function applyAutoProvidedSandboxId(
-  args: Record<string, unknown>,
-  pattern: Readonly<Pattern> | undefined,
-  extraParams: Record<string, unknown>,
-  identityCell: Cell<any> | undefined,
-): void {
-  const properties = (pattern?.argumentSchema as
-    | { properties?: Record<string, unknown> }
-    | undefined)?.properties;
-  if (!properties || !("sandboxId" in properties)) return;
-  if (extraParams.sandboxId !== undefined) {
-    throw new Error(
-      "sandboxId is framework-provided for tools that declare it; " +
-        "remove it from patternTool's extraParams",
-    );
-  }
-  // getEntityId does the heavy lifting the key needs (content-hashing data:
-  // URIs, path-qualifying sub-cell identities so two tools in one document
-  // get distinct sandboxes) but it ERASES the URI scheme — and the scheme is
-  // part of the identity, so a computed: cell's bare hash would alias its
-  // of: sibling's sandbox. Re-apply the sourceURI's entity scheme (of: or
-  // computed:) as a prefix, so the key is the full schemed id. data:-derived
-  // identities have no entity scheme and stay as their bare content hash.
-  const ref = identityCell ? getEntityId(identityCell) : undefined;
-  const bare = ref && isEntityRef(ref) ? entityRefToString(ref) : undefined;
-  const scheme = entityUriSchemePrefix(identityCell?.sourceURI ?? "") ?? "";
-  const entityId = bare ? scheme + bare : undefined;
-  if (typeof entityId !== "string" || entityId.length === 0) {
-    throw new Error(
-      "Cannot auto-provide sandboxId: tool instance has no stable entity id",
-    );
-  }
-  // The entity id carries URI scheme separators (e.g. "fid1:<hash>",
-  // "computed:fid1:<hash>"). The id names a server-side resource at
-  // `/v1/sandboxes/<id>`, so map the only unsafe character (the colon) to a
-  // hyphen. The hash body is base64url and is preserved exactly, so distinct
-  // entity ids stay distinct.
-  args.sandboxId = entityId.replace(/[^A-Za-z0-9_-]/g, "-");
 }
 
 function applyFrameworkProvidedFactoryInputs(

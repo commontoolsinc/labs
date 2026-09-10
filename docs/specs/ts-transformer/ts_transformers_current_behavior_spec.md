@@ -1931,6 +1931,12 @@ Special path:
   schema).
 - `unknown` is emitted distinctly as `{ type: "unknown" }`; `any` remains `true`
 - arrays of `unknown` emit `items: { type: "unknown" }`
+- empty-record defaults emit `default: {}` in pattern argument schemas,
+  including inside `Writable`. Both `Record<string, unknown> | Default<V>`
+  and `Default<Record<string, unknown>, V>` support `V` written as `{}`,
+  `Record<string, never>`, `Record<PropertyKey, never>`, or an alias of either
+  record (`test/default-empty-record-schema.test.ts`). The extraction rules
+  live in §7 of the schema-generator mapping spec.
 - the node-based generator analyzes through a `readonly` type operator to
   its wrapped array type. A pattern-scope `.get()` on a `Cell<unknown[]>`
   lowers to a lift with result type `readonly unknown[]` and result schema

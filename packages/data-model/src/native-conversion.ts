@@ -215,7 +215,7 @@ export function shallowFabricFromNativeObjectElseUndefined(
   value: unknown,
 ): FabricValueLayer | undefined {
   switch (tagFromNativeValueElseNull(value)) {
-    case VALUE_TAGS.Error: {
+    case VALUE_TAGS.JsError: {
       // Shallow conversion, so the native `Error` is wrapped without recursing
       // into its internals: `cause` and the custom properties are stored as
       // they stand, and the result is only a _shallow_ `FabricError`, whose
@@ -234,7 +234,7 @@ export function shallowFabricFromNativeObjectElseUndefined(
       }));
     }
 
-    case VALUE_TAGS.Date: {
+    case VALUE_TAGS.JsDate: {
       // A `Date` becomes a `FabricEpochNsec` (nanoseconds from the epoch).
       // Extra enumerable properties cause rejection ("death before
       // confusion").
@@ -243,12 +243,12 @@ export function shallowFabricFromNativeObjectElseUndefined(
       return new FabricEpochNsec(nsec);
     }
 
-    case VALUE_TAGS.RegExp: {
+    case VALUE_TAGS.JsRegExp: {
       // `FabricRegExp` rejects extra enumerable properties of its own accord.
       return new FabricRegExp(value as RegExp);
     }
 
-    case VALUE_TAGS.Uint8Array: {
+    case VALUE_TAGS.JsUint8Array: {
       // A native `Uint8Array` becomes a `FabricBytes`.
       return new FabricBytes(value as Uint8Array);
     }

@@ -13,6 +13,7 @@ import {
   CI_SOURCE,
   dayOf,
   emptyAggregate,
+  executionsFor,
   Fold,
   foldReports,
   lastRun,
@@ -22,7 +23,6 @@ import {
   provenance,
   readReport,
   recordSurface,
-  repeatsFor,
   reportFromText,
 } from "./build.ts";
 import { parseManifest, serializeManifest } from "./manifest.ts";
@@ -35,8 +35,11 @@ import {
 } from "./score.ts";
 import {
   COST_WINDOW_DAYS,
+  FLAKE_ANCHOR_EXECUTIONS,
+  FLAKE_ANCHOR_RATE,
   FLAKE_EXCLUSION_RATE,
-  MAX_REPEATS,
+  FLAKE_MIN_EXECUTIONS,
+  MAX_EXECUTIONS,
 } from "./policy.ts";
 
 const NO_ALIASES = new AliasResolver([]);
@@ -194,18 +197,32 @@ describe("build", () => {
     });
   });
 
-  describe("repeatsFor()", () => {
-    it("runs a steady test once", () => {
-      expect(repeatsFor(0)).toBe(1);
+  describe("executionsFor()", () => {
+    it("runs a test that has never disagreed once", () => {
+      expect(executionsFor(0)).toBe(1);
     });
 
-    it("runs a slightly intermittent one more than once", () => {
-      expect(repeatsFor(0.02)).toBeGreaterThan(1);
-      expect(repeatsFor(0.04)).toBe(MAX_REPEATS);
+    it("runs a test that has disagreed at all at least twice", () => {
+      // One execution cannot tell a pass from a lucky pass.
+      expect(executionsFor(Number.MIN_VALUE)).toBe(FLAKE_MIN_EXECUTIONS);
+      expect(executionsFor(0.0001)).toBe(FLAKE_MIN_EXECUTIONS);
     });
 
-    it("runs one past the exclusion rate once, since it is not selected", () => {
-      expect(repeatsFor(FLAKE_EXCLUSION_RATE + 0.1)).toBe(1);
+    it("runs a test at the anchor rate the anchor count of times", () => {
+      expect(executionsFor(FLAKE_ANCHOR_RATE)).toBe(FLAKE_ANCHOR_EXECUTIONS);
+    });
+
+    it("climbs between the two, and goes on climbing past the anchor", () => {
+      const half = executionsFor(FLAKE_ANCHOR_RATE / 2);
+      expect(half).toBeGreaterThan(FLAKE_MIN_EXECUTIONS);
+      expect(half).toBeLessThan(FLAKE_ANCHOR_EXECUTIONS);
+      expect(executionsFor(FLAKE_ANCHOR_RATE * 2)).toBeGreaterThan(
+        FLAKE_ANCHOR_EXECUTIONS,
+      );
+    });
+
+    it("stops climbing at the cap", () => {
+      expect(executionsFor(1)).toBe(MAX_EXECUTIONS);
     });
   });
 
@@ -253,6 +270,34 @@ describe("build", () => {
         readReport(stored(CI_NAME, forked, [record()]), NO_ALIASES)
           .observations,
       ).toEqual([]);
+    });
+
+    it("reads nothing from a lane measuring itself", () => {
+      // The lane's own measurements travel as ordinary records, so they
+      // arrive here beside the tests they were recorded with. A lane is
+      // not a test: scoring one reads the batch it ran going red as the
+      // lane disagreeing with itself, which is the shape of a flake and
+      // is nothing of the kind.
+      const read = readReport(
+        stored(CI_NAME, context(), [
+          record(),
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" },
+            outcome: "fail",
+          }),
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane setup deno" },
+          }),
+        ]),
+        NO_ALIASES,
+      );
+      // The test beside them is read, so this is the measurements being
+      // left out rather than the whole group.
+      expect(read.observations.map((seen) => seen.test.n)).toEqual([
+        "space > writes",
+      ]);
+      expect([...read.surfaces.keys()]).toEqual([KEY]);
+      expect([...read.durations.keys()]).toEqual([KEY]);
     });
   });
 
@@ -401,7 +446,33 @@ describe("build", () => {
       ]);
       const state = second.finish().states.get(KEY)!;
       expect(state.mainCatches).toBe(0);
-      expect(flakeRate(state, "2026-08-20")).toBe(1);
+      expect(state.flakesByDay["2026-08-20"]).toBe(1);
+      // One run of two disagreed, which is what holds it out until it
+      // has run enough to say the rate is lower than that.
+      expect(flakeRate(state, "2026-08-20")).toBeGreaterThan(
+        FLAKE_EXCLUSION_RATE,
+      );
+    });
+
+    it("drops a lane measurement an earlier aggregate carried", () => {
+      // Nothing adds one now, and nothing has ever removed one, so an
+      // aggregate written while they were still folded would carry them
+      // for good.
+      const aggregate = emptyAggregate("2026-08-20");
+      const measurement = testIdentityKey({
+        k: "gate",
+        s: "ci",
+        n: "ci-lane batch workspace-unit",
+      });
+      aggregate.states[measurement] = emptyState();
+      aggregate.states[KEY] = emptyState();
+
+      const states = new Fold(aggregate, NO_ALIASES, "2026-08-20")
+        .finish().states;
+      expect(states.has(measurement)).toBe(false);
+      // The test beside it survives, so this drains the measurements
+      // rather than the aggregate.
+      expect(states.has(KEY)).toBe(true);
     });
 
     it("does not fold an object it has already folded", () => {
@@ -720,11 +791,53 @@ describe("what buildManifest() does with the states it is given", () => {
 
   it("withholds a test that disagrees with itself too often", () => {
     const state = emptyState();
+    state.runsByDay["2026-08-20"] = 100;
     state.failuresByDay["2026-08-20"] = 10;
     state.flakesByDay["2026-08-20"] = 10;
     const manifest = built(new Map([[KEY, state]]));
     expect(manifest.withheld.length).toBe(1);
     expect(manifest.withheld[0]!.reason).toBe("flaky");
+  });
+
+  it("withholds nothing for a test that flaked once and passes since", () => {
+    // Every failure it has had was a flake, so a share of its failures
+    // would hold it out of every pull request for one bad run.
+    const state = emptyState();
+    state.runsByDay["2026-08-20"] = 10000;
+    state.failuresByDay["2026-08-20"] = 1;
+    state.flakesByDay["2026-08-20"] = 1;
+    const manifest = built(new Map([[KEY, state]]));
+    expect(manifest.withheld).toEqual([]);
+    // Selectable, and still run twice: it has disagreed with itself, and
+    // one execution cannot tell a pass from a lucky pass.
+    expect(manifest.entries[0]!.repeats).toBe(FLAKE_MIN_EXECUTIONS);
+  });
+
+  it("holds a share that is not zero above the precision it records", () => {
+    // One disagreement among enough runs that the share rounds to
+    // nothing. Zero is what says a test has never been seen to disagree,
+    // so the execution count would read this as a test that never has.
+    const state = emptyState();
+    state.runsByDay["2026-08-20"] = 100_000;
+    state.failuresByDay["2026-08-20"] = 1;
+    state.flakesByDay["2026-08-20"] = 1;
+    const entry = built(new Map([[KEY, state]])).entries[0]!;
+    expect(entry.flakeRate).toBeGreaterThan(0);
+    expect(entry.repeats).toBe(FLAKE_MIN_EXECUTIONS);
+  });
+
+  it("carries the counts the share was taken from", () => {
+    const state = emptyState();
+    state.runsByDay["2026-08-20"] = 80;
+    state.failuresByDay["2026-08-20"] = 12;
+    state.flakesByDay["2026-08-20"] = 12;
+    const entry = built(new Map([[KEY, state]])).entries[0]!;
+    expect(entry.flakeEvidence).toEqual({ flakes: 12, runs: 80 });
+    // The counts are what was seen, flat. The share weights recent days
+    // more heavily, so it is not those counts divided; what it is, is
+    // the figure every decision here was taken on.
+    expect(entry.flakeRate).toBe(0.15);
+    expect(entry.repeats).toBe(executionsFor(entry.flakeRate));
   });
 
   it("withholds nothing for a test that has never failed", () => {

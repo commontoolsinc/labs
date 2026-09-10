@@ -27,6 +27,7 @@ const NOW = Date.parse("2026-08-20T04:00:00.000Z");
 function heldBack(fields: Partial<Manifest> = {}): Manifest {
   const entry = sampleEntry({ k: "unit", s: "memory", n: "space > writes" }, {
     flakeRate: 0.42,
+    flakeEvidence: { flakes: 84, runs: 180 },
   });
   return sampleManifest({
     entries: [entry],
@@ -50,12 +51,38 @@ describe("test-selection-page", () => {
       expect(page).toContain(`id="${FLAKY_SECTION_ID}"`);
     });
 
-    it("says the flake share counts failures rather than runs", () => {
-      // 100% is a share of one test's failures, so it says nothing about
-      // how often that test fails. A page showing the figure has to say so.
+    it("shows the counts a rate was taken from beside it", () => {
+      // A share without its denominator cannot be weighed, and the
+      // exclusion this page explains was decided on the share.
       const page = testSelectionPage(heldBack(), NOW);
-      expect(page).toContain("counts failures rather than runs");
-      expect(page).toContain("failed once and flaked once reads 100%");
+      expect(page).toContain("42.0% · 84 in 180");
+    });
+
+    it("shows the share alone where a manifest carries no counts", () => {
+      const bare = sampleEntry({ k: "unit", s: "memory", n: "bare" }, {
+        flakeRate: 0.3,
+      });
+      const page = testSelectionPage(
+        sampleManifest({
+          entries: [bare],
+          withheld: [{
+            test: bare.test,
+            suite: bare.suite,
+            reason: "flaky",
+          }],
+        }),
+        NOW,
+      );
+      expect(page).toContain(`<td class="measure">30.0%</td>`);
+    });
+
+    it("says the flake share counts runs, and what it is measured against", () => {
+      // A share without its denominator is not a figure anybody can read,
+      // and neither half of this one is guessable from the number.
+      const page = testSelectionPage(heldBack(), NOW);
+      expect(page).toContain("The share of the runs each test took part in");
+      expect(page).toContain("nothing is charged against the count");
+      expect(page).toContain("one disagreement among two runs reads as the half");
     });
 
     it("takes the flake window and threshold from the manifest's own dials", () => {

@@ -12,6 +12,7 @@
 
 import {
   type Manifest,
+  type ManifestEntry,
   type TestIdentity,
   testIdentityKey,
 } from "@commonfabric/test-support/records";
@@ -127,10 +128,13 @@ function testSection(section: {
 }
 
 /**
- * What the flake share counts. The denominator is what a reader gets
- * wrong: the publisher divides a test's flakes by its failures, not by
- * its runs, so a test whose one failure in the window was a flake reads
- * 100% however reliably it passes the rest of the time.
+ * What the flake share counts. The share is over runs rather than over
+ * failures, so a test that passes reliably reads as small however many of
+ * its rare failures were flakes, and a disagreement weighs less the more
+ * runs have followed it, so a test that has settled since reads lower
+ * than one that has just started. The counts beside it are what let a reader weigh it,
+ * since one disagreement in two runs and a thousand in two thousand are
+ * the same ratio and not the same claim.
  */
 function flakeLead(manifest: Manifest): string {
   const days = numberDial(
@@ -143,34 +147,49 @@ function flakeLead(manifest: Manifest): string {
     "FLAKE_EXCLUSION_RATE",
     FLAKE_EXCLUSION_FALLBACK,
   );
-  return `The share of each test's failures over the last ${days} days that ` +
-    "were flakes: the same commit both passing and failing, with nothing " +
-    "between the two runs but chance. It counts failures rather than runs, " +
-    `so a test that failed once and flaked once reads 100%. Past ${
-      percent(exclusion)
-    } a test is held back from pull requests, and comes back on its own ` +
-    "once it stops disagreeing.";
+  return `The share of the runs each test took part in over the last ${days} ` +
+    "days that it was seen disagreeing with itself over: the same commit " +
+    "both passing and failing, with nothing between the two runs but " +
+    "chance. A test that is deterministic cannot do that, so nothing is " +
+    "charged against the count and one disagreement among two runs reads " +
+    "as the half it is; a disagreement counts for less as the test goes " +
+    "on running without repeating it. " +
+    `Past ${percent(exclusion)} a test is held back from pull requests, ` +
+    "and the share falls again as it goes on running without disagreeing, " +
+    "so the exclusion reverses on its own. The counts are flat, so they " +
+    "are not what the share divides.";
 }
 
 /** The tests held back as flaky, worst-measured first. */
 function flakyRows(manifest: Manifest): TestRow[] {
-  const rates = new Map(
-    manifest.entries.map((entry) => [
-      testIdentityKey(entry.test),
-      entry.flakeRate,
-    ]),
+  const scored = new Map(
+    manifest.entries.map((entry) => [testIdentityKey(entry.test), entry]),
   );
   return manifest.withheld
     .filter((entry) => entry.reason === "flaky")
     .map((entry) => ({
       test: entry.test,
-      rate: rates.get(testIdentityKey(entry.test)),
+      scored: scored.get(testIdentityKey(entry.test)),
     }))
-    .sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))
-    .map(({ test, rate }) => ({
+    .sort((a, b) => (b.scored?.flakeRate ?? 0) - (a.scored?.flakeRate ?? 0))
+    .map(({ test, scored }) => ({
       test,
-      measure: rate === undefined ? undefined : percent(rate),
+      ...(scored === undefined ? {} : { measure: flakeMeasure(scored) }),
     }));
+}
+
+/**
+ * One test's flake share with the counts it was taken from, where the
+ * manifest carries them. The share alone says how the exclusion was
+ * decided; the counts say how much is behind that decision.
+ */
+function flakeMeasure(entry: ManifestEntry): string {
+  const share = percent(entry.flakeRate);
+  const evidence = entry.flakeEvidence;
+  if (evidence === undefined) return share;
+  return `${share} · ${groupDigits(evidence.flakes)} in ${
+    groupDigits(evidence.runs)
+  }`;
 }
 
 /** The lanes a pull request would run, each against the budget it was packed to. */

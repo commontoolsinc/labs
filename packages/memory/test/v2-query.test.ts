@@ -6,6 +6,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import { toFileUrl } from "@std/path";
+import { Database } from "@db/sqlite";
 import type { JSONSchema } from "@commonfabric/api";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { encodeMemoryBoundary } from "../v2.ts";
@@ -487,7 +488,7 @@ Deno.test("memory v2 query does not walk nested links inside inline opaque cells
   }
 });
 
-Deno.test("memory v2 query includes metadata links without traversing their values", async () => {
+Deno.test("memory v2 query delivers a named document's metadata links as data without following them", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-query-meta-link-schema";
   const rootPiece = "of:root-piece";
@@ -507,6 +508,15 @@ Deno.test("memory v2 query includes metadata links without traversing their valu
     },
     required: ["child"],
   };
+  const argumentLink = {
+    "/": {
+      "link@1": {
+        id: argument,
+        path: [],
+        schema: argumentSchema,
+      },
+    },
+  };
 
   try {
     applyCommit(engine, {
@@ -525,15 +535,7 @@ Deno.test("memory v2 query includes metadata links without traversing their valu
           id: childPiece,
           value: {
             value: { label: "child" },
-            argument: {
-              "/": {
-                "link@1": {
-                  id: argument,
-                  path: [],
-                  schema: argumentSchema,
-                },
-              },
-            },
+            argument: argumentLink,
             result: { "/": { "link@1": { id: childResult, path: [] } } },
           },
         }, {
@@ -549,15 +551,7 @@ Deno.test("memory v2 query includes metadata links without traversing their valu
           id: rootPiece,
           value: {
             value: { title: "root" },
-            argument: {
-              "/": {
-                "link@1": {
-                  id: argument,
-                  path: [],
-                  schema: argumentSchema,
-                },
-              },
-            },
+            argument: argumentLink,
           },
         }],
       },
@@ -573,17 +567,25 @@ Deno.test("memory v2 query includes metadata links without traversing their valu
       }],
     });
 
-    assertEquals(result.entities.map((entity) => entity.id), [
-      argument,
-      rootPiece,
-    ]);
+    // The root's `argument` link is data on the root. The argument document
+    // it names, and the child that document links to, are not delivered: a
+    // consumer that wants them names them with a query of its own.
+    assertEquals(result.entities, [{
+      branch: "",
+      id: rootPiece,
+      seq: 1,
+      document: {
+        value: { title: "root" },
+        argument: argumentLink,
+      },
+    }]);
   } finally {
     close(engine);
     await Deno.remove(path);
   }
 });
 
-Deno.test("memory v2 query refresh follows changed metadata links", async () => {
+Deno.test("memory v2 query refresh delivers a changed metadata link as data without following it", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-query-meta-link-refresh";
   const rootPiece = "of:root-piece";
@@ -596,6 +598,15 @@ Deno.test("memory v2 query refresh follows changed metadata links", async () => 
     },
     required: ["label"],
   };
+  const argumentLinkTo = (id: string) => ({
+    "/": {
+      "link@1": {
+        id,
+        path: [],
+        schema: argumentSchema,
+      },
+    },
+  });
 
   try {
     applyCommit(engine, {
@@ -614,15 +625,7 @@ Deno.test("memory v2 query refresh follows changed metadata links", async () => 
           id: rootPiece,
           value: {
             value: { title: "root" },
-            argument: {
-              "/": {
-                "link@1": {
-                  id: argumentA,
-                  path: [],
-                  schema: argumentSchema,
-                },
-              },
-            },
+            argument: argumentLinkTo(argumentA),
           },
         }],
       },
@@ -654,20 +657,15 @@ Deno.test("memory v2 query refresh follows changed metadata links", async () => 
           id: rootPiece,
           value: {
             value: { title: "root" },
-            argument: {
-              "/": {
-                "link@1": {
-                  id: argumentB,
-                  path: [],
-                  schema: argumentSchema,
-                },
-              },
-            },
+            argument: argumentLinkTo(argumentB),
           },
         }],
       },
     });
 
+    // The refresh delivers the dirty root carrying its new link, and
+    // nothing else: the link's new target is data the root points at, not
+    // a document the refresh loads.
     const refreshed = refreshTrackedGraph(
       space,
       engine,
@@ -675,10 +673,15 @@ Deno.test("memory v2 query refresh follows changed metadata links", async () => 
       new Set([toDirtyKey(rootPiece)]),
     );
     assertExists(refreshed);
-    assertEquals(
-      [...refreshed.updates.values()].map((entity) => entity.id).sort(),
-      [argumentB, rootPiece],
-    );
+    assertEquals([...refreshed.updates.values()], [{
+      branch: "",
+      id: rootPiece,
+      seq: 2,
+      document: {
+        value: { title: "root" },
+        argument: argumentLinkTo(argumentB),
+      },
+    }]);
 
     const fresh = queryGraph(space, engine, {
       roots: [{
@@ -689,10 +692,7 @@ Deno.test("memory v2 query refresh follows changed metadata links", async () => 
         },
       }],
     });
-    assertEquals(fresh.entities.map((entity) => entity.id), [
-      argumentB,
-      rootPiece,
-    ]);
+    assertEquals(fresh.entities.map((entity) => entity.id), [rootPiece]);
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -706,6 +706,22 @@ Deno.test("memory v2 query reuses a persistent manager cache for shared source g
   const pieceB = "of:piece-b";
   const result = "of:result";
   const base = "of:base";
+  const link = (id: string) => ({ "/": { "link@1": { id, path: [] } } });
+  // Reaches two links deep: a piece's `child`, and that document's `child`.
+  const chainSchema: JSONSchema = {
+    type: "object",
+    properties: {
+      child: {
+        type: "object",
+        properties: {
+          child: {
+            type: "object",
+            properties: { label: { type: "string" } },
+          },
+        },
+      },
+    },
+  };
 
   try {
     applyCommit(engine, {
@@ -722,47 +738,34 @@ Deno.test("memory v2 query reuses a persistent manager cache for shared source g
         }, {
           op: "set",
           id: result,
-          value: {
-            result: { "/": { "link@1": { id: base, path: [] } } },
-          },
+          value: { value: { child: link(base) } },
         }, {
           op: "set",
           id: pieceA,
-          value: {
-            result: { "/": { "link@1": { id: result, path: [] } } },
-          },
+          value: { value: { child: link(result) } },
         }, {
           op: "set",
           id: pieceB,
-          value: {
-            result: { "/": { "link@1": { id: result, path: [] } } },
-          },
+          value: { value: { child: link(result) } },
         }],
       },
     });
 
     const tracked = trackGraph(space, engine, {
-      roots: [{
-        id: pieceA,
-        selector: {
-          path: [],
-          schema: false,
-        },
-      }],
+      roots: [{ id: pieceA, selector: { path: [], schema: chainSchema } }],
     });
 
+    // One read per document the walk reaches: the root, the document its
+    // `child` crosses into, and that document's own `child` target.
+    assert(tracked.state.entities.has(`${space}/space/${base}`));
     assertEquals(tracked.state.manager.readCount, 3);
 
     extendTrackedGraph(space, engine, tracked.state, {
-      roots: [{
-        id: pieceB,
-        selector: {
-          path: [],
-          schema: false,
-        },
-      }],
+      roots: [{ id: pieceB, selector: { path: [], schema: chainSchema } }],
     });
 
+    // The second root costs its own read alone: both documents its walk
+    // crosses into are already in the manager's cache.
     assertEquals(tracked.state.manager.readCount, 4);
   } finally {
     close(engine);
@@ -1060,6 +1063,22 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
   const result = "of:result";
   const base1 = "of:base-1";
   const base2 = "of:base-2";
+  const link = (id: string) => ({ "/": { "link@1": { id, path: [] } } });
+  // Reaches two links deep: a piece's `child`, and that document's `child`.
+  const chainSchema: JSONSchema = {
+    type: "object",
+    properties: {
+      child: {
+        type: "object",
+        properties: {
+          child: {
+            type: "object",
+            properties: { label: { type: "string" } },
+          },
+        },
+      },
+    },
+  };
 
   try {
     applyCommit(engine, {
@@ -1080,35 +1099,25 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
         }, {
           op: "set",
           id: result,
-          value: {
-            result: { "/": { "link@1": { id: base1, path: [] } } },
-          },
+          value: { value: { child: link(base1) } },
         }, {
           op: "set",
           id: pieceA,
-          value: {
-            result: { "/": { "link@1": { id: result, path: [] } } },
-          },
+          value: { value: { child: link(result) } },
         }, {
           op: "set",
           id: pieceB,
-          value: {
-            result: { "/": { "link@1": { id: result, path: [] } } },
-          },
+          value: { value: { child: link(result) } },
         }],
       },
     });
 
     const tracked = trackGraph(space, engine, {
-      roots: [{
-        id: pieceA,
-        selector: {
-          path: [],
-          schema: false,
-        },
-      }],
+      roots: [{ id: pieceA, selector: { path: [], schema: chainSchema } }],
     });
 
+    // One read per document the walk reaches: the root, the document its
+    // `child` crosses into, and that document's own `child` target.
     assertEquals(tracked.state.manager.readCount, 3);
 
     applyCommit(engine, {
@@ -1121,9 +1130,7 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
         operations: [{
           op: "set",
           id: result,
-          value: {
-            result: { "/": { "link@1": { id: base2, path: [] } } },
-          },
+          value: { value: { child: link(base2) } },
         }],
       },
     });
@@ -1135,17 +1142,15 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
       new Set([toDirtyKey(result)]),
     );
     assertExists(refreshed);
+    assert(refreshed.updates.has(`${space}/space/${base2}`));
 
     extendTrackedGraph(space, engine, tracked.state, {
-      roots: [{
-        id: pieceB,
-        selector: {
-          path: [],
-          schema: false,
-        },
-      }],
+      roots: [{ id: pieceB, selector: { path: [], schema: chainSchema } }],
     });
 
+    // The refresh re-walked the dirty document and its new target into the
+    // persistent manager's cache, so the second root costs its own read
+    // alone.
     assertEquals(tracked.state.manager.readCount, 4);
   } finally {
     close(engine);
@@ -1731,16 +1736,29 @@ Deno.test("memory v2 schema scan and verification caches stay bounded at scale",
   }
 });
 
-Deno.test("memory v2 delivers a meta-linked document that arrives after its referrer", async () => {
-  const { engine, path } = await createEngine();
-  const space = "did:key:z6Mk-memory-v2-meta-arrival";
+Deno.test("memory v2 delivers a label schema document that arrives after the document naming it", async () => {
+  const opened = await createEngine();
+  const { path } = opened;
+  let engine = opened.engine;
+  const space = "did:key:z6Mk-memory-v2-label-schema-arrival";
+  const referrer = "of:label-schema-arrival-referrer";
+  // The schema the referrer's labels are stated against, held as a
+  // content-addressed document its `cfc` envelope names by hash.
+  const labelSchema = {
+    type: "object",
+    properties: { n: { type: "number" } },
+  } as const;
+  const labelSchemaId = `cid:${internSchemaAsTaggedHashString(labelSchema)}`;
   try {
-    // The referrer's `pattern` meta link points at a document nothing has
-    // written yet. The absent target must still enter the tracker — the
-    // tracker is what makes the graph reactive — or its arrival would
-    // never reach this watch.
+    // The commit boundary admits a `cfc` envelope only with the schema
+    // document it names installed or already stored, so the referrer and
+    // its document land together, and the document's rows are then
+    // removed from the store directly, which is the shape of a store the
+    // boundary never validated. The absent target must still enter the
+    // tracker — the tracker is what makes the graph reactive — or its
+    // arrival would never reach this watch.
     applyCommit(engine, {
-      sessionId: "session:meta-arrival-writer",
+      sessionId: "session:label-schema-arrival-writer",
       invocation: invocationFor(1),
       authorization,
       commit: {
@@ -1748,29 +1766,51 @@ Deno.test("memory v2 delivers a meta-linked document that arrives after its refe
         reads: { confirmed: [], pending: [] },
         operations: [{
           op: "set",
-          id: "of:meta-arrival-referrer",
+          id: labelSchemaId,
+          value: { value: labelSchema },
+        }, {
+          op: "set",
+          id: referrer,
           value: {
             value: { n: 1 },
-            pattern: {
-              "/": {
-                "link@1": { id: "of:meta-arrival-target", path: [] },
-              },
+            cfc: {
+              version: 1,
+              schemaHash: labelSchemaId.slice("cid:".length),
+              labelMap: { version: 1, entries: [] },
             },
           },
         }],
       },
     });
+    close(engine);
+    const raw = new Database(path);
+    try {
+      for (const table of ["head", "revision", "snapshot"]) {
+        raw.prepare(`DELETE FROM ${table} WHERE id = ?`).run(labelSchemaId);
+      }
+    } finally {
+      raw.close();
+    }
+    engine = await open({ url: toFileUrl(path) });
+
     const tracked = trackGraph(space, engine, {
       roots: [{
-        id: "of:meta-arrival-referrer",
+        id: referrer,
         selector: { path: [], schema: false },
       }],
     });
-    const targetKey = `${space}/space/of:meta-arrival-target` as const;
+    const targetKey = `${space}/space/${labelSchemaId}` as const;
     assert(tracked.state.tracker.has(targetKey));
+    // Tracked while absent, the target is delivered as an absence marker.
+    assertEquals(tracked.state.entities.get(targetKey), {
+      branch: "",
+      id: labelSchemaId,
+      seq: 0,
+      document: null,
+    });
 
     applyCommit(engine, {
-      sessionId: "session:meta-arrival-writer",
+      sessionId: "session:label-schema-arrival-writer",
       invocation: invocationFor(2),
       authorization,
       commit: {
@@ -1778,8 +1818,8 @@ Deno.test("memory v2 delivers a meta-linked document that arrives after its refe
         reads: { confirmed: [], pending: [] },
         operations: [{
           op: "set",
-          id: "of:meta-arrival-target",
-          value: { value: { arrived: true } },
+          id: labelSchemaId,
+          value: { value: labelSchema },
         }],
       },
     });
@@ -1787,10 +1827,15 @@ Deno.test("memory v2 delivers a meta-linked document that arrives after its refe
       space,
       engine,
       tracked.state,
-      new Set([toDirtyKey("of:meta-arrival-target")]),
+      new Set([toDirtyKey(labelSchemaId)]),
     );
     assertExists(refreshed);
-    assert(refreshed.updates.has(targetKey));
+    assertEquals(refreshed.updates.get(targetKey)?.document, {
+      value: labelSchema,
+    });
+    assertEquals(tracked.state.entities.get(targetKey)?.document, {
+      value: labelSchema,
+    });
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -2327,20 +2372,10 @@ Deno.test("memory v2 extendTrackedGraph attributes the roots it adds", async () 
   }
 });
 
-Deno.test("memory v2 query chases metadata for named roots, not crossings", async () => {
+Deno.test("memory v2 query loads the label schema document for every document it delivers, and nothing else of its metadata", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-query-meta-roots";
   const link = (id: string) => ({ "/": { "link@1": { id, path: [], space } } });
-  const foreignLink = (id: string) => ({
-    "/": {
-      "link@1": {
-        id,
-        path: [],
-        space: "did:key:z6Mk-memory-v2-query-meta-other",
-      },
-    },
-  });
-  const identity = { principal: "did:key:alice", sessionId: "session:alice" };
   // The root's selector reaches `child`, the link into the crossing.
   const rootQuery: Parameters<typeof extendTrackedGraph>[3] = {
     roots: [{
@@ -2373,9 +2408,21 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     }],
   };
   const idsOf = (result: { entities: { id: string }[] }) =>
-    new Set(result.entities.map((entity) => entity.id));
-  // The schema the crossing document's labels are stated against, held as
-  // a content-addressed document its `cfc` envelope names by hash.
+    result.entities.map((entity) => entity.id).sort();
+  // The schemas each document's labels are stated against, held as
+  // content-addressed documents the `cfc` envelopes name by hash.
+  const rootLabelSchema = {
+    type: "object",
+    properties: {
+      child: {
+        type: "object",
+        properties: { name: { type: "string" } },
+      },
+    },
+  } as const;
+  const rootLabelSchemaId = `cid:${
+    internSchemaAsTaggedHashString(rootLabelSchema)
+  }`;
   const labelSchema = {
     type: "object",
     properties: { name: { type: "string" } },
@@ -2390,6 +2437,31 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
   const relabeledSchemaId = `cid:${
     internSchemaAsTaggedHashString(relabeledSchema)
   }`;
+  const cfcNaming = (schemaId: string) => ({
+    version: 1,
+    schemaHash: schemaId.slice("cid:".length),
+    labelMap: { version: 1, entries: [] },
+  });
+  // The targets of every other metadata link the two documents carry: the
+  // pattern that serves loading each, and the result and derived cell the
+  // crossing's computations write.
+  const familyIds = [
+    "of:root-family",
+    "of:target-family",
+    "of:target-result",
+    "of:target-cell",
+  ];
+  const assertFamilyUntracked = (
+    state: {
+      tracker: { has(key: string): boolean };
+      entities: Map<string, unknown>;
+    },
+  ) => {
+    for (const id of familyIds) {
+      assert(!state.tracker.has(`${space}/space/${id}`));
+      assert(!state.entities.has(`${space}/space/${id}`));
+    }
+  };
 
   try {
     applyCommit(engine, {
@@ -2400,6 +2472,10 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
         localSeq: 1,
         reads: { confirmed: [], pending: [] },
         operations: [{
+          op: "set",
+          id: rootLabelSchemaId,
+          value: { value: rootLabelSchema },
+        }, {
           op: "set",
           id: labelSchemaId,
           value: { value: labelSchema },
@@ -2424,101 +2500,59 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
           id: "of:crossing-target",
           value: {
             value: { name: "target" },
-            cfc: {
-              version: 1,
-              schemaHash: labelSchemaId.slice("cid:".length),
-              labelMap: { version: 1, entries: [] },
-            },
+            cfc: cfcNaming(labelSchemaId),
             pattern: link("of:target-family"),
             result: link("of:target-result"),
-            internal: [{ link: link("of:target-cell") }, {
-              link: foreignLink("of:foreign-cell"),
-            }],
+            internal: [{ link: link("of:target-cell") }],
           },
         }, {
           op: "set",
           id: "of:meta-root",
           value: {
             value: { child: link("of:crossing-target") },
+            cfc: cfcNaming(rootLabelSchemaId),
             pattern: link("of:root-family"),
-            internal: [{ link: foreignLink("of:foreign-root-cell") }],
           },
         }],
       },
     });
 
-    // The named root arrives with its full metadata family; the document
-    // the walk reaches through the `child` crossing arrives under the
-    // selector that reached it and with none of its family — not the
-    // pattern that serves loading it, not the result and derived cell its
-    // computations write — beyond the schema document its labels are
-    // checked against.
-    const rooted = idsOf(
-      queryGraph(space, engine, rootQuery, undefined, identity),
+    // Every document the walk delivers — the named root, and the document
+    // the walk reaches through the `child` crossing — arrives with the
+    // schema document its `cfc` envelope names, which a reader of a
+    // labeled document checks its reads against, and with nothing else
+    // its metadata links name.
+    const rooted = idsOf(queryGraph(space, engine, rootQuery));
+    assertEquals(
+      rooted,
+      [
+        "of:meta-root",
+        rootLabelSchemaId,
+        "of:crossing-target",
+        labelSchemaId,
+      ].sort(),
     );
-    assert(rooted.has("of:meta-root"));
-    assert(rooted.has("of:crossing-target"));
-    assert(rooted.has("of:root-family"));
-    assert(rooted.has(labelSchemaId));
-    assert(!rooted.has("of:target-family"));
-    assert(!rooted.has("of:target-result"));
-    assert(!rooted.has("of:target-cell"));
 
-    // The same document, NAMED as a root, chases its family: intent to
-    // load rides the naming, not the reachability.
-    const targetRooted = idsOf(
-      queryGraph(space, engine, targetQuery, undefined, identity),
+    // Naming the crossed document as a root changes nothing about what
+    // comes with it.
+    assertEquals(
+      idsOf(queryGraph(space, engine, targetQuery)),
+      ["of:crossing-target", labelSchemaId].sort(),
     );
-    assert(targetRooted.has("of:crossing-target"));
-    assert(targetRooted.has(labelSchemaId));
-    assert(targetRooted.has("of:target-family"));
-    assert(targetRooted.has("of:target-result"));
-    assert(targetRooted.has("of:target-cell"));
-
-    // A metadata family is a same-space structure: a foreign-space
-    // manifest entry selects nothing, on a named root and on a named
-    // crossing target alike.
-    assert(![...rooted].some((id) => id.includes("foreign")));
-    assert(![...targetRooted].some((id) => id.includes("foreign")));
-
-    // Naming beats ordering: the first root's crossing may cover the second
-    // root's document before it is visited, and coverage skips the second
-    // root's traversal — but a named root's family arrives regardless.
-    const bothRooted = idsOf(queryGraph(
-      space,
-      engine,
-      { roots: [...rootQuery.roots, ...targetQuery.roots] },
-      undefined,
-      identity,
-    ));
-    assert(bothRooted.has("of:target-family"));
-
-    // The same guarantee across INCREMENTAL adds: a first query's crossing
-    // covers the target's selector, and a later query naming the target is
-    // not covered until its family has been chased — the extension supplies
-    // it, and only then does coverage hold.
-    const tracked = trackGraph(space, engine, rootQuery);
-    assert(!isGraphQueryCoveredByState(space, tracked.state, targetQuery));
-    const familyExtended = extendTrackedGraph(
-      space,
-      engine,
-      tracked.state,
-      targetQuery,
+    assertEquals(
+      idsOf(queryGraph(
+        space,
+        engine,
+        { roots: [...rootQuery.roots, ...targetQuery.roots] },
+      )),
+      rooted,
     );
-    assert(
-      [...familyExtended.updates.values()].some((entity) =>
-        entity.id === "of:target-family"
-      ),
-    );
-    assert(isGraphQueryCoveredByState(space, tracked.state, targetQuery));
 
-    // A crossing-only state holds no interest in the crossed document's
-    // family: a commit to its derived cell touches nothing the query
+    // A tracked graph holds no interest in the metadata targets: a commit
+    // to the crossed document's derived cell touches nothing the query
     // tracks, so the refresh has nothing to deliver.
-    const crossingTracked = trackGraph(space, engine, rootQuery);
-    const cellKey = `${space}/space/of:target-cell`;
-    assert(!crossingTracked.state.tracker.has(cellKey));
-    assert(!crossingTracked.state.entities.has(cellKey));
+    const tracked = trackGraph(space, engine, rootQuery);
+    assertFamilyUntracked(tracked.state);
     applyCommit(engine, {
       sessionId: "session:writer",
       invocation: invocationFor(2),
@@ -2537,17 +2571,15 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
       refreshTrackedGraph(
         space,
         engine,
-        crossingTracked.state,
+        tracked.state,
         new Set([toDirtyKey("of:target-cell")]),
       ) === null,
     );
 
-    // A dirty crossing keeps its crossing shape: updating the crossed
-    // document re-walks it WITHOUT promoting it to a named root's
-    // family, so what a subscriber holds does not depend on update
-    // history — and the re-walk delivers the schema document the new
-    // version's labels are checked against, exactly as the first reach
-    // delivered the old one.
+    // A new version of the crossed document restating its labels against
+    // another schema delivers that schema document with it, exactly as
+    // the first reach delivered the one it named then — and still none
+    // of the metadata targets.
     applyCommit(engine, {
       sessionId: "session:writer",
       invocation: invocationFor(3),
@@ -2564,11 +2596,7 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
           id: "of:crossing-target",
           value: {
             value: { name: "target, renamed" },
-            cfc: {
-              version: 1,
-              schemaHash: relabeledSchemaId.slice("cid:".length),
-              labelMap: { version: 1, entries: [] },
-            },
+            cfc: cfcNaming(relabeledSchemaId),
             pattern: link("of:target-family"),
             result: link("of:target-result"),
             internal: [{ link: link("of:target-cell") }],
@@ -2576,184 +2604,117 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
         }],
       },
     });
-    const crossingRefreshed = refreshTrackedGraph(
+    const refreshed = refreshTrackedGraph(
       space,
       engine,
-      crossingTracked.state,
+      tracked.state,
       new Set([toDirtyKey("of:crossing-target")]),
     );
-    assertExists(crossingRefreshed);
-    assertExists(
-      crossingRefreshed.updates.get(`${space}/space/of:crossing-target`),
-    );
-    assertExists(
-      crossingRefreshed.updates.get(`${space}/space/${relabeledSchemaId}`),
+    assertExists(refreshed);
+    assertEquals(
+      [...refreshed.updates.values()].map((entity) => entity.id).sort(),
+      ["of:crossing-target", relabeledSchemaId].sort(),
     );
     assert(
-      crossingTracked.state.entities.has(`${space}/space/${relabeledSchemaId}`),
+      tracked.state.entities.has(`${space}/space/${relabeledSchemaId}`),
     );
-    for (
-      const id of ["of:target-family", "of:target-result", "of:target-cell"]
-    ) {
-      assert(!crossingTracked.state.tracker.has(`${space}/space/${id}`));
-      assert(!crossingTracked.state.entities.has(`${space}/space/${id}`));
-    }
+    assertFamilyUntracked(tracked.state);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
 
-    // An absent NAMED root heals with its family: naming records the
-    // role, creation delivers the family, and coverage then holds.
-    const absentRootQuery: Parameters<typeof extendTrackedGraph>[3] = {
-      roots: [{
-        id: "of:late-root",
-        selector: {
-          path: [],
-          schema: {
-            type: "object",
-            properties: { name: { type: "string" } },
-          },
-        },
-      }],
-    };
-    const lateTracked = trackGraph(space, engine, absentRootQuery);
-    assert(!lateTracked.state.chased.has(`${space}/space/of:late-root`));
+// The memory engine owns scope partitions and drives the runner's graph walk,
+// so this boundary test makes an inherited metadata scope observable.
+Deno.test("memory v2 query loads CFC schemas from space scope", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-cfc-schema-scope";
+  const identity = { principal: "did:key:alice", sessionId: "session:alice" };
+  const labelSchema = {
+    type: "object",
+    properties: { name: { type: "string" } },
+  } as const;
+  const labelSchemaId = `cid:${internSchemaAsTaggedHashString(labelSchema)}`;
+
+  try {
     applyCommit(engine, {
-      sessionId: "session:writer",
-      invocation: invocationFor(4),
+      ...identity,
+      invocation: invocationFor(1),
       authorization,
       commit: {
-        localSeq: 4,
+        localSeq: 1,
         reads: { confirmed: [], pending: [] },
         operations: [{
           op: "set",
-          id: "of:late-family",
-          value: { value: { kind: "late pattern" } },
+          id: labelSchemaId,
+          value: { value: labelSchema },
         }, {
           op: "set",
-          id: "of:late-root",
+          id: "of:scoped-crossing",
+          scope: "user",
           value: {
-            value: { name: "born late" },
-            pattern: link("of:late-family"),
+            value: { name: "target" },
+            cfc: {
+              version: 1,
+              schemaHash: labelSchemaId.slice("cid:".length),
+              labelMap: { version: 1, entries: [] },
+            },
           },
-        }],
-      },
-    });
-    const lateRefreshed = refreshTrackedGraph(
-      space,
-      engine,
-      lateTracked.state,
-      new Set([toDirtyKey("of:late-root"), toDirtyKey("of:late-family")]),
-    );
-    assertExists(lateRefreshed);
-    assert(lateTracked.state.chased.has(`${space}/space/of:late-root`));
-    assert(lateTracked.state.tracker.has(`${space}/space/of:late-family`));
-    assert(
-      isGraphQueryCoveredByState(space, lateTracked.state, absentRootQuery),
-    );
-
-    // A member of a named root's family is owed its own family on its
-    // re-walk: the family is recursive, so a member whose metadata link
-    // moves delivers the new target — which a crossing's re-walk never
-    // does.
-    applyCommit(engine, {
-      sessionId: "session:writer",
-      invocation: invocationFor(5),
-      authorization,
-      commit: {
-        localSeq: 5,
-        reads: { confirmed: [], pending: [] },
-        operations: [{
-          op: "set",
-          id: "of:late-family-source",
-          value: { value: { source: "late pattern source" } },
         }, {
           op: "set",
-          id: "of:late-family",
+          id: "of:cfc-schema-scope-root",
           value: {
-            value: { kind: "late pattern, with a source" },
-            result: link("of:late-family-source"),
+            value: {
+              child: {
+                "/": {
+                  "link@1": {
+                    id: "of:scoped-crossing",
+                    path: [],
+                    space,
+                    scope: "user",
+                  },
+                },
+              },
+            },
           },
         }],
       },
     });
-    const memberRefreshed = refreshTrackedGraph(
+
+    const result = queryGraph(
       space,
       engine,
-      lateTracked.state,
-      new Set([toDirtyKey("of:late-family")]),
-    );
-    assertExists(memberRefreshed);
-    assertExists(
-      memberRefreshed.updates.get(`${space}/space/of:late-family-source`),
-    );
-    assert(
-      lateTracked.state.tracker.has(`${space}/space/of:late-family-source`),
+      {
+        roots: [{
+          id: "of:cfc-schema-scope-root",
+          selector: {
+            path: [],
+            schema: {
+              type: "object",
+              properties: {
+                child: {
+                  type: "object",
+                  properties: { name: { type: "string" } },
+                },
+              },
+            },
+          },
+        }],
+      },
+      undefined,
+      identity,
     );
 
-    // A family link naming a document that does not exist yet still
-    // entitles that document to its own family: the absent target is
-    // tracked so its arrival re-fires the query, and its arrival is walked
-    // as a family member — its own links chased — not as a crossing.
-    applyCommit(engine, {
-      sessionId: "session:writer",
-      invocation: invocationFor(6),
-      authorization,
-      commit: {
-        localSeq: 6,
-        reads: { confirmed: [], pending: [] },
-        operations: [{
-          op: "set",
-          id: "of:parent-root",
-          value: {
-            value: { name: "parent" },
-            result: link("of:absent-member"),
-          },
-        }],
+    assertEquals(
+      result.entities.find((entity) => entity.id === labelSchemaId),
+      {
+        branch: "",
+        id: labelSchemaId,
+        seq: 1,
+        document: { value: labelSchema },
       },
-    });
-    const parentTracked = trackGraph(space, engine, {
-      roots: [{
-        id: "of:parent-root",
-        selector: {
-          path: [],
-          schema: {
-            type: "object",
-            properties: { name: { type: "string" } },
-          },
-        },
-      }],
-    });
-    const absentMemberKey = `${space}/space/of:absent-member`;
-    assert(parentTracked.state.tracker.has(absentMemberKey));
-    assert(parentTracked.state.chased.has(absentMemberKey));
-    applyCommit(engine, {
-      sessionId: "session:writer",
-      invocation: invocationFor(7),
-      authorization,
-      commit: {
-        localSeq: 7,
-        reads: { confirmed: [], pending: [] },
-        operations: [{
-          op: "set",
-          id: "of:member-family",
-          value: { value: { kind: "member pattern" } },
-        }, {
-          op: "set",
-          id: "of:absent-member",
-          value: {
-            value: { name: "born member" },
-            pattern: link("of:member-family"),
-          },
-        }],
-      },
-    });
-    const bornMember = refreshTrackedGraph(
-      space,
-      engine,
-      parentTracked.state,
-      new Set([toDirtyKey("of:absent-member"), toDirtyKey("of:member-family")]),
     );
-    assertExists(bornMember);
-    assertExists(bornMember.updates.get(`${space}/space/of:member-family`));
-    assert(parentTracked.state.tracker.has(`${space}/space/of:member-family`));
   } finally {
     close(engine);
     await Deno.remove(path);

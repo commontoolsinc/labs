@@ -47,6 +47,42 @@ The scripting bundle is also the agent door the non-goals hold open:
 stable machine-readable output, exit-code discipline, and deterministic
 non-TTY behavior (no views, no strip) arrive with it, not before.
 
+**A slow call's outcome collects in the fabric, not in a shuttle job table.**
+The identity half is already shuttle's: one invocation session is minted at
+startup and passed explicitly into every `call`, which mints an id under it
+(decision 6, [`runtime-integration.md`](runtime-integration.md)). Replaying that
+pair deduplicates against the receipt the handling wrote: the commit lands once
+and the original outcome settles the retry, though the body runs again and
+repeats whatever effects it has outside its transaction. Where no receipt was
+written — a handling that failed, or a deployment not writing them — there is
+nothing to collide with, and the replay executes and commits again. What v1 has
+no spelling for is the wait half: `cf`'s `--wait <seconds>` patience bound, and
+its `--no-wait`, which exits at the commit acknowledgment carrying the receipt's
+address (`resolveWaitControl`, `packages/cli/commands/piece.ts`). Both belong at
+shuttle's `call` when a slow verb makes them worth typing, and collecting a
+detached outcome is then an ordinary `get` of that address: no second read path,
+and the handler does not run again.
+
+One fact bounds how far that goes. The handler runs in the calling process,
+which is why even a detached call awaits its own commit. A shuttle that exits
+mid-call abandons work, and the invocation id makes the retry safe rather than
+the abandonment lossless. So a backgrounded call here is a line shuttle keeps
+running while the prompt goes on reading keys — which B1f's event loop already
+allows — and never a call that outlives the process.
+
+Where outcomes collect while nobody is watching is a fabric question rather than
+a shuttle one, on the same stance the session scope takes above: shuttle adds
+spelling, never a private store. A receipt is addressed from the event id and
+the handler's bound closure, so the caller collects it from the address the call
+published and nobody enumerates them; listing what settled since a person left
+needs the retention collection
+[`../pattern-verb-contract.md`](../pattern-verb-contract.md) designs and has not
+built. Shuttle's own collector is `watch`: a verb whose result lands in a
+watched cell announces itself through the event lines B3 builds, and candidate
+6's `--bell` and `--notify` carry that to someone who stepped away. The open
+detail is whether an armed watch on a detached call's receipt earns a spelling
+of its own, or whether `watch <receipt>` is already it.
+
 **A place's space is safe by its alphabet rather than by a guard.**
 `renderPosition` (`place.ts`) writes the space into what `pwd` and `where`
 show without holding it to the class a terminal acts on, and `isDID`

@@ -53,16 +53,6 @@ import {
 } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 
-/** Consecutive cold-view deferrals before a drained event hardens into
- * events.md §5's DROP (see #eventDeferrals). A deferral re-arms the
- * scan from the NEXT INPUT (the creation commit arriving) or, absent
- * input, from a real-time backstop tick — never synchronously, so the
- * retry budget cannot be consumed back-to-back inside one quiet
- * moment (verdict blocker, 2026-08-12: all eight deferrals used to
- * run in immediate succession and permanently drop an event whose
- * creation input was milliseconds away). */
-const EVENT_DEFERRAL_DROP_THRESHOLD = 8;
-
 /** The deferral backstop cadence: with NO input arriving at all, a
  * deferred event retries once per tick and hardens into the DROP
  * after the full budget — bounded unrunnable-event cleanup (the park
@@ -129,6 +119,7 @@ import {
 import { type SealedEffectBatch, SpaceOutbox } from "./outbox.ts";
 import { effectCompletionKeyOf } from "./effect-completion.ts";
 import { markRendererTrustedEvent } from "../cfc/ui-contract.ts";
+import { EVENT_DEFERRAL_DROP_THRESHOLD } from "../scheduler/constants.ts";
 import { LT1_LATE_SEAL_REFUSED } from "../scheduler/types.ts";
 import {
   type CellScope,

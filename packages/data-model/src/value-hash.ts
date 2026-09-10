@@ -288,7 +288,7 @@ function feedObjectValue(
   const nativeTag = tagFromNativeValueElseNull(value);
 
   switch (nativeTag) {
-    case VALUE_TAGS.EpochNsec: {
+    case VALUE_TAGS.FabricEpochNsec: {
       hasher.update(TAG_EPOCH_NSEC_BYTES);
       const bytes = bigintToMinimalTwosComplement(
         (value as { value: bigint }).value,
@@ -298,7 +298,7 @@ function feedObjectValue(
       return;
     }
 
-    case VALUE_TAGS.EpochDay: {
+    case VALUE_TAGS.FabricEpochDay: {
       hasher.update(TAG_EPOCH_DAY_BYTES);
       const bytes = bigintToMinimalTwosComplement(
         (value as { value: bigint }).value,
@@ -308,7 +308,7 @@ function feedObjectValue(
       return;
     }
 
-    case VALUE_TAGS.Hash: {
+    case VALUE_TAGS.FabricHash: {
       const cid = value as FabricHash;
       hasher.update(TAG_HASH_BYTES);
       hasher.update(getStringRep(cid.tag));
@@ -373,9 +373,9 @@ function feedObjectValue(
       return;
     }
 
-    case VALUE_TAGS.Date:
-    case VALUE_TAGS.RegExp:
-    case VALUE_TAGS.Uint8Array: {
+    case VALUE_TAGS.JsDate:
+    case VALUE_TAGS.JsRegExp:
+    case VALUE_TAGS.JsUint8Array: {
       // Native instances that have a well-defined `FabricValue` conversion.
       // Convert on-the-fly and hash the converted value.
       const converted = shallowFabricFromNativeValue(value, false);

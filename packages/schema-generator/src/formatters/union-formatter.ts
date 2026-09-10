@@ -20,6 +20,7 @@ import {
   getNativeTypeSchema,
   getPropertyNameText,
   isDefaultBrandedMember,
+  isEmptyRecordType,
   resolveWrapperNode,
   TypeWithInternals,
 } from "../type-utils.ts";
@@ -963,6 +964,10 @@ export class UnionFormatter implements TypeFormatter {
     }
     if (type.flags & ts.TypeFlags.Undefined) {
       return undefined;
+    }
+
+    if (isEmptyRecordType(type, context.typeChecker)) {
+      return {};
     }
 
     const symbol = type.getSymbol();

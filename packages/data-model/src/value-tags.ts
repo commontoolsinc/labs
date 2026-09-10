@@ -30,26 +30,53 @@ import {
  */
 export const FABRIC_PRIMITIVE_VALUE_TAGS = Object.freeze(
   {
-    EpochNsec: "EpochNsec",
-    EpochDay: "EpochDay",
-    Hash: "Hash",
+    FabricEpochNsec: "FabricEpochNsec",
+    FabricEpochDay: "FabricEpochDay",
+    FabricHash: "FabricHash",
     FabricBytes: "FabricBytes",
     FabricKeyPair: "FabricKeyPair",
     FabricRegExp: "FabricRegExp",
   } as const,
 );
 
-/** One of the primitive tag strings. */
+/** One of the `FabricPrimitive` tag strings. */
 export type FabricPrimitiveValueTag =
   typeof FABRIC_PRIMITIVE_VALUE_TAGS[keyof typeof FABRIC_PRIMITIVE_VALUE_TAGS];
+
+/**
+ * The tags of the JS types that `typeof` decides: one per name it reports
+ * other than `object`, plus `null`, which it files under `object` and which
+ * has a tag of its own here. Every JS primitive has its tag here, and so does
+ * a function.
+ */
+export const JS_TYPE_VALUE_TAGS = Object.freeze(
+  {
+    bigint: "bigint",
+    boolean: "boolean",
+    function: "function",
+    null: "null",
+    number: "number",
+    string: "string",
+    symbol: "symbol",
+    undefined: "undefined",
+  } as const,
+);
+
+/** One of the JS type tag strings. */
+export type JsTypeValueTag =
+  typeof JS_TYPE_VALUE_TAGS[keyof typeof JS_TYPE_VALUE_TAGS];
 
 /**
  * Tags identifying the value types that this system recognizes for dispatch.
  * These are distinct from wire-format `TAGS`.
  *
  * Covers the following:
- * * **Native JS builtins**: standard JS types, primitives all represented by
- *   the type `Primitive`, and classes represented by their respective names.
+ * * **JS types**: every primitive and a function, each represented by its
+ *   `typeof` name, plus `null`. These are `JS_TYPE_VALUE_TAGS`, which this
+ *   table includes whole.
+ * * **Native JS builtins**: arrays and plain objects represented by `Array`
+ *   and `Object`, and classes represented by their respective names under a
+ *   `Js` prefix.
  * * **`FabricPrimitive`s**: classes defined by this package which are
  *   considered equivalent to primitives (always frozen, pass through conversion
  *   unchanged) but aren't under the open-ended `FabricInstance` umbrella. These
@@ -60,16 +87,16 @@ export type FabricPrimitiveValueTag =
 export const VALUE_TAGS = Object.freeze(
   {
     Array: "Array",
-    Object: "Object",
-    Error: "Error",
-    Map: "Map",
-    Set: "Set",
-    Date: "Date",
-    Uint8Array: "Uint8Array",
-    RegExp: "RegExp",
     FabricInstance: "FabricInstance",
-    Primitive: "Primitive",
+    JsDate: "JsDate",
+    JsError: "JsError",
+    JsMap: "JsMap",
+    JsRegExp: "JsRegExp",
+    JsSet: "JsSet",
+    JsUint8Array: "JsUint8Array",
+    Object: "Object",
     ...FABRIC_PRIMITIVE_VALUE_TAGS,
+    ...JS_TYPE_VALUE_TAGS,
   } as const,
 );
 
@@ -115,6 +142,16 @@ export function tagFromFabricPrimitiveElseNull(
 }
 
 /**
+ * Maps a value to its JS type tag, which is decided by `typeof` alone: the
+ * `typeof` name of a non-object, and the `null` tag for the value `null`.
+ * Returns `object` for any other object, which has no JS type tag; its tag is
+ * a question for `tagFromFabricValue()` or `tagFromNativeValueElseNull()`.
+ */
+export function jsTagFromValue(value: unknown): JsTypeValueTag | "object" {
+  return (value === null) ? VALUE_TAGS.null : typeof value;
+}
+
+/**
  * Maps a presumed valid `FabricValue` to its tag. This `throw`s if it
  * determines that the given value cannot possibly be valid. To be clear, this
  * function does not go out of its way to make a validity determination.
@@ -138,21 +175,13 @@ export function tagFromFabricValue(value: FabricValue): ValueTag {
 export function tagFromFabricValueElseNull(
   value: FabricValue,
 ): ValueTag | null {
-  switch (typeof value) {
-    case "function": {
-      return null;
-    }
+  const jsType = jsTagFromValue(value);
 
-    case "object": {
-      if (value === null) {
-        return VALUE_TAGS.Primitive;
-      }
-      break;
-    }
-
-    default: {
-      return VALUE_TAGS.Primitive;
-    }
+  if (jsType === VALUE_TAGS.function) {
+    // A function is no `FabricValue`, so its tag is not one this returns.
+    return null;
+  } else if (jsType !== "object") {
+    return jsType;
   }
 
   if (isFabricArray(value)) {
@@ -205,7 +234,7 @@ export function tagFromNativeBuiltinClassElseNull(
       return VALUE_TAGS.Array;
     }
 
-    // `Error` and standard subclasses all map to the `Error` tag.
+    // `Error` and standard subclasses all map to the `JsError` tag.
     case Error:
     case TypeError:
     case RangeError:
@@ -213,27 +242,27 @@ export function tagFromNativeBuiltinClassElseNull(
     case ReferenceError:
     case URIError:
     case EvalError: {
-      return VALUE_TAGS.Error;
+      return VALUE_TAGS.JsError;
     }
 
     case Map: {
-      return VALUE_TAGS.Map;
+      return VALUE_TAGS.JsMap;
     }
 
     case Set: {
-      return VALUE_TAGS.Set;
+      return VALUE_TAGS.JsSet;
     }
 
     case Date: {
-      return VALUE_TAGS.Date;
+      return VALUE_TAGS.JsDate;
     }
 
     case Uint8Array: {
-      return VALUE_TAGS.Uint8Array;
+      return VALUE_TAGS.JsUint8Array;
     }
 
     case RegExp: {
-      return VALUE_TAGS.RegExp;
+      return VALUE_TAGS.JsRegExp;
     }
 
     default: {
@@ -246,7 +275,7 @@ export function tagFromNativeBuiltinClassElseNull(
         typeof constructorFn === "function" &&
         constructorFn.prototype instanceof Error
       ) {
-        return VALUE_TAGS.Error;
+        return VALUE_TAGS.JsError;
       }
       return null;
     }
@@ -254,9 +283,9 @@ export function tagFromNativeBuiltinClassElseNull(
 }
 
 /**
- * Maps a JS value to its native-instance tag. Returns the tag string if the
- * value is a recognized convertible native instance, or `null` otherwise.
- * Non-object types (`null`, `undefined`, primitives) return `Primitive`.
+ * Maps a JS value to its tag. Returns the tag of a primitive or a function,
+ * or that of a recognized convertible native instance, or `null` for any
+ * other object.
  *
  * An array is tagged `Array` before anything else is consulted.
  * `Array.isArray()` is realm-agnostic and sees through both a subclass and a
@@ -264,8 +293,10 @@ export function tagFromNativeBuiltinClassElseNull(
  * the array rule, which alone decides what an array may be.
  */
 export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
-  if (value === null || typeof value !== "object") {
-    return VALUE_TAGS.Primitive;
+  const jsType = jsTagFromValue(value);
+
+  if (jsType !== "object") {
+    return jsType;
   }
 
   // Arrays first, and unconditionally: see above.
@@ -278,7 +309,7 @@ export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
   if (proto === Object.prototype) {
     return VALUE_TAGS.Object;
   } else if (Error.isError(value)) {
-    return VALUE_TAGS.Error;
+    return VALUE_TAGS.JsError;
   } else if (proto === null) {
     // After the `isError()` check above, the only recognized possibility of a
     // null-proto object is a plain object.

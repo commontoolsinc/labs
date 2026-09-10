@@ -21,6 +21,7 @@ import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import type { Engine } from "../src/harness/engine.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
 
 const signer = await Identity.fromPassphrase("cfc PolicyOf label test");
 const space = signer.did();
@@ -683,7 +684,7 @@ describe("PolicyOf label-time binding", () => {
       );
       tx.prepareCfc();
       const result = await tx.commit();
-      expect(result.error).toBeDefined();
+      expect(isCfcEnforcementRejection(result.error)).toBe(true);
       expect(flushed).toBe(false);
     } finally {
       await sinkRuntime.dispose();

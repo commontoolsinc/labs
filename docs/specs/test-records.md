@@ -29,7 +29,11 @@ A test's identity has three required parts, scoped within a repository:
   invented for it, named `global`, and every chain that file goes on to
   run opens with that name. A suite it registers as ignored is reported
   under its bare name. The runner keeps such a suite out of the root
-  suite and never runs its body.
+  suite and never runs its body. A `describe` or `it` call carrying no
+  name of its own is named after the body it was given, and a name the
+  call carries stands even where it is empty, so a chain can hold an
+  empty element. The runner refuses an empty name for the outermost
+  registration of a file, so an empty element is never the first.
 - **variant**, when present — a stable name for a non-default configuration
   that runs the same test. The default configuration has no variant. The
   server-execution deployed-topology lanes have stable `default` and

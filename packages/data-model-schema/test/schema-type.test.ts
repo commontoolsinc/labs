@@ -119,8 +119,8 @@ describe("schema-type", () => {
       // Death before confusion: a primitive class that reaches the mapping
       // without a schema type name must fail loudly, not degrade to "object".
       class RogueFabricPrimitive extends BaseFabricPrimitive {
-        get [VALUE_TAG](): "EpochNsec" {
-          return "EpochNsec";
+        get [VALUE_TAG](): "FabricEpochNsec" {
+          return "FabricEpochNsec";
         }
       }
       expect(() => schemaTypeOfFabricPrimitive(new RogueFabricPrimitive()))

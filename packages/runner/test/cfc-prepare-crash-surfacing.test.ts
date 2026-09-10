@@ -174,7 +174,7 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
         observed.push(result.error);
       });
       const result = await tx.commit();
-      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("CommitPreparationError");
       expect(String(result.error?.message)).toMatch(/divergent anyOf/);
       // ...and commit callbacks observed the same failure (rollback ran).
       expect(observed.length).toBe(1);
@@ -230,7 +230,7 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
         const tx = secondWriterTx(runtime, id);
         runtime.prepareTxForCommit(tx);
         const result = await tx.commit();
-        expect(result.error).toBeDefined();
+        expect(result.error?.name).toBe("CommitPreparationError");
       } finally {
         console.error = realConsoleError;
       }

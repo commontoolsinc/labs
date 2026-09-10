@@ -453,4 +453,11 @@ export type QueuedEvent = {
   retryDeadline?: number;
   /** Settles an intent temporarily parked outside `eventQueue`. */
   cancelPending?: (reason: string) => void;
+
+  /**
+   * How many backoff re-runs this event has taken after its handler body did
+   * not run, counted against `HANDLER_NOT_RUN_BACKOFF_LIMIT`. A re-run parked
+   * on a load is not counted. Carried across requeues.
+   */
+  notRunBackoffs?: number;
 };
