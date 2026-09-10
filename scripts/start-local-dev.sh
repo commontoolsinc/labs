@@ -424,6 +424,12 @@ if [[ "$CF_HARNESS" == "true" ]]; then
     # console then has to read.
     CONSOLE_STORE=${MEMORY_DIR:-"$(cd "$SCRIPT_DIR/../packages/toolshed" && pwd)/cache/memory"}
     CONSOLE_ARGS+=(--store "$CONSOLE_STORE")
+    # `DB_PATH` puts the toolshed in single-file mode, where the directory the
+    # console would otherwise walk holds nothing. Naming the file keeps the
+    # console reading the store this fabric is actually writing.
+    if [[ -n "${DB_PATH:-}" ]]; then
+        CONSOLE_ARGS+=(-- --space-db "$DB_PATH")
+    fi
 
     echo ""
     echo "Starting cf-harness console on port $CONSOLE_PORT..."

@@ -200,15 +200,20 @@ derives that URL from the loom base it resolved, so its harness console setting
 is left blank for a remote loom and holds `http://127.0.0.1:8135` for a local
 one.
 
-The console's port is the one place the offset does not reach: the daemon
-proxies to 8135 whatever the instance's offset, because that is the port Weaver
-pairs with. Three things decide it, in order — `defaults.harness_console_port`
-in `pieces.json`, then a `CF_HARNESS_CONSOLE_PORT` the daemon itself inherited,
-then 8135. The middle one is the one to check when the route reaches nothing: a
+The console's port is the one place the offset does not reach: it defaults to
+8135 whatever the instance's offset, because that is the port Weaver pairs with.
+The daemon's proxy and the console read the same inputs in the same order —
+`defaults.harness_console_port` in `pieces.json`, then a
+`CF_HARNESS_CONSOLE_PORT` inherited from the launching shell, then 8135 — so
+**recording a port in `pieces.json` moves both.** That is what to do for a
+second instance on a machine that already has a console: the port is not derived
+from the offset, so two instances left at the default contend for one.
+
+The inherited variable is the one to check when the route reaches nothing. A
 daemon started from a shell that exported the console's own variable proxies
-wherever that shell said, which is not what `pieces.json` records. Move the
-console with `--port` and record the new port in `pieces.json`, so the daemon
-and the launcher agree from one place.
+wherever that shell said, which is not what `pieces.json` records. `--port` on
+the launcher wins over both and moves only the console, so use it to look at a
+console and `pieces.json` to move one.
 
 **The toolshed's own port is required, and its absence is silent.** Loom rebases
 the loopback URLs in `/config` onto the host the request arrived at and keeps

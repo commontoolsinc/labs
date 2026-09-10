@@ -127,6 +127,56 @@ describe("launch", () => {
       );
     });
 
+    it("returns the port the instance records, as loom's proxy resolves it", () => {
+      // The daemon's proxy target and the console's bind port read the same
+      // inputs in the same order, so one record moves both.
+
+      const plan = resolveConsoleLaunchPlan(
+        withPieces({
+          identity: "/keys/instance.key",
+          local_space: "ben-loom-dev-6",
+          server_urls: { toolshed: "http://localhost:8001" },
+          harness_console_port: 8136,
+        }),
+        OPTIONS,
+      );
+
+      expect(plan.environment.CF_HARNESS_CONSOLE_PORT).toBe("8136");
+      expect(plan.environment.CF_HARNESS_CONSOLE_DIR).toBe(
+        ".cf-harness-console-loom-8136",
+      );
+    });
+
+    it("returns a named port over the one the instance records", () => {
+      const plan = resolveConsoleLaunchPlan(
+        withPieces({
+          identity: "/keys/instance.key",
+          local_space: "s",
+          server_urls: { toolshed: "http://localhost:8001" },
+          harness_console_port: 8136,
+        }),
+        { ...OPTIONS, port: 8140 },
+      );
+
+      expect(plan.environment.CF_HARNESS_CONSOLE_PORT).toBe("8140");
+    });
+
+    it("returns the pairing port for a recorded value that is not a port", () => {
+      const plan = resolveConsoleLaunchPlan(
+        withPieces({
+          identity: "/keys/instance.key",
+          local_space: "s",
+          server_urls: { toolshed: "http://localhost:8001" },
+          harness_console_port: "not a port",
+        }),
+        OPTIONS,
+      );
+
+      expect(plan.environment.CF_HARNESS_CONSOLE_PORT).toBe(
+        String(WEAVER_PAIRING_PORT),
+      );
+    });
+
     it("returns a distinct console directory for each port", () => {
       const first = resolveConsoleLaunchPlan(RECORDS, {
         ...OPTIONS,

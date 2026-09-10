@@ -198,6 +198,19 @@ const parseJsonRecord = (
   return parsed as Record<string, unknown>;
 };
 
+const numericField = (
+  record: Record<string, unknown>,
+  key: string,
+): number | undefined => {
+  const value = record[key];
+  const parsed = typeof value === "number"
+    ? value
+    : typeof value === "string"
+    ? Number(value.trim())
+    : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+};
+
 const stringField = (
   record: Record<string, unknown>,
   key: string,
@@ -295,14 +308,14 @@ export const resolveConsoleLaunchPlan = (
     fromPieces(defaults, "identity"),
     "identity keyfile, which the console signs every write with",
     "--fabric-identity",
-    "CF_IDENTITY",
+    "CF_HARNESS_FABRIC_IDENTITY` or `CF_IDENTITY",
   );
   const space = required(
     options.space,
     fromPieces(defaults, "local_space"),
     "space, which the console writes its pieces into",
     "--fabric-space",
-    "CF_SPACE",
+    "CF_HARNESS_FABRIC_SPACE` or `CF_SPACE",
   );
   const toolshedUrl = required(
     options.toolshedUrl,
@@ -380,7 +393,12 @@ export const resolveConsoleLaunchPlan = (
     ? undefined
     : options.skillsRegistryUrl ?? DEPLOYMENT_SKILLS_REGISTRY_URL;
 
-  const port = options.port ?? WEAVER_PAIRING_PORT;
+  // The port loom's `/harness-console/*` proxy resolves its target with, in
+  // its order: the instance's own record, then the console's variable, then
+  // the port Weaver pairs with. Reading the same inputs the same way is what
+  // makes recording a port in one place move both sides.
+  const recordedPort = numericField(defaults, "harness_console_port");
+  const port = options.port ?? recordedPort ?? WEAVER_PAIRING_PORT;
   const consoleDir = options.consoleDir ??
     (instance === undefined
       ? `.cf-harness-console-${port}`
@@ -402,9 +420,11 @@ export const resolveConsoleLaunchPlan = (
     {
       name: "port",
       value: String(port),
-      source: options.port === undefined
-        ? `${LAUNCHER_DEFAULT} (the port Weaver pairs with)`
-        : NAMED,
+      source: options.port !== undefined
+        ? NAMED
+        : recordedPort !== undefined && instanceSource !== undefined
+        ? instanceSource
+        : `${LAUNCHER_DEFAULT} (the port Weaver pairs with)`,
     },
     {
       name: "console dir",
@@ -674,6 +694,16 @@ export const launchConsole = async (
     };
   }
 
+  // Two vocabularies name these, and both are already exported on the machines
+  // this runs on: the console's own, which its flags and README use, and the
+  // `cf` CLI's, which a person who has ever run `cf` has set. Reading both is
+  // what stops a value that is plainly present from reading as absent; the
+  // console's own name wins, being the one that names this surface.
+  const identity = flag("fabric-identity") ??
+    nonEmpty(env.CF_HARNESS_FABRIC_IDENTITY) ?? nonEmpty(env.CF_IDENTITY);
+  const space = flag("fabric-space") ??
+    nonEmpty(env.CF_HARNESS_FABRIC_SPACE) ?? nonEmpty(env.CF_SPACE);
+
   // Not configurable: the sandbox runs `docker`, so a launcher reading the
   // runtime table from anything else would print directories the runs never
   // reach.
@@ -688,16 +718,18 @@ export const launchConsole = async (
       ? { dockerRuntimesUnreadable: docker.unreadable }
       : {}),
   }, {
-    ...(flag("fabric-identity") ?? nonEmpty(env.CF_IDENTITY)) !== undefined
-      ? { identity: (flag("fabric-identity") ?? nonEmpty(env.CF_IDENTITY))! }
+    ...identity !== undefined ? { identity } : {},
+    ...space !== undefined ? { space } : {},
+    ...(flag("fabric-api-url") ?? nonEmpty(env.CF_HARNESS_FABRIC_API_URL)) !==
+        undefined
+      ? {
+        toolshedUrl: (flag("fabric-api-url") ??
+          nonEmpty(env.CF_HARNESS_FABRIC_API_URL))!,
+      }
       : {},
-    ...(flag("fabric-space") ?? nonEmpty(env.CF_SPACE)) !== undefined
-      ? { space: (flag("fabric-space") ?? nonEmpty(env.CF_SPACE))! }
+    ...(flag("store") ?? nonEmpty(env.MEMORY_DIR)) !== undefined
+      ? { store: (flag("store") ?? nonEmpty(env.MEMORY_DIR))! }
       : {},
-    ...(flag("fabric-api-url") !== undefined
-      ? { toolshedUrl: flag("fabric-api-url")! }
-      : {}),
-    ...(flag("store") !== undefined ? { store: flag("store")! } : {}),
     ...(flag("port") !== undefined
       ? { port: positiveInteger(flag("port")!, "--port") }
       : {}),

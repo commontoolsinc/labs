@@ -70,21 +70,24 @@ that is already running:
 ```sh
 deno task --cwd packages/cf-harness console:launch --instance <loom-instance>
 deno task --cwd packages/cf-harness console:launch \
-  --fabric-api-url http://localhost:8000 --store packages/toolshed/cache/memory
+  --fabric-api-url http://localhost:8000 --store packages/toolshed/cache/memory \
+  --fabric-identity "$HOME/.cf/my-key.pkcs8" --fabric-space my-space
 ```
 
 That task reads the identity, the space and the toolshed URL off a loom
 instance's `pieces.json` when `--instance` names one, the store off
 `loom toolshed-store-dir`, and the two `runsc-cfc` sidecar directories off the
 runtime registration `docker info` reports — so a sidecar path is fixed where
-Docker registers the runtime, not in loom. Without an instance, `CF_IDENTITY`
-and `CF_SPACE` name the identity and the space, and their absence is an error
-naming them. The pattern index and skills registry are this deployment's
-constants rather than any fabric's. It prints every value with the record that
-decided it, and serves on the port Weaver pairs with. Arguments after `--` reach
-this server untouched, so every flag in the tables below is reachable through
-it. [`../docs/WEAVER.md`](../docs/WEAVER.md) is the operator procedure it
-belongs to, including the tailnet topology and the pre-demo preflight.
+Docker registers the runtime, not in loom. Without an instance the identity and
+the space are named — by the flags above, or by `CF_HARNESS_FABRIC_IDENTITY` and
+`CF_HARNESS_FABRIC_SPACE`, or by the `cf` CLI's own `CF_IDENTITY` and `CF_SPACE`
+— and their absence is an error naming them. The pattern index and skills
+registry are this deployment's constants rather than any fabric's. It prints
+every value with the record that decided it, and serves on the port Weaver pairs
+with. Arguments after `--` reach this server untouched, so every flag in the
+tables below is reachable through it. [`../docs/WEAVER.md`](../docs/WEAVER.md)
+is the operator procedure it belongs to, including the tailnet topology and the
+pre-demo preflight.
 
 Against a toolshed of your own, the environment below is what `console:launch`
 would otherwise have resolved:
