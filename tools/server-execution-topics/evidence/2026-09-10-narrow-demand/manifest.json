@@ -1,5 +1,5 @@
 {
-  "artifactRoot": "/Users/berni/.codex/artifacts/server-execution-topics-2026-09-09",
+  "artifactRoot": "./artifacts",
   "profileHead": "83ee6cf73f3b8ab9cd7fccd2d12bee09c518a15b",
   "implementationBase": "1eefa123bbd01337481397c97962cc25ed6d2c73",
   "shape": {
@@ -194,5 +194,6 @@
       "path": "runs/seed-full-83ee-on-02/manifest.json",
       "sha256": "64190a4d616f388b24cad9ab5a57b1cbcb335633d160edf6fe73f63b2232e3f0"
     }
-  ]
+  ],
+  "artifactBundle": "./artifact-bundle.json"
 }

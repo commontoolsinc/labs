@@ -1,7 +1,7 @@
 ---
 status: historical
-created: 2026-09-10
-archived: 2026-09-10
+created: 2026-09-09
+archived: 2026-09-09
 reason: "Recommendation 5 source, demand, and correctness observations during the server-execution topics campaign."
 ---
 
