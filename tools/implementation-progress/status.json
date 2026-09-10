@@ -1,11 +1,11 @@
 {
-  "updated": "2026-09-10T18:02:20.011367+00:00",
+  "updated": "2026-09-10T18:26:50.106029+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7241",
-  "head": "4c61faae67",
-  "activity": "A3 parser and limit evaluator implemented in isolated worktree; seven tests pass. Next: transaction-attempt coverage and harness integration. #7241 is running CI and fresh review.",
-  "review": "Four earlier Cubic findings fixed and antagonistically reviewed. CI is running. Cubic skipped the merge commit; the dashboard checkpoint requests an actual review on a regular commit. A success badge for a skipped review does not satisfy the merge gate.",
+  "head": "3839d504e1",
+  "activity": "Three real CLI budget demos are visible below. A3 runtime review findings are fixed; broader tests are running. #7241 coverage repair is verified locally. Publishing that checkpoint awaits approval.",
+  "review": "Automatic approval review rejected pushing the coverage fix and dashboard changes to commontoolsinc/labs without explicit authorization for that payload and destination. Q5 requests it. Local implementation continues. #7241 also retains an open Cubic fan-out finding despite its tested fix.",
   "checks": [
     "Current fixes: runner accounting regression 20 steps passed",
     "Current fixes: CLI render-demand regression 13 steps passed",
@@ -16,7 +16,12 @@
     "Published baseline: patterns package and all 412 authoritative pattern checks passed",
     "After main integration: 15 focused suites / 230 steps passed",
     "After main integration: type checks, formatting, lint, history index, and conflict-marker checks passed",
-    "A3 worktree: budget parser/evaluator test passed all seven steps (not yet harness enforcement)"
+    "A3 worktree: budget parser/evaluator test passed all seven steps (not yet harness enforcement)",
+    "A3 worktree: three real harness budget regressions and 24 accounting steps pass; recorded CLI pass/fail outcomes verified",
+    "#7241 coverage repair: initialization/action/assertion/settle report test passes; missing line verified executed twice",
+    "A3 API package: 27 tests / five steps pass",
+    "A3 full CLI package: 1,819 pass; the same two pre-existing color-mode failures",
+    "A3 runtime: 26 focused accounting steps pass; CLI budget harness: eight cases pass"
   ],
   "stages": [
     {
@@ -29,19 +34,19 @@
       "id": "A1",
       "title": "Reactive read accounting",
       "status": "review",
-      "detail": "Four counters implemented. Fixing Cubic findings before merge."
+      "detail": "Four body counters implemented; fan-out setting fix passes regression testing. Cubic finding remains open."
     },
     {
       "id": "A2",
       "title": "Attributed CLI reports",
       "status": "review",
-      "detail": "Initialization and step reports implemented. Failed-step reporting fix in progress."
+      "detail": "Attributed initialization and step reports implemented, including reports for failed render/settle operations."
     },
     {
       "id": "A3",
       "title": "Read budgets and whole-step coverage",
       "status": "active",
-      "detail": "Parser and evaluator implemented; seven tests pass for opt-in, malformed limits, overrides, and exact/one-over boundaries. Runtime enforcement and the CLI pass/fail demo are still pending."
+      "detail": "Working CLI budgets and three recorded demos. Antagonistic runtime findings fixed; 26 accounting steps and eight budget harness cases pass. Full runner validation and remaining contract checks in progress."
     },
     {
       "id": "A4",
@@ -180,6 +185,13 @@
       "proposal": "Provide its URL or space/piece identifier. Continue on the local controlled fixture meanwhile.",
       "blocks": "Deployed comparison only; local implementation and demos continue.",
       "status": "Awaiting answer"
+    },
+    {
+      "id": "Q5",
+      "title": "Push coverage fix and dashboard checkpoint to GitHub?",
+      "status": "Approval pending",
+      "proposal": "Approve pushing the validated local checkpoint to the existing branch for PR #7241 in commontoolsinc/labs. Automatic approval review rejected the push for missing explicit payload/destination authorization.",
+      "blocks": "Publishing this checkpoint; local implementation and tests continue."
     }
   ],
   "milestones": [

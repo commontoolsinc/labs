@@ -129,6 +129,26 @@ async function refresh() {
     byId("interval").value = selected || "5";
     byId("command").textContent = demo.command;
     byId("provenance").textContent = `Recorded ${demo.date} · ${demo.revision}`;
+    byId("budget-provenance").textContent = demo.budgets?.provenance ??
+      "Recording budget enforcement demo…";
+    byId("budget-runs").replaceChildren(
+      ...(demo.budgets?.runs ?? []).map((run) => {
+        const card = node("article", "", "card");
+        card.append(
+          node("span", run.outcome, "badge"),
+          node("h3", run.title),
+          node("p", run.detail),
+        );
+        const details = node("details", "");
+        details.append(
+          node("summary", "CLI evidence and reproduction"),
+          node("pre", run.output),
+          node("pre", run.command),
+        );
+        card.append(details);
+        return card;
+      }),
+    );
     renderStages();
     renderInterval();
     byId("error").textContent = "";

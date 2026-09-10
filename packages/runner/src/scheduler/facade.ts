@@ -2773,6 +2773,7 @@ export class Scheduler {
       runtime: this.runtime,
       actionChangeGroups: this.#actionChangeGroups,
       actionTimingState: this.#actionTimingState,
+      // Each run snapshots this setting before invoking its first fan-out instance.
       getReadAccountingEnabled: () => this.#readAccountingEnabled,
       retries: this.#retries,
       offBudgetRetries: this.#offBudgetRetries,

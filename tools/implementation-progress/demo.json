@@ -510,5 +510,31 @@
       "dependencies": 0,
       "rows": []
     }
-  ]
+  ],
+  "budgets": {
+    "provenance": "Recorded from the uncommitted A3 worktree /tmp/b13-read-budgets, based on 4c61faae67. Experimental implementation, not landed; these are CLI recordings, not a browser-triggered test run. Counts measure proxy accesses, not every Cell read.",
+    "runs": [
+      {
+        "title": "Passing workload",
+        "outcome": "PASS",
+        "detail": "The functional assertion passes within generous limits. A zero-work settle override also passes a zero limit.",
+        "output": "Read budget (initialization): 0 attempt accesses, 0 maximum body accesses\nRead budget (step 1): 0 attempt accesses, 0 maximum body accesses\n\u2713 assertion_1 (after action_1)\nRead budget (step 2): 2 attempt accesses, 2 maximum body accesses\nRead budget (step 3): 0 attempt accesses, 0 maximum body accesses\n\u2713 assertion_1 (after action_1)\n1 passed, 0 failed (1089ms)",
+        "command": "cd /tmp/b13-read-budgets\ndeno task cf test packages/cli/test/fixtures/read-budgets/passing.test.tsx --verbose --stats-threshold 0"
+      },
+      {
+        "title": "Step budget exceeded",
+        "outcome": "EXPECTED FAILURE",
+        "detail": "The same functional assertion passes, but its demanded computation uses two accesses against a total limit of zero.",
+        "output": "Read budget (initialization): 0 attempt accesses, 0 maximum body accesses\nRead budget (step 1): 0 attempt accesses, 0 maximum body accesses\n\u2713 assertion_1 (after action_1)\nRead budget (step 2): 2 attempt accesses, 2 maximum body accesses \u2014 FAIL\nRead budget (step 3): 0 attempt accesses, 0 maximum body accesses\n\u2713 assertion_1 (after action_1)\nstep 2: read budget total exceeded: 2 accesses > 0\n1 passed, 1 failed (588ms)",
+        "command": "cd /tmp/b13-read-budgets\ndeno task cf test packages/cli/test/fixtures/read-budgets/failing-step.test.tsx --verbose --stats-threshold 0"
+      },
+      {
+        "title": "Initialization budget exceeded",
+        "outcome": "EXPECTED FAILURE",
+        "detail": "Continuous UI demand uses 28 accesses during initialization against a limit of zero. Later functional assertions still pass.",
+        "output": "Read budget (initialization): 28 attempt accesses, 13 maximum body accesses \u2014 FAIL\nRead budget (step 1): 2 attempt accesses, 2 maximum body accesses\n\u2713 assertion_1 (after action_1)\nRead budget (step 2): 2 attempt accesses, 2 maximum body accesses\nRead budget (step 3): 0 attempt accesses, 0 maximum body accesses\ninitialization: read budget total exceeded: 28 accesses > 0\n\u2713 assertion_1 (after action_1)\n1 passed, 1 failed (1152ms)",
+        "command": "cd /tmp/b13-read-budgets\nCF_TEST_CONTINUOUS_UI=1 deno task cf test packages/cli/test/fixtures/read-budgets/failing-initialization.test.tsx --verbose --stats-threshold 0"
+      }
+    ]
+  }
 }
