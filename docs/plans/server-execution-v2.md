@@ -38,6 +38,15 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
+**Delta 2026-09-09 (the lifecycle verbs as server calls): the seed archived
+at `docs/history/plans/server-pattern-verbs-seed.md` is BUILT. Under ON,
+`cf piece new` and `cf piece setsrc` send the resolved program to
+`/api/pattern-lifecycle/*`, and the space's serving runtime compiles,
+materializes, and commits inside a wave cycle
+(`docs/features/server-pattern-lifecycle.md`). The client keeps the start,
+the registry add, and the slug; the shell and the background piece service
+keep the client-side shape until their own migration. OFF is byte-identical.**
+
 **Delta 2026-09-03 (the ROLLBACK): the first-party default returned to OFF
 via the rollback PR (#6840) — the first data-only flip:
 `SERVER_EXECUTION_DEFAULT_ENABLED` → `false` plus current-status prose, with

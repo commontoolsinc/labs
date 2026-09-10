@@ -298,6 +298,25 @@ describe("cf cell get (integration)", { ignore: !API_URL }, () => {
     });
   });
 
+  it("creates pieces through the serving loop under ON, and in the client under OFF", async () => {
+    // The pieces above came from `newPiece`. Under ON the serving loop ran
+    // each creation as a lifecycle verb and counts it; under OFF no serving
+    // loop exists, so the health stats carry no `servingLoop` block and
+    // each creation was the client's own setup transaction.
+    const response = await fetch(new URL("/api/health/stats", API_URL!));
+    expect(response.ok).toBe(true);
+    const stats = await response.json() as {
+      servingLoop?: { lifecycleVerbs?: { runs: number; failures: number } };
+    };
+    if (serverExecutionOn) {
+      expect(stats.servingLoop?.lifecycleVerbs?.runs).toBeGreaterThanOrEqual(
+        6,
+      );
+      return;
+    }
+    expect(stats.servingLoop).toBeUndefined();
+  });
+
   it("list and inspect expose the running pattern reference", async () => {
     const listed = await listPieces(spaceConfig);
     const listedPiece = listed.find((piece) => piece.id === pieceId);

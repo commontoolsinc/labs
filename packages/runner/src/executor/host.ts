@@ -33,6 +33,8 @@ import { getLogger } from "@commonfabric/utils/logger";
 import type { Runtime } from "../runtime.ts";
 import type { MemorySpace } from "../storage/interface.ts";
 import {
+  LIFECYCLE_VERB_SPACE_PARKED,
+  type LifecycleVerb,
   SpaceServer,
   type SpaceServerOptions,
   type SpaceServerPolicy,
@@ -43,6 +45,8 @@ import {
   registerServingLoopStatsProvider,
   type ServingLoopStats,
 } from "./stats.ts";
+
+export type { LifecycleVerb } from "./space-server.ts";
 
 const logger = getLogger("executor-host", { enabled: true, level: "warn" });
 
@@ -221,6 +225,54 @@ export class ExecutorHost {
 
   spaceServer(space: MemorySpace): SpaceServer | undefined {
     return this.#spaces.get(space);
+  }
+
+  /**
+   * Run a pattern-lifecycle verb on `space`'s serving runtime and
+   * resolve with its receipt once the verb's writes are durable
+   * (docs/features/server-pattern-lifecycle.md). A verb request is an
+   * activation trigger of its own: the requester holds no session on
+   * the space, so the ACTIVE criteria the session and admission hooks
+   * consult do not apply. A verb the space parked under before running
+   * is queued once more on the successor tenure.
+   *
+   * Throws when this process cannot serve the space — the host is
+   * closed, or another process holds the space's lease.
+   */
+  async runLifecycleVerb<T>(
+    space: MemorySpace,
+    verb: LifecycleVerb<T>,
+  ): Promise<T> {
+    for (let attempt = 0;; attempt += 1) {
+      const standing = this.#spaces.get(space);
+      if (
+        standing !== undefined && !standing.active &&
+        !this.#activating.has(space)
+      ) {
+        // A park in progress: its lease releases only once it completes,
+        // and an activation before that would fail to acquire.
+        await standing.whenParked;
+      }
+      await this.#activate(space, []);
+      const server = this.#spaces.get(space);
+      if (server === undefined || !server.active) {
+        throw new Error(
+          `space ${space} is not served by this process (host closed, or ` +
+            "its execution lease is held elsewhere)",
+        );
+      }
+      try {
+        return await server.runLifecycleVerb(verb);
+      } catch (error) {
+        if (
+          attempt === 0 && error instanceof Error &&
+          error.message === LIFECYCLE_VERB_SPACE_PARKED
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
   }
 
   #onCommitAdmitted(notice: AdmittedCommitNotice): void {

@@ -45,6 +45,14 @@ toolshed process
 A space is ACTIVE when it has ≥1 live client session or undelivered
 events; otherwise it MAY be parked (runtime disposed, lease released).
 Activation on: session open, event append, or explicit warm request.
+*(AMENDED 2026-09-09: a fourth trigger — a pattern-lifecycle verb
+request, which the host queues on the space's serving loop; the loop
+runs it ahead of a cycle's event drain, its seals joining that cycle's
+wave, and once the wave has committed re-announces the documents the
+verb staged to itself as a warm-marked notice — the same carrier as the
+provisioning path's — so the next cycle loads and derives the staged
+piece; the request settles after the wave carrying those first runs —
+[docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).)*
 
 What activation LOADS (RULED 2026-08-02): there is NO piece-start
 policy in v2. The space is ONE lazy reactive graph, and activation

@@ -110,3 +110,18 @@ export {
   assertPieceInputPath,
   PieceInputPathError,
 } from "./piece-input-path.ts";
+export {
+  confirmServedInstantiate,
+  confirmServedSourceUpdate,
+  servedCheckPieceSource,
+  servedInstantiatePiece,
+  type ServedInstantiateReceipt,
+  type ServedInstantiateRequest,
+  ServedLifecycleRefusal,
+  type ServedLifecycleRefusalCode,
+  type ServedPatternRef,
+  type ServedPatternSource,
+  servedSetPieceSource,
+  type ServedSourceRequest,
+  servedUploadPattern,
+} from "./served-lifecycle.ts";

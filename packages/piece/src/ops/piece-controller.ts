@@ -1701,7 +1701,7 @@ export function durableSourceContract(
  * operates on their transaction-local materializations; the exact envelopes
  * are restored before the final durable write.
  */
-function suppliedLinks(
+export function suppliedLinks(
   value: unknown,
   path: (string | number)[] = [],
   seen = new WeakSet<object>(),
@@ -5066,7 +5066,13 @@ function pieceSourceArgumentEvidence(
   return taggedHashStringOf({ raw, links });
 }
 
-async function pieceSourceCompatibilityReview(
+/**
+ * Review whether `candidate` can replace `previousPattern` on `piece`:
+ * the declared schemas, the stored argument, the retained links, and the
+ * CFC envelope, each reported as an issue rather than thrown so a caller
+ * can show them all at once.
+ */
+export async function pieceSourceCompatibilityReview(
   previousPattern: Pattern,
   candidate: Pattern,
   piece: Cell<unknown>,
@@ -5190,7 +5196,8 @@ function pieceSourceCfcEnvelopeIssue(
       `envelope stored for this piece: ${issue.message}`;
 }
 
-function hasPieceSourceCompatibilityIssues(
+/** Whether a review found anything that refuses the candidate. */
+export function hasPieceSourceCompatibilityIssues(
   issues: PieceSourceCompatibilityIssues,
 ): boolean {
   return issues.schema !== undefined ||
@@ -5199,7 +5206,8 @@ function hasPieceSourceCompatibilityIssues(
     issues.cfc !== undefined;
 }
 
-function pieceSourceCompatibilityMessage(
+/** Every issue a review found, one per line. */
+export function pieceSourceCompatibilityMessage(
   issues: PieceSourceCompatibilityIssues,
 ): string {
   return [issues.schema, issues.argument, issues.retainedLinks, issues.cfc]
@@ -5218,7 +5226,8 @@ function pieceSourceErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function pieceSourceTransition(
+/** A fresh source transition from `expected` to a candidate. */
+export function pieceSourceTransition(
   expected: PieceSourceSnapshot,
   operation: PieceSourceTransition["operation"],
   origin: string | null,

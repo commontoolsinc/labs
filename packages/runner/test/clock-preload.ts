@@ -51,6 +51,9 @@ installFakeClock({
     // timers are the wall-clock behavior under test; auto-advance would
     // fire them as fast as they arm.
     "executor-cooperative-yield",
+    // The lifecycle-verb suite drives a live ExecutorHost through verbs
+    // and reads what they left through a client under the same policies.
+    "executor-lifecycle-verbs",
     // The Phase-2 speculation-overlay journeys run a live ExecutorHost
     // (the serving side of the client-loses-derivation-commit journey)
     // under the same wall-clock policies.

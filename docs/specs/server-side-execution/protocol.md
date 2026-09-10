@@ -71,6 +71,24 @@ authored, and the scheduler's stamping choke points are exactly where
 derivation-kind runs divert (speculation.md §2's posture rows) — so
 this ruling NAMES the landed boundary rather than changing it.
 
+*(AMENDED 2026-09-09 — the pattern-lifecycle verbs as server calls,
+RULED 2026-08-24 and BUILT: the client-authored classification above is
+the posture of a runtime running the whole stack. A `cf` client connected
+to a deployment running the serving loop no longer performs the
+instantiation or source-replacement transaction itself: `cf piece new`
+and `cf piece setsrc` send the program they resolved to
+`/api/pattern-lifecycle/*`, and the space's serving runtime compiles it
+and materializes the piece — the setup transaction, stamped
+`bookkeeping` under the space's lease and carrying the requester's trust
+snapshot — or swaps the source, as a step of a wave cycle
+([docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md)).
+The scheduler tell is unchanged: the verb's writes are still commits made
+outside the scheduler, made now by the serving side on the requester's
+behalf. The registry add stays the client's authored event append and the
+slug its authored write, and every other client of the piece controller —
+the shell, the background piece service — keeps the client-side shape
+until its own migration.)*
+
 **The `system` class is PRODUCER-defined, its contents exemplary
 (RULED 2026-08-05).** The stamp rides the memory server's generic
 direct-write path (`Server.writeDocument`,

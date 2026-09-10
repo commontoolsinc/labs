@@ -54,7 +54,11 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   flow), UI bindings, widget edits — are the client's authored acts
   and commit as today. NO creation carve-out: a pattern instantiated
   within a lift/map/filter is a derived computation like any other,
-  so its first run diverts even at instantiation.
+  so its first run diverts even at instantiation. *(AMENDED 2026-09-09:
+  a `cf` client sends its instantiation and source-replacement verbs to
+  the serving runtime instead of committing them itself — protocol.md
+  §1's lifecycle-verb amendment; nothing about that speculates, and the
+  registry add and slug stay the client's authored acts.)*
 - Pure structural nodes: freely.
 - Handlers: run locally on fire, writes go to the overlay (events.md §2);
   the committed artifact is the event only.

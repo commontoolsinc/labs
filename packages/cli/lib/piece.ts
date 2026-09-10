@@ -12,7 +12,12 @@ import {
   codecOf,
   NULL_LIVE_ENVIRONMENT,
 } from "@commonfabric/data-model/codec-common";
-import { createSession, isDID, Session } from "@commonfabric/identity";
+import {
+  createSession,
+  type Identity,
+  isDID,
+  Session,
+} from "@commonfabric/identity";
 import { collectDataFileNames } from "@commonfabric/js-compiler";
 import { TARGET } from "@commonfabric/js-compiler/typescript";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
@@ -133,6 +138,11 @@ import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
 import { loadIdentity } from "./identity.ts";
 import { stderrConsoleHandler } from "./json-output.ts";
 import { validateEmbeddedSpaces } from "./llm-friendly-ref.ts";
+import {
+  checkPieceSourceOnServer,
+  instantiatePieceOnServer,
+  setPieceSourceOnServer,
+} from "./pattern-lifecycle.ts";
 import { claimProcessDeployment } from "./process-deployment.ts";
 import {
   deriveDiskHandleId,
@@ -464,6 +474,9 @@ interface PieceOperationDependencies extends PieceResolutionDeps {
   loadIdentity?: typeof loadIdentity;
   getProgramFromFile?: typeof getProgramFromFile;
   getPinnedProgramFromFile?: typeof getPinnedProgramFromFile;
+  instantiatePieceOnServer?: typeof instantiatePieceOnServer;
+  setPieceSourceOnServer?: typeof setPieceSourceOnServer;
+  checkPieceSourceOnServer?: typeof checkPieceSourceOnServer;
   reportSearchError?: (
     pieceId: string,
     source: "input data" | "result data" | "metadata",
@@ -1602,6 +1615,54 @@ export async function resolveLinkEndpointAddress(
  * exists, so it names the piece as well as the flag: an operator who meant to
  * repoint has an id to name, and one who did not has a piece to find.
  */
+/**
+ * Whether the deployment this connection speaks to runs the serving loop,
+ * in which case a pattern's lifecycle verbs are its to execute: the
+ * connection carries the deployment's own flag posture
+ * (docs/features/server-pattern-lifecycle.md).
+ */
+function servesLifecycleVerbs(pieces: PiecesController): boolean {
+  return (pieces.runtime as Runtime | undefined)?.experimental
+    .serverExecution === true;
+}
+
+async function lifecycleClient(
+  config: SpaceConfig,
+  deps: PieceOperationDependencies,
+): Promise<{ apiUrl: URL; identity: Identity }> {
+  return {
+    apiUrl: new URL(config.apiUrl),
+    identity: await (deps.loadIdentity ?? loadIdentity)(config.identity),
+  };
+}
+
+/**
+ * The served half of `newPiece`: the serving runtime compiles the program
+ * and materializes the piece — the creation act — and this connection then
+ * starts it the way it starts any piece it opens, running the graph as
+ * speculation while the server derives on demand.
+ */
+async function createOnServer(
+  config: SpaceConfig,
+  pieces: PiecesController,
+  program: RuntimeProgram,
+  entry: EntryConfig,
+  options: { start?: boolean } | undefined,
+  deps: PieceOperationDependencies,
+): Promise<{ id: string; getCell: () => Cell<unknown> }> {
+  const receipt = await (deps.instantiatePieceOnServer ??
+    instantiatePieceOnServer)(await lifecycleClient(config, deps), {
+      space: pieces.getSpace(),
+      program,
+      ...(entry.repository === undefined
+        ? {}
+        : { repository: entry.repository }),
+    });
+  const cell = await pieces.getPieceCell(receipt.pieceId, false);
+  if (options?.start !== false) await pieces.startPiece(cell);
+  return { id: receipt.pieceId, getCell: () => cell };
+}
+
 export async function newPiece(
   config: SpaceConfig,
   entry: EntryConfig,
@@ -1654,10 +1715,12 @@ export async function newPiece(
   const runtimeErrors = runtimeErrorLog(pieces.runtime);
   const errorCountBefore = runtimeErrors.length;
   const piece = await timeCliPhase("newPiece.create", () => {
-    const createPromise = pieces.create(program, {
-      repository: entry.repository,
-      start: options?.start,
-    });
+    const createPromise = servesLifecycleVerbs(pieces)
+      ? createOnServer(config, pieces, program, entry, options, deps)
+      : pieces.create(program, {
+        repository: entry.repository,
+        start: options?.start,
+      });
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
@@ -1844,24 +1907,39 @@ export async function setPiecePattern(
     pieces,
     deps,
   );
+  const program = await (deps.getPinnedProgramFromFile ??
+    getPinnedProgramFromFile)(pieces, entry);
+  if (servesLifecycleVerbs(pieces)) {
+    const receipt = await (deps.setPieceSourceOnServer ??
+      setPieceSourceOnServer)(
+        await lifecycleClient(config, deps),
+        {
+          space: pieces.getSpace(),
+          piece: resolvedConfig.piece,
+          program,
+          ...(entry.repository === undefined
+            ? {}
+            : { repository: entry.repository }),
+          ...(options.dangerouslyAllowIncompatibleSchema
+            ? { dangerouslyAllowIncompatibleSchema: true }
+            : {}),
+        },
+      );
+    noteWroteTo(config.space);
+    return receipt;
+  }
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
     undefined,
     resolvedConfig.pieceScope,
   );
-  const receipt = await piece.setPattern(
-    await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
-      pieces,
-      entry,
-    ),
-    {
-      repository: entry.repository,
-      ...(options.dangerouslyAllowIncompatibleSchema
-        ? { dangerouslyAllowIncompatibleSchema: true }
-        : {}),
-    },
-  );
+  const receipt = await piece.setPattern(program, {
+    repository: entry.repository,
+    ...(options.dangerouslyAllowIncompatibleSchema
+      ? { dangerouslyAllowIncompatibleSchema: true }
+      : {}),
+  });
   noteWroteTo(config.space);
   return receipt;
 }
@@ -1884,18 +1962,21 @@ export async function checkPiecePattern(
     pieces,
     deps,
   );
+  const program = await (deps.getPinnedProgramFromFile ??
+    getPinnedProgramFromFile)(pieces, entry);
+  if (servesLifecycleVerbs(pieces)) {
+    return await (deps.checkPieceSourceOnServer ?? checkPieceSourceOnServer)(
+      await lifecycleClient(config, deps),
+      { space: pieces.getSpace(), piece: resolvedConfig.piece, program },
+    );
+  }
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
     undefined,
     resolvedConfig.pieceScope,
   );
-  return await piece.checkPattern(
-    await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
-      pieces,
-      entry,
-    ),
-  );
+  return await piece.checkPattern(program);
 }
 
 export async function savePiecePattern(
