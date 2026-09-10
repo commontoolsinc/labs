@@ -249,10 +249,13 @@ class VisitInProgress<Domain, ResultType> {
   /** Visits the indicated value as a top-level operation. */
   visit(value: Domain): BaselineVisitResult<ResultType> {
     if (this.#stack.depth !== 0) {
+      // deno-coverage-ignore-start
+      // This is a defense-in-depth protection against bugs in this file.
       throw new Error(
-        "Cannot use `VisitInProgress` for multiple concurrent top-level visits.",
+        "Shouldn't happen: Cannot use `VisitInProgress` for multiple concurrent top-level visits.",
       );
     }
+    // deno-coverage-ignore-stop
 
     this.#knownValid = false; // Because it's read by the next call.
     this.#knownValid = this.#isValidFabricValue(value);
