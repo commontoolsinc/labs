@@ -8,10 +8,12 @@ import {
   type RuntimeProgram,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { readStoredCfcMetadata } from "@commonfabric/runner/cfc";
 import {
   loadCompiledClosure,
   loadVerifiedSourceClosure,
   setCompileCacheRuntimeVersionForTesting,
+  sourceDocKey,
 } from "../../runner/src/compilation-cache/cell-cache.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
@@ -54,6 +56,35 @@ export const revision = ${JSON.stringify(version)};
 `,
       },
     ],
+  };
+}
+
+/**
+ * The same contract in two revisions, with a confidential argument. The label
+ * is what makes the piece's argument document CFC-relevant, so a transaction
+ * reading it carries that clause in its flow join; the two revisions declare
+ * the same label, so nothing about the swap itself weakens anything.
+ */
+function confidentialArgumentProgram(version: string): RuntimeProgram {
+  return {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: `/// <cts-enable />
+import { Confidential, NAME, pattern } from "commonfabric";
+const ATOM = {
+  type: "https://commonfabric.org/cfc/atom/Resource",
+  class: "SetsrcDelegationCheck",
+  subject: "did:example:owner",
+} as const;
+type Label = readonly [typeof ATOM];
+interface Args { seed: Confidential<string, Label>; }
+export default pattern<Args, { label: string }>(({ seed }) => ({
+  [NAME]: "Delegation check",
+  label: ${JSON.stringify(version)} + ":" + seed,
+}));
+`,
+    }],
   };
 }
 
@@ -545,6 +576,87 @@ export default pattern<{seed?: ${seedType}}>(() => {
       for (const freshRuntime of freshRuntimes.reverse()) {
         await freshRuntime.dispose();
       }
+    }
+  });
+
+  it("updates a piece whose argument carries a confidentiality label", async () => {
+    // The source transition stages the successor's delegation union on the
+    // same transaction that moves the piece's source pointer, so that the
+    // authority and the pointer land together. That transaction also reads the
+    // piece's argument. Where the argument carries a label, the join reaches
+    // the cache document the union is staged on, and measuring that write
+    // against the ceiling a content-addressed cache document declares — none —
+    // refuses the commit. At the strict rung that is a refused pattern update
+    // for exactly the pieces a confidentiality label is written for.
+    const strictStorage = StorageManager.emulate({ as: signer });
+    const strictRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager: strictStorage,
+      cfcEnforcementMode: "enforce-strict",
+      cfcFlowLabels: "persist",
+    });
+    try {
+      const strictPieces = new PiecesController(
+        await createSession({
+          identity: signer,
+          spaceName: "setsrc-delegation-strict-" + crypto.randomUUID(),
+        }),
+        strictRuntime,
+      );
+      await strictPieces.synced();
+      const piece = await strictPieces.create(
+        confidentialArgumentProgram("v1"),
+        { input: { seed: "hello" } },
+      );
+      await strictRuntime.idle();
+      const previous = getPatternIdentityRef(piece.getCell())!;
+
+      await piece.setPattern(confidentialArgumentProgram("v2"));
+      await strictRuntime.idle();
+
+      // The swap happened, the argument survived it, and the successor
+      // inherited the predecessor's writer authority.
+      expect(await piece.result.get(["label"])).toBe("v2:hello");
+      const successor = getPatternIdentityRef(piece.getCell())!;
+      expect(successor.identity).not.toBe(previous.identity);
+      const tx = strictRuntime.edit();
+      try {
+        const closure = await loadVerifiedSourceClosure(
+          strictRuntime,
+          strictPieces.getSpace(),
+          successor.identity,
+          tx,
+        );
+        expect(closure?.get(successor.identity)?.delegatedModuleIdentities)
+          .toContain(previous.identity);
+        // The skip decides which store the value may land in, not whether the
+        // join follows it: the successor's record carries the argument's
+        // clause. Without this the case would pass equally if the label had
+        // stopped reaching the write at all, which is what the refusal was
+        // about.
+        const recordId = strictRuntime.getCell(
+          strictPieces.getSpace(),
+          sourceDocKey(successor.identity),
+          undefined,
+          tx,
+        ).getAsNormalizedFullLink().id;
+        const stamped = readStoredCfcMetadata(tx, {
+          space: strictPieces.getSpace(),
+          id: recordId,
+        })?.labelMap.entries ?? [];
+        expect(
+          stamped.flatMap((entry) => entry.label.confidentiality ?? []),
+        ).toContainEqual({
+          type: "https://commonfabric.org/cfc/atom/Resource",
+          class: "SetsrcDelegationCheck",
+          subject: "did:example:owner",
+        });
+      } finally {
+        tx.abort();
+      }
+    } finally {
+      await strictRuntime.dispose();
+      await strictStorage.close();
     }
   });
 });

@@ -4,6 +4,10 @@ import { stub } from "@std/testing/mock";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import type { PreparedSourceUpdate } from "../src/pattern-manager.ts";
 import type { JSONSchema, Pattern } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
@@ -50,6 +54,54 @@ function moduleFor(program: RuntimeProgram): CacheableModule {
     imports: [],
   };
 }
+
+/**
+ * Seed a document whose `secret` field carries a confidentiality clause, so a
+ * transaction reading it takes that clause into its flow join. This stands for
+ * the piece argument a source transition reads on the same transaction that
+ * stages the successor's delegation union.
+ */
+const seedLabeledSource = async (
+  runtime: Runtime,
+  name: string,
+): Promise<void> => {
+  const seed = runtime.edit();
+  const id = runtime.getCell(space, name, {
+    type: "object",
+    properties: { secret: { type: "string" } },
+  }).getAsNormalizedFullLink().id;
+  writeSeedEnvelopeDoc(seed, space);
+  seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+    value: { secret: "s3cr3t" },
+    cfc: {
+      version: 1,
+      schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+      labelMap: {
+        version: 1,
+        entries: [{
+          path: ["secret"],
+          label: { confidentiality: ["secret"] },
+        }],
+      },
+    },
+  });
+  expect((await seed.commit()).ok).toBeDefined();
+};
+
+/** The persisted label-map entries on `id`, for pinning that a join landed. */
+const replicaEntries = (
+  storage: ReturnType<typeof StorageManager.emulate>,
+  id: string,
+): { label: { confidentiality?: string[] } }[] => {
+  const replica = storage.open(space).replica as unknown as {
+    getDocument(id: string): {
+      cfc?: {
+        labelMap?: { entries: { label: { confidentiality?: string[] } }[] };
+      };
+    } | undefined;
+  };
+  return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+};
 
 const protectedSchema = {
   type: "object",
@@ -968,4 +1020,145 @@ describe("module identity delegation", () => {
       expect(await setName(observer, observed, "after")).toBe("v1:after");
     });
   });
+
+  for (
+    const stage of [
+      {
+        name: "writes the closure",
+        write: (
+          runtime: Runtime,
+          tx: ReturnType<Runtime["edit"]>,
+          modules: readonly CacheableModule[],
+          entryIdentity: string,
+          predecessor: string,
+          version: string,
+        ) => {
+          const delegations = new Map([
+            [entryIdentity, new Set([predecessor])],
+          ]);
+          writeSourceDocs(
+            runtime,
+            space,
+            modules,
+            entryIdentity,
+            tx,
+            delegations,
+          );
+          writeCompiledDocs(runtime, space, modules, entryIdentity, {
+            runtimeVersion: version,
+            moduleDelegations: delegations,
+          }, tx);
+        },
+      },
+      {
+        name: "stages a delegation union",
+        write: (
+          runtime: Runtime,
+          tx: ReturnType<Runtime["edit"]>,
+          _modules: readonly CacheableModule[],
+          entryIdentity: string,
+          predecessor: string,
+          version: string,
+        ) => {
+          stageModuleDelegations(
+            runtime,
+            space,
+            new Map([[entryIdentity, new Set([predecessor])]]),
+            version,
+            tx,
+          );
+        },
+      },
+    ]
+  ) {
+    it(`commits a cache write carrying a flow join when it ${stage.name}`, async () => {
+      // A cache document is a store no pattern declares a policy on: its id is
+      // a content address of module bytes. Measuring it refuses any
+      // transaction that both reads labeled data and reaches a cache write,
+      // which a piece's source transition does by construction. The assertion
+      // is the COMMIT rather than the marker, so a write target the marker
+      // does not reach fails this: the import edge below is stored in a
+      // document of its own, which `anchorValueAsEntity` has to carry the
+      // claim down to.
+      const strict = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        cfcEnforcementMode: "enforce-strict",
+        cfcFlowLabels: "persist",
+      });
+      try {
+        const dependency = moduleFor(moduleProgram("dependency"));
+        const previous = moduleFor(moduleProgram("old"));
+        const entry = {
+          ...moduleFor(moduleProgram("new")),
+          imports: [{
+            specifier: "./dependency.ts",
+            targetIdentity: dependency.identity,
+          }],
+        };
+        const modules = [entry, dependency];
+        const version = "delegation-undeclarable-marker";
+        // Staging reads the artifacts back, so both sets have to be there.
+        expect(
+          (await strict.editWithRetry((tx) => {
+            writeSourceDocs(strict, space, modules, entry.identity, tx);
+            writeCompiledDocs(strict, space, modules, entry.identity, {
+              runtimeVersion: version,
+            }, tx);
+          })).error,
+        ).toBeUndefined();
+        await seedLabeledSource(strict, "module-delegation-secret");
+
+        const tx = strict.edit();
+        try {
+          // The read that puts a confidentiality clause in the flow join,
+          // standing for the piece argument a source transition reads.
+          const secret = strict.getCell(
+            space,
+            "module-delegation-secret",
+            undefined,
+            tx,
+          );
+          expect((secret.getRaw() as { secret?: string }).secret)
+            .toBe("s3cr3t");
+          stage.write(
+            strict,
+            tx,
+            modules,
+            entry.identity,
+            previous.identity,
+            version,
+          );
+          tx.prepareCfc();
+          const result = await tx.commit();
+          expect(result.error?.message).toBeUndefined();
+          // The commit is the assertion, and on its own it passes whether or
+          // not the transaction ever carried a clause — so pin both halves.
+          // The stamp on the record says the join reached this write, which
+          // is the thing the old refusal was about; the stored value says the
+          // write itself landed.
+          const stamped = replicaEntries(
+            storageManager,
+            strict.getCell(space, sourceDocKey(entry.identity), undefined, tx)
+              .getAsNormalizedFullLink().id,
+          ).flatMap((label) => label.label.confidentiality ?? []);
+          expect(stamped).toContain("secret");
+          const readTx = strict.edit();
+          try {
+            const stored = strict.getCell<
+              { delegatedModuleIdentities?: string[] }
+            >(space, sourceDocKey(entry.identity), undefined, readTx).get();
+            expect(stored?.delegatedModuleIdentities)
+              .toContain(previous.identity);
+          } finally {
+            readTx.abort();
+          }
+        } finally {
+          if (tx.status().status === "ready") tx.abort();
+        }
+      } finally {
+        await strict.dispose();
+      }
+    });
+  }
 });
