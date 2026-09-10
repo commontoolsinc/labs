@@ -217,7 +217,9 @@ export function tagFromFabricValue(value: FabricValueLayer): FabricValueTag {
  * possibly be valid. To be clear, this function does not go out of its way to
  * make a validity determination.
  */
-export function tagFromFabricValueElseNull(value: FabricValueLayer): FabricValueTag;
+export function tagFromFabricValueElseNull(
+  value: FabricValueLayer,
+): FabricValueTag;
 export function tagFromFabricValueElseNull(value: FabricValue): FabricValueTag;
 export function tagFromFabricValueElseNull(
   value: FabricValue | FabricValueLayer,

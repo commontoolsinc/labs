@@ -37,15 +37,28 @@ import { toCompactDebugString } from "./value-debug.ts";
 export type DomainFor<DomainExtra> = FabricValue | DomainExtra;
 
 /**
- * An `arrayContents` form. This is returned by visitor methods which wish to
+ * An `iterateArray` form. This is returned by visitor methods which wish to
  * treat the value they received as a container of array-like contents. `value`
  * indicates the contents of the container, and by returning this, the engine
  * will iterate over the contents, calling
  * `ValueVisitor.visitArrayContentsItem()` on each element.
  */
-export type ArrayContentsForm<DomainExtra> = {
-  type: "arrayContents";
+export type IterateArrayForm<DomainExtra> = {
+  type: "iterateArray";
   value: readonly DomainFor<DomainExtra>[];
+};
+
+/**
+ * An `iterateMap` form. This is returned by visitor methods which wish to
+ * treat the value they received as a container of map-like contents. `value`
+ * indicates the contents of the container as `[key, value]` pairs (similar to
+ * the return value from `Map.entries()` or `Object.entries()`), and by
+ * returning this, the engine will iterate over the contents, calling
+ * `ValueVisitor.visitMapContentsItem()` on each element.
+ */
+export type IterateMapForm<DomainExtra> = {
+  type: "iterateMap";
+  value: readonly [DomainFor<DomainExtra>, DomainFor<DomainExtra>][];
 };
 
 /**
@@ -57,19 +70,6 @@ export type ArrayContentsForm<DomainExtra> = {
 export type MainResultForm<ResultType> = {
   type: "mainResult";
   value: ResultType;
-};
-
-/**
- * A `mapContents` form. This is returned by visitor methods which wish to
- * treat the value they received as a container of map-like contents. `value`
- * indicates the contents of the container as `[key, value]` pairs (similar to
- * the return value from `Map.entries()` or `Object.entries()`), and by
- * returning this, the engine will iterate over the contents, calling
- * `ValueVisitor.visitMapContentsItem()` on each element.
- */
-export type MapContentsForm<DomainExtra> = {
-  type: "mapContents";
-  value: readonly [DomainFor<DomainExtra>, DomainFor<DomainExtra>][];
 };
 
 /**
@@ -120,27 +120,27 @@ export const DO_VISIT_SUBTYPE: VisitSubtypeForm = Object.freeze(
 );
 
 /**
- * Constructs an `arrayContents` form.
+ * Constructs an `iterateArray` form.
  *
  * The `do` prefix is intended to make it clear at use sites that it is telling
  * the visitor engine to "do" something.
  */
-export function doArrayContents<DomainExtra>(
+export function doIterateArray<DomainExtra>(
   values: readonly DomainFor<DomainExtra>[],
-): ArrayContentsForm<DomainExtra> {
-  return { type: "arrayContents", value: values };
+): IterateArrayForm<DomainExtra> {
+  return { type: "iterateArray", value: values };
 }
 
 /**
- * Constructs a `mapContents` form.
+ * Constructs an `iterateMap` form.
  *
  * The `do` prefix is intended to make it clear at use sites that it is telling
  * the visitor engine to "do" something.
  */
-export function doMapContents<DomainExtra>(
+export function doIterateMap<DomainExtra>(
   mappings: readonly [DomainFor<DomainExtra>, DomainFor<DomainExtra>][],
-): MapContentsForm<DomainExtra> {
-  return { type: "mapContents", value: mappings };
+): IterateMapForm<DomainExtra> {
+  return { type: "iterateMap", value: mappings };
 }
 
 //
@@ -198,8 +198,8 @@ export type DispatchingVisitorResult<
 export type LeafVisitorResult<DomainExtra = never, ResultType = FabricValue> =
   | BaselineVisitResult<ResultType>
   | ReplaceForm<DomainExtra>
-  | ArrayContentsForm<DomainExtra>
-  | MapContentsForm<DomainExtra>;
+  | IterateArrayForm<DomainExtra>
+  | IterateMapForm<DomainExtra>;
 
 //
 // Visitor interface and exported implementations thereof
@@ -221,7 +221,7 @@ export type LeafVisitorResult<DomainExtra = never, ResultType = FabricValue> =
  */
 export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   /**
-   * Visits an item from an `arrayContents` result.
+   * Visits an item from an `iterateArray` result.
    */
   visitArrayContentsItem(
     index: number,
@@ -275,7 +275,7 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   ): DispatchingVisitorResult<DomainExtra, ResultType>;
 
   /**
-   * Visits an item from a `mapContents` result.
+   * Visits an item from an `iterateMap` result.
    */
   visitMapContentsItem(
     key: DomainFor<DomainExtra>,
@@ -488,7 +488,7 @@ export abstract class ContainerIteratingVisitor<
   visitFabricArray(
     value: FabricArray,
   ): LeafVisitorResult<DomainExtra, ResultType> {
-    return doArrayContents<DomainExtra>(value);
+    return doIterateArray<DomainExtra>(value);
   }
 
   /** @inheritDoc */
@@ -504,7 +504,7 @@ export abstract class ContainerIteratingVisitor<
   visitFabricPlainObject(
     value: FabricPlainObject,
   ): LeafVisitorResult<DomainExtra, ResultType> {
-    return doMapContents<DomainExtra>(Object.entries(value));
+    return doIterateMap<DomainExtra>(Object.entries(value));
   }
 
   /** @inheritDoc */
@@ -614,7 +614,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
     }
 
     switch (result.type) {
-      case "arrayContents": {
+      case "iterateArray": {
         return this.#subvisitArray(value, result.value);
       }
 
@@ -622,14 +622,14 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         return result;
       }
 
-      case "mapContents": {
+      case "iterateMap": {
         return this.#subvisitMap(value, result.value);
       }
     }
   }
 
   /**
-   * Visits the items in an `arrayContents` result, recursing or returning as
+   * Visits the items in an `iterateArray` result, recursing or returning as
    * directed by `ValueVisitor.visitArrayContentsItem()`.
    */
   #subvisitArray(
@@ -643,7 +643,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
     try {
       for (const idx in values) {
         if (!isArrayIndexPropertyName(idx)) {
-          throw new Error("Improper array returned in `arrayContents` result.");
+          throw new Error("Improper array returned in `iterateArray` result.");
         }
 
         const idxNumber = Number(idx);
@@ -672,7 +672,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   }
 
   /**
-   * Visits the items in an `mapContents` result, recursing or returning as
+   * Visits the items in an `iterateMap` result, recursing or returning as
    * directed by `ValueVisitor.visitMapContentsItem()`.
    */
   #subvisitMap(
