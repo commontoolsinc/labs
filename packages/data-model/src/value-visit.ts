@@ -755,6 +755,8 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   #visitResolvingCyclesAndReplacement(
     value: DomainFor<DomainExtra>,
   ):
+    | IterateArrayOfForm<DomainExtra>
+    | IterateMapOfForm<DomainExtra>
     | VisitSubtypeOfForm<DomainExtra>
     | Exclude<
       DispatchingVisitorResult<DomainExtra, ResultType>,
@@ -770,6 +772,22 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         : vis.visitCycle(resultValue, cycleAt, this.#stack.depth);
 
       switch (result?.type) {
+        case "iterateArray": {
+          return (value === resultValue) ? result : {
+            type: "iterateArrayOf",
+            value: resultValue,
+            elements: result.elements,
+          };
+        }
+
+        case "iterateMap": {
+          return (value === resultValue) ? result : {
+            type: "iterateMapOf",
+            value: resultValue,
+            mappings: result.mappings,
+          };
+        }
+
         case "replace": {
           resultValue = result.value;
           break;
