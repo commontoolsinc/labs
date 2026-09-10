@@ -782,6 +782,29 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 //
 
 /**
+ * Performs a one-off visit of a value with a visitor, where the value is
+ * assumed to be a valid `FabricValue` and where the full domain of the visit is
+ * exactly `FabricValue`.
+ */
+export function visitFabricValue(
+  value: FabricValue,
+  visitor: ValueVisitor,
+): BaselineVisitResult {
+  const inProgress = new VisitInProgress(visitor);
+  return inProgress.visit(value);
+}
+
+/**
+ * Creates a visitor function bound to the given visitor. The result is a
+ * single-argument `visit(value)` function.
+ */
+export function makeVisitFabricValueFunction(
+  visitor: ValueVisitor,
+): (value: FabricValue) => BaselineVisitResult {
+  return (value: FabricValue) => visitValue(value, visitor);
+}
+
+/**
  * Performs a one-off visit of a value with a visitor.
  */
 export function visitValue<DomainExtra, ResultType>(
