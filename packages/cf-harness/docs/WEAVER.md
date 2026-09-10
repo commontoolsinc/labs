@@ -150,11 +150,18 @@ runs on the loom host, so a Weaver that is not on that host reaches everything
 through Tailscale. Three routes carry it, and each is a Tailscale serve entry on
 the loom host:
 
-| What the Weaver opens                    | Route                                     | Serves                                           |
-| ---------------------------------------- | ----------------------------------------- | ------------------------------------------------ |
-| The loom app, the pill, the pattern pane | `https://<host>.ts.net/`                  | the daemon on 9900                               |
-| The harness console                      | `https://<host>.ts.net/harness-console/*` | the daemon, which proxies to the console on 8135 |
-| A pattern's runtime                      | `https://<host>.ts.net:8000/`             | the toolshed                                     |
+| What the Weaver opens                    | Route                           | Serves                                           |
+| ---------------------------------------- | ------------------------------- | ------------------------------------------------ |
+| The loom app, the pill, the pattern pane | `<loom base>/`                  | the daemon on 9900                               |
+| The harness console                      | `<loom base>/harness-console/*` | the daemon, which proxies to the console on 8135 |
+| A pattern's runtime                      | `https://<host>.ts.net:8000/`   | the toolshed                                     |
+
+`<loom base>` is whichever front reaches the daemon. Loom's matching-port
+topology fronts it on its own port, so the base is `https://<host>.ts.net:9900`;
+a bench that has also configured the page-link root route reaches it at
+`https://<host>.ts.net` as well. Either is a base to give Weaver, and the
+console's route hangs off whichever one it was given — there is no separate
+console front to configure.
 
 **Those two port numbers belong to an instance at no port offset. An instance at
 an offset serves its own.** Its daemon and toolshed sit at the base port plus
@@ -184,11 +191,12 @@ and the launcher agree from one place.
 the loopback URLs in `/config` onto the host the request arrived at and keeps
 the port, so a tailnet client is handed `https://<host>.ts.net:8000` for the
 fabric API. With nothing serving that port a pattern's runtime cannot boot and
-hands out no port, while the static render keeps working because it goes through
-the daemon on 443 — the pane looks healthy and is dead. The loom repository's
-`docs/operations/tailnet.md` gives the matching-port serve topology, one entry
-per service with the external port matching the internal one, and `loom doctor`
-reports an instance that fronts its daemon without fronting its toolshed.
+hands out no port, while the static render keeps working because it rides the
+front that already reaches the daemon — the pane looks healthy and is dead. The
+loom repository's `docs/operations/tailnet.md` gives the matching-port serve
+topology, one entry per service with the external port matching the internal
+one, and `loom doctor` reports an instance that fronts its daemon without
+fronting its toolshed.
 
 ## 4. Pre-demo preflight
 
@@ -198,7 +206,7 @@ this order. Each one fails in a way the next cannot diagnose.
 ```sh
 FRONT=https://<host>.ts.net
 
-# 1. The serve topology carries 443 and the toolshed's own port.
+# 1. The serve topology carries the daemon's front and the toolshed's own port.
 tailscale serve status
 
 # 2. The URLs a pattern's runtime is handed resolve from this device.
