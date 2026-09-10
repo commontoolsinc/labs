@@ -19,6 +19,10 @@ import {
 import { isValidFabricValue } from "./validity-check.ts";
 import { tagFromFabricValue, VALUE_TAGS, type ValueTag } from "./value-tags.ts";
 
+//
+// Individual result forms
+//
+
 /**
  * An `arrayContents` form. This is returned by visitor methods which wish to
  * treat the value they received as a container of array-like contents. `value`
@@ -30,6 +34,58 @@ export type ArrayContentsForm<Domain> = {
   type: "arrayContents";
   value: readonly Domain[];
 };
+
+/**
+ * A `mainResult` form. `value` is a value that is to be returned from the
+ * original main (top-level) `visit()` call, and by returning this form, a
+ * visitor indicates that the `visit()` should end promptly (do no further
+ * sub-visits), returning this value.
+ */
+export type MainResultForm<ResultType> = {
+  type: "mainResult";
+  value: ResultType;
+};
+
+/**
+ * A `mapContents` form. This is returned by visitor methods which wish to
+ * treat the value they received as a container of map-like contents. `value`
+ * indicates the contents of the container as `[key, value]` pairs (similar to
+ * the return value from `Map.entries()` or `Object.entries()`), and by
+ * returning this, the engine will iterate over the contents, calling
+ * `ValueVisitor.visitMapContentsItem()` on each element.
+ */
+export type MapContentsForm<Domain> = {
+  type: "mapContents";
+  value: readonly [Domain, Domain][];
+};
+
+/**
+ * A `recurse` form. This is returned by visitor methods which are used to
+ * iterate over container contents. By returning this form, a visitor indicates
+ * that the value should be visited by the engine, recursively, such that it is
+ * known by the engine to be an element of the container which is being iterated
+ * over.
+ */
+export type RecurseForm = { type: "recurse"; value: true };
+
+/**
+ * A `replace` form. `value` is a value that is to be used in place of the value
+ * originally received by the visitor method which returns this. This tells the
+ * visitor engine to redo visitor dispatch with the replacement (as if the
+ * replacement were the value in the same position as the original).
+ */
+export type ReplaceForm<Domain> = { type: "replace"; value: Domain };
+
+/**
+ * A `visitSubtype` form. This is returned by visitor methods which cover
+ * multiple possible subtype dispatches. By returning this form, a visitor
+ * indicates that the engine should in fact do a subtype-based dispatch.
+ */
+export type VisitSubtypeForm = { type: "visitSubtype"; value: true };
+
+//
+// `visit*()` method result union types
+//
 
 /**
  * Baseline possible results from arbitrary `visit*()` calls, defining the
@@ -82,53 +138,9 @@ export type LeafVisitorResult<Domain, ResultType> =
   | ArrayContentsForm<Domain>
   | MapContentsForm<Domain>;
 
-/**
- * A `mainResult` form. `value` is a value that is to be returned from the
- * original main (top-level) `visit()` call, and by returning this form, a
- * visitor indicates that the `visit()` should end promptly (do no further
- * sub-visits), returning this value.
- */
-export type MainResultForm<ResultType> = {
-  type: "mainResult";
-  value: ResultType;
-};
-
-/**
- * A `mapContents` form. This is returned by visitor methods which wish to
- * treat the value they received as a container of map-like contents. `value`
- * indicates the contents of the container as `[key, value]` pairs (similar to
- * the return value from `Map.entries()` or `Object.entries()`), and by
- * returning this, the engine will iterate over the contents, calling
- * `ValueVisitor.visitMapContentsItem()` on each element.
- */
-export type MapContentsForm<Domain> = {
-  type: "mapContents";
-  value: readonly [Domain, Domain][];
-};
-
-/**
- * A `recurse` form. This is returned by visitor methods which are used to
- * iterate over container contents. By returning this form, a visitor indicates
- * that the value should be visited by the engine, recursively, such that it is
- * known by the engine to be an element of the container which is being iterated
- * over.
- */
-export type RecurseForm = { type: "recurse"; value: true };
-
-/**
- * A `replace` form. `value` is a value that is to be used in place of the value
- * originally received by the visitor method which returns this. This tells the
- * visitor engine to redo visitor dispatch with the replacement (as if the
- * replacement were the value in the same position as the original).
- */
-export type ReplaceForm<Domain> = { type: "replace"; value: Domain };
-
-/**
- * A `visitSubtype` form. This is returned by visitor methods which cover
- * multiple possible subtype dispatches. By returning this form, a visitor
- * indicates that the engine should in fact do a subtype-based dispatch.
- */
-export type VisitSubtypeForm = { type: "visitSubtype"; value: true };
+//
+// Other type declarations
+//
 
 /**
  * Interface for visit receivers.
@@ -226,6 +238,10 @@ export interface ValueVisitor<Domain = FabricValue, ResultType = FabricValue> {
    */
   visitValue(value: Domain): DispatchingVisitorResult<Domain, ResultType>;
 }
+
+//
+// Classes
+//
 
 /**
  * Empty implementation of `ValueVisitor`: Every method is implemented and just
@@ -571,6 +587,10 @@ class VisitInProgress<Domain, ResultType> {
       isValidFabricValue(value);
   }
 }
+
+//
+// Exported functions
+//
 
 /**
  * Performs a one-off visit of a value with a visitor.
