@@ -9,6 +9,7 @@ import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   acquireServerExecutionEnabler,
+  type CellScope,
   commitPreconditionValueHash,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
@@ -131,7 +132,10 @@ import type { CompiledModuleArtifact } from "./harness/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
 import { ModuleRegistry } from "./module.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
-import { PatternManager } from "./pattern-manager.ts";
+import {
+  PatternManager,
+  type PreparedSourceUpdate,
+} from "./pattern-manager.ts";
 import { SourceReconciler } from "./source-reconciler.ts";
 import { snapshotQueryResult } from "./query-result-proxy.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
@@ -152,6 +156,7 @@ import {
 } from "./storage/reactivity-log.ts";
 import { isRetryableCommitRejection } from "./storage/rejection.ts";
 import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
+import { entityNameKey } from "./scheduler/keys.ts";
 import { toURI } from "./uri-utils.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
@@ -1171,7 +1176,7 @@ export class Runtime {
     }
   }
 
-  #moduleDelegationSnapshot(): Map<
+  #moduleDelegationSnapshot(sourceUpdate?: PreparedSourceUpdate): Map<
     MemorySpace,
     ReadonlyMap<string, readonly string[]>
   > {
@@ -1179,7 +1184,24 @@ export class Runtime {
       MemorySpace,
       ReadonlyMap<string, readonly string[]>
     >();
-    for (const [space, spaceDelegations] of this.#moduleDelegations) {
+    const delegations = new Map(this.#moduleDelegations);
+    if (sourceUpdate !== undefined) {
+      const proposal = this.patternManager.sourceUpdateDelegations(
+        sourceUpdate,
+      );
+      const combined = new Map(delegations.get(proposal.space));
+      for (const [identity, predecessors] of proposal.delegations) {
+        combined.set(
+          identity,
+          new Set([
+            ...(combined.get(identity) ?? []),
+            ...predecessors,
+          ]),
+        );
+      }
+      delegations.set(proposal.space, combined);
+    }
+    for (const [space, spaceDelegations] of delegations) {
       const spaceSnapshot = new Map<string, readonly string[]>();
       for (const identity of spaceDelegations.keys()) {
         const inherited = new Set<string>();
@@ -2160,7 +2182,10 @@ export class Runtime {
    * multiple spaces but writing only to one space.
    */
   edit(
-    options: { changeGroup?: ChangeGroup } = {},
+    options: {
+      changeGroup?: ChangeGroup;
+      sourceUpdate?: PreparedSourceUpdate;
+    } = {},
   ): IExtendedStorageTransaction {
     const tx = this.storageManager.edit();
     if (options.changeGroup !== undefined) {
@@ -2257,7 +2282,9 @@ export class Runtime {
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
-    wrapped.setCfcModuleDelegations(this.#moduleDelegationSnapshot());
+    wrapped.setCfcModuleDelegations(
+      this.#moduleDelegationSnapshot(options.sourceUpdate),
+    );
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     wrapped.configureSealDestination(
       this.#transactionSealDestination ?? this.#speculationDestination(),
@@ -2665,6 +2692,7 @@ export class Runtime {
   editWithRetry<T = void>(
     fn: (tx: IExtendedStorageTransaction) => T,
     maxRetries: number = DEFAULT_MAX_RETRIES,
+    options: { sourceUpdate?: PreparedSourceUpdate } = {},
   ): Promise<
     { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
   > {
@@ -2679,7 +2707,7 @@ export class Runtime {
       },
     });
     if (this.#tearingDownWrites) return Promise.resolve(teardownResult());
-    const tx = this.edit();
+    const tx = this.edit(options);
     tx.tx.immediate = true;
     (tx.tx as { deferRunnerStartUntilCommit?: boolean })
       .deferRunnerStartUntilCommit = true;
@@ -2714,7 +2742,7 @@ export class Runtime {
               this.#writeTeardown.signal,
             );
             if (this.#tearingDownWrites) return teardownResult();
-            return this.editWithRetry<T>(fn, maxRetries - 1);
+            return this.editWithRetry<T>(fn, maxRetries - 1, options);
           } else {
             return { error };
           }
@@ -2765,7 +2793,7 @@ export class Runtime {
           `editWithRetry re-run: ${present} document(s) read as absent ` +
             "are present; the action re-runs against them",
         );
-        return this.editWithRetry<T>(fn, maxRetries - 1);
+        return this.editWithRetry<T>(fn, maxRetries - 1, options);
       }
       return commitPrepared();
     });
@@ -2868,9 +2896,11 @@ export class Runtime {
    * this replica never READ does not arrive with it — and a conflicted blind
    * WRITE means exactly that (the compile-cache write-back rewrites derived
    * docs a cold replica has never seen; a piece start's basis names computed
-   * docs the serving side was materializing). So the named doc is pulled
-   * too, and the retry's write carries its true version instead of
-   * re-asserting seq 0.
+   * docs the serving side was materializing). So every document named by the
+   * rejection is pulled concurrently in its scope, and the retry's writes
+   * carry their true versions instead of re-asserting seq 0. Entries without
+   * scope use the default space instance. If no array entry names a usable
+   * address, the singular conflict supplies the recovery target.
    *
    * Every step is best-effort by design: this resolves rather than throws,
    * because the retry's commit — not this readiness — is what decides.
@@ -2909,24 +2939,48 @@ export class Runtime {
       }
     }
     if (teardownSignal?.aborted) return;
-    const conflict = (error as {
-      conflict?: { space?: MemorySpace; of?: string };
-    })?.conflict;
-    if (
-      conflict?.space !== undefined &&
-      typeof conflict.of === "string" &&
-      conflict.of !== "of:unknown"
-    ) {
+    type ConflictAddress = { space: MemorySpace; of: URI; scope?: CellScope };
+    const isPullableConflict = (value: unknown): value is ConflictAddress => {
+      const conflict = value as Partial<ConflictAddress> | null | undefined;
+      return typeof conflict?.space === "string" &&
+        typeof conflict.of === "string" && conflict.of !== "of:unknown" &&
+        (conflict.scope === undefined || isCellScope(conflict.scope));
+    };
+    const rejection = error as { conflict?: unknown; conflicts?: unknown };
+    const listedConflicts = Array.isArray(rejection?.conflicts)
+      ? rejection.conflicts.filter(isPullableConflict)
+      : [];
+    const conflicts = listedConflicts.length > 0
+      ? listedConflicts
+      : isPullableConflict(rejection?.conflict)
+      ? [rejection.conflict]
+      : [];
+    const pulls: Promise<unknown>[] = [];
+    const seen = new Set<string>();
+    for (const conflict of conflicts) {
+      const key = entityNameKey({
+        space: conflict.space,
+        id: conflict.of,
+        scope: conflict.scope,
+      });
+      if (seen.has(key)) continue;
+      seen.add(key);
       try {
-        await waitUnlessTeardown(
-          this.storageManager.open(conflict.space).sync(
-            conflict.of as unknown as URI,
-            { path: [], schema: false },
-          ),
+        pulls.push(
+          Promise.resolve(
+            this.storageManager.open(conflict.space).sync(
+              conflict.of,
+              { path: [], schema: false },
+              conflict.scope,
+            ),
+          ).catch(() => undefined),
         );
       } catch {
-        // Pull failed — the retry's commit decides.
+        // A synchronous pull failure leaves the retry's commit to decide.
       }
+    }
+    if (pulls.length > 0) {
+      await waitUnlessTeardown(Promise.all(pulls));
     }
   }
 

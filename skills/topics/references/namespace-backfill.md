@@ -165,9 +165,11 @@ endpoint values, so it can bind a declared input that has neither a value nor a
 default. It cannot override the input schema. Topics' `boardNames` default makes
 that override unnecessary for this migration.
 
-**`setsrc --check` is not read-only against the store** (#6964). It writes, even
-when it refuses and replaces nothing, so a rehearsal clone is spent after one
-and a second pass needs `deno task cf space reset`. Nothing authored moves.
+**`setsrc --check` issues no storage writes**, including when it refuses. Normal
+reads can demand server-side materialization when server execution is active;
+verify the clone's fingerprint before reusing its baseline. Applying source can
+persist compilation artifacts before setup accepts it, so reset the clone with
+`deno task cf space reset` before repeating an apply rehearsal.
 
 **Binding a piece the board does not hold** does nothing wrong and nothing
 useful: it succeeds, and the Topic reads no name. The lookup is by identity —
