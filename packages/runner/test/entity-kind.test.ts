@@ -11,10 +11,12 @@ import {
   entityUriSchemePrefix,
   hasEntityUriScheme,
   hashStringForEntityAddress,
+  idStringForEntityAddress,
   isEntityKind,
   stripEntityUriScheme,
   uriSchemeForEntityKind,
 } from "../src/entity-kind.ts";
+import { toURI } from "../src/uri-utils.ts";
 
 describe("entity-kind", () => {
   const base = hashOf({ probe: "entity-kind" });
@@ -137,6 +139,47 @@ describe("entity-kind", () => {
         "future:fid1:abc",
       );
       expect(hashStringForEntityAddress("")).toBe("");
+    });
+  });
+
+  describe("idStringForEntityAddress()", () => {
+    it("returns the same id string for a bare hash and its `of:` URI", () => {
+      expect(idStringForEntityAddress("fid1:abc")).toBe("of:fid1:abc");
+      expect(idStringForEntityAddress("of:fid1:abc")).toBe("of:fid1:abc");
+    });
+
+    it("returns a kinded id unchanged", () => {
+      expect(idStringForEntityAddress("computed:fid1:abc")).toBe(
+        "computed:fid1:abc",
+      );
+    });
+
+    it("returns an id under every entity URI scheme unchanged", () => {
+      // Driven by the scheme list so a kind added there is left alone without
+      // a further edit here. An id already carrying one of these schemes is
+      // already an id, and scheming it again would name nothing.
+      for (const scheme of ENTITY_URI_SCHEMES) {
+        expect(idStringForEntityAddress(`${scheme}:fid1:abc`)).toBe(
+          `${scheme}:fid1:abc`,
+        );
+      }
+    });
+
+    it("returns the unkinded id over a string carrying no entity scheme", () => {
+      expect(idStringForEntityAddress("my-board")).toBe("of:my-board");
+      expect(idStringForEntityAddress("future:fid1:abc")).toBe(
+        "of:future:fid1:abc",
+      );
+      expect(idStringForEntityAddress("")).toBe("of:");
+    });
+
+    it("returns the id `toURI()` builds from the same address", () => {
+      // The two agree on the spelling a document is stored under, which is
+      // what makes a lookup keyed on that id answer about the entity a read
+      // through `entityIdFrom()` would reach.
+      const address = base.toString();
+      expect(idStringForEntityAddress(address)).toBe(toURI(base));
+      expect(idStringForEntityAddress(`of:${address}`)).toBe(toURI(base));
     });
   });
 });

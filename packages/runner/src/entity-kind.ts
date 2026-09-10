@@ -140,6 +140,32 @@ export function hashStringForEntityAddress(address: string): string {
   );
 }
 
+/**
+ * The id string naming the entity `address` addresses, accepting the same two
+ * spellings of an unkinded entity {@link hashStringForEntityAddress} takes:
+ * the `of:`-schemed URI, or the bare tagged hash (`fid1:<hash>`) under it.
+ *
+ * The companion of that function and the other direction of the same seam. It
+ * reduces an address to the hash a cell is built from; this raises one to the
+ * id a document is stored and looked up under, so an index keyed on the id
+ * answers about the entity the caller named however they wrote it.
+ *
+ * An address already carrying an entity scheme is already an id and comes back
+ * unchanged, a kinded one included: `computed:fid1:<hash>` names an entity of
+ * its own, so scheming it again would name nothing and stripping it would name
+ * that entity's `of:` sibling.
+ *
+ * What follows the scheme is not parsed and no address is refused. An address
+ * no `FabricHash` could spell is schemed like any other, and the id that comes
+ * back names an entity nothing holds — which is what a lookup then reports,
+ * rather than a caller asking about a string having to catch a throw.
+ */
+export function idStringForEntityAddress(address: string): string {
+  return hasEntityUriScheme(address)
+    ? address
+    : `${uriSchemeForEntityKind(undefined)}:${address}`;
+}
+
 const KNOWN_ENTITY_KINDS: ReadonlySet<string> = new Set(["computed"]);
 
 export function isEntityKind(value: unknown): value is EntityKind {
