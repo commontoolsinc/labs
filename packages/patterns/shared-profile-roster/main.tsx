@@ -4,7 +4,12 @@ import {
   Default,
   equals,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   type PerSpace,
   type PerUser,
@@ -154,11 +159,45 @@ export default pattern<RosterDemoInput, RosterDemoOutput>(
     });
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+    const observedProfileName = observeAvailability(profileNameWish.result);
+    const observedProfileAvatar = observeAvailability(
+      profileAvatarWish.result,
+    );
 
-    const myName = resultOf(profileNameWish.result);
-    const myAvatar = resultOf(profileAvatarWish.result);
+    const myName = computed(() => {
+      if (
+        hasError(observedProfileName) || isPending(observedProfileName) ||
+        isSyncing(observedProfileName) ||
+        hasSchemaMismatch(observedProfileName)
+      ) return "";
+      return resultOf(observedProfileName);
+    });
+    const myAvatar = computed(() => {
+      if (
+        hasError(observedProfileAvatar) || isPending(observedProfileAvatar) ||
+        isSyncing(observedProfileAvatar) ||
+        hasSchemaMismatch(observedProfileAvatar)
+      ) return "";
+      return resultOf(observedProfileAvatar);
+    });
+    const unavailableProfile = new Writable<{ name?: string; avatar?: string }>(
+      {},
+    );
+    const profileAvailable = computed(() =>
+      !hasError(profileWish.result) && !isPending(profileWish.result) &&
+      !isSyncing(profileWish.result) && !hasSchemaMismatch(profileWish.result)
+    );
     // The live profile cell — passed to the join handler as the identity key.
-    const myProfile = resultOf(profileWish.result);
+    const myProfile = hasError(profileWish.result) ||
+        isPending(profileWish.result) || isSyncing(profileWish.result) ||
+        hasSchemaMismatch(profileWish.result)
+      ? unavailableProfile
+      : resultOf(profileWish.result);
+    const currentProfileBadge = computed(() =>
+      profileAvailable && myProfile
+        ? <cf-profile-badge $profile={myProfile} size="md" />
+        : <></>
+    );
 
     const participants = roster.participants;
     const participantCount = participants.length;
@@ -198,14 +237,17 @@ export default pattern<RosterDemoInput, RosterDemoOutput>(
               >
                 You
               </span>
-              <cf-profile-badge $profile={myProfile} size="md" />
+              {currentProfileBadge}
             </cf-vstack>
 
             <cf-hstack justify="between" align="center">
               <cf-heading level={3}>
                 Participants ({participantCount})
               </cf-heading>
-              <cf-button onClick={boundJoin} disabled={hasJoined}>
+              <cf-button
+                onClick={boundJoin}
+                disabled={computed(() => hasJoined || !profileAvailable)}
+              >
                 {joinLabel}
               </cf-button>
             </cf-hstack>

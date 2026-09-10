@@ -2,9 +2,13 @@ import {
   computed,
   Default,
   generateObject,
+  hasError,
+  hasSchemaMismatch,
   ifElse,
   isPending,
+  isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   resultOf,
   UI,
@@ -76,9 +80,21 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
       },
       model: "anthropic:claude-haiku-4-5",
     });
-    const response = resultOf(responseRequest);
+    const observedResponse = observeAvailability(responseRequest);
+    const responseState = computed(() => {
+      if (isPending(observedResponse)) {
+        return { response: { items: [] }, pending: true };
+      }
+      if (
+        hasError(observedResponse) || isSyncing(observedResponse) ||
+        hasSchemaMismatch(observedResponse)
+      ) {
+        return { response: { items: [] }, pending: false };
+      }
+      return { response: resultOf(observedResponse), pending: false };
+    });
 
-    const items = computed(() => response.items || []);
+    const items = computed(() => responseState.response.items || []);
 
     const total = computed(() => {
       let sum = 0;
@@ -105,7 +121,7 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
 
           <cf-vstack gap="3" style="padding: 1.5rem;">
             {ifElse(
-              isPending(responseRequest),
+              responseState.pending,
               <div style="color: var(--cf-theme-color-text-secondary);">
                 <cf-loader show-elapsed /> Generating budget...
               </div>,
@@ -176,7 +192,7 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
       items,
       total,
       remaining,
-      pending: isPending(responseRequest),
+      pending: responseState.pending,
     };
   },
 );

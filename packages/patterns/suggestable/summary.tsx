@@ -2,9 +2,13 @@ import {
   computed,
   Default,
   generateText,
+  hasError,
+  hasSchemaMismatch,
   ifElse,
   isPending,
+  isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   resultOf,
   UI,
@@ -49,7 +53,19 @@ const Summary = pattern<SummaryInput, SummaryOutput>(({ topic, context }) => {
     prompt,
     context,
   });
-  const response = resultOf(responseRequest);
+  const observedResponse = observeAvailability(responseRequest);
+  const responseState = computed(() => {
+    if (isPending(observedResponse)) {
+      return { response: "", pending: true };
+    }
+    if (
+      hasError(observedResponse) || isSyncing(observedResponse) ||
+      hasSchemaMismatch(observedResponse)
+    ) {
+      return { response: "", pending: false };
+    }
+    return { response: resultOf(observedResponse), pending: false };
+  });
 
   return {
     [NAME]: computed(() => (topic ? `Summary: ${topic}` : "Summary")),
@@ -63,20 +79,20 @@ const Summary = pattern<SummaryInput, SummaryOutput>(({ topic, context }) => {
 
         <cf-vstack gap="3" style="padding: 1.5rem;">
           {ifElse(
-            isPending(responseRequest),
+            responseState.pending,
             <div style="color: var(--cf-theme-color-text-secondary);">
               <cf-loader show-elapsed /> Generating summary...
             </div>,
             <div style="line-height: 1.6; white-space: pre-wrap;">
-              {response}
+              {responseState.response}
             </div>,
           )}
         </cf-vstack>
       </cf-screen>
     ),
     topic,
-    summary: computed(() => response || ""),
-    pending: isPending(responseRequest),
+    summary: responseState.response,
+    pending: responseState.pending,
   };
 });
 

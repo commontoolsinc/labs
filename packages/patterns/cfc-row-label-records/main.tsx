@@ -18,6 +18,9 @@ import {
   computed,
   handler,
   hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   NAME,
   pattern,
   resultOf,
@@ -94,8 +97,13 @@ export default pattern<Record<string, never>, RecordsOutput>(() => {
     { reactOn: db, maxConfidentiality: ceiling, onExceed: "fail" },
   );
 
-  const diagnosisResult = resultOf(diagnoses);
-  const diagnosisRows = computed<DiagnosisRow[]>(() => diagnosisResult.rows);
+  const diagnosisRows = computed<DiagnosisRow[]>(() => {
+    if (
+      hasError(diagnoses) || isPending(diagnoses) || isSyncing(diagnoses) ||
+      hasSchemaMismatch(diagnoses)
+    ) return [];
+    return resultOf(diagnoses).rows;
+  });
   const diagnosisError = computed<string>(() =>
     hasError(diagnoses) ? diagnoses.error.message : ""
   );

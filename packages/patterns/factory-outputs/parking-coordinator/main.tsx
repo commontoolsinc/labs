@@ -13,6 +13,7 @@ import {
   isPending,
   isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   type PerSpace,
   type RequiresIntegrity,
@@ -636,6 +637,16 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
     const profileWish = wish<ParkingProfile>({ query: "#profile" });
     const profileNameWish = wish<string>({ query: "#profileName" });
+    const observedProfileSetupUI = observeAvailability(profileWish[UI]);
+    const profileSetupUI = computed(() => {
+      if (
+        hasError(observedProfileSetupUI) ||
+        isPending(observedProfileSetupUI) ||
+        isSyncing(observedProfileSetupUI) ||
+        hasSchemaMismatch(observedProfileSetupUI)
+      ) return <></>;
+      return observedProfileSetupUI ?? <></>;
+    });
     // Which of the two identity sources this viewer is on. The predicate gates
     // on the claim's NAME STRING and never on its profile cell: an absent
     // cell-typed field lowers to an `asCell` lift and reads back as a
@@ -1981,7 +1992,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           Pick the identity you want to bring to this lot before
                           claiming your row.
                         </span>
-                        {profileWish[UI]}
+                        {profileSetupUI}
                       </cf-vstack>
                     )}
 

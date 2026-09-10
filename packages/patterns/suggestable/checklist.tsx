@@ -2,9 +2,13 @@ import {
   computed,
   Default,
   generateObject,
+  hasError,
+  hasSchemaMismatch,
   ifElse,
   isPending,
+  isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   resultOf,
   UI,
@@ -72,11 +76,23 @@ const Checklist = pattern<ChecklistInput, ChecklistOutput>(
       },
       model: "anthropic:claude-haiku-4-5",
     });
-    const response = resultOf(responseRequest);
+    const observedResponse = observeAvailability(responseRequest);
+    const responseState = computed(() => {
+      if (isPending(observedResponse)) {
+        return { response: { items: [] }, pending: true };
+      }
+      if (
+        hasError(observedResponse) || isSyncing(observedResponse) ||
+        hasSchemaMismatch(observedResponse)
+      ) {
+        return { response: { items: [] }, pending: false };
+      }
+      return { response: resultOf(observedResponse), pending: false };
+    });
 
     // Seed items from LLM result when it arrives
     const items = computed(() => {
-      return response.items || [];
+      return responseState.response.items || [];
     });
 
     return {
@@ -91,7 +107,7 @@ const Checklist = pattern<ChecklistInput, ChecklistOutput>(
 
           <cf-vstack gap="2" style="padding: 1.5rem;">
             {ifElse(
-              isPending(responseRequest),
+              responseState.pending,
               <div style="color: var(--cf-theme-color-text-secondary);">
                 <cf-loader show-elapsed /> Generating checklist...
               </div>,
@@ -108,7 +124,7 @@ const Checklist = pattern<ChecklistInput, ChecklistOutput>(
       ),
       topic,
       items,
-      pending: isPending(responseRequest),
+      pending: responseState.pending,
     };
   },
 );

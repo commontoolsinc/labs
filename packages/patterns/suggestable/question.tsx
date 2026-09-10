@@ -3,9 +3,13 @@ import {
   Default,
   generateObject,
   handler,
+  hasError,
+  hasSchemaMismatch,
   ifElse,
   isPending,
+  isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   resultOf,
   UI,
@@ -78,7 +82,25 @@ const Question = pattern<QuestionInput, QuestionOutput>(
       },
       model: "anthropic:claude-haiku-4-5",
     });
-    const response = resultOf(responseRequest);
+    const observedResponse = observeAvailability(responseRequest);
+    const responseState = computed(() => {
+      if (isPending(observedResponse)) {
+        return {
+          response: { question: "", options: [] },
+          pending: true,
+        };
+      }
+      if (
+        hasError(observedResponse) || isSyncing(observedResponse) ||
+        hasSchemaMismatch(observedResponse)
+      ) {
+        return {
+          response: { question: "", options: [] },
+          pending: false,
+        };
+      }
+      return { response: resultOf(observedResponse), pending: false };
+    });
 
     const answer = new Writable("");
 
@@ -94,16 +116,16 @@ const Question = pattern<QuestionInput, QuestionOutput>(
 
           <cf-vstack gap="3" style="padding: 1.5rem;">
             {ifElse(
-              isPending(responseRequest),
+              responseState.pending,
               <div style="color: var(--cf-theme-color-text-secondary);">
                 <cf-loader show-elapsed /> Generating question...
               </div>,
               <cf-question
                 question={computed(
-                  () => response.question || "",
+                  () => responseState.response.question || "",
                 )}
                 options={computed(
-                  () => response.options || [],
+                  () => responseState.response.options || [],
                 )}
                 oncf-answer={onAnswer({ answer })}
               />,
@@ -112,10 +134,10 @@ const Question = pattern<QuestionInput, QuestionOutput>(
         </cf-screen>
       ),
       topic,
-      question: computed(() => response.question || ""),
-      options: computed(() => response.options || []),
+      question: computed(() => responseState.response.question || ""),
+      options: computed(() => responseState.response.options || []),
       answer,
-      pending: isPending(responseRequest),
+      pending: responseState.pending,
     };
   },
 );

@@ -2,10 +2,14 @@ import {
   computed,
   generateText,
   handler,
+  hasError,
+  hasSchemaMismatch,
   ifElse,
   ImageData,
   isPending,
+  isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   resultOf,
   UI,
@@ -83,8 +87,21 @@ export default pattern<ImageChatInput, ImageChatOutput>(
       ),
       prompt: contentParts,
     });
-    const result = resultOf(responseRequest);
-    const pending = isPending(responseRequest);
+    const observedResponse = observeAvailability(responseRequest);
+    const responseState = computed(() => {
+      if (isPending(observedResponse)) {
+        return { response: undefined, pending: true };
+      }
+      if (
+        hasError(observedResponse) || isSyncing(observedResponse) ||
+        hasSchemaMismatch(observedResponse)
+      ) {
+        return { response: undefined, pending: false };
+      }
+      return { response: resultOf(observedResponse), pending: false };
+    });
+    const result = responseState.response;
+    const pending = responseState.pending;
 
     const ui = (
       <cf-screen>

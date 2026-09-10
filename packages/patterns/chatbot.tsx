@@ -6,9 +6,12 @@ import {
   generateObject,
   handler,
   hasError,
+  hasSchemaMismatch,
   isPending,
+  isSyncing,
   llmDialog,
   NAME,
+  observeAvailability,
   pattern,
   resultOf,
   Stream,
@@ -144,14 +147,18 @@ export const TitleGenerator = pattern<
       required: ["title"],
     },
   });
-  const result = resultOf(titleRequest);
+  const observedTitle = observeAvailability(titleRequest);
 
-  const title = computed(() => {
-    if (isPending(titleRequest) || hasError(titleRequest)) {
-      return "Untitled Chat";
+  const titleResult = computed<{ title: string }>(() => {
+    if (
+      isPending(observedTitle) || hasError(observedTitle) ||
+      isSyncing(observedTitle) || hasSchemaMismatch(observedTitle)
+    ) {
+      return { title: "" };
     }
-    return result?.title || "Untitled Chat";
+    return resultOf(observedTitle);
   });
+  const title = computed(() => titleResult.title || "Untitled Chat");
 
   return title;
 });
@@ -184,11 +191,18 @@ export default pattern<ChatInput, ChatOutput>(
     const modelDirectoryRequest = fetchJsonUnchecked({
       url: "/api/ai/llm/models",
     });
-    const modelDirectory = resultOf(modelDirectoryRequest);
-
+    const observedModelDirectory = observeAvailability(modelDirectoryRequest);
+    const modelDirectory = computed<Record<string, unknown>>(() => {
+      if (
+        isPending(observedModelDirectory) ||
+        hasError(observedModelDirectory) ||
+        isSyncing(observedModelDirectory) ||
+        hasSchemaMismatch(observedModelDirectory)
+      ) return {};
+      return resultOf(observedModelDirectory);
+    });
     const items = computed(() => {
-      if (!modelDirectory) return [];
-      const items = Object.keys(modelDirectory as any).map((key) => ({
+      const items = Object.keys(modelDirectory).map((key) => ({
         label: key,
         value: key,
       }));
