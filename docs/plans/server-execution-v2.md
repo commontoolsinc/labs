@@ -1229,10 +1229,18 @@ Tasks:
       notice (events.md §5, speculation.md §5); effect run cardinality
       follows cell scopes, quota attribution deferred (README §3.8,
       §6).
-- [ ] Owner + spec review of cell SCOPES (`user`/`session`) end to
-      end — v1's scope confusion must not carry into v2; blocks the
+- [x] Owner + spec review of cell SCOPES (`user`/`session`) end to
+      end — v1's scope confusion must not carry into v2; answered the
       user/session-derived-state question (README §6 Q7, was ledger
-      L10; runtime-mapping.md N56). Q6's non-quota remainder —
+      L10; runtime-mapping.md N56): the SpaceServer derives EVERY
+      instance of every scoped node — RULED 2026-08-02 (batch 3,
+      scopes.md §1) — and its run-supply half (one instance per
+      demanding principal, materialized on demand, ragged below the
+      space→user hop) RULED 2026-08-16 and LANDED by fan-out stages A
+      and B 2026-08-16/17 (scopes.md §2; verification-coverage.md OW17
+      CLOSED; `packages/runner/src/scheduler/fan-out.ts`). The one
+      residual is session-data GC (scopes.md §8 item 2), tracked as a
+      deferred design, not as a blocker. Q6's non-quota remainder —
       per-run identity for served effects — RULED 2026-08-02, R-Q6b:
       service-identity envelope, attribution within the derived
       commit (protocol.md §1/§7; runtime-mapping.md N57 resolved).
