@@ -16,6 +16,13 @@ persistence.
 - **Dependency Injection**: No singleton patterns - all services are injected
   through a central Runtime instance
 
+## Collection aggregates
+
+Array-valued `Cell` inputs support `count`, `sum`, `min`, `max`, `minBy`, and
+`maxBy`. Their numeric contracts, callback forms, type-surface limits, and
+maintenance costs are described in
+[Incremental collection aggregates](../../docs/features/collection-aggregates.md).
+
 ## Action read accounting
 
 `runtime.scheduler.setReadStatsEnabled(true)` enables transaction-scoped read
