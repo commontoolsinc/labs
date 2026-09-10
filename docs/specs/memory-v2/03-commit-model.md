@@ -123,7 +123,10 @@ A client satisfies the rule in either of two ways:
   reaches the wire, for its caller to re-run — when any value differs from
   its snapshot. The read set then names the seqs of the local state at build
   time, and the check has established that every read's content is the
-  content at those seqs.
+  content at those seqs. The check has to be immediate: a transaction closed
+  as one commit per space builds each space's read set after awaiting the
+  earlier spaces' round trips, so it re-checks each later space's documents
+  right before building that space's read set.
 
 The runner takes the checking form: `claim()` in
 `packages/runner/src/storage/transaction/attestation.ts`, run by every commit

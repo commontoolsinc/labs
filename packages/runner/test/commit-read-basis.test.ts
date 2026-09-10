@@ -12,6 +12,8 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("commit read basis");
 const space = signer.did();
+const signerY = await Identity.fromPassphrase("commit read basis second space");
+const spaceY = signerY.did();
 
 const valueSchema = {
   type: "object",
@@ -53,7 +55,7 @@ describe("commit read basis", () => {
   });
 
   afterEach(async () => {
-    await server.flushSessions([space]);
+    await server.flushSessions([space, spaceY]);
     await clock.settle();
     await rtB.dispose();
     await rtA.dispose();
@@ -149,6 +151,83 @@ describe("commit read basis", () => {
       rtB.prepareTxForCommit(tx);
       const committed = await tx.commit({ resolveAt: "verdict" });
       expect(committed.error).toBeUndefined();
+    });
+  });
+
+  describe("a transaction closed as one commit per space", () => {
+    // B's transaction writes `space` first and `spaceY` second, and reads a
+    // document in `spaceY` as absent. Runtime A creates that document while
+    // B's first space is closing, so the frame lands after the transaction
+    // was admitted and before its second space's read set is built.
+
+    const sharedYOf = (runtime: Runtime) =>
+      runtime.getCell(spaceY, SHARED, valueSchema);
+
+    // Resolves once B's replica for `spaceY` holds the document A creates.
+    const landInB = async () => {
+      const cell = sharedYOf(rtB);
+      const landed = new Promise<void>((resolve) => {
+        const cancel = cell.sink((value) => {
+          if (value?.value === 42) {
+            cancel();
+            resolve();
+          }
+        });
+      });
+      const txA = rtA.edit();
+      sharedYOf(rtA).withTx(txA).set({ value: 42 });
+      const created = await txA.commit({ resolveAt: "verdict" });
+      expect(created.error).toBeUndefined();
+      await server.flushSessions([spaceY]);
+      await clock.settle();
+      await landed;
+    };
+
+    const openTwoSpaceTx = async () => {
+      const shared = sharedYOf(rtB);
+      await shared.sync();
+      const tx = rtB.edit();
+      tx.enableMultiSpaceWrites?.([space, spaceY]);
+      rtB.getCell(space, "x-doc", valueSchema, tx).set({ value: 1 });
+      expect(shared.withTx(tx).get()).toBeUndefined();
+      rtB.getCell(spaceY, "y-derived-doc", valueSchema, tx).set({ value: 1 });
+      return tx;
+    };
+
+    it("re-checks the later space's documents before building its read set", async () => {
+      const tx = await openTwoSpaceTx();
+      const replica = storageB.open(space).replica;
+      const commitNative = replica.commitNative!.bind(replica);
+      replica.commitNative = async (native, source, options) => {
+        await landInB();
+        return commitNative(native, source, options);
+      };
+
+      rtB.prepareTxForCommit(tx);
+      const committed = await tx.commit({ resolveAt: "verdict" });
+      expect(committed.error?.name).toBe("StorageTransactionInconsistent");
+
+      // The first space closed before the change was found; the second
+      // never does.
+      await storageB.synced();
+      expect(rtB.getCell(space, "x-doc", valueSchema).get())
+        .toEqual({ value: 1 });
+      expect(rtB.getCell(spaceY, "y-derived-doc", valueSchema).get())
+        .toBeUndefined();
+    });
+
+    it("re-checks the later space's documents before sealing it", async () => {
+      const tx = await openTwoSpaceTx();
+      const sealed: string[] = [];
+      const result = await tx.tx.sealInto!({
+        sealSpaceCommit: async (sealing) => {
+          if (sealing === space) await landInB();
+          sealed.push(sealing);
+          return { ok: {} };
+        },
+      });
+      expect(result.error?.name).toBe("StorageTransactionInconsistent");
+      expect(sealed).toEqual([space]);
     });
   });
 });
