@@ -259,11 +259,8 @@ export class EmptyValueVisitor<Domain, ResultType>
 
   /** @inheritDoc */
   visitCycle(
-    /** Value to visit. */
     value: Domain,
-    /** Depth at which `value` was originally encountered. */
     originalDepth: number,
-    /** Depth of the current visit. */
     thisDepth: number,
   ): LeafVisitorResult<Domain, ResultType> {
     return undefined;
