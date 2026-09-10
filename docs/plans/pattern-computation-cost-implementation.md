@@ -1,8 +1,9 @@
 # Pattern computation cost: implementation sequence
 
-Status: initial A1 reactive action counters and A2 verbose reports implemented
-and validated. A0 needs a controlled large workload; whole-step accounting
-remains part of A3.
+Status: A0 controlled baseline, initial A1 reactive action counters, and A2
+verbose reports implemented and validated in
+[PR #7241](https://github.com/commontoolsinc/labs/pull/7241). Whole-step
+accounting remains part of A3.
 
 This tracker executes the design in
 [PR #7155](https://github.com/commontoolsinc/labs/pull/7155), reviewed at commit
@@ -62,16 +63,16 @@ replacement advice requires a shipped replacement.
 
 ## 1–2. Establish measurement: A0, A1, A2
 
-- [ ] **A0a — Establish a repeatable workload before instrumentation.**
+- [x] **A0a — Establish a repeatable workload before instrumentation.**
   - [x] Run
         `deno task cf test packages/patterns/lunch-poll/main.test.tsx
         --verbose --stats-threshold 0`;
         inspect which tally and row reads it actually demands.
-  - [ ] Specify the options, votes, voters, source revision, demanded output,
+  - [x] Specify the options, votes, voters, source revision, demanded output,
         CFC posture, lazy-materialization setting, and execution location. Add a
         controlled fixture if the existing test cannot reproduce the design's
         workload.
-  - [ ] Separate initialization from one steady-state vote update. Record
+  - [x] Separate initialization from one steady-state vote update. Record
         available run counts; leave unavailable access counts unmeasured.
         Disable idempotency verification before using test durations as
         performance evidence, following the performance-investigation skill.
@@ -116,11 +117,16 @@ replacement advice requires a shipped replacement.
         double-counting shared action IDs and parent/child totals.
   - [x] Test interval resets, multiple runs, zero-work steps, missing source
         locations, and completed runs without consulting graph snapshots.
-- [ ] **A0b — Regenerate the durable baseline using A1/A2.**
-  - [ ] Provide one command and checked fixture that regenerate all four
+- [x] **A0b — Regenerate the durable baseline using A1/A2.**
+  - [x] Provide one command and checked fixture that regenerate all four
         counters, by action and step, with initialization separate.
-  - [ ] Record measured evidence and explain differences from the design's
+  - [x] Record measured evidence and explain differences from the design's
         estimates. A0 is complete only after this pass.
+
+See the
+[controlled baseline](../history/development/performance/2026-09-10-lunch-poll-read-baseline.md)
+for the fixture, command, execution posture, and counts. No pattern-test
+durations are used as performance evidence.
 
 ## 3–4. Defend and calibrate measurements: A3–A5
 
@@ -276,11 +282,10 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Establish the controlled large A0 workload with its UI demanded throughout the
-update. The current tally already uses single-pass grouping and memoized voter
-lookup, so the design's nested-scan estimates are not this checkout's baseline.
-The existing lunch-poll test is a functional smoke check whose UI assertions can
-trigger work after the vote step. Keep A0 unchecked until the controlled
-workload and execution posture are recorded. Add event/commit coverage before A3
-whole-step budgets. Do not implement collection operators before the measurement
-and semantic gates above are satisfied.
+Define A3's budget declaration and extend measurement to event dispatch and
+commit work before enforcing whole-step budgets. Preserve separate
+initialization limits and include short-lived actions and failed attempts. The
+controlled A0 fixture is available for count comparisons; A4/A5 still need
+browser and cross-space measurements before product performance claims. Do not
+implement collection operators before the measurement and semantic gates above
+are satisfied.
