@@ -24,6 +24,9 @@ import { toCompactDebugString } from "./value-debug.ts";
 // Individual result form types and associated definitions
 //
 
+/** Full domain for a `ValueVisitor` class, given its `DomainExtra`. */
+type DomainFor<DomainExtra> = FabricValue | DomainExtra;
+
 /**
  * An `arrayContents` form. This is returned by visitor methods which wish to
  * treat the value they received as a container of array-like contents. `value`
@@ -31,9 +34,9 @@ import { toCompactDebugString } from "./value-debug.ts";
  * will iterate over the contents, calling
  * `ValueVisitor.visitArrayContentsItem()` on each element.
  */
-export type ArrayContentsForm<Domain> = {
+export type ArrayContentsForm<DomainExtra> = {
   type: "arrayContents";
-  value: readonly Domain[];
+  value: readonly DomainFor<DomainExtra>[];
 };
 
 /**
@@ -55,9 +58,9 @@ export type MainResultForm<ResultType> = {
  * returning this, the engine will iterate over the contents, calling
  * `ValueVisitor.visitMapContentsItem()` on each element.
  */
-export type MapContentsForm<Domain> = {
+export type MapContentsForm<DomainExtra> = {
   type: "mapContents";
-  value: readonly [Domain, Domain][];
+  value: readonly [DomainFor<DomainExtra>, DomainFor<DomainExtra>][];
 };
 
 /**
@@ -75,7 +78,7 @@ export type RecurseForm = { type: "recurse"; value: true };
  * visitor engine to redo visitor dispatch with the replacement (as if the
  * replacement were the value in the same position as the original).
  */
-export type ReplaceForm<Domain> = { type: "replace"; value: Domain };
+export type ReplaceForm<DomainExtra> = { type: "replace"; value: DomainFor<DomainExtra> };
 
 /**
  * A `visitSubtype` form. This is returned by visitor methods which cover
@@ -110,9 +113,9 @@ export const DO_VISIT_SUBTYPE: VisitSubtypeForm = Object.freeze(
  * The `do` prefix is intended to make it clear at use sites that it is telling
  * the visitor engine to "do" something.
  */
-export function doArrayContents<Domain>(
-  values: readonly Domain[],
-): ArrayContentsForm<Domain> {
+export function doArrayContents<DomainExtra>(
+  values: readonly DomainFor<DomainExtra>[],
+): ArrayContentsForm<DomainExtra> {
   return { type: "arrayContents", value: values };
 }
 
@@ -122,9 +125,9 @@ export function doArrayContents<Domain>(
  * The `do` prefix is intended to make it clear at use sites that it is telling
  * the visitor engine to "do" something.
  */
-export function doMapContents<Domain>(
-  mappings: readonly [Domain, Domain][],
-): MapContentsForm<Domain> {
+export function doMapContents<DomainExtra>(
+  mappings: readonly [DomainFor<DomainExtra>, DomainFor<DomainExtra>][],
+): MapContentsForm<DomainExtra> {
   return { type: "mapContents", value: mappings };
 }
 
@@ -162,8 +165,8 @@ export type ContainerIterationResult<ResultType> =
  *
  * See the included result types for details on what they mean.
  */
-export type DispatchingVisitorResult<Domain, ResultType> =
-  | LeafVisitorResult<Domain, ResultType>
+export type DispatchingVisitorResult<DomainExtra, ResultType> =
+  | LeafVisitorResult<DomainExtra, ResultType>
   | VisitSubtypeForm;
 
 /**
@@ -177,11 +180,11 @@ export type DispatchingVisitorResult<Domain, ResultType> =
  *
  * See the included result types for details on what they mean.
  */
-export type LeafVisitorResult<Domain, ResultType> =
+export type LeafVisitorResult<DomainExtra, ResultType> =
   | BaselineVisitResult<ResultType>
-  | ReplaceForm<Domain>
-  | ArrayContentsForm<Domain>
-  | MapContentsForm<Domain>;
+  | ReplaceForm<DomainExtra>
+  | ArrayContentsForm<DomainExtra>
+  | MapContentsForm<DomainExtra>;
 
 //
 // Visitor interface and exported implementations thereof
@@ -196,14 +199,18 @@ export type LeafVisitorResult<Domain, ResultType> =
  * Different methods are allowed to return different subsets of the full
  * complement of possible results (see their declarations for more detail). Each
  * structured result type is documented as to its meaning.
+ *
+ * The value domain of visitors always includes `FabricValue`, and the
+ * `DomainExtra` type parameter is available to selectively include another type
+ * (possibly itself compound) as an additional option.
  */
-export interface ValueVisitor<Domain = FabricValue, ResultType = FabricValue> {
+export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   /**
    * Visits an item from an `arrayContents` result.
    */
   visitArrayContentsItem(
     index: number,
-    value: Domain,
+    value: DomainFor<DomainExtra>,
   ): ContainerIterationResult<ResultType>;
 
   /**
@@ -214,33 +221,33 @@ export interface ValueVisitor<Domain = FabricValue, ResultType = FabricValue> {
    */
   visitCycle(
     /** Value to visit. */
-    value: Domain,
+    value: DomainFor<DomainExtra>,
     /** Depth at which `value` was originally encountered. */
     originalDepth: number,
     /** Depth of the current visit. */
     thisDepth: number,
-  ): LeafVisitorResult<Domain, ResultType>;
+  ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /**
    * Visits the given _known-valid_ `FabricArray`.
    */
   visitFabricArray(
-    value: Domain & FabricArray,
-  ): LeafVisitorResult<Domain, ResultType>;
+    value: FabricArray,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /**
    * Visits the given _known-valid_ `FabricInstance`.
    */
   visitFabricInstance(
-    value: Domain & FabricInstance,
-  ): LeafVisitorResult<Domain, ResultType>;
+    value: FabricInstance,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /**
    * Visits the given _known-valid_ `FabricPlainObject`.
    */
   visitFabricPlainObject(
-    value: Domain & FabricPlainObject,
-  ): LeafVisitorResult<Domain, ResultType>;
+    value: FabricPlainObject,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /**
    * Visits the given _known-valid_ `FabricContainerValue`. If this returns type
@@ -249,47 +256,47 @@ export interface ValueVisitor<Domain = FabricValue, ResultType = FabricValue> {
    * `visitFabricPlainObject()`.
    */
   visitFabricContainer(
-    value: Domain & FabricContainerValue,
-  ): DispatchingVisitorResult<Domain, ResultType>;
+    value: FabricContainerValue,
+  ): DispatchingVisitorResult<DomainExtra, ResultType>;
 
   /**
    * Visits an item from a `mapContents` result.
    */
   visitMapContentsItem(
-    key: Domain,
-    value: Domain,
+    key: DomainFor<DomainExtra>,
+    value: DomainFor<DomainExtra>,
   ): ContainerIterationResult<ResultType>;
 
   /**
    * Visits a value determined to _not_ be a valid `FabricValue`.
    */
   visitNonFabricValue(
-    value: Domain,
-  ): LeafVisitorResult<Domain, ResultType>;
+    value: DomainExtra,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /**
    * Visits the given primitive value, which can be either a native JavaScript
    * primitive or a `FabricPrimitive`.
    */
   visitPrimitive(
-    value: Domain & (Primitive | FabricPrimitive),
+    value: Primitive | FabricPrimitive,
     type: ValueTag,
-  ): LeafVisitorResult<Domain, ResultType>;
+  ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /**
    * Visits the given arbitrary value. If this returns type `visitSubtype`, then
    * the visitor system will call one of `visitFabricContainer()`,
    * `visitNonFabricValue()`, or `visitPrimitive()`.
    */
-  visitValue(value: Domain): DispatchingVisitorResult<Domain, ResultType>;
+  visitValue(value: DomainFor<DomainExtra>): DispatchingVisitorResult<DomainExtra, ResultType>;
 }
 
 /**
  * Base implementation of `ValueVisitor`, which leaves all visitor methods
  * `abstract` and includes `protected` helper methods.
  */
-export abstract class BaseValueVisitor<Domain, ResultType>
-  implements ValueVisitor<Domain, ResultType> {
+export abstract class BaseValueVisitor<DomainExtra, ResultType>
+  implements ValueVisitor<DomainExtra, ResultType> {
   //
   // Subclass contract
   //
@@ -297,57 +304,57 @@ export abstract class BaseValueVisitor<Domain, ResultType>
   /** @inheritDoc */
   abstract visitArrayContentsItem(
     index: number,
-    value: Domain,
+    value: DomainFor<DomainExtra>,
   ): ContainerIterationResult<ResultType>;
 
   /** @inheritDoc */
   abstract visitCycle(
-    value: Domain,
+    value: DomainFor<DomainExtra>,
     originalDepth: number,
     thisDepth: number,
-  ): LeafVisitorResult<Domain, ResultType>;
+  ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /** @inheritDoc */
   abstract visitFabricArray(
-    value: Domain & FabricArray,
-  ): LeafVisitorResult<Domain, ResultType>;
+    value: FabricArray,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /** @inheritDoc */
   abstract visitFabricInstance(
-    value: Domain & FabricInstance,
-  ): LeafVisitorResult<Domain, ResultType>;
+    value: FabricInstance,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /** @inheritDoc */
   abstract visitFabricPlainObject(
-    value: Domain & FabricPlainObject,
-  ): LeafVisitorResult<Domain, ResultType>;
+    value: FabricPlainObject,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /** @inheritDoc */
   abstract visitFabricContainer(
-    value: Domain & FabricContainerValue,
-  ): DispatchingVisitorResult<Domain, ResultType>;
+    value: FabricContainerValue,
+  ): DispatchingVisitorResult<DomainExtra, ResultType>;
 
   /** @inheritDoc */
   abstract visitMapContentsItem(
-    key: Domain,
-    value: Domain,
+    key: DomainFor<DomainExtra>,
+    value: DomainFor<DomainExtra>,
   ): ContainerIterationResult<ResultType>;
 
   /** @inheritDoc */
   abstract visitNonFabricValue(
-    value: Domain,
-  ): LeafVisitorResult<Domain, ResultType>;
+    value: DomainExtra,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /** @inheritDoc */
   abstract visitPrimitive(
-    value: Domain & (Primitive | FabricPrimitive),
+    value: Primitive | FabricPrimitive,
     type: ValueTag,
-  ): LeafVisitorResult<Domain, ResultType>;
+  ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /** @inheritDoc */
   abstract visitValue(
-    value: Domain,
-  ): DispatchingVisitorResult<Domain, ResultType>;
+    value: DomainFor<DomainExtra>,
+  ): DispatchingVisitorResult<DomainExtra, ResultType>;
 
   //
   // Instance members
@@ -356,7 +363,7 @@ export abstract class BaseValueVisitor<Domain, ResultType>
   /**
    * Throws an error indicating that this visitor does not handle cycles.
    */
-  protected throwNoCycles(value: Domain): never {
+  protected throwNoCycles(value: DomainFor<DomainExtra>): never {
     const desc = toCompactDebugString(value, { backtickQuote: true });
     throw new Error(`Cannot visit cyclic value: ${desc}`);
   }
@@ -367,78 +374,78 @@ export abstract class BaseValueVisitor<Domain, ResultType>
  * returns `undefined`. This is meant to be a reasonable base class for more
  * useful visitors, not to be particularly useful by itself.
  */
-export class EmptyValueVisitor<Domain, ResultType>
-  extends BaseValueVisitor<Domain, ResultType> {
+export class EmptyValueVisitor<DomainExtra, ResultType>
+  extends BaseValueVisitor<DomainExtra, ResultType> {
   /** @inheritDoc */
   visitArrayContentsItem(
     _index: number,
-    _value: Domain,
+    _value: DomainFor<DomainExtra>,
   ): ContainerIterationResult<ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitCycle(
-    _value: Domain,
+    _value: DomainFor<DomainExtra>,
     _originalDepth: number,
     _thisDepth: number,
-  ): LeafVisitorResult<Domain, ResultType> {
+  ): LeafVisitorResult<DomainExtra, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitFabricArray(
-    _value: Domain & FabricArray,
-  ): LeafVisitorResult<Domain, ResultType> {
+    _value: FabricArray,
+  ): LeafVisitorResult<DomainExtra, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitFabricInstance(
-    _value: Domain & FabricInstance,
-  ): LeafVisitorResult<Domain, ResultType> {
+    _value: FabricInstance,
+  ): LeafVisitorResult<DomainExtra, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitFabricPlainObject(
-    _value: Domain & FabricPlainObject,
-  ): LeafVisitorResult<Domain, ResultType> {
+    _value: FabricPlainObject,
+  ): LeafVisitorResult<DomainExtra, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitFabricContainer(
-    _value: Domain & FabricContainerValue,
-  ): DispatchingVisitorResult<Domain, ResultType> {
+    _value: FabricContainerValue,
+  ): DispatchingVisitorResult<DomainExtra, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitMapContentsItem(
-    _key: Domain,
-    _value: Domain,
+    _key: DomainFor<DomainExtra>,
+    _value: DomainFor<DomainExtra>,
   ): ContainerIterationResult<ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitNonFabricValue(
-    _value: Domain,
-  ): LeafVisitorResult<Domain, ResultType> {
+    _value: DomainExtra,
+  ): LeafVisitorResult<DomainExtra, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitPrimitive(
-    _value: Domain & (Primitive | FabricPrimitive),
+    _value: (Primitive | FabricPrimitive),
     _type: ValueTag,
-  ): LeafVisitorResult<Domain, ResultType> {
+  ): LeafVisitorResult<DomainExtra, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
-  visitValue(_value: Domain): DispatchingVisitorResult<Domain, ResultType> {
+  visitValue(_value: DomainFor<DomainExtra>): DispatchingVisitorResult<DomainExtra, ResultType> {
     return undefined;
   }
 }
@@ -451,12 +458,12 @@ export class EmptyValueVisitor<Domain, ResultType>
  * State of a visit currently in progress, along with most of the visit
  * execution machinery.
  */
-class VisitInProgress<Domain, ResultType> {
+class VisitInProgress<DomainExtra, ResultType> {
   /** Concrete visitor implementation. */
-  #visitor: ValueVisitor<Domain, ResultType>;
+  #visitor: ValueVisitor<DomainExtra, ResultType>;
 
   /** Container stack of the visit currently in progress. */
-  #stack = new IndexTrackingStack<Domain>();
+  #stack = new IndexTrackingStack<DomainFor<DomainExtra>>();
 
   /**
    * Indicates if the value being visited is known to be a valid `FabricValue`.
@@ -467,7 +474,7 @@ class VisitInProgress<Domain, ResultType> {
   /**
    * Constructs an instance.
    */
-  constructor(visitor: ValueVisitor<Domain, ResultType>) {
+  constructor(visitor: ValueVisitor<DomainExtra, ResultType>) {
     this.#visitor = visitor;
   }
 
@@ -476,7 +483,7 @@ class VisitInProgress<Domain, ResultType> {
   //
 
   /** Visits the indicated value as a top-level operation. */
-  visit(value: Domain): BaselineVisitResult<ResultType> {
+  visit(value: DomainFor<DomainExtra>): BaselineVisitResult<ResultType> {
     if (this.#stack.depth !== 0) {
       // deno-coverage-ignore-start
 
@@ -504,7 +511,7 @@ class VisitInProgress<Domain, ResultType> {
     }
   }
 
-  #visitValue(value: Domain): BaselineVisitResult<ResultType> {
+  #visitValue(value: DomainFor<DomainExtra>): BaselineVisitResult<ResultType> {
     const result = this.#visitResolvingSubtype(value);
 
     if (result === undefined) {
@@ -531,8 +538,8 @@ class VisitInProgress<Domain, ResultType> {
    * directed by `ValueVisitor.visitArrayContentsItem()`.
    */
   #subvisitArray(
-    value: Domain,
-    values: readonly Domain[],
+    value: DomainFor<DomainExtra>,
+    values: readonly DomainFor<DomainExtra>[],
   ): BaselineVisitResult<ResultType> {
     const vis = this.#visitor;
 
@@ -574,8 +581,8 @@ class VisitInProgress<Domain, ResultType> {
    * directed by `ValueVisitor.visitMapContentsItem()`.
    */
   #subvisitMap(
-    value: Domain,
-    mappings: readonly [Domain, Domain][],
+    value: DomainFor<DomainExtra>,
+    mappings: readonly [DomainFor<DomainExtra>, DomainFor<DomainExtra>][],
   ): BaselineVisitResult<ResultType> {
     const vis = this.#visitor;
 
@@ -609,10 +616,10 @@ class VisitInProgress<Domain, ResultType> {
    * the visitor returns something other than a `replace` result.
    */
   #visitResolvingCyclesAndReplacement(
-    value: Domain,
+    value: DomainFor<DomainExtra>,
   ): Exclude<
-    DispatchingVisitorResult<Domain, ResultType>,
-    ReplaceForm<Domain>
+    DispatchingVisitorResult<DomainExtra, ResultType>,
+    ReplaceForm<DomainExtra>
   > {
     const vis = this.#visitor;
 
@@ -636,12 +643,12 @@ class VisitInProgress<Domain, ResultType> {
    * or `visitSubtype` result.
    */
   #visitResolvingSubtype(
-    value: Domain,
-  ): Exclude<LeafVisitorResult<Domain, ResultType>, ReplaceForm<Domain>> {
+    value: DomainFor<DomainExtra>,
+  ): Exclude<LeafVisitorResult<DomainExtra, ResultType>, ReplaceForm<DomainExtra>> {
     const vis = this.#visitor;
 
     for (;;) {
-      let result: DispatchingVisitorResult<Domain, ResultType> = this
+      let result: DispatchingVisitorResult<DomainExtra, ResultType> = this
         .#visitResolvingCyclesAndReplacement(value);
 
       if (result?.type !== "visitSubtype") {
@@ -652,7 +659,7 @@ class VisitInProgress<Domain, ResultType> {
         const tag = tagFromFabricValue(value);
         switch (tag) {
           case VALUE_TAGS.Array: {
-            const array = value as (Domain & FabricArray);
+            const array = value as FabricArray;
             result = vis.visitFabricContainer(array);
             if (result?.type === "visitSubtype") {
               result = vis.visitFabricArray(array);
@@ -661,7 +668,7 @@ class VisitInProgress<Domain, ResultType> {
           }
 
           case VALUE_TAGS.FabricInstance: {
-            const instance = value as (Domain & FabricInstance);
+            const instance = value as FabricInstance;
             result = vis.visitFabricContainer(instance);
             if (result?.type === "visitSubtype") {
               result = vis.visitFabricInstance(instance);
@@ -670,7 +677,7 @@ class VisitInProgress<Domain, ResultType> {
           }
 
           case VALUE_TAGS.Object: {
-            const object = value as (Domain & FabricPlainObject);
+            const object = value as FabricPlainObject;
             result = vis.visitFabricContainer(object);
             if (result?.type === "visitSubtype") {
               result = vis.visitFabricPlainObject(object);
@@ -679,12 +686,12 @@ class VisitInProgress<Domain, ResultType> {
           }
 
           default: {
-            const prim = value as (Domain & (Primitive | FabricPrimitive));
+            const prim = value as Primitive | FabricPrimitive;
             result = vis.visitPrimitive(prim, tag);
           }
         }
       } else {
-        result = vis.visitNonFabricValue(value);
+        result = vis.visitNonFabricValue(value as DomainExtra);
       }
 
       if (result?.type !== "replace") {
@@ -716,11 +723,11 @@ class VisitInProgress<Domain, ResultType> {
 /**
  * Performs a one-off visit of a value with a visitor.
  */
-export function visitValue<Domain, ResultType>(
-  value: Domain,
-  visitor: ValueVisitor<Domain, ResultType>,
+export function visitValue<DomainExtra, ResultType>(
+  value: DomainFor<DomainExtra>,
+  visitor: ValueVisitor<DomainExtra, ResultType>,
 ): BaselineVisitResult<ResultType> {
-  const inProgress = new VisitInProgress<Domain, ResultType>(visitor);
+  const inProgress = new VisitInProgress<DomainExtra, ResultType>(visitor);
   return inProgress.visit(value);
 }
 
@@ -728,8 +735,8 @@ export function visitValue<Domain, ResultType>(
  * Creates a visitor function bound to the given visitor. The result is a
  * single-argument `visit(value)` function.
  */
-export function makeVisitFunction<Domain, ResultType>(
-  visitor: ValueVisitor<Domain, ResultType>,
-): (value: Domain) => BaselineVisitResult<ResultType> {
-  return (value: Domain) => visitValue(value, visitor);
+export function makeVisitFunction<DomainExtra, ResultType>(
+  visitor: ValueVisitor<DomainExtra, ResultType>,
+): (value: DomainFor<DomainExtra>) => BaselineVisitResult<ResultType> {
+  return (value: DomainFor<DomainExtra>) => visitValue(value, visitor);
 }
