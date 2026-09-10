@@ -35,8 +35,32 @@
  *   a property of the binding, not of the entity, and unrelated to
  *   identity despite sharing the word (and the value `"stream"`).
  *
+ * ## Which scheme names are registered
+ *
+ * The IANA URI scheme registry lists every registered scheme name:
+ * <https://www.iana.org/assignments/uri-schemes/uri-schemes.xhtml>.
+ * Consult it before minting another prefix. A name used here falls into
+ * one of three cases.
+ *
+ * - **Registered, and used for what it was registered for.** `did:`,
+ *   defined by the W3C Decentralized Identifiers specification, and
+ *   `data:`, defined by RFC 2397.
+ * - **Absent from the registry.** `of:` and `computed:` are private to
+ *   this codebase.
+ * - **Registered for an unrelated subject.** `cid:` prefixes a
+ *   content-addressed schema document reference (`schema-decompose.ts`).
+ *   RFC 2392 registers the same name for a body part of a MIME message,
+ *   addressed by its `Content-ID` header.
+ *
+ * RFC 3986 section 3.1 bounds what a scheme name may contain: a letter,
+ * then any number of letters, digits, `+`, `-`, and `.`. A prefix holding
+ * a character outside that set, such as `@`, is not a scheme name at all,
+ * and so cannot collide with one.
+ *
  * See `docs/specs/computed-cell-identity.md`.
  */
+
+/** The kinds an entity id can carry, beyond the unkinded `of:` default. */
 export type EntityKind = "computed";
 
 /** The URI scheme of computed-kind entity ids (`computed:fid1:<hash>`). */

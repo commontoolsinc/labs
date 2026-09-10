@@ -784,6 +784,7 @@ Deno.test("memory v2 client fails closed without entity identifier capabilities"
       ...HELLO_OK,
       flags: {
         modernCellRep: getMemoryProtocolFlags().modernCellRep,
+        stableExpressionResultIds: true,
       },
     }),
   });
@@ -3426,6 +3427,7 @@ Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
           protocol: MEMORY_PROTOCOL,
           flags: {
             modernCellRep: !getMemoryProtocolFlags().modernCellRep,
+            stableExpressionResultIds: true,
           },
         }));
       }
@@ -3446,9 +3448,8 @@ Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
 });
 
 Deno.test("memory v2 client stores the server's advertised flags (capability handshake)", async () => {
-  // An OLD server's hello.ok omits sqliteCommitRowLabelEval: the parsed
-  // server flags must read false (the runner's write gate then keeps failing
-  // closed), while a current server's advertisement reads true.
+  // Omitting sqliteCommitRowLabelEval leaves the parsed capability false,
+  // which keeps the runner's write gate closed. Advertising it yields true.
   const transportWithFlags = (flags: unknown): Transport => {
     let receiver = (_payload: string) => {};
     return {
@@ -3488,6 +3489,7 @@ Deno.test("memory v2 client stores the server's advertised flags (capability han
   const legacy = await connect({
     transport: transportWithFlags({
       modernCellRep: getMemoryProtocolFlags().modernCellRep,
+      stableExpressionResultIds: true,
     }),
   });
   try {
@@ -3516,6 +3518,7 @@ Deno.test("memory v2 client keeps compression disabled when the server omits the
           protocol: MEMORY_PROTOCOL,
           flags: {
             modernCellRep: getMemoryProtocolFlags().modernCellRep,
+            stableExpressionResultIds: true,
           },
           sessionOpen: {
             audience: TEST_SESSION_OPEN_AUDIENCE,

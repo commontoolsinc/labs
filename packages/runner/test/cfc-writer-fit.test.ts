@@ -9,6 +9,7 @@ import {
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
 import { Runtime } from "../src/runtime.ts";
 import { runtimeOwnedStoreOwnerKey } from "../src/cfc/runtime-owned-stores.ts";
 import type { NormalizedFullLink } from "../src/link-types.ts";
@@ -322,7 +323,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       const derivedId = derived.getAsNormalizedFullLink().id;
       tx.prepareCfc();
       const result = await tx.commit();
-      expect(result.error).toBeDefined();
+      expect(isCfcEnforcementRejection(result.error)).toBe(true);
       // SC-18c error contract: stable reason naming the rule id and path.
       expect(result.error?.message).toContain(
         "writer-fit confidentiality misfit",
@@ -508,7 +509,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       partial.set({ copied: `${raw.secret}!` });
       tx.prepareCfc();
       const result = await tx.commit();
-      expect(result.error).toBeDefined();
+      expect(isCfcEnforcementRejection(result.error)).toBe(true);
       expect(result.error?.message).toContain(
         "writer-fit confidentiality misfit",
       );
@@ -1496,7 +1497,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         tx.prepareCfc();
 
         const result = await tx.commit();
-        expect(result.error).toBeDefined();
+        expect(isCfcEnforcementRejection(result.error)).toBe(true);
         expect(result.error?.message).toContain(
           "writer-fit confidentiality misfit",
         );
@@ -1621,7 +1622,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         tx.prepareCfc();
 
         const result = await tx.commit();
-        expect(result.error).toBeDefined();
+        expect(isCfcEnforcementRejection(result.error)).toBe(true);
         expect(result.error?.message).toContain(
           "writer-fit confidentiality misfit",
         );

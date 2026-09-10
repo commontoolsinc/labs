@@ -13,6 +13,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import type { CfcWriteFloorMode, IFCLabel } from "../src/cfc/mod.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-write-floor");
 
@@ -529,11 +530,13 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
     }
   });
 
-  it("a link with no derivable source label is skipped by the floor (reason recorded elsewhere)", async () => {
-    // A link whose source has no stored metadata and no candidate schema is
-    // underivable: derivePersistedLinkLabel returns a reason (the persist loop
-    // reports it), and the floor does not double-count it as a contribution.
-    // The whole commit still rejects — via that missing-source reason.
+  it("a link whose source is not CFC-relevant still fails the floor", async () => {
+    // The write at /out is a link whose source carries no stored metadata and
+    // no schema, so nothing marks the link CFC-relevant and no link-write
+    // policy input is recorded for it. The floor measures the path with no
+    // link contribution at all, crediting only the transaction's flow
+    // integrity, which is empty at the default `cfcFlowLabels` rung, and
+    // refuses there.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
     try {
@@ -553,9 +556,8 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
       sink.set({ out: src as unknown as string });
       tx.prepareCfc();
       const result = await tx.commit();
-      // Underivable link source => the commit rejects (missing link source
-      // metadata), and the floor contributes nothing spurious.
-      expect(result.error).toBeDefined();
+      expect(isCfcEnforcementRejection(result.error)).toBe(true);
+      expect(result.error?.message).toContain("write floor failed at /out");
     } finally {
       await runtime.dispose();
       await storageManager.close();
