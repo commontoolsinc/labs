@@ -79,7 +79,7 @@ export type MainResultForm<ResultType> = {
  * known by the engine to be an element of the container which is being iterated
  * over.
  */
-export type RecurseForm = { type: "recurse"; value: true };
+export type RecurseForm = { type: "recurse" };
 
 /**
  * A `replace` form. `value` is a value that is to be used in place of the value
@@ -97,7 +97,7 @@ export type ReplaceForm<DomainExtra> = {
  * multiple possible subtype dispatches. By returning this form, a visitor
  * indicates that the engine should in fact do a subtype-based dispatch.
  */
-export type VisitSubtypeForm = { type: "visitSubtype"; value: true };
+export type VisitSubtypeForm = { type: "visitSubtype" };
 
 /**
  * Standard instance of `RecurseForm`.
@@ -106,7 +106,7 @@ export type VisitSubtypeForm = { type: "visitSubtype"; value: true };
  * the visitor engine to "do" something.
  */
 export const DO_RECURSE: RecurseForm = Object.freeze(
-  { type: "recurse", value: true } as const,
+  { type: "recurse" } as const,
 );
 
 /**
@@ -116,7 +116,7 @@ export const DO_RECURSE: RecurseForm = Object.freeze(
  * the visitor engine to "do" something.
  */
 export const DO_VISIT_SUBTYPE: VisitSubtypeForm = Object.freeze(
-  { type: "visitSubtype", value: true } as const,
+  { type: "visitSubtype" } as const,
 );
 
 /**
