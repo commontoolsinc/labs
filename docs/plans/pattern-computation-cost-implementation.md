@@ -1,10 +1,11 @@
 # Pattern computation cost: implementation sequence
 
 Status: A1/A2 instrumentation shipped in #7246; worker control shipped in #7256.
-The controlled A0 fixture and accounting regressions are in #7241. A3 budget
-enforcement is in [PR #7257](https://github.com/commontoolsinc/labs/pull/7257),
-with full runner validation, targeted CLI regressions, and antagonistic review
-complete. CI and Cubic review remain before landing.
+The controlled A0 fixture and accounting regressions shipped in #7241; A4's
+browser benchmark shipped in #7261. A3 budget enforcement is in
+[PR #7257](https://github.com/commontoolsinc/labs/pull/7257), with full runner
+validation, targeted CLI regressions, and antagonistic review complete. CI and
+Cubic review remain before landing.
 
 This tracker executes the design in
 [PR #7155](https://github.com/commontoolsinc/labs/pull/7155), reviewed at commit
@@ -166,7 +167,7 @@ durations are used as performance evidence.
 ### Validation evidence for the A3 slice
 
 [PR #7257](https://github.com/commontoolsinc/labs/pull/7257) implements the
-checked A3 acceptance items. The full runner suite passed 1,410 tests / 8,761
+checked A3 acceptance items. The full runner suite passed 1,410 tests / 8,765
 steps;
 [read-accounting.test.ts](../../packages/runner/test/read-accounting.test.ts)
 covers transaction ownership, aborted attempts, event/preflight failures,
@@ -306,10 +307,11 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Publish A3's locally validated implementation for CI and Cubic review. Its
-declaration, separate initialization limits, and five real pass/fail demos are
-implemented. Continue A4's browser read benchmark in an isolated worktree. The
-controlled A0 fixture is available for count comparisons; A4/A5 still need
-browser and cross-space measurements before product performance claims. Do not
+Complete A3's CI and fresh Cubic review after its six review fixes. Continue
+C1's remote-row probes from
+[PR #7265](https://github.com/commontoolsinc/labs/pull/7265), including nested
+swatches, profile-only updates, and ranking changes. The controlled A0 fixture
+and A4 browser benchmark are available for count comparisons; A5 still needs
+cross-space and deployed measurements before product performance claims. Do not
 implement collection operators before the measurement and semantic gates above
 are satisfied.
