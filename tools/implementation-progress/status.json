@@ -1,0 +1,204 @@
+{
+  "updated": "2026-09-10T17:54:55.218233+00:00",
+  "title": "Pattern computation cost",
+  "design": "https://github.com/commontoolsinc/labs/pull/7155",
+  "pr": "https://github.com/commontoolsinc/labs/pull/7241",
+  "head": "91959194f7",
+  "activity": "Cubic fixes pass the full runner suite. Committing dashboard and fixes, then resolving main conflicts before refreshed PR review.",
+  "review": "Four Cubic findings fixed and independently reviewed; local validation complete except two independently reproduced baseline CLI color failures. GitHub reports main conflicts: resolve and revalidate before push and latest-head Cubic review.",
+  "checks": [
+    "Current fixes: runner accounting regression 20 steps passed",
+    "Current fixes: CLI render-demand regression 13 steps passed",
+    "Current CLI suite: 1,817 passed; same two pre-existing color failures",
+    "Current repository type checks, formatting, and lint passed",
+    "Current full runner suite: 1,405 passed / 8,643 steps / zero failures",
+    "Dashboard: browser rendering, interval switching, stage filter, and live updates verified",
+    "Published baseline: patterns package and all 412 authoritative pattern checks passed"
+  ],
+  "stages": [
+    {
+      "id": "A0",
+      "title": "Controlled workload and baseline",
+      "status": "review",
+      "detail": "14 options, eight voters, 74 keyed votes; normal and continuous-UI tests pass."
+    },
+    {
+      "id": "A1",
+      "title": "Reactive read accounting",
+      "status": "review",
+      "detail": "Four counters implemented. Fixing Cubic findings before merge."
+    },
+    {
+      "id": "A2",
+      "title": "Attributed CLI reports",
+      "status": "review",
+      "detail": "Initialization and step reports implemented. Failed-step reporting fix in progress."
+    },
+    {
+      "id": "A3",
+      "title": "Read budgets and whole-step coverage",
+      "status": "active",
+      "detail": "Budget contract drafted: pre-initialization opt-in, separate per-run and settled-step limits, and a real pass/fail demo. Execution coverage comes first."
+    },
+    {
+      "id": "A4",
+      "title": "Read-side benchmark",
+      "status": "todo",
+      "detail": "Measure a vote with its tally demanded across collection sizes."
+    },
+    {
+      "id": "A5",
+      "title": "Browser and cross-space comparison",
+      "status": "todo",
+      "detail": "Match workload and explain probe/product differences."
+    },
+    {
+      "id": "C1",
+      "title": "Multi-replica reproductions",
+      "status": "next",
+      "detail": "Reproduce nested-filter and remote-row failures before choosing repairs."
+    },
+    {
+      "id": "B1",
+      "title": "Grouping and unique-key indexing",
+      "status": "todo",
+      "detail": "Settle key, duplicate, ordering, identity, and complexity contracts."
+    },
+    {
+      "id": "B2",
+      "title": "Keyed lookup and join",
+      "status": "todo",
+      "detail": "Specify cardinality and invalidation, then implement."
+    },
+    {
+      "id": "B3",
+      "title": "Deterministic aggregates",
+      "status": "todo",
+      "detail": "Count, sum, min/max, minBy/maxBy; no inverse subtraction."
+    },
+    {
+      "id": "B4",
+      "title": "Operator documentation",
+      "status": "todo",
+      "detail": "Publish contracts and executable examples with each operator."
+    },
+    {
+      "id": "C2",
+      "title": "Partial materialization correctness",
+      "status": "todo",
+      "detail": "Repair only after C1 establishes the failure."
+    },
+    {
+      "id": "C3",
+      "title": "Remote row invalidation",
+      "status": "todo",
+      "detail": "Guard affected-row updates and stable identity."
+    },
+    {
+      "id": "C4",
+      "title": "Reactive lunch-poll rows",
+      "status": "todo",
+      "detail": "Remove workaround after both regressions pass."
+    },
+    {
+      "id": "B5",
+      "title": "Lunch-poll operator migration",
+      "status": "todo",
+      "detail": "Preserve behavior and add measured budgets."
+    },
+    {
+      "id": "B6",
+      "title": "End-to-end savings",
+      "status": "todo",
+      "detail": "Compare maintenance and user-visible cost on matched rigs."
+    },
+    {
+      "id": "D1",
+      "title": "Lazy materialization coordination",
+      "status": "todo",
+      "detail": "Follow the owning plan; avoid duplicate implementation."
+    },
+    {
+      "id": "D2",
+      "title": "Baseline after dependency changes",
+      "status": "todo",
+      "detail": "Separate fewer reads from cheaper reads."
+    },
+    {
+      "id": "D3",
+      "title": "Scoped snapshot memo verification",
+      "status": "todo",
+      "detail": "Implementation exists; verify isolation and measure reuse."
+    },
+    {
+      "id": "E1",
+      "title": "Computed versus lift measurements",
+      "status": "todo",
+      "detail": "Measure current defaults and declared read width."
+    },
+    {
+      "id": "E2",
+      "title": "Author guidance",
+      "status": "todo",
+      "detail": "Publish measured advice using shipped operators."
+    },
+    {
+      "id": "E3",
+      "title": "Nested-scan diagnostic",
+      "status": "todo",
+      "detail": "Warning with negative cases and corpus noise assessment."
+    }
+  ],
+  "questions": [
+    {
+      "id": "Q1",
+      "title": "Where should the dashboard live?",
+      "proposal": "Local browser page backed by checked-in status; Markdown tracker remains the acceptance checklist.",
+      "blocks": "Dashboard hosting choice only; implementation continues.",
+      "status": "Awaiting answer"
+    },
+    {
+      "id": "Q2",
+      "title": "Merge automatically after all gates pass?",
+      "proposal": "Merge and continue after required checks, antagonistic review, and clean latest-head Cubic review.",
+      "blocks": "Merge only; further implementation can use stacked branches.",
+      "status": "Awaiting answer"
+    },
+    {
+      "id": "Q3",
+      "title": "Any priority, deadline, or environment constraints?",
+      "proposal": "Follow the plan sequence, emphasizing observable demos.",
+      "blocks": "No current work.",
+      "status": "Awaiting answer"
+    },
+    {
+      "id": "Q4",
+      "title": "Which deployed lunch-poll board should anchor A5/B6?",
+      "proposal": "Provide its URL or space/piece identifier. Continue on the local controlled fixture meanwhile.",
+      "blocks": "Deployed comparison only; local implementation and demos continue.",
+      "status": "Awaiting answer"
+    }
+  ],
+  "milestones": [
+    {
+      "title": "Observe read costs",
+      "state": "Available",
+      "detail": "Explore the recorded 74-vote workload below. These are actual measurements, not simulated speedups."
+    },
+    {
+      "title": "See budget failures",
+      "state": "Planned \u00b7 A3",
+      "detail": "Demonstrate an inexpensive edit passing and an expensive computation failing with a useful diagnostic."
+    },
+    {
+      "title": "See remote updates",
+      "state": "Planned \u00b7 C1\u2013C4",
+      "detail": "Show two participants and the affected row updating correctly."
+    },
+    {
+      "title": "Compare optimized vote updates",
+      "state": "Planned \u00b7 B5\u2013B6",
+      "detail": "Compare the same interaction before and after migration, with read work and measured time."
+    }
+  ]
+}

@@ -10,6 +10,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Pattern-test read budgets](read-cost-budgets.md) specifies opt-in limits,
+  execution coverage, failure diagnostics, and the A3 demonstration.
+
 - [Pattern computation cost: implementation sequence](pattern-computation-cost-implementation.md)
   executes the design in PR #7155 with checkable measurement, collection
   operator, multi-replica correctness, and authoring-guidance stages.

@@ -1,0 +1,514 @@
+{
+  "revision": "07300583c7 + read-cost.test.tsx (published in 91959194f7)",
+  "date": "2026-09-10",
+  "command": "CF_TEST_CONTINUOUS_UI=1 deno task cf test packages/patterns/lunch-poll/read-cost.test.tsx --verbose --stats-threshold 0",
+  "intervals": [
+    {
+      "label": "initialization",
+      "runs": 673,
+      "accesses": 1219,
+      "hops": 10472,
+      "documents": 4837,
+      "dependencies": 16255,
+      "rows": [
+        {
+          "runs": 2,
+          "accesses": 64,
+          "hops": 16,
+          "documents": 14,
+          "dependencies": 57,
+          "source": "lunch-poll/main.tsx:1499:19"
+        },
+        {
+          "runs": 2,
+          "accesses": 64,
+          "hops": 2,
+          "documents": 10,
+          "dependencies": 22,
+          "source": "raw:wish:VWsczAydex0n"
+        },
+        {
+          "runs": 1,
+          "accesses": 57,
+          "hops": 2,
+          "documents": 2,
+          "dependencies": 18,
+          "source": "lunch-poll/main.tsx:1816:34"
+        },
+        {
+          "runs": 1,
+          "accesses": 44,
+          "hops": 5,
+          "documents": 4,
+          "dependencies": 22,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 42,
+          "hops": 5,
+          "documents": 4,
+          "dependencies": 22,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 40,
+          "hops": 5,
+          "documents": 4,
+          "dependencies": 22,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 38,
+          "hops": 5,
+          "documents": 4,
+          "dependencies": 22,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 36,
+          "hops": 5,
+          "documents": 4,
+          "dependencies": 22,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 34,
+          "hops": 5,
+          "documents": 4,
+          "dependencies": 22,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 32,
+          "hops": 5,
+          "documents": 4,
+          "dependencies": 22,
+          "source": "lunch-poll/main.tsx:1933:40"
+        }
+      ]
+    },
+    {
+      "label": "step 1",
+      "runs": 52,
+      "accesses": 1746,
+      "hops": 483,
+      "documents": 410,
+      "dependencies": 2131,
+      "rows": [
+        {
+          "runs": 1,
+          "accesses": 649,
+          "hops": 4,
+          "documents": 2,
+          "dependencies": 19,
+          "source": "lunch-poll/main.tsx:1816:34"
+        },
+        {
+          "runs": 1,
+          "accesses": 360,
+          "hops": 174,
+          "documents": 97,
+          "dependencies": 783,
+          "source": "lunch-poll/main.tsx:1499:19"
+        },
+        {
+          "runs": 1,
+          "accesses": 224,
+          "hops": 77,
+          "documents": 78,
+          "dependencies": 451,
+          "source": "lunch-poll/main.tsx:1446:33"
+        },
+        {
+          "runs": 1,
+          "accesses": 44,
+          "hops": 7,
+          "documents": 4,
+          "dependencies": 23,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 42,
+          "hops": 7,
+          "documents": 4,
+          "dependencies": 23,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 40,
+          "hops": 7,
+          "documents": 4,
+          "dependencies": 23,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 38,
+          "hops": 7,
+          "documents": 4,
+          "dependencies": 23,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 36,
+          "hops": 7,
+          "documents": 4,
+          "dependencies": 23,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 34,
+          "hops": 7,
+          "documents": 4,
+          "dependencies": 23,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 32,
+          "hops": 7,
+          "documents": 4,
+          "dependencies": 23,
+          "source": "lunch-poll/main.tsx:1933:40"
+        }
+      ]
+    },
+    {
+      "label": "step 2",
+      "runs": 326,
+      "accesses": 2811,
+      "hops": 3508,
+      "documents": 2312,
+      "dependencies": 7754,
+      "rows": [
+        {
+          "runs": 1,
+          "accesses": 649,
+          "hops": 4,
+          "documents": 2,
+          "dependencies": 19,
+          "source": "lunch-poll/main.tsx:1816:34"
+        },
+        {
+          "runs": 1,
+          "accesses": 360,
+          "hops": 174,
+          "documents": 96,
+          "dependencies": 781,
+          "source": "lunch-poll/main.tsx:1499:19"
+        },
+        {
+          "runs": 1,
+          "accesses": 93,
+          "hops": 89,
+          "documents": 82,
+          "dependencies": 272,
+          "source": "lunch-poll/poll-option-card.tsx:145:28"
+        },
+        {
+          "runs": 1,
+          "accesses": 92,
+          "hops": 89,
+          "documents": 82,
+          "dependencies": 270,
+          "source": "lunch-poll/poll-option-card.tsx:145:28"
+        },
+        {
+          "runs": 1,
+          "accesses": 91,
+          "hops": 89,
+          "documents": 82,
+          "dependencies": 268,
+          "source": "lunch-poll/poll-option-card.tsx:145:28"
+        },
+        {
+          "runs": 1,
+          "accesses": 90,
+          "hops": 89,
+          "documents": 82,
+          "dependencies": 266,
+          "source": "lunch-poll/poll-option-card.tsx:145:28"
+        },
+        {
+          "runs": 1,
+          "accesses": 89,
+          "hops": 89,
+          "documents": 82,
+          "dependencies": 264,
+          "source": "lunch-poll/poll-option-card.tsx:145:28"
+        },
+        {
+          "runs": 1,
+          "accesses": 88,
+          "hops": 89,
+          "documents": 82,
+          "dependencies": 262,
+          "source": "lunch-poll/poll-option-card.tsx:145:28"
+        },
+        {
+          "runs": 1,
+          "accesses": 87,
+          "hops": 89,
+          "documents": 82,
+          "dependencies": 260,
+          "source": "lunch-poll/poll-option-card.tsx:145:28"
+        },
+        {
+          "runs": 1,
+          "accesses": 86,
+          "hops": 89,
+          "documents": 82,
+          "dependencies": 258,
+          "source": "lunch-poll/poll-option-card.tsx:145:28"
+        }
+      ]
+    },
+    {
+      "label": "step 3",
+      "runs": 3,
+      "accesses": 6,
+      "hops": 21,
+      "documents": 12,
+      "dependencies": 35,
+      "rows": [
+        {
+          "runs": 1,
+          "accesses": 6,
+          "hops": 18,
+          "documents": 8,
+          "dependencies": 20,
+          "source": "lunch-poll/read-cost.test.tsx:64:27"
+        },
+        {
+          "runs": 2,
+          "accesses": 0,
+          "hops": 3,
+          "documents": 4,
+          "dependencies": 15,
+          "source": "pull:of:fid1:tdyMqqD2kCqo2w_Sid0wzlqPY58j7e9Xhnd-ZrPqLIM"
+        }
+      ]
+    },
+    {
+      "label": "step 4",
+      "runs": 3,
+      "accesses": 43569,
+      "hops": 3247,
+      "documents": 327,
+      "dependencies": 1302,
+      "rows": [
+        {
+          "runs": 1,
+          "accesses": 43569,
+          "hops": 3244,
+          "documents": 323,
+          "dependencies": 1287,
+          "source": "lunch-poll/read-cost.test.tsx:68:33"
+        },
+        {
+          "runs": 2,
+          "accesses": 0,
+          "hops": 3,
+          "documents": 4,
+          "dependencies": 15,
+          "source": "pull:of:fid1:tdyMqqD2kCqo2w_Sid0wzlqPY58j7e9Xhnd-ZrPqLIM"
+        }
+      ]
+    },
+    {
+      "label": "step 5",
+      "runs": 60,
+      "accesses": 1769,
+      "hops": 579,
+      "documents": 413,
+      "dependencies": 2033,
+      "rows": [
+        {
+          "runs": 1,
+          "accesses": 649,
+          "hops": 4,
+          "documents": 2,
+          "dependencies": 19,
+          "source": "lunch-poll/main.tsx:1816:34"
+        },
+        {
+          "runs": 1,
+          "accesses": 360,
+          "hops": 174,
+          "documents": 96,
+          "dependencies": 781,
+          "source": "lunch-poll/main.tsx:1499:19"
+        },
+        {
+          "runs": 1,
+          "accesses": 224,
+          "hops": 77,
+          "documents": 78,
+          "dependencies": 376,
+          "source": "lunch-poll/main.tsx:1446:33"
+        },
+        {
+          "runs": 1,
+          "accesses": 80,
+          "hops": 89,
+          "documents": 82,
+          "dependencies": 246,
+          "source": "lunch-poll/poll-option-card.tsx:145:28"
+        },
+        {
+          "runs": 1,
+          "accesses": 44,
+          "hops": 7,
+          "documents": 4,
+          "dependencies": 23,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 42,
+          "hops": 7,
+          "documents": 4,
+          "dependencies": 23,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 40,
+          "hops": 7,
+          "documents": 4,
+          "dependencies": 23,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 38,
+          "hops": 7,
+          "documents": 4,
+          "dependencies": 23,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 36,
+          "hops": 7,
+          "documents": 4,
+          "dependencies": 23,
+          "source": "lunch-poll/main.tsx:1933:40"
+        },
+        {
+          "runs": 1,
+          "accesses": 34,
+          "hops": 7,
+          "documents": 4,
+          "dependencies": 23,
+          "source": "lunch-poll/main.tsx:1933:40"
+        }
+      ]
+    },
+    {
+      "label": "step 6",
+      "runs": 4,
+      "accesses": 153,
+      "hops": 89,
+      "documents": 88,
+      "dependencies": 402,
+      "rows": [
+        {
+          "runs": 1,
+          "accesses": 152,
+          "hops": 85,
+          "documents": 81,
+          "dependencies": 383,
+          "source": "lunch-poll/read-cost.test.tsx:73:33"
+        },
+        {
+          "runs": 1,
+          "accesses": 1,
+          "hops": 2,
+          "documents": 3,
+          "dependencies": 6,
+          "source": "lunch-poll/main.tsx:2297:22"
+        },
+        {
+          "runs": 2,
+          "accesses": 0,
+          "hops": 2,
+          "documents": 4,
+          "dependencies": 13,
+          "source": "pull:of:fid1:tdyMqqD2kCqo2w_Sid0wzlqPY58j7e9Xhnd-ZrPqLIM"
+        }
+      ]
+    },
+    {
+      "label": "step 7",
+      "runs": 3,
+      "accesses": 82,
+      "hops": 82,
+      "documents": 84,
+      "dependencies": 249,
+      "rows": [
+        {
+          "runs": 1,
+          "accesses": 82,
+          "hops": 80,
+          "documents": 80,
+          "dependencies": 236,
+          "source": "lunch-poll/read-cost.test.tsx:77:29"
+        },
+        {
+          "runs": 2,
+          "accesses": 0,
+          "hops": 2,
+          "documents": 4,
+          "dependencies": 13,
+          "source": "pull:of:fid1:tdyMqqD2kCqo2w_Sid0wzlqPY58j7e9Xhnd-ZrPqLIM"
+        }
+      ]
+    },
+    {
+      "label": "step 8",
+      "runs": 3,
+      "accesses": 3222,
+      "hops": 483,
+      "documents": 411,
+      "dependencies": 1511,
+      "rows": [
+        {
+          "runs": 1,
+          "accesses": 3222,
+          "hops": 480,
+          "documents": 407,
+          "dependencies": 1496,
+          "source": "lunch-poll/read-cost.test.tsx:83:36"
+        },
+        {
+          "runs": 2,
+          "accesses": 0,
+          "hops": 3,
+          "documents": 4,
+          "dependencies": 15,
+          "source": "pull:of:fid1:tdyMqqD2kCqo2w_Sid0wzlqPY58j7e9Xhnd-ZrPqLIM"
+        }
+      ]
+    },
+    {
+      "label": "settle step 9",
+      "runs": 0,
+      "accesses": 0,
+      "hops": 0,
+      "documents": 0,
+      "dependencies": 0,
+      "rows": []
+    }
+  ]
+}

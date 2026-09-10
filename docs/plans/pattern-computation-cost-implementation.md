@@ -12,6 +12,12 @@ scope; this document owns dependencies, implementation slices, acceptance
 checks, and the next task. Keep the A–E identifiers aligned with the design. Its
 reported durations and access estimates are hypotheses until reproduced here.
 
+The [execution dashboard](../../tools/implementation-progress/README.md) shows
+delivery state, review gates, outstanding questions, and observable demos.
+Checked items below mean implemented and validated; the dashboard separately
+records whether they have landed. Keep both current at implementation
+milestones.
+
 ## Tracking rules
 
 An unchecked item is pending. Check an item only after its acceptance checks
@@ -130,7 +136,9 @@ durations are used as performance evidence.
 
 ## 3–4. Defend and calibrate measurements: A3–A5
 
-- [ ] **A3 — Add opt-in pattern-test budgets.**
+- [ ] **A3 — Add opt-in pattern-test budgets.** The
+      [budget contract](read-cost-budgets.md) defines the pending surface,
+      execution coverage, and pass/fail demo.
   - [ ] Define the test declaration and diagnostics for per-action-run and
         per-step-through-settle limits, with separate initialization limits.
   - [ ] Include every execution in a step, including builtins, coordinators,
