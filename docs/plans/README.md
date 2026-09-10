@@ -62,6 +62,15 @@ a record: archive it to `docs/history/plans/` following the procedure in
   schema-observing lazy view over a cell, a transaction mode that hands one back
   from every read, and the runner disposition for a reader that touches data the
   schema no longer describes.
+- [Making pattern computation cost declarable and visible](pattern-computation-cost.md)
+  pairs two repairs to the same gap: the collection algebra has incremental
+  `map`, `filter`, and `flatMap` but no `groupBy`, keyed lookup, join, or
+  incremental `reduce`, so a group-by is written as nested scans over a
+  reactive array; and a scheduler node records how often an action ran but not
+  how much it read, so the cost is invisible until somebody profiles. Carries
+  the access counter, the missing operators, the replication failures that
+  currently push authors off the incremental path, and the authoring guidance
+  that steers them into the expensive construct.
 - [Choosing which tests a pull request runs](pull-request-test-selection.md)
   replaces the sixty-seven pull-request jobs with five, each running a subset
   chosen from what the record store knows about which tests have caught real
