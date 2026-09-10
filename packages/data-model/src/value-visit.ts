@@ -95,7 +95,7 @@ export type GeneralVisitorResult<Domain, ResultType> =
  * See the included result types for details on what they mean.
  */
 export type LeafVisitorResult<Domain, ResultType> =
-  | MainVisitResult<ResultType>
+  | BaselineVisitResult<ResultType>
   | ReplaceForm<Domain>
   | ArrayContentsForm<Domain>
   | MapContentsForm<Domain>;
@@ -107,11 +107,12 @@ export type LeafVisitorResult<Domain, ResultType> =
  * See the included result types for details on what they mean.
  */
 export type ContainerIterationResult<ResultType> =
-  | MainVisitResult<ResultType>
+  | BaselineVisitResult<ResultType>
   | RecurseForm;
 
 /**
- * Baseline possible results from arbitrary `visit*()` calls.
+ * Baseline possible results from arbitrary `visit*()` calls, defining the
+ * result cases common to all of these methods.
  *
  * See the included result types for details on what they mean. As for
  * `undefined`, if a visitor returns it in the context of this type, it means
@@ -119,7 +120,7 @@ export type ContainerIterationResult<ResultType> =
  * process it further, and there is no specific value to return from (this part
  * of) the visit.
  */
-export type MainVisitResult<ResultType> =
+export type BaselineVisitResult<ResultType> =
   | MainResultForm<ResultType>
   | undefined;
 
@@ -246,7 +247,7 @@ class VisitInProgress<Domain, ResultType> {
   //
 
   /** Visits the indicated value as a top-level operation. */
-  visit(value: Domain): MainVisitResult<ResultType> {
+  visit(value: Domain): BaselineVisitResult<ResultType> {
     if (this.#stack.depth !== 0) {
       throw new Error(
         "Cannot use `VisitInProgress` for multiple concurrent top-level visits.",
@@ -269,7 +270,7 @@ class VisitInProgress<Domain, ResultType> {
     }
   }
 
-  #visitValue(value: Domain): MainVisitResult<ResultType> {
+  #visitValue(value: Domain): BaselineVisitResult<ResultType> {
     const result = this.#visitResolvingSubtype(value);
 
     if (result === undefined) {
@@ -295,7 +296,7 @@ class VisitInProgress<Domain, ResultType> {
    * Visits the items in an `arrayContents` result, recursing or returning as
    * directed by `ValueVisitor.visitArrayContentsItem()`.
    */
-  #subvisitArray(value: Domain, values: readonly Domain[]): MainVisitResult<ResultType> {
+  #subvisitArray(value: Domain, values: readonly Domain[]): BaselineVisitResult<ResultType> {
     const vis = this.#visitor;
 
     this.#stack.push(value);
@@ -338,7 +339,7 @@ class VisitInProgress<Domain, ResultType> {
   #subvisitMap(
     value: Domain,
     mappings: readonly [Domain, Domain][],
-  ): MainVisitResult<ResultType> {
+  ): BaselineVisitResult<ResultType> {
     const vis = this.#visitor;
 
     this.#stack.push(value);
@@ -474,7 +475,7 @@ class VisitInProgress<Domain, ResultType> {
 export function visitValue<Domain, ResultType>(
   value: Domain,
   visitor: ValueVisitor<Domain, ResultType>,
-): MainVisitResult<ResultType> {
+): BaselineVisitResult<ResultType> {
   const inProgress = new VisitInProgress<Domain, ResultType>(visitor);
   return inProgress.visit(value);
 }
@@ -485,6 +486,6 @@ export function visitValue<Domain, ResultType>(
  */
 export function makeVisitFunction<Domain, ResultType>(
   visitor: ValueVisitor<Domain, ResultType>,
-): (value: Domain) => MainVisitResult<ResultType> {
+): (value: Domain) => BaselineVisitResult<ResultType> {
   return (value: Domain) => visitValue(value, visitor);
 }
