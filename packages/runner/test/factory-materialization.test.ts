@@ -163,7 +163,7 @@ describe("runner-owned factory materialization", () => {
       ARGUMENT_SCHEMA,
       RESULT_SCHEMA,
     );
-    const baseModule = lift(
+    const baseModule = lift<{ value: number }>(
       ({ value }: { value: number }) => ({ result: value + 1 }),
       ARGUMENT_SCHEMA,
       RESULT_SCHEMA,
@@ -310,7 +310,7 @@ describe("runner-owned factory materialization", () => {
     setDurableArtifactEntryRef(base, REFS.module);
     runtime.moduleRegistry.addModuleByRef(
       "trusted-module",
-      lift(
+      lift<{ value: number }>(
         ({ value }: { value: number }) => ({ result: value + 1 }),
         ARGUMENT_SCHEMA,
         RESULT_SCHEMA,

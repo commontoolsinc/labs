@@ -153,7 +153,7 @@ describe("builder factory state", () => {
     const scopeThenSpace = basePattern.asScope("user").inSpace(cellSelector);
     const spaceThenScope = basePattern.inSpace(cellSelector).asScope("user");
 
-    const baseModule = lift((value: number) => value, true, true);
+    const baseModule = lift<number>((value) => value, true, true);
     const scopedModule = baseModule.asScope("session");
 
     const basePatternState = factoryStateOf(basePattern);
@@ -251,7 +251,7 @@ describe("builder factory state", () => {
       true,
     );
     const scopedPattern = basePattern.asScope("user");
-    const baseModule = lift((value: number) => value, true, true);
+    const baseModule = lift<number>((value) => value, true, true);
     const scopedModule = baseModule.asScope("session");
 
     expect(() => sealFactoryState(scopedPattern)).toThrow(

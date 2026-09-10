@@ -47,7 +47,7 @@ const PROGRAM: RuntimeProgram = {
 };
 
 class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
+  static override connectTo(
     server: MemoryV2Server.Server,
     options: Omit<Options, "memoryHost" | "spaceHostMap">,
   ): SharedServerStorageManager {

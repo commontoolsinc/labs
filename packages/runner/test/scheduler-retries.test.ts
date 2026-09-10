@@ -138,6 +138,7 @@ describe("reactive retries", () => {
         >;
     await watchReactiveActionCommit({
       action,
+      generation: 0,
       tx: {} as IExtendedStorageTransaction,
       log: {} as ReactivityLog,
       retries,

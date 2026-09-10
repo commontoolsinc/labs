@@ -846,24 +846,19 @@ the cold fallback.
 ### Structured-clone runtime IPC
 
 Browser runtime messages may carry factories inside cell values, VDOM props,
-or telemetry details. Because callable `Factory@1` values are not directly
-structured-cloneable, every such message projects the complete containing
-value through the canonical Fabric JSON codec before crossing the worker
-boundary. An out-of-band protocol discriminator selects that projection;
-authored strings are never sniffed or reinterpreted as Fabric envelopes.
-
-Factory detection and projection recurse through registered codec state, not
-only enumerable JavaScript properties. A factory nested in `UnknownValue`,
-`FabricError.cause` or extras, another codec-backed Fabric instance, an array,
-or an ordinary object therefore selects the canonical Fabric projection and
-round-trips the complete enclosing value. IPC preparation never flattens a
-codec-backed instance with `Object.entries()` or strips its container before
-the codec owns the projection.
+or telemetry details. Every complete message crosses the worker boundary
+through the canonical Fabric realm codec. The realm encoding makes callable
+`Factory@1` values structured-cloneable while preserving all other Fabric
+special values and their registered codec state. Encoding the message as a
+whole keeps the protocol independent of which field or nested container holds
+a factory and avoids any authored-value sniffing or per-field envelope.
 
 The receiving side performs context-free decode, so every factory leaf is an
 inert callable shell. Worker IPC does not grant materialization or code-loading
 authority, and arbitrary JavaScript functions remain invalid message values.
-Values without factories retain the existing plain structured-clone path.
+The realm codec retains unchanged subtrees when their values need no encoding;
+all messages nevertheless use the same explicit realm envelope at the
+structured-clone boundary.
 
 ### Immutability, cloning, equality, and hashing
 
@@ -889,7 +884,7 @@ does not make them opaque to the graph builder.
 
 All Fabric-aware walks use the factory state accessor or a shared codec-state
 visitor. Builder traversal, alias conversion, CFC inspection, deep freeze,
-clone, equality, hashing, serialization, IPC detection, and destination-artifact
+clone, equality, hashing, serialization, realm IPC encoding, and destination-artifact
 publication must not each invent a different view of factory state. Registered
 codec-backed Fabric instances with implemented container state recurse through
 their encoded state. Walks that change that state, including data-URI

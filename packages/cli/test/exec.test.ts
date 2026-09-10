@@ -2807,7 +2807,13 @@ describe("mounted callable resolution and execution", () => {
       query: "tea",
       help: "",
     });
-    expect(factoryStateOf(harness.tracker.toolRunPattern).params).toEqual({
+    const toolRunPatternState = factoryStateOf(
+      harness.tracker.toolRunPattern,
+    );
+    if (toolRunPatternState.kind !== "pattern") {
+      throw new Error("Expected a pattern factory");
+    }
+    expect(toolRunPatternState.params).toEqual({
       source: "bound-source",
       result: "bound-result",
     });

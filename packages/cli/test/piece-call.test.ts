@@ -575,7 +575,13 @@ describe("executePieceCallable", () => {
     );
 
     expect(result.resolved.callableKind).toBe("tool");
-    expect(factoryStateOf(harness.tracker.toolRunPattern).params).toEqual({
+    const toolRunPatternState = factoryStateOf(
+      harness.tracker.toolRunPattern,
+    );
+    if (toolRunPatternState.kind !== "pattern") {
+      throw new Error("Expected a pattern factory");
+    }
+    expect(toolRunPatternState.params).toEqual({
       source: "bound-source",
     });
     expect(harness.tracker.toolRunInput).toEqual({

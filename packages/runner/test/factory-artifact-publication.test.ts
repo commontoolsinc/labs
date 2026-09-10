@@ -87,7 +87,9 @@ describe("Factory@1 artifact publication fences", () => {
       tx,
     );
     destination.set({ factory: null });
-    const writable = destination.get() as { factory: Cell<FabricValue> };
+    const writable = destination.get() as unknown as {
+      factory: Cell<FabricValue>;
+    };
 
     expect(() => {
       writable.factory.set(unavailableFactory);

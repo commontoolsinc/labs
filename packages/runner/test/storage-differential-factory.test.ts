@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import { type FabricValue, hashOf } from "@commonfabric/data-model";
+import type { FabricValue } from "@commonfabric/data-model";
 import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
 
 import * as Differential from "../src/storage/differential.ts";
@@ -20,7 +20,6 @@ const fact = (is: FabricValue): State => ({
   the: "application/json",
   of: "of:factory-differential",
   is,
-  cause: hashOf({ test: "factory differential" }),
 });
 
 const compare = (before: State, after: State) => {
@@ -29,7 +28,12 @@ const compare = (before: State, after: State) => {
       return before;
     },
   };
-  return [...Differential.create().update(memory, [after])];
+  return [
+    ...Differential.create({
+      principal: "did:key:z6MkFactoryDifferential",
+      sessionId: "factory-differential",
+    }).update(memory, [after]),
+  ];
 };
 
 Deno.test("storage differential compares independent factories by canonical state", () => {
