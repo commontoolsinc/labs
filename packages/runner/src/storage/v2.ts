@@ -6923,12 +6923,9 @@ export class SpaceReplica
     const record = this.#docs.get(docKey(`cid:${hash}` as URI, "space"));
     const doc = record?.confirmed.value;
     if (!isObjectNotArray(doc)) return false;
-    const value = (doc as { value?: unknown }).value;
-    // A code document is a bare string whose id is its own content hash;
-    // a schema document verifies through the schema hash instead.
-    if (typeof value === "string") return taggedHashStringOf(value) === hash;
-    return isSubschema(value) &&
-      internSchemaAsTaggedHashString(value as JSONSchema) === hash;
+    const value = doc.value;
+    // A content-addressed document's value must hash to the id it sits under.
+    return taggedHashStringOf(value) === hash;
   }
 
   /**
