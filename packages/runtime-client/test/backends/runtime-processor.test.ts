@@ -1372,6 +1372,59 @@ describe("runtime-processor", () => {
       });
     });
 
+    it("returns a cell inside a piece under the schema the redirect carries when the links along its path carry none", async () => {
+      const redirectSchema: NonNullable<CellRef["schema"]> = {
+        type: "object",
+        properties: { entries: { type: "array" } },
+      };
+      const targetRef: CellRef = {
+        id: "of:fid1-parent-piece" as CellRef["id"],
+        space,
+        scope: "space",
+        path: ["activityTab"],
+        schema: redirectSchema,
+      };
+      const landingRef: CellRef = {
+        id: targetRef.id,
+        space,
+        scope: "space",
+        path: [],
+      };
+      const slugRef: CellRef = {
+        id: "of:fid1-slug-doc" as CellRef["id"],
+        space,
+        scope: "space",
+        path: [],
+      };
+      const landingCell = mockCell(landingRef, {
+        patternIdentity: { identity: "pattern-identity", symbol: "default" },
+        resultSchema: {
+          type: "object",
+          properties: { activityTab: { type: "object" } },
+        },
+      });
+      const targetCell = mockCell(targetRef);
+      const slugCell = mockCell(slugRef, { raw: redirectRaw(targetRef) });
+      const processor = buildProcessor({
+        runtime: runtimeLandingIn(
+          slugCell,
+          { ref: landingRef, cell: landingCell },
+          targetCell,
+        ),
+        cc: { getSpace: () => space },
+        space,
+      });
+
+      const result = await processor.handlePieceGet({
+        type: RequestType.PieceGet,
+        pieceId: fid("slug-doc"),
+        space,
+        runIt: true,
+      });
+
+      expect(result.piece.cell).toMatchObject(targetRef);
+    });
+
     it("loads slug redirects to piece cells through the pieces controller", async () => {
       const pieceRef: CellRef = {
         id: "of:fid1-piece" as CellRef["id"],
