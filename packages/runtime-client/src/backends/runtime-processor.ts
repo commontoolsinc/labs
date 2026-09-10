@@ -2197,8 +2197,9 @@ export class RuntimeProcessor {
       undefined,
       request.scope,
     );
-    // Schema-less, so the sync asks for the document and nothing its value
-    // reaches.
+    // Schema-less, so the selector rejects the value's subtree: the document
+    // arrives, plus what the server resolves at the address itself when the
+    // value stored there is a link.
     await requestedCell.sync();
     const redirect = parseLink(
       requestedCell.getRaw(),
@@ -2213,8 +2214,9 @@ export class RuntimeProcessor {
       const targetLink = target.getAsNormalizedFullLink();
       // The document the redirect lands in, at its root. Whether it is a
       // piece, and the result schema a cell inside it takes, are its
-      // metadata; a sync at the redirect's own path would instead have the
-      // server resolve every link along that path.
+      // metadata. Synced at the root rather than at the redirect's path, so
+      // the watch this leaves behind covers the document alone rather than
+      // every link the server resolves along that path.
       const landing = targetLink.path.length === 0
         ? target
         : this.#runtime.getCellFromLink({

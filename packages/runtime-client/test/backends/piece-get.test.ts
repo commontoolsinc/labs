@@ -34,6 +34,7 @@ import {
 } from "@commonfabric/runner/storage/cache.deno";
 import type { SpaceReplica } from "@commonfabric/runner/storage/v2";
 
+import { createCellRef } from "@/backends/utils.ts";
 import { RequestType } from "@/protocol/mod.ts";
 import { buildProcessor } from "./build-processor.ts";
 
@@ -49,6 +50,12 @@ const itemSchema = {
 const listSchema = {
   type: "array",
   items: itemSchema,
+} as const satisfies JSONSchema;
+
+/** The piece's result: the list, under `items`. */
+const resultSchema = {
+  type: "object",
+  properties: { items: listSchema },
 } as const satisfies JSONSchema;
 
 describe("handlePieceGet()", () => {
@@ -70,6 +77,12 @@ describe("handlePieceGet()", () => {
   /** The document `slug` redirects from, as a piece id the handler takes. */
   function slugDocumentId(slug: string): string {
     return entityIdFrom(slugIdForSpace(space, slug)).taggedHashString;
+  }
+
+  /** The schema a ref carries for a cell read under `schema`. */
+  function refSchema(schema: JSONSchema): JSONSchema | undefined {
+    return createCellRef(writerRuntime.getCell(space, "schema-probe", schema))
+      .schema;
   }
 
   /** Whether the reader's replica ever examined the document at `uri`. */
@@ -137,7 +150,7 @@ describe("handlePieceGet()", () => {
     // whether the pointer is there and never follows it.
     const pattern: Pattern = {
       argumentSchema: { type: "object", properties: { items: listSchema } },
-      resultSchema: { type: "object", properties: { items: listSchema } },
+      resultSchema,
       result: { items: { $alias: { cell: "argument", path: ["items"] } } },
       nodes: [],
     };
@@ -196,7 +209,7 @@ describe("handlePieceGet()", () => {
   it("returns the piece with its result schema for its id, leaving the result's documents cold", async () => {
     const response = await get(pieceId);
     expect(response.piece.cell).toMatchObject({ id: pieceUri, path: [] });
-    expect(response.piece.cell.schema).toBeDefined();
+    expect(response.piece.cell.schema).toEqual(refSchema(resultSchema));
     expect(readerExamined(listUri)).toBe(false);
     expect(readerExamined(itemUri)).toBe(false);
   });
@@ -204,7 +217,7 @@ describe("handlePieceGet()", () => {
   it("returns the piece with its result schema for a slug naming it, leaving the result's documents cold", async () => {
     const response = await get(slugDocumentId("board"));
     expect(response.piece.cell).toMatchObject({ id: pieceUri, path: [] });
-    expect(response.piece.cell.schema).toBeDefined();
+    expect(response.piece.cell.schema).toEqual(refSchema(resultSchema));
     expect(readerExamined(listUri)).toBe(false);
     expect(readerExamined(itemUri)).toBe(false);
   });
@@ -219,7 +232,7 @@ describe("handlePieceGet()", () => {
       id: pieceUri,
       path: ["items"],
     });
-    expect(response.piece.cell.schema).toBeDefined();
+    expect(response.piece.cell.schema).toEqual(refSchema(listSchema));
     expect(readerExamined(itemUri)).toBe(false);
   });
 

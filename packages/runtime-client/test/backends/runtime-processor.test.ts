@@ -1064,7 +1064,7 @@ describe("runtime-processor", () => {
       resultSchema?: unknown;
       onSync?: () => void;
     } = {}) {
-      const cell = {
+      return {
         sync: () => {
           options.onSync?.();
           return Promise.resolve();
@@ -1083,7 +1083,6 @@ describe("runtime-processor", () => {
         asSchema: (schema: CellRef["schema"]) =>
           mockCell({ ...ref, schema }, options),
       };
-      return cell;
     }
 
     function redirectRaw(ref: CellRef) {
