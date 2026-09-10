@@ -2785,11 +2785,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-after-prepare");
     }
+    // Schema documents must enter the speculative layer before the carrier.
+    // A write can synchronously wake another transaction, which must never see
+    // a reference during the interval before its closure is staged.
+    this.#stageSchemaDocsForValue(address.space, address.id, value);
     this.#invalidateReadResultCache();
     const result = this.tx.write(address, value, options);
-    if (result.ok) {
-      this.#stageSchemaDocsForValue(address.space, address.id, value);
-    }
     return result;
   }
 
@@ -2804,6 +2805,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-after-prepare");
     }
+    // Keep speculative visibility causal: the closure is observable before
+    // the carrier can wake a reader that immediately follows its schema.
+    this.#stageSchemaDocsForValue(address.space, address.id, value);
     this.#invalidateReadResultCache();
     const writeResult = this.tx.write(address, value, options);
     if (
@@ -2876,11 +2880,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     } else if (writeResult.error) {
       throw toThrowable(writeResult.error);
     }
-    // The staged value may carry link schemas with external refs; stage
-    // their closure with it (the write-side delivery guarantee, and what
-    // makes a same-transaction read through the link resolve). The `cid:`
-    // writes this issues recurse harmlessly: the stager skips them by id.
-    this.#stageSchemaDocsForValue(address.space, address.id, value);
   }
 
   writeValueOrThrow(
@@ -2945,21 +2944,26 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         cachesInvalidated = true;
         this.#invalidateReadResultCache();
       };
-      // Collected while the batch consumes the generator, staged after it
-      // returns: the schema-document closure behind each written link (the
-      // write-side delivery guarantee, and what makes a same-transaction
-      // read through the link resolve). Staging mid-batch would inject
-      // writes while `writeBatch` is applying runs.
-      const staged: { address: IMemorySpaceAddress; value: FabricValue }[] = [];
+      // Schema-document closure staging completes before the carrier batch
+      // begins, preserving causal visibility for synchronously awakened
+      // readers. Materializing the iterable also keeps closure writes outside
+      // the generator while `writeBatch` applies its same-document runs.
+      const pendingWrites = [...writes];
+      for (const write of pendingWrites) {
+        if (write.delete) continue;
+        const address = toMemorySpaceAddress(write.address);
+        this.#stageSchemaDocsForValue(
+          address.space,
+          address.id,
+          write.value,
+        );
+      }
       const result = this.tx.writeBatch(
         (function* () {
-          for (const write of writes) {
+          for (const write of pendingWrites) {
             const address = toMemorySpaceAddress(write.address);
             noteSystemWrite(address, write.value);
             noteWriteIdentity();
-            if (!write.delete && getContentAddressedSchemasConfig()) {
-              staged.push({ address, value: write.value });
-            }
             // After the chokepoint, so a write it refuses leaves the caches
             // standing over a state it did not change.
             invalidateReadCaches();
@@ -2969,13 +2973,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       );
       if (result.error) {
         throw toThrowable(result.error);
-      }
-      for (const write of staged) {
-        this.#stageSchemaDocsForValue(
-          write.address.space,
-          write.address.id,
-          write.value,
-        );
       }
       return;
     }

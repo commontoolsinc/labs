@@ -2421,12 +2421,15 @@ function followPointer(
   markIfcBearingLinkCrossing(tx, doc.address.space, link.schema, link.id);
   if (!collected) {
     // Closure documents travel WITH the documents that refer to them, so
-    // an unresolvable ref names a corrupt or deliberately malformed
-    // declaration. Such a declaration selects nothing: narrow with a
-    // false schema, which a reader with a shape of its own ignores.
-    logger.warn("traverse", () => [
-      "Link schema names cid: documents this space does not hold — a " +
-      "corrupt or malformed declaration; it selects nothing:",
+    // a committed writer cannot leave the reference permanently unbacked.
+    // A reader already running while one commit's operations become visible
+    // can nevertheless observe the carrier before it re-runs for the schema
+    // document's arrival. That transient absence is ordinary reactive state,
+    // not evidence of corruption: select nothing now and let the tracked
+    // schema-document read schedule the retry. A reader with a shape of its
+    // own ignores the false narrowing.
+    logger.debug("traverse", () => [
+      "Link schema closure is not available yet; it selects nothing:",
       doc.address,
     ]);
     link = { ...link, schema: false };

@@ -1403,7 +1403,18 @@ export class V2StorageTransaction implements IStorageTransaction {
       return undefined;
     }
 
+    const contentAddressedOperations: NativeStorageCommitOperation[] = [];
     const operations: NativeStorageCommitOperation[] = [];
+    // A transaction's document map reflects first read/write access, not
+    // dependency order. Emit content-addressed documents before ordinary
+    // carriers so applying the speculative commit cannot wake a reader on a
+    // reference whose closure is still later in the same operation list.
+    const appendOperation = (operation: NativeStorageCommitOperation) => {
+      (operation.id.startsWith("cid:")
+        ? contentAddressedOperations
+        : operations)
+        .push(operation);
+    };
     // Unconfirmed schema documents whose staged write nets to no visible
     // change (#mustDeliverSchemaDoc; the visible copy sits on a layer the
     // wire never carries, such as a client speculation overlay entry).
@@ -1490,7 +1501,7 @@ export class V2StorageTransaction implements IStorageTransaction {
           // against durable state instead of clobbering it with a whole-value
           // `set`.
           const basePatches = patch?.op === "patch" ? patch.patches : [];
-          operations.push({
+          appendOperation({
             op: "patch",
             id,
             type,
@@ -1501,14 +1512,14 @@ export class V2StorageTransaction implements IStorageTransaction {
           continue;
         }
         if (patch) {
-          operations.push(patch);
+          appendOperation(patch);
           continue;
         }
       } else {
         this.#abandonMergeableOps(doc);
       }
 
-      operations.push(
+      appendOperation(
         doc.current.value === undefined ? { op: "delete", id, type, scope } : {
           op: "set",
           id,
@@ -1520,13 +1531,16 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     if (
-      redeliveries.length > 0 && (operations.length > 0 || sqliteOps?.length)
+      redeliveries.length > 0 &&
+      (contentAddressedOperations.length > 0 || operations.length > 0 ||
+        sqliteOps?.length)
     ) {
-      operations.push(...redeliveries);
+      contentAddressedOperations.push(...redeliveries);
     }
 
+    const orderedOperations = [...contentAddressedOperations, ...operations];
     return {
-      operations,
+      operations: orderedOperations,
       ...(nativePreconditions.length
         ? { preconditions: nativePreconditions }
         : {}),
@@ -3153,32 +3167,52 @@ export class V2StorageTransaction implements IStorageTransaction {
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
   ): { doc: DocumentEntry } {
     const scope = normalizeCellScope(address.scope);
+    let doc: DocumentEntry | undefined;
     if (
       this.#lastDocument?.branch === branch &&
       this.#lastDocument.id === address.id &&
       this.#lastDocument.type === (address.type ?? DOCUMENT_MIME) &&
       this.#lastDocument.scope === scope
     ) {
-      return { doc: this.#lastDocument.doc };
+      doc = this.#lastDocument.doc;
+    } else {
+      const key = this.#docKey(address);
+      doc = branch.docs.get(key);
+      if (!doc) {
+        const loaded = this.#loadRoot(branch, address);
+        doc = {
+          initial: loaded,
+          validated: false,
+        };
+        branch.docs.set(key, doc);
+      }
+      this.#lastDocument = {
+        branch,
+        id: address.id,
+        type: address.type ?? DOCUMENT_MIME,
+        scope,
+        doc,
+      };
     }
 
-    const key = this.#docKey(address);
-    let doc = branch.docs.get(key);
-    if (!doc) {
+    // Content-addressed documents are immutable and layer-independent, so an
+    // absence cached before a same-space delivery may safely advance to the
+    // verified content now held by the replica. Ordinary documents retain
+    // transaction snapshot semantics, and a transaction that staged a cid:
+    // write keeps its own writable view.
+    if (
+      address.id.startsWith("cid:") &&
+      !isWritableDocument(doc) &&
+      doc.initial.value === undefined
+    ) {
       const loaded = this.#loadRoot(branch, address);
-      doc = {
-        initial: loaded,
-        validated: false,
-      };
-      branch.docs.set(key, doc);
+      if (loaded.value !== undefined) {
+        doc.initial = loaded;
+        doc.validated = false;
+        doc.frozenReads = undefined;
+      }
     }
-    this.#lastDocument = {
-      branch,
-      id: address.id,
-      type: address.type ?? DOCUMENT_MIME,
-      scope,
-      doc,
-    };
+
     return { doc };
   }
 

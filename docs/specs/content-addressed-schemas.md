@@ -99,11 +99,24 @@ A schema document is a `cid:` document whose value is a JSON Schema:
 - **Write**: idempotent blind write (no read-before-write, per the
   `ensureSchemaDocument` precedent — a read-before-write turns concurrent
   installation of the same content into a false conflict), performed in the
-  same transaction as the write that references it.
+  same transaction as the write that references it. The complete closure is
+  staged before the carrier write becomes speculatively visible, so a
+  synchronously awakened reader cannot observe the reference first.
 - **Per space**: a schema document must exist in every space that contains a
   reference to it, written there by whichever writer first references it in
   that space. Content addressing makes concurrent installs collide
   harmlessly.
+- **Read visibility**: an active transaction may refresh a cached absence only
+  for a `cid:` document after the replica receives its verified content.
+  Content addressing makes that absent-to-present transition monotonic;
+  ordinary documents and writable `cid:` entries retain their transaction
+  snapshots.
+- **Transient absence**: a traversal that overlaps local delivery may observe
+  a carrier before its already-running read is re-evaluated for the closure's
+  arrival. It selects nothing, tracks every missing schema document, and
+  retries reactively without diagnosing corruption. A stored document whose
+  content does not verify against its `cid:` remains a warning and selects
+  nothing.
 - **Space scope only, by rule**: the commit boundary rejects a `cid:`
   write at any other scope. A scoped partition could hold a divergent
   copy under one content-addressed id, and the paths that read the
@@ -395,7 +408,8 @@ exactly two guarantees, both about delivery rather than about values:
 - **The write-side guarantee.** The client that replaces an inline schema
   with a reference created the obligation, so it discharges it: the
   decomposed closure is written into the space that will hold the
-  reference, in the same transaction as the reference itself. A
+  reference, in the same transaction as the reference itself and before that
+  reference enters the speculative layer. A
   transaction commits against one space's session, so the closure reaches
   whichever server handles that space by construction. `decomposeSchema`
   refuses to emit a reference whose closure the writer does not hold,
