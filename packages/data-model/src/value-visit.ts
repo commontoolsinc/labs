@@ -76,8 +76,8 @@ export type MainResultForm<ResultType> = {
  * A `recurse` form. This is returned by visitor methods which are used to
  * iterate over container contents. By returning this form, a visitor indicates
  * that the container elements should be visited by the engine, recursively,
- * such that it is known by the engine to be an element of the container which
- * is being iterated over.
+ * such that each element is known by the engine to be contained by the
+ * container which is being iterated over.
  *
  * The two `boolean` properties indicate which of the keys and/or values is to
  * be recursed over. `doKey` is ignored in a context where there is no key.
