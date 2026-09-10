@@ -877,11 +877,10 @@ export function makeVisitFabricValueFunction<ResultType = FabricValue>(
  *   resulting in a guarantee that anything of type `FabricValue` passed to the
  *   visitor is in fact a valid `FabricValue`.
  *
- *   This can incur significant performance overhead, especially when passing
- *   non-deep-frozen values. As a worst-case, it can result in O(N^2) checks on
- *   the number of values in the graph of the top-level value being visited.
- *   _If this turns out to be a problem in practice,_ this will become an active
- *   area of optimization.
+ * This can incur significant performance overhead. As a worst-case, it can
+ * result in O(N^2) checks on the number of values in the graph of the top-level
+ * value being visited. _If this turns out to be a problem in practice,_ this
+ * will become an active area of optimization.
  */
 export function visitValue<DomainExtra, ResultType>(
   value: NoInfer<DomainFor<DomainExtra>>,
