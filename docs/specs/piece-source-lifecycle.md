@@ -636,6 +636,11 @@ alternatives, then omit the root default from both sides of each alternative
 comparison. Descendant defaults remain checked. This applies to both pattern
 evolution and link proofs, under their respective default policies.
 
+Disjoint branch types make a union stable under descendant default insertion;
+this check resolves local references against each schema's owning root, so an
+inline branch and the equivalent referenced branch have the same result.
+Overlapping types and unresolved references do not establish that stability.
+
 An incompatible pattern contract or retained link becomes an
 actionable warning. The UI requires explicit confirmation, and command-line
 tooling requires an explicit flag, before applying it. A materialized retained

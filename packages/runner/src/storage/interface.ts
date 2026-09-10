@@ -313,6 +313,13 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   ensureSpaceInitialized?(space: MemorySpace): Promise<void>;
 
   /**
+   * Waits for this manager's already-running initialization of a space whose
+   * key it holds. Opens no provider and grants no authority: callers must
+   * authorize against the resulting current ACL after the wait.
+   */
+  waitForPendingSpaceInitialization?(space: MemorySpace): Promise<void>;
+
+  /**
    * The serving manager's HOME space (a serving runtime's storage
    * manager declares it; undefined on every client manager). Consumers
    * use it to decide whether a write target is FOREIGN to the serving
@@ -1824,6 +1831,8 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * document pulls.
    * Unavailable evidence or a traversal outside `destinationSpace` returns
    * `undefined`; storage binds authorization revisions within one space.
+   * A missing descendant in a loaded envelope returns `absenceParent` for
+   * applicability checks, without supplying positive content evidence.
    */
   resolveCfcContentTarget(
     address: CfcAddress & Pick<NormalizedFullLink, "schema" | "scopeCaps">,
@@ -1835,6 +1844,8 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
     address: CfcAddress;
     value: FabricValue;
     references: readonly CfcAddress[];
+    /** Existing parent whose shape establishes a missing descendant. */
+    absenceParent?: CfcAddress;
   } | undefined;
 
   /** Acquires a reference from trusted writes staged in this attempt. */
@@ -2001,6 +2012,14 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   setCfcImplementationIdentity(
     identity: ImplementationIdentity | undefined,
   ): void;
+
+  /**
+   * Returns captured value authorship, withholding builtin authority when any
+   * surviving overlapping write was untrusted. Undefined means no value write.
+   */
+  getCfcValueWriteAuthor(
+    target: CfcAddress,
+  ): Readonly<{ identity: ImplementationIdentity | undefined }> | undefined;
 
   /**
    * Records a write-policy input that will participate in the CFC
@@ -3087,6 +3106,10 @@ export type NativeStorageCommitOperation =
     type: MediaType;
     scope?: CellScope;
     patches: PatchOp[];
+    /** Local pending view; admission and confirmation always use `patches`. */
+    replayPatches?: PatchOp[];
+    /** Pending layers whose values the local replay snapshot contains. */
+    replayDependencies?: readonly number[];
     value: FabricValue;
   };
 

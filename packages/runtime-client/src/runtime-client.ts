@@ -1007,6 +1007,17 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  /**
+   * Measures subsequent reactive action bodies in the worker. Read samples
+   * appear in action statistics and in completion events when telemetry is on.
+   */
+  async setReadStatsEnabled(enabled: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetReadStatsEnabled>({
+      type: RequestType.SetReadStatsEnabled,
+      enabled,
+    });
+  }
+
   /** Changes memory WebSocket compression without reconnecting. */
   async setMemoryMessageCompression(enabled: boolean): Promise<void> {
     await this.#conn.request<RequestType.SetMemoryMessageCompression>({

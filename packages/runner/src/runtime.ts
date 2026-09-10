@@ -1,4 +1,7 @@
-import { fabricFromNativeValue } from "@commonfabric/data-model";
+import {
+  fabricFromNativeValue,
+  isKeyableObjectOrArray,
+} from "@commonfabric/data-model";
 import {
   getModernCellRepConfig,
   resetModernCellRepConfig,
@@ -2284,13 +2287,48 @@ export class Runtime {
           blocked || link.pendingHopDoc ||
           traces.some((trace) => trace.target.space !== destinationSpace)
         ) return undefined;
-        const result = tx.read(toMemorySpaceAddress(link));
-        if (!result.ok) return undefined;
-        return {
-          address: link,
-          value: result.ok.value,
-          references: [source, ...traces.map((trace) => trace.source)],
-        };
+        const memoryAddress = toMemorySpaceAddress(link);
+        const result = tx.read(memoryAddress);
+        const references = [source, ...traces.map((trace) => trace.source)];
+        if (!result.ok) {
+          const missing = result.error;
+          if (
+            missing.name !== "NotFoundError" ||
+            missing.source.value === undefined || missing.path[0] !== "value"
+          ) return undefined;
+          // The loaded envelope proves absence of the value root or a
+          // descendant. Parent shape protects applicability, and this read
+          // still binds the source revision at commit.
+          return {
+            address: link,
+            value: undefined,
+            references,
+            absenceParent: {
+              ...link,
+              path: missing.path.slice(1, -1),
+            },
+          };
+        }
+        if (result.ok.value === undefined) {
+          // A missing final slot reads successfully as undefined. Its parent
+          // distinguishes absence from a present, explicitly undefined value.
+          const parent = tx.read({
+            ...memoryAddress,
+            path: memoryAddress.path.slice(0, -1),
+          }, { nonRecursive: true });
+          if (!parent.ok || !isKeyableObjectOrArray(parent.ok.value)) {
+            return undefined;
+          }
+          if (!Object.hasOwn(parent.ok.value, memoryAddress.path.at(-1)!)) {
+            return {
+              address: link,
+              value: undefined,
+              references,
+              absenceParent: { ...link, path: link.path.slice(0, -1) },
+            };
+          }
+        }
+        return { address: link, value: result.ok.value, references };
       },
       resolvePolicyManifest: (
         reference,

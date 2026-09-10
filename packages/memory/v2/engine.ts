@@ -461,6 +461,7 @@ CREATE TABLE IF NOT EXISTS execution_outbox (
                                       --   horizon keys on it (events §4)
   payload           TEXT    NOT NULL, -- the event payload, JSON —
                                       --   bounded by the event
+  runtime_reference_context TEXT,    -- opaque Runtime event attestation
   acting_principal  TEXT,             -- the originating chain actor
   acting_session    TEXT,             --   (absent for sessionless chains)
   sessionless_space_scope INTEGER,    -- the OW15 declaration (protocol §2's
@@ -1923,6 +1924,12 @@ ADD COLUMN ${column} TEXT;
 // the sidecar id, and NULL declaration means "not declared" — exactly the
 // fail-closed reading the carve-out requires.
 const migrateExecutionOutboxEventCarriage = (database: Database): void => {
+  if (!hasColumn(database, "execution_outbox", "runtime_reference_context")) {
+    database.exec(`
+ALTER TABLE execution_outbox
+ADD COLUMN runtime_reference_context TEXT;
+`);
+  }
   if (!hasColumn(database, "execution_outbox", "target_stream_link")) {
     database.exec(`
 ALTER TABLE execution_outbox
@@ -3249,6 +3256,14 @@ const validateEventAppends = (
         );
       }
 
+      if (
+        entry.runtimeReferenceContext !== undefined &&
+        typeof entry.runtimeReferenceContext !== "string"
+      ) {
+        throw new ProtocolError(
+          `event append ${entry.eventId} carries malformed runtimeReferenceContext`,
+        );
+      }
       // The firedAt stamp, per admitting class (protocol.md §2).
       let firedAt: StreamEventFiredAt;
       if (commitClass === "derived") {

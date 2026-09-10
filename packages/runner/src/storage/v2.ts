@@ -55,6 +55,7 @@ import {
   toDocumentPath,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import { pathsOverlap } from "@commonfabric/memory/v2/path";
 import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
@@ -175,8 +176,8 @@ export type CfcSchemaDocumentSyncer = (
   document: EntityDocument | undefined,
 ) => Promise<Error | undefined>;
 
-// A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
-// part of the write; that read is dropped from its conflict set.
+// Document CFC metadata can be read for write bookkeeping. Authorization reads
+// at this path retain their revision dependency in the commit's conflict set.
 const isCfcLabelPath = (path: readonly string[]): boolean =>
   path.length === 1 && path[0] === "cfc";
 
@@ -391,6 +392,9 @@ type PendingVersion =
     localSeq: number;
     op: "patch";
     patches: PatchOp[];
+    replayPatches?: PatchOp[];
+    replayDependencies?: readonly number[];
+    replayInvalid?: boolean;
     value: EntityDocument;
   }
   | {
@@ -481,7 +485,13 @@ const pendingVersion = (
   localSeq: number,
   operation:
     | { op: "set"; value: EntityDocument }
-    | { op: "patch"; patches: PatchOp[]; value: EntityDocument }
+    | {
+      op: "patch";
+      patches: PatchOp[];
+      replayPatches?: PatchOp[];
+      replayDependencies?: readonly number[];
+      value: EntityDocument;
+    }
     | { op: "delete" },
 ): PendingVersion => ({ localSeq, ...operation });
 
@@ -509,6 +519,7 @@ const applyPendingVersion = (
   base: EntityDocument | undefined,
   pending: PendingVersion,
   logContext: PendingPatchLogContext,
+  authoritative = false,
 ): EntityDocument | undefined => {
   switch (pending.op) {
     case "delete":
@@ -516,19 +527,25 @@ const applyPendingVersion = (
     case "set":
       return cloneIfNecessary(pending.value) as EntityDocument;
     case "patch": {
-      // Replay the layer's OPS over the base — never combine values. The
-      // patch vocabulary is semantic (append / add-unique / increment /
-      // splice / ...), so replaying re-folds the layer against whatever
-      // base the server delivered, exactly as the server folds it on
-      // accept — the client and the server share this applyPatch. Spine
-      // materialization comes from the ops that allow it (createMissing),
-      // mirroring the server's mergeable disposition, and the ops can only
-      // express this layer's own writes, so a dropped sibling's data is
-      // unrepresentable in the result (CT-1872 1a).
+      // A withdrawn layer may have supplied part of the authored snapshot.
+      // Hide the complete local layer, including companion fields, until its
+      // verdict; wire admission still decides its independent operations.
+      if (!authoritative && pending.replayInvalid) return base;
+      // Replay this layer's operations over the base. Semantic append /
+      // add-unique / increment intents retain their deltas. A generated
+      // fixed-array diff has local replacement patches so a competing
+      // update cannot create slots absent from its authored value and
+      // companion metadata. Confirmation uses the admitted wire patches.
+      // The client and server share applyPatch. Spine materialization comes
+      // from ops that allow it (createMissing). The snapshot dependency guard
+      // above prevents fixed-array replay from restoring a withdrawn layer's
+      // prefix; ordinary operation replay carries only its own writes.
       try {
         return applyPatchToDocument(
           base,
-          pending.patches as PatchOp[],
+          authoritative
+            ? pending.patches
+            : pending.replayPatches ?? pending.patches,
         ) as EntityDocument;
       } catch (error) {
         if (!(error instanceof PatchApplyError)) {
@@ -1405,6 +1422,20 @@ export class StorageManager implements IStorageManager {
    */
   async ensureSpaceInitialized(space: MemorySpace): Promise<void> {
     await this.open(space).ensureSession?.();
+  }
+
+  /**
+   * Waits for this manager's already-running, key-backed initialization.
+   * A session mount can create the store before its genesis ACL lands; the
+   * caller must check that ACL after readiness. Opens no provider and does
+   * not adopt unrelated or populated ACL-less spaces.
+   */
+  async waitForPendingSpaceInitialization(space: MemorySpace): Promise<void> {
+    if (
+      this.#genesisPhase.get(space)?.phase !== "in-flight" ||
+      (space !== this.as.did() && !this.#spaceIdentities.has(space))
+    ) return;
+    await this.#providers.get(space)?.ensureSession();
   }
 
   async resolveEventAttention(
@@ -3050,6 +3081,8 @@ type NativeCommitOperation =
     id: URI;
     scope?: CellScope;
     patches: PatchOp[];
+    replayPatches?: PatchOp[];
+    replayDependencies?: readonly number[];
     value: EntityDocument;
   }
   | { op: "delete"; id: URI; scope?: CellScope };
@@ -4874,6 +4907,10 @@ export class SpaceReplica
                 id: operation.id,
                 scope: operation.scope,
                 patches: operation.patches,
+                ...(operation.replayPatches === undefined ? {} : {
+                  replayPatches: operation.replayPatches,
+                  replayDependencies: operation.replayDependencies,
+                }),
                 value: toExplicitDocument(operation.value),
               }
               : {
@@ -4948,6 +4985,10 @@ export class SpaceReplica
             id: operation.id,
             scope: operation.scope,
             patches: operation.patches,
+            ...(operation.replayPatches === undefined ? {} : {
+              replayPatches: operation.replayPatches,
+              replayDependencies: operation.replayDependencies,
+            }),
             value: toExplicitDocument(operation.value),
           }
           : {
@@ -6391,11 +6432,14 @@ export class SpaceReplica
       // used the element count that a concurrent mergeable op changes.
       const readsMergeableOpArrayLength = opPaths !== undefined &&
         opPaths.some((opPath) => isArrayLengthChildPath(opPath, read.path));
+      // A surviving sibling intent cannot discard the reads of an abandoned
+      // operation whose value is carried by an ordinary covering patch.
       if (
         !authorization && opPaths !== undefined &&
         !readsMergeableOpArrayLength &&
-        (isMergeableOpRead(read.meta) ||
-          isReadMarkedAsAttemptedWrite(read.meta) ||
+        (((isMergeableOpRead(read.meta) ||
+          isReadMarkedAsAttemptedWrite(read.meta)) &&
+          opPaths.some((opPath) => pathsOverlap(opPath, read.path))) ||
           isCfcLabelPath(read.path) ||
           opPaths.some((opPath) =>
             isStrictPrefixPath(opPath, read.path) ||
@@ -7603,7 +7647,29 @@ export class SpaceReplica
   ): void {
     const { id, scope, ...pending } = operation;
     const record = this.#record(id, scope, identity);
-    record.pending.push(pendingVersion(localSeq, pending));
+    const version = pendingVersion(localSeq, pending);
+    // Unknown includes an accepted source pruned from the bounded ack cache.
+    // Withhold only its optimistic snapshot; admission and wire confirmation
+    // remain available without this local evidence.
+    if (
+      version.op === "patch" &&
+      version.replayDependencies?.some((dependency) =>
+        !record.pending.some((entry) => entry.localSeq === dependency) &&
+        !this.#ackedSeqsByLocalSeq.has(dependency)
+      )
+    ) {
+      version.replayInvalid = true;
+    }
+    record.pending.push(version);
+  }
+
+  /** Records an accepted local commit, including directly confirmed seals. */
+  #recordAcknowledgedCommit(localSeq: number, seq: number): void {
+    this.#ackedSeqsByLocalSeq.set(localSeq, seq);
+    if (this.#ackedSeqsByLocalSeq.size > SpaceReplica.#MAX_RETAINED_ACK_SEQS) {
+      const oldest = this.#ackedSeqsByLocalSeq.keys().next();
+      if (!oldest.done) this.#ackedSeqsByLocalSeq.delete(oldest.value);
+    }
   }
 
   /**
@@ -7627,13 +7693,7 @@ export class SpaceReplica
     // The retirement floor's ack record (speculation.md §4): known at
     // VERDICT time, before any parking — a parked promotion changes when
     // the value becomes visible, not that the origin acked.
-    this.#ackedSeqsByLocalSeq.set(localSeq, applied.seq);
-    if (
-      this.#ackedSeqsByLocalSeq.size > SpaceReplica.#MAX_RETAINED_ACK_SEQS
-    ) {
-      const oldest = this.#ackedSeqsByLocalSeq.keys().next();
-      if (!oldest.done) this.#ackedSeqsByLocalSeq.delete(oldest.value);
-    }
+    this.#recordAcknowledgedCommit(localSeq, applied.seq);
     // The input barrier's own-echo race repair (Phase 2 revisit (a)):
     // the frame can OUTRUN this verdict handler on the same socket, so
     // an own-echo upsert may have been mis-recorded as shadowed foreign
@@ -7752,6 +7812,7 @@ export class SpaceReplica
   ): void {
     // The accept is being applied (immediately at verdict, or promoted
     // off the parked set): release any read-barrier waiter (whenApplied).
+    this.#recordAcknowledgedCommit(localSeq, applied.seq);
     this.#resolveAppliedWaiter(localSeq);
     const keys = new Map(
       this.#touchedOf(operations, identity).map((touched) => [
@@ -7768,14 +7829,22 @@ export class SpaceReplica
     // change notification for exactly the shadowed docs, so scheduler
     // dirtiness registers BEFORE `unappliedForeignSeqFloor` lifts and
     // the serving loop's next wave derives over the foreign value.
-    // Flag-gated: the OFF arm keeps today's silent flip byte-for-byte
-    // (the residual is self-healing there and the timing delta is not a
-    // recorded acceptance — see the Phase-2 PR's Flags).
-    const shadowTouched = getServerExecutionConfig()
-      ? [...keys.entries()]
-        .filter(([key]) => this.#shadowedForeignSeqs.has(key))
-        .map(([, address]) => address)
-      : [];
+    // The serving input barrier enables foreign-shadow notifications.
+    // Local fixed-array replay has its own promotion notification below,
+    // independent of that barrier.
+    // Fixed-array replay can differ from the wire result when admission
+    // allows a disjoint update. Its promotion changes the visible value
+    // even without the serving input barrier, and must notify readers.
+    const shadowTouched = [...keys.entries()]
+      .filter(([key, address]) =>
+        (getServerExecutionConfig() && this.#shadowedForeignSeqs.has(key)) ||
+        this.#record(address.id, address.scope, undefined, address.scopeKey)
+          .pending.some((entry) =>
+            entry.localSeq === localSeq && entry.op === "patch" &&
+            entry.replayPatches !== undefined
+          )
+      )
+      .map(([, address]) => address);
     const shouldNotifyShadowSubscribers = shadowTouched.length > 0 &&
       this.#hasNotificationSubscribers();
     const shouldNotifyShadowSinks = shadowTouched.length > 0 &&
@@ -7802,13 +7871,16 @@ export class SpaceReplica
       }
       const firstPendingIndex = pendingIndexes[0]!;
       const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1]!;
-      const pending = record.pending[lastPendingIndex]!;
       const previousConfirmed = record.confirmed;
       let promoted: ConfirmedVersion | undefined;
       let reusedSuffix: PendingMaterializedPrefix[] | undefined;
 
       if (record.confirmed.seq < applied.seq) {
-        if (firstPendingIndex === 0) {
+        const hasLocalReplay = pendingIndexes.some((index) => {
+          const entry = record.pending[index]!;
+          return entry.op === "patch" && entry.replayPatches !== undefined;
+        });
+        if (firstPendingIndex === 0 && !hasLocalReplay) {
           const prefix = materializedVersionThroughPending(
             record,
             { space: this.#space, id, scope },
@@ -7825,13 +7897,20 @@ export class SpaceReplica
             reusedSuffix = cache.prefixes.slice(lastPendingIndex + 1);
           }
         } else {
-          promoted = confirmedVersion(
-            applied.seq,
-            applyPendingVersion(record.confirmed.value, pending, {
+          // The admitted result is the wire operation folded over confirmed
+          // state. A cached optimistic replacement may hide a peer's accepted
+          // array-prefix edit, so it cannot become the confirmed value.
+          let value = record.confirmed.value;
+          for (const index of pendingIndexes) {
+            value = applyPendingVersion(value, record.pending[index]!, {
               space: this.#space,
               id,
               scope,
-            }),
+            }, true);
+          }
+          promoted = confirmedVersion(
+            applied.seq,
+            value,
             coverClass,
           );
         }
@@ -7914,6 +7993,13 @@ export class SpaceReplica
       record.pending = record.pending.filter((entry) =>
         entry.localSeq !== localSeq
       );
+      for (const entry of record.pending) {
+        if (
+          entry.op === "patch" && entry.replayDependencies?.includes(localSeq)
+        ) {
+          entry.replayInvalid = true;
+        }
+      }
       dropMaterializedSuffix(record, firstPendingIndex);
       if (
         record.pending.length === 0 && this.#shadowedForeignSeqs.has(key)

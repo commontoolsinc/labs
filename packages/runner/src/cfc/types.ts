@@ -31,12 +31,10 @@ export type {
 export const CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION =
   "runtime.setup.result-projection";
 
-// Recorded ONLY by the runtime's cell-serialization path (data-updating.ts
-// BRANCH_CELL) when it materializes a runtime-constructed cell's initial
-// value into the brand-new doc the cell points at. The prepare gate accepts a
-// protected write only when this marker covers the target AND the write
-// creates the doc — arbitrary `cell.set` calls record no marker and stay
-// fully enforced.
+// Trusted constructor initialization covers the cell's new document and an
+// action's new root reference to it. Each keeps its own declared policy. The
+// prepare gate requires runtimeWritePolicyAuthorization and creation of the
+// value root before exempting a covered write from writeAuthorizedBy.
 export const CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION =
   "runtime.setup.seed-materialization";
 

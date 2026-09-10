@@ -57,6 +57,7 @@ import type {
   DerivedInternalCellDescriptor,
 } from "./builder/types.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
+import { schemaWithRetainedReferenceScope } from "./cfc/reference-scope.ts";
 import { getServerExecutionConfig } from "@commonfabric/memory/v2";
 
 /**
@@ -627,11 +628,10 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
     link: NormalizedFullLink,
     source: NormalizedFullLink | AnyCell<unknown>,
   ) => {
-    const sigil = createSigilLinkFromParsedLink(link, {
-      includeSchema: true,
-      overwrite: "redirect",
-    });
-    if (resultCell.runtime.cfcFlowLabels === "persist") {
+    if (
+      (resultCell.tx?.getCfcState().flowLabelsMode ??
+        resultCell.runtime.cfcFlowLabels) === "persist"
+    ) {
       const sourceCell = resultCell.runtime.getCellFromLink(
         source,
         undefined,
@@ -653,15 +653,24 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
       ) {
         throw new Error("Reference alias exceeds its acquired scope cap");
       }
-      const acquired = resultCell.runtime.getCellFromLink(
+      link = {
+        ...link,
+        schema: schemaWithRetainedReferenceScope(
+          sanitizeAliasSchemaForBinding(link.schema ?? true),
+          reference.scopeCaps,
+        ),
+      };
+      return resultCell.runtime.getCellFromLink(
         { ...link, scopeCaps: reference.scopeCaps },
         undefined,
         resultCell.tx,
         withCfcReferenceConfidentiality(undefined, reference.confidentiality),
       ).getAsWriteRedirectLink({ includeSchema: true });
-      carryCfcReferenceProvenance(acquired, sigil);
     }
-    return sigil;
+    return createSigilLinkFromParsedLink(link, {
+      includeSchema: true,
+      overwrite: "redirect",
+    });
   };
 
   /**

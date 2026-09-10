@@ -152,6 +152,7 @@ import {
   type URI,
 } from "./storage/interface.ts";
 import {
+  internalVerifierRead,
   machineryRead,
   markDurableReadTx,
   schedulerDependencyRead,
@@ -2711,15 +2712,28 @@ export class Runner {
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     ) as R;
-    const previousResult = writableResultCell.getRaw({
-      meta: ignoreReadForScheduling,
-    });
-    if (
-      options.preserveName &&
-      isObjectOrArray(previousResult) &&
-      previousResult[NAME]
-    ) {
-      result = { ...result, [NAME]: previousResult[NAME] };
+    // Comparing the stored projection only decides whether a write is needed.
+    // Keep its conflict dependency without consuming the old result's content.
+    const resultLink = writableResultCell.getAsNormalizedFullLink();
+    const previousResult = tx.readValueOrThrow(
+      resultLink,
+      { meta: { ...ignoreReadForScheduling, ...internalVerifierRead } },
+    );
+    // Preserving an authored name copies content, so its read contributes CFC
+    // labels independently of the comparison above.
+    let previousName = options.preserveName
+      ? tx.readValueOrThrow({
+        ...resultLink,
+        path: [...resultLink.path, NAME],
+      }, { meta: ignoreReadForScheduling })
+      : undefined;
+    if (isCellLink(previousName)) {
+      previousName = writableResultCell.key(NAME).getRaw({
+        meta: ignoreReadForScheduling,
+      });
+    }
+    if (previousName) {
+      result = { ...result, [NAME]: previousName };
     }
     // Convert-and-freeze (default): a deep-frozen value lets the storage write
     // boundary's `cloneIfNecessary` identity-pass instead of

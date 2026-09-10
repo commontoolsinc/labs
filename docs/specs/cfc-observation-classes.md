@@ -84,6 +84,17 @@ read consumes the join of every entry whose class is in its consumed set:
 | `linkResolutionProbe` / slot-pointer read (no deref) | `followRef`                                                              | consumes reference confidentiality at the slot, without consuming target content           |
 | dereference (follow a ref to its target)             | reference restrictions at every hop, then the target observation classes | traces record topology; actual reads and held-reference observations determine consumption |
 
+Materializing a scalar through `Cell.get()`, a query-result proxy, or a schema
+view records a value observation. A shallow read used to find the scalar does
+not replace that observation. Container key and presence probes retain their
+shape classification. Live property descriptors expose getters, so enumerating
+keys need not materialize the values; invoking the getter consumes the value.
+Schema-view optional-property checks use shape alone for exact stored-kind
+schemas (`string`, `number`, `boolean`, `null`, or `undefined`). Integer checks
+inspect numeric payloads and retain value observations, as do other projections
+outside that set. See
+[reflection on lazy views](../features/lazy-cell-materialization.md#reflection-observes-properties-lazily).
+
 The `followRef` observation remains in the flow join even when the attempt
 subsequently dereferences the same slot. A runtime-owned bookkeeping marker can
 exclude its own machinery reads; the probe marker itself grants no exemption.

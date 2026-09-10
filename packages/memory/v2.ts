@@ -508,6 +508,11 @@ export type StreamEventEntry = {
    * trust as today's client-side enforcement). */
   runtimeInjectedEventKeys?: string[];
 
+  /** Firing Runtime's opaque reference-acquisition attestation. Memory carries
+   * it under the same producer authority as runtimeInjectedEventKeys; Runtime
+   * validates its binding to the payload before restoring acquisitions. */
+  runtimeReferenceContext?: string;
+
   /** The firing RUNTIME's attestation that the sent event was
    * RENDERER-TRUSTED — it carried the process-local renderer-trust mark
    * (`markRendererTrustedEvent`, set by the renderer's dispatch and

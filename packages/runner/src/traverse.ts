@@ -38,6 +38,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
+import { readStatsActive, recordLinkResolution } from "./read-stats.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 // TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
 // but rollup has issues
@@ -488,6 +489,7 @@ type PlainSchemaPlan =
 type PlainSchemaReads = {
   address: Omit<IMemorySpaceValueAddress, "path">;
   paths: (readonly string[])[];
+  valuePaths: (readonly string[])[];
 };
 
 const _plainSchemaPlanCache = new WeakMap<
@@ -496,7 +498,10 @@ const _plainSchemaPlanCache = new WeakMap<
 >();
 
 /** Exact `{ type }` schemas have no traversal semantics beyond this check. */
-function isPlainTypeSchema(schema: JSONSchemaObj, type: string): boolean {
+export function isPlainTypeSchema(
+  schema: JSONSchemaObj,
+  type: string,
+): boolean {
   return schema.type === type && Object.keys(schema).length === 1;
 }
 
@@ -2500,6 +2505,7 @@ function followPointer(
   // contents and this could just be an intermediate link, so ignore this read
   // for scheduling. We'll have to tag it later.
   // We use a nonRecursive read, since we may not need everything at the target.
+  if (readStatsActive) recordLinkResolution(tx);
   const { ok: valueEntry, error } = tx.read(target, READ_NON_RECURSIVE);
 
   if (error !== undefined) {
@@ -4323,7 +4329,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     link?: NormalizedFullLink,
   ): TraverseResult<FabricValue> | undefined {
     const { path: _path, ...address } = doc.address;
-    const reads: PlainSchemaReads = { address, paths: [] };
+    const reads: PlainSchemaReads = { address, paths: [], valuePaths: [] };
     const result = this.#traversePlainSchemaWithReads(doc, plan, link, reads);
     this.#trackPlainSchemaReads(reads);
     return result;
@@ -4332,20 +4338,22 @@ export class SchemaObjectTraverser<V extends FabricValue>
   #trackPlainSchemaReads(
     reads: PlainSchemaReads,
   ): void {
-    if (reads.paths.length === 0) return;
-    if (this.tx.trackReadPaths) {
-      this.tx.trackReadPaths(reads.address, reads.paths, {
-        nonRecursive: true,
-      });
-    } else {
-      for (const path of reads.paths) {
-        this.tx.read(
-          { ...reads.address, path },
-          READ_NON_RECURSIVE_FOR_SCHEDULING,
-        );
+    for (
+      const [paths, options] of [
+        [reads.paths, READ_NON_RECURSIVE_FOR_SCHEDULING],
+        [reads.valuePaths, READ_FOR_SCHEDULING],
+      ] as const
+    ) {
+      if (paths.length === 0) continue;
+      if (this.tx.trackReadPaths) {
+        this.tx.trackReadPaths(reads.address, paths, options);
+      } else {
+        for (const path of paths) {
+          this.tx.read({ ...reads.address, path }, options);
+        }
       }
+      paths.length = 0;
     }
-    reads.paths.length = 0;
   }
 
   #createPlainSchemaObject(
@@ -4369,9 +4377,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
     if (isSigilLink(doc.value)) return undefined;
 
     if (plan.kind === "primitive") {
-      return getPlainJsonType(doc.value) === plan.type
-        ? { ok: doc.value }
-        : fail(TRAVERSE_FAILURES.invalidType);
+      if (getPlainJsonType(doc.value) !== plan.type) {
+        return fail(TRAVERSE_FAILURES.invalidType);
+      }
+      reads.valuePaths.push(doc.address.path);
+      return { ok: doc.value };
     }
 
     if (plan.kind === "array") {
@@ -4389,8 +4399,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
       reads.paths.push(doc.address.path);
       let valid = true;
       doc.value.forEach((item, index) => {
-        reads.paths.push(appendToPath(doc.address.path, index.toString()));
+        const itemPath = appendToPath(doc.address.path, index.toString());
+        reads.paths.push(itemPath);
         if (getPlainJsonType(item) === itemPlan.type) {
+          reads.valuePaths.push(itemPath);
           newValue[index] = item;
         } else if (itemPlan.type === "undefined") {
           newValue[index] = undefined;
@@ -4412,7 +4424,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // A `FabricPrimitive` is an opaque leaf; see the value-type dispatch's
       // arm (the plan compiles from the same schema family, so the same
       // posture applies here).
-      if (doc.value instanceof FabricPrimitive) return { ok: doc.value };
+      if (doc.value instanceof FabricPrimitive) {
+        reads.valuePaths.push(doc.address.path);
+        return { ok: doc.value };
+      }
       // TODO(danfuzz): a `FabricInstance` is not yet handled here either —
       // see the dispatch's `FabricInstance` arm. Fail loudly until it is.
       throw new Error(
@@ -4435,6 +4450,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       reads.paths.push(propPath);
       if (childPlan.kind === "primitive" && !isSigilLink(propValue)) {
         if (getPlainJsonType(propValue) === childPlan.type) {
+          reads.valuePaths.push(propPath);
           newValue[propKey] = propValue;
         }
       } else {
@@ -4514,6 +4530,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   ): [IMemorySpaceValueAttestation, SchemaPathSelector] | undefined {
     const target = this.#plainArrayItemLinkTarget(doc, selector);
     if (target === undefined) return undefined;
+    if (readStatsActive) recordLinkResolution(this.tx);
     const { ok, error } = this.tx.read(target, READ_NON_RECURSIVE);
     if (error !== undefined) {
       if (error.name !== "NotFoundError" || error.path.length !== 0) {
@@ -4757,6 +4774,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
                 this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
               }
               const preparedTarget = preparedPlainLinks?.targets[batchIndex];
+              if (readStatsActive && preparedTarget !== undefined) {
+                recordLinkResolution(this.tx);
+              }
               const preparedResult = preparedTarget === undefined
                 ? undefined
                 : this.tx.read(preparedTarget, READ_NON_RECURSIVE);
@@ -5264,6 +5284,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
         doc.value,
       );
     } else {
+      // The consumer receives a value, so its value-scoped labels participate
+      // even though the traversal entered through a shallow container read.
+      this.tx.read(doc.address, READ_FOR_SCHEDULING);
       return doc.value;
     }
   }
@@ -5664,6 +5687,7 @@ function getNextCellLink(
   // that location, so we effectively follow one more link if available.
   const lastLink = parseLink(doc.value, doc.address);
   if (lastLink !== undefined) {
+    if (readStatsActive) recordLinkResolution(tx);
     // This extra hop bypasses followPointer, so it carries the crossing
     // seam itself.
     markIfcBearingLinkCrossing(

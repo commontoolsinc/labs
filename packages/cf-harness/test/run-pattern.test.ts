@@ -8,7 +8,7 @@ import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { Runtime } from "@commonfabric/runner";
+import { type Cell, Runtime } from "@commonfabric/runner";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import {
   EmulatedStorageManager,
@@ -403,7 +403,7 @@ async function seedAccountHolder(
   const notesCell = runtime.getCell(space, `${cause}-notes`, undefined, seed);
   const notesId = notesCell.getAsNormalizedFullLink().id;
   seed.writeOrThrow({ space, scope: "space", id: notesId, path: [] }, {
-    value: { text: "unlabeled" },
+    value: { text: "unlabeled", transactions: account.transactions },
   });
   expect((await seed.commit()).ok).toBeDefined();
 
@@ -1629,7 +1629,7 @@ describe("run-pattern", () => {
     it("counts a refused read of a computed document, whose kinded id no input address can be compared against", async () => {
       // A kinded entity id does not reduce to a hash, so neither route from a
       // refused read to an input key can place it. The report counts it
-      // instead of guessing, and drops to `partial`.
+      // instead of guessing, and attributes none of the offending flow.
       const { runtime, pieces, space, dispose } = await createStrictFabric();
       try {
         const sourceRef = await seedLabelledComputedSecret(
@@ -1648,6 +1648,42 @@ describe("run-pattern", () => {
         const output = result.output as RunPatternToolSuccessOutput;
         expect(output.status).toBe("ok");
         expect(output.policyRefusal?.unattributedInputCount).toBe(1);
+        expect(output.policyRefusal?.attribution).toBe("none");
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("keeps partial attribution when a known input accompanies an unplaced computed read", async () => {
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const known = await seedLabelledSecret(runtime, space, "known-source");
+        const unknown = await seedLabelledComputedSecret(
+          runtime,
+          space,
+          "unplaced-computed-source",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: [
+              "import { computed, pattern, Reactive } from 'commonfabric';",
+              "interface Source { secret: string; }",
+              "interface Input { known: Reactive<Source>; unknown: Reactive<Source>; }",
+              "export default pattern<Input, { total: number }>(({ known, unknown }) => ({",
+              "  total: computed(() => known.secret.length + unknown.secret.length),",
+              "}));",
+              "",
+            ].join("\n"),
+            inputs: { known, unknown },
+            resultSchema: TOTAL_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.policyRefusal?.inputKeys).toEqual(["known"]);
+        expect(output.policyRefusal?.unattributedInputCount).toBe(1);
+        expect(output.policyRefusal?.attribution).toBe("partial");
       } finally {
         await dispose();
       }
@@ -1871,7 +1907,9 @@ describe("run-pattern", () => {
       // dereference is recorded against the same holder document, but it
       // starts beside the `account` address rather than at, below, or above
       // it, so it leads the `account` input nowhere — and `notes` is not
-      // named, since nothing it reaches carries the label.
+      // named, since nothing it reaches carries the label. Its transaction
+      // rows have the same bytes as the account's rows, so their immutable
+      // snapshot addresses alone cannot establish confidential provenance.
       const { runtime, pieces, space, dispose } = await createStrictFabric();
       try {
         const refs = await seedAccountHolder(
@@ -1887,7 +1925,7 @@ describe("run-pattern", () => {
               "import { computed, pattern } from 'commonfabric';",
               "interface Transaction { amount: number; }",
               "interface Account { balance: number; transactions: Transaction[]; }",
-              "interface Notes { text: string; }",
+              "interface Notes { text: string; transactions: Transaction[]; }",
               "interface Input { account: Account; notes: Notes; }",
               "interface Output { totalSpending: number; noteLength: number; }",
               "export default pattern<Input, Output>(({ account, notes }) => ({",
@@ -2024,16 +2062,7 @@ describe("run-pattern", () => {
       const { runtime, pieces, space, dispose } = await createStrictFabric();
       try {
         const expenseIds: string[] = [];
-        const elementLinks: {
-          "/": {
-            "link@1": {
-              id: string;
-              path: string[];
-              scope: string;
-              space: string;
-            };
-          };
-        }[] = [];
+        const elementCells: Cell<unknown>[] = [];
         for (
           const [i, description] of ["alpha-secret", "beta-secret"].entries()
         ) {
@@ -2062,9 +2091,7 @@ describe("run-pattern", () => {
           });
           expect((await seed.commit()).ok).toBeDefined();
           expenseIds.push(id);
-          elementLinks.push({
-            "/": { "link@1": { id, path: [], scope: "space", space } },
-          });
+          elementCells.push(cell.withTx());
         }
         const listSeed = runtime.edit();
         const listCell = runtime.getCell(
@@ -2073,15 +2100,8 @@ describe("run-pattern", () => {
           { type: "array", items: EXPENSE_SCHEMA },
           listSeed,
         );
-        listSeed.writeOrThrow(
-          {
-            space,
-            scope: "space",
-            id: listCell.getAsNormalizedFullLink().id,
-            path: [],
-          },
-          { value: elementLinks },
-        );
+        listCell.set(elementCells.map((cell) => cell.withTx(listSeed)));
+        listSeed.prepareCfc();
         expect((await listSeed.commit()).ok).toBeDefined();
 
         const engine = createStrictEngine(pieces);

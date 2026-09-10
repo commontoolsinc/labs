@@ -7,6 +7,7 @@ import {
 } from "../link-utils.ts";
 import { resolveLink } from "../link-resolution.ts";
 import type { Runtime } from "../runtime.ts";
+import { internalVerifierRead } from "../storage/reactivity-log.ts";
 import { readStoredCfcMetadata } from "./metadata.ts";
 import type { CfcMetadata } from "./types.ts";
 import { CFC_LABEL_READ_FAILED_ATOM } from "./observation.ts";
@@ -94,7 +95,7 @@ const linkedValueMetadataForCell = (
   }
   try {
     const tx = cell.runtime.readTx(cell.tx);
-    const value = tx.readValueOrThrow(link);
+    const value = tx.readValueOrThrow(link, { meta: internalVerifierRead });
     if (!isPrimitiveCellLink(value)) {
       return { linkedValue: undefined, readFailed: false };
     }

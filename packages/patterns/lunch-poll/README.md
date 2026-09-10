@@ -11,6 +11,22 @@ files so repo-wide pattern checks do not compile it as a pattern:
 Deployment and migration details, including why link-bearing JSON exports are
 not restorable backups, live in [`DEPLOY-AND-SHARE.md`](./DEPLOY-AND-SHARE.md).
 
+`read-cost.test.tsx` seeds 14 options, eight same-space voters, and 74 keyed
+votes, then changes one vote while preserving the vote count. For read-cost
+measurements, keep its exported UI demanded throughout the update:
+
+```bash
+CF_TEST_CONTINUOUS_UI=1 deno task cf test \
+  packages/patterns/lunch-poll/read-cost.test.tsx \
+  --verbose --stats-threshold 0
+```
+
+The report separates initialization, seeding, viewer setup, the vote update
+(step 5), and assertions. Counters cover reactive action bodies; they exclude
+event dispatch, commit processing, and diagnostic idempotency reruns. The
+headless reconciler exercises UI demand without creating a browser DOM. Test
+durations include idempotency verification and are not product timing evidence.
+
 By default, diagnostics run against `main.tsx` so runtime changes are measured
 against the product lunch-poll graph instead of a comparison fixture.
 

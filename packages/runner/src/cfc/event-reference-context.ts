@@ -1,0 +1,333 @@
+/**
+ * Reference acquisitions carried by admitted Runtime event entries. The entry's
+ * transport attestation is distinct from application-owned payload fields.
+ */
+
+import {
+  deepFreeze,
+  type FabricValue,
+  hashStringOf,
+} from "@commonfabric/data-model";
+import {
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import {
+  isFabricDataUri,
+  valueFromDataUri,
+} from "@commonfabric/data-model/codec-data-uri";
+import type { URI } from "@commonfabric/memory/interface";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+
+import { type CellLinkInput, convertCellsToLinks } from "../cell.ts";
+import {
+  createSigilLinkFromParsedLink,
+  inlineExternalSchemaRefsInValue,
+  parseLink,
+} from "../link-utils.ts";
+import type { SigilLink } from "../sigil-types.ts";
+import { isCellScope, isSchemaScope } from "../scope.ts";
+import { linkWithRetainedScopeCaps } from "../schema.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { CfcConfClause } from "./clause.ts";
+import {
+  type CfcImmutableReference,
+  immutableReferenceEntries,
+  withImmutableReferenceTable,
+} from "./immutable-reference.ts";
+import type { CfcLabelView } from "./label-view-core.ts";
+import { joinCfcObservedConfidentiality } from "./observation.ts";
+import { deriveFlowJoin } from "./prepare.ts";
+import { schemaWithRetainedReferenceScope } from "./reference-scope.ts";
+import {
+  cfcReferenceBindingMatches,
+  cfcReferenceConfidentialityForView,
+  type CfcReferenceProvenance,
+  getCfcReferenceProvenance,
+  getCfcReferenceView,
+  registerCfcReferenceCarrier,
+  withCfcReferenceConfidentiality,
+} from "./reference-provenance.ts";
+
+type EventReference = {
+  path: readonly string[];
+  reference: CfcReferenceProvenance;
+  view?: CfcLabelView;
+  viewConfidentiality: readonly CfcConfClause[];
+  immutableReferences: readonly CfcImmutableReference[];
+};
+
+type EventReferenceContext = {
+  version: 1;
+  payloadHash: string;
+  references: EventReference[];
+};
+
+/** A malformed attestation is a terminal event failure. */
+export class InvalidRuntimeEventReferenceContext extends Error {
+  constructor() {
+    super("Invalid Runtime event reference context");
+  }
+}
+
+function invalidContext(): never {
+  throw new InvalidRuntimeEventReferenceContext();
+}
+
+const stringPath = (path: unknown): path is string[] =>
+  Array.isArray(path) && path.every((part) => typeof part === "string");
+
+function validReference(value: CfcReferenceProvenance): boolean {
+  return value !== null && typeof value === "object" &&
+    value.binding !== null && typeof value.binding === "object" &&
+    typeof value.binding.space === "string" &&
+    typeof value.binding.id === "string" &&
+    isCellScope(value.binding.scope) && stringPath(value.binding.path) &&
+    (value.binding.overwrite === undefined ||
+      value.binding.overwrite === "redirect") &&
+    Array.isArray(value.confidentiality) &&
+    (value.scopeCaps === undefined ||
+      Array.isArray(value.scopeCaps) &&
+        value.scopeCaps.every((cap) =>
+          Number.isSafeInteger(cap.depth) && cap.depth >= 0 &&
+          isSchemaScope(cap.scope)
+        ));
+}
+
+function restoreView(record: EventReference): CfcLabelView | undefined {
+  if (
+    !Array.isArray(record.viewConfidentiality) ||
+    !Array.isArray(record.immutableReferences)
+  ) {
+    invalidContext();
+  }
+  if (
+    record.view !== undefined && (record.view.version !== 1 ||
+      !Array.isArray(record.view.entries) || record.view.entries.some((entry) =>
+        !stringPath(entry.path) ||
+        !Array.isArray(entry.label?.confidentiality) ||
+        entry.label.integrity !== undefined ||
+        (entry.observes !== undefined &&
+          !["value", "shape", "enumerate", "followRef"].includes(
+            entry.observes,
+          ))
+      ))
+  ) invalidContext();
+  for (const entry of record.immutableReferences) {
+    if (
+      !validReference(entry.reference) || !entry.source ||
+      !isFabricDataUri(entry.source.id) || !stringPath(entry.source.path)
+    ) invalidContext();
+    let value = valueFromDataUri(entry.source.id);
+    for (const key of entry.source.path) {
+      if (
+        value === null || typeof value !== "object" ||
+        !Object.hasOwn(value, key)
+      ) invalidContext();
+      value = (value as Record<string, FabricValue>)[key];
+    }
+    const link = parseLink(value, {
+      ...entry.source,
+      id: entry.source.id as URI,
+    });
+    if (
+      link === undefined || !cfcReferenceBindingMatches(entry.reference, link)
+    ) invalidContext();
+  }
+  verifyImmutableReferenceTree(record.reference, record.immutableReferences);
+  const view = withCfcReferenceConfidentiality(
+    record.view,
+    record.viewConfidentiality,
+  );
+  return record.immutableReferences.length === 0
+    ? view
+    : withImmutableReferenceTable(view, record.immutableReferences);
+}
+
+function verifyImmutableReferenceTree(
+  reference: CfcReferenceProvenance,
+  entries: readonly CfcImmutableReference[],
+  visited = new Set<string>(),
+): void {
+  const source = reference.binding;
+  if (!isFabricDataUri(source.id)) return;
+  const identity = hashStringOf(source);
+  if (visited.has(identity)) return;
+  visited.add(identity);
+  let value = valueFromDataUri(source.id);
+  for (const key of source.path) {
+    if (
+      value === null || typeof value !== "object" || !Object.hasOwn(value, key)
+    ) invalidContext();
+    value = (value as Record<string, FabricValue>)[key];
+  }
+  convertCellsToLinks(value, {
+    allowLinkFreeFabricInstances: true,
+    transformLink(_cell, link, path) {
+      const slot = {
+        space: source.space,
+        id: source.id,
+        scope: source.scope,
+        path: [...source.path, ...path],
+      };
+      const matching = entries.filter((entry) => deepEqual(entry.source, slot));
+      const actual = parseLink(link, { ...slot, id: slot.id as URI });
+      if (
+        matching.length === 0 || actual === undefined ||
+        matching.some((entry) =>
+          !cfcReferenceBindingMatches(entry.reference, actual)
+        )
+      ) invalidContext();
+      for (const entry of matching) {
+        verifyImmutableReferenceTree(entry.reference, entries, visited);
+      }
+      return link;
+    },
+  });
+}
+
+/** Captures only privately authenticated acquisitions before event encoding. */
+export function serializeRuntimeEvent(
+  value: CellLinkInput,
+  tx: IExtendedStorageTransaction,
+): { payload: FabricValue; runtimeReferenceContext?: string } {
+  if (tx.getCfcState().flowLabelsMode !== "persist") {
+    return { payload: convertCellsToLinks(value) };
+  }
+  const references: EventReference[] = [];
+  const payload = convertCellsToLinks(value, {
+    allowLinkFreeFabricInstances: true,
+    transformLink(cell, link, path) {
+      const acquired = getCfcReferenceProvenance(link);
+      if (acquired === undefined) {
+        throw new Error("Event reference lacks authenticated acquisition");
+      }
+      const binding = parseLink(link, {
+        ...acquired.binding,
+        id: acquired.binding.id as URI,
+      });
+      if (
+        binding === undefined || !cfcReferenceBindingMatches(acquired, binding)
+      ) invalidContext();
+      const scoped = linkWithRetainedScopeCaps({
+        ...binding,
+        schema: cell?.getAsNormalizedFullLink().schema ?? binding.schema,
+      }, acquired.scopeCaps);
+      const reference = { ...acquired, scopeCaps: scoped.scopeCaps };
+      const view = getCfcReferenceView(link);
+      references.push({
+        path: [...path],
+        reference,
+        ...(view === undefined ? {} : {
+          view: {
+            version: 1,
+            entries: view.entries.map((entry) => ({
+              path: entry.path,
+              label: { confidentiality: entry.label.confidentiality ?? [] },
+              ...(entry.observes === undefined
+                ? {}
+                : { observes: entry.observes }),
+            })),
+          },
+        }),
+        viewConfidentiality: cfcReferenceConfidentialityForView(view),
+        immutableReferences: immutableReferenceEntries(view),
+      });
+      // The handler schema owns value projection. Only the acquired follow
+      // restriction travels on the link, inline so event admission does not
+      // depend on schema documents in the sender's space or realm registry.
+      const result = inlineExternalSchemaRefsInValue(
+        createSigilLinkFromParsedLink({
+          ...binding,
+          schema: schemaWithRetainedReferenceScope(undefined, scoped.scopeCaps),
+        }, { includeSchema: true }),
+      );
+      registerCfcReferenceCarrier(result, () => reference, () => view);
+      return result;
+    },
+  });
+  if (references.length === 0) return { payload };
+  const flow = deriveFlowJoin(tx).confidentiality;
+  const context: EventReferenceContext = {
+    version: 1,
+    payloadHash: hashStringOf(payload),
+    references: references.map((record) => ({
+      ...record,
+      reference: {
+        ...record.reference,
+        confidentiality: joinCfcObservedConfidentiality([
+          record.reference.confidentiality,
+          flow,
+        ]),
+      },
+    })),
+  };
+  const runtimeReferenceContext = jsonFromFabricValue(
+    context as unknown as FabricValue,
+  );
+  return {
+    payload: restoreRuntimeEventReferences(payload, runtimeReferenceContext),
+    runtimeReferenceContext,
+  };
+}
+
+/** Restores an admitted entry's exact acquisitions onto an isolated payload. */
+export function restoreRuntimeEventReferences(
+  payload: FabricValue,
+  runtimeReferenceContext: string | undefined,
+): FabricValue {
+  if (runtimeReferenceContext === undefined) return payload;
+  try {
+    return restoreAttestedReferences(payload, runtimeReferenceContext);
+  } catch {
+    return invalidContext();
+  }
+}
+
+function restoreAttestedReferences(
+  payload: FabricValue,
+  runtimeReferenceContext: string,
+): FabricValue {
+  const context = fabricFromJsonValue(
+    runtimeReferenceContext,
+  ) as unknown as EventReferenceContext;
+  if (
+    context?.version !== 1 || context.payloadHash !== hashStringOf(payload) ||
+    !Array.isArray(context.references)
+  ) invalidContext();
+  const records = new Map<string, EventReference>();
+  for (const record of context.references) {
+    if (!stringPath(record.path) || !validReference(record.reference)) {
+      invalidContext();
+    }
+    const key = JSON.stringify(record.path);
+    if (records.has(key)) invalidContext();
+    records.set(key, deepFreeze(record));
+  }
+  const restored = convertCellsToLinks(payload, {
+    allowLinkFreeFabricInstances: true,
+    transformLink(_cell, link, path): SigilLink {
+      const key = JSON.stringify(path);
+      const record = records.get(key);
+      const binding = parseLink(link);
+      if (
+        record === undefined || binding === undefined ||
+        !deepEqual(record.reference.binding, {
+          space: binding.space,
+          id: binding.id,
+          scope: binding.scope,
+          path: binding.path,
+          ...(binding.overwrite === "redirect"
+            ? { overwrite: "redirect" }
+            : {}),
+        })
+      ) invalidContext();
+      records.delete(key);
+      const view = restoreView(record);
+      registerCfcReferenceCarrier(link, () => record.reference, () => view);
+      return link;
+    },
+  });
+  if (records.size !== 0) invalidContext();
+  return restored;
+}

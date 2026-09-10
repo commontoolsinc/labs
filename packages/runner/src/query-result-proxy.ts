@@ -5,6 +5,7 @@ import {
 } from "@commonfabric/data-model";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { readStatsActive, recordProxyAccess } from "./read-stats.ts";
 import { isStreamValue } from "./builder/types.ts";
 import { type BackToCellInternals, toCell } from "./back-to-cell.ts";
 import { resolveLinkTracingDereferences } from "./link-resolution.ts";
@@ -374,15 +375,9 @@ function createViewProxy<T>(
   // serves no purpose and would leak that proxy into any consumer that
   // deep-clones or freezes the surrounding value (e.g. schema interning).
   if (!isObjectOrArray(value) || value instanceof FabricPrimitive) {
-    // The SHAPE_READ above tracks only the container's shape, but a
-    // FabricPrimitive is an atomic VALUE the consumer materializes here (handed
-    // back directly, like a JS primitive), not a container whose shape it
-    // inspects. Register a recursive value read so an in-place change to the
-    // primitive (e.g. a FabricBytes updated to different bytes) re-triggers
-    // consumers — a nonRecursive read is compared shape-only and would miss it.
-    if (value instanceof FabricPrimitive) {
-      viewTx.readValueOrThrow(link);
-    }
+    // Returning a leaf exposes its value, including its value-scoped labels.
+    // Container construction keeps the shape read until a child is consumed.
+    viewTx.readValueOrThrow(link);
     return remember(value);
   }
 
@@ -466,7 +461,9 @@ function createViewProxy<T>(
         // with no `then`; every other property still refuses.
         if (prop === "then" && pinned && !isReadable(viewTx)) return undefined;
         if (Array.isArray(value) && prop === "length") {
-          const current = readTx().readValueOrThrow(link) as typeof value;
+          const accessTx = readTx();
+          if (readStatsActive) recordProxyAccess(accessTx);
+          const current = accessTx.readValueOrThrow(link) as typeof value;
           return Array.isArray(current) ? current.length : 0;
         }
 
@@ -494,10 +491,12 @@ function createViewProxy<T>(
                       path: [...link.path, "length"],
                     }) as number;
                     if (index < length) {
+                      const accessTx = childViewTx();
+                      if (readStatsActive) recordProxyAccess(accessTx);
                       const result = {
                         value: createViewProxy(
                           runtime,
-                          childViewTx(),
+                          accessTx,
                           tx,
                           {
                             ...link,
@@ -563,9 +562,11 @@ function createViewProxy<T>(
                   if (!(i in current)) {
                     continue;
                   }
+                  const accessTx = childViewTx();
+                  if (readStatsActive) recordProxyAccess(accessTx);
                   copy[i] = createViewProxy(
                     runtime,
-                    childViewTx(),
+                    accessTx,
                     tx,
                     { ...link, path: [...link.path, String(i)] },
                     depth + 1,
@@ -609,9 +610,11 @@ function createViewProxy<T>(
           return Reflect.get(value, prop);
         }
 
+        const accessTx = childViewTx();
+        if (readStatsActive) recordProxyAccess(accessTx);
         return createViewProxy(
           runtime,
-          childViewTx(),
+          accessTx,
           tx,
           { ...link, path: [...link.path, prop] },
           depth + 1,
@@ -672,9 +675,11 @@ function createViewProxy<T>(
     getOwnPropertyDescriptor: (target, prop) =>
       atEpoch(() => {
         if (Array.isArray(target) && prop === "length") {
+          const accessTx = readTx();
+          if (readStatsActive) recordProxyAccess(accessTx);
           // Read the array fully (not SHAPE_READ) so the length descriptor tracks
           // element add/remove, matching the `length` get trap above. [review: ubik2]
-          const current = readTx().readValueOrThrow(link);
+          const current = accessTx.readValueOrThrow(link);
           return {
             configurable: false,
             enumerable: false,
@@ -716,19 +721,26 @@ function createViewProxy<T>(
           (isObjectOrArray(current) || Array.isArray(current)) &&
           Object.hasOwn(current, prop)
         ) {
+          // A live property is an accessor: descriptor inspection and key
+          // enumeration expose its presence, while invoking the getter consumes
+          // its value through the same transaction and epoch as ordinary access.
           return {
             configurable: true,
             enumerable: true,
-            writable: false,
-            value: createViewProxy(
-              runtime,
-              childViewTx(),
-              tx,
-              { ...link, path: [...link.path, prop as string] },
-              depth + 1,
-              childLabelView(cfcLabelView, String(prop)),
-              pinned,
-            ),
+            get: () =>
+              atEpoch(() => {
+                const accessTx = childViewTx();
+                if (readStatsActive) recordProxyAccess(accessTx);
+                return createViewProxy(
+                  runtime,
+                  accessTx,
+                  tx,
+                  { ...link, path: [...link.path, prop as string] },
+                  depth + 1,
+                  childLabelView(cfcLabelView, String(prop)),
+                  pinned,
+                );
+              }),
           };
         }
         return undefined;

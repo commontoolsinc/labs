@@ -57,11 +57,12 @@ deltas print, and `--storage-stats` adds the storage rows. This is the fastest
 way to see a read count explode, and it needs no conversion work.
 
 Its counts are exact; its milliseconds are not the product's.
-`packages/cli/lib/test-runner.ts` calls `runtime.enableIdempotencyCheck()`
-unconditionally, which runs every computation a second time and changes what
-subscription registers. On a fifty-create topics run that was 16% of the wall
-clock and 58% of the action time, and it moved no count. Read this rung for
-shape, and gate that call off before quoting a duration from it.
+`packages/cli/lib/test-runner.ts` enables idempotency verification by default.
+Use `--no-idempotency-check` for timing experiments so verification replay does
+not distort the measurement. Keep verification enabled for correctness checks.
+The single-runtime runner also reports per-step read costs, including work
+triggered by assertions and render steps; `packages/cli/README.md` defines each
+counter and its measurement boundary.
 
 **Browser integration test.** What the pattern test cannot see: rendering, the
 main-thread/worker split, IPC, cold load, and anything about how cost scales

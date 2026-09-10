@@ -23,6 +23,7 @@ import {
   isNontrivialSchema,
   schemaWithProperties,
 } from "@commonfabric/data-model-schema";
+import { readStatsActive, recordLinkResolution } from "./read-stats.ts";
 import {
   readMaybeLink,
   rebaseScopeCaps,
@@ -47,6 +48,7 @@ import { opaqueReference, toCell } from "./back-to-cell.ts";
 import {
   defaultForAbsentValue,
   materializeSchemaView,
+  schemaViewPresence,
   UnresolvedInputError,
 } from "./schema-view.ts";
 import {
@@ -78,6 +80,7 @@ import {
   registerCfcReferenceCarrier,
 } from "./cfc/reference-provenance.ts";
 import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
+import { schemaWithRetainedReferenceScope } from "./cfc/reference-scope.ts";
 import { markIfcBearingLinkCrossing, schemaHasIfc } from "./schema-ifc.ts";
 import type { CfcAddress } from "./cfc/types.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
@@ -111,7 +114,7 @@ const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
 });
 
 /** Retains a link's follow restrictions before replacing its value schema. */
-function linkWithRetainedScopeCaps(
+export function linkWithRetainedScopeCaps(
   link: NormalizedFullLink,
   inheritedCaps?: NormalizedFullLink["scopeCaps"],
 ): NormalizedFullLink {
@@ -1064,6 +1067,8 @@ function readValueAtResolvedLink(
 }
 
 export interface ValidateAndTransformOptions {
+  [schemaViewPresence]?: boolean;
+
   /** When true, also read into each Cell created for asCell fields to capture dependencies */
   traverseCells?: boolean;
 
@@ -1210,6 +1215,7 @@ export function validateAndTransform(
     // We've already followed all the writeRedirect links above.
     const next = readMaybeLink(tx, link);
     if (next !== undefined) {
+      if (readStatsActive) recordLinkResolution(tx);
       // This one-step hop bypasses resolveLink and the traversal, so it
       // carries the crossing seam itself (the schema.ts twin of
       // getNextCellLink).
@@ -1357,6 +1363,7 @@ export function validateAndTransform(
       cfcLabelView,
       options?.synced ?? false,
       options?.mismatchThrows !== true,
+      options?.[schemaViewPresence] === true,
     );
   }
 
@@ -1664,6 +1671,16 @@ class TransformObjectCreator
       // anymore.
       const cellMatch = matches.find((v) => isCell(v));
       if (cellMatch !== undefined) {
+        const projectCell = (projection: JSONSchema) =>
+          cellMatch.asSchema(
+            this.#tx.getCfcState().flowLabelsMode === "persist"
+              ? schemaWithRetainedReferenceScope(
+                projection,
+                linkWithRetainedScopeCaps(cellMatch.getAsNormalizedFullLink())
+                  .scopeCaps,
+              )
+              : projection,
+          );
         // At least one match is a cell. If they are all cells, we should be
         // able to combine them. If some are not, we could alter our schema on
         // the cell to include the anyOf. Since that's already a cell, we want
@@ -1676,7 +1693,7 @@ class TransformObjectCreator
           // schema will have just removed one level from asCell and returned
           // that instead. However, I include it here for completeness.
           const unwrappedSchema = unwrapAsCellSchema(schema);
-          return cellMatch.asSchema(unwrappedSchema) as any;
+          return projectCell(unwrappedSchema) as any;
         } else {
           // at least one of the entries should have had an asCell or we
           // wouldn't have a cell. We will use the asCell used for creating
@@ -1690,7 +1707,7 @@ class TransformObjectCreator
             : undefined;
           if (cacheKey !== undefined) {
             const cached = combinedCellSchemaCache.get(schema)?.get(cacheKey);
-            if (cached !== undefined) return cellMatch.asSchema(cached) as any;
+            if (cached !== undefined) return projectCell(cached) as any;
           }
           const allOfItems = (schema.allOf ?? []).map(removeAsCellFromSchema);
           const anyOfItems = (schema.anyOf ?? []).map(removeAsCellFromSchema);
@@ -1710,7 +1727,7 @@ class TransformObjectCreator
             }
             byKey.set(cacheKey, combinedSchema);
           }
-          return cellMatch.asSchema(combinedSchema) as any;
+          return projectCell(combinedSchema) as any;
         }
       }
     }
@@ -1853,7 +1870,12 @@ class TransformObjectCreator
           this.#runtime,
           {
             ...handleLink,
-            schema: unwrapAsCellSchema(schema as JSONSchemaObj),
+            schema: this.#tx.getCfcState().flowLabelsMode === "persist"
+              ? schemaWithRetainedReferenceScope(
+                unwrapAsCellSchema(schema as JSONSchemaObj),
+                handleLink.scopeCaps,
+              )
+              : unwrapAsCellSchema(schema as JSONSchemaObj),
           },
           getTransactionForChildCells(this.#tx),
           this.#synced,

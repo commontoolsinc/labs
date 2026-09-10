@@ -1001,10 +1001,11 @@ export function normalizeAndDiff(
         ),
       )
     ) {
-      // Don't subscribe the serializing action to the seed doc — mirror
-      // materializeDerivedInternalCells' read for the same check.
+      // Initialization depends on presence, not existing payload contents.
+      // Keep that shape dependency without subscribing the serializing action.
       const absent = tx.readValueOrThrow(seedTarget, {
         meta: ignoreReadForScheduling,
+        nonRecursive: true,
       }) === undefined;
       if (!absent) {
         seededDocs(runtime).add(
@@ -1015,19 +1016,16 @@ export function normalizeAndDiff(
         );
       }
       if (absent) {
+        let materialized = false;
         try {
           tx.writeValueOrThrow(
             seedTarget,
             fabricFromNativeValue(seedDefault),
           );
-          // The marker is what authorizes the write above past an
-          // owner-protected schema's `writeAuthorizedBy` (cfc/prepare.ts
-          // requires marker AND doc-creation; both are checked at commit,
-          // so in-tx ordering is immaterial there). Record it only AFTER
-          // the write succeeds: a thrown write must not leave a stray
-          // marker that could authorize an unrelated same-doc write later
-          // in this transaction. It is recorded only here, by the runtime,
-          // never from arbitrary cell.set calls.
+          // Trusted initialization covers the new cell and, for an action's
+          // root result, the new reference to it. Each document retains its
+          // own declared policy. Prepare independently requires creation of
+          // the value root before exempting either from writeAuthorizedBy.
           tx.recordCfcWritePolicyInput({
             kind: "structural-provenance",
             target: {
@@ -1037,13 +1035,24 @@ export function normalizeAndDiff(
               path: [],
             },
             claim: CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
-            sources: [{
-              space: seedTarget.space,
-              id: seedTarget.id,
-              scope: seedTarget.scope,
-              path: [],
-            }],
-          });
+            sources: [
+              {
+                space: seedTarget.space,
+                id: seedTarget.id,
+                scope: seedTarget.scope,
+                path: [],
+              },
+              ...(options?.schemaRole === "output" && link.path.length === 0
+                ? [{
+                  space: link.space,
+                  id: link.id,
+                  scope: link.scope,
+                  path: [],
+                }]
+                : []),
+            ],
+          }, runtimeWritePolicyAuthorization);
+          materialized = true;
           // Deliberately NOT memoized here: if this tx aborts, the doc stays
           // absent and the next serialization must seed again. Once the
           // write commits, the next check finds the doc present and settles.
@@ -1059,6 +1068,12 @@ export function normalizeAndDiff(
               error,
             ],
           );
+        }
+        if (materialized) {
+          // The seed is content written to this document. Its constructor
+          // policy belongs here independently of the receiving reference's
+          // projection. A policy failure must abort the initialized write.
+          recordRelevantSchemaWritePolicyInput(tx, seedTarget, cellSchema);
         }
       }
     }

@@ -576,6 +576,10 @@ const pathsComparable = (
 const inputAddressKey = (address: RunPatternInputAddress): string =>
   JSON.stringify([address.key, address.hash, address.path]);
 
+/** Exact address identity for observations made while reading one input. */
+const observedInputAddressKey = (address: CfcAddress): string =>
+  JSON.stringify([address.space, address.scope, address.id, address.path]);
+
 /**
  * The addresses an input's value reaches, given the dereferences a read of
  * it performed: the address the caller's link named, and every address a
@@ -1470,13 +1474,17 @@ export const runPatternTool: HarnessToolDefinition<
       const reached = inputAddressesReached(inputAddresses, attributionTraces);
       return foldPolicyRefusals(
         details,
-        (read) =>
-          refusalReadInputKeys(
-            read,
-            reached,
-            argumentHash,
-            suppliedInputKeys,
-          ),
+        (read) => [
+          ...new Set([
+            ...refusalReadInputKeys(
+              read,
+              reached,
+              argumentHash,
+              suppliedInputKeys,
+            ),
+            ...(inputObservationKeys.get(observedInputAddressKey(read)) ?? []),
+          ]),
+        ],
       );
     };
 
@@ -1559,10 +1567,32 @@ export const runPatternTool: HarnessToolDefinition<
       pieces.runtime.cfcEnforcementMode !== "observe";
     let releaseRefusal: CfcRefusalDetail | undefined;
     let attributionTraces: readonly CfcDereferenceTrace[] = [];
+    const inputObservationKeys = new Map<string, Set<string>>();
     let rawValue: unknown;
     const measureRelease = async () => {
       const releaseTx = pieces.runtime.edit();
       const inputsTx = pieces.runtime.edit();
+      const readInput = async (key: string, cell: Cell<unknown>) => {
+        const observedTx = pieces.runtime.edit();
+        try {
+          const measuredInput = cell.withTx(observedTx);
+          await measuredInput.pull();
+          asSerializableValue(measuredInput.get());
+          // Array value reads may create immutable snapshots with their own
+          // addresses. Each input's footprint has its own transaction, so
+          // snapshot acquisition cannot inherit a sibling input's flow join.
+          for (
+            const observation of observedTx.getCfcState().referenceObservations
+          ) {
+            const address = observedInputAddressKey(observation.target);
+            const keys = inputObservationKeys.get(address) ?? new Set<string>();
+            keys.add(key);
+            inputObservationKeys.set(address, keys);
+          }
+        } finally {
+          observedTx.abort("run_pattern input reference attribution");
+        }
+      };
       try {
         // The `required` relaxation is the piece controller's, so a scoped
         // link the session cannot materialize degrades its member rather
@@ -1577,14 +1607,18 @@ export const runPatternTool: HarnessToolDefinition<
             .withTx(inputsTx);
           await measuredArgument.pull();
           asSerializableValue(measuredArgument.get());
+          for (const key of suppliedInputKeys) {
+            await readInput(key, measuredArgument.key(key));
+          }
         } catch {
           // An argument cell that will not resolve leaves the caller's own
           // addresses as the route from a clause back to an input key.
         }
-        for (const { cell } of liveCellInputs) {
+        for (const { key, cell } of liveCellInputs) {
           const measuredInput = cell.withTx(inputsTx);
           await measuredInput.pull();
           asSerializableValue(measuredInput.get());
+          await readInput(key, cell);
         }
         // Copied before the abort below, which clears them.
         attributionTraces = [...inputsTx.getCfcState().dereferenceTraces];

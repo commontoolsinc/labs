@@ -206,6 +206,8 @@ type CfcInstrumentationHooks = {
     address: CfcAddress;
     value: FabricValue;
     references: readonly CfcAddress[];
+    /** Existing parent whose shape establishes a missing descendant. */
+    absenceParent?: CfcAddress;
   } | undefined;
 
   onRelevantTx?(): void;
@@ -368,6 +370,33 @@ export const readOnlyCfcView = <T>(value: T): T => {
   return view as T;
 };
 
+type ValueWriteAuthor = Readonly<
+  { identity: ImplementationIdentity | undefined }
+>;
+type ValueWriteAuthorNode = {
+  at?: ValueWriteAuthor;
+  latest?: ValueWriteAuthor;
+  children: Map<string, ValueWriteAuthorNode>;
+  untrustedChildren: number;
+  untrusted: boolean;
+  revision: number;
+};
+const valueWriteDocumentKey = (
+  target: Pick<CfcAddress, "space" | "id"> & {
+    scope?: IMemorySpaceAddress["scope"];
+  },
+): string =>
+  `${target.space}\0${normalizeCellScope(target.scope)}\0${target.id}`;
+const unattributedValueWrite: ValueWriteAuthor = Object.freeze({
+  identity: undefined,
+});
+const valueWriteAuthorNode = (): ValueWriteAuthorNode => ({
+  children: new Map(),
+  untrustedChildren: 0,
+  untrusted: false,
+  revision: 0,
+});
+
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #commitCallbacks = new Set<
     (
@@ -434,6 +463,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #createOnlyMarks = new Map<MemorySpace, Set<string>>();
   #outboxIdempotencyKeys = new Set<string>();
   #readOnlySource?: string;
+  #valueWriteIdentities = new Map<string, ValueWriteAuthorNode>();
   #narrowestReadScope: CellScope = "space";
 
   /**
@@ -1386,6 +1416,70 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  /** Captures payload authorship independently of schema relevance. */
+  #recordValueWriteIdentity(
+    address: IMemorySpaceAddress,
+    identity: ImplementationIdentity | undefined,
+  ): void {
+    if (
+      this.#privilegedSystemWriteDepth > 0 ||
+      (address.path.length > 0 && address.path[0] !== "value")
+    ) return;
+    const key = valueWriteDocumentKey(address);
+    const root = this.#valueWriteIdentities.get(key) ?? valueWriteAuthorNode();
+    root.revision++;
+    this.#valueWriteIdentities.set(key, root);
+    const spine = [root];
+    let node = root;
+    for (const segment of canonicalizeLogicalPath(address.path)) {
+      const child = node.children.get(segment) ?? valueWriteAuthorNode();
+      node.children.set(segment, child);
+      spine.push(child);
+      node = child;
+    }
+    const stamp = deepFreeze({ identity });
+    let previousUntrusted = node.untrusted;
+    // A replacement shadows prior writes inside its subtree. Sibling writes
+    // remain represented, so one later builtin cannot certify a user's bytes.
+    node.children.clear();
+    node.untrustedChildren = 0;
+    node.at = stamp;
+    node.latest = stamp;
+    node.untrusted = identity?.kind !== "builtin";
+    for (let depth = spine.length - 2; depth >= 0; depth--) {
+      const parent = spine[depth];
+      const parentWasUntrusted = parent.untrusted;
+      parent.untrustedChildren += Number(node.untrusted) -
+        Number(previousUntrusted);
+      parent.untrusted =
+        (parent.at !== undefined && parent.at.identity?.kind !== "builtin") ||
+        parent.untrustedChildren > 0;
+      parent.latest = stamp;
+      node = parent;
+      previousUntrusted = parentWasUntrusted;
+    }
+  }
+
+  getCfcValueWriteAuthor(
+    target: CfcAddress,
+  ): ValueWriteAuthor | undefined {
+    const key = valueWriteDocumentKey(target);
+    let node = this.#valueWriteIdentities.get(key);
+    let covering = node?.at;
+    for (const segment of target.path) {
+      node = node?.children.get(segment);
+      if (node?.at !== undefined) covering = node.at;
+      if (node === undefined) return covering;
+    }
+    if (
+      node?.untrusted ||
+      (covering !== undefined && covering.identity?.kind !== "builtin")
+    ) {
+      return unattributedValueWrite;
+    }
+    return node?.latest ?? covering;
+  }
+
   invalidateCfc(reason: string): void {
     const wasPrepared = this.#cfcState.prepare.status === "prepared";
     const previousDigest = this.#cfcState.prepare.status === "prepared"
@@ -1437,6 +1531,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: CfcAddress;
     value: FabricValue;
     references: readonly CfcAddress[];
+    /** Existing parent whose shape establishes a missing descendant. */
+    absenceParent?: CfcAddress;
   } | undefined {
     if (!runtimeWritePolicyAuthorized(authorization)) return undefined;
     try {
@@ -2885,6 +2981,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#invalidateReadResultCache();
     const result = this.tx.write(address, value, options);
     if (result.ok) {
+      this.#recordValueWriteIdentity(
+        address,
+        this.#cfcState.implementationIdentity,
+      );
       this.#stageSchemaDocsForValue(address.space, address.id, value);
     }
     return result;
@@ -2973,6 +3073,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     } else if (writeResult.error) {
       throw toThrowable(writeResult.error);
     }
+    this.#recordValueWriteIdentity(
+      address,
+      this.#cfcState.implementationIdentity,
+    );
     // The staged value may carry link schemas with external refs; stage
     // their closure with it (the write-side delivery guarantee, and what
     // makes a same-transaction read through the link resolve). The `cid:`
@@ -3029,7 +3133,34 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // Capture the identity per yielded write, not once up front: an empty
       // batch authored nothing, so it must not record a write for the
       // transaction's write-identity summary.
-      const noteWriteIdentity = () => this.#noteWriteIdentity();
+      const batchRevisions = new Map<string, number>();
+      const interleavedDocuments = new Set<string>();
+      const captured: Array<{
+        address: IMemorySpaceAddress;
+        identity: ImplementationIdentity | undefined;
+      }> = [];
+      const noteWriteIdentity = (address: IMemorySpaceAddress) => {
+        this.#noteWriteIdentity();
+        if (this.#privilegedSystemWriteDepth === 0) {
+          const key = valueWriteDocumentKey(address);
+          const previous = batchRevisions.get(key);
+          if (
+            previous !== undefined &&
+            this.#valueWriteIdentities.get(key)?.revision !== previous
+          ) {
+            interleavedDocuments.add(key);
+          }
+          captured.push(deepFreeze({
+            address: { ...address, path: [...address.path] },
+            identity: this.#cfcState.implementationIdentity,
+          }));
+          this.#recordValueWriteIdentity(address, undefined);
+          batchRevisions.set(
+            key,
+            this.#valueWriteIdentities.get(key)!.revision,
+          );
+        }
+      };
       // The read caches go the same way: dropped ahead of the first write the
       // batch yields, and kept when it yields none. A `set()` whose diff
       // finds nothing to write arrives here as an empty batch, and a lift
@@ -3048,24 +3179,47 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // read through the link resolve). Staging mid-batch would inject
       // writes while `writeBatch` is applying runs.
       const staged: { address: IMemorySpaceAddress; value: FabricValue }[] = [];
-      const result = this.tx.writeBatch(
-        (function* () {
-          for (const write of writes) {
-            const address = toMemorySpaceAddress(write.address);
-            noteSystemWrite(address, write.value);
-            noteWriteIdentity();
-            if (!write.delete && getContentAddressedSchemasConfig()) {
-              staged.push({ address, value: write.value });
+      let result;
+      try {
+        result = this.tx.writeBatch(
+          (function* () {
+            for (const write of writes) {
+              const address = toMemorySpaceAddress(write.address);
+              noteSystemWrite(address, write.value);
+              noteWriteIdentity(address);
+              if (!write.delete && getContentAddressedSchemasConfig()) {
+                staged.push({ address, value: write.value });
+              }
+              // After the chokepoint, so a write it refuses leaves the caches
+              // standing over a state it did not change.
+              invalidateReadCaches();
+              yield { address, value: write.value, delete: write.delete };
             }
-            // After the chokepoint, so a write it refuses leaves the caches
-            // standing over a state it did not change.
-            invalidateReadCaches();
-            yield { address, value: write.value, delete: write.delete };
-          }
-        })(),
-      );
-      if (result.error) {
-        throw toThrowable(result.error);
+          })(),
+        );
+        if (result.error) throw toThrowable(result.error);
+      } catch (error) {
+        // A generator can fail after native document runs have already landed.
+        // No earlier builtin proof may certify that partially authored value.
+        for (const write of captured) {
+          this.#recordValueWriteIdentity(write.address, undefined);
+        }
+        throw error;
+      }
+      for (const [key, revision] of batchRevisions) {
+        if (this.#valueWriteIdentities.get(key)?.revision !== revision) {
+          interleavedDocuments.add(key);
+        }
+      }
+      for (const write of captured) {
+        // Native runs can flush between yields. An interleaved same-document
+        // write makes yield order insufficient to prove final authorship.
+        this.#recordValueWriteIdentity(
+          write.address,
+          interleavedDocuments.has(valueWriteDocumentKey(write.address))
+            ? undefined
+            : write.identity,
+        );
       }
       for (const write of staged) {
         this.#stageSchemaDocsForValue(
@@ -3654,6 +3808,8 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     address: CfcAddress;
     value: FabricValue;
     references: readonly CfcAddress[];
+    /** Existing parent whose shape establishes a missing descendant. */
+    absenceParent?: CfcAddress;
   } | undefined {
     return this.#wrapped.resolveCfcContentTarget(
       address,
@@ -3762,6 +3918,12 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     identity: ImplementationIdentity | undefined,
   ): void {
     this.#wrapped.setCfcImplementationIdentity(identity);
+  }
+
+  getCfcValueWriteAuthor(
+    target: CfcAddress,
+  ): Readonly<{ identity: ImplementationIdentity | undefined }> | undefined {
+    return this.#wrapped.getCfcValueWriteAuthor(target);
   }
 
   recordCfcWritePolicyInput(

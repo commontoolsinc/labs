@@ -43,6 +43,7 @@ import {
   cfcIntegrityForObservationNode,
   type CfcLabelView,
   cfcLabelViewForCell,
+  cfcLabelViewForResolvedCellWithStatus,
   clauseAlternatives,
   markRendererTrustedEvent,
   type RenderConfidentialityResolver,
@@ -933,17 +934,17 @@ export class WorkerReconciler {
   }
 
   /**
-   * A cell's CFC label view, mirroring the render gate's resolution: the cell's
-   * own view, or — when it has none — the resolved (followed) target's view,
-   * whose label may carry the `Space(...)` atoms. May throw (each caller
-   * decides its own fail-closed handling). The SINGLE source of label
-   * resolution shared by the gate (`#canRenderCellUnderPolicy`), the
-   * represents-principal read, and the Stage-2 membership watcher
-   * (`watchCellMembership`), so they can never drift out of lockstep.
+   * Reads the reference and resolved target labels without materializing a
+   * value snapshot. Label inspection must retain the held reference's history
+   * without acquiring the ambient history of other rendered cells.
+   * All render gates and membership checks share this resolution.
    */
   #resolveCellLabelView(cell: Cell<unknown>): CfcLabelView | undefined {
-    return cfcLabelViewForCell(cell) ??
-      cfcLabelViewForCell(cell.resolveAsCell());
+    const { view, readFailed } = cfcLabelViewForResolvedCellWithStatus(cell);
+    if (readFailed) {
+      throw new Error("Render label evidence is unavailable");
+    }
+    return view;
   }
 
   #representsPrincipalSubjectForCell(

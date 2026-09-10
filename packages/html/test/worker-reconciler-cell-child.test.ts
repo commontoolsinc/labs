@@ -1964,6 +1964,12 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
           resolvedOutputId === deniedOutputId ? deniedLabelView : undefined,
       } as unknown as Cell<unknown>;
       outputCell.resolveAsCell = () => resolvedOutputCell;
+      // The mock has no stored target from which the metadata resolver can
+      // read. Carry the selected output's policy on its live reference.
+      Object.defineProperty(outputCell, cfcLabelViewSymbol, {
+        value: () =>
+          resolvedOutputId === deniedOutputId ? deniedLabelView : undefined,
+      });
 
       const rootCell = new MockCell(
         {

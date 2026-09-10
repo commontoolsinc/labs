@@ -1,6 +1,7 @@
 import ts from "typescript";
 import { CFHelpers } from "../../core/cf-helpers.ts";
 import {
+  detectNewExpressionKind,
   getExpressionText,
   getTypeAtLocationWithFallback,
   preserveSourceMapRange,
@@ -26,6 +27,7 @@ import {
 } from "../../ast/type-building.ts";
 import { registerLiftAppliedCallType } from "../../ast/type-inference.ts";
 import type { TransformationContext } from "../../core/mod.ts";
+import { unwrapParentheses } from "../../utils/expression.ts";
 
 /**
  * Replace Reactive expressions with parameter identifiers in the callback body.
@@ -370,7 +372,7 @@ function buildResultTypeNode(
   // emitted result type arg doesn't print `import("commonfabric").X`),
   // registers the Type for the SchemaGeneratorTransformer, and falls back to
   // `unknown` if conversion fails.
-  return typeToTypeNodeWithRegistry(
+  const resultNode = typeToTypeNodeWithRegistry(
     resultType,
     {
       checker,
@@ -379,4 +381,34 @@ function buildResultTypeNode(
     },
     context.state.typeRegistry,
   );
+
+  // Constructor type arguments retain binding queries such as `typeof save`.
+  // Reconstructing those from the returned Cell type erases the binding into
+  // its structural function type, which cannot authorize a writer claim.
+  let constructor = unwrapParentheses(expression);
+  if (
+    ts.isCallExpression(constructor) &&
+    ts.isPropertyAccessExpression(constructor.expression) &&
+    constructor.expression.name.text === "for"
+  ) {
+    constructor = unwrapParentheses(constructor.expression.expression);
+  }
+  if (
+    ts.isNewExpression(constructor) &&
+    detectNewExpressionKind(constructor, checker)?.kind === "cell-factory" &&
+    constructor.typeArguments?.[0] &&
+    ts.isTypeReferenceNode(resultNode) &&
+    resultNode.typeArguments?.length === 1
+  ) {
+    const inner = constructor.typeArguments[0];
+    context.state.typeRegistry.set(inner, checker.getTypeFromTypeNode(inner));
+    const preserved = factory.updateTypeReferenceNode(
+      resultNode,
+      resultNode.typeName,
+      factory.createNodeArray([inner]),
+    );
+    context.state.typeRegistry.set(preserved, resultType);
+    return preserved;
+  }
+  return resultNode;
 }

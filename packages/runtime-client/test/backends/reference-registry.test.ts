@@ -8,6 +8,7 @@ import type { VDomOp } from "@commonfabric/html/vdom-ops";
 import { Identity } from "@commonfabric/identity";
 import {
   convertCellsToLinks,
+  lookupSchemaDocument,
   Runtime,
   type SigilLink,
 } from "@commonfabric/runner";
@@ -33,6 +34,9 @@ import {
 } from "@/protocol/mod.ts";
 import type { WorkerClient } from "@/backends/worker-client.ts";
 import { $conn, CellHandle, type RuntimeClient } from "@/mod.ts";
+import { createSigilLinkFromParsedLink } from "../../../runner/src/link-utils.ts";
+import { decomposeSchema } from "../../../runner/src/schema-decompose.ts";
+import type { URI } from "@commonfabric/memory/interface";
 import { deriveFlowJoin } from "../../../runner/src/cfc/prepare.ts";
 import { normalizeClause } from "../../../runner/src/cfc/clause.ts";
 import type { LabelMapEntry } from "../../../runner/src/cfc/types.ts";
@@ -540,7 +544,11 @@ describe("reference-registry", () => {
     const setup = runtime.edit();
     selectedTarget.withTx(setup).setMetaRaw(
       "argument",
-      argument.getAsLink(),
+      argument.asSchema({
+        type: "object",
+        properties: { public: { type: "string" } },
+        required: ["public"],
+      }).getAsLink({ includeSchema: true }),
       rawMetaWriteAuthorization,
     );
     expect((await setup.commit()).error).toBeUndefined();
@@ -592,6 +600,50 @@ describe("reference-registry", () => {
     )
       .toContainEqual(selection);
     expect(output.get()).toBe("argument value");
+  });
+
+  it("projects linked metadata through a delivered external schema", async () => {
+    const piece = await seed("cold-metadata-piece", { uniqueChild: "piece" });
+    const argument = await seed("cold-metadata-argument", {
+      uniqueChild: "argument",
+    });
+    const { rootRef, documents } = decomposeSchema({
+      type: "object",
+      properties: { uniqueChild: { type: "string", minLength: 3 } },
+      required: ["uniqueChild"],
+    });
+    expect(lookupSchemaDocument(rootRef.slice(4))).toBeUndefined();
+    const setup = runtime.edit();
+    for (const [hash, schema] of documents) {
+      setup.writeOrThrow({
+        space,
+        id: `cid:${hash}` as URI,
+        scope: "space",
+        path: [],
+      }, { value: schema as FabricValue });
+    }
+    piece.withTx(setup).setMetaRaw(
+      "argument",
+      createSigilLinkFromParsedLink({
+        ...argument.getAsNormalizedFullLink(),
+        schema: { $ref: rootRef },
+      }, { includeSchema: true }),
+      rawMetaWriteAuthorization,
+    );
+    expect((await setup.commit()).error).toBeUndefined();
+    expect(lookupSchemaDocument(rootRef.slice(4))).toBeDefined();
+    const processor = buildProcessor({ runtime, identity: signer, space });
+    const child = processor.handleAcquireCell({
+      type: RequestType.AcquireCell,
+      address: piece.key("uniqueChild").getAsNormalizedFullLink(),
+    }).cell;
+    expect(
+      processor.handleCellGet({
+        type: RequestType.CellGet,
+        cell: child,
+        meta: "argument",
+      }).value,
+    ).toBe("argument");
   });
 
   it("retains acquired scope caps when reading linked metadata", async () => {

@@ -63,16 +63,12 @@ async function readDurable(
 describe("CFC metadata probes under mergeable appends", () => {
   // The CFC prepare pass reads a document's stored label metadata through
   // `storedMetadataFor`, and its result schema through `setupResultSchemaFor`.
-  // Both must read the member surface they want — `["cfc"]` and `["schema"]` —
-  // rather than the document root: a recursive root read depends on every path
-  // in the document, so it enters the commit's confirmed conflict reads. Two
-  // exemptions keep a member read out of that set. A runtime-internal read at
-  // `["cfc"]` is dropped wherever it is made, and on a document a mergeable
-  // operation targets the builder drops that operation's own reads together
-  // with the reads below its path. Neither exemption reaches a read of the
-  // root. A root read therefore survives on a document a mergeable operation
-  // targets, and two concurrent appends — writes the mergeable machinery
-  // exists to let both land — conflict, silently dropping one side's data.
+  // Both read the member surface they want — `["cfc"]` and `["schema"]` —
+  // rather than the document root. Incidental probes and mergeable operations'
+  // own value reads do not constrain admission; authorization reads retain
+  // their revision basis. A stable wildcard label therefore permits both
+  // appends, while changed per-slot reference metadata requires a conflict
+  // and a refreshed write (covered by cfc-array-concurrency.test.ts).
 
   let server: MemoryV2Server.Server;
   let storage1: EmulatedStorageManager;

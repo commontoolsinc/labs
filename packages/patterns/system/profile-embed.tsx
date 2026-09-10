@@ -53,7 +53,10 @@ import type {
 // The wish `result` for `#profile` is the profile-home pattern's output: it
 // carries the readable `name`/`avatar`/`bio` fields AND the exported
 // owner-protected write streams we amend through.
-type ProfileResult = BackwardsCompatibleProfile;
+type ProfileResult = Pick<
+  BackwardsCompatibleProfile,
+  "name" | "avatar" | "bio" | "setName" | "setAvatar" | "setBio"
+>;
 
 const trimmed = (value?: string): string => (value ?? "").trim();
 

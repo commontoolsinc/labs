@@ -4,6 +4,7 @@ import {
   deepFreeze,
   isDeepFrozen,
   isFabricPlainContainer,
+  isFabricPlainObject,
   valueEqual,
 } from "@commonfabric/data-model";
 import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
@@ -22,6 +23,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { PathKeyMap } from "@commonfabric/utils/path-key-map";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
+import { readStatsActive, recordDocumentRead } from "../read-stats.ts";
 import {
   patchOpIsStructural,
   patchOpPointerFields,
@@ -673,6 +675,75 @@ const buildArrayPatchCandidates = (
   }
 
   return candidates;
+};
+
+/**
+ * Splits covering writes along mergeable paths so sibling values travel in
+ * separate patches. The mergeable operation owns its target; an enclosing
+ * object replacement would overwrite its result against the durable base.
+ */
+const expandMergeablePatchCandidate = (
+  candidate: PatchDraftCandidate,
+  before: FabricValue | undefined,
+  after: FabricValue | undefined,
+  suppress: readonly OpSuppression[],
+): PatchDraftCandidate[] => {
+  const path = candidate.path;
+  if (
+    !candidate.coversDescendants ||
+    !suppress.some((entry) =>
+      entry.path.length > path.length && isPrefixPath(path, entry.path)
+    )
+  ) {
+    return [candidate];
+  }
+
+  const beforeValue = readValueAtPath(before, path);
+  const afterValue = readValueAtPath(after, path);
+  if (!isFabricPlainContainer(afterValue)) {
+    return [candidate];
+  }
+
+  const children: PatchDraftCandidate[] = [];
+  if (Array.isArray(afterValue)) {
+    // Intents covered by a structural array payload are abandoned before
+    // emission. The remaining array candidates address existing elements.
+    children.push(...buildArrayPatchCandidates(path, beforeValue, afterValue));
+  } else if (isFabricPlainObject(afterValue)) {
+    const beforeObject = isFabricPlainObject(beforeValue) ? beforeValue : {};
+    const keys = new Set([
+      ...Object.keys(beforeObject),
+      ...Object.keys(afterValue),
+    ]);
+    for (const key of keys) {
+      const childPath = [...path, key];
+      const previous = beforeObject[key];
+      const value = afterValue[key];
+      const previousPresent = Object.hasOwn(beforeObject, key);
+      const valuePresent = Object.hasOwn(afterValue, key);
+      if (Array.isArray(previous) || Array.isArray(value)) {
+        children.push(...buildArrayPatchCandidates(
+          childPath,
+          previous,
+          value,
+          previousPresent,
+          valuePresent,
+        ));
+      } else {
+        const child = buildValuePatchCandidate(
+          childPath,
+          value,
+          previous,
+          valuePresent,
+          previousPresent,
+        );
+        if (child) children.push(child);
+      }
+    }
+  }
+  return children.flatMap((child) =>
+    expandMergeablePatchCandidate(child, before, after, suppress)
+  );
 };
 
 // A concrete RFC 6901 array-index segment: a non-negative integer with no
@@ -1457,10 +1528,8 @@ export class V2StorageTransaction implements IStorageTransaction {
           mergeable.suppress,
         );
         if (mergeable.ops.length > 0) {
-          // Emit the mergeable ops even when there is no base to diff against
-          // (where buildPatchOperation returns null) so a stale-base write lands
-          // against durable state instead of clobbering it with a whole-value
-          // `set`.
+          // Mergeable operations create their missing ancestors. Residual
+          // sibling patches follow them, including for a new document.
           const basePatches = patch?.op === "patch" ? patch.patches : [];
           operations.push({
             op: "patch",
@@ -1468,6 +1537,12 @@ export class V2StorageTransaction implements IStorageTransaction {
             type,
             scope,
             patches: [...mergeable.ops, ...basePatches],
+            ...(patch?.op === "patch" && patch.replayPatches !== undefined
+              ? {
+                replayPatches: [...mergeable.ops, ...patch.replayPatches],
+                replayDependencies: patch.replayDependencies,
+              }
+              : {}),
             value: doc.current.value,
           });
           continue;
@@ -1591,6 +1666,9 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const branch = this.#branch(address.space);
     const { doc } = this.#document(branch, address);
+    if (readStatsActive && !hasDataUriScheme(address.id)) {
+      recordDocumentRead(this, doc);
+    }
     // The one place a read chooses which root it is reading. A materialized
     // read walking under an epoch describes the state that epoch names; every
     // other read describes the transaction's current state. The epoch is only
@@ -1842,6 +1920,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const branch = this.#branch(address.space);
     const { doc } = this.#document(branch, address);
     if (hasDataUriScheme(address.id)) return { ok: {} };
+    if (readStatsActive) recordDocumentRead(this, doc);
 
     const suppliedMeta = options?.meta ?? EMPTY_META;
     const readMeta = withAuthorizationReadBasis(
@@ -3303,12 +3382,16 @@ export class V2StorageTransaction implements IStorageTransaction {
     doc: WritableDocumentEntry,
     suppress: readonly OpSuppression[] = [],
   ): NativeStorageCommitOperation | null {
-    if (doc.initial.value === undefined || doc.current.value === undefined) {
+    if (doc.current.value === undefined) {
       return null;
     }
 
     const details = [...doc.patchDetails.values()];
-    if (details.some((detail) => detail.address.path.length === 0)) {
+    if (
+      suppress.length === 0 &&
+      (doc.initial.value === undefined ||
+        details.some((detail) => detail.address.path.length === 0))
+    ) {
       return null;
     }
 
@@ -3417,11 +3500,36 @@ export class V2StorageTransaction implements IStorageTransaction {
       }
     }
 
+    const expandedCoverCandidates = fullCoverCandidates.flatMap((candidate) =>
+      expandMergeablePatchCandidate(
+        candidate,
+        doc.initial.value,
+        doc.current.value,
+        suppress,
+      )
+    );
+    fullCoverCandidates.length = 0;
+    for (const candidate of expandedCoverCandidates) {
+      if (candidate.coversDescendants) {
+        fullCoverCandidates.push(candidate);
+      } else {
+        nonCoverCandidates.push(candidate);
+      }
+    }
+
     if (fullCoverCandidates.length === 0 && nonCoverCandidates.length === 0) {
       return null;
     }
 
-    const tailSpliceCandidates = nonCoverCandidates.filter((candidate) =>
+    // Root and leaf details can discover the same generated array tail.
+    // A splice carries its delta once, regardless of how many writes cover it.
+    const uniqueNonCoverCandidates = [...new Map(
+      nonCoverCandidates.map((candidate) => [
+        encodePointer(candidate.path),
+        candidate,
+      ]),
+    ).values()];
+    const tailSpliceCandidates = uniqueNonCoverCandidates.filter((candidate) =>
       candidate.tailSpliceStartIndex !== undefined
     );
 
@@ -3444,7 +3552,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       nonOverlappingCoverCandidates.push(detail);
     }
 
-    const retainedNonCoverCandidates = nonCoverCandidates.filter((detail) =>
+    const retainedNonCoverCandidates = uniqueNonCoverCandidates.filter((
+      detail,
+    ) =>
       !nonOverlappingCoverCandidates.some((existing) =>
         isPrefixPath(existing.path, detail.path)
       ) &&
@@ -3499,7 +3609,39 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
     assertNoIndexedArrayStructuralOps(patches);
 
-    return { op: "patch", id, type, scope, patches, value: doc.current.value };
+    // A generated tail splice encodes a fixed array value against the
+    // transaction's base. Replaying that delta over a longer pending base
+    // would duplicate slots and separate them from companion metadata.
+    // Keep the compact delta for admission; the local view replaces only
+    // this array. Deliberate mergeable operations suppress these candidates.
+    const fixedArrays = new Map(
+      tailSpliceCandidates.map((
+        candidate,
+      ) => [candidate.patch, candidate.path]),
+    );
+    const replayPatches = patches.some((patch) => fixedArrays.has(patch))
+      ? patches.map((patch): PatchOp => {
+        const path = fixedArrays.get(patch);
+        return path === undefined ? patch : {
+          op: "replace",
+          path: encodePointer(path),
+          value: readValueAtPath(doc.current.value, path),
+        };
+      })
+      : undefined;
+
+    return {
+      op: "patch",
+      id,
+      type,
+      scope,
+      patches,
+      ...(replayPatches === undefined ? {} : {
+        replayPatches,
+        replayDependencies: doc.initialReadBasis?.localSeqs ?? [],
+      }),
+      value: doc.current.value,
+    };
   }
 
   /**
@@ -3541,10 +3683,47 @@ export class V2StorageTransaction implements IStorageTransaction {
     }));
 
     const abandoned: string[] = [];
+    const arrayPayloads = new Map<string, PatchDraftCandidate[]>();
+    const indivisibleObjects = new Map<string, boolean>();
     for (const { intent, ctx } of pending) {
-      const built = pending.some(({ intent: other, ctx: otherCtx }) =>
-          mergeableOpPayloadContains(other, otherCtx, intent.path)
-        )
+      // Generated array payloads and object writes changing numeric key sets
+      // carry their nested mutations whole. Numeric add/remove pointers cannot
+      // express the object-only intent safely against a possibly-array base.
+      // Abandon contained intents before filtering their incidental reads.
+      const carriedByCoveringWrite = intent.path.some((_, depth) => {
+        const path = intent.path.slice(0, depth);
+        const before = readValueAtPath(doc.initial.value, path);
+        const after = readValueAtPath(doc.current.value, path);
+        const key = encodePointer(path);
+        if (isFabricPlainObject(after)) {
+          let indivisible = indivisibleObjects.get(key);
+          if (indivisible === undefined) {
+            const beforeObject = isFabricPlainObject(before) ? before : {};
+            indivisible = [...Object.keys(beforeObject), ...Object.keys(after)]
+              .some((member) =>
+                ARRAY_INDEX_SEGMENT.test(member) &&
+                Object.hasOwn(beforeObject, member) !==
+                  Object.hasOwn(after, member)
+              );
+            indivisibleObjects.set(key, indivisible);
+          }
+          return indivisible;
+        }
+        if (!Array.isArray(after)) return false;
+        let candidates = arrayPayloads.get(key);
+        if (candidates === undefined) {
+          candidates = buildArrayPatchCandidates(path, before, after);
+          arrayPayloads.set(key, candidates);
+        }
+        return candidates.some((candidate) =>
+          (candidate.coversDescendants && candidate.path.length === depth) ||
+          isSubsumedByTailSplice(candidate, intent.path)
+        );
+      });
+      const built = carriedByCoveringWrite ||
+          pending.some(({ intent: other, ctx: otherCtx }) =>
+            mergeableOpPayloadContains(other, otherCtx, intent.path)
+          )
         ? { abandon: true, ops: [], suppress: [] }
         : buildMergeableIntent(intent, ctx);
       if (built.abandon) {

@@ -153,6 +153,256 @@ describe("prepare", () => {
     }
   });
 
+  const optionalListPredicate = {
+    type: "object",
+    properties: {
+      selected: {
+        type: "object",
+        properties: {
+          list: { type: "array", ifc: { maxConfidentiality: [] } },
+        },
+      },
+    },
+  } as const satisfies JSONSchema;
+
+  it("accepts a known absent optional descendant in an available linked document", async () => {
+    const source = await seed("absent-optional-source", {});
+    const tx = runtime.edit();
+    runtime.getCell(
+      signer.did(),
+      "absent-optional-sink",
+      optionalListPredicate,
+      tx,
+    )
+      .set({ selected: source.key("rooms") });
+    tx.prepareCfc();
+    expect((await tx.commit()).error).toBeUndefined();
+  });
+
+  const seedEmptyRoot = async (entries: LabelMapEntry[] = []) => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      signer.did(),
+      "empty-value-root",
+      undefined,
+      tx,
+    );
+    writeSeedEnvelopeDoc(tx, signer.did());
+    tx.writeOrThrow({ ...source.getAsNormalizedFullLink(), path: [] }, {
+      cfc: {
+        version: 2,
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+        labelMap: { version: 1, entries },
+      },
+    });
+    expect((await tx.commit()).error).toBeUndefined();
+    return source.withTx(undefined);
+  };
+
+  it("accepts an optional descendant of a loaded envelope without a value root", async () => {
+    const source = await seedEmptyRoot();
+    const tx = runtime.edit();
+    runtime.getCell(signer.did(), "empty-root-sink", optionalListPredicate, tx)
+      .set({ selected: source.withTx(tx) });
+    tx.prepareCfc();
+    expect((await tx.commit()).error).toBeUndefined();
+  });
+
+  it("binds an absent value root to the source revision", async () => {
+    const source = await seedEmptyRoot();
+    const tx = runtime.edit();
+    runtime.getCell(signer.did(), "empty-root-sink", optionalListPredicate, tx)
+      .set({ selected: source.withTx(tx) });
+    tx.prepareCfc();
+    expect(tx.getCfcState().prepare.status).toBe("prepared");
+    const update = runtime.edit();
+    source.withTx(update).set({ list: [] });
+    expect((await update.commit()).error).toBeUndefined();
+    expect((await tx.commit()).error).toBeDefined();
+  });
+
+  it("protects an absent value root's confidentiality", async () => {
+    const source = await seedEmptyRoot([{
+      path: [],
+      observes: "shape",
+      origin: "structure",
+      label: { confidentiality: ["private-review"] },
+    }]);
+    const tx = runtime.edit();
+    runtime.getCell(signer.did(), "empty-root-sink", optionalListPredicate, tx)
+      .set({ selected: source.withTx(tx) });
+    tx.prepareCfc();
+    expect((await tx.commit()).error?.message).toContain(
+      "linked content evidence is unavailable",
+    );
+  });
+
+  it("does not endorse an absent value root from its envelope's integrity", async () => {
+    const source = await seedEmptyRoot([{
+      path: [],
+      label: { integrity: [APPROVED] },
+    }]);
+    const tx = runtime.edit();
+    tx.setCfcEnforcementMode("enforce-strict");
+    runtime.getCell(signer.did(), "empty-root-floor", floorSchema, tx)
+      .set({ selected: source.withTx(tx) as unknown as string });
+    tx.prepareCfc();
+    expect((await tx.commit()).error?.message).toContain(
+      "linked content evidence is unavailable",
+    );
+  });
+
+  for (const nested of [false, true]) {
+    it(`accepts explicitly stored undefined at a ${nested ? "field" : "value root"} only with content endorsement`, async () => {
+      for (const endorsed of [false, true]) {
+        const source = await seed(
+          `present-undefined-${nested}-${endorsed}`,
+          nested ? { field: undefined } : undefined,
+          endorsed
+            ? [{
+              path: nested ? ["field"] : [],
+              label: { integrity: [APPROVED] },
+            }]
+            : [],
+        );
+        const tx = runtime.edit();
+        const subject = nested ? source.key("field") : source;
+        runtime.getCell<unknown>(signer.did(), "present-undefined-floor", {
+          type: "object",
+          properties: {
+            selected: {
+              type: ["string", "undefined"],
+              ifc: { requiredIntegrity: [APPROVED] },
+            },
+          },
+        }, tx).set({ selected: subject.withTx(tx) });
+        tx.prepareCfc();
+        expect((await tx.commit()).error === undefined).toBe(endorsed);
+      }
+    });
+  }
+
+  it("binds known linked absence to the source revision at commit", async () => {
+    const source = await seed("changing-optional-source", {});
+    const tx = runtime.edit();
+    runtime.getCell(
+      signer.did(),
+      "changing-optional-sink",
+      optionalListPredicate,
+      tx,
+    )
+      .set({ selected: source.key("rooms") });
+    tx.prepareCfc();
+    expect(tx.getCfcState().prepare.status).toBe("prepared");
+    expect(
+      [...(tx.getReadActivities?.() ?? [])].some((read) =>
+        read.id === source.getAsNormalizedFullLink().id &&
+        isAuthorizationRead(read.meta)
+      ),
+    ).toBe(true);
+    const update = runtime.edit();
+    source.withTx(update).set({ rooms: { list: ["unapproved"] } });
+    expect((await update.commit()).error).toBeUndefined();
+    expect((await tx.commit()).error).toBeDefined();
+  });
+
+  it("withholds the same verdict for private missing and present optional descendants", async () => {
+    const outcomes: (string | undefined)[] = [];
+    for (const value of [{}, { rooms: { list: ["unapproved"] } }]) {
+      const source = await seed("private-optional-source", value, [{
+        path: [],
+        label: { confidentiality: ["private-review"] },
+      }]);
+      const tx = runtime.edit();
+      runtime.getCell(
+        signer.did(),
+        "private-optional-sink",
+        optionalListPredicate,
+        tx,
+      )
+        .set({ selected: source.key("rooms") });
+      tx.prepareCfc();
+      outcomes.push((await tx.commit()).error?.message);
+    }
+    expect(outcomes[0]).toContain("linked content evidence is unavailable");
+    expect(outcomes[1]).toBe(outcomes[0]);
+  });
+
+  for (const shapePath of [[], ["rooms"]]) {
+    it(`withholds optional presence verdicts protected by shape at /${shapePath.join("/")}`, async () => {
+      const outcomes: (string | undefined)[] = [];
+      for (const value of [{}, { rooms: { list: [] } }]) {
+        const source = await seed("private-optional-shape-source", value, [{
+          path: shapePath,
+          origin: "structure",
+          observes: "shape",
+          label: { confidentiality: ["private-review"] },
+        }]);
+        const tx = runtime.edit();
+        runtime.getCell(
+          signer.did(),
+          "private-optional-shape-sink",
+          optionalListPredicate,
+          tx,
+        )
+          .set({ selected: source.key("rooms") });
+        tx.prepareCfc();
+        outcomes.push((await tx.commit()).error?.message);
+      }
+      expect(outcomes[0]).toContain("linked content evidence is unavailable");
+      expect(outcomes[1]).toBe(outcomes[0]);
+    });
+  }
+
+  it("refuses unavailable documents when an optional descendant is asserted", async () => {
+    const tx = runtime.edit();
+    const missing = runtime.getCell(
+      signer.did(),
+      "unavailable-optional-source",
+      undefined,
+      tx,
+    );
+    runtime.getCell(
+      signer.did(),
+      "unavailable-optional-sink",
+      optionalListPredicate,
+      tx,
+    )
+      .set({ selected: missing.key("rooms") });
+    tx.prepareCfc();
+    expect((await tx.commit()).error?.message).toContain(
+      "linked content evidence is unavailable",
+    );
+  });
+
+  it("does not treat known absence as endorsement evidence", async () => {
+    const source = await seed("absent-content-source", {});
+    const tx = runtime.edit();
+    runtime.getCell(signer.did(), "absent-content-sink", floorSchema, tx)
+      .set({ selected: source.key("rooms").key("list") as unknown as string });
+    tx.prepareCfc();
+    expect((await tx.commit()).error?.message).toContain(
+      "linked content evidence is unavailable",
+    );
+  });
+
+  it("does not consume unrelated sibling content to establish optional absence", async () => {
+    const source = await seed("absent-sibling-source", { private: "secret" }, [{
+      path: ["private"],
+      label: { confidentiality: ["private-review"] },
+    }]);
+    const tx = runtime.edit();
+    runtime.getCell(
+      signer.did(),
+      "absent-sibling-sink",
+      optionalListPredicate,
+      tx,
+    )
+      .set({ selected: source.key("rooms") });
+    tx.prepareCfc();
+    expect((await tx.commit()).error).toBeUndefined();
+  });
+
   for (const transfer of ["cell", "sigil"] as const) {
     const guardedCases: {
       name: string;
@@ -697,6 +947,33 @@ describe("prepare", () => {
   });
 
   describe("copy assertions", () => {
+    it("refuses to certify two missing final fields as copied content", async () => {
+      const source = await seed("missing-copy-source", {});
+      const destination = await seed("missing-copy-destination", {});
+      const tx = runtime.edit();
+      const schema = {
+        type: "object",
+        properties: {
+          input: { type: "object" },
+          output: {
+            type: "object",
+            properties: {
+              text: {
+                type: ["string", "undefined"],
+                ifc: { exactCopyOf: ["input", "text"] },
+              },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+      runtime.getCell(signer.did(), "missing-copy-sink", schema, tx).set({
+        input: source as unknown as { text?: string },
+        output: destination as unknown as { text?: string },
+      });
+      tx.prepareCfc();
+      expect((await tx.commit()).error?.message).toContain("exactCopyOf");
+    });
+
     it("rejects an exact reference copy that changes overwrite mode", async () => {
       const source = await seed("source", "same");
       const schema = {

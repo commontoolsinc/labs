@@ -85,6 +85,15 @@ export function immutableReferenceViewIdentity(
     : tables.get(view)?.map((t) => t.identity);
 }
 
+/** Copies the private slots carried by a Runtime-attested event reference. */
+export function immutableReferenceEntries(
+  view: CfcLabelView | undefined,
+): readonly CfcImmutableReference[] {
+  return view === undefined
+    ? []
+    : (tables.get(view) ?? []).flatMap((table) => table.entries);
+}
+
 /** Binds a source-slot acquisition to the runtime's captured target proof. */
 export function immutableReferenceSourceAcquisition(
   view: CfcLabelView | undefined,

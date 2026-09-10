@@ -352,7 +352,7 @@ const handlers: Record<
         ? { cfcEnforcementMode: requestedMode }
         : {}),
     }));
-    runtime.enableIdempotencyCheck();
+    if (args.noIdempotencyCheck !== true) runtime.enableIdempotencyCheck();
     // Channel 1: capture pattern-code console.error / console.warn calls.
     runtime.scheduler.onConsole(
       (({ method, args }) => {

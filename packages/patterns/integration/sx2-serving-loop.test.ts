@@ -109,6 +109,7 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
       space: `${SPACE_NAME}-sx2-loop`,
       apiUrl: new URL(API_URL),
       identity,
+      cfcFlowLabels: "persist",
     });
     const sourcePath = join(
       import.meta.dirname!,

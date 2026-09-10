@@ -441,6 +441,7 @@ describe("Phase 3 events-down (serving side)", () => {
   let clientRuntime: Runtime;
   let extraManagers: EmulatedStorageManager[];
   let extraRuntimes: Runtime[];
+  let preciseEventReferences = false;
 
   /** The live serving runtime/manager (set by newHost's createRuntime)
    * — the C8d raced-cascade test reads sealed state through them and
@@ -517,6 +518,7 @@ describe("Phase 3 events-down (serving side)", () => {
           apiUrl: new URL(import.meta.url),
           storageManager: manager,
           servingPosture: true,
+          cfcFlowLabels: preciseEventReferences ? "persist" : "off",
           experimental: {
             serverExecution: true,
           },
@@ -575,6 +577,7 @@ describe("Phase 3 events-down (serving side)", () => {
     });
 
   beforeEach(() => {
+    preciseEventReferences = false;
     server = newSharedServer({ subscriptionRefreshDelayMs: 0 });
     GatedStorageManager.loadParkRecoveryGeneration = 0;
     extraManagers = [];
@@ -610,6 +613,7 @@ describe("Phase 3 events-down (serving side)", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: manager,
+      cfcFlowLabels: preciseEventReferences ? "persist" : "off",
       experimental: { serverExecution: true },
     });
     return { manager, runtime };
@@ -649,6 +653,90 @@ describe("Phase 3 events-down (serving side)", () => {
     }
     return { compiled, argument, result };
   };
+
+  it("restores a durable event's acquired reference when a serving host starts", async () => {
+    preciseEventReferences = true;
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const source = [
+      "import { handler, pattern, Stream, Writable } from 'commonfabric';",
+      "const bump = handler<{ piece: Writable<number> }, { value: Writable<number> }>(",
+      "  (event, { value }) => { value.set(event.piece.get() + 1); },",
+      ");",
+      "export default pattern<{ value: Writable<number> },",
+      "  { value: number; bump: Stream<{ piece: Writable<number> }> }>",
+      "(({ value }) => ({ value, bump: bump({ value }) }));",
+    ].join("\n");
+    const { argument, result } = await standUp(clientRuntime, source, {
+      arg: "reference-event-arg",
+      result: "reference-event-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientManager.synced();
+    result.key("bump").send({ piece: argument.key("value") });
+    await clientRuntime.idle();
+    await clientManager.synced();
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the reference event append",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    const readEntry = () =>
+      (Engine.read(engine, { id: sidecarId })?.value as StreamEventsDocValue)
+        .entries![0];
+    expect(readEntry().runtimeReferenceContext).toBeDefined();
+    expect(readEntry().consequenced).toBeUndefined();
+    host = newHost();
+    const poke = clientRuntime.edit();
+    clientRuntime.getCell(space, "reference-event-activate", undefined, poke)
+      .set(1);
+    expect((await poke.commit()).error).toBeUndefined();
+    await waitUntil(
+      () => readEntry().consequenced === true,
+      "the restored reference event consequence",
+    );
+    expect(readEntry().status).toBeUndefined();
+    expect(readEntry().error).toBeUndefined();
+    expect(
+      (Engine.read(engine, { id: argument.getAsNormalizedFullLink().id })
+        ?.value as { value: number }).value,
+    ).toBe(1);
+    // Neither corrupted attestation nor plain decoded reference bytes can
+    // execute the handler. Each refusal reaches a durable terminal outcome.
+    for (
+      const [eventId, context] of [
+        ["evt-reference-invalid", "invalid-context"],
+        ["evt-reference-missing", undefined],
+      ] as const
+    ) {
+      const original = readEntry();
+      const delivery = await clientManager.open(space).replica
+        .enqueueEventAppend!({
+          sidecarId,
+          stream: original.stream,
+          eventId,
+          payload: original.payload,
+          ...(context === undefined
+            ? {}
+            : { runtimeReferenceContext: context }),
+        });
+      expect(delivery.delivered).toBe(true);
+      const terminal = () =>
+        (Engine.read(engine, { id: sidecarId })?.value as StreamEventsDocValue)
+          .entries?.find((entry) => entry.eventId === eventId);
+      await waitUntil(
+        () => terminal()?.consequenced === true,
+        "the invalid reference event refusal",
+      );
+      expect(terminal()?.status).toBe("dropped");
+      expect(
+        (Engine.read(engine, { id: argument.getAsNormalizedFullLink().id })
+          ?.value as { value: number }).value,
+      ).toBe(1);
+    }
+    cancelDemand();
+  });
 
   it("the full loop: fire → drain → authoritative handler → ONE derived commit with consequenceOf + mark + watermark → echo retires", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
@@ -2896,6 +2984,61 @@ describe("Phase 3 events-down (serving side)", () => {
       () => host!.spaceServer(space)?.active === true,
       "reactivation on the event-only admission racing the park",
     );
+  });
+
+  it("retains reference acquisitions in a same-space served cascade", async () => {
+    preciseEventReferences = true;
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const source = CASCADE_PATTERN
+      .replace(
+        "handler<unknown, { value: Writable<number> }>",
+        "handler<{ piece: Writable<number> }, { value: Writable<number> }>",
+      )
+      .replace(
+        "(_ev, { value }) => { value.set((value.get() ?? 0) + 10); }",
+        "(event, { value }) => { value.set(event.piece.get() + 10); }",
+      )
+      .replaceAll(
+        "second: Stream<unknown>",
+        "second: Stream<{ piece: Writable<number> }>",
+      )
+      .replace("second.send({});", "second.send({ piece: value });");
+    const { argument, result } = await standUp(clientRuntime, source, {
+      arg: "reference-cascade-arg",
+      result: "reference-cascade-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientManager.synced();
+    host = newHost();
+    result.key("first").send({});
+    await clientRuntime.idle();
+    await clientManager.synced();
+    const entries = () =>
+      sidecarIdsIn(engine).flatMap((id) =>
+        (Engine.read(engine, { id })?.value as StreamEventsDocValue).entries ??
+          []
+      );
+    await waitUntil(
+      () =>
+        entries().length === 2 &&
+        entries().every((entry) => entry.consequenced === true),
+      "both reference cascade consequences",
+    );
+    expect(
+      entries().filter((entry) => entry.runtimeReferenceContext !== undefined),
+    ).toHaveLength(1);
+    for (const entry of entries()) {
+      expect(entry.status).toBeUndefined();
+      expect(entry.error).toBeUndefined();
+      expect(entry.firedAt?.user).toBe(aliceSigner.did());
+    }
+    expect(
+      (Engine.read(engine, { id: argument.getAsNormalizedFullLink().id })
+        ?.value as { value: number }).value,
+    ).toBe(11);
+    cancelDemand();
   });
 
   it("same-space cascade (LT1): the served handler's send commits a durable wave-carried entry with the INHERITED actor — processed exactly once", async () => {

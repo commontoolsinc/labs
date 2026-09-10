@@ -55,6 +55,7 @@ import {
 } from "@commonfabric/utils/types";
 
 import { toCell } from "./back-to-cell.ts";
+import { serializeRuntimeEvent } from "./cfc/event-reference-context.ts";
 import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
 import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
@@ -128,6 +129,7 @@ import {
   recordCfcReferenceObservation,
   registerCfcReferenceCarrier,
 } from "./cfc/reference-provenance.ts";
+import { schemaWithRetainedReferenceScope } from "./cfc/reference-scope.ts";
 import {
   readStoredCfcMetadata,
   storedCfcMetadataAppliesToPath,
@@ -1688,9 +1690,10 @@ export class CellImpl<T extends FabricValue>
       // the client side.
       //
       // TODO(danfuzz): constrain `T`, so that neither cast is needed.
-      const event = convertCellsToLinks(
+      const { payload: event, runtimeReferenceContext } = serializeRuntimeEvent(
         newValue as CellLinkInput,
-      ) as AnyCellWrapping<T>;
+        this.runtime.readTx(this.tx),
+      );
       propagateRendererTrustedEvent(newValue, event);
 
       const mintedKeys = mintedRuntimeInjectedEventKeys(
@@ -1771,6 +1774,9 @@ export class CellImpl<T extends FabricValue>
             stream,
             eventId,
             payload: event as never,
+            ...(runtimeReferenceContext === undefined ? {} : {
+              runtimeReferenceContext,
+            }),
             ...(mintedKeys !== undefined
               ? { runtimeInjectedEventKeys: [...mintedKeys] }
               : {}),
@@ -1951,6 +1957,9 @@ export class CellImpl<T extends FabricValue>
               eventId: emittedId,
               stream,
               payload: event,
+              ...(runtimeReferenceContext === undefined ? {} : {
+                runtimeReferenceContext,
+              }),
               firedAt: {
                 ...(acting?.user !== undefined ? { user: acting.user } : {}),
                 session: acting?.session ?? "server",
@@ -2042,6 +2051,9 @@ export class CellImpl<T extends FabricValue>
               targetStreamLink: stream,
               eventId: emittedId,
               payload: event as never,
+              ...(runtimeReferenceContext === undefined ? {} : {
+                runtimeReferenceContext,
+              }),
               ...(userless ? {} : { actingPrincipal: acting!.user }),
               ...(acting?.session !== undefined
                 ? { actingSession: acting.session }
@@ -2072,7 +2084,9 @@ export class CellImpl<T extends FabricValue>
           this.#cleanup?.();
           const [cancel, addCancel] = useCancelGroup();
           this.#cleanup = cancel;
-          this.#listeners.forEach((callback) => addCancel(callback(event)));
+          this.#listeners.forEach((callback) =>
+            addCancel(callback(event as AnyCellWrapping<T>))
+          );
           return this as unknown as Cell<T>;
         }
       }
@@ -2134,7 +2148,9 @@ export class CellImpl<T extends FabricValue>
       const [cancel, addCancel] = useCancelGroup();
       this.#cleanup = cancel;
 
-      this.#listeners.forEach((callback) => addCancel(callback(event)));
+      this.#listeners.forEach((callback) =>
+        addCancel(callback(event as AnyCellWrapping<T>))
+      );
     } else {
       // Regular cell behavior
       if (!this.tx) {
@@ -2699,7 +2715,19 @@ export class CellImpl<T extends FabricValue>
     if (removed.length === 0) {
       return;
     }
-    const filtered = array.filter((element) => !matches(element));
+    const filtered = array.flatMap((element, index) => {
+      if (matches(element)) return [];
+      if (this.tx!.getCfcState().flowLabelsMode !== "persist") return [element];
+      // A surviving slot moves to a new index. Capture its original slot's
+      // acquisition before the replacement changes that source address.
+      const captured = captureReferenceSlots(
+        this.tx!,
+        { ...resolvedLink, path: [...resolvedLink.path, String(index)] },
+        element,
+        this.#cfcLabelView,
+      );
+      return [captured.value];
+    });
     diffAndUpdate(
       this.runtime,
       this.tx,
@@ -3169,7 +3197,15 @@ export class CellImpl<T extends FabricValue>
     );
     return createCell(
       this.runtime,
-      snapshot.link,
+      readTx.getCfcState().flowLabelsMode === "persist"
+        ? {
+          ...snapshot.link,
+          schema: schemaWithRetainedReferenceScope(
+            snapshot.link.schema,
+            snapshot.link.scopeCaps,
+          ),
+        }
+        : snapshot.link,
       this.tx,
       this.#synced,
       undefined,
@@ -4268,6 +4304,45 @@ function maybeConvertArrayPathToDataURILink(
   };
 }
 
+/** Copies reference slots with the acquisitions at their original addresses. */
+function captureReferenceSlots(
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  value: FabricValue,
+  cfcLabelView: CfcLabelView | undefined,
+): {
+  value: FabricValue;
+  references: Array<
+    { path: readonly string[]; reference: CfcReferenceProvenance }
+  >;
+} {
+  const references: Array<{
+    path: readonly string[];
+    reference: CfcReferenceProvenance;
+  }> = [];
+  const capturedValue = convertCellsToLinks(value, {
+    allowLinkFreeFabricInstances: true,
+    transformLink: (_cell, rawLink, path) => {
+      const source = { ...link, path: [...link.path, ...path] };
+      // The copied slot keeps its own policy; its enclosing handle retains
+      // the source scope restrictions.
+      acquireRawReference(tx, source, rawLink, cfcLabelView, "copy");
+      references.push({
+        path,
+        reference: getCfcReferenceProvenance(rawLink)!,
+      });
+      return carryCfcReferenceProvenance(
+        rawLink,
+        createSigilLinkFromParsedLink(parseLink(rawLink, source), {
+          includeSchema: true,
+          keepAsCell: KeepAsCell.All,
+        }),
+      );
+    },
+  });
+  return { value: capturedValue, references };
+}
+
 /** Captures a value at its source address with exact nested reference proofs. */
 export function snapshotValueAtAddress(
   runtime: Runtime,
@@ -4277,30 +4352,12 @@ export function snapshotValueAtAddress(
   cfcLabelView: CfcLabelView | undefined,
 ): { link: NormalizedFullLink; cfcLabelView: CfcLabelView | undefined } {
   if (tx.getCfcState().flowLabelsMode === "persist") {
-    const references: Array<{
-      path: readonly string[];
-      reference: CfcReferenceProvenance;
-    }> = [];
-    const capturedValue = convertCellsToLinks(value, {
-      allowLinkFreeFabricInstances: true,
-      transformLink: (_cell, rawLink, path) => {
-        const source = { ...link, path: [...link.path, ...path] };
-        // The copied slot keeps its own policy. The snapshot below retains
-        // the source handle's schema and rebases its outer follow caps.
-        acquireRawReference(tx, source, rawLink, cfcLabelView, "copy");
-        references.push({
-          path,
-          reference: getCfcReferenceProvenance(rawLink)!,
-        });
-        return carryCfcReferenceProvenance(
-          rawLink,
-          createSigilLinkFromParsedLink(parseLink(rawLink, source), {
-            includeSchema: true,
-            keepAsCell: KeepAsCell.All,
-          }),
-        );
-      },
-    });
+    const { value: capturedValue, references } = captureReferenceSlots(
+      tx,
+      link,
+      value,
+      cfcLabelView,
+    );
     const immutable = runtime.getImmutableCell(
       link.space,
       capturedValue,

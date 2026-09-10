@@ -220,6 +220,7 @@ const handlers: Record<
       apiUrl: new URL(apiUrl as string),
       identity,
       space: spaceName as string,
+      cfcFlowLabels: "persist",
       ...(cfcWriteFloor !== undefined
         ? { cfcWriteFloor: cfcWriteFloor as CfcWriteFloorMode }
         : {}),

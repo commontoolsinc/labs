@@ -193,6 +193,7 @@ import {
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
   type SetMemoryMessageCompressionRequest,
+  type SetReadStatsEnabledRequest,
   type SetSettleStatsEnabledRequest,
   type SetTelemetryEnabledRequest,
   type SettleStatsHistoryResponse,
@@ -397,9 +398,9 @@ function cellValueForClient(
 function metadataTargetWithScopeCaps(
   source: NormalizedFullLink,
   target: NormalizedFullLink,
-  projectPath: boolean,
+  projectionDepth?: number,
 ): NormalizedFullLink {
-  const path = projectPath ? [...target.path, ...source.path] : target.path;
+  const path = target.path;
   type ScopeCap = NonNullable<NormalizedFullLink["scopeCaps"]>[number];
   const caps = new Map<number, ScopeCap["scope"]>();
   const addCap = (depth: number, scope: ScopeCap["scope"] | undefined) => {
@@ -412,8 +413,8 @@ function metadataTargetWithScopeCaps(
     ContextualFlowControl.getAsCellFollowScopeCap(source.schema),
   );
   for (const { depth, scope } of source.scopeCaps ?? []) {
-    if (projectPath) {
-      addCap(target.path.length + depth, scope);
+    if (projectionDepth !== undefined) {
+      addCap(projectionDepth + depth, scope);
     } else if (depth <= source.path.length) {
       // A manifest entry starts a new path domain. Its inherited restrictions
       // apply at every hop onto the returned target.
@@ -1290,8 +1291,14 @@ export class RuntimeProcessor {
         // For the meta link fields, use the meta linked cell instead
         const link = getMetaLink(cell, request.meta);
         if (link === undefined) return { value: undefined };
+        const projected = this.#runtime.getCellFromLink(
+          link,
+          undefined,
+          undefined,
+          referenceView,
+        ).key(...source.path).getAsNormalizedFullLink();
         cell = this.#runtime.getCellFromLink(
-          metadataTargetWithScopeCaps(source, link, true),
+          metadataTargetWithScopeCaps(source, projected, link.path.length),
           undefined,
           undefined,
           referenceView,
@@ -1307,7 +1314,6 @@ export class RuntimeProcessor {
                 metadataTargetWithScopeCaps(
                   source,
                   parseLink(link, cell),
-                  false,
                 ),
                 undefined,
                 undefined,
@@ -2724,6 +2730,11 @@ export class RuntimeProcessor {
     this.#runtime.scheduler.setEventPreflightTelemetryEnabled(request.enabled);
   }
 
+  /** Sets body accounting independently of telemetry transport. */
+  setReadStatsEnabled(request: SetReadStatsEnabledRequest): void {
+    this.#runtime.scheduler.setReadStatsEnabled(request.enabled);
+  }
+
   /** Changes memory-message compression for every remote storage session. */
   async setMemoryMessageCompression(
     request: SetMemoryMessageCompressionRequest,
@@ -3051,6 +3062,8 @@ export class RuntimeProcessor {
         return this.setLoggerEnabled(request);
       case RequestType.SetTelemetryEnabled:
         return this.setTelemetryEnabled(request);
+      case RequestType.SetReadStatsEnabled:
+        return this.setReadStatsEnabled(request);
       case RequestType.SetMemoryMessageCompression:
         return await this.setMemoryMessageCompression(request);
       case RequestType.ResetLoggerBaselines:

@@ -1296,6 +1296,134 @@ describe("cfc-reference-provenance", () => {
     });
   }
 
+  for (const mode of ["eager", "lazy", "compound-eager", "compound-lazy"]) {
+    it(`persists a materialized handle with inherited scope caps (${mode})`, async () => {
+      const target = await seed("materialized-cap-profile", { name: "Bob" });
+      const setup = runtime.edit();
+      const profiles = runtime.getCell(
+        space,
+        "materialized-cap-profiles",
+        undefined,
+        setup,
+      );
+      profiles.set([{
+        profile: target.withTx(setup).asSchema({ scope: "space" }),
+      }]);
+      expect((await setup.commit()).ok).toBeDefined();
+      const acquire = runtime.edit();
+      if (mode.endsWith("lazy")) acquire.markLazyMaterialize(true);
+      const projected = profiles.withTx(acquire).asSchema({
+        type: "array",
+        scope: "space",
+        items: {
+          type: "object",
+          properties: {
+            profile: mode.startsWith("compound")
+              ? {
+                anyOf: [
+                  {
+                    type: "object",
+                    properties: { name: { type: "string" } },
+                    asCell: [{ kind: "cell" }],
+                  },
+                  {
+                    type: "object",
+                    properties: { color: { type: "string" } },
+                    asCell: [{ kind: "cell" }],
+                  },
+                ],
+              }
+              : {
+                type: "object",
+                properties: { name: { type: "string" } },
+                asCell: [{ kind: "cell" }],
+              },
+          },
+        },
+      }).get();
+      const held = (projected as { profile: unknown }[])[0].profile;
+      expect(isCell(held)).toBe(true);
+      if (!isCell(held)) throw new Error("Expected a profile Cell");
+      expect(getCfcReferenceProvenance(held)?.scopeCaps).toContainEqual({
+        depth: 0,
+        scope: "space",
+      });
+      acquire.abort();
+      const tx = runtime.edit();
+      const output = runtime.getCell(
+        space,
+        "materialized-cap-output",
+        undefined,
+        tx,
+      );
+      output.set(held.withTx(tx));
+      expect((await tx.commit()).ok).toBeDefined();
+      const read = runtime.edit();
+      expect(output.withTx(read).get()).toEqual({ name: "Bob" });
+      read.abort();
+      const widening = runtime.edit();
+      expect(() =>
+        output.withTx(widening).set(
+          held.withTx(widening).asSchema({ scope: "session" }),
+        )
+      )
+        .toThrow(
+          "Reference acquisition scope cap cannot be widened for storage",
+        );
+      widening.abort();
+    });
+  }
+
+  for (const wrapped of [false, true]) {
+    it(`retains inherited scope in a resolved handle's durable schema (wrapped=${wrapped})`, async () => {
+      const target = await seed("resolved-cap-target", { name: "Alice" });
+      const acquire = runtime.edit();
+      const source = runtime.getCellFromLink(
+        {
+          ...target.getAsNormalizedFullLink(),
+          scopeCaps: [{ depth: 0, scope: "space" }],
+        },
+        {
+          type: "object",
+          properties: { name: { type: "string" } },
+          ...(wrapped
+            ? { asCell: [{ kind: "cell" as const, scope: "session" as const }] }
+            : {}),
+        },
+        acquire,
+      );
+      const held = source.resolveAsCell().withTx(undefined);
+      acquire.abort();
+      const tx = runtime.edit();
+      const output = runtime.getCell(
+        space,
+        "resolved-cap-output",
+        undefined,
+        tx,
+      );
+      output.set(held.withTx(tx));
+      expect((await tx.commit()).ok).toBeDefined();
+      const read = runtime.edit();
+      expect(
+        output.withTx(read).asSchema({
+          type: "object",
+          properties: { name: { type: "string" } },
+        }).get(),
+      ).toEqual({ name: "Alice" });
+      read.abort();
+      const widening = runtime.edit();
+      expect(() =>
+        output.withTx(widening).set(
+          held.withTx(widening).asSchema({ scope: "session" }),
+        )
+      )
+        .toThrow(
+          "Reference acquisition scope cap cannot be widened for storage",
+        );
+      widening.abort();
+    });
+  }
+
   it("retains a trusted pending reference's scope cap after acquisition", async () => {
     const target = await seed("pending-cap-target", "public");
     const capped = target.asSchema({ scope: "space" }).asSchema({
@@ -1578,6 +1706,159 @@ describe("cfc-reference-provenance", () => {
     expect(deriveFlowJoin(tx).confidentiality).toContainEqual(selection);
     tx.abort();
   });
+
+  for (const scope of ["space", "user", "session"] as const) {
+    it(`persists the ${scope} source declaration in a scope-silent alias projection`, async () => {
+      const setup = runtime.edit();
+      const target = runtime.getCellFromLink(
+        {
+          ...runtime.getCell(space, `alias-${scope}-target`)
+            .getAsNormalizedFullLink(),
+          scope,
+        },
+        undefined,
+        setup,
+      );
+      target.set("visible");
+      const argument = runtime.getCell(
+        space,
+        `alias-${scope}-argument`,
+        undefined,
+        setup,
+      );
+      argument.set({ value: target });
+      expect((await setup.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      const output = runtime.getCell(
+        space,
+        `alias-${scope}-output`,
+        undefined,
+        tx,
+      );
+      const projectedArgument = argument.withTx(tx).asSchema({
+        type: "object",
+        properties: {
+          value: { type: "string", asCell: [{ kind: "cell", scope }] },
+        },
+      });
+      const bound = unwrapOneLevelAndBindToDoc(
+        { $alias: { cell: "argument", path: ["value"] } },
+        projectedArgument.getAsNormalizedFullLink(),
+        output,
+        { targetSchema: { type: "string" } },
+      );
+      output.set(bound);
+      expect((await tx.commit()).ok).toBeDefined();
+      const read = runtime.edit();
+      expect(output.withTx(read).get()).toBe("visible");
+      read.abort();
+    });
+  }
+
+  it("retains alias acquisition when a transaction strengthens an off Runtime to persist", async () => {
+    const argument = await seed("strengthened-alias-source", {
+      value: "visible",
+    });
+    const offRuntime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager: storage,
+      cfcFlowLabels: "off",
+    });
+    try {
+      const tx = offRuntime.edit();
+      tx.setCfcFlowLabelsMode("persist");
+      const output = offRuntime.getCell(
+        space,
+        "strengthened-alias-output",
+        undefined,
+        tx,
+      );
+      const source = offRuntime.getCellFromLink(
+        argument.getAsNormalizedFullLink(),
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              asCell: [{ kind: "cell", scope: "space" }],
+            },
+          },
+        },
+        tx,
+      );
+      const bound = unwrapOneLevelAndBindToDoc(
+        { $alias: { cell: "argument", path: ["value"] } },
+        source.getAsNormalizedFullLink(),
+        output,
+        { targetSchema: { type: "string" } },
+      );
+      expect(getCfcReferenceProvenance(bound)).toBeDefined();
+      output.set(bound);
+      expect((await tx.commit()).ok).toBeDefined();
+      const read = offRuntime.edit();
+      read.setCfcFlowLabelsMode("persist");
+      expect(output.withTx(read).get()).toBe("visible");
+      read.abort();
+    } finally {
+      await offRuntime.dispose();
+    }
+  });
+
+  for (const reverseCaps of [false, true]) {
+    it(`retains inherited alias caps at different depths (reverse=${reverseCaps})`, async () => {
+      const setup = runtime.edit();
+      const secret = runtime.getCellFromLink(
+        {
+          ...runtime.getCell(space, "alias-inherited-session")
+            .getAsNormalizedFullLink(),
+          scope: "session",
+        },
+        undefined,
+        setup,
+      );
+      secret.set("session-only");
+      const argument = runtime.getCell(
+        space,
+        "alias-inherited-source",
+        undefined,
+        setup,
+      );
+      argument.set({ value: secret });
+      expect((await setup.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      const caps = [
+        { depth: 0, scope: "user" as const },
+        { depth: 1, scope: "space" as const },
+      ];
+      const source = runtime.getCellFromLink(
+        {
+          ...argument.getAsNormalizedFullLink(),
+          scopeCaps: reverseCaps ? caps.reverse() : caps,
+        },
+        undefined,
+        tx,
+      );
+      const output = runtime.getCell(
+        space,
+        "alias-inherited-output",
+        undefined,
+        tx,
+      );
+      output.set(unwrapOneLevelAndBindToDoc(
+        { $alias: { cell: "argument", path: ["value"] } },
+        source.getAsNormalizedFullLink(),
+        output,
+        { targetSchema: { type: "string" } },
+      ));
+      expect((await tx.commit()).ok).toBeDefined();
+      const read = runtime.edit();
+      expect(output.withTx(read).get()).toBeUndefined();
+      expect(argument.withTx(read).key("value").get()).toBe("session-only");
+      read.abort();
+    });
+  }
 
   it("uses a staged replacement's selection instead of an existing complete marker", async () => {
     const left = await seed("staged-left", "left");

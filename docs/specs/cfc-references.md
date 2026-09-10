@@ -22,6 +22,9 @@ slots before encoding; decoding an address alone cannot restore that history.
 Eager and lazy schema reads that box inline array objects capture references at
 their original slots and rebase inherited scope caps onto the immutable result.
 A later target-label change is resolved on the next content observation.
+Collection removals capture surviving references at their original slots before
+compacting indices; neither nested references nor their selection history become
+raw, unauthenticated links during that move.
 
 Precise immutable construction, raw reads and writes, and pattern result
 projection preserve link-free instance values through their canonical codecs,
@@ -39,6 +42,12 @@ coordinator reference retains broader selection history from its creation or
 reconciliation. Dereferencing through that coordinator still consumes its
 history.
 
+Setup compares stored result bytes only to elide an unchanged projection write;
+that comparison retains its conflict dependency without consuming content
+labels. Preserving a stored name is a separate content copy whose read
+contributes the name's confidentiality, including a covering label or labeled
+absence.
+
 `LinkReference` integrity records a relationship. It does not endorse B's
 contents. A receiver's `addIntegrity` declaration cannot satisfy a floor on a
 different content subject. The schema attached to a handle is a read projection;
@@ -46,6 +55,21 @@ it is not proof that the target currently satisfies a content assertion.
 Declared receiving policies apply to the reference slot and projected paths
 structurally. Merely declaring confidentiality there does not inspect the
 target's type or contents.
+
+Runtime-minted integrity from a schema, such as `LlmDerived` or `InjectionSafe`,
+certifies the concrete value written by its authenticated builtin. Wildcard
+schemas expand only over written inline slots; they do not endorse later array
+members or follow passive references. These attestations persist as derived
+value entries, separately from ordinary declared confidentiality and integrity.
+An overlapping value replacement or deletion invalidates them, including when
+flow labeling is off. Each write captures its author independently of subsequent
+identity changes in the transaction. An existing wildcard runtime attestation
+cannot prove which concrete values were certified and is not carried forward.
+
+A stored stream binding retains its own CFC declarations. Child schemas under
+the stream wrapper describe future event payloads, so publishing that binding
+does not inspect or declare those children as stored stream contents. The
+unwrapped event schema retains its payload policies for event processing.
 
 ## Verification before storage submission
 
@@ -56,13 +80,24 @@ contributions and verify each; unresolved evidence rejects. Reference exact-copy
 compares the complete binding, while a claim about a linked descendant resolves
 that content. Reference serialization consults the handle's carried schema. It
 does not resolve the target merely to discover a schema or populate reference
-labels.
+labels. Canonical handle materialization and resolution retain inherited scope
+caps in the handle's schema so ordinary forwarding preserves them durably. An
+explicit later schema projection that widens those caps remains ineligible for
+storage.
 
 A content assertion can itself reveal protected information through success or
 failure. Its evidence, including traversed bindings and protected metadata, must
 fit confidentiality the attempt already carries. Otherwise it returns the common
 unavailable-evidence refusal. This guard applies to content assertions; ordinary
 reference forwarding does not inspect or import target content labels.
+
+A loaded envelope can prove that its value root or an optional descendant is
+absent. A parent shape check distinguishes a missing final field from a present
+field containing `undefined`. Applicability checks protect parent shape
+observations in both the present and absent cases, without consuming unrelated
+sibling contents. This absence remains bound to the source revision and supplies
+no positive endorsement or copy evidence. An unavailable document or a
+scope-blocked reference cannot prove absence.
 
 Verification reads carry authorization dependencies separately from application
 taint. Storage checks ordinary document revisions, including the confirmed and
@@ -86,6 +121,24 @@ identity, space, scope, or overwrite mode rejects. Persistence rejects a schema
 projection that cannot encode the acquisition's retained scope caps. Stripped,
 stale, or foreign tokens cannot recreate trusted acquisition through arbitrary
 CellRef operations.
+
+Durable events carry an optional opaque `runtimeReferenceContext` outside the
+application payload. The sending Runtime captures authenticated acquisitions at
+exact payload slots, binds the context to the canonical payload hash and full
+reference bindings, and joins the sending attempt's confidentiality. The serving
+Runtime validates completeness and restores confidentiality, scope caps, and
+private immutable reference tables onto an isolated payload before dispatch.
+This conveys no target-content integrity. The handler owns value projection;
+links carry only an inline scope restriction needed to retain their caps.
+
+The context has the same admitted producer trust as renderer and
+runtime-injected event attestations. It is not a signature, and a payload field
+cannot mint it. Memory validates the optional field's shape and retains it
+through same-space emission, cross-space outbox delivery, restart, and explicit
+Retry; it does not interpret CFC policy. An invalid context is a terminal event
+refusal. Without a context, ordinary precise reference-acquisition checks still
+apply, so decoded reference bytes cannot become public acquisitions. Primitive
+events need no context.
 
 Explicit host acquisition APIs, including `GetCell(cause)`,
 `RuntimeClient.acquireCell(address)`, and piece/home/slug loaders, remain

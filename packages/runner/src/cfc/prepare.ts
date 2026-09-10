@@ -998,43 +998,11 @@ const setupProjectionSourceMatchesValue = (
   );
 };
 
-// `writeAuthorizedBy` is a *modification* gate (CFC spec §8.15.10): it restricts
-// who may edit an existing owner-protected value. It does not govern the trusted
-// instantiation that first projects and initializes a field (§8.15.4 — defaults
-// are installed by trusted runtime/pattern instantiation; write authorization
-// applies to *subsequent* modifications).
-//
-// When the runtime instantiates a pattern whose result declares owner-protected
-// fields, it records a setup-projection marker on the result cell whose
-// `sources` point at the pattern's own projected (internal) cells — the cells
-// that hold the field's value and carry its `writeAuthorizedBy` schema. The
-// pattern initializing those fields (e.g. `avatar = ""`, `elements = []`) is its
-// own trusted creation step, authored by the runtime's result projection, not by
-// the per-field edit handler. Recognize a target as that trusted-creation site
-// when it is the redirect *source* of a setup-projection marker recorded in this
-// transaction, covering the field path.
-//
-// This is safe because the marker is recorded ONLY by the runtime's result
-// projection — never by an arbitrary `cell.set` — and only when the projection
-// STRUCTURE is established (instantiation), not on value edits (which leave the
-// projection unchanged and so record no marker). Direct untrusted writes, no-op
-// re-writes, and later field edits therefore remain fully enforced; the slot the
-// pattern result is placed into is independently gated by its own
-// `writeAuthorizedBy`, and the owner binding by `currentPrincipalIntegrityReason`.
-// `writeAuthorizedBy` gates *modification* of an existing owner-protected
-// value (§8.15.10); the runtime materializing a runtime-constructed cell's
-// initial value (`Writable(initialValue)` in a lift/handler frame — the CTS
-// wraps derived initializers this way) is the trusted initialization step
-// (§8.15.4), like the projection-marker case above. It is not (and cannot be)
-// the claim-referenced edit handler. Recognize it by BOTH signals together:
-// the seed-materialization marker — recorded ONLY by the runtime's
-// cell-serialization path (data-updating.ts BRANCH_CELL), never reachable
-// from arbitrary `cell.set` — AND the write creating the doc (a root-level
-// write whose previousValue is undefined, the same signal
-// `derivePersistedLinkLabel` uses for same-tx child docs). Edits to existing
-// docs and direct unmarked writes stay fully enforced; ownerPrincipal /
-// integrity minting is gated separately (`currentPrincipalIntegrityReason`
-// runs before this).
+// CFC §8.15.4 permits trusted initialization before §8.15.10's modification
+// gate applies. A runtime-authorized seed marker names the new constructor cell
+// and, for a root action result, its new reference. Each must create its value
+// root; adding metadata to an existing document is insufficient. Ownership,
+// integrity, and confidentiality checks remain independent of this exemption.
 const writeIsSeedMaterialization = (
   tx: IExtendedStorageTransaction,
   target: {
@@ -1045,6 +1013,7 @@ const writeIsSeedMaterialization = (
 ): boolean => {
   const marked = tx.getCfcState().writePolicyInputs.some((input) =>
     input.kind === "structural-provenance" &&
+    tx.isRuntimeWritePolicyInput(input) &&
     input.claim === CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION &&
     input.sources.some((source) =>
       source.space === target.space && source.id === target.id &&
@@ -1057,11 +1026,13 @@ const writeIsSeedMaterialization = (
   return [...(tx.getWriteDetails?.(target.space) ?? [])].some((detail) =>
     detail.address.id === target.id &&
     normalizeCellScope(detail.address.scope) === target.scope &&
-    detail.address.path.length <= 1 &&
+    canonicalizeLogicalPath(detail.address.path).length === 0 &&
     detail.previousValue === undefined
   );
 };
 
+// Result projection records the internal fields it initializes. Only writes
+// within those fields qualify; the receiving result slot has its own policy.
 const writeIsPatternSetupInitialization = (
   tx: IExtendedStorageTransaction,
   target: {
@@ -4363,7 +4334,19 @@ const assertionOutcomeIsCovered = (
   >,
   confidentiality: readonly CfcConfClause[],
 ): boolean => {
-  for (const address of [...current.references, current.address]) {
+  const observations = [...current.references, current.address].flatMap(
+    (address) => [
+      { address, nonRecursive: false },
+      // Looking up an optional descendant distinguishes its parents' shape
+      // in both the present and absent worlds. Read only each parent node;
+      // unrelated sibling contents do not participate in this decision.
+      ...address.path.map((_, depth) => ({
+        address: { ...address, path: address.path.slice(0, depth) },
+        nonRecursive: true,
+      })),
+    ],
+  );
+  for (const { address, nonRecursive } of observations) {
     if (assertionSubjectWritten(tx, address)) continue;
     let metadata: CfcMetadata | undefined;
     try {
@@ -4381,9 +4364,14 @@ const assertionOutcomeIsCovered = (
       ) return false;
       throw error;
     }
-    if (!assertionMetadataIsCovered(metadata, address.path, confidentiality)) {
-      return false;
-    }
+    if (
+      !assertionMetadataIsCovered(
+        metadata,
+        address.path,
+        confidentiality,
+        nonRecursive,
+      )
+    ) return false;
   }
   return true;
 };
@@ -4410,6 +4398,8 @@ const copyClaimValuesMatch = (
   );
   if (
     source === undefined || destination === undefined ||
+    source.absenceParent !== undefined ||
+    destination.absenceParent !== undefined ||
     !assertionOutcomeIsCovered(tx, source, confidentiality) ||
     !assertionOutcomeIsCovered(tx, destination, confidentiality)
   ) return false;
@@ -4819,6 +4809,62 @@ const gateRuntimeMintedIntegrity = (
   };
 };
 
+/** Expands runtime evidence over authored payload slots without following links. */
+const runtimeEvidencePaths = (
+  tx: IExtendedStorageTransaction,
+  target: Pick<CfcAddress, "space" | "scope"> & { id: URI },
+  pattern: readonly string[],
+  writes: {
+    paths: readonly (readonly string[])[];
+    metaOnlyByPath: Map<string, boolean>;
+  },
+  schema: JSONSchema,
+  root: JSONSchema,
+): readonly (readonly string[])[] => {
+  const candidates = new Map<string, readonly string[]>();
+  const visitedPrefixes = new Set<string>();
+  const visit = (
+    value: unknown,
+    path: readonly string[],
+    rest: readonly string[],
+  ) => {
+    if (rest.length === 0) {
+      if (
+        value !== undefined && !isPrimitiveCellLink(value) &&
+        policySchemaMatchesValue(schema, value, root)
+      ) {
+        candidates.set(pathKey(path), path);
+      }
+      return;
+    }
+    if (isPrimitiveCellLink(value) || !isKeyableObjectOrArray(value)) return;
+    const [head, ...tail] = rest;
+    const keys = head === "*" ? Object.keys(value) : [head];
+    for (const key of keys) {
+      if (Object.hasOwn(value, key)) visit(value[key], [...path, key], tail);
+    }
+  };
+  for (const written of writes.paths) {
+    if (
+      writes.metaOnlyByPath.get(pathKey(written)) ||
+      !pathsOverlap(pattern, written)
+    ) continue;
+    // A wildcard in an array item policy never names its length field.
+    if (
+      pattern.some((part, index) => part === "*" && written[index] === "length")
+    ) continue;
+    const prefix = written.slice(0, Math.min(written.length, pattern.length));
+    const prefixKey = pathKey(prefix);
+    if (visitedPrefixes.has(prefixKey)) continue;
+    visitedPrefixes.add(prefixKey);
+    const value = tx.readValueOrThrow({ ...target, path: prefix }, {
+      meta: INTERNAL_VERIFIER_META,
+    });
+    visit(value, prefix, pattern.slice(prefix.length));
+  }
+  return [...candidates.values()];
+};
+
 const persistedLabelFromSchemaAtPath = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
@@ -5162,7 +5208,7 @@ const resolveLinkedContentEvidence = (
 ): { integrity: readonly CfcAtom[]; reason?: string } => {
   const current = resolveWrittenReferenceTarget(tx, input, projectionPath);
   if (
-    current === undefined ||
+    current === undefined || current.absenceParent !== undefined ||
     !assertionOutcomeIsCovered(tx, current, confidentiality)
   ) {
     return { integrity: [], reason: "linked content evidence is unavailable" };
@@ -6201,7 +6247,10 @@ const verifyWriteFloor = (
         entryLabels,
         target.space,
       ),
-      ctx.identityForPath(entry.path),
+      tx.getCfcValueWriteAuthor({ ...target, path: entry.path })?.identity
+          ?.kind === "builtin"
+        ? ctx.identityForPath(entry.path)
+        : undefined,
     ).integrity ?? [];
 
     // One contribution per link written at/under the floor path (each linked
@@ -6358,7 +6407,8 @@ export const prepareBoundaryCommit = (
   // its cross-space eligibility, and the writer-fit measurement reads it to
   // decide whether a computed target's exemption applies.
   const labelProtectionMode = state.labelMetadataProtectionMode;
-  const flowTargets = flowMode === "off" ? undefined : valueWriteTargets(tx);
+  const writtenTargets = valueWriteTargets(tx);
+  const flowTargets = flowMode === "off" ? undefined : writtenTargets;
   const flowJoin = flowMode === "off"
     ? { confidentiality: [], integrity: [] }
     : deriveFlowJoin(tx, { collectLabeledSpaces: true });
@@ -6405,7 +6455,7 @@ export const prepareBoundaryCommit = (
         `${flowTargets.size} written doc(s)`,
     );
   }
-  for (const [key, target] of valueWriteTargets(tx)) {
+  for (const [key, target] of writtenTargets) {
     if (candidates.has(key)) {
       continue;
     }
@@ -6778,6 +6828,7 @@ export const prepareBoundaryCommit = (
     // (appended below) but drop the payload's declared policy label — a
     // non-rejecting commit must not store claims that didn't verify.
     const remintedDeclaredPaths = new Map<string, readonly string[]>();
+    const runtimeStampEntries: LabelMapEntry[] = [];
     const persistedLabelEntries: LabelMapEntry[] = ingestVerificationFailed
       ? []
       : mergedSchemaEntries
@@ -6813,16 +6864,46 @@ export const prepareBoundaryCommit = (
           ) {
             remintedDeclaredPaths.set(pathKey(entry.path), entry.path);
           }
-          const derived = gateRuntimeMintedIntegrity(
-            derivePersistedLabel(
-              tx,
-              entry.schema,
-              entry.label,
-              mergedSchemaEntryLabels,
-              target.space,
-            ),
-            identityForSchemaPath(writeAuthorIdentities.get(key), entry.path),
+          const proposed = derivePersistedLabel(
+            tx,
+            entry.schema,
+            entry.label,
+            mergedSchemaEntryLabels,
+            target.space,
           );
+          // Runtime evidence certifies an authored value, not every future
+          // member of the schema's wildcard. Ordinary declared policy retains
+          // its schema path and its independent store-policy discipline.
+          const derived = gateRuntimeMintedIntegrity(proposed, undefined);
+          const runtimeAtoms =
+            proposed.integrity?.filter(isRuntimeMintedIntegrityAtom) ?? [];
+          const writes = writtenTargets.get(key);
+          if (runtimeAtoms.length > 0 && writes !== undefined) {
+            for (
+              const path of runtimeEvidencePaths(
+                tx,
+                target,
+                entry.path,
+                writes,
+                entry.schema,
+                entry.root,
+              )
+            ) {
+              if (
+                tx.getCfcValueWriteAuthor({ ...target, path })?.identity
+                    ?.kind !==
+                  "builtin" ||
+                identityForSchemaPath(writeAuthorIdentities.get(key), path)
+                    ?.kind !== "builtin"
+              ) continue;
+              runtimeStampEntries.push({
+                path,
+                label: { integrity: runtimeAtoms },
+                origin: "derived",
+                observes: "value",
+              });
+            }
+          }
           // Store confidentiality is grow-only (§8.12.1): a re-write of a path must
           // not drop confidentiality the labelMap already carried beyond the schema
           // (e.g. link-derived or carried-view atoms). Reads use longest-prefix
@@ -6918,6 +6999,7 @@ export const prepareBoundaryCommit = (
     );
     let flowCleared = false;
     let remintCleared = false;
+    let runtimeEvidenceCleared = false;
     // Stage B: stored label-metadata templates this persist drops (they are
     // re-derived from the FINAL payload entry set below). Tracked so a
     // TEMPLATE-ONLY stale envelope — a mixed-version writer cleared the
@@ -7017,9 +7099,30 @@ export const prepareBoundaryCommit = (
         }
         return presentAtPath(flowWrittenValues?.get(writtenKey), rel);
       });
-    for (const entry of existing?.labelMap.entries ?? []) {
+    for (let entry of existing?.labelMap.entries ?? []) {
       const entryPath = canonicalizeLogicalPath(entry.path);
       const key = pathKey(entryPath);
+      // Runtime attestations expire when any part of their value changes,
+      // including with flow labeling disabled. An old wildcard attestation
+      // cannot establish which concrete values its author actually certified.
+      const runtimeEvidence = entry.label.integrity?.some(
+        isRuntimeMintedIntegrityAtom,
+      );
+      const runtimeValueEntry = entry.origin === "derived" &&
+        entry.observes === "value";
+      const runtimeDeclaration = entry.origin === "declared";
+      if (
+        runtimeEvidence && (runtimeValueEntry || runtimeDeclaration) &&
+        ((runtimeDeclaration && entryPath.includes("*")) ||
+          tx.getCfcValueWriteAuthor({ ...target, path: entryPath }) !==
+            undefined)
+      ) {
+        runtimeEvidenceCleared = true;
+        entry = {
+          ...entry,
+          label: gateRuntimeMintedIntegrity(entry.label, undefined),
+        };
+      }
       // Label-metadata population templates (template-population Stage B,
       // spec §4.6.4.2) are a pure function of the payload entries in this
       // same envelope: never carried forward — re-derived below from the
@@ -7159,6 +7262,7 @@ export const prepareBoundaryCommit = (
         });
       }
     }
+    persistedLabelEntries.push(...runtimeStampEntries);
     for (const input of linkWriteInputs) {
       const linkIdentity = identityForInput(input);
       // Inv-12 Stage 1: link-origin entries are cross-space when the link
@@ -8008,6 +8112,7 @@ export const prepareBoundaryCommit = (
 
     if (
       coalescedLabelEntries.length === 0 && !flowCleared && !remintCleared &&
+      !runtimeEvidenceCleared &&
       !droppedLabelMetadataTemplates
     ) {
       continue;
