@@ -1,8 +1,3 @@
-import type {
-  CellScope,
-  EmbeddedFactorySchema,
-  JSONSchema,
-} from "@commonfabric/api";
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 import { isPlainObject } from "@commonfabric/utils/types";
 import {
@@ -25,6 +20,30 @@ import {
   IS_DEEP_FROZEN,
 } from "./fabric-bases/BaseFabricInstance.ts";
 
+// The wire protocol owns structural schema and scope types at the data-model
+// layer. Author-facing API types are assignable to these shapes, while the
+// protocol remains independent of the higher API package.
+type FactoryCellScope = "space" | "user" | "session";
+
+type FactoryJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | FactoryJsonArray
+  | FactoryJsonObject;
+
+interface FactoryJsonArray extends ReadonlyArray<FactoryJsonValue> {}
+
+interface FactoryJsonObject
+  extends Readonly<Record<string, FactoryJsonValue>> {}
+
+type EmbeddedFactorySchema =
+  | boolean
+  | Readonly<Record<string, FactoryJsonValue>>;
+
+type LiveFactorySchema = boolean | Readonly<Record<string, unknown>>;
+
 /** Content-addressed reference to a builder factory artifact. */
 export interface FactoryArtifactRef extends FabricPlainObject {
   readonly identity: string;
@@ -42,7 +61,7 @@ export interface PatternFactoryStateV1 extends FactoryStateBaseV1 {
   readonly resultSchema: EmbeddedFactorySchema;
   readonly paramsSchema?: EmbeddedFactorySchema;
   readonly params?: FabricPlainObject;
-  readonly defaultScope?: CellScope;
+  readonly defaultScope?: FactoryCellScope;
   readonly spaceSelector?: FabricValue;
 }
 
@@ -51,7 +70,7 @@ export interface ModuleFactoryStateV1 extends FactoryStateBaseV1 {
   readonly kind: "module";
   readonly argumentSchema?: EmbeddedFactorySchema;
   readonly resultSchema?: EmbeddedFactorySchema;
-  readonly defaultScope?: CellScope;
+  readonly defaultScope?: FactoryCellScope;
 }
 
 /** Canonical serialized state for a handler factory. */
@@ -78,27 +97,27 @@ interface LiveFactoryStateBase {
  */
 export interface LivePatternFactoryState extends LiveFactoryStateBase {
   readonly kind: "pattern";
-  readonly argumentSchema: JSONSchema;
-  readonly resultSchema: JSONSchema;
-  readonly paramsSchema?: JSONSchema;
+  readonly argumentSchema: LiveFactorySchema;
+  readonly resultSchema: LiveFactorySchema;
+  readonly paramsSchema?: LiveFactorySchema;
   readonly params?: unknown;
-  readonly defaultScope?: CellScope;
+  readonly defaultScope?: FactoryCellScope;
   readonly spaceSelector?: unknown;
 }
 
 /** Unsealed module state whose complete artifact ref may still be pending. */
 export interface LiveModuleFactoryState extends LiveFactoryStateBase {
   readonly kind: "module";
-  readonly argumentSchema?: JSONSchema;
-  readonly resultSchema?: JSONSchema;
-  readonly defaultScope?: CellScope;
+  readonly argumentSchema?: LiveFactorySchema;
+  readonly resultSchema?: LiveFactorySchema;
+  readonly defaultScope?: FactoryCellScope;
 }
 
 /** Unsealed handler state whose complete artifact ref may still be pending. */
 export interface LiveHandlerFactoryState extends LiveFactoryStateBase {
   readonly kind: "handler";
-  readonly contextSchema?: JSONSchema;
-  readonly eventSchema?: JSONSchema;
+  readonly contextSchema?: LiveFactorySchema;
+  readonly eventSchema?: LiveFactorySchema;
 }
 
 /** Internal, not-yet-canonical state for a live builder factory. */
@@ -181,7 +200,11 @@ const FACTORY_STATE = Symbol.for("common.factoryState");
 const factoryAdmissions = new WeakMap<Callable, FactoryAdmission>();
 
 const CONTENT_IDENTITY_RE = /^[A-Za-z0-9_-]{43}$/;
-const FACTORY_SCOPES = new Set<CellScope>(["space", "user", "session"]);
+const FACTORY_SCOPES = new Set<FactoryCellScope>([
+  "space",
+  "user",
+  "session",
+]);
 
 function validationError(path: string, message: string): never {
   throw new TypeError(`Invalid Factory@1 state at ${path}: ${message}`);
@@ -293,12 +316,12 @@ function canonicalSchema(
   value: unknown,
   path: string,
   visiting: Set<object>,
-): JSONSchema {
+): EmbeddedFactorySchema {
   if (typeof value === "boolean") return value;
   if (!isPlainObject(value)) {
     validationError(path, "expected a boolean or plain schema object");
   }
-  return canonicalJsonValue(value, path, visiting) as JSONSchema;
+  return canonicalJsonValue(value, path, visiting) as EmbeddedFactorySchema;
 }
 
 function isCanonicallyDeepFrozenValue(
@@ -508,11 +531,14 @@ function canonicalRef(
   return Object.freeze({ identity, symbol });
 }
 
-function canonicalScope(value: unknown, path: string): CellScope {
-  if (typeof value !== "string" || !FACTORY_SCOPES.has(value as CellScope)) {
+function canonicalScope(value: unknown, path: string): FactoryCellScope {
+  if (
+    typeof value !== "string" ||
+    !FACTORY_SCOPES.has(value as FactoryCellScope)
+  ) {
     validationError(path, "expected space, user, or session");
   }
-  return value as CellScope;
+  return value as FactoryCellScope;
 }
 
 function optionalCanonical<T>(

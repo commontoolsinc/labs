@@ -343,6 +343,12 @@ interface FabricFactory {
 }
 ```
 
+The `Factory@1` state shapes and validation belong to the data-model layer.
+They use data-model-owned structural schema and scope descriptions and do not
+depend on the higher author-facing API package. API factory types may consume
+or refine those shapes, but the wire protocol remains usable without creating
+an API/data-model dependency cycle.
+
 The state accessor resolves through a stable internal root token because an
 artifact ref is assigned after verified module evaluation. Curried, mapped,
 and modifier-derived factories retain that same root token through a
