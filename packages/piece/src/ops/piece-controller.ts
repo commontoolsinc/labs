@@ -532,12 +532,14 @@ export interface PatternUpdateReceipt extends PieceSourceSetResult {
  * The verdict {@link PieceController.changeSource} returns: `applied` when
  * storage accepted the transaction carrying the source transition, and
  * `incompatible` when the candidate cannot run over the piece's retained
- * state, with the prepared change a caller may confirm to apply anyway.
+ * state, with the prepared change a caller may confirm to apply anyway. An
+ * update that finds its active origin already current makes no transition;
+ * it reports `applied` after recording that finding.
  *
- * `applied` is the transaction's own outcome, never a read of the piece
- * beside the call — a read answers what the piece points at now, which a
- * concurrent later change may have moved, and it resolves from local cache
- * over a provider failure. `executionWarning` reports a failure in the work
+ * A transition's `applied` is its transaction's own outcome, never a read of
+ * the piece beside the call — a read answers what the piece points at now,
+ * which a concurrent later change may have moved, and it resolves from local
+ * cache over a provider failure. `executionWarning` reports a failure in the work
  * that refreshes the running piece after its transition committed; such a
  * failure does not undo the accepted transition, the same split
  * {@link PatternUpdateReceipt}'s `refresh` arm reports for a direct edit.

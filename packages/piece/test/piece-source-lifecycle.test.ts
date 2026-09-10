@@ -1762,6 +1762,80 @@ describe("piece source lifecycle", () => {
     ).toHaveLength(1);
   });
 
+  it("reports a restore's refresh failure without rereading source history after its receipt", async () => {
+    // What the receipt replaces: confirming the transition by synchronizing
+    // the piece and re-reading its revision list. Such a read answers a
+    // different question — which revisions the piece holds now, after any
+    // concurrent change — and `syncCell` resolves normally over a provider
+    // error, so a cache hit reads as durable truth. The guard is armed the
+    // moment the setup transaction issues its receipt and fails every source
+    // history read from then on, so a read-back added beside the receipt
+    // fails this case rather than quietly agreeing with it.
+
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, "system:receipt-guard.tsx");
+    await piece.changeSource({ kind: "detach" });
+    const baseline = (await readPieceSourceState(runtime, piece.getCell()))
+      .history[0];
+    await piece.setPattern(versionProgram("v2"));
+
+    const mutablePieces = pieces as unknown as {
+      syncPattern: typeof pieces.syncPattern;
+    };
+    const syncPattern = pieces.syncPattern;
+    const runSyncedWithCommit = runtime.runSyncedWithCommit.bind(runtime);
+    const cellPrototype = Object.getPrototypeOf(piece.getCell()) as {
+      getMetaRaw: (field: string, options?: unknown) => unknown;
+    };
+    const getMetaRaw = cellPrototype.getMetaRaw;
+    let receiptIssued = false;
+    let sourceHistoryReadsAfterReceipt = 0;
+    mutablePieces.syncPattern = () => {
+      if (!receiptIssued) {
+        throw new Error("post-commit refresh started before the receipt");
+      }
+      throw new Error("injected post-commit refresh failure");
+    };
+    runtime.runSyncedWithCommit = (async (...args) => {
+      const result = await runSyncedWithCommit(...args);
+      receiptIssued = true;
+      return result;
+    }) as typeof runtime.runSyncedWithCommit;
+    cellPrototype.getMetaRaw = function (field, options) {
+      if (receiptIssued && field === "pieceSourceHistory") {
+        sourceHistoryReadsAfterReceipt++;
+        throw new Error(
+          "the commit receipt must not be verified by rereading source history",
+        );
+      }
+      return getMetaRaw.call(this, field, options);
+    };
+    try {
+      const result = await piece.changeSource({
+        kind: "restore",
+        revisionId: baseline.revisionId,
+      });
+
+      expect(receiptIssued).toBe(true);
+      expect(sourceHistoryReadsAfterReceipt).toBe(0);
+      expect(result).toEqual({
+        status: "applied",
+        executionWarning: "injected post-commit refresh failure",
+      });
+    } finally {
+      mutablePieces.syncPattern = syncPattern;
+      runtime.runSyncedWithCommit = runSyncedWithCommit;
+      cellPrototype.getMetaRaw = getMetaRaw;
+    }
+
+    // Read after the guard has proved the restore itself did not.
+    expect(getPatternIdentityRef(piece.getCell())).toEqual(baseline.pattern);
+    expect(
+      (await readPieceSourceState(runtime, piece.getCell())).history.at(-1)
+        ?.operation,
+    ).toBe("revert");
+  });
+
   it("reports a committed detach after a concurrent refresh fails", async () => {
     const piece = await pieces.create(versionProgram("v1"), { input: {} });
     await stampOrigin(piece, "system:detach-refresh.tsx");
@@ -1775,6 +1849,23 @@ describe("piece source lifecycle", () => {
     // Only awaited, never read: this test is about what the newer edit does
     // to the detach beside it, not about what it returns.
     let newerEdit: Promise<unknown> | undefined;
+    const cellPrototype = Object.getPrototypeOf(cell) as {
+      getMetaRaw: (field: string, options?: unknown) => unknown;
+    };
+    const getMetaRaw = cellPrototype.getMetaRaw;
+    // Armed at the refresh failure: from there to the verdict is exactly
+    // where a read-back would run.
+    let refreshFailed = false;
+    let sourceHistoryReadsAfterFailure = 0;
+    cellPrototype.getMetaRaw = function (field, options) {
+      if (refreshFailed && field === "pieceSourceHistory") {
+        sourceHistoryReadsAfterFailure++;
+        throw new Error(
+          "a committed detach must not be verified by rereading source history",
+        );
+      }
+      return getMetaRaw.call(this, field, options);
+    };
 
     runtime.editWithRetry = (async (action, maxRetries) => {
       const result = await originalEditWithRetry(action, maxRetries);
@@ -1787,6 +1878,7 @@ describe("piece source lifecycle", () => {
           heldSyncEntered.resolve();
           return releaseHeldSync.promise.then(() => originalSync());
         }
+        refreshFailed = true;
         return Promise.reject(
           new Error("detach post-commit refresh failed"),
         );
@@ -1801,9 +1893,12 @@ describe("piece source lifecycle", () => {
         status: "applied",
         executionWarning: "detach post-commit refresh failed",
       });
+      expect(sourceHistoryReadsAfterFailure).toBe(0);
     } finally {
       mutableCell.sync = originalSync;
       runtime.editWithRetry = originalEditWithRetry;
+      refreshFailed = false;
+      cellPrototype.getMetaRaw = getMetaRaw;
       releaseHeldSync.resolve();
     }
     await newerEdit;
