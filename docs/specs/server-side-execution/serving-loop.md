@@ -1083,9 +1083,13 @@ same crossing (builtins.md §5 carries the register row; RULED
 
 The SpaceServer owns the pattern-source watcher and the hot-swap. The
 two halves have different owners. FOLLOWING a piece's source origin
-belongs to whoever OPENS the piece, which a serving tenure never does
-(piece-source-lifecycle.md); a tenure owes its space the EXISTENCE of a
-root and nothing more. The SWAP is the server's: a pattern-pointer
+belongs to whoever explicitly OPENS the piece (piece-source-lifecycle.md).
+Tenure activation owes its space the EXISTENCE of a root, without following
+that root's source. A served wish explicitly opens the runtime-supplied
+sidecars it needs through `openSidecarSurface` and `SourceReconciler.open`;
+existing sidecars follow their origins on that open. The ON client only
+references those sidecars, leaving the serving runtime as their opener. The
+SWAP is the server's: a pattern-pointer
 write is an ordinary authored input that dirties the piece, the swap is
 the server reacting to it, and the swap's setup write stamps the
 `bookkeeping` kind and enters the wave
@@ -1094,10 +1098,10 @@ commit, the swap replaces the running graph only after DURABLE
 acceptance — on withdrawal the old graph stays (old-graph-plus-new-
 pointer is a coherent not-yet-swapped state; the reverse is the
 broken-setup class). The pointer write itself stays authored-class
-under the writing principal. A serving tenure does not probe an existing
-piece's source origin. Creating a missing space root still fetches its initial
-system source through the serving runtime's API URL; that fetch remains within
-verification-coverage.md OW55's source-trust obligation.
+under the writing principal. Root creation and explicit wish-sidecar opens
+fetch system source through the serving runtime's API URL. Those fetches remain
+within verification-coverage.md OW55's source-trust obligation; root ensuring
+adds no source-following probe for an existing root.
 
 ## 4. Effectful nodes: memoization contract
 

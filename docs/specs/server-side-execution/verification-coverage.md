@@ -22,7 +22,7 @@ The status corrections in this register are bounded to the rows below:
 
 | Row | Current disposition |
 | --- | --- |
-| OW18 / OW45 source freshness | Server tenure ensures root existence; source following belongs to the opener. |
+| OW18 / OW45 source freshness | Tenure activation ensures root existence; explicit opens follow source, including served wish-sidecar opens. |
 | OW28 | Open: no served compile outbox/completion path or real-host completion regression test. |
 | OW28-createRef | Open: distinct schema-backed program values can collide in the compile cache, including under OFF. |
 | OW28-supersession-family / OW28-instance-family | Investigation follow-ups; reproduce current residuals and reconcile the instance family with OW53. |
@@ -36,8 +36,11 @@ The status corrections in this register are bounded to the rows below:
 The [coverage status audit](../../history/plans/server-execution-v2/optimize/coverage-status-audit-2026-09-09.md)
 records the investigation's inspected head, provenance, probes, and limits.
 It is a historical record; the row's current implementation and tests govern
-its disposition. The dated execution records below do not describe the current
-deployment posture or establish that every owed row has been re-audited.
+its disposition. In particular, runtime-supplied sidecars are explicitly opened
+by the serving wish builtin; the audit's blanket statement that serving tenures
+open no pieces is too broad. The dated execution records below do not describe
+the current deployment posture or establish that every owed row has been
+re-audited.
 
 ## 1. The map
 
@@ -303,7 +306,7 @@ acceptances only — no rule counts move):
   the parked-on-own-seal distinction (or excluding unapplied frames'
   seqs from `batchHead`) and source-check verification — are carried in
   the plan's Phase 2 section. The source-check obligation is superseded by
-  opener-owned source following (OW18); it is not an owed server probe.
+  explicit-open source following (OW18); it is not an owed tenure-wide probe.
 - Flag 2 (watermark-only derived commits): CONFIRMED — protocol §4's
   "never its own commit" now carries the ruled parenthetical: an
   advance-only wave commits the advance as the batch's ONE derived
@@ -616,8 +619,10 @@ client does not; this PR):
   own-echo exemption). The stage-F residual comment at `inputSynced`
   is rewritten to the resolved posture.
 - The Phase-2 revisit (b) — the source-following half: RETIRED, not
-  covered. A serving tenure opens no piece, so it follows no piece's
-  source origin, and there is no server-side half left to verify. The
+  covered as a tenure-wide source probe. Tenure activation ensures root
+  existence without following the root's origin. Runtime-supplied wish
+  sidecars are explicitly opened and follow their origins through that open;
+  their lifecycle is a separate surface from root ensuring. The
   `sx2-serving-loop` integration surface
   (`packages/patterns/integration/sx2-serving-loop.test.ts`) keeps its
   remaining gates and runs in both arms, its ON-arm skip having been
@@ -1330,16 +1335,20 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   the amplification-ratio gate. Source-following ownership and the
   server's root-existence coverage are recorded by OW18 below.
 
-- OW18 — CLOSED as a move-everything obligation. A serving tenure ensures
-  that the space root exists; it does not follow the root's source or any
-  other piece's origin. Source following belongs to whoever opens the piece,
-  as specified by [piece-source-lifecycle.md](../piece-source-lifecycle.md)
-  and serving-loop.md §3e. The server still reacts to accepted pattern-pointer
+- OW18 — CLOSED as a move-everything obligation. Tenure activation ensures
+  that the space root exists without following the root's source. Source
+  following belongs to whoever explicitly opens a piece, as specified by
+  [piece-source-lifecycle.md](../piece-source-lifecycle.md) and serving-loop.md
+  §3e. Under ON, the serving wish builtin opens its runtime-supplied sidecars
+  through `openSidecarSurface` → `SourceReconciler.open`; existing sidecars
+  reconcile their origins there. ON clients reference those served sidecars
+  without opening them. The server still reacts to accepted pattern-pointer
   writes by swapping the served graph. Coverage belongs to
   `packages/runner/test/executor-space-root-ensure.test.ts`,
   `packages/runner/test/ensure-space-root.test.ts`, and
-  `packages/piece/test/piece-source-lifecycle.test.ts`. OW45's root-existence work and any opener-side
-  lifecycle gaps retain their own scope; no server updater move is owed here.
+  `packages/piece/test/piece-source-lifecycle.test.ts`. OW45's root-existence
+  work and explicit-open lifecycle gaps retain their own scope; no tenure-wide
+  source updater move is owed here.
 
 **Phase 3 follow-ups (the independent review's owed rows,
 2026-08-11):**
@@ -7207,9 +7216,10 @@ supply; OW29/OW32/OW34 closed):
     no durable retry record behind them — the wish case above, where
     a dropped first-ever derivation leaves neither basis rows nor any
     entry to re-drain. (ii) The dual-updater contention finding is CLOSED:
-    following a piece's source belongs to the opener and a serving tenure
-    follows none (piece-source-lifecycle.md; OW56 finding 2). The server's
-    remaining role is the hot-swap after an accepted pointer change.
+    following a piece's source belongs to its explicit opener, while root
+    ensuring does not follow source (piece-source-lifecycle.md; OW56 finding
+    2). The serving runtime explicitly opens wish sidecars; it also performs
+    the hot-swap after an accepted pointer change.
     (iii) The lunch FILE entry's
     third member (ensure-OFF: the guest's ~98-101-op
     program-materialization commit never landing) is a DIFFERENT,
@@ -9190,12 +9200,14 @@ supply; OW29/OW32/OW34 closed):
     freshness mechanism remains its separate currentness design and is
     not part of this closure.
   - **OW55 — OPEN: the serving runtimes' pattern-fetch trust surface.**
-    `toolshed/index.ts` passes `new URL(env.API_URL)` into
+    `packages/toolshed/index.ts` passes `new URL(env.API_URL)` into
     `startServerExecutionHost`, which supplies the serving runtime's API URL.
     The default is `http://localhost:8000`. Wish sidecars and space-root
-    creation resolve system program sources through this URL; the serving
-    tenure does not follow existing pieces' source origins or run a source
-    updater. Owed: a deliberate posture that pins the serving source to self
+    creation resolve system program sources through this URL. Existing wish
+    sidecars also reconcile their origins when `openSidecarSurface` explicitly
+    opens them on the serving runtime. Tenure activation does not follow the
+    root's source or run a general source updater. Owed: a deliberate posture
+    that pins the serving source to self
     when co-hosted, or verifies its identity against the local patterns route,
     plus a local-reproduction runbook note requiring explicit API_URL and
     MEMORY_URL when the default port is occupied. Root creation is within
@@ -9274,9 +9286,12 @@ supply; OW29/OW32/OW34 closed):
       `api/cfc.ts` :132-140) remains the complete fix — this OW56 row.
     - **Finding 2 — version-update was a dual-write under ON, client AND
       server, unarbitrated.** CLOSED: following a piece's source origin
-      now runs only where a piece is OPENED, and a serving tenure opens
-      none, so the server no longer fetches, compiles, or swaps on a
-      piece's behalf. What follows is the finding as recorded. Both
+      runs where a piece is explicitly OPENED; tenure activation no longer
+      follows the root's source. Under ON, the serving wish builtin opens its
+      sidecars and the client references the served cells, preserving one
+      source-following owner for that surface too. The server still swaps
+      served graphs after accepted pointer writes. What follows is the
+      finding as recorded. Both
       runtimes defaulted the update posture on, so both ran the
       check/fetch/compile/persist and attempted the pointer swap; they
       RACED — OCC-guarded so the loser failed clean,

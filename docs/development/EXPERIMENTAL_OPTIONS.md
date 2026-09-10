@@ -21,7 +21,7 @@ in the same change.
 flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-09-03. Each flag's section carries the date its status
+**Last reviewed:** 2026-09-09. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -414,6 +414,14 @@ server](#clients-that-are-not-built-alongside-their-server).
   OFF code path is removed — a separate post-soak
   PR (the plan's Phase 7 task 2; it also removes the opposite guard lanes and
   `build-toolshed-opposite`).
+- **Status on 2026-09-09 (coverage reconciliation).** The first-party
+  default remains OFF and the ON soak is paused. OW28's served `compileAndRun`
+  outbox/completion port is missing on main and remains an unmet Phase-7
+  ordered gate. Restore and verify that port before a renewed ON rollout;
+  the preserved sibling implementation is an input to that work, not proof
+  of a landed capability. The
+  [coverage register](../specs/server-side-execution/verification-coverage.md#current-status)
+  carries the current scope and the audit's evidence boundaries.
 - **Status on 2026-09-03 (the ROLLBACK).** The rollback PR (#6840)
   returned the constant to `false` — the first data-only flip: this value
   and this registry's current-status prose, with no workflow, test, or role

@@ -1501,9 +1501,10 @@ Stages, one PR each except C, which is a three-PR train (below):
       (OW10), both dischargeable stage-D bounds discharged (delegated
       foreign admission; read-only-space read sets folding into
       withdrawals), and toolshed wiring so the ON CI arm actually
-      serves. Server-side hot-swap is verified end to end. A serving tenure
-      does not follow source origins; the opener owns that mechanism under
-      piece-source-lifecycle.md, so no server network source-check is owed.
+      serves. Server-side hot-swap is verified end to end. Explicit opens
+      follow source origins under piece-source-lifecycle.md, including served
+      wish-sidecar opens. Tenure activation owes root existence, not a general
+      network source-check.
 - [x] **G — effectful + outbox**: serve `fetch*`, `generate*`,
       `sqlite*` behind request-hash memoization; the outbox; egress
       performed only here (effect authority per README §3.8; quota
@@ -1646,7 +1647,8 @@ W):
 - [x] Source-check ownership is settled by piece-source-lifecycle.md and
       serving-loop.md §3e: the opener follows a piece's origin, and the server
       ensures root existence and reacts to accepted pointer changes. The
-      server source-probe obligation is superseded (OW18). Current root
+      tenure-wide source-probe obligation is superseded (OW18). Served wish
+      sidecars follow their origins through explicit runtime opens. Current root
       coverage is `executor-space-root-ensure.test.ts`, including leaving an
       existing root's source alone across reactivation. Source-lifecycle and
       hot-swap coverage remain separate from the serving-loop's propagation
