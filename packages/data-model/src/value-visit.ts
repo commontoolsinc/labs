@@ -16,8 +16,16 @@ import {
   FabricPrimitive,
   FabricValue,
 } from "./interface.ts";
-import { isValidFabricValue } from "./validity-check.ts";
-import { tagFromFabricValue, VALUE_TAGS, type ValueTag } from "./value-tags.ts";
+import {
+  isValidFabricValue,
+  isValidFabricValueLayer,
+} from "./validity-check.ts";
+import {
+  tagFromFabricValue,
+  tagFromFabricValueElseNull,
+  VALUE_TAGS,
+  type ValueTag,
+} from "./value-tags.ts";
 import { toCompactDebugString } from "./value-debug.ts";
 
 //
@@ -486,7 +494,7 @@ export abstract class ContainerIteratingVisitor<
 
   /** @inheritDoc */
   visitFabricInstance(
-    value: FabricInstance,
+    _value: FabricInstance,
   ): LeafVisitorResult<DomainExtra, ResultType> {
     // TODO(danfuzz): This is where we finally need to sort out `FabricInstance`
     // iteration.
@@ -502,7 +510,7 @@ export abstract class ContainerIteratingVisitor<
 
   /** @inheritDoc */
   visitFabricContainer(
-    value: FabricContainerValue,
+    _value: FabricContainerValue,
   ): DispatchingVisitorResult<DomainExtra, ResultType> {
     return DO_VISIT_SUBTYPE;
   }
@@ -524,10 +532,16 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   #stack = new IndexTrackingStack<DomainFor<DomainExtra>>();
 
   /**
-   * Indicates if the value being visited is known to be a valid `FabricValue`.
-   * This is used to avoid re-checking during the visit.
+   * Indicates if the value being visited is assumed to be a valid
+   * `FabricValue`.
    */
-  #knownValid = false;
+  #assumeValid = false;
+
+  /**
+   * When `#assumeValid` is `false`, whether to do deep type checks (vs.
+   * shallow).
+   */
+  #deepTypeCheck = false;
 
   /**
    * Constructs an instance.
@@ -540,8 +554,35 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   // Instance members
   //
 
-  /** Visits the indicated value as a top-level operation. */
-  visit(value: DomainFor<DomainExtra>): BaselineVisitResult<ResultType> {
+  /**
+   * Visits the indicated value as a top-level operation, where the domain and
+   * result type are assumed to all be known-valid `FabricValue`. This is only
+   * appropriate to call when this class is instantiated with default type
+   * parameters _and_ `value` can safely be assumed to be valid (either because
+   * of an explicit check or by fiat).
+   */
+  visitFabricValue(value: FabricValue): BaselineVisitResult<ResultType> {
+    this.#assumeValid = true;
+    this.#deepTypeCheck = false;
+    return this.#mainVisit(value);
+  }
+
+  /**
+   * Visits the indicated value as a top-level operation, checking every
+   * encountered value to determine whether or not it is a `FabricValue`.
+   * See `visitValue()` for details on the `deepTypeCheck` argument.
+   */
+  visit(
+    value: DomainFor<DomainExtra>,
+    deepTypeCheck: boolean,
+  ): BaselineVisitResult<ResultType> {
+    this.#assumeValid = false;
+    this.#deepTypeCheck = deepTypeCheck;
+    return this.#mainVisit(value);
+  }
+
+  /** Helper which implements most of a top-level visit. */
+  #mainVisit(value: DomainFor<DomainExtra>): BaselineVisitResult<ResultType> {
     if (this.#stack.depth !== 0) {
       // deno-coverage-ignore-start
 
@@ -552,9 +593,6 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       );
     }
     // deno-coverage-ignore-stop
-
-    this.#knownValid = false; // Because it's read by the next call.
-    this.#knownValid = this.#isValidFabricValue(value);
 
     const result = this.#visitValue(value);
 
@@ -716,43 +754,52 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         return result;
       }
 
-      if (this.#isValidFabricValue(value)) {
-        const tag = tagFromFabricValue(value);
-        switch (tag) {
-          case VALUE_TAGS.Array: {
-            const array = value as FabricArray;
-            result = vis.visitFabricContainer(array);
-            if (result?.type === "visitSubtype") {
-              result = vis.visitFabricArray(array);
-            }
-            break;
+      const tag = this.#tagFromValueElseNull(value);
+      switch (tag) {
+        case VALUE_TAGS.Array: {
+          const array = value as FabricArray;
+          result = vis.visitFabricContainer(array);
+          if (result?.type === "visitSubtype") {
+            result = vis.visitFabricArray(array);
           }
-
-          case VALUE_TAGS.FabricInstance: {
-            const instance = value as FabricInstance;
-            result = vis.visitFabricContainer(instance);
-            if (result?.type === "visitSubtype") {
-              result = vis.visitFabricInstance(instance);
-            }
-            break;
-          }
-
-          case VALUE_TAGS.Object: {
-            const object = value as FabricPlainObject;
-            result = vis.visitFabricContainer(object);
-            if (result?.type === "visitSubtype") {
-              result = vis.visitFabricPlainObject(object);
-            }
-            break;
-          }
-
-          default: {
-            const prim = value as Primitive | FabricPrimitive;
-            result = vis.visitPrimitive(prim, tag);
-          }
+          break;
         }
-      } else {
-        result = vis.visitNonFabricValue(value as DomainExtra);
+
+        case VALUE_TAGS.FabricInstance: {
+          const instance = value as FabricInstance;
+          result = vis.visitFabricContainer(instance);
+          if (result?.type === "visitSubtype") {
+            result = vis.visitFabricInstance(instance);
+          }
+          break;
+        }
+
+        case VALUE_TAGS.Object: {
+          const object = value as FabricPlainObject;
+          result = vis.visitFabricContainer(object);
+          if (result?.type === "visitSubtype") {
+            result = vis.visitFabricPlainObject(object);
+          }
+          break;
+        }
+
+        case null: {
+          // `null` means that `value` was not recognized as a `FabricValue`.
+          if (this.#assumeValid) {
+            const desc = toCompactDebugString(value);
+            throw new Error(
+              `Encountered a non-\`FabricValue\` while doing an "assume valid" visit: ${desc}`,
+            );
+          }
+          result = vis.visitNonFabricValue(value as DomainExtra);
+          break;
+        }
+
+        default: {
+          const prim = value as Primitive | FabricPrimitive;
+          result = vis.visitPrimitive(prim, tag);
+          break;
+        }
       }
 
       if (result?.type !== "replace") {
@@ -764,16 +811,25 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   }
 
   /**
-   * Indicates whether or not the given value is a valid `FabricValue`.
-   *
-   * TODO(danfuzz): If cached, `isValidDeepFrozenFabricValue()` is faster than
-   * `isValidFabricValue()`. The latter should actually sniff at the frozen
-   * cache.
+   * Gets the tag for the given value, in a manner which honors the
+   * type-checking style indicated by the top-level `visit*()` call on this
+   * instance.
    */
-  #isValidFabricValue(value: unknown): value is FabricValue {
-    return this.#knownValid ||
-      isValidDeepFrozenFabricValue(value) ||
-      isValidFabricValue(value);
+  #tagFromValueElseNull(value: DomainFor<DomainExtra>): ValueTag | null {
+    if (this.#assumeValid) {
+      return tagFromFabricValueElseNull(value as FabricValue);
+    } else if (this.#deepTypeCheck) {
+      // TODO(danfuzz): If cached, `isValidDeepFrozenFabricValue()` is faster
+      // than `isValidFabricValue()`. The latter should actually sniff at the
+      // frozen cache.
+      const isFabricValue = isValidDeepFrozenFabricValue(value) ||
+        isValidFabricValue(value);
+      return isFabricValue ? tagFromFabricValue(value) : null;
+    } else {
+      return isValidFabricValueLayer(value)
+        ? tagFromFabricValue(value as FabricValue)
+        : null;
+    }
   }
 }
 
@@ -791,7 +847,7 @@ export function visitFabricValue(
   visitor: ValueVisitor,
 ): BaselineVisitResult {
   const inProgress = new VisitInProgress(visitor);
-  return inProgress.visit(value);
+  return inProgress.visitFabricValue(value);
 }
 
 /**
@@ -801,26 +857,39 @@ export function visitFabricValue(
 export function makeVisitFabricValueFunction(
   visitor: ValueVisitor,
 ): (value: FabricValue) => BaselineVisitResult {
-  return (value: FabricValue) => visitValue(value, visitor);
+  return (value: FabricValue) => visitFabricValue(value, visitor);
 }
 
 /**
- * Performs a one-off visit of a value with a visitor.
+ * Performs a one-off visit of a value with a visitor, using runtime type checks
+ * to determine whether or not an encountered value is a `FabricValue`.
+ *
+ * Type checking can be performed either as a deep-validity check or a shallow
+ * "shape of value" check. The shallow check is faster and considers all arrays
+ * to be `FabricArray`s and all plain objects to be `FabricPlainObject`s. The
+ * deep check can incur significant performance overhead, and in return
+ * guarantees that anything of type `FabricValue` passed to the visitor is in
+ * fact a valid `FabricValue`.
  */
 export function visitValue<DomainExtra, ResultType>(
   value: DomainFor<DomainExtra>,
   visitor: ValueVisitor<DomainExtra, ResultType>,
+  deepTypeCheck: boolean = false,
 ): BaselineVisitResult<ResultType> {
   const inProgress = new VisitInProgress<DomainExtra, ResultType>(visitor);
-  return inProgress.visit(value);
+  return inProgress.visit(value, deepTypeCheck);
 }
 
 /**
  * Creates a visitor function bound to the given visitor. The result is a
  * single-argument `visit(value)` function.
+ *
+ * See `visitValue()` for details on the `deepTypeCheck` argument.
  */
 export function makeVisitValueFunction<DomainExtra, ResultType>(
   visitor: ValueVisitor<DomainExtra, ResultType>,
+  deepTypeCheck: boolean = false,
 ): (value: DomainFor<DomainExtra>) => BaselineVisitResult<ResultType> {
-  return (value: DomainFor<DomainExtra>) => visitValue(value, visitor);
+  return (value: DomainFor<DomainExtra>) =>
+    visitValue(value, visitor, deepTypeCheck);
 }
