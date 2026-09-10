@@ -525,8 +525,10 @@ export abstract class ContainerIteratingVisitor<
  * _only_ when a replacement has been made (expected to be uncommon), thereby
  * avoiding allocation for the common un-replaced `visitSubtype` cases.
  */
-type VisitSubtypeOfForm<DomainExtra> =
-  { type: "visitSubtypeOf", value: DomainFor<DomainExtra> };
+type VisitSubtypeOfForm<DomainExtra> = {
+  type: "visitSubtypeOf";
+  value: DomainFor<DomainExtra>;
+};
 
 /**
  * State of a visit currently in progress, along with most of the visit
@@ -724,10 +726,12 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    */
   #visitResolvingCyclesAndReplacement(
     value: DomainFor<DomainExtra>,
-  ): VisitSubtypeOfForm<DomainExtra> | Exclude<
-    DispatchingVisitorResult<DomainExtra, ResultType>,
-    ReplaceForm<DomainExtra>
-  > {
+  ):
+    | VisitSubtypeOfForm<DomainExtra>
+    | Exclude<
+      DispatchingVisitorResult<DomainExtra, ResultType>,
+      ReplaceForm<DomainExtra>
+    > {
     const vis = this.#visitor;
     let resultValue = value;
 
@@ -737,7 +741,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         ? vis.visitValue(resultValue)
         : vis.visitCycle(resultValue, cycleAt, this.#stack.depth);
 
-      switch(result?.type) {
+      switch (result?.type) {
         case "replace": {
           resultValue = result.value;
           break;
