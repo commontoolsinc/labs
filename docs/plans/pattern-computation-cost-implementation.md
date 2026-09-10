@@ -7,6 +7,13 @@ browser benchmark shipped in #7261. A3 budget enforcement is in
 validation, targeted CLI regressions, and antagonistic review complete. CI and
 Cubic review remain before landing.
 
+B3's named aggregates are implemented and validated in
+[PR #7259](https://github.com/commontoolsinc/labs/pull/7259), with
+[contracts](../features/collection-aggregates.md) and
+[measured update and initialization costs](../history/development/performance/2026-09-incremental-aggregates.md).
+The aggregate comparison precedes B1/B2; index contracts and keyed lookup are
+the next collection-operator priority.
+
 This tracker executes the design in
 [PR #7155](https://github.com/commontoolsinc/labs/pull/7155), reviewed at commit
 `147e7518c9d03bc9808c56e1488d2ae0965ea655`. The design owns the rationale and
@@ -45,7 +52,7 @@ deferred and does not block completion of the active work.
 | 6     | B1/B2 contracts      | 2; incorporate C1 findings                  | Written index, lookup, and join contracts              |
 | 7     | B1, B4               | 6                                           | Incremental grouping and unique-key indexing           |
 | 8     | B2, B4               | 7                                           | Keyed lookup and incremental join                      |
-| 9     | B3 contracts, B3, B4 | 8                                           | Deterministic named aggregates                         |
+| 9     | B3 contracts, B3, B4 | 2                                           | Deterministic named aggregates                         |
 | 10    | C2, C3, C4           | 5; use 2 for cost evidence                  | Remote updates work through reactive rows              |
 | 11    | B5, B6               | 3, 4, 8, 9; coordinate with 10              | Measured lunch-poll migration                          |
 | 12    | E1, E2, E3           | 2 for measurements; 7–9 for operator advice | Measured guidance and warning diagnostic               |
@@ -169,8 +176,8 @@ durations are used as performance evidence.
 ### Validation evidence for the A3 slice
 
 [PR #7257](https://github.com/commontoolsinc/labs/pull/7257) implements the
-checked A3 acceptance items. The full runner suite integrated with current main passed 1,417 tests / 8,843
-steps;
+checked A3 acceptance items. The full runner suite integrated with current main
+passed 1,417 tests / 8,843 steps;
 [read-accounting.test.ts](../../packages/runner/test/read-accounting.test.ts)
 covers transaction ownership, aborted attempts, event/preflight failures,
 fan-out, and asynchronous writebacks. The
@@ -223,21 +230,23 @@ alongside these fixtures. CI and clean latest reviews remain landing gates.
         consumers do not rerun and measure maintenance work as size grows.
 - [ ] **B2 implementation — Build keyed lookup, then join.** Test lookup and
       join contracts, both-side updates, and affected-row-only invalidation.
-- [ ] **B3 contract — Specify deterministic aggregates.**
-  - [ ] Define combine order from the current collection, independent of edit
+- [x] **B3 contract — Specify deterministic aggregates.**
+  - [x] Define combine order from the current collection, independent of edit
         history; define floating-point behavior explicitly.
-  - [ ] Define ties, empty collections, NaN, infinities, and signed zero for
+  - [x] Define ties, empty collections, NaN, infinities, and signed zero for
         `sum`, `min`, `max`, `minBy`, and `maxBy`; define predicate counting.
-- [ ] **B3 implementation — Add `count`, `sum`, `min`/`max`, `minBy`/`maxBy`.**
-  - [ ] Maintain partial aggregates using existing element identities and
+- [x] **B3 implementation — Add `count`, `sum`, `min`/`max`, `minBy`/`maxBy`.**
+  - [x] Maintain partial aggregates using existing element identities and
         deterministic combination; avoid inverse subtraction.
-  - [ ] Reach identical results through different insertion, deletion, reorder,
+  - [x] Reach identical results through different insertion, deletion, reorder,
         and edit histories. Test count bounds on single-element updates and
         initialization separately.
-  - [ ] Keep ordinary `reduce` as the full-rerun order-dependent operation.
+  - [x] Keep ordinary `reduce` as the full-rerun order-dependent operation.
 - [ ] **B4 — Publish contracts and complexity with each operator.** Update
       public doc comments, pattern-author documentation, and executable examples
-      in the same slice that ships the API.
+      in the same slice that ships the API. The aggregate portion is documented
+      in [collection aggregates](../features/collection-aggregates.md); index
+      and join documentation remains pending.
 
 **Deferred B3a:** Reconsider restricted append folds only after B1–B3 ship and a
 remaining use case justifies them. Requires a separate contract excluding
@@ -311,11 +320,13 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 Complete A3's CI and fresh Cubic review after its six review fixes. Continue
 C1's nested-filter and remote-row reproductions from
-[PR #7265](https://github.com/commontoolsinc/labs/pull/7265), including nested
-swatches, profile-only updates, and ranking changes. Validate the C3 inline-element
-dependency repair while retaining the production workaround. The controlled A0 fixture
-and A4 browser benchmark are available for count comparisons; A5 still needs
+[PR #7265](https://github.com/commontoolsinc/labs/pull/7265), and validate C3's
+inline-element dependency repair while retaining the production workaround. A4's
+browser benchmark is available; count regression limits remain. A5 still needs
 cross-space and deployed measurements before product performance claims. Live
-poll access requires coordination with Mike. Do not
-implement collection operators before the measurement and semantic gates above
-are satisfied.
+poll access requires coordination with Mike.
+
+For the pending collection operators, settle B1's index contracts before
+implementing `groupBy`/`keyBy`, then build B2's keyed lookup and join. Their
+measurements use the shipped counters and the aggregate comparison method; A4/A5
+gate deployed-product claims rather than operator implementation.

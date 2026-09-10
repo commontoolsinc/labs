@@ -1,5 +1,6 @@
 {
   "updated": "2026-09-10T23:20:03.571259+00:00",
+
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7241",
@@ -69,14 +70,14 @@
     {
       "id": "B3",
       "title": "Deterministic aggregates",
-      "status": "todo",
-      "detail": "Count, sum, min/max, minBy/maxBy; no inverse subtraction."
+      "status": "review",
+      "detail": "Implemented and validated in #7259: count/sum/min/max/minBy/maxBy, deterministic numeric and identity contracts, cold-resume regressions, and 10/100/1000-row comparisons. Updates at 1000 rows use 77–159 proxy accesses versus 1001–3001 for generic reductions; initialization costs more. CI and final review gate landing."
     },
     {
       "id": "B4",
       "title": "Operator documentation",
-      "status": "todo",
-      "detail": "Publish contracts and executable examples with each operator."
+      "status": "active",
+      "detail": "Aggregate contracts, examples, public types, and measured complexity are included in #7259. Index and join documentation remains pending."
     },
     {
       "id": "C2",
