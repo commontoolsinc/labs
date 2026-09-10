@@ -11,7 +11,6 @@ import type {
   Module,
   Pattern,
   Reactive,
-  ResultOfFunction,
   schema as schemaFunction,
   SELF as SELFSymbol,
 } from "@commonfabric/api";

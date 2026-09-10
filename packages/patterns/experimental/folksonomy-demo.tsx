@@ -19,7 +19,12 @@
  * - Events are posted to the aggregator in real-time
  */
 import {
+  computed,
   type Default,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   NAME,
   pattern,
   UI,

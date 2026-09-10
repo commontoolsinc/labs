@@ -13,10 +13,7 @@ import { type Cell, createCell, getCellWithStatus } from "../src/cell.ts";
 import { getDerivedInternalCell, parseLink } from "../src/link-utils.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
-import type {
-  IExtendedStorageTransaction,
-  IReadActivity,
-} from "../src/storage/interface.ts";
+import type { IReadActivity } from "../src/storage/interface.ts";
 import {
   isInternalVerifierRead,
   isLinkResolutionProbe,

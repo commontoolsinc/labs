@@ -214,7 +214,7 @@ export default pattern<GithubActivityInput, GithubActivityOutput>((state) => {
   const commitsData = fetchJson<CommitResponse>({ url: fallbackApiUrl });
   const commits = resultOf(commitsData);
   const fallbackPrompt = computed(() => {
-    const commitList = commits ?? [];
+    const commitList = commits;
     if (commitList.length === 0) return "";
     const messages = commitList
       .slice(0, 10)

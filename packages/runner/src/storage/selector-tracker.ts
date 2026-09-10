@@ -338,9 +338,10 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       // external ref that is a recoverable miss — the schema document can
       // arrive later — which is why the populate below is gated on the
       // miss counter.
+      const refFullSchema = current.$defs !== undefined ? current : schema;
       const resolved = ContextualFlowControl.resolveSchemaRefs(
         current,
-        schema,
+        refFullSchema,
       );
       if (resolved !== undefined) {
         hashes.push(

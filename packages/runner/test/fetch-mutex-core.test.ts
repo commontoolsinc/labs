@@ -394,7 +394,7 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
       (writeTx) => result.withTx(writeTx).setRaw("completed"),
       (cell) => cell.get() ?? {},
     );
-    expect(oldWrite).toBe(true);
+    expect(oldWrite).toEqual({ written: true });
 
     const readTx = runtime.edit();
     try {

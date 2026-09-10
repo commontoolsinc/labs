@@ -132,7 +132,6 @@ describe("ContextualFlowControl.schemaAtPath", () => {
   });
 
   it("classifies frozen union refs against branch-local definitions", () => {
-    const cfc = new ContextualFlowControl();
     const logger = getLogger("cfc");
     const warningCount = logger.counts.warn;
     const schema = deepFreeze({

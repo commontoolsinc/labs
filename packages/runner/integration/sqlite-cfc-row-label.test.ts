@@ -226,7 +226,6 @@ async function runTest(base: URL) {
       // Read-time clearance (Phase 3.b): the owner satisfies no row's
       // conjunctive rule (the did:mailto participants are required too), so a
       // cleared query returns zero rows and reports withheld: 2.
-      const clearErr = result.key("qClear").key("error").getRaw();
       const cleared = result.key("qClear").key("result").get() as
         | unknown[]
         | undefined;

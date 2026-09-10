@@ -8,10 +8,10 @@ import {
   handler,
   lift,
   NAME,
-  observeAvailability,
   pattern,
   type PerSession,
   type ReadonlyCell,
+  resultOf,
   SELF,
   Stream,
   UI,
@@ -1379,12 +1379,13 @@ export default pattern<TopicInput, TopicOutput>(
     const profileWish = wish<{ name: string; avatar: string }>({
       query: "#profile",
     });
+    const profile = resultOf(profileWish.result);
     // A wish resolves after setup, so each of these stays a derivation. Reading
     // the fields once here would pin the page to the empty profile the topic
     // opened with: the composer's controls never enable, and a comment or edit
     // made through them carries blank attribution.
-    const profileName = profileWish.result?.name ?? "";
-    const profileAvatar = profileWish.result?.avatar ?? "";
+    const profileName = profile.name ?? "";
+    const profileAvatar = profile.avatar ?? "";
     const hasProfile = profileName.trim().length > 0;
     const createdByView = createdByOf({ createdBy });
     // The board has already derived the table; this is a lookup by identity,
@@ -1789,7 +1790,7 @@ export default pattern<TopicInput, TopicOutput>(
                 {hasProfile
                   ? (
                     <cf-profile-badge
-                      $profile={profileWish.result}
+                      $profile={profile}
                       size="sm"
                       noNavigate
                     />

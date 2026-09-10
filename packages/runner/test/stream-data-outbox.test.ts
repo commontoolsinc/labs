@@ -249,6 +249,7 @@ describe("stream-data outbox mechanism", () => {
     );
     await tx.commit();
     await result.pull();
+    await waitForFetchCount(1);
 
     expect(rawResult(result.key("final"))).toBe(DataUnavailable.pending());
     expect(rawResult(result.key("partial"))).toBe(DataUnavailable.pending());

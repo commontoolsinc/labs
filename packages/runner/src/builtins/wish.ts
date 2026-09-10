@@ -4,11 +4,7 @@ import {
   type WishState,
   type WishTag,
 } from "@commonfabric/api";
-import {
-  deepFrozenCloneAndInternSchema,
-  hashSchema,
-  internSchema,
-} from "@commonfabric/data-model-schema";
+import { internSchema } from "@commonfabric/data-model-schema";
 import {
   type DebugValueOptions,
   toCompactDebugString,
@@ -20,7 +16,6 @@ import {
 } from "@commonfabric/data-model/fabric-instances";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import { LRUCache } from "@commonfabric/utils/cache";
 import { extractHashtags } from "@commonfabric/utils/hashtags";
 import { getLogger } from "@commonfabric/utils/logger";
 
@@ -1826,7 +1821,11 @@ function projectWishCellValue(
   schema: unknown,
 ): unknown {
   if (schema === undefined) return cell;
-  return cell.asSchema(schema as JSONSchema).getAsLink({ includeSchema: true });
+  const projected = cell.asSchema(schema as JSONSchema);
+  const value = projected.get();
+  if (isDataUnavailable(value)) return value;
+  if (value === undefined) return DataUnavailable.pending();
+  return projected.getAsLink({ includeSchema: true });
 }
 
 /**
@@ -3174,6 +3173,24 @@ export function wish(
               queryKey,
             );
 
+            const projectedFirstResult = projectWishCellValue(
+              uniqueResultCells[0],
+              schema,
+            );
+            if (isDataUnavailable(projectedFirstResult)) {
+              sendWishState(
+                tx,
+                {
+                  result: projectedFirstResult,
+                  candidates: [],
+                  [UI]: undefined,
+                },
+                outputScope,
+                schema,
+              );
+              return;
+            }
+
             // Unified shape: always return { result, candidates, [UI] }
             // For single result, use fast path (no picker needed)
             // For multiple results, launch suggestion pattern for picker
@@ -3215,10 +3232,7 @@ export function wish(
                   sendWishState(
                     tx,
                     {
-                      result: projectWishCellValue(
-                        uniqueResultCells[0],
-                        schema,
-                      ),
+                      result: projectedFirstResult,
                       candidates: candidatesCell,
                       [UI]: profilePickerUI(ctx),
                     },
@@ -3248,10 +3262,7 @@ export function wish(
                   sendWishState(
                     tx,
                     {
-                      result: projectWishCellValue(
-                        uniqueResultCells[0],
-                        schema,
-                      ),
+                      result: projectedFirstResult,
                       candidates: candidatesCell,
                       [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
                     },
@@ -3295,10 +3306,7 @@ export function wish(
                     sendWishState(
                       tx,
                       {
-                        result: projectWishCellValue(
-                          uniqueResultCells[0],
-                          schema,
-                        ),
+                        result: projectedFirstResult,
                         candidates: candidatesCell,
                         [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
                       },

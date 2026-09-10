@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
@@ -1749,7 +1750,9 @@ describe("late space host hints", () => {
       const committed = await tx.commit();
       expect(committed.error).toBeUndefined();
       await result.pull();
-      expect(result.key("seen").get()).toBeUndefined();
+      expect(result.key("seen").get()).toBe(
+        DataUnavailable.schemaMismatch(),
+      );
 
       expect(
         runtime.registerSpaceHost(

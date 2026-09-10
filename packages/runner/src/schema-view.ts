@@ -488,6 +488,15 @@ export function materializeSchemaView(
     }
   }
 
+  // Availability markers are control-flow leaves, not user containers. The
+  // eager traverser preserves them through any declared result schema; the
+  // lazy view must make the same decision before narrowing or container-shape
+  // checks can reject their object representation.
+  if (isDataUnavailable(value)) {
+    tx.readValueOrThrow(link, { nonRecursive: true });
+    return value;
+  }
+
   const schema = narrowForValue(link.schema, value);
   if (schema === false) {
     return mismatch("no branch of the schema matches this value");
@@ -522,14 +531,6 @@ export function materializeSchemaView(
         `expected ${JSON.stringify(schema.type)}, found ${actualType}`,
       );
     }
-  }
-
-  // Availability markers are control-flow leaves, not user containers. The
-  // eager traverser preserves them through any declared result schema; the
-  // lazy view must make the same decision before its container-shape checks.
-  if (isDataUnavailable(value)) {
-    tx.readValueOrThrow(link, { nonRecursive: true });
-    return value;
   }
 
   // An opaque leaf still owes the schema's `required` keys. A `FabricPrimitive`

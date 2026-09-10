@@ -87,6 +87,7 @@ function makeAction(cacheState: Record<string, unknown>) {
   const cells = { pending, result, error, cache };
   const runtime = {
     id: "test-runtime",
+    scopeKeyIdentity: undefined,
     getCell(
       _space: unknown,
       cause: { fetchProgram: Record<string, unknown> },
@@ -95,12 +96,14 @@ function makeAction(cacheState: Record<string, unknown>) {
       return cells[key];
     },
   } as unknown as Runtime;
+  Object.defineProperty(parent, "runtime", { value: runtime });
   const tx = {
     resetNarrowestReadScope() {},
     getNarrowestReadScope() {
       return "space";
     },
     recordCfcWritePolicyInput() {},
+    enrollRuntimeOwnedStore() {},
     enqueuePostCommitEffect(effect: unknown) {
       effects.push(effect);
     },

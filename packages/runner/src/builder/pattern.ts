@@ -61,7 +61,6 @@ import { traverseValue } from "./traverse-utils.ts";
 import {
   type CellScope,
   type DerivedInternalCellDescriptor,
-  type FactoryCallInput,
   type FactoryInput,
   type Frame,
   type ICell,

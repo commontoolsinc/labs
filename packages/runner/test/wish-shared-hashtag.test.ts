@@ -234,12 +234,16 @@ Deno.test(
         resolvedSchema(
           rawLinkSchema(results[0].key("result").getRaw()) as JSONSchema,
         ),
-      ).toEqual(nameOnlyWishSchema);
+      ).toEqual(
+        sanitizeSchemaForLinks(wishStateSchemaForResult(nameOnlyWishSchema)),
+      );
       expect(
         resolvedSchema(
           rawLinkSchema(results[1].key("result").getRaw()) as JSONSchema,
         ),
-      ).toEqual(bodyOnlyWishSchema);
+      ).toEqual(
+        sanitizeSchemaForLinks(wishStateSchemaForResult(bodyOnlyWishSchema)),
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();

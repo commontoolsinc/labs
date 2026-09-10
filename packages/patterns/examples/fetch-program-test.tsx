@@ -10,6 +10,7 @@ import {
   resultOf,
   toIndentedDebugString,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -19,7 +20,7 @@ import {
  */
 type FetchProgramTestOutput = {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   url: unknown;
   program: FetchProgramResult | undefined;
   result: unknown;

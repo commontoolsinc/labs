@@ -9,6 +9,7 @@ import {
   refuseFabricInstance,
   shallowFabricFromNativeObjectElseUndefined,
 } from "@commonfabric/data-model";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { type AliasBinding, isAliasBinding } from "../alias-binding.ts";
 import {
   type FabricExecPlainObject,
@@ -160,6 +161,12 @@ export function withAliasBindings(
   // to `{}`. It leaves whole, and it leaves FIRST: it is also a record, so an
   // `isObjectOrArray()` test would otherwise claim it.
   if (value instanceof FabricPrimitive) return value;
+
+  // Availability markers are runtime-owned atomic control values. Their codec
+  // state is closed over the fixed reason (and frozen FabricError for the
+  // error variant), so preserve them as leaves instead of treating them as an
+  // arbitrary FabricInstance container.
+  if (isDataUnavailable(value)) return value;
 
   // A `FabricInstance` is NOT a leaf. It is a container reached by its codec
   // contents rather than by property name, which this walk cannot do, so the

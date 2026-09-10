@@ -19,6 +19,7 @@ import {
   assert,
   computed,
   pattern,
+  resultOf,
   TESTS,
   UI,
   wish,

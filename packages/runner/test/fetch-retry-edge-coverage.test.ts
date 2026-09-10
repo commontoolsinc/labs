@@ -35,9 +35,10 @@ describe("fetch retry edge paths", () => {
       () => {
         throw new Error("must not publish");
       },
+      (cell) => cell.getRaw() as Record<string, unknown>,
     );
 
-    expect(wrote).toBe(false);
+    expect(wrote).toEqual({ written: false });
   });
 
   it("releases only the matching generic-fetch claim", async () => {

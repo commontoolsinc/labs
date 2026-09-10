@@ -16,7 +16,11 @@
 import {
   computed,
   Default,
+  hasError,
+  hasSchemaMismatch,
   ifElse,
+  isPending,
+  isSyncing,
   NAME,
   pattern,
   type SqliteDb,
@@ -122,14 +126,26 @@ export const LedgerMonthTransactions = pattern<
     scope: "session",
   });
 
-  const resolvedMonth = computed(() => monthRead.result?.[0]?.month ?? "");
-  const rows = computed(() => rowsRead.result ?? []);
-  const rowCount = computed(() => (rowsRead.result ?? []).length);
-  const pending = computed(() => rowsRead.pending === true);
-  const errorMessage = computed(() => errorText(rowsRead.error));
-  const hasError = computed(() => errorMessage !== "");
+  const resolvedMonth = computed(() =>
+    isPending(monthRead) || hasError(monthRead) || isSyncing(monthRead) ||
+      hasSchemaMismatch(monthRead)
+      ? ""
+      : monthRead.rows[0]?.month ?? ""
+  );
+  const rows = computed(() =>
+    isPending(rowsRead) || hasError(rowsRead) || isSyncing(rowsRead) ||
+      hasSchemaMismatch(rowsRead)
+      ? []
+      : rowsRead.rows
+  );
+  const rowCount = computed(() => rows.length);
+  const pending = computed(() => isPending(rowsRead));
+  const errorMessage = computed(() =>
+    hasError(rowsRead) ? errorText(rowsRead.error) : ""
+  );
+  const hasQueryError = computed(() => errorMessage !== "");
   const isEmpty = computed(() =>
-    !pending && !hasError && (rowsRead.result ?? []).length === 0
+    !pending && !hasQueryError && rows.length === 0
   );
 
   const listRows = rows.map((row: LedgerTransaction) => (

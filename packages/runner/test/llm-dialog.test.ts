@@ -147,7 +147,7 @@ describe("llmDialog", () => {
 
     const addMessage = await result.key("addMessage").pull();
     addMessage.send({ role: "user", content: "Present a result" });
-    await waitForLlmMessages(runtime, result, 1);
+    await runtime.settled();
 
     const unavailable = result.key("result").getRaw();
     expect(isDataUnavailable(unavailable)).toBe(true);
@@ -211,11 +211,11 @@ describe("llmDialog", () => {
 
     const addMessage = await result.key("addMessage").pull();
     addMessage.send({ role: "user", content: "First turn" });
-    await waitForLlmMessages(runtime, result, 4);
+    await runtime.settled();
     expect(result.key("result").get()).toEqual({ answer: 42 });
 
     addMessage.send({ role: "user", content: "Second turn" });
-    await waitForLlmMessages(runtime, result, 5);
+    await runtime.settled();
     expect(result.key("result").get()).toEqual({ answer: 42 });
     expect(result.key("error").get()).toMatch(/no matching mock response/);
   });
@@ -274,7 +274,7 @@ describe("llmDialog", () => {
 
     const addMessage = await result.key("addMessage").pull();
     addMessage.send({ role: "user", content: "Invalid turn" });
-    await waitForLlmMessages(runtime, result, 4);
+    await runtime.settled();
 
     expect(result.key("result").getRaw()).toBe(
       DataUnavailable.schemaMismatch(),
@@ -283,7 +283,7 @@ describe("llmDialog", () => {
 
     clearMockResponses();
     addMessage.send({ role: "user", content: "Failed retry" });
-    await waitForLlmMessages(runtime, result, 5);
+    await runtime.settled();
     const retryFailure = result.key("result").getRaw();
     expect(isDataUnavailable(retryFailure)).toBe(true);
     if (isDataUnavailable(retryFailure)) {
@@ -319,7 +319,7 @@ describe("llmDialog", () => {
       ],
     });
     addMessage.send({ role: "user", content: "Valid turn" });
-    await waitForLlmMessages(runtime, result, 9);
+    await runtime.settled();
 
     expect(result.key("result").get()).toEqual({ answer: "valid" });
     expect(result.key("error").get()).toBeUndefined();

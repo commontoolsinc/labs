@@ -13,6 +13,7 @@ Deno.test("DataUnavailable fails closed on an invalid canonical constructor", as
     });
 
     await expect(
+      // deno-lint-ignore cf-imports/no-inline-module-import -- the query gives this test an isolated module instance after it replaces the global slot
       import("../../src/fabric-instances/DataUnavailable.ts?invalid-slot"),
     ).rejects.toThrow("Invalid global DataUnavailable constructor");
   } finally {

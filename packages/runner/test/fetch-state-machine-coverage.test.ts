@@ -99,6 +99,7 @@ describe("fetch state-machine edge paths", () => {
       },
       prepareTxForCommit() {},
     } as unknown as Runtime;
+    Object.defineProperty(parent, "runtime", { value: runtime });
     const effects: unknown[] = [];
     const tx = {
       resetNarrowestReadScope() {},
@@ -106,6 +107,7 @@ describe("fetch state-machine edge paths", () => {
         return "space";
       },
       recordCfcWritePolicyInput() {},
+      enrollRuntimeOwnedStore() {},
       enqueuePostCommitEffect(effect: unknown) {
         effects.push(effect);
       },

@@ -16,7 +16,11 @@
 import {
   computed,
   Default,
+  hasError,
+  hasSchemaMismatch,
   ifElse,
+  isPending,
+  isSyncing,
   NAME,
   pattern,
   type SqliteDb,
@@ -137,14 +141,26 @@ export const MailboxMonthHeaders = pattern<
     scope: "session",
   });
 
-  const resolvedMonth = computed(() => monthRead.result?.[0]?.month ?? "");
-  const headers = computed(() => headersRead.result ?? []);
-  const headerCount = computed(() => (headersRead.result ?? []).length);
-  const pending = computed(() => headersRead.pending === true);
-  const errorMessage = computed(() => errorText(headersRead.error));
-  const hasError = computed(() => errorMessage !== "");
+  const resolvedMonth = computed(() =>
+    isPending(monthRead) || hasError(monthRead) || isSyncing(monthRead) ||
+      hasSchemaMismatch(monthRead)
+      ? ""
+      : monthRead.rows[0]?.month ?? ""
+  );
+  const headers = computed(() =>
+    isPending(headersRead) || hasError(headersRead) || isSyncing(headersRead) ||
+      hasSchemaMismatch(headersRead)
+      ? []
+      : headersRead.rows
+  );
+  const headerCount = computed(() => headers.length);
+  const pending = computed(() => isPending(headersRead));
+  const errorMessage = computed(() =>
+    hasError(headersRead) ? errorText(headersRead.error) : ""
+  );
+  const hasQueryError = computed(() => errorMessage !== "");
   const isEmpty = computed(() =>
-    !pending && !hasError && (headersRead.result ?? []).length === 0
+    !pending && !hasQueryError && headers.length === 0
   );
 
   const listRows = headers.map((header: MailboxHeader) => (

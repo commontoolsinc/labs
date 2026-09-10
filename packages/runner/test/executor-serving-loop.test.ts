@@ -20,6 +20,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
@@ -1878,9 +1879,7 @@ describe("stage F serving loop", () => {
 
     openClient();
     const engine = await server.engineForSpace(space);
-    const clientResult = clientRuntime.getCell<
-      { fetch: { result?: unknown; error?: unknown } }
-    >(
+    const clientResult = clientRuntime.getCell<{ fetch: unknown }>(
       space,
       "effect-result",
       undefined,
@@ -1919,7 +1918,7 @@ describe("stage F serving loop", () => {
     // budget below.
     await waitUntil(
       () =>
-        (clientResult.key("fetch").key("result").get() as {
+        (clientResult.key("fetch").get() as {
           from?: string;
         } | undefined)?.from === "https://stage-g.test/one",
       "client to observe the served fetch result",
@@ -1998,7 +1997,10 @@ describe("stage F serving loop", () => {
     clientArg.withTx(failTx).set({ url: "https://stage-g.test/fails" });
     expect((await failTx.commit()).error).toBeUndefined();
     await waitUntil(
-      () => clientResult.key("fetch").key("error").get() !== undefined,
+      () => {
+        const value = clientResult.key("fetch").get();
+        return isDataUnavailable(value) && value.reason === "error";
+      },
       "client to observe the error-shaped result",
       30_000,
     );
@@ -2041,7 +2043,7 @@ describe("stage F serving loop", () => {
     expect((await retryTx.commit()).error).toBeUndefined();
     await waitUntil(
       () =>
-        (clientResult.key("fetch").key("result").get() as {
+        (clientResult.key("fetch").get() as {
           from?: string;
         } | undefined)?.from === "https://stage-g.test/two",
       "client to observe the retried fetch result",
@@ -2119,9 +2121,7 @@ describe("stage F serving loop", () => {
     };
 
     openClient();
-    const clientResult = clientRuntime.getCell<
-      { fetch: { result?: unknown; error?: unknown } }
-    >(
+    const clientResult = clientRuntime.getCell<{ fetch: unknown }>(
       space,
       "cycle-result",
       undefined,
@@ -2138,7 +2138,7 @@ describe("stage F serving loop", () => {
     );
     await clientArg.sync();
     const observes = (leg: string) =>
-      (clientResult.key("fetch").key("result").get() as {
+      (clientResult.key("fetch").get() as {
         from?: string;
       } | undefined)?.from === `https://stage-g.test/${leg}`;
     const writeUrl = async (leg: string) => {
@@ -2254,8 +2254,8 @@ describe("stage F serving loop", () => {
 
     openClient();
     const clientResult = clientRuntime.getCell<{
-      one: { result?: { from?: string } };
-      two: { result?: { from?: string } };
+      one: unknown;
+      two: unknown;
     }>(
       space,
       "two-node-result",
@@ -2279,7 +2279,7 @@ describe("stage F serving loop", () => {
     // BOTH nodes' cells serve. The pre-fix tree wedges exactly one of
     // these waits (whichever node's closure was admitted second).
     const served = (key: "one" | "two") =>
-      (clientResult.key(key).key("result").get() as
+      (clientResult.key(key).get() as
         | { from?: string }
         | undefined)
         ?.from === "https://stage-g.test/shared";
@@ -2363,9 +2363,7 @@ describe("stage F serving loop", () => {
     };
 
     openClient();
-    const clientResult = clientRuntime.getCell<
-      { fetch: { result?: unknown; error?: unknown } }
-    >(
+    const clientResult = clientRuntime.getCell<{ fetch: unknown }>(
       space,
       "liveness-result",
       undefined,
@@ -2388,7 +2386,7 @@ describe("stage F serving loop", () => {
       expect((await tx.commit()).error).toBeUndefined();
       await waitUntil(
         () =>
-          (clientResult.key("fetch").key("result").get() as {
+          (clientResult.key("fetch").get() as {
             from?: string;
           } | undefined)?.from === `https://stage-g.test/${leg}`,
         `client to observe leg ${leg}`,

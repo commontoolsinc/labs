@@ -1,5 +1,4 @@
-import { assertEquals, assertStrictEquals } from "@std/assert";
-import { stub } from "@std/testing/mock";
+import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -7,7 +6,6 @@ import { compileAndRun } from "../src/builtins/compile-and-run.ts";
 import { stampWaveRunContext } from "../src/executor/wave.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
-import { CompilerError } from "@commonfabric/js-compiler/errors";
 
 Deno.test("compileAndRun initializes outputs and handles invalid programs", async () => {
   const identity = await Identity.fromPassphrase("compile and run coverage");

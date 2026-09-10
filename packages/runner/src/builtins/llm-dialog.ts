@@ -901,21 +901,6 @@ function traverseAndCellify(
 
 const resultSchema = LLMDialogResultSchema;
 
-function beginPresentedResultTurn(
-  tx: IExtendedStorageTransaction,
-  result: Cell<any>,
-  userResultSchema: unknown,
-): void {
-  result.withTx(tx).key("error").set(undefined);
-  if (userResultSchema === undefined) return;
-
-  const presented = result.withTx(tx).key("result");
-  const raw = presented.getRaw();
-  if (isDataUnavailable(raw)) {
-    presented.setRaw(DataUnavailable.pending());
-  }
-}
-
 function publishPresentedResultSchemaMismatch(
   tx: IExtendedStorageTransaction,
   result: Cell<any>,
@@ -4499,18 +4484,38 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           `I encountered an error generating a response: ${errorMessageText}`,
       } satisfies BuiltInLLMMessage;
 
-      safelyPerformUpdate(runtime, pending, internal, requestId, (tx) => {
-        messagesCell.withTx(tx).push(
-          errorMessage as Schema<typeof LLMMessageSchema>,
-        );
-        failPresentedResultTurn(
-          tx,
-          result,
-          pending,
-          userResultSchema,
-          error,
-        );
-      });
+      return safelyPerformUpdate(
+        runtime,
+        pending,
+        internal,
+        requestId,
+        (tx) => {
+          const errorBase = resolveLink(
+            runtime,
+            tx,
+            messagesCell.getAsNormalizedFullLink(),
+          );
+          const errorCell = runtime.getCell<Schema<typeof LLMMessageSchema>>(
+            errorBase.space,
+            { llmDialog: { message: cause, id: crypto.randomUUID() } },
+            undefined,
+            tx,
+            errorBase.scope,
+          );
+          recordRuntimeOwnedStore(tx, result, errorCell);
+          errorCell.withTx(tx).set(
+            errorMessage as Schema<typeof LLMMessageSchema>,
+          );
+          messagesCell.withTx(tx).push(errorCell);
+          failPresentedResultTurn(
+            tx,
+            result,
+            pending,
+            userResultSchema,
+            error,
+          );
+        },
+      );
     });
 }
 
