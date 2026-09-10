@@ -65,6 +65,24 @@ type WrongRoomBinding = {
   >;
 };
 
+const HANDLER_FACTORY_SCHEMA = {
+  asFactory: {
+    kind: "handler",
+    contextSchema: {
+      type: "object",
+      properties: { state: { type: "string" } },
+      required: ["state"],
+    },
+    eventSchema: {
+      type: "object",
+      properties: { click: { type: "number" } },
+      required: ["click"],
+    },
+  },
+} as const satisfies JSONSchema;
+
+type SchemaHandlerFactory = Schema<typeof HANDLER_FACTORY_SCHEMA>;
+
 const _handlerBinding: MustBeTrue<
   AssertAssignable<HandlerBinding, FactoryInput<StripCell<HandlerState>>>
 > = true;
@@ -89,6 +107,20 @@ const _patternFactory: MustBeTrue<
 
 const _wrongRoomBinding: MustBeTrue<
   AssertNotAssignable<WrongRoomBinding, FactoryInput<StripCell<RoomInput>>>
+> = true;
+
+const _handlerSchemaGenericOrder: MustBeTrue<
+  AssertAssignable<
+    SchemaHandlerFactory,
+    HandlerFactory<{ click: number }, { state: string }>
+  >
+> = true;
+
+const _handlerSchemaIsNotReversed: MustBeTrue<
+  AssertNotAssignable<
+    SchemaHandlerFactory,
+    HandlerFactory<{ state: string }, { click: number }>
+  >
 > = true;
 
 type SchemaPatternOverloadAcceptsFactoryInput = PatternFunction extends {
@@ -135,10 +167,24 @@ Deno.test("FactoryInput accepts reactive cell handles in factory bindings", () =
       _handlerFactory,
       _patternFactory,
       _wrongRoomBinding,
+      _handlerSchemaGenericOrder,
+      _handlerSchemaIsNotReversed,
       _schemaPatternOverload,
       _schemaWishOverload,
       typeof assertFactoryCallBoundaries,
     ],
-    ["object", true, true, true, true, true, true, true, "function"],
+    [
+      "object",
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      "function",
+    ],
   );
 });

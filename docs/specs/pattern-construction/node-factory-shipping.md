@@ -1216,7 +1216,9 @@ to `true`.
 ```
 
 The `module` form uses `argumentSchema` / `resultSchema`. The `handler` form
-uses `contextSchema` / `eventSchema`. A `HandlerFactory` must not be mistaken
+uses `contextSchema` / `eventSchema`. Schema interpretation maps `eventSchema`
+to `HandlerFactory`'s event type parameter and `contextSchema` to its bound
+context type parameter. A `HandlerFactory` must not be mistaken
 for an `asCell: ["stream"]` merely because calling it returns a stream.
 
 `asFactory` has one schema meaning and two execution-context exposures. In an
@@ -1558,6 +1560,15 @@ before a named-family delay in the child's full setup. That pointer is visible
 through the normal synchronous speculative commit, and subsequent setup commits
 remain causally behind it, so an intervening reader waits for the new factory
 instead of restarting canceled code against the new params.
+
+The supervisor also owns the selected child's setup commit through final
+settlement. The graph may become locally visible through the ordinary
+synchronous speculative commit, but a commit refusal or serving-wave
+withdrawal cancels that exact child generation, reports the failure through the
+runner's node diagnostic channel, and prevents its subscriptions from writing
+again. A settlement from an older generation cannot cancel or report against a
+newer child. The failed selection is not treated as an active same-state child;
+a later selector invalidation may create a fresh generation and retry it.
 
 The same fence applies to the selected child's pattern-identity watcher. A
 queued initial or intermediate pointer notification verifies that it still

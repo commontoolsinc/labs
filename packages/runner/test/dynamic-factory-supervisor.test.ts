@@ -228,6 +228,98 @@ describe("dynamic Factory@1 supervisor", () => {
     });
   });
 
+  it("cancels a child whose setup commit is refused", async () => {
+    const executions: Execution[] = [];
+    const { factoryA, factoryB } = makeFactories(executions);
+    warmArtifacts.set(refKey(REFS.a.identity, REFS.a.symbol), factoryA);
+    warmArtifacts.set(refKey(REFS.b.identity, REFS.b.symbol), factoryB);
+    const diagnostic = Promise.withResolvers<Error>();
+    runtime.scheduler.onError((error) => diagnostic.resolve(error));
+    const originalEdit = runtime.edit.bind(runtime);
+    const originalArtifactFromIdentitySync = runtime.patternManager
+      .artifactFromIdentitySync.bind(runtime.patternManager);
+    let intercepted = false;
+    let refuseNextEdit = false;
+
+    try {
+      const selector = runtime.getCell<unknown>(
+        space,
+        "dynamic-factory-refused-setup-selector",
+        undefined,
+        tx,
+      );
+      const resultCell = runtime.getCell<{ result: number }>(
+        space,
+        "dynamic-factory-refused-setup-result",
+        RESULT_SCHEMA,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        outerPattern(),
+        { factory: selector, value: 6 },
+        resultCell,
+      );
+      await commitAndRenew();
+      await runtime.scheduler.idleWithPendingCommits();
+
+      selector.withTx(tx).set(createFactoryShell(sealFactoryState(factoryA)));
+      runtime.prepareTxForCommit(tx);
+      runtime.patternManager.artifactFromIdentitySync = (identity, symbol) => {
+        const artifact = originalArtifactFromIdentitySync(identity, symbol);
+        if (identity === REFS.a.identity && symbol === REFS.a.symbol) {
+          refuseNextEdit = true;
+        }
+        return artifact;
+      };
+      runtime.edit = ((...args: Parameters<typeof originalEdit>) => {
+        const childTx = originalEdit(...args);
+        const refuseThisCommit = refuseNextEdit;
+        refuseNextEdit = false;
+        const originalCommit = childTx.commit.bind(childTx);
+        childTx.commit = ((
+          ...commitArgs: Parameters<typeof originalCommit>
+        ) => {
+          if (intercepted || !refuseThisCommit) {
+            return originalCommit(...commitArgs);
+          }
+          intercepted = true;
+          const refusal = {
+            name: "CfcCommitRefusalError" as const,
+            message: "refused dynamic child setup",
+            reasons: ["test refusal"],
+            refusals: [],
+          };
+          expect(childTx.abort(refusal).error).toBeUndefined();
+          return Promise.resolve({ error: refusal as never });
+        }) as typeof childTx.commit;
+        return childTx;
+      }) as typeof runtime.edit;
+      expect((await tx.commit()).error).toBeUndefined();
+
+      expect(
+        (await within(diagnostic.promise, "dynamic child setup refusal"))
+          .message,
+      ).toContain("refused dynamic child setup");
+      await runtime.scheduler.idleWithPendingCommits();
+      expect(intercepted).toBe(true);
+      expect(executions).toEqual([]);
+      expect(result.key("result").get()).toBeUndefined();
+
+      runtime.edit = originalEdit;
+      tx = runtime.edit();
+      selector.withTx(tx).set(createFactoryShell(sealFactoryState(factoryB)));
+      await commitAndRenew();
+      expect(await within(result.pull(), "replacement after setup refusal"))
+        .toEqual({ result: 600 });
+      expect(executions).toEqual([{ factory: "B", value: 6 }]);
+    } finally {
+      runtime.edit = originalEdit;
+      runtime.patternManager.artifactFromIdentitySync =
+        originalArtifactFromIdentitySync;
+    }
+  });
+
   it("replaces warm A with B, cancels A, and retains the output identity", async () => {
     const executions: Execution[] = [];
     const { factoryA, factoryB } = makeFactories(executions);

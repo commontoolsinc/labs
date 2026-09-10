@@ -252,15 +252,15 @@ type SchemaFactoryContract<
     eventSchema: infer Event extends JSONSchema;
   } ? HandlerFactory<
       SchemaInner<
-        Context,
-        Context,
+        Event,
+        Event,
         DecrementDepth<Depth>,
         false,
         ChildFactoryDepth
       >,
       SchemaInner<
-        Event,
-        Event,
+        Context,
+        Context,
         DecrementDepth<Depth>,
         false,
         ChildFactoryDepth

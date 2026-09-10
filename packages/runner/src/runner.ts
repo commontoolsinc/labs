@@ -8236,6 +8236,26 @@ export class Runner {
       const [cancelChild, addChildCancel] = useCancelGroup();
       childCancel = cancelChild;
       const childTx = this.#runtime.edit();
+      const failSetupIfCurrent = (error: unknown): void => {
+        if (
+          !active || selectedGeneration !== generation ||
+          childCancel !== cancelChild
+        ) {
+          return;
+        }
+        cancelChild();
+        childCancel = undefined;
+        selectionReadinessFailed = true;
+        const diagnostic = error instanceof Error ? error : new Error(
+          typeof (error as { message?: unknown })?.message === "string"
+            ? (error as { message: string }).message
+            : "Dynamic factory child setup failed",
+          { cause: error },
+        );
+        this.#runtime.scheduler.reportError(diagnostic, {
+          name: "dynamic-factory-setup",
+        });
+      };
       try {
         // The selected code is data-dependent. Keep that selection read in the
         // setup transaction, and thread the same link into scheduled
@@ -8256,7 +8276,18 @@ export class Runner {
           bindingLink,
         );
         this.#runtime.prepareTxForCommit(childTx);
-        void childTx.commit();
+        void childTx.commit().then(async ({ error }) => {
+          if (error !== undefined) {
+            failSetupIfCurrent(error);
+            return;
+          }
+          const settlement = waveSettlementOf(childTx);
+          if (settlement === undefined) return;
+          const settled = await settlement;
+          if (settled.error !== undefined) {
+            failSetupIfCurrent(settled.error);
+          }
+        }).catch(failSetupIfCurrent);
       } catch (error) {
         cancelChild();
         childCancel = undefined;
