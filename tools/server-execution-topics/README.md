@@ -44,6 +44,13 @@ count. The named server add/refresh loops support the whole-session scaling
 claims. Loaded-address iteration and its nested map iteration overlap; do not
 sum them as separate costs.
 
+Watch setup and mutation phases print their names to stderr before awaiting
+their completion. These in-process manual-fan-out waits have no persistent timer
+or socket keeping an unresolved promise alive: Deno reports an unresolved
+top-level await and exits unsuccessfully once the event loop drains. The capture
+wrapper records that exit and stderr in its failed manifest. The final phase
+name identifies the stalled operation without adding a timing limit.
+
 The serving probe holds the existing grace callback and preserves other timers.
 It rejects causal observations containing an input-wait timer wake, a deadline
 callback firing, or a deadline-exhausted cycle. It identifies the deadline by

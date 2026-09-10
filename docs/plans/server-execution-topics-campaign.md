@@ -120,7 +120,10 @@ campaign completion.
   baseline report, and this ledger. Production runtime and pattern code are
   unchanged; the index-demand experiment is retained as an unapplied patch.
 - Branch: `codex/server-execution-topics-verification`; base
-  `83ee6cf73f3b8ab9cd7fccd2d12bee09c518a15b`; PR/head pending.
+  `83ee6cf73f3b8ab9cd7fccd2d12bee09c518a15b`; PR [#7229](https://github.com/commontoolsinc/labs/pull/7229),
+  initial reviewed head `ec78595dec79a52e7131b4249814854a9c17b343`. CI and
+  automated review are pending; exact refreshed status is retained in
+  `metadata/pr-7229-current.json` under the artifact root.
 - Self-review: cf-review coverage was deep-read plus read-only review of watch,
   loader/event/grace, and seed/sidecar evidence. Findings addressed: provenance
   manifests and hashes; timer wake/deadline discrimination; guaranteed cleanup;
@@ -145,3 +148,32 @@ campaign completion.
   six citation edges. `runs/seed-full-83ee-{off,on}-02/` includes statistics
   captured before verification-reader demand. These are correctness runs;
   controlled index-demand comparison remains outstanding.
+- PR #7229's first head completed its required CI checks successfully. Cubic
+  requested timeouts around watch waits in thread
+  `PRRT_kwDOL5jtCM6g8aeW`. Six deliberate stalls (setup flush, setup watch set,
+  covered add, disjoint add, refresh, and removal) each exited unsuccessfully
+  with Deno's unresolved-top-level-await diagnostic; their capture manifests
+  recorded failure. The probe now prints the phase name before those waits.
+  This follows the event-driven waiting guidance without imposing time limits.
+  Healthy 100/1,000/10,000-root runs passed with the diagnostics. Evidence is in
+  `runs/watch-stall-*-ec785-02/` and
+  `runs/watch-phase-diagnostics-ec785-01/`. Review response and fresh-head CI
+  remain pending.
+
+## Follow-up verification observations
+
+- At 83ee, the real serving drain deferred two admitted streams while their
+  sidecars were absent from its replica. Its existing settle flushed their
+  frames; both ordered consequences then landed in one durable commit before
+  the held backstop fired. One armed deferral therefore did not impose a
+  250 ms wait in this fixture. Manually firing that callback after completion
+  repeated neither handler. `runs/event-drain-83ee-02/` retains source, command,
+  manifest, and state snapshots; it does not establish backstop avoidance for
+  other scheduling or shadowing cases.
+- The refreshed typed-index seed passed OFF and ON with five topics and six
+  actual citation edges. Before verification-reader demand, the ON full and
+  index arms both reported a client-demand maximum of 1,012. This snapshot does
+  not establish a demand reduction and excludes the serving principal. The
+  remaining caller reads and actual serving-session sizes need attribution.
+  Results: `runs/seed-index-83ee-{on,off}-01/`, compared with the full-demand
+  runs above. All four remain correctness-only.

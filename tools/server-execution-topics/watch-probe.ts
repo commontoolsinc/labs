@@ -56,6 +56,7 @@ async function measure(size: number) {
         value: { value: { n: 0 } },
       })),
     });
+    console.error(`watch size=${size} phase=setup-flush`);
     await server.flushSessions();
     const watch = (id: string): WatchSpec => ({
       id,
@@ -63,6 +64,7 @@ async function measure(size: number) {
       query: { roots: [{ id, selector: { path: [], schema: false } }] },
     });
     const watches = ids.slice(0, size).map(watch);
+    console.error(`watch size=${size} phase=setup-watch-set`);
     await reader.watchSetSync(watches);
     const session = registry.get(space, reader.sessionId)!;
     expect(session.entities.size).toBe(size);
@@ -126,6 +128,7 @@ async function measure(size: number) {
       counts: Record<string, Count>;
     }[] = [];
     const record = async (name: string, run: () => Promise<unknown>) => {
+      console.error(`watch size=${size} phase=${name}`);
       const before = {
         entities: session.entities.size,
         trackedIds: session.trackedIds.size,
