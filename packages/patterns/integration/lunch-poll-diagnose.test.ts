@@ -56,6 +56,18 @@ describe("lunch-poll-diagnose", () => {
     expect(() => matrixConfigFromArgs(["--voters=0"]))
       .toThrow("--voters must be an integer >= 1");
 
+    const tooManyVoters = ["--users=2", "--voters=3"];
+    expect(() =>
+      casesFromConfig(matrixConfigFromArgs(tooManyVoters), tooManyVoters)
+    ).toThrow("--voters=3 exceeds the 2 users of 1x2");
+    const tooManyVotersForCase = ["--cases=1x2", "--voters=3"];
+    expect(() =>
+      casesFromConfig(
+        matrixConfigFromArgs(tooManyVotersForCase),
+        tooManyVotersForCase,
+      )
+    ).toThrow("--voters=3 exceeds the 2 users of 1x2");
+
     expect(describeCase({ optionCount: 14, userCount: 2, voteRounds: 3 }))
       .toBe("14 options x 2 users, rounds=3");
     expect(describeCase({

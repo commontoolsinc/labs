@@ -106,9 +106,10 @@ the cold-load table, and it is per browser, per load.
 
 ## Finding 3: concurrent voters churn optimistic commits
 
-Five voters on 14 options, three rounds of everyone recasting every option
-(45 casts per session), produced 626 commit conflicts and 918 reverted
-optimistic writes across the five sessions. One voter produced none. Per
+Five voters on 14 options, three rounds in which every session casts one
+vote per round (3 casts per session, 15 in all, each round's casts sent
+concurrently), produced 626 commit conflicts and 918 reverted optimistic
+writes across the five sessions. One voter produced none. Per
 vote settle time did not move (103 to 139 ms), so headless the churn is
 wasted work rather than latency, but every revert is a commit built, sent,
 refused, undone, and its dependents re-run. The two-browser runs show the

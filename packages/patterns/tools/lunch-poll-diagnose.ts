@@ -90,20 +90,27 @@ interface DiagnosticsSummary {
 export interface MatrixConfig {
   program: string;
   optionCounts: readonly number[];
+  /** Sessions per case: every user opens the poll and joins it. */
   userCounts: readonly number[];
   voteRounds: number;
   /**
-   * How many users cast in each vote round, counted from the host; the rest
-   * only observe. `undefined` has every user cast.
+   * How many of a case's users cast in each vote round, counted from the
+   * host; the rest only observe. `undefined` has every user cast. A case
+   * with fewer users than this is refused rather than reported as casting
+   * from sessions it does not have.
    */
   voters?: number;
 }
 
 export interface CaseConfig {
   optionCount: number;
+  /** Sessions in the case: every user opens the poll and joins it. */
   userCount: number;
   voteRounds: number;
-  /** How many users cast, counted from the host; `undefined` is all of them. */
+  /**
+   * How many of the users cast, counted from the host; `undefined` is all
+   * of them. Never more than `userCount`.
+   */
   voters?: number;
 }
 
@@ -938,6 +945,7 @@ function explicitCasesArg(
     const optionCount = Number(match[1]);
     const userCount = Number(match[2]);
     validateUserCount(userCount, entry.trim());
+    validateVoters(config.voters, userCount, entry.trim());
     return [{
       optionCount,
       userCount,
@@ -953,6 +961,18 @@ function validateUserCount(userCount: number, source: string): void {
     throw new Error(
       `lunch-poll diagnostics require at least 1 user for ${source}; ` +
         `got ${userCount}`,
+    );
+  }
+}
+
+function validateVoters(
+  voters: number | undefined,
+  userCount: number,
+  source: string,
+): void {
+  if (voters !== undefined && voters > userCount) {
+    throw new Error(
+      `--voters=${voters} exceeds the ${userCount} users of ${source}`,
     );
   }
 }
@@ -1016,6 +1036,7 @@ export function casesFromConfig(
   for (const optionCount of config.optionCounts) {
     for (const userCount of config.userCounts) {
       validateUserCount(userCount, `${optionCount}x${userCount}`);
+      validateVoters(config.voters, userCount, `${optionCount}x${userCount}`);
       cases.push({
         optionCount,
         userCount,

@@ -43,10 +43,12 @@ deno run -A packages/patterns/tools/lunch-poll-diagnose.ts \
   --rounds=3
 ```
 
-`--voters=N` has only the first `N` users cast in each vote round, the host
-among them, while the remaining users only observe. The churn line then breaks
-down per session, which separates the conflicts an observer's own derivations
-raise from those its votes raise. A poll one user votes in and one only watches:
+`--users` and the `users` half of a `--cases` entry count sessions: every one
+opens the poll and joins it. `--voters=N` has only the first `N` of them cast in
+each vote round, the host among them, while the remaining users only observe; a
+case with fewer users than `N` is refused. The churn line then breaks down per
+session, which separates the conflicts an observer's own derivations raise from
+those its votes raise. A poll one user votes in and one only watches:
 
 ```bash
 deno run -A packages/patterns/tools/lunch-poll-diagnose.ts \
