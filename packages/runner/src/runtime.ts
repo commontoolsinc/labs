@@ -2831,7 +2831,8 @@ export class Runtime {
    * docs the serving side was materializing). So every document named by the
    * rejection is pulled concurrently in its scope, and the retry's writes
    * carry their true versions instead of re-asserting seq 0. Entries without
-   * scope use the default space instance.
+   * scope use the default space instance. If no array entry names a usable
+   * address, the singular conflict supplies the recovery target.
    *
    * Every step is best-effort by design: this resolves rather than throws,
    * because the retry's commit — not this readiness — is what decides.
@@ -2870,33 +2871,28 @@ export class Runtime {
       }
     }
     if (teardownSignal?.aborted) return;
-    const rejection = error as {
-      conflict?: { space?: MemorySpace; of?: string; scope?: CellScope };
-      conflicts?: Array<{
-        space?: MemorySpace;
-        of?: string;
-        scope?: CellScope;
-      }>;
+    type ConflictAddress = { space: MemorySpace; of: URI; scope?: CellScope };
+    const isPullableConflict = (value: unknown): value is ConflictAddress => {
+      const conflict = value as Partial<ConflictAddress> | null | undefined;
+      return typeof conflict?.space === "string" &&
+        typeof conflict.of === "string" && conflict.of !== "of:unknown" &&
+        (conflict.scope === undefined || isCellScope(conflict.scope));
     };
-    const conflicts = Array.isArray(rejection?.conflicts) &&
-        rejection.conflicts.length > 0
-      ? rejection.conflicts
-      : rejection?.conflict === undefined
-      ? []
-      : [rejection.conflict];
+    const rejection = error as { conflict?: unknown; conflicts?: unknown };
+    const listedConflicts = Array.isArray(rejection?.conflicts)
+      ? rejection.conflicts.filter(isPullableConflict)
+      : [];
+    const conflicts = listedConflicts.length > 0
+      ? listedConflicts
+      : isPullableConflict(rejection?.conflict)
+      ? [rejection.conflict]
+      : [];
     const pulls: Promise<unknown>[] = [];
     const seen = new Set<string>();
     for (const conflict of conflicts) {
-      if (
-        conflict.space === undefined ||
-        typeof conflict.of !== "string" ||
-        conflict.of === "of:unknown"
-      ) {
-        continue;
-      }
       const key = entityNameKey({
         space: conflict.space,
-        id: conflict.of as URI,
+        id: conflict.of,
         scope: conflict.scope,
       });
       if (seen.has(key)) continue;
@@ -2905,7 +2901,7 @@ export class Runtime {
         pulls.push(
           Promise.resolve(
             this.storageManager.open(conflict.space).sync(
-              conflict.of as unknown as URI,
+              conflict.of,
               { path: [], schema: false },
               conflict.scope,
             ),
