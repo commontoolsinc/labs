@@ -458,6 +458,46 @@ replica has examined the document and also once a local write for it is
 pending, so a case turning on the first of those says in a comment that
 nothing has written the document yet.
 
+**A persisted label map reads as empty for four different states.** A test
+reaches the CFC label map through a chain like
+`replica.getDocument(id)?.cfc?.labelMap?.entries ?? []`. The `getDocument()`
+collapse above accounts for the first of the four. The rest of the chain adds
+three more: the document carries no `cfc` metadata, that metadata carries no
+`labelMap`, and the label map holds no matching entry. All four read as the
+same empty list. An assertion over that list saying some entry is absent
+therefore also passes when the label-map machinery persisted nothing
+whatsoever, and where no passing run stamps that document, the case cannot
+fail at all. Say which state is meant. A positive companion the same helper
+reads back from that same document closes all four at once: the entry is
+there, so the label map, the metadata and the document are there too. Where
+the run labels nothing on that document, the companion has to come from
+another one the run labels, and that closes only the last three — pair it with
+the value the document stores, which is what says the document is there at
+all. A run that labels nothing anywhere has only that second assertion to
+make.
+
+```ts
+// Shown at module scope.
+import { expect } from "@std/expect";
+
+type StoredEntry = { label: { confidentiality?: string[] } };
+
+declare const entriesOf: (id: string) => StoredEntry[];
+declare const storedDocument: (id: string) => { value?: unknown } | undefined;
+declare const sourceId: string;
+declare const copyId: string;
+
+// The stored value pins the copy document, and the source carries the atom
+// the copy must not.
+expect(storedDocument(copyId)?.value).toEqual({ reading: "37.77,-122.41" });
+expect(
+  entriesOf(sourceId).flatMap((e) => e.label.confidentiality ?? []),
+).toContain("secret");
+expect(
+  entriesOf(copyId).flatMap((e) => e.label.confidentiality ?? []),
+).not.toContain("secret");
+```
+
 ## What a claim ranges over
 
 A test exhibits instances. To exhibit an absence it has to exhaust the set the
