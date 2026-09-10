@@ -365,7 +365,8 @@ maximum per-run accesses, link traversals, and successful/failed event-commit
 markers from the browser worker. Accounting and telemetry are disabled before
 the timed change. These body counters exclude event-handler and commit-preparation
 reads; event-commit markers are counted separately and do not describe every
-storage transaction. Diagnostics go to stderr. Browser exceptions fail the run.
+storage transaction. Diagnostics go to stderr. Missing successful event commits, event-commit
+errors, and browser exceptions fail the run.
 
 The workflow pins the shell build, toolshed, and benchmark process to
 `EXPERIMENTAL_SERVER_EXECUTION=false`. This keeps its client-execution series

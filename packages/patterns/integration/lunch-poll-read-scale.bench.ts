@@ -273,6 +273,13 @@ for (const voteCount of SIZES) {
       if (sample.runs === 0) {
         throw new Error("The demanded vote produced no measured worker runs");
       }
+      if (sample.eventCommits === 0 || sample.eventCommitErrors !== 0) {
+        throw new Error(
+          `The diagnostic vote did not commit cleanly: ${
+            JSON.stringify(sample)
+          }`,
+        );
+      }
       note(`[lunch-read-scale] ${voteCount} votes: ${JSON.stringify(sample)}`);
       b.start();
       await vote(page, "green");

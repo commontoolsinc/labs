@@ -10,7 +10,7 @@ export default pattern(() => {
           poll.seed.send({ voteCount: 74, voterCount: 8, optionCount: 14 })
         ),
       },
-      { action: action(() => poll.claim.send({})) },
+      { action: action(() => poll.claim.send({ type: "click" })) },
       {
         assertion: assert(() =>
           poll.voteCount === 74 && poll.userCount === 8 &&

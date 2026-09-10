@@ -63,7 +63,7 @@ const seed = handler<
   }
 });
 
-const claim = handler<Record<string, never>, {
+const claim = handler<Record<string, unknown>, {
   profiles: Writable<LunchProfile[]>;
   overrideViewer: Stream<ViewerOverride>;
 }>((_, { profiles, overrideViewer }) => {
