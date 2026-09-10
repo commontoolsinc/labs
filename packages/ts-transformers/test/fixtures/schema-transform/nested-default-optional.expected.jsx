@@ -56,6 +56,9 @@ const increment = handler(false as const satisfies __cfHelpers.JSONSchema, {
             properties: {
                 counter: {
                     type: "number"
+                },
+                label: {
+                    type: "string"
                 }
             }
         }

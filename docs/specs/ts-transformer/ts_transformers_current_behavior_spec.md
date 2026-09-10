@@ -545,8 +545,8 @@ Diagnostics emitted in all modes:
   - direct `lift()` or `handler()` inside restricted context
   - special message for immediate `lift(fn)(args)` suggesting `computed()`
 - **Error** `standalone-function:reactive-operation`
-  - in standalone functions (except inline first arg to `patternTool`):
-    `computed(...)`, `lift(...)`, or reactive collection methods on reactive
+  - in standalone functions: `computed(...)`, `lift(...)`, or reactive
+    collection methods on reactive
     receivers
   - what counts as a standalone definition is read through transparent
     parentheses: `const helper = (() => ...)` is validated (and context-
@@ -613,18 +613,11 @@ Diagnostics emitted in all modes:
     imperative container roots" unsupported bucket. Guidance: use a supported
     array-method/value call, an event handler, or move the work into
     `computed(() => ...)`, module-scope `lift()`, or a helper.
-- **Error** `pattern-context:patterntool-requires-pattern`
-  - `patternTool(fn, ...)` where the first argument is a bare callback (arrow /
-    function expression, read through transparent parentheses) rather than a
-    `pattern(...)`. The runtime/transformer
-    auto-wrapping (`pattern(fn)`) and auto-capture were removed in CT-1655;
-    authors now wrap explicitly: `patternTool(pattern(fn), extraParams?)`. The
-    diagnostic is reported on the bare-callback argument.
 - **Error** `ses-callback:callable-capture`
   - a callback at an SES-self-contained boundary captures a **callable**
     declared in an enclosing function scope. The boundary kinds that require
     self-containment are `SES_SELF_CONTAINED_CALLBACK_BOUNDARIES`:
-    `event-handler`, `reactive-array-method`, `pattern-tool`, `pattern-builder`,
+    `event-handler`, `reactive-array-method`, `pattern-builder`,
     `render-builder`, `lift-applied`, `computed-builder`, `action-builder`,
     `lift-builder`, `handler-builder`. (`sqlite-row-label-rule` is deliberately
     excluded — `table()` evaluates its rule callback eagerly at pattern build
@@ -1131,11 +1124,10 @@ order:
 Strategy rebuilds — and the callbacks `PatternBuilder` assembles for them —
 carry the replaced nodes' source-map ranges (§11.5).
 
-There is no longer a separate patternTool closure strategy (CT-1655, #3862):
-`patternTool` now requires an explicit `pattern(...)` first argument (see
-§6.5 `pattern-context:patterntool-requires-pattern`), so the captures live on
-that authored pattern and the call is hoisted by `BuilderCallHoisting` (§11)
-rather than capture-rewritten here.
+Pattern factories used as nested values are closure-converted by the dedicated
+pattern strategy. Their public input remains callback argument 0; lexical
+captures are carried only in compiler-private callback argument 1 and bound by
+one emitted `.curry(captures)` call.
 
 ### 9.1 Capture model
 
@@ -1268,21 +1260,14 @@ The runtime meaning of `materializerWriteInputPaths` is specified in
 
 If no captures are found, the lift-applied call is left unchanged.
 
-### 9.6 patternTool (no closure strategy)
+### 9.6 Pattern factories as values
 
-There is no patternTool closure strategy in the current pipeline. The former
-strategy auto-wrapped a bare callback as `pattern(fn)` and auto-captured
-module-scoped reactive values into the call; both were removed in CT-1655
-(#3862) in favor of an explicit, addressable pattern.
-
-Current behavior:
-
-- `patternTool(...)`'s first argument **must** be an explicit `pattern(...)`; a
-  bare callback reports `pattern-context:patterntool-requires-pattern` (§6.5).
-- the captures live on the authored `pattern(...)` (module-scoped reads are
-  absorbed by the pattern; per-instance values go in `extraParams`).
-- the bare `pattern(...)` inside `patternTool(...)` is hoisted to module scope
-  by `BuilderCallHoisting` (§11, argument-position pattern case).
+An authored `pattern(...)` used as a nested value is the tool value directly.
+The pattern strategy closure-converts its non-module lexical captures, records
+their private schema with `withPatternParamsSchema(callback, schema)`, and emits
+one `.curry(captures)` binding. The public input and private captures are never
+merged. A capture-free nested pattern has neither the private callback argument
+nor a `.curry(...)` call.
 
 ### 9.7 Pattern callback lowering
 
@@ -1623,7 +1608,7 @@ content-addressing registration. It is the sole module-scope hoisting phase; it
 absorbed the former `LiftHoistingTransformer` (lift-only) and replaced the
 deleted `BuilderCallbackHoistingTransformer` (which hoisted builder callbacks
 and caused TDZ double-hoist bugs — #3864). Tickets: CT-1644 (lift), CT-1655
-(handler, pattern, patternTool), CT-1623 (`__cfReg` content addressing).
+(handler, pattern), CT-1623 (`__cfReg` content addressing).
 
 ### 11.1 What gets hoisted
 
@@ -1653,14 +1638,14 @@ time.
   ```
 
 - **Argument-position builder** (`pattern`): the bare `pattern(...)` call sits
-  in argument 0 of an enclosing `*WithPattern` call (`mapWithPattern`, etc.) or
-  `patternTool(...)`. Hoist argument 0 to `__cfPattern_N` and rewrite only that
+  in argument 0 of an enclosing `*WithPattern` call (`mapWithPattern`, etc.).
+  Hoist argument 0 to `__cfPattern_N` and rewrite only that
   argument, keeping the enclosing callee and remaining arguments intact. The
   top-level `export default pattern(...)` is a direct call, not an argument, so
   it is naturally excluded.
 
 Detection is provenance-driven via `detectCallKind` / `isHandlerAppliedCall` /
-`getWithPatternHoistablePatternCall` / `getPatternToolHoistablePatternCall`.
+`getWithPatternHoistablePatternCall`.
 
 ### 11.2 Why this runs after SchemaInjection
 
@@ -2173,10 +2158,9 @@ return {
 Pattern-factory identifiers are exempt (`isPatternFactoryHelperExpression`),
 and retargeting is disabled inside arguments of pattern-factory /
 pattern-builder calls (`shouldPreserveStructuralCallArgumentReferences`), so
-`{ pattern: searchWeb }` descriptors and `patternTool(searchWeb)` stay
-untouched. Plain (non-cell) identifiers such as string handler params are
-never retargeted (test: "does not retarget plain handler params inside local
-object initializers").
+direct factory values and calls stay untouched. Plain (non-cell) identifiers
+such as string handler params are never retargeted (test: "does not retarget
+plain handler params inside local object initializers").
 
 ### 13.5 Emitted cause grammar
 

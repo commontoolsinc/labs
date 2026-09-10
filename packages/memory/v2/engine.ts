@@ -6152,7 +6152,7 @@ const writeOperation = (
           branch,
           seq: localRow.seq,
           opIndex: localRow.op_index,
-        })
+        }).document
         : null;
       if (existing !== null && existing !== undefined) {
         let actualIdentity = existing as FabricValue;

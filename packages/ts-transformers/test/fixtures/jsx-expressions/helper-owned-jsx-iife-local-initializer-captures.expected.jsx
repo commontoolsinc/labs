@@ -93,7 +93,10 @@ const __cfLift_2 = __cfHelpers.lift<{
     type: "object",
     properties: {
         tree: {
-            $ref: "#/$defs/AnonymousType_1",
+            type: "array",
+            items: {
+                $ref: "#/$defs/Entry"
+            },
             asCell: ["readonly"]
         },
         p: {
@@ -105,12 +108,6 @@ const __cfLift_2 = __cfHelpers.lift<{
     },
     required: ["tree", "p"],
     $defs: {
-        AnonymousType_1: {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Entry"
-            }
-        },
         Entry: {
             type: "object",
             properties: {
@@ -124,7 +121,10 @@ const __cfLift_2 = __cfHelpers.lift<{
                     "enum": ["file", "folder"]
                 },
                 children: {
-                    $ref: "#/$defs/AnonymousType_1"
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Entry"
+                    }
                 }
             },
             required: ["id", "name", "type"]
@@ -149,16 +149,13 @@ const __cfLift_2 = __cfHelpers.lift<{
                     "enum": ["file", "folder"]
                 },
                 children: {
-                    $ref: "#/$defs/AnonymousType_1"
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Entry"
+                    }
                 }
             },
             required: ["id", "name", "type"]
-        },
-        AnonymousType_1: {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Entry"
-            }
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
@@ -189,16 +186,13 @@ const __cfLift_3 = __cfHelpers.lift<{
                     "enum": ["file", "folder"]
                 },
                 children: {
-                    $ref: "#/$defs/AnonymousType_1"
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Entry"
+                    }
                 }
             },
             required: ["id", "name", "type"]
-        },
-        AnonymousType_1: {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Entry"
-            }
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, {

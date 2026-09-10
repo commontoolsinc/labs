@@ -96,20 +96,20 @@ const __cfPattern_1 = __cfHelpers.pattern(__cfHelpers.withPatternParamsSchema((_
                 contextSchema: {
                     type: "object",
                     properties: {
-                        value: {
-                            type: "number"
-                        }
-                    },
-                    required: ["value"]
-                },
-                eventSchema: {
-                    type: "object",
-                    properties: {
                         result: {
                             type: "number"
                         }
                     },
                     required: ["result"]
+                },
+                eventSchema: {
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number"
+                        }
+                    },
+                    required: ["value"]
                 }
             }
         },
@@ -191,20 +191,20 @@ const __cfPattern_1 = __cfHelpers.pattern(__cfHelpers.withPatternParamsSchema((_
                 contextSchema: {
                     type: "object",
                     properties: {
-                        value: {
-                            type: "number"
-                        }
-                    },
-                    required: ["value"]
-                },
-                eventSchema: {
-                    type: "object",
-                    properties: {
                         result: {
                             type: "number"
                         }
                     },
                     required: ["result"]
+                },
+                eventSchema: {
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number"
+                        }
+                    },
+                    required: ["value"]
                 }
             }
         },
@@ -304,20 +304,20 @@ export default pattern((__cf_pattern_input_1) => {
                 contextSchema: {
                     type: "object",
                     properties: {
-                        value: {
-                            type: "number"
-                        }
-                    },
-                    required: ["value"]
-                },
-                eventSchema: {
-                    type: "object",
-                    properties: {
                         result: {
                             type: "number"
                         }
                     },
                     required: ["result"]
+                },
+                eventSchema: {
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number"
+                        }
+                    },
+                    required: ["value"]
                 }
             }
         },
@@ -406,20 +406,20 @@ export default pattern((__cf_pattern_input_1) => {
                                 contextSchema: {
                                     type: "object",
                                     properties: {
-                                        value: {
-                                            type: "number"
-                                        }
-                                    },
-                                    required: ["value"]
-                                },
-                                eventSchema: {
-                                    type: "object",
-                                    properties: {
                                         result: {
                                             type: "number"
                                         }
                                     },
                                     required: ["result"]
+                                },
+                                eventSchema: {
+                                    type: "object",
+                                    properties: {
+                                        value: {
+                                            type: "number"
+                                        }
+                                    },
+                                    required: ["value"]
                                 }
                             }
                         },

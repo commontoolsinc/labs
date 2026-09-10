@@ -177,25 +177,33 @@ export default pattern(() => {
                     required: ["count", "users", "lastAction"]
                 },
                 eventSchema: {
-                    type: "object",
-                    properties: {
-                        user: {
+                    $ref: "#/$defs/UserEvent",
+                    $defs: {
+                        UserEvent: {
                             type: "object",
                             properties: {
-                                name: {
-                                    type: "string"
+                                user: {
+                                    type: "object",
+                                    properties: {
+                                        name: {
+                                            type: "string"
+                                        },
+                                        email: {
+                                            type: "string"
+                                        },
+                                        age: {
+                                            type: "number"
+                                        }
+                                    },
+                                    required: ["name", "email"]
                                 },
-                                email: {
-                                    type: "string"
+                                action: {
+                                    "enum": ["create", "update", "delete"]
                                 }
                             },
-                            required: ["name", "email"]
-                        },
-                        action: {
-                            "enum": ["create", "update", "delete"]
+                            required: ["user", "action"]
                         }
-                    },
-                    required: ["user", "action"]
+                    }
                 }
             }
         }

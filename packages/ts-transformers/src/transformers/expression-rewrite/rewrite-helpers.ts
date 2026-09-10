@@ -10,6 +10,7 @@ import {
   typeToTypeNodeWithRegistry,
 } from "../../ast/mod.ts";
 import { isModuleScopedDeclaration } from "../../ast/scope-analysis.ts";
+import { CF_HELPERS_IDENTIFIER } from "../../core/cf-helpers.ts";
 import { unwrapTransparentWrapperOnce } from "../../utils/expression.ts";
 import { TransformationContext } from "../../core/mod.ts";
 import { createLiftAppliedCall } from "../builtins/lift-applied.ts";
@@ -275,6 +276,13 @@ function unionWithEnclosingScopeFreeIdentifiers(
   expression: ts.Expression,
   checker: ts.TypeChecker,
 ): ts.Expression[] {
+  // Helper namespaces are compiler lexical dependencies, never graph inputs.
+  // Synthetic dataflow analysis can surface `__cfHelpers` as the root of a
+  // generated builder call; transporting it would create invalid Fabric state.
+  const portableRefs = refs.filter((ref) =>
+    getRootIdentifier(ref)?.text !== CF_HELPERS_IDENTIFIER
+  );
+
   // Build a set of identifier names already represented by the dataflow refs
   // so we don't add them again. We key by name rather than by symbol because
   // dataflow refs are sometimes synthesized expressions whose root identifier
@@ -282,7 +290,7 @@ function unionWithEnclosingScopeFreeIdentifiers(
   // single expression, TypeScript scoping makes name → binding unambiguous,
   // so name-based dedup is safe here.
   const alreadyCoveredNames = new Set<string>();
-  for (const ref of refs) {
+  for (const ref of portableRefs) {
     const root = getRootIdentifier(ref);
     if (root) alreadyCoveredNames.add(root.text);
   }
@@ -299,9 +307,14 @@ function unionWithEnclosingScopeFreeIdentifiers(
 
     if (ts.isIdentifier(node) && isReferenceSite(node)) {
       if (
+        node.text !== CF_HELPERS_IDENTIFIER &&
         !alreadyCoveredNames.has(node.text) && !addedNames.has(node.text)
       ) {
-        const symbol = checker.getSymbolAtLocation(node);
+        const original = ts.getOriginalNode(node);
+        const symbol = checker.getSymbolAtLocation(node) ??
+          (original !== node && ts.isIdentifier(original)
+            ? checker.getSymbolAtLocation(original)
+            : undefined);
         // Only capture value-space symbols. Type-only identifiers (type
         // aliases, interfaces — type parameters are also filtered by
         // `isEnclosingScopeDeclaration` below) can appear at reference
@@ -313,7 +326,9 @@ function unionWithEnclosingScopeFreeIdentifiers(
           isEnclosingScopeDeclaration(symbol)
         ) {
           addedNames.add(node.text);
-          added.push(node);
+          added.push(
+            original !== node && ts.isExpression(original) ? original : node,
+          );
         }
       }
     }
@@ -323,7 +338,7 @@ function unionWithEnclosingScopeFreeIdentifiers(
 
   visit(expression);
 
-  return [...refs, ...added];
+  return [...portableRefs, ...added];
 }
 
 /**

@@ -1799,7 +1799,10 @@ const tools = {
 ```
 
 Tool discovery reads the factory's public argument schema. Invocation follows
-the same dynamic factory path as ordinary pattern composition.
+the same dynamic factory path as ordinary pattern composition. CLI verb
+discovery recognizes a direct PatternFactory or the factory in an ordinary
+metadata wrapper and publishes that public schema unchanged; it does not infer
+or subtract closure-capture keys.
 
 ## Compatibility and Migration
 

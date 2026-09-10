@@ -21,7 +21,11 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     type: "object",
     properties: {
         a: {
-            type: ["string", "undefined"],
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "undefined"
+                }],
             asCell: ["readonly"]
         }
     }
@@ -30,7 +34,11 @@ const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     type: "object",
     properties: {
         b: {
-            type: ["number", "undefined"],
+            anyOf: [{
+                    type: "number"
+                }, {
+                    type: "undefined"
+                }],
             asCell: ["readonly"]
         }
     }

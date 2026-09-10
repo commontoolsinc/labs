@@ -32,16 +32,19 @@ const __cfLift_1 = __cfHelpers.lift<{
     type: "object",
     properties: {
         entries: {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Entry"
-            },
-            "default": [],
+            $ref: "#/$defs/EntriesValue",
             asCell: ["readonly"]
         }
     },
     required: ["entries"],
     $defs: {
+        EntriesValue: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Entry"
+            },
+            "default": []
+        },
         Entry: {
             type: "object",
             properties: {
