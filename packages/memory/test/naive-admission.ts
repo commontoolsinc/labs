@@ -132,14 +132,14 @@ const conflictSeq = (
  * accepted history so far. Mirrors §3.6 exactly, without shortcuts.
  */
 /**
- * Whether every operation of `commit` leaves the document `store` holds as
- * it is: an identity commit, which the engine accepts without a staleness
- * check because applying it changes nothing (03-commit-model.md §3.6.1). A
- * `set` qualifies by equality; a `patch` by being idempotent on the stored
- * document. The engine's patch rule also replays the patch from the read's
- * basis, which this model has no history to reconstruct, so the engine
- * accepts a subset of what this predicate admits, the direction INV-2
- * requires.
+ * Whether `commit` leaves every document `store` holds as it is: an identity
+ * commit, which the engine accepts without a staleness check because
+ * applying it changes nothing (03-commit-model.md §3.6.1). Per document,
+ * the commit's `set` and `patch` operations replayed in order on the stored
+ * document must leave it unchanged. The engine's rule also replays the
+ * sequence from the view the reader saw, which this model has no history to
+ * reconstruct, so the engine accepts a subset of what this predicate
+ * admits, the direction INV-2 requires.
  */
 export const naiveIsIdentityCommit = (
   store: ReadonlyMap<string, Record<string, unknown>>,

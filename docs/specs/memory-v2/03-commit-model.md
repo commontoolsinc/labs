@@ -340,12 +340,15 @@ in local order, since that read is the view the value came through, even
 where the commit also carries a confirmed read of the document; for a
 confirmed read, the document at its `seq`; and the stored document itself
 when the commit did not read the document, where the sequence is an identity
-only if it is idempotent. A read of the same entity on another branch is
-passed over. A pending read that declares no `basisSeq` leaves the view
-unreconstructable, and the commit gets no exemption: the durable document at
-a named layer's resolution is not that view, since it carries every foreign
-write on other paths that landed before the layer and that the reader had not
-integrated.
+only if it is idempotent. A read names its branch only where that differs
+from the commit's, exactly as §3.6.1's staleness rule reads it, and a read of
+the same entity on another branch is passed over. Two reads leave the view
+unreconstructable, and a commit carrying one gets no exemption: a pending
+read that declares no `basisSeq`, since the durable document at a named
+layer's resolution is not the reader's view, carrying every foreign write on
+other paths that landed before the layer and that the reader had not
+integrated; and a read whose basis lies below the commit's branch's creation
+seq, which names no state of that branch (`06-branching.md` §6.10.1).
 
 Applying such a commit changes nothing, so no read it recorded can have led it
 to a wrong write, and refusing it would only make the writer re-derive the

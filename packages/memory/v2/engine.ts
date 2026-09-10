@@ -5529,7 +5529,7 @@ const applyCommitTransaction = (
     }
   }
 
-  // An identity commit: every operation leaves its document as the space
+  // An identity commit leaves every document it writes as the space
   // already holds it, so applying the commit changes nothing. A commit that
   // changes nothing cannot have observed anything wrongly in a way that
   // matters, so its reads' staleness is not checked (03-commit-model.md
@@ -5541,15 +5541,16 @@ const applyCommitTransaction = (
   // same identity the write would apply under, so a scoped instance
   // compares against its own partition.
   //
-  // A `set` qualifies when its value equals the stored document. A `patch`
-  // qualifies when replaying it on the document as the commit's read of that
-  // document saw it yields the stored document, and replaying it on the
-  // stored document leaves that unchanged. The second condition is for the
-  // writer's own replica, which re-folds the patch over whatever confirmed
-  // base it holds when the accept arrives: a patch idempotent on the durable
-  // value lands on that value from any base between the read and the head,
-  // where a positional splice replayed over a base already carrying its
-  // elements would duplicate them.
+  // The proof is per document, over the commit's `set` and `patch`
+  // operations on it in order: replayed on the document as the commit's
+  // read of it saw it, the sequence yields the stored document, and
+  // replayed on the stored document it leaves that unchanged. The second
+  // condition is for the writer's own replica, which re-folds the
+  // operations over whatever confirmed base it holds when the accept
+  // arrives: a sequence idempotent on the durable value lands on that value
+  // from any base between the read and the head, where a positional splice
+  // replayed over a base already carrying its elements would duplicate
+  // them.
   type DocumentOps = Array<
     Extract<typeof commit.operations[number], { op: "set" | "patch" }>
   >;
@@ -5578,14 +5579,21 @@ const applyCommitTransaction = (
   // commit gets no exemption. Where a commit also carries a confirmed read
   // of the same document (a shape-only read that names the non-speculative
   // stack), the pending read decides. A confirmed read's view is the
-  // document at its seq; a read of the same entity on another branch says
-  // nothing about this branch and is passed over. With no read of the
-  // document at all the sequence is an identity only where it is
-  // idempotent, so the stored document is the basis.
+  // document at its seq. A read names its branch only when that differs
+  // from the commit's, exactly as the staleness check reads it; a read
+  // that names another branch says nothing about this one and is passed
+  // over. A basis below the branch's creation seq is not a state of this
+  // branch (06-branching.md §6.10.1), so such a read leaves the view
+  // unreconstructable as well. With no read of the document at all the
+  // sequence is an identity only where it is idempotent, so the stored
+  // document is the basis.
   type Basis =
     | { known: true; document: EntityDocument | undefined }
     | { known: false };
   const REPLAYABLE_LAYER_OPS = new Set(["set", "patch", "delete"]);
+  const branchCreatedSeq = branch === DEFAULT_BRANCH
+    ? 0
+    : getBranch(engine, branch)?.createdSeq ?? Number.POSITIVE_INFINITY;
   const basisOf = (
     first: DocumentOps[number],
     stored: EntityDocument,
@@ -5601,7 +5609,11 @@ const applyCommitTransaction = (
       seq === 0 ? undefined : at(seq) ?? undefined;
     const pending = commit.reads.pending.find(sameDocument);
     if (pending !== undefined) {
-      if (pending.basisSeq === undefined) return { known: false };
+      if (
+        pending.basisSeq === undefined || pending.basisSeq < branchCreatedSeq
+      ) {
+        return { known: false };
+      }
       let document = documentAt(pending.basisSeq);
       const layers = [...pendingReadLayers(pending)].sort((a, b) => a - b);
       for (const localSeq of layers) {
@@ -5625,13 +5637,11 @@ const applyCommitTransaction = (
       return { known: true, document };
     }
     const confirmed = commit.reads.confirmed.find((candidate) =>
-      sameDocument(candidate) &&
-      (candidate.branch ?? DEFAULT_BRANCH) === branch
+      sameDocument(candidate) && (candidate.branch ?? branch) === branch
     );
-    return {
-      known: true,
-      document: confirmed === undefined ? stored : documentAt(confirmed.seq),
-    };
+    if (confirmed === undefined) return { known: true, document: stored };
+    if (confirmed.seq < branchCreatedSeq) return { known: false };
+    return { known: true, document: documentAt(confirmed.seq) };
   };
   // Proving the identity reads the stored document and, for a patch, the
   // document at the reader's basis, so it runs only once a staleness check

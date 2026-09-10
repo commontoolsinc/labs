@@ -98,17 +98,19 @@ model. The residual deviation retires when clients that omit `basisSeq`
 fall below the support floor.
 
 A second deviation is deliberate: an **identity commit**
-(`03-commit-model.md` §3.6.1), every operation of which leaves its document
-as the space already holds it, is accepted without a staleness check. Its
+(`03-commit-model.md` §3.6.1), which leaves every document it writes as the
+space already holds it, is accepted without a staleness check. Its
 observation may be stale in this invariant's terms, but it produced no
 write, so the durable state at its resolution point is unchanged by it and
 the phantom and missed-write failures both have nothing to act on. What
 makes the acceptance sound is that the server proves the identity itself,
-inside the commit's transaction, against the stored document and, for a
-patch, against the document at the reader's basis; a client claim would not
-do. The differential harness's reference model applies the same rule for
-`set` operations and the idempotence half of it for patches, so it admits a
-superset of what the engine admits. The TLA+ model's `IdentityMode = "elide"`
+inside the commit's transaction: per document, the commit's ordered `set`
+and `patch` operations replayed on the view the reader saw yield the stored
+document, and replayed on the stored document leave it unchanged, where a
+pending read's view is its declared confirmed basis with exactly the own
+layers it names replayed on it; a client claim would not do. The
+differential harness's reference model applies the idempotence half alone,
+so it admits a superset of what the engine admits. The TLA+ model's `IdentityMode = "elide"`
 (`PendingStacks_Identity.cfg`, `PendingStacks_ChannelIdentity.cfg`) certifies
 the rule in the bounded model under this invariant's content form,
 `ContentCoherence`: the writer-set form `ReadCoherence` is not the statement

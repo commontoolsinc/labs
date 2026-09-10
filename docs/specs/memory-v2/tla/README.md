@@ -16,9 +16,11 @@ refinement are.)
 Checked with TLC 2.19 (the atomic configs finish in under a minute each, the
 channel configs in one to three minutes, and the deep config in about five).
 `IdentityMode` is `none` and `Values` is the single value `{"v"}` in every
-row that does not say otherwise; with one value no write can be an identity
-and the reachable state graphs are those the earlier rows certified, to the
-digit.
+row that does not say otherwise. It is the mode that keeps elision out of
+those rows, not the alphabet: with one value a stale write of `v` onto a
+path already holding `v` satisfies `IsIdentity` just the same, and would be
+elided under `elide`. The single value is what leaves those rows' reachable
+state graphs exactly the ones the earlier runs certified, to the digit.
 
 | Config | DepMode | BasisMode | DeliveryMode | Result |
 | --- | --- | --- | --- | --- |

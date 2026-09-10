@@ -10,6 +10,7 @@ import {
   type Engine,
   open,
 } from "../v2/engine.ts";
+import { DEFAULT_BRANCH } from "../v2.ts";
 
 const setOp = (id: string, value: unknown) =>
   ({ op: "set", id, value: { value } }) as never;
@@ -749,13 +750,123 @@ describe("applyCommit() with an identity commit", () => {
           branch: "feature",
           reads: {
             confirmed: [
-              { id: "of:doc", branch: undefined, path: [], seq: install },
-              { id: "of:doc", branch: "feature", path: [], seq: onFeature },
+              { id: "of:doc", branch: DEFAULT_BRANCH, path: [], seq: install },
+              { id: "of:doc", path: [], seq: onFeature },
             ],
             pending: [],
           },
           operations: [patchOp("of:doc", [
             { op: "replace", path: "/value/a", value: 1 },
+          ])],
+        }),
+      })
+    ).toThrow(ConflictError);
+  });
+
+  it("reads a confirmed read that names no branch as a read of the commit's branch", () => {
+    // The wire shape omits a branch equal to the commit's. Passed over as
+    // a default-branch read, the commit would have no read of the document
+    // and the idempotent patch would pass on the stored document alone;
+    // as the feature read it is, its view {a: 1, b: 1} replays to a
+    // document the stored {a: 1, b: 0} is not.
+    const { onFeature } = installForkThenReplaceOnFeature();
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(3, {
+          branch: "feature",
+          reads: {
+            confirmed: [{ id: "of:doc", path: [], seq: onFeature }],
+            pending: [],
+          },
+          operations: [patchOp("of:doc", [
+            { op: "replace", path: "/value/a", value: 1 },
+          ])],
+        }),
+      })
+    ).toThrow(ConflictError);
+  });
+
+  it("gives no exemption to a confirmed read below the branch's creation seq", () => {
+    // Two parent-branch commits precede the branch, so a feature read at
+    // seq 1 names no state of the feature branch (06-branching.md
+    // §6.10.1); the idempotent replace would pass on the stored document
+    // alone, and the refusal stands instead.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, { operations: [setOp("of:doc", { a: 1 })] }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, { operations: [setOp("of:other", { x: 1 })] }),
+    });
+    createBranch(engine, "feature");
+    applyCommit(engine, {
+      sessionId: "s:x",
+      commit: commit(1, {
+        branch: "feature",
+        operations: [setOp("of:doc", { a: 3 })],
+      }),
+    });
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(3, {
+          branch: "feature",
+          reads: {
+            confirmed: [{ id: "of:doc", path: [], seq: 1 }],
+            pending: [],
+          },
+          operations: [patchOp("of:doc", [
+            { op: "replace", path: "/value/a", value: 3 },
+          ])],
+        }),
+      })
+    ).toThrow(ConflictError);
+  });
+
+  it("gives no exemption to a pending read whose basis is below the branch's creation seq", () => {
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, { operations: [setOp("of:doc", { a: 1 })] }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, { operations: [setOp("of:other", { x: 1 })] }),
+    });
+    createBranch(engine, "feature");
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(3, {
+        branch: "feature",
+        operations: [patchOp("of:doc", [
+          { op: "add", path: "/value/m", value: 1 },
+        ])],
+      }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:x",
+      commit: commit(1, {
+        branch: "feature",
+        operations: [patchOp("of:doc", [
+          { op: "replace", path: "/value/a", value: 3 },
+        ])],
+      }),
+    });
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(4, {
+          branch: "feature",
+          reads: {
+            confirmed: [],
+            pending: [{ id: "of:doc", path: [], localSeq: 3, basisSeq: 1 }],
+          },
+          operations: [patchOp("of:doc", [
+            { op: "replace", path: "/value/a", value: 3 },
           ])],
         }),
       })
@@ -797,8 +908,8 @@ describe("applyCommit() with an identity commit", () => {
           branch: "feature",
           reads: {
             confirmed: [
-              { id: "of:doc", path: [], seq: 1 },
-              { id: "of:doc", branch: "feature", path: [], seq: onFeature },
+              { id: "of:doc", branch: DEFAULT_BRANCH, path: [], seq: 1 },
+              { id: "of:doc", path: [], seq: onFeature.seq },
             ],
             pending: [],
           },
