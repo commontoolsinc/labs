@@ -372,7 +372,8 @@ for the compile request.
 
 **N40/N41 (pattern updates — who triggers under v2).** The two halves
 have different owners. FOLLOWING a source origin belongs to whoever
-OPENS a piece, which is a client; a serving tenure opens none. The live
+OPENS a piece, including runtime-supplied surfaces opened for a user; a
+serving tenure opens none. The live
 hot-swap via the `patternIdentity` meta sink, including teardown +
 reinstantiation and the unloadable-pointer roll-forward, belongs to
 whichever runtime is running the piece. Under v2 pieces run only in the

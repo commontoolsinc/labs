@@ -1094,10 +1094,10 @@ commit, the swap replaces the running graph only after DURABLE
 acceptance — on withdrawal the old graph stays (old-graph-plus-new-
 pointer is a coherent not-yet-swapped state; the reverse is the
 broken-setup class). The pointer write itself stays authored-class
-under the writing principal. Nothing server-side probes a pattern
-route any more, so the network source probe against a fully-local
-store that this section used to record as a residual is gone with the
-half that made it.
+under the writing principal. A serving tenure does not probe an existing
+piece's source origin. Creating a missing space root still fetches its initial
+system source through the serving runtime's API URL; that fetch remains within
+verification-coverage.md OW55's source-trust obligation.
 
 ## 4. Effectful nodes: memoization contract
 
