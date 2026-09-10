@@ -9605,8 +9605,9 @@ supply; OW29/OW32/OW34 closed):
     following the ruling asks for EXISTED at the graph layer —
     `assembleSchemaDocClosures` (memory/v2/query.ts, since #5833)
     scans every delivered snapshot for embedded cid refs and stages
-    the verified closure, beside the meta-link following
-    (`loadMetaLinkedDocs`, runner traverse.ts) that ships computed
+    the verified closure, beside the meta-link following in runner
+    traverse.ts (as of #7193 a traversal follows a document's `cfc`
+    envelope alone, through `loadLabelSchemaDoc`) that shipped computed
     results at all — but it stages a closure doc only while the
     tracked graph has never delivered it, and the frame builders
     additionally elide entries the session cache says were delivered
