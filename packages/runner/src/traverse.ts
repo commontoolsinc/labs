@@ -1290,11 +1290,12 @@ export type TraversalContext = {
   scopeKeyIdentity: ScopeKeyIdentity;
 
   /**
-   * Whether this is a query-shaped traversal, which walks through `asCell`
-   * positions instead of stopping at them, skips a document a selector it
-   * already tracks covers, takes no lazy-proxy or plain-schema fast path,
-   * and loads beside every document it reaches through a link the schema
-   * document that document's `cfc` envelope names (`loadLabelSchemaDoc`).
+   * Whether this is a query-shaped traversal. Such a traversal walks
+   * through `asCell` positions instead of stopping at them, skips a
+   * document already covered by a selector it tracks, takes no lazy-proxy
+   * or plain-schema fast path, and loads, beside every document it reaches
+   * through a link, the schema document that document's `cfc` envelope
+   * names (`loadLabelSchemaDoc`).
    */
   traverseCells: boolean;
 
@@ -2597,10 +2598,9 @@ function trackVisitedDoc(
     );
   }
   // A document reached through a link is owed the schema document its
-  // `cfc` envelope names, whichever way the walk reached it, unless the
-  // address holds no value.
+  // `cfc` envelope names, whichever way the walk reached it.
   if (context.traverseCells) {
-    // Loading the envelope requires the full doc. Ignore this read for
+    // Reading the envelope takes the whole document. Ignore this read for
     // scheduling.
     const { ok: fullDoc } = tx.read(
       { ...target, path: [] },

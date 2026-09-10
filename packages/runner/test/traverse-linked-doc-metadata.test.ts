@@ -1,9 +1,9 @@
 /**
- * What a traversal loads beside a document it reaches through a link. Two
- * cases drive the same shape from opposite ends: one through a `Cell` read
- * over an emulated replica, where the transaction's read log is the
- * evidence, and one through a bare `SchemaObjectTraverser` over a map-backed
- * store, where the schema tracker is.
+ * What a traversal loads beside a document it reaches through a link. The
+ * cases drive that from two ends: a `Cell` read over an emulated replica,
+ * where the transaction's read log is the evidence, and a bare
+ * `SchemaObjectTraverser` over a map-backed store, where the schema tracker
+ * is.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -52,11 +52,10 @@ const sourceSchema: JSONSchema = {
 };
 
 describe("traverse-linked-doc-metadata", () => {
-  // Each case stores three documents: `source`, whose value links to
-  // `target`; `target`, whose `argument` metadata links to `absent`; and
-  // `absent`, which is never written. A read of `source` under a schema that
-  // reaches into `target` crosses the link, and what the crossing loads
-  // beside `target` is what the case observes.
+  // Every case stores a `source` whose value links to a `target` carrying
+  // one metadata member. Reading `source` under a schema that reaches into
+  // `target` crosses that link, and what the crossing loads beside `target`
+  // is what the case observes.
 
   describe("a `Cell` read with `traverseCells: true`", () => {
     let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -111,6 +110,10 @@ describe("traverse-linked-doc-metadata", () => {
     const type = "application/json" as const;
     const storeSpace = "did:null:null";
 
+    // Any non-empty string stands in for a schema hash: the envelope's
+    // `schemaHash` is turned into a `cid:` link without being resolved.
+    const schemaHash = "traversetestschemahash";
+
     const link = (id: string) => ({ "/": { [LINK_V1_TAG]: { id, path: [] } } });
 
     const putDoc = (
@@ -118,23 +121,21 @@ describe("traverse-linked-doc-metadata", () => {
       id: string,
       is: Record<string, FabricValue>,
     ): void => {
-      store.set(`${id}/${type}`, {
-        the: type,
-        of: id as Entity,
-        is,
-        since: 1,
-      });
+      store.set(`${id}/${type}`, { the: type, of: id as Entity, is, since: 1 });
     };
 
-    it("tracks the linked document and not the target of its `argument` metadata", () => {
+    /** Stores `source` linking to a `target` carrying `targetMeta`. */
+    const storeWith = (
+      targetMeta: Record<string, FabricValue>,
+    ): Map<string, Revision<State>> => {
       const store = new Map<string, Revision<State>>();
-      putDoc(store, "of:target", {
-        value: { title: "held" },
-        argument: link("of:absent-argument"),
-      });
-      const sourceValue = { ref: link("of:target") };
-      putDoc(store, "of:source", { value: sourceValue });
+      putDoc(store, "of:target", { value: { title: "held" }, ...targetMeta });
+      putDoc(store, "of:source", { value: { ref: link("of:target") } });
+      return store;
+    };
 
+    /** Reads `of:source` under `sourceSchema`, crossing into `of:target`. */
+    const traverse = (store: Map<string, Revision<State>>) => {
       const tx = new ExtendedStorageTransaction(
         new ManagedStorageTransaction(new StoreObjectManager(store)),
       );
@@ -151,16 +152,30 @@ describe("traverse-linked-doc-metadata", () => {
           type,
           path: ["value"],
         },
-        value: sourceValue,
+        value: { ref: link("of:target") },
       });
+      const tracked = [...context.schemaTracker].map(([key]) => key);
+      return { ok, tracked };
+    };
 
-      const trackedKeys = [...context.schemaTracker].map(([key]) => key);
-      const keyOf = (id: string) =>
-        schemaTrackerKey(storeSpace, id, undefined, TEST_SCOPE_IDENTITY);
+    const keyOf = (id: string) =>
+      schemaTrackerKey(storeSpace, id, undefined, TEST_SCOPE_IDENTITY);
+
+    it("tracks the schema document the linked document's `cfc` envelope names", () => {
+      const store = storeWith({ cfc: { schemaHash } });
+      putDoc(store, `cid:${schemaHash}`, { value: { type: "object" } });
+
+      expect(traverse(store).tracked).toContain(keyOf(`cid:${schemaHash}`));
+    });
+
+    it("tracks the linked document and not the target of its `argument` metadata", () => {
+      const { ok, tracked } = traverse(
+        storeWith({ argument: link("of:absent-argument") }),
+      );
 
       expect(ok).toEqual({ ref: { title: "held" } });
-      expect(trackedKeys).toContain(keyOf("of:target"));
-      expect(trackedKeys).not.toContain(keyOf("of:absent-argument"));
+      expect(tracked).toContain(keyOf("of:target"));
+      expect(tracked).not.toContain(keyOf("of:absent-argument"));
     });
   });
 });
