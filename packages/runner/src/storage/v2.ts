@@ -311,19 +311,22 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
  * without bound — a rendered UI tree reaches tens of kilobytes — and a cache
  * keyed on it directly would cost that much per entry.
  */
-export function dataURISyncKey(identity: {
+export function dataURISyncKey(sync: {
   id: string;
   schema: JSONSchema | undefined;
   path: readonly string[];
   space: MemorySpace;
   scope: CellScope | undefined;
+  /** The served run's identity when the sync names its instances. */
+  identity?: ScopeKeyIdentity;
 }): string {
   return hashStringOf([
-    identity.id,
-    identity.schema ? hashStringOf(identity.schema) : "",
-    [...identity.path],
-    identity.space,
-    normalizeCellScope(identity.scope),
+    sync.id,
+    sync.schema ? hashStringOf(sync.schema) : "",
+    [...sync.path],
+    sync.space,
+    normalizeCellScope(sync.scope),
+    sync.identity === undefined ? "" : hashStringOf(sync.identity),
   ]);
 }
 
@@ -1169,7 +1172,14 @@ export class StorageManager implements IStorageManager {
       },
       registerPendingLoad: (address) => this.#registerPendingLoad(address),
       collectLinkedCellSyncs: (value, base, schema, promises, seen) =>
-        this.#collectLinkedCellSyncs(value, base, schema, promises, seen),
+        this.#collectLinkedCellSyncs(
+          value,
+          base,
+          schema,
+          promises,
+          seen,
+          undefined,
+        ),
     };
   }
 
@@ -2228,7 +2238,14 @@ export class StorageManager implements IStorageManager {
     }
 
     if (hasDataUriScheme(id)) {
-      return this.#syncDataURICell(cell, space, id, schema, scope);
+      return this.#syncDataURICell(
+        cell,
+        space,
+        id,
+        schema,
+        scope,
+        options?.scopeKeyIdentity,
+      );
     }
 
     const provider = this.open(space);
@@ -2357,7 +2374,12 @@ export class StorageManager implements IStorageManager {
    * resolved error counted as the load's failure and logged.
    */
   #trackPendingProviderSync(
-    address: { space: MemorySpace; scope: CellScope; id: URI },
+    address: {
+      space: MemorySpace;
+      scope: CellScope;
+      id: URI;
+      scopeKey?: ScopeKey;
+    },
     start: () => Promise<Result<Unit, Error>>,
   ): Promise<Result<Unit, Error>> {
     const releaseLoad = this.#registerPendingLoad(address);
@@ -2408,6 +2430,7 @@ export class StorageManager implements IStorageManager {
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
+    identity: ScopeKeyIdentity | undefined,
   ): Promise<Cell<T>> {
     const cacheKey = dataURISyncKey({
       id,
@@ -2415,10 +2438,18 @@ export class StorageManager implements IStorageManager {
       path: cell.path.map(String),
       space,
       scope,
+      identity,
     });
     let work = this.#dataURISyncs.get(cacheKey);
     if (work === undefined) {
-      work = this.#syncDataURILinkTargets(cell, space, id, schema, scope);
+      work = this.#syncDataURILinkTargets(
+        cell,
+        space,
+        id,
+        schema,
+        scope,
+        identity,
+      );
       this.#dataURISyncs.set(cacheKey, work);
     }
     await work;
@@ -2431,6 +2462,7 @@ export class StorageManager implements IStorageManager {
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
+    identity: ScopeKeyIdentity | undefined,
   ): Promise<void> {
     let value: unknown = valueFromDataUri(id);
     for (const segment of [...cell.path.map(String)]) {
@@ -2453,6 +2485,7 @@ export class StorageManager implements IStorageManager {
       schema,
       promises,
       new Set(),
+      identity,
     );
     if (promises.length > 0) {
       await Promise.all(promises);
@@ -2464,7 +2497,9 @@ export class StorageManager implements IStorageManager {
    * linked document onto `promises`, under the schema a read at the link's
    * place in `schema` would cross it with: the reader's sub-schema, which the
    * link's own schema cannot widen (`combineSchemaForLink`). `seen` holds
-   * the objects already walked.
+   * the objects already walked. A served per-instance run's `identity`
+   * names that principal's instance of each scoped target (server-execution
+   * v2 stage A), as `syncCell` does for a stored document.
    */
   #collectLinkedCellSyncs(
     value: unknown,
@@ -2472,6 +2507,7 @@ export class StorageManager implements IStorageManager {
     schema: JSONSchema | undefined,
     promises: Promise<unknown>[],
     seen: Set<unknown>,
+    identity: ScopeKeyIdentity | undefined,
   ): void {
     if (value === null || value === undefined || seen.has(value)) {
       return;
@@ -2488,14 +2524,25 @@ export class StorageManager implements IStorageManager {
         const scope = normalizeCellScope(
           link.scope as CellScope | undefined,
         );
+        const instance = this.#foreignInstanceKey(scope, identity);
         promises.push(
           this.#trackPendingProviderSync(
-            { space, scope, id: link.id },
+            {
+              space,
+              scope,
+              id: link.id,
+              ...(instance !== undefined ? { scopeKey: instance } : {}),
+            },
             () =>
-              this.open(space).sync(link.id!, {
-                path: link.path.map((segment) => segment.toString()),
-                schema: combineOptionalSchema(schema, link.schema) ?? false,
-              }, scope),
+              this.open(space).sync(
+                link.id!,
+                {
+                  path: link.path.map((segment) => segment.toString()),
+                  schema: combineOptionalSchema(schema, link.schema) ?? false,
+                },
+                scope,
+                instance,
+              ),
           ),
         );
       }
@@ -2514,6 +2561,7 @@ export class StorageManager implements IStorageManager {
           itemSchema,
           promises,
           seen,
+          identity,
         );
       }
       return;
@@ -2541,6 +2589,7 @@ export class StorageManager implements IStorageManager {
           childSchema,
           promises,
           seen,
+          identity,
         );
       }
     }

@@ -2693,64 +2693,6 @@ describe("setup/start", () => {
     changedTx.abort();
   });
 
-  it("keeps the stored-argument guard when a linked target does not sync", async () => {
-    const setupTx = runtime.edit();
-    const targetCell = runtime.getCell(
-      space,
-      "stored setup argument unavailable linked target",
-      undefined,
-      setupTx,
-    );
-    targetCell.set({ name: "Ada" });
-    const argumentCell = runtime.getCell(
-      space,
-      "stored setup argument with unavailable target",
-      undefined,
-      setupTx,
-    );
-    argumentCell.setRaw({
-      profile: targetCell.getAsWriteRedirectLink(),
-    });
-    const resultCell = runtime.getCell(
-      space,
-      "stored setup argument unavailable target result",
-      undefined,
-      setupTx,
-    );
-    resultCell.setMetaRaw(
-      "argument",
-      argumentCell.getAsWriteRedirectLink(),
-      rawMetaWriteAuthorization,
-    );
-    await setupTx.commit();
-    await runtime.idle();
-
-    const originalSyncCell = runtime.storageManager.syncCell;
-    const targetLink = targetCell.getAsNormalizedFullLink();
-    let targetSyncs = 0;
-    Reflect.set(runtime.storageManager, "syncCell", (cell: unknown) => {
-      const linkedCell = cell as typeof targetCell;
-      if (
-        areNormalizedLinksSame(
-          linkedCell.getAsNormalizedFullLink(),
-          targetLink,
-        )
-      ) {
-        targetSyncs++;
-        return Promise.reject(new Error("linked target unavailable"));
-      }
-      return Reflect.apply(originalSyncCell, runtime.storageManager, [cell]);
-    });
-
-    try {
-      const guard = await runtime.runner.syncStoredSetupArgument(resultCell);
-      expect(targetSyncs).toBe(1);
-      expect(guard(resultCell)).toBe(true);
-    } finally {
-      Reflect.set(runtime.storageManager, "syncCell", originalSyncCell);
-    }
-  });
-
   it("setup with cell argument and start reacts to cell updates", async () => {
     const pattern: Pattern = {
       argumentSchema: {
