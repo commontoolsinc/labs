@@ -765,7 +765,7 @@ function createObjectView(
   // Every read this view takes goes through here, so this is where it steps
   // into the instant it describes. Before the transaction's first write there
   // is nothing to step into — every epoch names the same root — so the common
-  // case pays one boolean and no more. Entered by hand rather than around a
+  // case checks the accounting flag and the read epoch. Entered by hand rather than around a
   // callback: a reader walking a large value touches this per property, and a
   // callback would allocate a closure each time.
   const childOrAbsent = (key: string): unknown => {
@@ -947,7 +947,9 @@ function createArrayView(
       }
       if (isArrayIndexPropertyName(prop)) {
         const index = Number(prop);
-        return index in value ? element(index) : undefined;
+        if (index in value) return element(index);
+        if (readStatsActive) recordProxyAccess(tx);
+        return undefined;
       }
       const method = Reflect.get(Array.prototype, prop, receiver);
       if (typeof method !== "function") return method;

@@ -478,6 +478,7 @@ export async function runSchedulerAction(
   state: SchedulerActionRunState,
   action: Action,
 ): Promise<any> {
+  const readStatsEnabled = state.getReadStatsEnabled();
   logger.timeStart("scheduler", "run");
   const actionId = state.getActionId(action);
   state.runtime.telemetry.submit({
@@ -597,9 +598,7 @@ export async function runSchedulerAction(
         }
         : {}),
     });
-    const finishReads = state.getReadStatsEnabled()
-      ? startReadStats(tx)
-      : undefined;
+    const finishReads = readStatsEnabled ? startReadStats(tx) : undefined;
     const actionStartTime = performance.now();
 
     let result: any;
