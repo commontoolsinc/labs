@@ -165,7 +165,7 @@ only one that helps patterns nobody rewrites. Do it first.
       | Counter | What it answers |
       | --- | --- |
       | proxy accesses | how many element and property reads the body performed |
-      | link resolutions | how many of those crossed a link |
+      | link resolutions | how much stored-link traversal work the run performed |
       | distinct documents | how much of the space the run touched |
       | registered dependencies | how much will re-trigger it |
 

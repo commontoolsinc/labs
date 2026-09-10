@@ -389,6 +389,46 @@ describe("read-stats", () => {
     });
   }
 
+  it("counts both target reads when a prepared array hop needs a fallback", async () => {
+    const write = runtime.edit();
+    const rows = runtime.getCell<{ n: number }[]>(
+      space,
+      "rows",
+      rowsSchema,
+      write,
+    );
+    rows.set([{ n: 1 }, { n: 2 }]);
+    await write.commit();
+    const tx = runtime.edit();
+    const sourceId = rows.getAsNormalizedFullLink().id;
+    const read = tx.read.bind(tx);
+    let fallbackRequested = false;
+    tx.read = (address, options) => {
+      const result = read(address, options);
+      if (
+        !fallbackRequested && address.id !== sourceId &&
+        address.path.length === 1 && address.path[0] === "value" &&
+        options?.nonRecursive === true && result.ok
+      ) {
+        // The fast read performs its work but supplies no usable value,
+        // forcing the general traversal to read this target again.
+        fallbackRequested = true;
+        return { ok: { ...result.ok, value: undefined } };
+      }
+      return result;
+    };
+    const finish = startReadStats(tx);
+    try {
+      expect(rows.withTx(tx).get()).toEqual([{ n: 1 }, { n: 2 }]);
+      expect(fallbackRequested).toBe(true);
+    } finally {
+      const reads = finish(0);
+      tx.abort();
+      expect(reads.linkResolutions).toBe(3);
+      expect(reads.distinctDocuments).toBe(3);
+    }
+  });
+
   it("does not count a link traversal rejected by cycle detection", () => {
     const id = "of:self" as URI;
     const value = { "/": { "link@1": { id, space, path: [] } } };

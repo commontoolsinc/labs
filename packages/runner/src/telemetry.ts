@@ -12,7 +12,7 @@ export type ActionReadStats = {
   /** Reactive property and element reads, including cached reads. */
   proxyAccesses: number;
 
-  /** Stored link hops traversed on cache misses. */
+  /** Stored-link traversal attempts, including repeated fallback reads. */
   linkResolutions: number;
 
   /** Distinct replica documents read, counted separately in each run. */

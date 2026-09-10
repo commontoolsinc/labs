@@ -26,13 +26,15 @@ source location. Cumulative counts include only runs measured while enabled.
 
 Proxy accesses include lazy schema views and query result proxies, including
 elements materialized by array methods and iterators. Link resolutions count
-actual stored-link hops through the resolver and schema traversal; a memo hit
-performs no hop. Document identity comes from the transaction's replica records,
-so spaces and scope instances stay distinct. Dependencies count the deep and
-shallow scheduling read addresses separately, compacted by the scheduler's
-ordinary rules, at the end of action execution before commit preparation. A
-fanned-out node reports each executed instance separately; this count is not the
-union subscription retained for all instances.
+stored-link traversal attempts through the resolver and schema traversal; a memo
+hit performs no hop. Missing-target reads count, and a fast-path read followed
+by a general-traversal fallback counts twice: the metric measures traversal
+work, not distinct logical links. Document identity comes from the transaction's
+replica records, so spaces and scope instances stay distinct. Dependencies count
+the deep and shallow scheduling read addresses separately, compacted by the
+scheduler's ordinary rules, at the end of action execution before commit
+preparation. A fanned-out node reports each executed instance separately; this
+count is not the union subscription retained for all instances.
 
 When no collector is active, read sites check one shared boolean and perform no
 counter lookup or allocation. While any collector is active in the same isolate,

@@ -11,7 +11,7 @@ interface ReadCounter {
   /** Property and element reads, including array materialization. */
   proxyAccesses: number;
 
-  /** Link hops actually traversed, excluding memo hits. */
+  /** Stored-link traversal attempts, excluding memo hits. */
   linkResolutions: number;
 
   /** Replica document records touched by storage reads. */
@@ -64,7 +64,7 @@ export function recordProxyAccess(tx: IExtendedStorageTransaction): void {
   if (counter) counter.proxyAccesses++;
 }
 
-/** Records a stored link hop that the read path traverses. */
+/** Records a stored-link traversal attempt, excluding memo hits. */
 export function recordLinkResolution(tx: IExtendedStorageTransaction): void {
   const counter = counters.get(tx.tx);
   if (counter) counter.linkResolutions++;

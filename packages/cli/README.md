@@ -10,13 +10,15 @@ accesses. Actions without an authored source are grouped by builtin name, or by
 action ID when no name is available.
 
 The counters measure reactive data property and element reads (including array
-method materialization and cached reads), stored link hops traversed on cache
-misses, distinct storage documents per action run, and compacted scheduling read
-dependencies at action completion. The last two columns sum per-run counts; they
-are not a union of documents or subscriptions across the step. Link hops can
-exceed proxy accesses because schema traversal and runtime code also follow
-links. These counters exclude plain JavaScript arithmetic, event-handler
-transactions, commit preparation, and the idempotency verification replay.
+method materialization and cached reads), stored-link traversal attempts on
+cache misses, distinct storage documents per action run, and compacted
+scheduling read dependencies at action completion. The last two columns sum
+per-run counts; they are not a union of documents or subscriptions across the
+step. Link hops can exceed proxy accesses because schema traversal and runtime
+code also follow links. Missing-target reads count; a fast-path target read
+followed by a fallback counts twice, since both attempts perform work. These
+counters exclude plain JavaScript arithmetic, event-handler transactions, commit
+preparation, and the idempotency verification replay.
 
 The total includes every measured scheduler run, including builtin and
 coordinator actions and actions removed before the step ends.
