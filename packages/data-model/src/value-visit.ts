@@ -606,6 +606,9 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
     }
   }
 
+  /**
+   * Visit a top-level value or contained sub-value.
+   */
   #visitValue(value: DomainFor<DomainExtra>): BaselineVisitResult<ResultType> {
     const result = this.#visitResolvingSubtype(value);
 
