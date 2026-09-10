@@ -115,6 +115,7 @@ import {
   StorageTransactionRejected,
   toReplicaLoadFailureError,
   TransactionCommitOptions,
+  UnexaminedAbsence,
   Unit,
 } from "./interface.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
@@ -2727,11 +2728,16 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
     >;
   }
 
-  /** See {@link SpaceReplica.loadUnexaminedAbsences}. */
-  loadUnexaminedAbsences(
+  /** See {@link SpaceReplica.unexaminedAbsences}. */
+  unexaminedAbsences(
     source: IStorageTransaction | undefined,
-  ): number | Promise<number> {
-    return this.replica.loadUnexaminedAbsences(source);
+  ): readonly UnexaminedAbsence[] {
+    return this.replica.unexaminedAbsences(source);
+  }
+
+  /** See {@link SpaceReplica.presentCount}. */
+  presentCount(absences: readonly UnexaminedAbsence[]): number {
+    return this.replica.presentCount(absences);
   }
 
   async #replaySync(
@@ -3471,7 +3477,8 @@ export class SpaceReplica
   /**
    * The caught-up and stale-floor bookkeeping, the read builder, the
    * session-sync consumer, the watch-set refresh, the session-sync apply
-   * step, and the conflict read repair, which a test drives directly.
+   * step, and the conflict read repair, which a test drives directly. It
+   * also reports whether the replica holds a record for a document.
    */
   get accessForTestingOnly(): {
     noteCaughtUpLocalSeq(localSeq: number | undefined): void;
@@ -3487,12 +3494,16 @@ export class SpaceReplica
     refreshWatchSet(
       entries: Iterable<[WatchAddress, SchemaPathSelector]>,
       type?: "pull" | "integrate",
-      watchBranch?: string,
     ): Promise<Result<Unit, PullError>>;
     applySessionSync(sync: SessionSync, type: "pull" | "integrate"): void;
     waitForConflictReadRepair(
       rejection: StorageTransactionRejected,
     ): Promise<void>;
+    hasDocumentRecord(
+      id: URI,
+      scope?: CellScope,
+      identity?: ScopeKeyIdentity,
+    ): boolean;
   } {
     return {
       noteCaughtUpLocalSeq: (localSeq) => this.#noteCaughtUpLocalSeq(localSeq),
@@ -3504,11 +3515,12 @@ export class SpaceReplica
       buildReads: (source, localSeq, identity) =>
         this.#buildReads(source, localSeq, identity),
       consumeUpdates: (iterator) => this.#consumeUpdates(iterator),
-      refreshWatchSet: (entries, type, watchBranch) =>
-        this.#refreshWatchSet(entries, type, watchBranch),
+      refreshWatchSet: (entries, type) => this.#refreshWatchSet(entries, type),
       applySessionSync: (sync, type) => this.#applySessionSync(sync, type),
       waitForConflictReadRepair: (rejection) =>
         this.#waitForConflictReadRepair(rejection),
+      hasDocumentRecord: (id, scope, identity) =>
+        this.#hasDocumentRecord(id, scope, identity),
     };
   }
 
@@ -3583,6 +3595,27 @@ export class SpaceReplica
       address.id,
       this.instanceKey(address.scope, identity, address.scopeKey),
     );
+  }
+
+  /**
+   * Whether this replica holds a record for the document. A record appears
+   * once the replica has examined the document — an examination that found
+   * a value and one that found the document absent both leave one — and
+   * also once a local write for it is pending. This is the predicate
+   * {@link loadUnexaminedAbsences} decides by. It takes `scope` and
+   * `identity` as {@link getDocument} takes them, so a caller reading the
+   * two together names one document across both.
+   *
+   * `getDocument()` reads `undefined` for a record whose value materializes
+   * as `undefined` and for a document with no record at all, so a caller
+   * separating those two reads both.
+   */
+  #hasDocumentRecord(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    return this.#docs.has(this.#docKeyOf({ id, scope }, identity));
   }
 
   /**
@@ -5219,7 +5252,6 @@ export class SpaceReplica
   async #refreshWatchSet(
     entries: Iterable<[WatchAddress, SchemaPathSelector]>,
     type: "pull" | "integrate" = "pull",
-    watchBranch = "",
   ): Promise<Result<Unit, PullError>> {
     const refreshStart = performance.now();
     try {
@@ -5275,7 +5307,7 @@ export class SpaceReplica
       }
 
       const watches = watchEntries.map(([address, selector]) => ({
-        id: watchIdForEntry(address, selector, watchBranch),
+        id: watchIdForEntry(address, selector, ""),
         kind: "graph" as const,
         query: {
           roots: [{
@@ -5339,50 +5371,6 @@ export class SpaceReplica
       return { error: toPullError(error) };
     } finally {
       logger.time(refreshStart, "watchRefresh", "total");
-    }
-  }
-
-  /** Remove graph watches whose caller needed only a one-shot absence probe. */
-  async #removeWatchIds(watchIds: readonly string[]): Promise<void> {
-    if (watchIds.length === 0) return;
-    let lastError: unknown;
-    // A failed watchRemoveSync has already removed these ids from the
-    // SpaceSession's reconnect intent. Reissuing it therefore sends the full
-    // corrected watch set; Client.request waits for an in-progress reconnect,
-    // so one retry also repairs the resumed-session ambiguity where the server
-    // may still hold the old watches.
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const { session } = await this.#activeSessionHandle();
-        const { view, precedingSyncs, sync } = await session.watchRemoveSync(
-          watchIds,
-        );
-        if (this.#closed) {
-          view.close();
-          return;
-        }
-        this.#watchView = view;
-        try {
-          for (const precedingSync of precedingSyncs) {
-            this.#applySessionSync(precedingSync, "integrate");
-          }
-          this.#applySessionSync(sync, "integrate");
-        } catch (error) {
-          view.close();
-          throw error;
-        }
-        this.#consumeWatchView(view);
-        return;
-      } catch (error) {
-        lastError = error;
-        if (this.#closed) return;
-      }
-    }
-    if (!this.#closed) {
-      console.warn(
-        "failed to remove temporary graph watches after retry",
-        lastError,
-      );
     }
   }
 
@@ -6394,19 +6382,22 @@ export class SpaceReplica
   }
 
   /**
-   * Load the documents a transaction read as absent without the replica ever
-   * having examined them, and report how many turned out to exist.
+   * The documents `source` read as absent that this replica has never
+   * examined, each keyed the way a pending load for it is keyed: an address
+   * naming a foreign instance carries that instance's key, and one naming
+   * the replica's own carries none.
    *
    * A read of a document the replica never synced resolves as absent, and
    * {@link buildReads} exports that as `seq: 0` — the claim that no such
    * document exists. The engine rejects the commit as `stale confirmed read`
    * whenever one does, and the rejection is right: the reading run followed
    * a link into a document it did not hold, so its traversal is sound only
-   * if that document really is absent. `Runtime.editWithRetry` calls this
-   * between running its action and committing, and a non-zero return is its
-   * signal to discard the attempt and re-run against the now-local
-   * documents — the same convergence the engine's rejection would force,
-   * without the round trip, the catch-up gate, or the wasted upload.
+   * if that document really is absent. `Runtime.editWithRetry` takes this
+   * list between running its action and committing, waits for the loads
+   * already in flight for these documents, and re-runs the action when
+   * {@link presentCount} then finds any of them present — the same
+   * convergence the engine's rejection would force, without the round trip,
+   * the catch-up gate, or the wasted upload.
    *
    * Session-scoped reads of this replica's own fresh session are excluded,
    * because no unseen server-side revision can exist under that instance.
@@ -6417,12 +6408,12 @@ export class SpaceReplica
    * transaction's scope identity, while ordinary client transactions use the
    * replica's own identity.
    */
-  loadUnexaminedAbsences(
+  unexaminedAbsences(
     source: IStorageTransaction | undefined,
-  ): number | Promise<number> {
-    if (source === undefined) return 0;
+  ): UnexaminedAbsence[] {
+    if (source === undefined) return [];
     const reads = getDirectTransactionReadActivities(source);
-    if (!reads) return 0;
+    if (!reads) return [];
     const identity = source.scopeKeyIdentity;
     // Documents this transaction writes are its own creations in flight:
     // reading one as absent and then writing it is what creating a document
@@ -6434,12 +6425,12 @@ export class SpaceReplica
       if (write.space !== this.#space) continue;
       ownWrites.add(docKey(write.id, this.instanceKey(write.scope, identity)));
     }
-    const unexamined = new Map<string, WatchAddress>();
+    const unexamined = new Map<string, UnexaminedAbsence>();
     for (const read of this.#commitReadActivities(source, reads)) {
       const scope = normalizeCellScope(read.scope);
       // A malformed/incomplete served identity cannot name the instance on
-      // the wire. Leave its claim for commit admission rather than pulling a
-      // different instance under the replica identity.
+      // the wire. Leave its claim for commit admission rather than waiting
+      // on a different instance under the replica identity.
       if (identity !== undefined && !canResolveScopeKey(scope, identity)) {
         continue;
       }
@@ -6450,96 +6441,34 @@ export class SpaceReplica
       if (ownWrites.has(key)) continue;
       if (this.#docs.has(key) || unexamined.has(key)) continue;
       unexamined.set(key, {
+        space: this.#space,
         id: read.id,
-        type: DOCUMENT_MIME as MIME,
         scope,
         ...(scope !== "space" && instance !== ownInstance
           ? { scopeKey: instance as ScopeKey }
           : {}),
       });
     }
-    // Synchronous zero: with nothing to examine there is nothing to await,
-    // and callers whose commit path is synchronous today stay synchronous —
-    // the commit-gated runner start among them.
-    if (unexamined.size === 0) return 0;
-    return (async () => {
-      // Like pull(), a one-shot probe must not reuse a session invalidated by
-      // an ACL change merely because the normal selector tracker is bypassed.
-      this.#consumeOwedSessionRemount();
-      const entries = normalizeSyncEntries(
-        [...unexamined.values()].map((
-          address,
-        ): [WatchAddress, SchemaPathSelector] => [
-          address,
-          // Fetch the document itself and follow no links. The basis needs
-          // this document's revision, not a schema-guided closure.
-          { path: [], schema: false },
-        ]),
-      );
-      // These probes own distinct watches so an absent result can be removed
-      // without disturbing a concurrent or pre-existing ordinary pull.
-      const watchBranch = `absence:${crypto.randomUUID()}`;
-      const watchIds = entries.map(([address, selector]) =>
-        watchIdForEntry(address, selector, watchBranch)
-      );
-      try {
-        const result = await this.#refreshWatchSet(
-          entries,
-          "pull",
-          watchBranch,
-        );
-        if (result.error) {
-          await this.#removeWatchIds(watchIds);
-          return 0;
-        }
+    return [...unexamined.values()];
+  }
 
-        const absentWatchIds: string[] = [];
-        const covered = Promise.resolve({ ok: {} } as Result<Unit, PullError>);
-        for (let index = 0; index < entries.length; index++) {
-          const [address, selector] = entries[index];
-          const key = docKey(
-            address.id,
-            this.instanceKey(address.scope, identity, address.scopeKey),
-          );
-          if ((this.#docs.get(key)?.confirmed.seq ?? 0) === 0) {
-            absentWatchIds.push(watchIds[index]);
-            continue;
-          }
-          // A discovered document is now a real dependency of the retry.
-          // Retain its watch and teach ordinary pulls that the selector is
-          // covered, even though this probe used a distinct watch id.
-          this.#watchSelectorTracker.add(
-            {
-              id: address.id,
-              type: DOCUMENT_MIME,
-              scope: normalizeCellScope(address.scope),
-              ...(address.scopeKey !== undefined
-                ? { scopeKey: address.scopeKey }
-                : {}),
-            },
-            selector,
-            covered,
-          );
-        }
-        // A never-created id must not become permanent live subscription
-        // state merely because one transaction asserted its absence.
-        await this.#removeWatchIds(absentWatchIds);
-        let present = 0;
-        for (const key of unexamined.keys()) {
-          if ((this.#docs.get(key)?.confirmed.seq ?? 0) > 0) present += 1;
-        }
-        return present;
-        // deno-coverage-ignore-start -- the refresh resolves to its error
-        // and the removal swallows its own, so only a bug lands here
-      } catch {
-        await this.#removeWatchIds(watchIds);
-        // Best-effort, like the retry gate it front-runs: an unexamined
-        // absence is what this path exported before, and the commit's own
-        // verdict still decides.
-        return 0;
-      }
-      // deno-coverage-ignore-stop
-    })();
+  /**
+   * How many of `absences` this replica now holds with a confirmed revision.
+   * `absences` is a list this replica's own {@link unexaminedAbsences}
+   * returned, not any address of that shape: a foreign instance is keyed by
+   * the `scopeKey` that call baked in, and an address from elsewhere would
+   * be counted against the replica's own instance.
+   */
+  presentCount(absences: readonly UnexaminedAbsence[]): number {
+    let present = 0;
+    for (const absence of absences) {
+      const key = docKey(
+        absence.id,
+        this.instanceKey(absence.scope, undefined, absence.scopeKey),
+      );
+      if ((this.#docs.get(key)?.confirmed.seq ?? 0) > 0) present += 1;
+    }
+    return present;
   }
 
   #buildReads(
@@ -6573,6 +6502,16 @@ export class SpaceReplica
     // the confirmed seq (or an explicit `confirmedSeq` override, e.g. a read that
     // carries its own `meta.seq`). Shared by the per-read loop below and the blind
     // write's structural precondition so the two emission sites stay in lockstep.
+    //
+    // Both the layers and the confirmed seq are read from the replica as the
+    // commit is built, not from the transaction's own snapshot of the doc,
+    // and a frame can land between the two. What the transaction owes this
+    // site (03-commit-model.md §3.3.4) is its commit-time claim check,
+    // passed before its reads are built: `claim()` in
+    // transaction/attestation.ts re-reads every doc the transaction
+    // snapshotted from this replica, and a differing value rejects the
+    // transaction locally as `StorageTransactionInconsistent`. So the
+    // content the transaction read is the content at the basis named here.
     //
     // `excludeSpeculativeLayers` (verification-coverage.md OW47, the client
     // own-write durability seam): the blind write's structural read passes

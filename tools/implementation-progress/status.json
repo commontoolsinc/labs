@@ -1,11 +1,11 @@
 {
-  "updated": "2026-09-10T17:54:55.218233+00:00",
+  "updated": "2026-09-10T17:57:22.240844+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7241",
   "head": "91959194f7",
-  "activity": "Cubic fixes pass the full runner suite. Committing dashboard and fixes, then resolving main conflicts before refreshed PR review.",
-  "review": "Four Cubic findings fixed and independently reviewed; local validation complete except two independently reproduced baseline CLI color failures. GitHub reports main conflicts: resolve and revalidate before push and latest-head Cubic review.",
+  "activity": "Dashboard and measured-run demo delivered. Cubic fixes and main integration validated; pushing the integrated revision for CI and review. A3 contract is ready for implementation.",
+  "review": "Four prior Cubic findings addressed and independently reviewed. Main integrated locally; post-merge accounting regressions and type checks pass. Awaiting CI and a fresh Cubic review on the pushed revision; not merge-ready.",
   "checks": [
     "Current fixes: runner accounting regression 20 steps passed",
     "Current fixes: CLI render-demand regression 13 steps passed",
@@ -13,7 +13,9 @@
     "Current repository type checks, formatting, and lint passed",
     "Current full runner suite: 1,405 passed / 8,643 steps / zero failures",
     "Dashboard: browser rendering, interval switching, stage filter, and live updates verified",
-    "Published baseline: patterns package and all 412 authoritative pattern checks passed"
+    "Published baseline: patterns package and all 412 authoritative pattern checks passed",
+    "After main integration: 15 focused suites / 230 steps passed",
+    "After main integration: type checks, formatting, lint, history index, and conflict-marker checks passed"
   ],
   "stages": [
     {
