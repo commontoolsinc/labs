@@ -1165,17 +1165,17 @@ function valuesOrCellsEqual(a: unknown, b: unknown): boolean {
     return isCellHandle(a) && isCellHandle(b) && a.equals(b);
   }
 
-  // A `FabricPrimitive` is compared by the data model rather than by this
-  // walk, and _before_ the record branch, for the same reason: two
-  // `FabricBytes` over different bytes both present as `{}` there and would
-  // compare equal. A primitive is a leaf, so comparing its content is the
-  // whole comparison.
+  // Atomic fabric values are compared by the data model rather than by this
+  // walk, and _before_ the record branch, for the same reason: two values with
+  // different private state both present as `{}` there and would compare
+  // equal. Comparing their codec-defined content is the whole comparison.
   //
-  // There is no arm for a `FabricInstance`. `applyValue()` is this function's
-  // only caller and refuses one before it returns, so neither argument can
-  // hold one -- an arm here would be unreachable rather than defensive, and
-  // untestable with it.
-  if (a instanceof FabricPrimitive || b instanceof FabricPrimitive) {
+  // DataUnavailable is the one FabricInstance `applyValue()` admits. Every
+  // other instance is refused before this comparison.
+  if (
+    a instanceof FabricPrimitive || b instanceof FabricPrimitive ||
+    isDataUnavailable(a) || isDataUnavailable(b)
+  ) {
     return valueEqual(a as FabricValue, b as FabricValue);
   }
   if (Array.isArray(a)) {

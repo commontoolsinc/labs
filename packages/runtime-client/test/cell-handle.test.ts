@@ -884,6 +884,21 @@ describe("cell-handle", () => {
       expect(calls.at(-1)).toBe(unavailable);
     });
 
+    it("notifies when a `DataUnavailable` marker changes", () => {
+      const cell = new CellHandle<unknown>(makeRuntime(), ref);
+      const calls: unknown[] = [];
+      cell.subscribe((value) => {
+        calls.push(value);
+      });
+
+      cell[$onCellUpdate](DataUnavailable.pending());
+      const afterPending = calls.length;
+      cell[$onCellUpdate](DataUnavailable.syncing());
+
+      expect(calls.length).toBe(afterPending + 1);
+      expect(calls.at(-1)).toBe(DataUnavailable.syncing());
+    });
+
     it("refuses a `FabricInstance` rather than apply one", () => {
       // A tripwire: the transport delivers a fabric class whole, so what keeps
       // an instance out of a cell is this refusal rather than a lossy arrival.
