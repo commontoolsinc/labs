@@ -2928,16 +2928,21 @@ export class CfHarnessPromptLoop {
   }
 
   /**
-   * Runs the loop, then sends whatever this session staged for the pattern
-   * index.
+   * Runs the loop, then sends whatever this session owes the pattern index:
+   * the pattern it staged for publication, and the reports its runs made
+   * about the indexed patterns they ran.
    *
    * The flush belongs here rather than at each `run_pattern` because the
    * ledger publishes once per capability per SESSION, and a session's last
-   * word on a capability is only known once the session is over. It runs on
-   * the failure paths too: a run that ends in an error still authored
-   * whatever it authored, and the alternative is silently discarding it.
-   * A flush failure is logged by the ledger and never displaces the loop's
-   * own result or its error.
+   * word on a capability is only known once the session is over. A report is
+   * sent as soon as the run makes it, and is waited for here because the
+   * process ends by exiting rather than by running out of work, so a report
+   * nothing waits for is a report that can be cut off in flight. The flush
+   * runs on the failure paths too: a run that ends in an error still authored
+   * whatever it authored and still ran whatever it ran, and the alternative
+   * is silently discarding it. The ledger catches and logs each write's own
+   * failure, so the flush answers with nothing to displace the loop's own
+   * result or its error.
    */
   async runTranscript(
     options: RunHarnessTranscriptOptions,
@@ -2945,7 +2950,7 @@ export class CfHarnessPromptLoop {
     try {
       return await this.#runTranscript(options);
     } finally {
-      await this.engine.flushPatternIndexPublications();
+      await this.engine.flushPatternIndexLedger();
     }
   }
 
