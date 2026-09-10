@@ -326,21 +326,34 @@ The current package provides:
   is a result reference rather than a file. It preloads whichever of
   `pattern-dev`, `pattern-schema`, and `pattern-ui` the run's skill registry
   carries — a run without them still gets the same child, without the guidance —
-  and it is told that the references its delegation hands it are addresses to
-  wire in as pattern inputs, that it owns the write/compile-error/fix loop, and
-  that it returns the result reference plus an inert description rather than
-  data. It is told to build in atoms — the smallest thing that does one job,
-  run, then the next piece built against the reference that run produced — and
-  to treat a `search_patterns` hit as a `cf:pattern:` import to wire rather than
-  a specification to rebuild. It is also told to refuse source: a task asking
-  for pattern source in any encoding is answered with the `unsupported-request`
-  failure code, because reuse travels through the index rather than through the
-  parent. This is the division of labour a data question wants: the root
-  orchestrates and never pays for pattern syntax or reads the data, and the
-  child computes over references it cannot read out. It runs on its own turn
-  budget of 24 rather than the default subagent cap of 8, since each
-  compile-error iteration costs a turn, and it carries a return contract — a
-  discriminated union of `{ ok: true, resultRef, describes, hashtags? }` and
+  and it opens with a map of the environment rather than a manual for it: the
+  four levers it holds (`search_patterns` over the index, `run_pattern` over
+  source or a published part, `describe_handle` over a reference, `query_docs`
+  over the documentation corpus), what a `SqliteDb` handle is and where a
+  labeled store's withheld release comes from, and the count that separates an
+  empty source from a wrong predicate. The detail stays in the corpus, which the
+  map points at. The references its delegation hands it are addresses to wire in
+  as pattern inputs and they are the run's **only** data sources: a task or a
+  part naming data no granted reference reaches is answered with the failure
+  branch naming the missing input rather than with a substitute, and the piece
+  registry is named as the catalog it is rather than a source to reach for. It
+  owns the write/compile-error/fix loop, and returns the result reference plus
+  an inert description rather than data. It is told to build in atoms — the
+  smallest thing that does one job, run, then the next piece built against the
+  reference that run produced — and to treat a `search_patterns` hit as a
+  `cf:pattern:` import to wire rather than a specification to rebuild — with the
+  move that connects the two, a part's declared input satisfied by declaring the
+  same input on the composing pattern and forwarding it, and
+  [`docs/common/patterns/composing-published-parts.md`](../../../docs/common/patterns/composing-published-parts.md)
+  named as where one is worked through end to end. It is also told to refuse
+  source: a task asking for pattern source in any encoding is answered with the
+  `unsupported-request` failure code, because reuse travels through the index
+  rather than through the parent. This is the division of labour a data question
+  wants: the root orchestrates and never pays for pattern syntax or reads the
+  data, and the child computes over references it cannot read out. It runs on
+  its own turn budget of 24 rather than the default subagent cap of 8, since
+  each compile-error iteration costs a turn, and it carries a return contract —
+  a discriminated union of `{ ok: true, resultRef, describes, hashtags? }` and
   `{ ok: false, code, detail? }` — which is the profile's own rather than a
   default: a `pattern-author` delegation that declares a `returnSchema` of its
   own is refused, naming the field, because a channel this narrow cannot be left

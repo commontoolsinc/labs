@@ -232,4 +232,32 @@ describe("docs-corpus", () => {
       expect(checkoutDocsCorpusRootsFrom("not a url")).toEqual([]);
     });
   });
+
+  describe("the checkout's own corpus", () => {
+    // A composition question the corpus cannot reach is one a child stops
+    // asking, so these hold the route from the question a run words to the
+    // document that answers it. Each case names the question rather than
+    // quantifying over the ones a run might ask: what it pins is that this
+    // wording reaches this document, and it fails if the document moves out
+    // of the corpus or loses the heading the wording matches.
+
+    const questions = [
+      "how do I give an imported pattern a database handle",
+      "how does a published pattern's declared SqliteDb input get satisfied",
+      "how do I feed one part's rows into another part's view",
+      "how do I compose a published part from the pattern index",
+      "the part I found needs an input I was not granted",
+    ];
+
+    for (const question of questions) {
+      it(`returns a section of composing-published-parts.md for "${question}"`, async () => {
+        const corpus = await loadHarnessDocsCorpus(checkoutDocsCorpusRoots());
+        const selected = selectSections(corpus.sections, question);
+
+        expect(
+          selected.map((section) => section.path),
+        ).toContain("common/patterns/composing-published-parts.md");
+      });
+    }
+  });
 });

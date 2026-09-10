@@ -59,6 +59,7 @@ on the Common Fabric runtime.
 - [patterns/view-switching.md](patterns/view-switching.md) — switching between views with `computed()`
 - [patterns/navigation.md](patterns/navigation.md) — navigating to detail views
 - [patterns/composition.md](patterns/composition.md) — composing patterns into reactive graphs
+- [patterns/composing-published-parts.md](patterns/composing-published-parts.md) — composing a part the pattern index holds: what a search reports about it, how its declared input is satisfied, and the route from a granted handle through a source part to a view part
 - [patterns/llm-dialog.md](patterns/llm-dialog.md) — `llmDialog` tool catalog facts: built-in tool injection, reserved built-in tool names, mutation tools as handlers
 - [patterns/held-item-interfaces.md](patterns/held-item-interfaces.md) — shaping what a pattern demands of the pieces it holds, across generations
 - [patterns/primitives.md](patterns/primitives.md) — the composition contract

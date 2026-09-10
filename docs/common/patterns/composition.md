@@ -2,6 +2,18 @@
 
 Patterns can compose other patterns by instantiating them and including the result in the vdom.
 
+A sub-pattern reaches the composing file two ways, and the call is the same
+either way. One is declared in the same file, or imported from a sibling
+module, and this document's examples are written that way. The other is a
+**published part**, imported from the pattern index by the specifier a search
+reported — `import ItemCard from "cf:pattern:<patternId>"` — whose source the
+composing file never sees and does not need: its declared argument and result
+shapes are the whole contract. Everything below about calling a sub-pattern,
+about `[UI]`, and about what an argument grants applies unchanged to a
+published part. [Composing Published Parts](composing-published-parts.md)
+covers what is different — how a part's declared input is satisfied, and the
+route from a granted handle through a source part to a view part.
+
 ## Syntax: Function Calls or JSX
 
 Use either function call or JSX syntax:
@@ -219,6 +231,9 @@ the pattern's state with it. See
 
 ## See Also
 
+- [Composing Published Parts](composing-published-parts.md) — composing a part
+  the pattern index holds: what a search reports, how a declared input is
+  satisfied, and a worked handle → source part → view part example
 - [Pattern Primitives](./primitives.md) — the contract for embedding reusable
   logic and model state
 - [View Switching](./view-switching.md) — dynamically switching between sub-patterns

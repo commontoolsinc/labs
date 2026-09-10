@@ -78,6 +78,32 @@ pattern reading an input database does not restate them. What it needs to know
 is which tables and columns are there — the shape of the contract it is
 querying against — and that is a property of the handle it was given.
 
+An empty result is a value rather than a failure. A statement matching nothing
+settles the way one matching everything does — `pending` false, `error` absent,
+`result` an empty list — and every field computed from it is empty in turn, so
+the view renders its empty state and nothing reports a problem. The run
+succeeded; the emptiness is data.
+
+That is what makes an empty source worth one check before it is believed. Count
+the table without the predicate you are least sure of — a `count(*)` returns one
+row and needs no bound of its own — and compare the two: rows under the count and
+none under the predicate put the disagreement in the predicate rather than in
+the store. Where the emptiness is then reported onward, name the predicate that
+produced it, so a reader of the result learns which condition emptied the source
+rather than that the source was empty. Which predicate to doubt first is the
+subject of [A connector store's column conventions](#a-connector-stores-column-conventions).
+
+```tsx
+// Shown at module scope.
+export const liveOrders = (orders: SqliteDb) => ({
+  rows: orders.query<{ id: number; glaze: string }>(
+    "SELECT id, glaze FROM orders WHERE deleted = 0 " +
+      "ORDER BY id DESC LIMIT 200",
+  ),
+  total: orders.query<{ n: number }>("SELECT count(*) AS n FROM orders"),
+});
+```
+
 Where a pattern also writes to the database, pass `{ reactOn: db }` so the read
 re-runs after a committed write. An input a pattern only reads has nothing to
 react to.
@@ -151,7 +177,7 @@ export const newestOrders = (orders: SqliteDb, since: number) =>
   );
 ```
 
-## A connector store's tombstones, and a query that returns no rows
+## A connector store's column conventions
 
 A connector-backed database carries the conventions of the connector that fills
 it, and a pattern reading one is held to them. Two conventions for a deleted row
@@ -171,30 +197,18 @@ queried: every column it names may be there while the value it tests for means
 something else. Two databases in one task can disagree about this, and each is
 right about itself.
 
-An empty result is a value rather than a failure. A statement matching nothing
-settles the way one matching everything does — `pending` false, `error` absent,
-`result` an empty list — and every field computed from it is empty in turn, so
-the view renders its empty state and nothing reports a problem. The run
-succeeded; the emptiness is data.
+A column a store never fills has the same shape as a sentinel and the same
+consequence. Where one connector stamps a message's `received_at` and another
+leaves it NULL on every row and keeps the real time in a sibling column, a
+window filtered on `received_at` alone matches nothing in the second store — the
+column is declared, its type is right, and no row carries a value to compare.
+The reads that work against such a store coalesce the columns that carry the
+value, `COALESCE(received_at, sent_at, internal_date)` and its like, and use the
+same expression to filter and to order.
 
-That is what makes an empty source worth one check before it is believed. Count
-the table without the predicate you are least sure of — the one testing a
-sentinel — and compare the two: rows under the count and none under the
-predicate put the disagreement in the predicate rather than in the store. Where
-the emptiness is then reported onward, name the predicate that produced it, so a
-reader of the result learns which condition emptied the source rather than that
-the source was empty.
-
-```tsx
-// Shown at module scope.
-export const liveOrders = (orders: SqliteDb) => ({
-  rows: orders.query<{ id: number; glaze: string }>(
-    "SELECT id, glaze FROM orders WHERE deleted = 0 " +
-      "ORDER BY id DESC LIMIT 200",
-  ),
-  total: orders.query<{ n: number }>("SELECT count(*) AS n FROM orders"),
-});
-```
+Both cases are the same defect: a value convention the table declaration does
+not carry. The count above is what separates either of them from a store that is
+genuinely empty.
 
 ## Session-scoped results
 

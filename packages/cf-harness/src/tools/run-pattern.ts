@@ -371,7 +371,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         type: "object",
         additionalProperties: true,
         description:
-          'Input values for the pattern. A string value that is a whole-string LLM-friendly link (e.g. "/of:fid1:abc.../path") is passed as a live cell reference; everything else passes through as plain JSON.',
+          'Input values for the pattern. A string value that names a reference — a whole-string LLM-friendly link (e.g. "/of:fid1:abc.../path"), or the whole `cfh:a:` handle token standing for one — is passed as a live cell reference; everything else passes through as plain JSON. A handle a pattern queries, such as a SqliteDb, is wired in this way and no other.',
       },
       resultSchema: {
         anyOf: [

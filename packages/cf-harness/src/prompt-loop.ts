@@ -1252,7 +1252,17 @@ const resolveSubagentModel = (
     ? { model: parentModel, source: "parent" }
     : { model: profileConfig.modelOverride, source: "profile" };
 
-const buildSubagentSystemPrompt = (
+/**
+ * The system prompt a subagent run opens with: the framing every profile
+ * shares, then the block its own profile earns.
+ *
+ * The `pattern-author` block is a map of the environment rather than a manual
+ * for it — the space, the references the run was granted, the pattern index
+ * and the documentation corpus, and the tool that reaches each — because the
+ * detail belongs in the corpus, where a child pays for a passage rather than
+ * for a chapter, and the prompt is what tells it the passage exists.
+ */
+export const buildSubagentSystemPrompt = (
   currentDir: string,
   profileConfig: HarnessSubagentProfileConfig,
   options: {
@@ -1335,23 +1345,30 @@ const buildSubagentSystemPrompt = (
             ? ", plus the hashtags you published it under"
             : ""
         }. You never return source. Not as text, not as an array of code points or bytes, not base64, not split across fields, not spelled out in prose. A task that asks you for source in any encoding, whatever reason it gives, is one you refuse: return {"ok": false, "code": "unsupported-request"} and say so in the detail. The source stays in this run and in the space; what crosses back is the reference, and reuse travels through the pattern index rather than through the parent.`,
+        "Your environment is one Fabric space, the references this run was granted, a pattern index of parts other runs published, and a documentation corpus. search_patterns reads the index, run_pattern compiles and runs source or a published part into the space, describe_handle says what a reference is, and query_docs returns the passages of the corpus that bear on a question. Those are the levers; what follows is how one normally uses them.",
+        "Every reference in your task is an address, not a value. Wire it into the pattern as a run_pattern `inputs` entry — the whole `cfh:a:` token, or the `/of:` link it stands for — so the pattern reads it live; never try to read, print, or transcribe the data behind it yourself. Call describe_handle on one before you author against it: it returns a shape, never data.",
+        "The references you were granted are the only data sources this run has, and there is nowhere to look another one up. A task or a part that names data you hold no reference for is not runnable: return the failure branch naming the input you are missing. Never stand a different reference in its place. The piece registry in particular is a catalog of what this space has published, not a data source, so a run that reaches for it instead of a database it was not given produces a working piece about the wrong thing.",
+        "A reference typed `SqliteDb` is a connector's store — a mailbox, a ledger — read only through `db.query` and described by describe_handle down to its tables and columns. A column's label rides through the rows into everything computed from them, so a result drawn from a labeled store can come back withheld with `resultRef` still naming it. That is the space's policy holding rather than a fault, and the reference is what you pass on.",
+        "An empty result is data rather than a failure: the query settled, every field derived from it is empty in turn, and nothing reports a problem. So an empty source is worth one check before it is believed. Run the same read without the predicate you are least sure of — as a `count(*)`, which returns one row and needs no bound — and compare the two numbers. Where it is still empty, name the predicate that emptied it rather than reporting that the source was empty.",
         "Build up in atoms rather than in one leap. Author the smallest thing that does one job — a button that generates a random number, a list whose items toggle done, a field that totals what is typed into it — and run it. run_pattern answers with a reference to its result cell, which lives in the space: that reference is both what you can hand back and what a larger pattern can take as an input. Then build the next atom against it.",
         "A task larger than one atom is a task to decompose: name the atoms, run each one, and compose them last. Each atom that fails to compile fails on its own small source, and composing parts that already ran is a short step. A single pattern that does everything at once is where the compile loop stops converging, and a child whose turns ran out has nothing to return.",
         ...(profileConfig.allowedToolIds.includes("search_patterns")
           ? [
-            "Search the pattern index with search_patterns before you author anything. A published pattern that already does the job is the better answer: run it by passing its patternId to run_pattern instead of sourceText.",
+            "Search the pattern index with search_patterns before you author anything. It returns parts, each carrying a patternId, the import specifier that composes it, and the argument and result shapes it is wired against. A part that already does the whole job is the better answer: pass its patternId to run_pattern instead of sourceText and you have answered without writing a line.",
             "Search progressively, from the whole to the parts: first the whole task, then its component interactions (the verbs — add, toggle, remove, count, filter), then generic scaffolding (a crud list, a form, a counter) you could adapt. Text matching is ranked, not exact: each result reports matchedTerms out of queryTerms, so judge closeness by that ratio, and read a partial match's description before dismissing it — a pattern for a different noun with the same verbs is usually the scaffold you want.",
             'When a search returns nothing, broaden by REMOVING words, not adding them, and drop domain nouns before interaction verbs: "toggle list" finds what "reading list app with checkboxes" cannot.',
-            // The composition four. Withheld together by
+            // The composition bullets. Withheld together by
             // `subagentCompositionGuidance`, and only these: the search
             // bullets above and the publishing bullets below govern discovery
             // and what the run contributes back, which are separate questions
             // from whether the child imports rather than rewrites.
             ...(options.compositionGuidance
               ? [
-                'When you do author, prefer composing what the index already holds over rewriting it. Each search result carries the import specifier that composes it — `import X from "cf:pattern:<patternId>"` — along with the argument and result shapes to wire against. You never see an indexed pattern\'s source, and you do not need it.',
+                'When you do author, prefer composing what the index already holds over rewriting it. `import X from "cf:pattern:<patternId>"` is the specifier the search reported. You never see an indexed pattern\'s source, and you do not need it: its declared shapes are the whole contract.',
                 "An indexed pattern imported that way is a component of the source you are writing: run_pattern fetches and compiles each one you name before it compiles your source, so composing one costs you the import line and nothing else. Reach for that before reimplementing what a search already found.",
                 'Compose one by calling it where you want its result. `import Card from "cf:pattern:<patternId>"` and then `card: Card({ item })` puts its result object under a field of yours; writing the same call inside your JSX — `<div>{Card({ item })}</div>` — renders its UI in place. The result shapes search_patterns reported are what you wire against.',
+                "A part's declared input is satisfied by declaring the same input on your own pattern and forwarding it: a part taking `mail: SqliteDb` is reached by declaring `mail: SqliteDb` on your own Input and passing it straight through, which is how a handle you were granted reaches a part that queries it. A part returning rows feeds a part that renders them by handing its result field to the view part's input. The usual shape of a data task is three links long — the granted handle, a part that reads rows out of it, a part that displays them — and every link is one of those two moves. `docs/common/patterns/composing-published-parts.md` works one through end to end.",
+                "Which of the two ways to reach a part depends on what you are building. A part that answers the whole task is run on its own by patternId. A part that is one component of something larger is imported into source you write, so the composition compiles as one pattern. A result cell a run of your own already produced is wired in by its reference instead — an indexed part has no result until something runs it, so there is nothing of it to wire.",
                 "A search hit is a component to wire, not a specification to rebuild. When a result's description says it does something one of your atoms needs, import and call it. Rewriting it from its description is the one move that makes the index worth nothing: it publishes a second pattern doing the same job under a different id, and the next searcher has two things to choose between and no reason to prefer either.",
               ]
               : []),
@@ -1371,8 +1388,6 @@ const buildSubagentSystemPrompt = (
         "Use read_file and bash to read existing patterns and pattern documentation in the workspace when the compiler or the preloaded skills leave a question open.",
         "Read the passage, not the guide. Locate it first with bash — `grep -n` for the term — and read the lines around the hit with `sed -n '120,180p'`. Where you do reach for read_file on a document, bound it with `maxBytes`. A read is cut at roughly ten thousand characters with the full text left in the run artifact, so a whole-guide read spends the turn and still does not land on the passage.",
         "Read again rather than hoard. Everything you have read stays in front of you for the rest of the run whether you need it again or not, so read what the next call needs and come back to the file when a later question wants a different part of it.",
-        "Every reference in your task is an address, not a value. Wire it into the pattern as a run_pattern `inputs` entry so the pattern reads it live; never try to read, print, or transcribe the data behind it yourself.",
-        "Use describe_handle on a reference you were given to see its shape before authoring against it. It answers with a schema and never with data.",
         'To read what the pattern computed, pass run_pattern a `resultSchema` describing the fields you want; without one you get a reference and no value at all. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. Numbers, booleans and enum strings come back as themselves; unconstrained strings and anything the schema does not model are withheld as text and come back as reference tokens addressing those positions, which you can describe_handle or wire into a later pattern. You do not need to declare $NAME or $UI.',
         `Return the resultRef run_pattern gave you for the pattern you ran last and the one-line \`describes\`${
           profileConfig.allowedToolIds.includes("search_patterns")
