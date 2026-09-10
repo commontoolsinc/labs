@@ -664,32 +664,18 @@ describe("elementSchemaFor tuple (prefixItems) schemas", () => {
         Point: { type: "object", properties: { x: { type: "number" } } },
       },
     });
-    expect(elementSchemaFor(tupleArraySchema, 1)).toEqual({
-      type: "number",
-      $defs: {
-        Point: { type: "object", properties: { x: { type: "number" } } },
-      },
-    });
+    // A slot with no local ref needs no definitions.
+    expect(elementSchemaFor(tupleArraySchema, 1)).toEqual({ type: "number" });
   });
 
   it("picks items past the tuple slots", () => {
-    expect(elementSchemaFor(tupleArraySchema, 2)).toEqual({
-      type: "string",
-      $defs: {
-        Point: { type: "object", properties: { x: { type: "number" } } },
-      },
-    });
+    expect(elementSchemaFor(tupleArraySchema, 2)).toEqual({ type: "string" });
   });
 
   it("treats an index-less element as rest-region (items)", () => {
     // elementById is id-keyed: tuple slots are positional and cannot be
     // id-addressed, so the element falls under `items`.
-    expect(elementSchemaFor(tupleArraySchema)).toEqual({
-      type: "string",
-      $defs: {
-        Point: { type: "object", properties: { x: { type: "number" } } },
-      },
-    });
+    expect(elementSchemaFor(tupleArraySchema)).toEqual({ type: "string" });
   });
 
   it("yields undefined for a pure tuple (no items) without an index", () => {

@@ -268,6 +268,36 @@ export const findCfcSchemaRefs = (
   addRefs(refSet, summarizeCfcSchemaRefs(schema).all);
 };
 
+/**
+ * Return `schema` carrying the definitions its local refs resolve against.
+ *
+ * A fragment evaluated apart from the schema that encloses it — a union arm, a
+ * property, a definition body — no longer reaches the `$defs` its
+ * `#/$defs/<name>` refs name. This attaches `inheritedDefinitions` when the
+ * fragment has such a ref and declares no `$defs` of its own. A fragment whose
+ * refs are all embedded or external comes back as the same object, since those
+ * resolve against their own documents.
+ *
+ * A fragment that declares its own `$defs` also comes back as the same object,
+ * and a ref under a child that declares its own does not count, because CFC
+ * schemas treat a nested `$defs` as a new `#/` scope (see
+ * `cfcSchemaChildRoot()`). JSON Schema does not: there `#` is the root of the
+ * schema resource, which only `$id` changes, so a nested `$defs` never shadows
+ * the root's. The two readings differ only where a nested `$defs` redefines a
+ * name the root also defines.
+ */
+export const cfcSchemaWithInheritedDefs = (
+  schema: JSONSchema,
+  inheritedDefinitions: SchemaDefinitions | undefined,
+): JSONSchema =>
+  // A definition map is a non-array record; an array would resolve indices
+  // as member names.
+  isObjectOrArray(schema) && schema.$defs === undefined &&
+    isObjectNotArray(inheritedDefinitions) &&
+    summarizeCfcSchemaRefs(schema).localDefinitions.size > 0
+    ? { ...schema, $defs: inheritedDefinitions }
+    : schema;
+
 const definitionIndexFor = (
   definitions: SchemaDefinitions,
 ): { index: DefinitionIndex; cacheable: boolean } => {
@@ -503,14 +533,9 @@ const resolveExternalCfcSchemaRef = (
       `${parsed.taggedHash}#/$defs/${parsed.defName}`,
     ]);
     view = undefined;
-  } else if (isObjectOrArray(member) && member.$defs === undefined) {
-    // Same rule as resolveCfcSchemaRefUncached: only local refs need the
-    // group's definition scope attached.
-    view = summarizeCfcSchemaRefs(member).localDefinitions.size > 0
-      ? internSchema({ ...member, $defs: document.$defs })
-      : member;
   } else {
-    view = member;
+    const scoped = cfcSchemaWithInheritedDefs(member, document.$defs);
+    view = scoped === member ? member : internSchema(scoped);
   }
   views.set(parsed.defName, view);
   return view;
@@ -624,20 +649,10 @@ const resolveCfcSchemaRefUncached = (
     ]);
     return undefined;
   }
-  if (isObjectOrArray(schemaCursor)) {
-    // Only LOCAL refs need the containing document's definition scope;
-    // embedded and external refs resolve against their own documents, so a
-    // target carrying only those stays as it is.
-    const { localDefinitions } = summarizeCfcSchemaRefs(schemaCursor);
-    if (localDefinitions.size > 0 && schemaCursor.$defs === undefined) {
-      schemaCursor = {
-        ...schemaCursor,
-        ...(isObjectOrArray(fullSchema) && fullSchema.$defs &&
-          { $defs: fullSchema.$defs }),
-      };
-    }
-  }
-  return schemaCursor as JSONSchema;
+  return cfcSchemaWithInheritedDefs(
+    schemaCursor as JSONSchema,
+    isObjectOrArray(fullSchema) ? fullSchema.$defs : undefined,
+  );
 };
 
 // resolveCfcSchemaRefs results per (frozen schemaObj, frozen fullSchema)
