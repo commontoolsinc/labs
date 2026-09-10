@@ -79,7 +79,7 @@ async function refresh() {
     byId("activity").textContent = status.activity;
     byId("updated").textContent = `Status updated ${
       new Date(status.updated).toLocaleString()
-    } · Last inspected PR head ${status.head}`;
+    } · Validated implementation ${status.validatedRevision}`;
     byId("design").href = status.design;
     byId("pr").href = status.pr;
     byId("review").textContent = status.review;

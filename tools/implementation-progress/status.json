@@ -1,11 +1,10 @@
 {
-  "updated": "2026-09-10T20:44:23.018814+00:00",
+  "updated": "2026-09-10T20:57:09.639581+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7241",
-  "head": "f12c01fddc",
-  "activity": "Merged worker read-statistics control in #7256 after all 69 checks and clean Cubic/antagonistic reviews. #7241 reconciliation remains under CI. The browser workload fixture and A3 lifecycle failure regressions are in progress.",
-  "review": "Worker control #7256 landed as 8d3c7dbc3c. Cubic skipped #7241\u2019s merge-only revision; this checkpoint requests a normal incremental review. All remaining gates must pass before merging #7241.",
+  "activity": "Worker control #7256 is merged. #7241 passes the full runner suite: 1,410 tests / 8,750 steps. A3 also passes its full runner suite: 1,410 tests / 8,761 steps, including lifecycle fixes. The first browser benchmark is being debugged.",
+  "review": "Cubic identified ambiguous revision labeling in this dashboard; the pointer now names validated implementation code, not the moving PR head. Its earlier fan-out finding is fixed and regression-tested but still awaits acknowledgement. CI gates remain required.",
   "checks": [
     "Current fixes: runner accounting regression 20 steps passed",
     "Current fixes: CLI render-demand regression 13 steps passed",
@@ -206,6 +205,13 @@
       "status": "Approved",
       "proposal": "Mike authorized pushing the coverage fix and dashboard checkpoint to the existing PR #7241 branch in commontoolsinc/labs.",
       "blocks": "None."
+    },
+    {
+      "id": "Q6",
+      "title": "May I post signed code-review replies?",
+      "proposal": "Reply in implementation PR review threads, including asking Cubic to acknowledge already-fixed findings. Explicit permission is required by the session communication rule.",
+      "blocks": "Review-thread communication only; other implementation work continues.",
+      "status": "Awaiting answer"
     }
   ],
   "milestones": [
@@ -229,5 +235,6 @@
       "state": "Planned \u00b7 B5\u2013B6",
       "detail": "Compare the same interaction before and after migration, with read work and measured time."
     }
-  ]
+  ],
+  "validatedRevision": "f12c01fddc"
 }
