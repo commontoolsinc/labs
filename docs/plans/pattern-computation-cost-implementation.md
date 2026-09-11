@@ -274,7 +274,7 @@ passed before merge, with clean Cubic and antagonistic reviews.
       [serving-loop case](../../packages/runner/test/executor-serving-loop.test.ts)
       observes the actual serving runtime and waits for the authored input
       watermark; a client diagnostic graph does not contain those actions.
-      The dashboard records publication of the serving acceptance in #7331.
+      The dashboard records serving acceptance as in review until #7331 lands.
 - [x] **C4 — Restore reactive lunch-poll rows.** Direct reactive option and
       voter maps use the scoped callback-child repair. Repository acceptance
       includes 93 assertions, unchanged A4 budgets at all three sizes, and

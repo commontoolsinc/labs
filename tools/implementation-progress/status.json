@@ -229,9 +229,9 @@
       "detail": "Compare the same interaction before and after migration, with read work and measured time."
     }
   ],
-  "validatedRevision": "4f2057b0d64c95e35558ff224786f4b7712fa173",
+  "validatedRevision": "6f5a2b23307cc8fdf4716ef6be94f87e0596779b",
   "validationProvenance": {
-    "revisionUrl": "https://github.com/commontoolsinc/labs/commit/4f2057b0d64c95e35558ff224786f4b7712fa173",
-    "scope": "D3 tests, benchmark, and documentation checkpoint. Full runner and final focused snapshot tests pass; this revision does not identify separately recorded browser captures."
+    "revisionUrl": "https://github.com/commontoolsinc/labs/commit/6f5a2b23307cc8fdf4716ef6be94f87e0596779b",
+    "scope": "Serving-host acceptance: full runner suite passed (1,437 tests / 8,960 steps); final serving-loop file passed all 27 cases after the authored-watermark correction. All 46 type groups and 599 documentation blocks passed. CI and Cubic review are tracked separately before landing."
   }
 }
