@@ -2678,7 +2678,9 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   despite one cleanup failure. `fetch-program-served-lifecycle.test.ts` covers
   stop before dispatch, rejected release checks, late publication acceptance,
   shared physical bindings across actors, independent bindings sharing a pending
-  result, and withdrawn publication. These controls exercise local program
+  result, stale-peer takeover after refusal publication, and withdrawn
+  publication. A refused request may publish its binding without owning the
+  resolution represented by a peer's cache claim. These controls exercise local program
   responses; cancellation of resolver network requests remains separate.
 
   The program lifecycle controls also admit duplicate accepted contributions
@@ -2687,6 +2689,8 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   the claim. `executor-outbox-budget.test.ts` covers the selected run context,
   readable-completion deduplication, immediate re-admission after all refusals,
   and the absence of fallback after a dispatched request fails.
+  `cfc-sink-release-reject-surfaced.test.ts` checks that inline release refusals
+  increment refusal statistics without counting an effect as flushed.
 
   `memory-v2-wave-promotion.test.ts` covers the storage boundary those completion
   guards depend on: all accepted contributions to one document at the same wave

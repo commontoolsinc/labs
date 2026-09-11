@@ -286,11 +286,33 @@ describe("fetch-program-served-lifecycle", () => {
       return read(cache, identity)?.[hash]?.state.type;
     }
 
+    async function replaceWithStaleClaim(identity: ScopeKeyIdentity) {
+      const tx = edit(identity);
+      const cache = runtime.getCellFromLink({
+        ...runtime.getCell(space, { fetchProgram: { cache: [parent] } })
+          .getAsNormalizedFullLink(),
+        scope: "user",
+      });
+      const hash = computeInputHashFromValue({ url });
+      cache.withTx(tx).set({
+        [hash]: {
+          inputHash: hash,
+          state: {
+            type: "fetching",
+            requestId: "other-replica",
+            startTime: Date.now() - 60_000,
+          },
+        },
+      });
+      await commit(tx);
+    }
+
     return {
       seed,
       stage,
       read,
       cacheState,
+      replaceWithStaleClaim,
       binding,
       cancels,
       dispatches,
@@ -369,8 +391,36 @@ describe("fetch-program-served-lifecycle", () => {
     expect(f.read(f.binding, aliceOne)?.selected).toBe("user");
     expect(f.read(f.binding, aliceTwo)?.selected).toBe("user");
     expect(f.cacheState(aliceOne, "user")).toBe("fetching");
+    expect(f.stage(aliceOne).getCfcState().outbox).toHaveLength(0);
     f.cancels[0]();
     await runtime.settled();
+    expect(f.cacheState(aliceOne, "user")).toBe("idle");
+  });
+
+  it("takes over a stale peer claim after publishing an abandoned request", async () => {
+    const f = fixture("session");
+    await f.seed(aliceOne, "user");
+    const refused = f.stage(aliceOne);
+    await f.replaceWithStaleClaim(aliceOne);
+    refused.getCfcState().outbox[0].abandon?.(new Error("request refused"));
+    await runtime.settled();
+    expect(f.read(f.binding, aliceOne)?.selected).toBe("user");
+    expect(f.cacheState(aliceOne, "user")).toBe("fetching");
+
+    const takeover = f.stage(aliceOne);
+    expect(takeover.getCfcState().outbox).toHaveLength(1);
+    await commit(takeover);
+    using network = stub(globalThis, "fetch", () =>
+      Promise.resolve(
+        new Response('export default { result: "recovered" };', {
+          headers: { "content-type": "application/javascript" },
+        }),
+      ));
+    await f.dispatches.at(-1)!();
+    await runtime.settled();
+    expect(network.calls).toHaveLength(1);
+    expect(f.cacheState(aliceOne, "user")).toBe("success");
+    f.cancels[0]();
   });
 
   it("releases an accepted claim when its release check skips dispatch", async () => {

@@ -266,6 +266,7 @@ export function fetchProgram(
   function observePublication(
     tx: IExtendedStorageTransaction,
     publication: ProgramPublication,
+    ownership: "binding" | "request" = "request",
   ): void {
     requireWaveAcceptance(tx);
     const accept = () => {
@@ -281,6 +282,7 @@ export function fetchProgram(
           publications.delete(other);
         }
       }
+      if (ownership === "binding") return;
       const resolution = publication.resolution;
       const effectKey = publication.effectKey;
       if (resolution === undefined || effectKey === undefined) return;
@@ -514,7 +516,7 @@ export function fetchProgram(
                   ) return;
                   if (publication.current) {
                     sendResult(settleTx, { pending, result, error });
-                    observePublication(settleTx, publication);
+                    observePublication(settleTx, publication, "binding");
                   }
                   if (!ownsFields) return;
                   pending.withTx(settleTx).set(false);
