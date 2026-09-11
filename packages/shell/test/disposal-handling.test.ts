@@ -18,7 +18,7 @@ function captureConsoleError(): { calls: unknown[][]; restore(): void } {
   return { calls, restore: () => (console.error = original) };
 }
 
-describe("DebuggerView worker-logger disposal handling", () => {
+describe("XDebuggerView", () => {
   // These handlers run fire-and-forget from @click; a disposal-raced rejection
   // must neither log nor escape as an unhandled rejection.
   function debuggerView(
