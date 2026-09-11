@@ -215,7 +215,7 @@ export function setsrcSuccessLine(
 ): string {
   return `Committed source update for piece ${config.piece} (Pattern Ref: ${
     formatPatternIdentity(update.ref)
-  }, Revision: ${update.revisionId})`;
+  }, Revision: ${update.revisionId}, Seq: ${update.seq})`;
 }
 
 /** A warning for work which failed after storage accepted the source update. */
@@ -225,7 +225,7 @@ export function setsrcRefreshWarning(
   return update.refresh.status === "failed"
     ? `Source revision ${update.revisionId} committed as ${
       formatPatternIdentity(update.ref)
-    }, but refreshing the running piece failed: ${update.refresh.warning}`
+    } at seq ${update.seq}, but refreshing the running piece failed: ${update.refresh.warning}`
     : undefined;
 }
 
