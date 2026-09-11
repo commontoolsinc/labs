@@ -453,3 +453,30 @@ with clearing. These are transaction read activities, not proxy-access counts
 or storage network requests. Run with `deno bench -A --json
 packages/runner/test/snapshot-memo.bench.ts`; the JSON timing report goes to
 stdout and the exact read counts go to stderr.
+
+## Index maintenance count probe
+
+Run `deno run -A scripts/collection-index-cost.ts` from the repository root to
+measure `groupBy` and `keyBy` at 32, 128, and 512 independently linked rows, with
+unique keys and four duplicate-key buckets. Each case measures initialization,
+unrelated and selected payload edits, a selected key edit, membership insertion,
+reordering and removal, and lookup retargeting as separate phases on one evolving
+fixture per case. Assertions check the resulting values after every phase, zero enumeration runs for these
+lookup-only consumers, and no action reruns for an unrelated payload edit. A
+complete run ends with `COLLECTION_INDEX_COST_COMPLETE`. The probe uses the
+shared collection occurrence-identity helper and UTF-8 comparison to check the
+canonical winner and group order after every
+phase, including winner removal and lookup retargeting.
+
+The JSON records sum `scheduler.run.complete` action bodies and their proxy
+accesses and link resolutions. They exclude compilation, external transaction
+setup, storage synchronization, and scheduler work outside completed bodies.
+Result validation runs after each record is captured. The probe fixes client
+execution and lazy materialization on; it reports counts, not elapsed time.
+Membership edits replace the source membership array, while payload and key
+edits address one linked row. The group consumer reads all matching titles; the
+unique-key consumer reads its winner's title. These different consumption widths
+are part of their respective measurements.
+
+The [phase measurement report](../history/development/performance/2026-09-11-index-maintenance-phases.md)
+records the validated local count matrix and its limits.
