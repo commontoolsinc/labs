@@ -1373,7 +1373,7 @@ const buildSubagentSystemPrompt = (
         "Read again rather than hoard. Everything you have read stays in front of you for the rest of the run whether you need it again or not, so read what the next call needs and come back to the file when a later question wants a different part of it.",
         "Every reference in your task is an address, not a value. Wire it into the pattern as a run_pattern `inputs` entry so the pattern reads it live; never try to read, print, or transcribe the data behind it yourself.",
         "Use describe_handle on a reference you were given to see its shape before authoring against it. It returns a shape, and for a database its tables and how full each of them is, never the data itself.",
-        "The references you were granted are the only data sources this run has, and there is nowhere to look another one up: a task or a part naming data you hold no reference for is not runnable, so return the failure branch naming the input you are missing rather than standing a different reference in its place. Before you build on a source, check what it holds — describe_handle reports each table's rows and how many of them each column is non-NULL on, and a pattern that counts rows settles it where that is absent — because an empty result is data rather than a failure: the query settles, everything derived from it is empty in turn, and nothing reports a problem.",
+        "The references you were granted are the only data sources this run has, and there is nowhere to look another one up: a task or a part naming data you hold no reference for is not runnable, so return the failure branch naming the input you are missing rather than standing a different reference in its place. Before you build on a source, check what it holds — describe_handle reports each table's rows and how many of them each column is non-NULL on, and a pattern that counts rows settles it where that is absent — because an empty result is data rather than a failure: the query settles, everything derived from it is empty in turn, and nothing reports a problem. A query result also carries an `error`, and a refused read arrives there rather than as rows — a table describe_handle reports `rowLabelReads` for refuses any query that does not select those columns, naming the one it wants — so read `error` before you treat a result as empty, and render what it says instead of an empty state, which would report as a fact about the data something no read established.",
         'To read what the pattern computed, pass run_pattern a `resultSchema` describing the fields you want; without one you get a reference and no value at all. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. Numbers, booleans and enum strings come back as themselves; unconstrained strings and anything the schema does not model are withheld as text and come back as reference tokens addressing those positions, which you can describe_handle or wire into a later pattern. You do not need to declare $NAME or $UI.',
         `Return the resultRef run_pattern gave you for the pattern you ran last and the one-line \`describes\`${
           profileConfig.allowedToolIds.includes("search_patterns")
@@ -4645,6 +4645,14 @@ export class CfHarnessPromptLoop {
         : {}),
       ...(this.engine.config.fabricSession !== undefined
         ? { fabricSession: this.engine.config.fabricSession }
+        : {}),
+      // And the connector handles the console was launched against, so a
+      // child's grants resolve from the same configuration its parent's did
+      // rather than from a second reading of loom's records. What a child
+      // actually holds is still decided by `seedSubagentHandleTable`: this
+      // carries the configuration, not an entitlement.
+      ...(this.engine.connectorGrants.length > 0
+        ? { connectorGrants: this.engine.connectorGrants }
         : {}),
       // Likewise the index client: a child searches and runs indexed
       // patterns through the one the parent built. The connection CONFIG

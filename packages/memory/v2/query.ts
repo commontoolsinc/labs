@@ -20,7 +20,11 @@ import {
 } from "@commonfabric/runner/graph-query";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
-import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
+import {
+  classifySchemaMeta,
+  collectExternalSchemaRefHashes,
+  schemaMetaRefHashes,
+} from "../../runner/src/schema-decompose.ts";
 import {
   lookupSchemaDocument,
   registerSchemaDocument,
@@ -985,6 +989,16 @@ const EMPTY_SCHEMA_REFS: ReadonlySet<string> = new Set();
  * its refs; its value is not link-scanned, because schema keywords such
  * as `default` may carry link-shaped DATA that is not a link position.
  * Every other document is scanned for link schemas anywhere in its value.
+ * Every document, `cid:` or not, also contributes its reserved `schema`
+ * metadata member, a schema position in the same spelling: content
+ * addressing hashes `.value` alone, and a blob whose value is
+ * schema-shaped is indistinguishable from a schema document, so the
+ * member is read the same way on all of them. A malformed member — a
+ * `cid:` reference outside a single root `$ref` — is state the commit
+ * boundary refuses, so one found here predates that enforcement or was
+ * written out of band; assembly fails the query on it
+ * ({@link SchemaClosureError}) rather than deliver a document whose
+ * schema no reader can resolve.
  */
 const scanSnapshotSchemaRefs = (
   engine: Engine.Engine,
@@ -1043,6 +1057,16 @@ const scanSnapshotSchemaRefs = (
         return schema;
       });
     }
+    const metaForm = classifySchemaMeta(doc);
+    if (metaForm.kind === "malformed") {
+      throw new SchemaClosureError(
+        `Query result delivers document ${id} with malformed schema ` +
+          `metadata (${metaForm.reason}). The commit boundary refuses this ` +
+          `form, so the stored document predates that enforcement or was ` +
+          `written out of band (docs/specs/content-addressed-schemas.md).`,
+      );
+    }
+    for (const hash of schemaMetaRefHashes(metaForm)) refs.add(hash);
   }
   const result = refs.size === 0 ? EMPTY_SCHEMA_REFS : refs;
   recordSchemaRefScan(engine, key, snapshot, result, scans);
@@ -1092,8 +1116,9 @@ export class SchemaClosureError extends Error {
 /**
  * The read-side delivery guarantee, enforced at the result-assembly
  * boundary: every schema reference embedded in the documents being
- * delivered — a link schema anywhere in a document's value, or a delivered
- * schema document's own refs — must resolve to a verified schema document
+ * delivered — a link schema anywhere in a document's value, the document's
+ * `schema` metadata member, or a delivered schema document's own refs —
+ * must resolve to a verified schema document
  * in this space, and the whole closure joins the delivered set and the
  * watch set. A missing or forged closure document fails the query loudly
  * ({@link SchemaClosureError}): the write-side guarantee installs closures

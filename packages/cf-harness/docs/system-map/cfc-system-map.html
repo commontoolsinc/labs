@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-11", sha: "9eb5400fef" };
+    const SNAPSHOT = { date: "2026-09-11", sha: "97ea55b2af" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -1865,7 +1865,7 @@
         kind: "Handle table",
         band: "agent",
         body:
-          `<p>The mechanism that lets the agent route data it never sees. A token names a cell address without carrying the value. The model composes work out of tokens: pass one to <code>run_pattern</code>, hand one to a child, name a piece with <code>assign_slug</code>, ask <code>describe_handle</code> what shape it has. Where a referent declares no shape and its value is a database, that tool reads the value instead and reports the table contract the database was created under, together with how full each table is — the one value it ever reads, and only where nothing was declared.</p><p>Ruled today: possession of a handle is not a release. A handle is never withheld; only values are gated.</p>`,
+          `<p>The mechanism that lets the agent route data it never sees. A token names a cell address without carrying the value. The model composes work out of tokens: pass one to <code>run_pattern</code>, hand one to a child, name a piece with <code>assign_slug</code>, ask <code>describe_handle</code> what shape it has. Where a referent declares no shape and its value is a database, that tool reads the value instead and reports the table contract the database was created under, together with how full each table is and, for a table carrying a per-row label rule, the columns that rule reads — the one value it ever reads, and only where nothing was declared.</p><p>Ruled today: possession of a handle is not a release. A handle is never withheld; only values are gated.</p>`,
         links: [["a handle is never withheld, values are gated", 6759]],
         close: [
           "Value handles (as opposed to address handles), lifetimes, release, garbage collection, and console-restore persistence are not yet contracts (deviation 4; CT-2202 item 8).",
@@ -1986,7 +1986,7 @@
         threats: ["t7"],
         close: [
           "Injection seeds <code>tables: {}</code> and treats injected files as unlabeled, so connector rows carry no labels yet. Decide how a connector's schema and row-label rules reach the handle (CT-2189 gap 2, shared loom + labs). What derives from a contract is settled; what is missing is the contract.",
-          "<code>describe_handle</code> reports an injected database's tables, its columns and their <code>ifc</code> labels, and how full each table is, read off the handle value where the cell declares no schema (gap 4, ours, closed). What the model can be told is therefore bounded by what injection puts on the handle, which is gap 2 above.",
+          "<code>describe_handle</code> reports an injected database's tables, its columns and their <code>ifc</code> labels, how full each table is, and the columns a per-row label rule reads — a query omitting one of those is refused rather than returned unlabeled — read off the handle value where the cell declares no schema (gap 4, ours, closed). What the model can be told is therefore bounded by what injection puts on the handle, which is gap 2 above.",
         ],
       },
       connectors: {
@@ -2295,7 +2295,7 @@
       e_conn_sqlite:
         `<p>Today: rows stop in <code>source-records.db</code> and <code>msgvault.db</code>. Intended: <code>loom-daemon</code> injects a read-only <code>SqliteDb</code> handle cell and a freshness cell into the target space.</p>`,
       e_sqlite_spaces:
-        `<p>Once the handle cell exists it is an ordinary same-space cell, so <code>--input-cell</code> and <code>/api/task inputCells</code> carry it into a harness session with no new transport.</p><p>An input on this path that does not read back as a handle settles as the query's own error rather than killing the reactive action, so the result carries the error for the pattern to render and a later pass can still succeed once the handle reads.</p>`,
+        `<p>Once the handle cell exists it is an ordinary same-space cell, so <code>--input-cell</code> and <code>/api/task inputCells</code> carry it into a harness session with no new transport. A console launched with <code>--instance</code> also grants it to every session it runs, without a caller attaching anything: the launcher reads loom's injection receipt and names each grant by the CFC class loom's own table contract declares for that handle's columns, so a bare task opens holding <code>email</code> and <code>finance</code>.</p><p>An input on this path that does not read back as a handle settles as the query's own error rather than killing the reactive action, so the result carries the error for the pattern to render and a later pass can still succeed once the handle reads.</p>`,
       e_parent_child:
         `<p>Delegation seeds the child's handle table with the parent entries the brief names, and nothing else. The brief itself is prose.</p>`,
       e_child_parent:
@@ -2441,7 +2441,7 @@
             ],
             sel: "handles",
             h: "Mint the handle",
-            t: "The input cell becomes cfh:a:… in the model's world. The model sees the cell's schema and label through describe_handle — or, for a database, its tables, its columns' labels and how full each table is — never the rows.",
+            t: "The input cell — or the console's own connector grant — becomes cfh:a:… in the model's world. The model sees the cell's schema and label through describe_handle — or, for a database, its tables, its columns' labels, how full each table is, and what a per-row label rule requires a query to select — never the rows.",
           },
           {
             f: ["parent", "e_parent_child", "g_deleg", "child_pa"],
@@ -2515,7 +2515,7 @@
             ],
             sel: "spaces",
             h: "A labeled cell like any other",
-            t: "Once the handle cell exists, /api/task inputCells carries it into a session with no new transport. The path is identical to demo 1 from here.",
+            t: "Once the handle cell exists, a console launched against the instance grants it to every session, and /api/task inputCells still carries it explicitly. The path is identical to demo 1 from here.",
           },
           {
             f: ["child_pa", "e_run_pattern", "runner", "spaces", "g_write"],

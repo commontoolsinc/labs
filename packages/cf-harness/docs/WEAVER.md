@@ -1,13 +1,14 @@
 # Driving the console from Weaver
 
-Weaver's command pill offers two verbs backed by the cf-harness console:
-`/patterns <query>` searches the pattern index, and `/cf-harness <task>` runs a
-harness session. A task places a panel in the current loom that streams the
-session live, and when the turn ends the panel is replaced by the finished
-piece, rendered in the person's own loom space under their own identity.
-`more
-<text>` continues the last session; a task that names a pattern id from
-`/patterns` has the session use that pattern.
+Weaver's command pill offers three verbs backed by the cf-harness console:
+`/patterns <query>` searches the pattern index, `/cf-harness <task>` runs a
+harness session, and `/feedback <patternId> up|down` records one vote on a
+pattern in the index through the console's `POST /api/index/feedback` route,
+signed with the console's fabric identity. A task places a panel in the current
+loom that streams the session live, and when the turn ends the panel is replaced
+by the finished piece, rendered in the person's own loom space under their own
+identity. `more <text>` continues the last session; a task that names a pattern
+id from `/patterns` has the session use that pattern.
 
 The arrangement rests on one fact: **the console and loom share one fabric.**
 The console runs against loom's toolshed, signs with loom's identity key, and
@@ -208,7 +209,9 @@ The daemon's proxy and the console read the same inputs in the same order —
 `--port` above all three — so **recording a port in `pieces.json` moves both.**
 That is what to do for a second instance on a machine that already has a
 console: the port is not derived from the offset, so two instances left at the
-default contend for one.
+default contend for one. A launch whose console port is held by something it did
+not start says so and names the pid holding it, because the console already
+there answers the health check the launch makes.
 
 The inherited variable is the one to check when the route reaches nothing. A
 daemon started from a shell that exported the console's own variable proxies
@@ -275,6 +278,10 @@ Mac. Then, in Weaver's settings under Services:
   current loom. A turn runs for minutes; the panel streams throughout, and the
   piece replaces it when the turn ends.
 - `more <text>` continues the last session.
+- `/feedback <patternId> up|down` records one vote on a pattern the index holds,
+  signed with the console's fabric identity; the pill answers "recorded up for
+  <patternId>" or the console's own refusal. An up vote is what promotes a
+  contributed pattern's discoverability.
 - The console at its base URL holds every run: transcript, policy trace, the CFC
   withheld markers, and `deno task cfc-audit <run dir>` audits a family.
 

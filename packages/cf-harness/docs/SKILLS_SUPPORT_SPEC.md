@@ -104,11 +104,14 @@ metadata and container path. See
 ## Non-Goals
 
 - Installing skills from remote registries into the skills root. Discovery on
-  the external skills.sh registry and pinned, instruction-only acquisition into
-  a capability-typed handle a child consumes are a separate surface
-  (`search_skills`, `acquire_skill`, `delegate_task.skillHandle`), specified in
+  the external skills.sh registry and pinned acquisition — a `SKILL.md` into a
+  capability-typed handle a child consumes, and the skill's `scripts/` held
+  host-side beside it — are a separate surface (`search_skills`,
+  `acquire_skill`, `delegate_task.skillHandle`), specified in
   `docs/plans/external-skill-acquisition.md` and described in the package
-  README; nothing acquired that way enters the registry this document defines.
+  README; nothing acquired that way enters the registry this document defines,
+  and an acquired script answers to the same operator allowlist a registry
+  skill's script does.
 - Managing user-global skill directories outside an explicitly configured root.
 - Running skill scripts automatically or without an exact operator allowlist.
 - Treating `allowed-tools` as a permission grant.
