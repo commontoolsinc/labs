@@ -358,11 +358,15 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 - [ ] **E2 — Publish the measured advice** where pattern authors encounter
       collections, `computed`, and `lift`. Explain nested-scan cost and use only
       available operators in replacement examples.
-- [ ] **E3 — Add a transformer warning** through the existing diagnostic
+- [x] **E3 — Add a transformer warning** through the existing diagnostic
       collector. Test recognizable nested reactive scans and negative cases
       involving plain arrays and unrelated scopes; inspect warning volume across
       authored patterns before shipping. Escalation to error requires separate
       evidence about false positives.
+      The [diagnostic acceptance report](../history/development/performance/2026-09-11-nested-collection-scan-diagnostic.md)
+      records the focused cases, full transformer suite, and all five distinct
+      findings across 413 pattern entries. Publication and review remain visible
+      in the dashboard.
 - [ ] **D1 — Follow the remaining lazy-materialization work** in its
       [own plan](lazy-cell-materialization.md), including handlers and flag
       removal. Keep implementation ownership there.

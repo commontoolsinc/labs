@@ -20,6 +20,11 @@ const filteredItems = computed(() => {
 rendering or other simple conditional values in normal pattern code, use plain
 ternaries — see [Conditional Rendering](../../patterns/conditional.md).
 
+The compiler's [nested-scan warning](../../../features/read-accounting.md#compiler-hints-for-nested-scans)
+points out some repeated scans of captured collections. It is a hint to measure
+and examine the computation's structure, not a failing budget or a complete
+complexity analysis.
+
 ## When NOT to Use computed()
 
 **Never inside JSX for interpolation or property access** — reactivity is

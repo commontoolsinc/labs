@@ -159,8 +159,8 @@
     {
       "id": "E3",
       "title": "Nested-scan diagnostic",
-      "status": "todo",
-      "detail": "Warning with negative cases and corpus noise assessment."
+      "status": "review",
+      "detail": "PR #7328 implements and validates the nested-scan warning with eleven focused cases and a 413-entry corpus review. CI and Cubic review govern landing."
     }
   ],
   "questions": [
