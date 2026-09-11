@@ -1048,6 +1048,12 @@ export class CellImpl<T extends FabricValue>
     hash: string;
   };
 
+  /** Immutable acquisition reused while this Cell's binding and history agree. */
+  #referenceProvenanceCache?: {
+    link: NormalizedFullLink;
+    reference: CfcReferenceProvenance;
+  };
+
   #synced: boolean;
   #cfcLabelView?: CfcLabelView;
 
@@ -1085,13 +1091,7 @@ export class CellImpl<T extends FabricValue>
     this.#cfcLabelView = cloneCfcLabelView(_cfcLabelView);
     registerCfcReferenceCarrier(
       this,
-      () => ({
-        binding: cfcReferenceBinding(this.#link),
-        confidentiality: cfcReferenceConfidentialityForView(this.#cfcLabelView),
-        ...(this.#link.scopeCaps !== undefined && {
-          scopeCaps: this.#link.scopeCaps,
-        }),
-      }),
+      () => this.#referenceProvenance(),
       runtime.cfcFlowLabels === "persist"
         ? () => this.#cfcLabelView
         : undefined,
@@ -4156,6 +4156,26 @@ export class CellImpl<T extends FabricValue>
       getCfcReferenceProvenance(this),
       purpose,
     );
+  }
+
+  /** Snapshots the acquired binding once for each retained history. */
+  #referenceProvenance(): CfcReferenceProvenance {
+    const link = this.#link;
+    const confidentiality = cfcReferenceConfidentialityForView(
+      this.#cfcLabelView,
+    );
+    const cached = this.#referenceProvenanceCache;
+    if (
+      cached?.link === link &&
+      cached.reference.confidentiality === confidentiality
+    ) return cached.reference;
+    const reference = deepFreeze({
+      binding: cfcReferenceBinding(link),
+      confidentiality,
+      ...(link.scopeCaps !== undefined && { scopeCaps: link.scopeCaps }),
+    });
+    this.#referenceProvenanceCache = { link, reference };
+    return reference;
   }
 
   toEncodableForm(): SigilLink | null {

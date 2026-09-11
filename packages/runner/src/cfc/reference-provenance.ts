@@ -37,6 +37,9 @@ const carriers = new WeakMap<object, () => CfcReferenceProvenance>();
 const carrierViews = new WeakMap<object, () => CfcLabelView | undefined>();
 const views = new WeakMap<object, readonly CfcConfClause[]>();
 
+/** Shared empty restriction list for views without recorded reference history. */
+const emptyConfidentiality: readonly CfcConfClause[] = Object.freeze([]);
+
 /** Registers a runtime-owned carrier; this mint stays package-internal. */
 export function registerCfcReferenceCarrier(
   carrier: object,
@@ -107,7 +110,9 @@ export function cfcReferenceBindingMatches(
 export function cfcReferenceConfidentialityForView(
   view: CfcLabelView | undefined,
 ): readonly CfcConfClause[] {
-  return view === undefined ? [] : views.get(view) ?? [];
+  return view === undefined
+    ? emptyConfidentiality
+    : views.get(view) ?? emptyConfidentiality;
 }
 
 /**

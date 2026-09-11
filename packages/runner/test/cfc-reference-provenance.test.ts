@@ -149,6 +149,44 @@ describe("cfc-reference-provenance", () => {
     ]);
   });
 
+  it("reuses one immutable acquisition record across repeated exports of a held reference", async () => {
+    const { target, selected } = await selectedTarget();
+    const publicRecords = new Set(
+      Array.from(
+        { length: 128 },
+        () => getCfcReferenceProvenance(target.getAsNormalizedFullLink()),
+      ),
+    );
+    expect(publicRecords.size).toBe(1);
+    expect([...publicRecords][0]?.confidentiality).toEqual([]);
+    const tx = runtime.edit();
+    const held = selected.withTx(tx).resolveAsCell();
+    const observationsBefore = tx.getCfcState().referenceObservations.length;
+    const records = new Set(
+      Array.from(
+        { length: 128 },
+        () => getCfcReferenceProvenance(held.getAsNormalizedFullLink()),
+      ),
+    );
+    expect(records.size).toBe(1);
+    expect(tx.getCfcState().referenceObservations).toHaveLength(
+      observationsBefore + 128,
+    );
+    const reference = [...records][0]!;
+    expect(reference.confidentiality).toContainEqual(selection);
+    expect(Object.isFrozen(reference)).toBe(true);
+    expect(Object.isFrozen(reference.binding.path)).toBe(true);
+
+    const child = held.key("public");
+    const childReference = getCfcReferenceProvenance(
+      child.getAsNormalizedFullLink(),
+    )!;
+    expect(childReference.binding.path).toEqual(["public"]);
+    expect(childReference.confidentiality).toContainEqual(selection);
+    expect(reference.binding.path).toEqual([]);
+    tx.abort();
+  });
+
   it("keeps passive proxy conversion and finished then probes out of the observation journal", async () => {
     const { target } = await selectedTarget();
     const tx = runtime.edit();
