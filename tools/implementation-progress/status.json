@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-11T11:41:56.081484+00:00",
+  "updated": "2026-09-11T12:21:13.942025+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7307",
@@ -102,7 +102,7 @@
       "id": "C3",
       "title": "Remote row invalidation",
       "status": "active",
-      "detail": "Inline-element dependency fix landed in #7265 with four browser cases and narrow invalidation tests. Remaining acceptance checks and production workaround removal stay open."
+      "detail": "Client acceptance is in #7329. Serving-host acceptance now passes correct values, full normalized-link and producer-identity stability, and edited-only execution in both directions. Full runner task: 1,437 tests / 8,960 steps; final serving-loop file: 27 cases. C3 closes after both reviewed slices land."
     },
     {
       "id": "C4",
