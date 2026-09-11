@@ -29,8 +29,8 @@ export type DomainFor<DomainExtra> = FabricValue | DomainExtra;
  * sub-visits), returning this value.
  */
 export type MainResultForm<ResultType> = {
-  type: "mainResult";
-  value: ResultType;
+  readonly type: "mainResult";
+  readonly value: ResultType;
 };
 
 /**
@@ -54,9 +54,9 @@ export type MainResultForm<ResultType> = {
  * is not prevented.
  */
 export type RecurseForm = {
-  type: "recurse";
-  doKeys: boolean;
-  doValues: boolean;
+  readonly type: "recurse";
+  readonly doKeys: boolean;
+  readonly doValues: boolean;
 };
 
 /**
@@ -66,8 +66,8 @@ export type RecurseForm = {
  * replacement were the value in the same position as the original).
  */
 export type ReplaceForm<DomainExtra> = {
-  type: "replace";
-  value: DomainFor<DomainExtra>;
+  readonly type: "replace";
+  readonly value: DomainFor<DomainExtra>;
 };
 
 /**
@@ -75,7 +75,7 @@ export type ReplaceForm<DomainExtra> = {
  * multiple possible subtype dispatches. By returning this form, a visitor
  * indicates that the engine should in fact do a subtype-based dispatch.
  */
-export type VisitSubtypeForm = { type: "visitSubtype" };
+export type VisitSubtypeForm = { readonly type: "visitSubtype" };
 
 /**
  * Standard instance of `RecurseForm` for recursing over keys and values. This

@@ -42,8 +42,8 @@ import {
  * avoiding allocation for the common un-replaced `visitSubtype` cases.
  */
 type VisitSubtypeOfForm<DomainExtra> = {
-  type: "visitSubtypeOf";
-  value: DomainFor<DomainExtra>;
+  readonly type: "visitSubtypeOf";
+  readonly value: DomainFor<DomainExtra>;
 };
 
 /**
@@ -53,14 +53,14 @@ type VisitSubtypeOfForm<DomainExtra> = {
  * is small potatoes, and it keeps the code a wee bit simpler.
  */
 type RecurseOfForm = {
-  type: "recurseOf";
-  containerTag:
+  readonly type: "recurseOf";
+  readonly containerTag:
     | typeof VALUE_TAGS.Array
     | typeof VALUE_TAGS.FabricInstance
     | typeof VALUE_TAGS.Object;
-  container: FabricContainerValue;
-  doKeys: boolean;
-  doValues: boolean;
+  readonly container: FabricContainerValue;
+  readonly doKeys: boolean;
+  readonly doValues: boolean;
 };
 
 /**
