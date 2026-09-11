@@ -1,9 +1,9 @@
 # Precise reference rollout
 
-**Rollout decision: enable the intended precise deployment posture first, then
-migrate existing Homes in a separate, controlled step.** The Home migration may
-wait for that activation. Enabling a flag does not migrate stored references or
-authorize replacing Home's published contract.
+**Rollout decision: land and activate CFC first, then migrate existing Homes in
+a separate, controlled step.** The Home migration may wait for that activation.
+Enabling a flag does not migrate stored references or authorize replacing Home's
+published contract.
 
 Hixie owns the activation decision. Coordinate the implementation and migration
 work for [PR #7243](https://github.com/commontoolsinc/labs/pull/7243) with him
@@ -102,6 +102,24 @@ afterward; activation implies no background live-data rewrite.
 
 Owner: migration implementer; the Home owner authorizes the resulting transition.
 
+Rehearsal and migration acceptance require all five dials at their strictest
+settings, even if the initially activated deployment uses a weaker posture:
+
+| Runtime dial | Required rehearsal and acceptance value |
+|---|---|
+| `cfcEnforcementMode` | `enforce-strict` |
+| `cfcFlowLabels` | `persist` |
+| `cfcWriteFloor` | `enforce` |
+| `cfcTriggerReadGating` | `true` |
+| `cfcPolicyEvaluation` | `enforce` |
+
+Assert the resolved settings on the migration Runtime and every participating
+reader/writer before acceptance actions run. Record the policy records/manifest,
+evaluation budgets, render ceiling, and server-execution posture with the
+results; use the policy configuration intended for the release. Runs with
+`enforce-explicit` plus `persist`, or with any other dial below this table, are
+diagnostic comparisons and cannot satisfy the readiness gate.
+
 - [ ] Follow the [space clone procedure](../development/space-clone-rehearsal.md)
       to copy representative real Homes and participating profile/consumer spaces.
       Record source revisions; keep inventory read-only until the clone exists.
@@ -145,7 +163,9 @@ The regression fixture in
 `packages/runner/test/profile-home-published-reference.test.ts` exercises both
 stored Home schemas with complete and incomplete incoming slots against a real
 profile. It supplies a starting case for migration tests, not an implementation
-of migration or evidence about every live Home.
+of migration or evidence about every live Home. Its current enforcing-floor
+posture does not exercise all five strict settings; the full-strict migration
+acceptance suite remains required.
 
 1. **Preflight.** Verify owner identity, recognized prior contract, and migration
    version. Snapshot Home's root, named cells, declarations, slots, and revisions.
