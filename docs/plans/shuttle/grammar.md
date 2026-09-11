@@ -844,10 +844,33 @@ being typed each leave the prompt as it is. A line with nothing on it is not
 recorded, nor is one identical to the line recorded last, and the comparison is
 against that one line alone — comparing against every line would drop a line
 from the middle of the run and leave the order no longer the order it was
-typed in. What is recorded is the line exactly as it was typed, at the moment
-it is taken rather than when it settles, so `up` reaches a line that is still
-running. The recall is the run's own memory; persistent history is a separate
-feature ([`futures.md`](futures.md)).
+typed in. A line is recorded at the moment it is taken rather than when it
+settles, so `up` reaches a line that is still running. The recall is the run's
+own memory; persistent history is a separate feature
+([`futures.md`](futures.md)).
+
+**A line is recorded with each `%n` replaced by what it bound to when it ran.**
+A handle is a reference only until the next listing, and a recalled line
+outlives listings, so a line recorded as it was typed would — replayed after a
+listing had renumbered — act on whichever row its number names then, and report
+that as what the line did. What is written in the handle's place is the operand
+the listing minted for the row, which is the most stable spelling the row
+carries: a piece stands as the id that names it in either facet, and a row
+inside a piece stands as its own name, which is a name inside the place the
+listing was read at rather than from anywhere. A callable row is written as the
+two tokens `call` takes in its place — the receiver's reference and the verb
+name — since no operand names a verb. What the screen holds is untouched: the
+line was drawn as it was typed, and the replacement is what `up` puts back.
+
+A token that bound to nothing is recorded as it was typed, and three do. A
+handle that named no row is one — `%0`, a number past the listing, a handle
+written before any listing — and a row that neither its name nor a reference
+reaches is another. The third is every token the operand grammar does not read:
+the verb, and everything from the first token that reads as an option, since
+from there what a token is for is the verb's own table to say, and a `%2`
+standing in an option's value or inside a callable's own section is a character
+of that value rather than a handle. A line carrying no handle is recorded
+character for character, its spacing and its quoting included.
 
 `tab` completes the token the line ends in, and it completes that token only:
 with the cursor anywhere else on the line it does nothing, the token being

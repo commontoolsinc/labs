@@ -27,7 +27,7 @@ import { UI } from "@commonfabric/runner";
 
 import type { SpaceConfig } from "../lib/piece.ts";
 import { HeldConnection } from "../lib/shuttle/connection.ts";
-import { CurrentPlace } from "../lib/shuttle/place.ts";
+import { CurrentPlace, placeAtSpaceRoot } from "../lib/shuttle/place.ts";
 import { ShuttleSession } from "../lib/shuttle/session.ts";
 import { moved } from "./shuttle-place-helpers.ts";
 import { type PromptTerminal, runPrompt } from "../lib/shuttle/prompt.ts";
@@ -842,6 +842,47 @@ describe("prompt", () => {
         kind: "edit",
         text: `${AT_ROOT}pwd`,
         column: 21,
+      });
+    });
+
+    it("recalls a line with its handles written out as the rows they named", async () => {
+      // A handle is a reference until the next listing, so a line recorded as
+      // it was typed would, recalled after a listing had renumbered, act on
+      // whichever row the number names then. What `up` puts back is the row.
+
+      const shuttle = shuttleIn();
+      shuttle.session.listed({
+        place: placeAtSpaceRoot(SPACE),
+        rows: [{ name: "slugs", kind: "container", operand: "slugs" }],
+      });
+      const writes = await running([...typed("cd %1"), ENTER, UP], shuttle);
+      expect(drawn(writes)).toEqual({
+        kind: "edit",
+        text: "shuttle /slugs/ @space> cd slugs",
+        column: 32,
+      });
+    });
+
+    it("draws the line as it was typed, the handle included", async () => {
+      // The other half of the pair above: only what is recorded differs, and
+      // the line on the screen is the one the person wrote. The reading is of
+      // the writes up to the `finish` that ended the line, which is the last
+      // the prompt drew of it.
+
+      const shuttle = shuttleIn();
+      shuttle.session.listed({
+        place: placeAtSpaceRoot(SPACE),
+        rows: [{ name: "slugs", kind: "container", operand: "slugs" }],
+      });
+      const writes = await running([...typed("cd %1"), ENTER], shuttle);
+      const typing = writes.slice(
+        0,
+        writes.findIndex((write) => write.kind === "finish"),
+      );
+      expect(drawn(typing)).toEqual({
+        kind: "edit",
+        text: `${AT_ROOT}cd %1`,
+        column: 23,
       });
     });
 

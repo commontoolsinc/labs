@@ -286,6 +286,16 @@ to a recalled line is still there when you come back to it. A line with nothing
 on it is not recorded, nor is one you just ran again, and neither end wraps
 round. Running a line or pressing `ctrl-c` returns you to the line being typed.
 
+A line is recorded with each `%n` replaced by what it named. A handle is a
+reference only until the next listing, so a line recorded as you typed it would
+— recalled after a later listing — act on whichever row that number names then.
+What is written in its place is the operand the listing printed for the row, and
+for a callable row the receiver and the verb name `call %4` stands for. The line
+on the screen is the one you typed; the replacement is what `up` puts back. A
+handle that named no row, and a `%n` written where the line reads no operand —
+in an option's value, or inside a callable's own section — come back as you
+typed them, and a line with no handle on it comes back character for character.
+
 `tab` completes the token the line ends in: a verb where you have typed none,
 and after a verb whatever that verb takes at the position you are typing at — a
 verb name for `help`, and the rows that stand where you stand for the verbs that
