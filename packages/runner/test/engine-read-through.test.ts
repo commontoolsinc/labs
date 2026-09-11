@@ -241,7 +241,10 @@ describe("engine-read-through", () => {
     const tx = clientRuntime.edit();
     clientArg.withTx(tx).set({ n });
     expect((await tx.commit()).error).toBeUndefined();
-    const authoredSeq = Engine.serverSeq(engine);
+    // The store head can include serving writes after the authored commit.
+    const authoredSeq = Engine.readState(engine, {
+      id: clientArg.getAsNormalizedFullLink().id,
+    })!.seq;
     await waitUntil(
       () => readWatermarkSeq(engine) >= authoredSeq,
       "watermark to reach the authored commit",
@@ -671,11 +674,11 @@ describe("engine-read-through", () => {
       space,
       path: [],
     });
+    const refreshesBefore = host.stats().storeRefreshes;
     const creating = clientRuntime.edit();
     cell.withTx(creating).set({ made: true });
     expect((await creating.commit()).error).toBeUndefined();
-    const authoredSeq = Engine.serverSeq(engine);
-    const refreshesBefore = host.stats().storeRefreshes;
+    const authoredSeq = Engine.readState(engine, { id })!.seq;
     await waitUntil(
       () => readWatermarkSeq(engine) >= authoredSeq,
       "the watermark to cover the creating commit",

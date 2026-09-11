@@ -553,6 +553,31 @@ That status means “source changed, running deploy unverified,” not rollback:
 `piece render`, `piece inspect`, and `piece getsrc` to determine the live state.
 A receipt alone is never proof that the updated piece starts.
 
+## Where a piece is created
+
+Against a deployment that runs the serving loop — one whose published posture
+selects `EXPERIMENTAL_SERVER_EXECUTION`, which the connection adopts —
+`cf piece new` does not compile or commit in this process. It resolves the
+program from disk, pins its fabric imports, and sends it to the deployment's
+pattern-lifecycle route, signed with the identity the command connects as; the
+space's serving runtime compiles it, creates the piece, and answers with the
+receipt the command prints. Where the deployment enforces ACLs, the identity
+must hold WRITE or OWNER on the space; a deployment with enforcement off admits
+any signed caller, as its memory server does. The registry entry and the slug
+travel with the creation, so a taken name refuses it before anything is created,
+and the space root is the serving loop's to ensure rather than this command's.
+What stays in this process after the receipt is what opening a piece does
+anyway: the start, which `--no-start` skips; `--no-start` also asks the serving
+loop not to derive the piece until something demands it. The receipt returns
+once the piece is durable; the serving loop derives it in the cycle after, so a
+reader that needs the derived value pulls it. Against any other deployment, and
+under `cf test`, the command performs every step itself, as before.
+`cf piece setsrc` and `cf piece setsrc --check` perform every step in this
+process on every deployment: a source update publishes module update authority,
+which requires an owned setup transaction that commits to storage, and a serving
+wave cannot supply one. The contract, including the refusals and their codes, is
+[`server-pattern-lifecycle.md`](../../docs/features/server-pattern-lifecycle.md).
+
 ## Piece discovery
 
 `cf piece describe --cell <piece>` documents a piece's readable fields and
@@ -1276,11 +1301,12 @@ Selections also follow these rules:
   from a result that _does_ exist is a different fact, and it is refused rather
   than reported as an absent result.
 - **`--no-wait` refuses all three flags.** That mode exits once the commit is
-  acknowledged and skips the receipt readback, so there is no result to shape.
-  The refusal names the flags that need the readback, alongside `--show-links`
-  for the same reason. What it still returns is the envelope's `receipt` — the
-  address of the cell holding the outcome, known at commit — so the shaping
-  flags apply to the `cf cell get` that collects it.
+  acknowledged — the handling's commit, or under server execution the event
+  append the server then handles — and skips the receipt readback, so there is
+  no result to shape. The refusal names the flags that need the readback,
+  alongside `--show-links` for the same reason. What it still returns is the
+  envelope's `receipt` — the address of the cell holding the outcome, known at
+  commit — so the shaping flags apply to the `cf cell get` that collects it.
 - **`--show-links` composes with a projection, not with `--filter`.** Links are
   collected after the selection, over exactly the value the caller is holding: a
   projection leaves every surviving path where it was, so each address still
