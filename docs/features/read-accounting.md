@@ -124,3 +124,24 @@ unrelated transactions, standalone harness reads, storage-server work, and
 network traffic are outside the measure. Plain eager values and primitive Cell
 reads are not proxy accesses. A zero count does not mean zero CPU work or zero
 storage reads.
+
+## Compiler hints for nested scans
+
+The non-fatal `collection:nested-scan` warning identifies an inline reactive
+array callback that scans another captured reactive collection. For example,
+filtering the same captured entries separately for each group can make work
+grow with both collection sizes. The warning asks for a measurement of the
+demanded output; it does not assert that every update performs that work.
+
+The check covers `map`, `filter`, `flatMap`, `count`, `minBy`, and `maxBy` with
+inline callbacks and receivers that resolve to captured root bindings. Plain
+local arrays, each row's own child arrays, callback-local derived lists,
+sequential scans, and unrelated function scopes are excluded. It does not trace
+arbitrary helper calls, complex receivers, or other loop forms. Absence of this
+warning is not a complexity guarantee.
+
+Move shared work outside the callback when possible. An
+[indexed lookup](collection-indexes.md) or
+[named aggregate](collection-aggregates.md) can fit some workloads; check its
+cardinality, numeric, ordering, and update contract before changing the pattern.
+Use the counters and budgets above to validate the resulting behavior.
