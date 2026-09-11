@@ -4,6 +4,7 @@ import {
   isSqliteDbRef,
   type SqliteDbRef,
   type SqliteQueryResult,
+  tableDeclaresRowLabel,
 } from "@commonfabric/memory/v2";
 import {
   rowLabelSpecOf,
@@ -143,13 +144,15 @@ export interface DescribeHandleTableFill {
   rowLabelReads?: string[];
 
   /**
-   * Present when the rule reads a column this disclosure does not name, which
-   * makes {@link rowLabelReads} a part of the requirement rather than the
-   * whole of it: a query projecting everything named there is still refused.
-   * A partial list with nothing saying it is partial would read as the recipe
-   * for a read that cannot succeed.
+   * Present when {@link rowLabelReads} is a part of the rule's requirement
+   * rather than the whole of it, so a query projecting everything named there
+   * is still refused. Two causes, and a caller acts the same way on both: the
+   * rule reads a column this disclosure does not name, or it is declared in a
+   * shape this build cannot read at all — which the runner counts as
+   * rule-bearing and refuses. A partial list with nothing saying it is partial
+   * would read as the recipe for a read that cannot succeed.
    */
-  rowLabelReadsWithheld?: true;
+  rowLabelReadsIncomplete?: true;
 
   /**
    * Why this table holds no counts, in the words of whatever refused. A table
@@ -258,7 +261,7 @@ export const describeHandleToolDescriptor: HarnessToolDescriptor = {
   toolId: "describe_handle",
   title: "Describe Handle",
   description:
-    "Report the shape of a general handle's referent and the CFC labels it carries: its recorded schema, path and label atom types, never its data. A referent that is a SQLite database reports its tables instead of a schema, under `database`: the columns of each table with their types, the labels those columns carry, and under `fill` how many rows each table holds and how many of them are non-NULL in each column. Read `fill` before writing a query: a column whose count is 0 is NULL on every row of this database, so filtering on it returns nothing, and a table reporting `unread` was not counted rather than empty. A table reporting `rowLabelReads` carries a per-row label rule over those columns, and a query over it must select every one of them by its own name — an alias does not stand in for the column — or the read is refused and the refusal arrives on the result's `error` rather than as rows; `rowLabelReadsWithheld` means the rule reads a further column this reply does not name, so such a query is refused whatever it selects. Read such a referent with `db.query` over the handle rather than as a value. A capability-restricted handle returns a named refusal. Use it to check that a reference is the kind of thing a step expects, and what handling it demands, before passing it on.",
+    "Report the shape of a general handle's referent and the CFC labels it carries: its recorded schema, path and label atom types, never its data. A referent that is a SQLite database reports its tables instead of a schema, under `database`: the columns of each table with their types, the labels those columns carry, and under `fill` how many rows each table holds and how many of them are non-NULL in each column. Read `fill` before writing a query: a column whose count is 0 is NULL on every row of this database, so filtering on it returns nothing, and a table reporting `unread` was not counted rather than empty. A table reporting `rowLabelReads` carries a per-row label rule over those columns, and a query over it must select every one of them by its own name — an alias does not stand in for the column — or the read is refused and the refusal arrives on the result's `error` rather than as rows; `rowLabelReadsIncomplete` means the named columns are not the whole of what the rule needs — it reads a column this reply does not name, or it is declared in a shape that cannot be read — so such a query is refused whatever it selects. Read such a referent with `db.query` over the handle rather than as a value. A capability-restricted handle returns a named refusal. Use it to check that a reference is the kind of thing a step expects, and what handling it demands, before passing it on.",
   effectClass: "read",
   inputSchema: {
     type: "object",
@@ -328,7 +331,7 @@ export const describeHandleToolDescriptor: HarnessToolDescriptor = {
                   additionalProperties: { type: "integer", minimum: 0 },
                 },
                 rowLabelReads: { type: "array", items: { type: "string" } },
-                rowLabelReadsWithheld: { type: "boolean" },
+                rowLabelReadsIncomplete: { type: "boolean" },
                 unread: { type: "string" },
               },
               required: ["table"],
@@ -536,22 +539,31 @@ const rowLabelReadsOf = (
   disclosed: readonly string[],
 ): Pick<
   DescribeHandleTableFill,
-  "rowLabelReads" | "rowLabelReadsWithheld"
+  "rowLabelReads" | "rowLabelReadsIncomplete"
 > => {
   const tables = db.tables as Record<string, unknown> | undefined;
-  // `rowLabelSpecOf` is the whole of the question: it answers both whether a
-  // rule is declared and what it is, so asking a separate predicate first
-  // would be a branch nothing can take.
-  const spec = rowLabelSpecOf(tables?.[table]);
-  if (spec === undefined) {
+  const declared = tables?.[table];
+  // Gated on the predicate the RUNNER uses, not on whether a spec can be read
+  // here: the two disagree on a `rowLabel` that is present but not an object,
+  // which the runner counts as rule-bearing and then refuses as an invalid
+  // rule. Reporting no rule for that table would describe a query that gets
+  // refused as one that works, which is the whole failure this disclosure
+  // exists to prevent.
+  if (!tableDeclaresRowLabel(declared)) {
     return {};
+  }
+  const spec = rowLabelSpecOf(declared);
+  if (spec === undefined) {
+    // Declared, and not a rule this build can read. There is a requirement
+    // and no column to name for it, which is the incomplete case.
+    return { rowLabelReadsIncomplete: true };
   }
   const named = new Set(disclosed);
   const inputs = ruleInputFields(spec);
   const reads = inputs.filter((field) => named.has(field));
   return {
     ...(reads.length > 0 ? { rowLabelReads: reads } : {}),
-    ...(reads.length < inputs.length ? { rowLabelReadsWithheld: true } : {}),
+    ...(reads.length < inputs.length ? { rowLabelReadsIncomplete: true } : {}),
   };
 };
 
