@@ -21,6 +21,7 @@ import {
 import type { HarnessFabricSession } from "../src/fabric-session.ts";
 import type { HarnessWellKnownGrant } from "../src/contracts/well-known-grants.ts";
 import {
+  checkRecordedWellKnownGrant,
   mintWellKnownGrants,
   resolveWellKnownGrantRefs,
   wellKnownGrantsContextMessage,
@@ -110,6 +111,54 @@ describe("well-known-grants", () => {
       await expect(
         resolveWellKnownGrantRefs(stubSession(), [MAIL_GRANT, MAIL_GRANT]),
       ).rejects.toThrow("`email` twice");
+    });
+  });
+
+  describe("checkRecordedWellKnownGrant()", () => {
+    it("accepts a fixed grant, which carries no source to check", () => {
+      expect(() =>
+        checkRecordedWellKnownGrant({
+          name: "piece-registry",
+          token: "cfh:a:abcdefgh",
+          ref: REGISTRY_REF,
+        })
+      ).not.toThrow();
+    });
+
+    it("accepts a connector grant recorded the way the mint records one", () => {
+      expect(() =>
+        checkRecordedWellKnownGrant({
+          name: "email",
+          token: "cfh:a:abcdefgh",
+          ref: MAIL_REF,
+          source: MAIL_GRANT.source,
+        })
+      ).not.toThrow();
+    });
+
+    it("throws for a recorded connector grant naming no connection", () => {
+      // A record another build wrote can carry a source with nothing in it,
+      // and the launch-time resolution that would have filled it never ran.
+
+      expect(() =>
+        checkRecordedWellKnownGrant({
+          name: "email",
+          token: "cfh:a:abcdefgh",
+          ref: MAIL_REF,
+          source: { connection: "  ", piece: "cf-gmail-messages--gmail-work" },
+        })
+      ).toThrow("records no connection and piece");
+    });
+
+    it("throws for a recorded connector grant naming no piece", () => {
+      expect(() =>
+        checkRecordedWellKnownGrant({
+          name: "email",
+          token: "cfh:a:abcdefgh",
+          ref: MAIL_REF,
+          source: { connection: "gmail-work", piece: "" },
+        })
+      ).toThrow("records no connection and piece");
     });
   });
 

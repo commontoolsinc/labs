@@ -9,10 +9,10 @@ export class StorageNetworkGate {
   #closed = false;
 
   /** Starts an ephemeral relay for the given storage server. */
-  constructor(target: URL) {
+  constructor(target: URL, port = 0) {
     this.#target = target;
     this.#server = Deno.serve(
-      { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+      { hostname: "127.0.0.1", port, onListen: () => {} },
       (request) => this.#serve(request),
     );
   }
@@ -20,6 +20,11 @@ export class StorageNetworkGate {
   /** The relay address supplied to one independent reader. */
   get url(): URL {
     return new URL(`http://127.0.0.1:${this.#server.addr.port}`);
+  }
+
+  /** Number of live relay socket endpoints, including both sides. */
+  get socketCount(): number {
+    return this.#sockets.size;
   }
 
   /** Closes current sockets and holds new requests until resume(). */

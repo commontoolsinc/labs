@@ -33,6 +33,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
+import { resultSchemaMetaSpelling } from "../src/result-schema-meta.ts";
 import {
   decodeMemoryBoundary,
   eventAttentionEntryKey,
@@ -433,6 +434,24 @@ const ow54AmbiguousEnvelopeSchema: JSONSchema = {
     candidates: { type: "array", items: ow54ProfileViewSchema },
   },
 } as JSONSchema;
+
+/**
+ * A served receipt's `schema` metadata: the shape of what it holds, in the
+ * spelling the metadata takes (a `cid:` reference under the default flag),
+ * with the referenced schema document — the closure a reader needs —
+ * stored in the space by the same wave commit.
+ */
+function expectReceiptSchemaMeta(
+  engine: Engine.Engine,
+  receiptDoc: unknown,
+  properties: Record<string, true>,
+): void {
+  const spelling = resultSchemaMetaSpelling({ type: "object", properties });
+  expect((receiptDoc as { schema?: unknown })?.schema).toEqual(spelling);
+  const ref = (spelling as { $ref?: string }).$ref;
+  expect(typeof ref).toBe("string");
+  expect(Engine.read(engine, { id: ref! })).toBeDefined();
+}
 
 describe("Phase 3 events-down (serving side)", () => {
   let server: MemoryV2Server.Server;
@@ -2474,6 +2493,11 @@ describe("Phase 3 events-down (serving side)", () => {
     // default-on for the serving runtime), durably, server-side.
     const receiptDoc = Engine.read(engine, { id: link!.id });
     expect(receiptDoc?.value).toEqual({ token: "tok-7" });
+    // The served receipt describes what it holds the way the client-era
+    // writer does: its `schema` metadata in the content-addressed
+    // spelling, with the referenced schema document installed by the same
+    // wave commit.
+    expectReceiptSchemaMeta(engine, receiptDoc, { token: true });
 
     // One writer, exactly once, atomic with the handling: the receipt
     // doc's WHOLE write history is one derived commit — the wave commit
@@ -2531,6 +2555,7 @@ describe("Phase 3 events-down (serving side)", () => {
     // value-less witness consumers distinguish from "no receipt at all".
     const receiptDoc = Engine.read(engine, { id: link!.id });
     expect(receiptDoc?.value).toEqual({});
+    expectReceiptSchemaMeta(engine, receiptDoc, {});
     const writers = commitsWriting(engine, link!.id);
     expect(writers.length).toBe(1);
     expect(writers[0].class).toBe("derived");

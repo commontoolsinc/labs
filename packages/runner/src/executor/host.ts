@@ -35,6 +35,7 @@ import type { MemorySpace } from "../storage/interface.ts";
 import {
   LIFECYCLE_VERB_SPACE_PARKED,
   type LifecycleVerb,
+  type RuntimeFactoryContext,
   SpaceServer,
   type SpaceServerOptions,
   type SpaceServerPolicy,
@@ -96,8 +97,14 @@ export type ExecutorHostOptions = {
 
   /** Build a serving runtime for one space over the loopback plane. The
    * factory owns auth and runtime options; it MUST pass
-   * `experimental: { serverExecution: true }`. */
-  createRuntime: (space: MemorySpace) => Promise<{
+   * `experimental: { serverExecution: true }`. `context` is what the
+   * SpaceServer hands its factory (see SpaceServerOptions.createRuntime):
+   * a factory that reads the home space before returning installs
+   * `context.storeReadThrough` on its storage manager first. */
+  createRuntime: (
+    space: MemorySpace,
+    context: RuntimeFactoryContext,
+  ) => Promise<{
     runtime: Runtime;
     dispose: () => Promise<void>;
   }>;
@@ -531,7 +538,7 @@ export class ExecutorHost {
         server: this.#options.server,
         engine,
         serviceIdentity: this.#options.serviceIdentity,
-        createRuntime: () => this.#options.createRuntime(space),
+        createRuntime: (context) => this.#options.createRuntime(space, context),
         localSeqRef,
         stats: this.#stats,
         policy: this.#options.policy,

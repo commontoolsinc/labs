@@ -406,6 +406,69 @@ describe("connector-grants", () => {
       );
     });
 
+    it("reports a handle whose reference names another space", () => {
+      // A grant is minted into the session's space, so a reference carrying a
+      // different one would seed every session on this console with something
+      // outside the authority it runs under. The receipt is a file rather than
+      // something an operator typed, which is why the check is here.
+
+      const other = "did:key:z6MkppPiVuNZsAPFC1tqn6WRnU5ECMVTjNEzLmEJNrEfDiN4";
+      const result = resolveConnectorGrants(records({
+        handlesJson: handlesJson([
+          handle(
+            "cf-gmail-messages--gmail-work",
+            "gmail-work",
+            `/@${other}${MAIL_REF}`,
+          ),
+          handle("cf-plaid-transactions--plaid-sim", "plaid-sim", BANK_REF),
+        ]),
+      }));
+
+      expect(result.grants.map((grant) => grant.name)).toEqual(["finance"]);
+      expect(result.unnamed[0]?.reason).toContain("names space");
+    });
+
+    it("grants a handle whose reference carries the receipt's own space", () => {
+      const result = resolveConnectorGrants(records({
+        handlesJson: handlesJson([
+          handle(
+            "cf-gmail-messages--gmail-work",
+            "gmail-work",
+            `/@${OWNER}${MAIL_REF}`,
+          ),
+        ]),
+      }));
+
+      expect(result.grants.map((grant) => grant.name)).toEqual(["email"]);
+      expect(result.unnamed).toEqual([]);
+    });
+
+    it("reports a space-carrying reference when the receipt names no space", () => {
+      // With nothing to check the claim against there is no reading on which
+      // granting it is safe, so the guard fails closed rather than switching
+      // itself off. A receipt written without a `space` is the case.
+
+      const spaceless = JSON.stringify({
+        schema_version: 1,
+        handles: [
+          handle(
+            "cf-gmail-messages--gmail-work",
+            "gmail-work",
+            `/@${OWNER}${MAIL_REF}`,
+          ),
+          handle("cf-plaid-transactions--plaid-sim", "plaid-sim", BANK_REF),
+        ],
+      });
+      const result = resolveConnectorGrants(
+        records({ handlesJson: spaceless }),
+      );
+
+      expect(result.grants.map((grant) => grant.name)).toEqual(["finance"]);
+      expect(result.unnamed[0]?.reason).toContain(
+        "names no space to check it against",
+      );
+    });
+
     it("reports a handle the receipt records no reference for", () => {
       const result = resolveConnectorGrants(records({
         handlesJson: handlesJson([{
