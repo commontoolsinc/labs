@@ -230,7 +230,10 @@ durations are used as performance evidence.
 
 ## 6–9. Complete the collection algebra: B1–B4
 
-- [ ] **B1 contract — Specify `groupBy` and `keyBy` separately.**
+- [ ] **B1 contract — Specify `groupBy` and `keyBy` separately.** The
+      [proposed index contract](collection-index-contract.md) records semantic
+      decisions and acceptance tests. The typed index handle and lowering
+      prototype remain prerequisites to completing this contract.
   - [ ] Key domain and equality, including resolved link identity and
         retargeting a key link without editing its containing element.
   - [ ] Duplicate-key handling that remains deterministic for unordered input;
