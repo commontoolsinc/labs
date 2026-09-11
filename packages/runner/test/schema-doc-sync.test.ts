@@ -609,6 +609,66 @@ describe("schema-doc-sync", () => {
     expect(replica.getDocument("of:frame-carrier")).toBeUndefined();
   });
 
+  it("quarantines a doc delivered with malformed `schema` metadata, applying the rest of the frame", () => {
+    // A `cid:` reference outside a single root `$ref` is a form the commit
+    // boundary refuses, so a frame carrying one models state that predates
+    // the enforcement or was written out of band. Arrival treats it as the
+    // broken-ref case above: that document is quarantined, its innocent
+    // sibling applies, and a well-formed reference-form member is embedded
+    // as an obligation and resolves against the closure the frame carries.
+    const described = {
+      type: "string",
+      title: "meta-frame-described",
+    } as const;
+    const describedHash = internSchemaAsTaggedHashString(described);
+    const provider = readerStorage.open(space);
+    const frame = {
+      type: "sync",
+      fromSeq: 810_000,
+      toSeq: 810_001,
+      upserts: [
+        {
+          branch: "",
+          id: `cid:${describedHash}`,
+          scope: "space",
+          seq: 1,
+          doc: { value: described },
+        },
+        {
+          branch: "",
+          id: "of:meta-frame-well-formed",
+          scope: "space",
+          seq: 1,
+          doc: {
+            value: { fine: true },
+            schema: { $ref: `cid:${describedHash}` },
+          },
+        },
+        {
+          branch: "",
+          id: "of:meta-frame-hybrid",
+          scope: "space",
+          seq: 1,
+          doc: {
+            value: { fine: false },
+            schema: { $ref: `cid:${describedHash}`, title: "sibling" },
+          },
+        },
+      ],
+      removes: [],
+    };
+    const replica = provider.replica as SpaceReplica;
+    replica.accessForTestingOnly.applySessionSync(
+      frame as unknown as SessionSync,
+      "integrate",
+    );
+    expect(replica.getDocument("of:meta-frame-well-formed")).toEqual({
+      value: { fine: true },
+      schema: { $ref: `cid:${describedHash}` },
+    });
+    expect(replica.getDocument("of:meta-frame-hybrid")).toBeUndefined();
+  });
+
   it("heals a quarantined doc when a later frame carries the cid sibling (the full-evaluation shape)", () => {
     const depSchema = {
       type: "string",

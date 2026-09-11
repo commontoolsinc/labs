@@ -137,6 +137,9 @@ export function enqueueSinkRequestPostCommitEffect(
      * staging this request is abandoned — no further attempt at it is
      * coming, so the request will never be sent. */
     onRejected?: (error: Error) => void;
+
+    /** Releases local ownership when a post-commit release check skips work. */
+    onReleaseRejected?: () => void;
   },
 ): void {
   const policyInput = createSinkRequestPolicyInput(sink, effectId, request);
@@ -188,6 +191,7 @@ export function enqueueSinkRequestPostCommitEffect(
             detail: reason,
           });
         }
+        options?.onReleaseRejected?.();
         return;
       }
       await flush(committedTx as IExtendedStorageTransaction);

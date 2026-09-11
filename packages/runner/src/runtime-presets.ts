@@ -142,11 +142,11 @@ import {
   sinkCeilingsOf,
   type SinkGovernanceRegistry,
   type SinkMaxConfidentiality,
+  STANDARD_PROMPT_CAVEAT_POLICY,
   type TrustSnapshot,
   ungatedSink,
 } from "./cfc/mod.ts";
 import { parseFlagValue } from "./experimental-posture.ts";
-import { STANDARD_PROMPT_CAVEAT_POLICY } from "./cfc/mod.ts";
 import type { CommitBackpressurePolicy } from "./scheduler/backpressure.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import type { IStorageManager } from "./storage/interface.ts";

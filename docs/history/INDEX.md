@@ -5,6 +5,14 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 ## Audits and reports
 
 - [2026-09-topics-caller-demand.md](development/performance/2026-09-topics-caller-demand.md) — recommendation 5 caller-demand verification, September 2026: isolated index/full reader demand, the CLI path-read regression, seeding demand limits, and ON/OFF persisted topic and citation controls; latency qualification remains outstanding.
+- [Lazy scalar read width](development/performance/2026-09-11-lazy-scalar-read-width.md) — D2 eager/lazy one-scalar and all-row baseline at 74, 296, and 1,184 inline rows, with journal counts and timing limits.
+
+- [2026-09-11-nested-collection-scan-diagnostic.md](development/performance/2026-09-11-nested-collection-scan-diagnostic.md) — E3 warning acceptance across 413 pattern entries and 1,731 modules: seven occurrences at five source sites, guarded-UI limits, and callback-local exclusions.
+- [2026-09-11-computed-lift-collection-loops.md](development/performance/2026-09-11-computed-lift-collection-loops.md) — E1 compiled computed/broad-lift/narrow-lift comparison at 32/128/512 linked rows, identical default-posture read counts, and unread-field invalidation controls.
+
+- [2026-09-11-pending-schema-policy-index.md](development/performance/2026-09-11-pending-schema-policy-index.md) — document-indexed pending schema-policy lookup CPU attribution and 1,184-vote fixture acceptance with unchanged read budgets.
+- [2026-09-11-reactive-lunch-rows.md](development/performance/2026-09-11-reactive-lunch-rows.md) — repository-only reactive lunch-row acceptance: 93 assertions, unchanged budgets at three sizes, matched two-browser voting, and headless settlement limits.
+
 - [2026-09-10-lunch-poll-read-baseline.md](development/performance/2026-09-10-lunch-poll-read-baseline.md) — controlled A0 baseline with 14 options, eight same-space voters, 74 keyed votes, continuous headless UI demand, and per-action read counts.
 - [2026-09-10-read-accounting-probes.md](development/performance/2026-09-10-read-accounting-probes.md) — disabled-probe comparison for initial reactive action read accounting: five alternating control/candidate windows over 1,000 lazy-view elements, and the limits of the lunch-poll functional smoke check.
 - [coverage-status-audit-2026-09-09.md](plans/server-execution-v2/optimize/coverage-status-audit-2026-09-09.md) — OW28 landing-provenance and coverage-status audit at `16de7e0c87`: the preserved compile-and-run port and its end-to-end test were omitted from #6096 despite the completion claim; current writeback refusal and an OFF-path program-proxy cache collision reproduced, with OW18, OW30, OW31, OW55, OW56, OW58, OW60, and rollout statements reconciled against current source and focused suites.
@@ -63,6 +71,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [pattern-update-open-argument-investigation.md](plans/pattern-update-open-argument-investigation.md) — why the open-argument update class went unvalidated on the repair path, and the correction of an earlier measurement that named the wrong mechanism, July 2026.
 
 ## Executed plans and work orders
+
+- [read-cost-budgets.md](plans/read-cost-budgets.md) — completed A3 plan for opt-in pattern-test read budgets, transaction-attempt coverage, failure diagnostics, and executable pass/fail demonstrations; shipped in #7257, September 2026.
 
 - [cli-surface-implementation.md](plans/cli-surface-implementation.md) — the execution plan for steps 4 through 7 of the CLI surface shape, August 2026: positional addresses and the `#argument` suffix, the top-level data names, the dated deprecation window that retired the piece-mounted spellings, and Stage 4's five merges, which resolved as naming rather than merging once each command was put under the noun it acts on.
 - [cli-surface-shape-step-10-2026-08-31.md](plans/cli-surface-shape-step-10-2026-08-31.md) — executing step 10 of the CLI surface shape (the verb opens the callable's section and `--` closes it), August 2026: a documentation sweep of twenty-one files against an estimate of twelve, because the estimating pattern used `\b` for a word boundary and on that machine `git grep -E` matched nothing with it — indistinguishably from a true count of nothing, and one command away from a `grep -E` on which the same pattern works; carries the measurements, and the trade the step made, retiring the read options' pre-positional spelling on all six reading commands in exchange for a post-positional one that works on all six.
@@ -146,6 +156,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [pr3154-review-guide.md](specs/ts-transformer/pr3154-review-guide.md) — reviewer entrypoint for the shipped PR-3154 transformer architecture.
 
 ## Investigations, journals, and working notes
+
+- [Scoped snapshot memo verification](development/performance/2026-09-10-scoped-snapshot-memo.md) — D3 metadata/epoch isolation regressions and exact label-view reuse counts at three sizes.
 
 - [Pattern read accounting: first-batch baseline](development/performance/2026-09-pattern-read-accounting.md) — 2026-09-10: transaction-scoped read counters, generic reduction update costs, headless lunch-poll attribution, and instrumentation overhead measurements.
 - [Incremental aggregate comparison](development/performance/2026-09-incremental-aggregates.md) — 2026-09-10: compiled aggregate initialization costs, paired update timings, read-work scaling, and coordinator rescan findings.

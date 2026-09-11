@@ -37,6 +37,8 @@ const DOCKER_RUNTIMES = {
   },
 };
 
+const HANDLES_JSON_PATH = "/loom/instances/loom/sqlite-injection/handles.json";
+
 const RECORDS: ConsoleLaunchRecords = {
   instance: {
     id: "loom",
@@ -44,8 +46,59 @@ const RECORDS: ConsoleLaunchRecords = {
     piecesJsonPath: "/loom/instances/loom/pieces.json",
     toolshedStoreDir:
       "file:///loom/instances/loom/toolshed-store/68239506e79d/",
+    handlesJsonPath: HANDLES_JSON_PATH,
   },
   dockerRuntimes: DOCKER_RUNTIMES,
+};
+
+const OWNER = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+const MAIL_REF = `/of:fid1:${"C".repeat(43)}`;
+
+/** A `pieces.json` that also declares one labeled connector source. */
+const PIECES_JSON_WITH_CONNECTOR = JSON.stringify({
+  defaults: JSON.parse(PIECES_JSON).defaults,
+  pieces: [{
+    name: "cf-gmail-messages--gmail-work",
+    sqlite_sources: [{
+      connection_id: "gmail-work",
+      tables: {
+        messages: {
+          properties: {
+            subject: {
+              type: "string",
+              ifc: {
+                confidentiality: [OWNER, {
+                  type: "https://commonfabric.org/cfc/atom/Resource",
+                  class: "email",
+                  subject: OWNER,
+                }],
+              },
+            },
+          },
+        },
+      },
+    }],
+  }],
+});
+
+/** The receipt loom's daemon writes for that one injected handle. */
+const HANDLES_JSON = JSON.stringify({
+  schema_version: 1,
+  space: OWNER,
+  handles: [{
+    connection_id: "gmail-work",
+    piece: "cf-gmail-messages--gmail-work",
+    handle_ref: MAIL_REF,
+  }],
+});
+
+const WITH_CONNECTOR: ConsoleLaunchRecords = {
+  ...RECORDS,
+  instance: {
+    ...RECORDS.instance!,
+    piecesJson: PIECES_JSON_WITH_CONNECTOR,
+    handlesJson: HANDLES_JSON,
+  },
 };
 
 const OPTIONS = {
@@ -436,6 +489,96 @@ describe("launch", () => {
   });
 
   // ----------------------------------------------------------------------
+  // The connector handles the instance has injected
+  //
+  // Grants rather than per-task input cells: every session this console runs
+  // holds them, so the launcher resolves them beside the fabric's other facts
+  // and passes them to the server it starts.
+  // ----------------------------------------------------------------------
+
+  describe("resolveConsoleLaunchPlan() with connector handles", () => {
+    it("passes one grant per injected handle to the console", () => {
+      const plan = resolveConsoleLaunchPlan(WITH_CONNECTOR, OPTIONS);
+
+      expect(JSON.parse(plan.environment.CF_HARNESS_CONNECTOR_GRANTS!))
+        .toEqual([{
+          name: "email",
+          ref: MAIL_REF,
+          source: {
+            connection: "gmail-work",
+            piece: "cf-gmail-messages--gmail-work",
+          },
+        }]);
+    });
+
+    it("reports each grant against the two records that decided it", () => {
+      const plan = resolveConsoleLaunchPlan(WITH_CONNECTOR, OPTIONS);
+      const grant = plan.resolved.find((entry) => entry.name === "grant email");
+
+      expect(grant?.value).toBe(MAIL_REF);
+      expect(grant?.source).toContain(HANDLES_JSON_PATH);
+      expect(grant?.source).toContain("cf-gmail-messages--gmail-work");
+    });
+
+    it("sets no grants variable for an instance whose daemon has injected none", () => {
+      const plan = resolveConsoleLaunchPlan(RECORDS, OPTIONS);
+
+      expect(plan.environment.CF_HARNESS_CONNECTOR_GRANTS).toBeUndefined();
+      expect(plan.resolved.some((entry) => entry.name.startsWith("grant ")))
+        .toBe(false);
+    });
+
+    it("sets no grants variable for a fabric with no instance behind it", () => {
+      const plan = resolveConsoleLaunchPlan(NO_INSTANCE, NAMED_FABRIC);
+
+      expect(plan.environment.CF_HARNESS_CONNECTOR_GRANTS).toBeUndefined();
+    });
+
+    it("reports a handle it could not name rather than passing it as a grant", () => {
+      const unlabeled: ConsoleLaunchRecords = {
+        ...WITH_CONNECTOR,
+        instance: {
+          ...WITH_CONNECTOR.instance!,
+          piecesJson: JSON.stringify({
+            defaults: JSON.parse(PIECES_JSON).defaults,
+            pieces: [{
+              name: "cf-gmail-messages--gmail-work",
+              sqlite_sources: [{
+                connection_id: "gmail-work",
+                tables: {
+                  messages: { properties: { subject: { type: "string" } } },
+                },
+              }],
+            }],
+          }),
+        },
+      };
+      const plan = resolveConsoleLaunchPlan(unlabeled, OPTIONS);
+      const reported = plan.resolved.find((entry) =>
+        entry.name === "grant gmail-work"
+      );
+
+      expect(plan.environment.CF_HARNESS_CONNECTOR_GRANTS).toBeUndefined();
+      expect(reported?.value).toContain("no CFC class");
+    });
+
+    it("refuses to start when the receipt does not parse", () => {
+      const broken: ConsoleLaunchRecords = {
+        ...WITH_CONNECTOR,
+        instance: { ...WITH_CONNECTOR.instance!, handlesJson: "{" },
+      };
+
+      expect(() => resolveConsoleLaunchPlan(broken, OPTIONS)).toThrow(
+        HANDLES_JSON_PATH,
+      );
+    });
+
+    it("names the grants variable among the ones the launcher owns", () => {
+      expect(LAUNCHER_OWNED_VARIABLES).toContain("CF_HARNESS_CONNECTOR_GRANTS");
+    });
+  });
+
+  // ----------------------------------------------------------------------
   // A fabric with no loom instance behind it
   //
   // The plain labs checkout, where nothing records the identity, the space,
@@ -814,7 +957,7 @@ describe("launch", () => {
       ).rejects.toThrow("`XDG_DATA_HOME`");
     });
 
-    it("reads an instance under `XDG_DATA_HOME` when it is set", async () => {
+    it("reads both of an instance's records under `XDG_DATA_HOME` when it is set", async () => {
       const read: string[] = [];
       await prepareConsoleLaunch(
         ["--instance", "loom"],
@@ -827,7 +970,10 @@ describe("launch", () => {
         }),
       );
 
-      expect(read).toEqual(["/data/loom/instances/loom/pieces.json"]);
+      expect(read).toEqual([
+        "/data/loom/instances/loom/pieces.json",
+        "/data/loom/instances/loom/sqlite-injection/handles.json",
+      ]);
     });
   });
 
