@@ -1249,9 +1249,10 @@ export interface PieceSourceTransition {
 
 /**
  * Pre-syncs what a run of `pattern` on `resultCell` reads before it runs:
- * the cells `inputs` links to, the result cell, and the nodes' argument and
- * result documents. Resolves to whether the node walk ran, which it does not
- * for a module: the shape of `Runner`'s own step.
+ * the result document, what each node's plan names under its read schema,
+ * and the cells the pattern owns; on a fresh run the plans bind against an
+ * immutable stand-in holding `inputs`. Resolves to whether the plans ran,
+ * which they do not for a module: the shape of `Runner`'s own step.
  */
 export type DependencySync = (
   resultCell: Cell<any>,
@@ -7130,6 +7131,9 @@ export class Runner {
         );
         return;
       }
+      // TODO(danfuzz): the walk stops at a `FabricSpecialObject`, so a link
+      // inside a `FabricInstance` held in the stored argument is never named
+      // here, and setup's proof over it reads a cold document.
       if (!isKeyableObjectOrArray(value)) return;
       seen.add(value);
       for (const key in value) collect(value[key]);
@@ -7179,9 +7183,11 @@ export class Runner {
 
   /**
    * Pre-syncs what a run of `pattern` on `resultCell` reads before it runs:
-   * the cells `inputs` links to, the result cell, and the nodes' argument and
-   * result documents. Resolves to whether the node walk ran, which it does
-   * not for a module. A syncer a test supplied wraps the whole step.
+   * the result document, what each node's plan names under its read schema,
+   * and the cells the pattern owns; on a fresh run the plans bind against an
+   * immutable stand-in holding `inputs`. Resolves to whether the plans ran,
+   * which they do not for a module. A syncer a test supplied wraps the whole
+   * step.
    */
   #syncCellsForRunningPattern(
     resultCell: Cell<any>,
@@ -7248,6 +7254,7 @@ export class Runner {
     }
 
     const cells: Cell<any>[] = [];
+    const plans: NodePlan[] = [];
 
     // The nodes bind against the piece's argument document once setup has
     // written it. Before that, on a fresh run, they bind against an
@@ -7267,8 +7274,8 @@ export class Runner {
           .getAsNormalizedFullLink()
         : undefined);
     if (argumentLink === undefined) {
-      // A resume finds the meta link on the result document; a fresh run
-      // supplies its argument. Neither here is a start with nothing to bind
+      // A resume finds the meta link on the result document, and a fresh run
+      // supplies its argument; a start with neither has nothing to bind
       // against, which is worth a trace.
       logger.warn("resume-pre-sync", () => [
         "no argument to bind against; skipping node pre-sync",
@@ -7278,9 +7285,14 @@ export class Runner {
         },
       ]);
     } else {
-      cells.push(
-        ...this.#cellsPatternNodes(planTx, pattern, resultCell, argumentLink),
+      const planned = this.#cellsPatternNodes(
+        planTx,
+        pattern,
+        resultCell,
+        argumentLink,
       );
+      cells.push(...planned.cells);
+      plans.push(...planned.plans);
       // The argument document itself, whole and under no schema: setup
       // reads it raw to write the argument over the slots it holds. The
       // node syncs above carry the narrower schemas the runs read through
@@ -7360,11 +7372,11 @@ export class Runner {
       );
       logger.time(argumentLinksStart, "start", "resumeArgumentLinksSync");
     }
+    await this.#syncCrossSpaceReads(plans, identity);
 
-    // Second wave: the list coordinators' children. The inputs their
-    // identities derive from arrived with the first wave, so this cannot run
-    // any earlier, and it must finish before instantiation runs those
-    // children.
+    // The list coordinators' children. The inputs their identities derive
+    // from arrived above, so this cannot run any earlier, and it must finish
+    // before instantiation runs those children.
     const followupSyncStart = performance.now();
     const listInstances = await this.#syncResumeListChildren(
       instances,
@@ -7372,9 +7384,9 @@ export class Runner {
     );
     logger.time(followupSyncStart, "start", "resumeFollowupSync");
 
-    // Third wave: the nested instances' own nodes, whose plans need each
-    // instance's argument link, data on the result document the earlier
-    // waves named. The root's nodes were planned above.
+    // The nested instances' own nodes, whose plans need each instance's
+    // argument link, data on the result document the steps above named. The
+    // root's nodes were planned above.
     const instanceNodesStart = performance.now();
     await this.#syncResumeInstanceNodes(
       [...instances.slice(1), ...listInstances],
@@ -7397,8 +7409,9 @@ export class Runner {
     pattern: Pattern,
     resultCell: Cell<any>,
     argumentLink: NormalizedFullLink,
-  ): Cell<any>[] {
+  ): { cells: Cell<any>[]; plans: NodePlan[] } {
     const cells: Cell<any>[] = [];
+    const plans: NodePlan[] = [];
     for (const node of pattern.nodes) {
       let plan: NodePlan | undefined;
       try {
@@ -7418,6 +7431,7 @@ export class Runner {
         continue;
       }
       if (plan === undefined) continue;
+      plans.push(plan);
       // Each node's plan, synced under the schema its run reads through. The
       // inputs document is a data URI, so syncing it under a schema hands the
       // server one selector per binding link, and the server's query walk
@@ -7430,7 +7444,66 @@ export class Runner {
         cells.push(this.#runtime.getCellFromLink(link));
       }
     }
-    return cells;
+    return { cells, plans };
+  }
+
+  /**
+   * The schema a plan's node reads its inputs document under, or undefined
+   * for a node whose inputs no schema of its own describes: a pattern node's
+   * are read by the child's plans, a passthrough node's are copied whole.
+   */
+  #planReadSchema(plan: NodePlan): JSONSchema | undefined {
+    switch (plan.kind) {
+      case "javascript":
+        return schemaWithoutEventSlot(plan.module.argumentSchema);
+      case "raw":
+        return plan.module.argumentSchema;
+      case "passthrough":
+      case "pattern":
+        return undefined;
+    }
+  }
+
+  /**
+   * Names what the plans' reads reach in other spaces. The server's query
+   * walk delivers what a plan's selector reaches within its space and stops
+   * at a link into another, so after the plan syncs land this reads each
+   * plan's inputs under its read schema through a read transaction: a read
+   * that dead-ends on such a link kicks that document's load, and the
+   * kicked loads are awaited before the next read, which reaches one space
+   * further. A round whose reads kick nothing ends it.
+   */
+  async #syncCrossSpaceReads(
+    plans: readonly NodePlan[],
+    identity: ScopeKeyIdentity | undefined,
+  ): Promise<void> {
+    const manager = this.#runtime.storageManager;
+    if (
+      manager.pendingCrossSpacePromiseCount === undefined ||
+      manager.crossSpaceSettled === undefined
+    ) return;
+    for (;;) {
+      const readTx = this.#familyReadTx(identity);
+      const before = manager.pendingCrossSpacePromiseCount();
+      for (const plan of plans) {
+        const schema = this.#planReadSchema(plan);
+        if (schema === undefined) continue;
+        try {
+          plan.inputsCell.asSchema(schema).withTx(readTx).get();
+        } catch (error) {
+          // A read a cold document cannot satisfy kicks its load all the
+          // same; the next round reads it warm.
+          logger.debug("resume-pre-sync", () => [
+            "a cross-space read of a plan's inputs did not resolve",
+            error,
+          ]);
+        }
+      }
+      if (manager.pendingCrossSpacePromiseCount() === before) return;
+      const settleStart = performance.now();
+      await manager.crossSpaceSettled();
+      logger.time(settleStart, "start", "resumeCrossSpaceSettle");
+    }
   }
 
   /**
@@ -7459,6 +7532,7 @@ export class Runner {
     }
     while (pending.size > 0) {
       const cells: Cell<any>[] = [];
+      const plans: NodePlan[] = [];
       const planTx = this.#runtime.edit();
       if (identity !== undefined) planTx.tx.scopeKeyIdentity = identity;
       try {
@@ -7466,14 +7540,14 @@ export class Runner {
           const argumentLink = getMetaLink(resultCell, "argument");
           if (argumentLink === undefined) continue;
           pending.delete(key);
-          cells.push(
-            ...this.#cellsPatternNodes(
-              planTx,
-              pattern,
-              resultCell,
-              argumentLink,
-            ),
+          const planned = this.#cellsPatternNodes(
+            planTx,
+            pattern,
+            resultCell,
+            argumentLink,
           );
+          cells.push(...planned.cells);
+          plans.push(...planned.plans);
           cells.push(
             this.#runtime.getCellFromLink({
               ...argumentLink,
@@ -7497,6 +7571,7 @@ export class Runner {
         ),
       );
       logger.time(waveStart, "start", "resumeInstanceNodeSyncWave");
+      await this.#syncCrossSpaceReads(plans, identity);
     }
   }
 
@@ -7517,11 +7592,16 @@ export class Runner {
           ),
         ];
         // A handler node's `$event` slot names its stream document, which
-        // instantiation reads the stream marker off. Named whole: it is the
+        // instantiation reads the stream marker off after following the
+        // slot's whole redirect chain. Every hop is named whole: it is the
         // event log, not a value the module schema describes.
         if (isObjectOrArray(plan.inputs) && "$event" in plan.inputs) {
-          const streamLink = parseLink(plan.inputs.$event, resultCell);
-          if (streamLink !== undefined) {
+          for (
+            const streamLink of findAllWriteRedirectCells(
+              plan.inputs.$event,
+              resultCell,
+            )
+          ) {
             cells.push(
               this.#runtime.getCellFromLink({
                 ...streamLink,

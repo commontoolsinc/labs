@@ -212,7 +212,7 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     expect(derivationStamps[0].scopeKeyIdentity).toBeUndefined();
   });
 
-  it("re-arms a node that ran with no demander reachable once a demander arrives for its root: the arrival run is the probe, stamped as the demander", async () => {
+  it("re-arms a node that ran with no demander reachable once a demander arrives for its root", async () => {
     const rootId = "of:p2f-late-demander-root";
     let demanders: Array<typeof alice> = [];
     runtime.installSealDestination(passThroughDestination(), {
@@ -241,10 +241,9 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     }, { isEffect: true });
     await runtime.idle();
     expect(invocations).toBe(1);
-    expect(stamped.filter((info) => info.kind === "derivation").length).toBe(
-      1,
-    );
-    expect(stamped[0].scopeKeyIdentity).toBeUndefined();
+    const fallbackStamps = stamped.filter((info) => info.kind === "derivation");
+    expect(fallbackStamps.length).toBe(1);
+    expect(fallbackStamps[0].scopeKeyIdentity).toBeUndefined();
 
     // Alice's demand reaches the root only now: the node has no known
     // scope for her, so it runs again, and that run is her probe.

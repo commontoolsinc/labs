@@ -2589,7 +2589,8 @@ export class StorageManager implements IStorageManager {
    * rest of the path appended, so a stand-in holding a caller's cell at
    * `def` reaches the store for a binding of `def.next` as the read does.
    * The reader's schema describes the value at the end of the path, so a
-   * link met earlier on the path contributes no schema of its own.
+   * link met earlier contributes its own schema narrowed to the rest of the
+   * path, the way `Cell.key()` narrows a schema it walks past.
    */
   #syncLinkTarget(
     link: NormalizedLink & { id: URI },
@@ -2609,20 +2610,27 @@ export class StorageManager implements IStorageManager {
         if (isPrimitiveCellLink(target)) {
           const inner = parseLinkPrimitive(target, dataBase);
           if (inner.id === undefined) return;
+          const remaining = segments.slice(i);
+          const innerSchema = inner.schema === undefined
+            ? undefined
+            : ContextualFlowControl.getSchemaAtPath(inner.schema, remaining);
           this.#syncLinkTarget(
             {
               ...inner,
               id: inner.id,
-              path: [...inner.path, ...segments.slice(i)],
+              path: [...inner.path, ...remaining],
             },
             dataBase,
-            schema,
+            combineOptionalSchema(schema, innerSchema),
             promises,
             seen,
             identity,
           );
           return;
         }
+        // TODO(danfuzz): the descent stops at a `FabricSpecialObject`, so a
+        // path through a `FabricInstance` held in the document ends here and
+        // the link past it is never synced.
         if (!isKeyableObjectOrArray(target)) return;
         target = (target as Record<string, unknown>)[segments[i]];
       }

@@ -122,11 +122,6 @@ export type EnsurePieceVerdict = {
    * assuming. Present whenever a start ran. */
   graphIsInstalled?: () => boolean;
 
-  /** The owning result doc's id (the chain terminus) where the chain
-   * resolved — present for `started`, `no-pattern-meta`, and
-   * `pattern-unloadable`. */
-  rootId?: string;
-
   /** Every doc id the traversal read (the demanded root plus chain
    * links): the demand cycle's commit-triggered re-arm watches these. */
   observedDocIds: string[];
@@ -153,11 +148,8 @@ export type EnsurePieceOptions = {
 
 /**
  * Classified variant of {@link ensurePieceRunning} — same traversal and
- * start, richer outcome. `propagateErrors` RETHROWS instead of
- * collapsing every exception into a verdict (review thread
- * r3739139521): the serving loop's demand cycle must distinguish a
- * deferral from an actual load/start FAILURE; default stays
- * best-effort for the event-recovery caller.
+ * start, richer outcome. {@link EnsurePieceOptions} says what a caller may
+ * ask of it.
  */
 export async function ensurePieceRunningVerdict(
   runtime: Runtime,
@@ -202,7 +194,6 @@ export async function ensurePieceRunningVerdict(
         return {
           started: false,
           reason: "no-pattern-meta",
-          rootId,
           observedDocIds,
         };
       }
@@ -225,7 +216,6 @@ export async function ensurePieceRunningVerdict(
         return {
           started: false,
           reason: "pattern-unloadable",
-          rootId,
           observedDocIds,
         };
       }
@@ -251,7 +241,6 @@ export async function ensurePieceRunningVerdict(
         started: true,
         graphIsInstalled: () =>
           runtime.runner.pieceGraphIsInstalled(resultCell),
-        rootId,
         observedDocIds,
       };
     } catch (error) {

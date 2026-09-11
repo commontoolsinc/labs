@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { Cell } from "../src/cell.ts";
+import { parseLink } from "../src/link-utils.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { NodePlan } from "../src/runner.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -100,9 +102,10 @@ describe("Runner node plans", () => {
     // A JavaScript node reads through links into the argument document, and
     // each such link carries the schema its binding declared. The lift
     // writes its derived cell; the handler writes nothing statically.
-    const [lift, bump] = byKind("javascript").sort((a, b) =>
-      b.writes.length - a.writes.length
-    );
+    const isHandler = (plan: NodePlan) =>
+      isObjectOrArray(plan.inputs) && "$event" in plan.inputs;
+    const lift = byKind("javascript").find((plan) => !isHandler(plan))!;
+    const bump = byKind("javascript").find(isHandler)!;
     expect(lift.reads.map((link) => link.path)).toEqual([["seed"]]);
     expect(lift.writes.length).toBe(1);
     expect(bump.reads.map((link) => link.path)).toEqual([["count"], []]);
@@ -116,9 +119,17 @@ describe("Runner node plans", () => {
     const [raw] = byKind("raw");
     if (raw.kind !== "raw") throw new Error("unreachable");
     expect(raw.moduleRefName).toBe("map");
-    expect(raw.inputsCell).toBeDefined();
-    expect(raw.resolvedOutputSpot).toBeDefined();
+    // The inputs document holds the bound bindings: its `list` slot names the
+    // same document the binding does.
+    const inputsValue = raw.inputsCell.getRaw() as { list: unknown };
+    const boundInputs = raw.inputs as { list: unknown };
+    expect(parseLink(inputsValue.list, raw.inputsCell)?.id).toBe(
+      parseLink(boundInputs.list, resultCell)?.id,
+    );
     expect(raw.writes.length).toBeGreaterThan(0);
+    expect(
+      raw.writes.some((link) => link.id === raw.resolvedOutputSpot?.id),
+    ).toBe(true);
 
     // The pattern node's plan derives the result cell its instantiation
     // minted: the child is registered as a running piece under that id.

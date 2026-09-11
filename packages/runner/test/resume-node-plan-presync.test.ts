@@ -60,7 +60,9 @@ const DEEP_READ_PROGRAM: RuntimeProgram = {
 };
 
 // A handler holding a cell handle it reads synchronously: the handle's
-// document is an `asCell` position of the module schema.
+// document is an `asCell` position of the module schema, one link past the
+// document the argument links to directly, so only the handler's plan
+// reaches it.
 const HANDLE_PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
   files: [{
@@ -68,13 +70,14 @@ const HANDLE_PROGRAM: RuntimeProgram = {
     contents: [
       "import { handler, pattern, type Stream, type Writable } from 'commonfabric';",
       "type Counter = { n: number };",
+      "type Holder = { counter: Writable<Counter> };",
       "const bump = handler<unknown, { counter: Writable<Counter> }>(",
       "  (_event, { counter }) => { counter.set({ n: counter.get().n + 1 }); },",
       ");",
-      "export default pattern<{ counter: Writable<Counter> }, {",
+      "export default pattern<{ holder: Holder }, {",
       "  bump: Stream<unknown>;",
-      "}>(({ counter }) => {",
-      "  return { bump: bump({ counter }) };",
+      "}>(({ holder }) => {",
+      "  return { bump: bump({ counter: holder.counter }) };",
       "});",
     ].join("\n"),
   }],
@@ -140,9 +143,23 @@ const GRANDCHILD_READ_PROGRAM: RuntimeProgram = {
   }],
 };
 
+// A body reads two links deep and the second link crosses into another
+// space: the home space's argument document links to a document of its own
+// whose `next` links into a profile space. The server's query walk stops at
+// the space boundary, so the pre-sync itself must reach the far document.
+const spaceP = (await Identity.fromPassphrase("resume node plan space P"))
+  .did();
+
 function commitConflictCount(): number {
   const counts = getLoggerCountsBreakdown()["storage.v2"] ?? {};
   return (counts as Record<string, { total?: number }>)["commit-conflict"]
+    ?.total ?? 0;
+}
+
+/** How many nodes the pre-sync skipped for bindings it could not plan. */
+function presyncSkipCount(): number {
+  const counts = getLoggerCountsBreakdown()["runner"] ?? {};
+  return (counts as Record<string, { total?: number }>)["resume-pre-sync"]
     ?.total ?? 0;
 }
 
@@ -175,10 +192,10 @@ describe("resume node plan pre-sync", () => {
     await server.close();
   });
 
-  /** Whether replica B holds the document `cell` names. */
-  function localOnB(cell: Cell<unknown>): boolean {
+  /** Whether replica B holds the document `cell` names, in `inSpace`. */
+  function localOnB(cell: Cell<unknown>, inSpace = space): boolean {
     const link = cell.getAsNormalizedFullLink();
-    const replica = managerB.open(space) as unknown as {
+    const replica = managerB.open(inSpace) as unknown as {
       get?: (uri: string, scope?: unknown) => unknown;
     };
     return replica.get?.(link.id, link.scope) !== undefined;
@@ -239,11 +256,15 @@ describe("resume node plan pre-sync", () => {
     expect((await tx.commit()).error).toBeUndefined();
 
     const conflictsBefore = commitConflictCount();
+    const skipsBefore = presyncSkipCount();
     const resumed = await createAndResume(
       UNREAD_LINK_PROGRAM,
       { def: profile },
       "unread link parent",
     );
+    // Every node was planned: `profile` is local because the plan named it,
+    // not only because the argument links to it directly.
+    expect(presyncSkipCount()).toBe(skipsBefore);
     await rt2.idle();
     await rt2.storageManager.synced();
     const label = resumed.key("label");
@@ -264,13 +285,23 @@ describe("resume node plan pre-sync", () => {
       tx,
     );
     counter.withTx(tx).set({ n: 1 });
+    const holder = rt1.getCell<{ counter: unknown }>(
+      space,
+      "handle holder doc",
+      undefined,
+      tx,
+    );
+    holder.withTx(tx).set({ counter });
     expect((await tx.commit()).error).toBeUndefined();
 
     const resumed = await createAndResume(
       HANDLE_PROGRAM,
-      { counter },
+      { holder },
       "handle parent",
     );
+    // The handle's document is local before any dispatch: the argument links
+    // to the holder, and only the handler's plan reaches the counter.
+    expect(localOnB(counter)).toBe(true);
     await rt2.idle();
     // The handler reads the handle synchronously; a cold handle document
     // reads as absent and the body throws instead of writing.
@@ -305,11 +336,13 @@ describe("resume node plan pre-sync", () => {
     expect((await tx1.commit()).error).toBeUndefined();
 
     const before = commitConflictCount();
+    const skipsBefore = presyncSkipCount();
     const resumed = await createAndResume(
       NESTED_UNREAD_LINK_PROGRAM,
       { def: profile },
       "nested unread parent",
     );
+    expect(presyncSkipCount()).toBe(skipsBefore);
     expect(localOnB(profile)).toBe(true);
     expect(localOnB(friend)).toBe(false);
     await rt2.idle();
@@ -435,6 +468,66 @@ describe("resume node plan pre-sync", () => {
     expect(computations.map((node) => node.stats?.runCount)).toEqual(
       computations.map(() => 1),
     );
+  });
+
+  it("names a document a body reads through a link into another space", async () => {
+    // A transaction writes one space, so the far document commits first.
+    const txP = rt1.edit();
+    const leafDoc = rt1.getCell<{ name?: string }>(
+      spaceP,
+      "cross-space leaf",
+      undefined,
+      txP,
+    );
+    leafDoc.withTx(txP).set({ name: "Ada" });
+    rt1.prepareTxForCommit(txP);
+    expect((await txP.commit()).error).toBeUndefined();
+    const tx1 = rt1.edit();
+    const midDoc = rt1.getCell<{ next?: unknown }>(
+      space,
+      "cross-space mid",
+      undefined,
+      tx1,
+    );
+    midDoc.withTx(tx1).set({ next: leafDoc });
+    const top = rt1.getCell<{ next?: unknown }>(
+      space,
+      "cross-space top",
+      undefined,
+      tx1,
+    );
+    top.withTx(tx1).set({ next: midDoc });
+    rt1.prepareTxForCommit(tx1);
+    expect((await tx1.commit()).error).toBeUndefined();
+
+    let leafLocalAfterPresync: boolean | undefined;
+    rt2.runner.accessForTestingOnly.dependencySyncer = async (
+      target,
+      pattern,
+      inputs,
+      sync,
+    ) => {
+      const walked = await sync(target, pattern, inputs);
+      leafLocalAfterPresync ??= localOnB(leafDoc, spaceP);
+      return walked;
+    };
+    const before = commitConflictCount();
+    try {
+      const resumed = await createAndResume(
+        DEEP_READ_PROGRAM,
+        { def: top },
+        "cross-space parent",
+      );
+      expect(leafLocalAfterPresync).toBe(true);
+      await rt2.idle();
+      await rt2.storageManager.synced();
+      const label = resumed.key("label");
+      await label.pull();
+      expect(label.get()).toBe("n:Ada");
+    } finally {
+      rt2.runner.accessForTestingOnly.dependencySyncer = undefined;
+    }
+    expect(commitConflictCount()).toBe(before);
   });
 
   it("names a document a body reads three links deep", async () => {

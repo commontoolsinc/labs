@@ -1107,14 +1107,17 @@ export class Scheduler {
    * first demand reached its roots — has no fan-out record and no known
    * scope, so it re-arms too: its next run is the probe that learns
    * whether it narrows for the arriving principal. A node that never ran
-   * will run for everyone when demanded. Returns the number of nodes
-   * re-armed.
+   * has no fan-out record either and is left alone: whether it runs is the
+   * pull scheduler's demand decision, and its first run is that probe
+   * whenever it comes. Returns the number of nodes re-armed.
    */
   invalidateActionsForDemandRoots(rootIds: readonly string[]): number {
     const roots = new Set(rootIds);
     let rearmed = 0;
     for (const record of this.#nodes.nodes()) {
-      if (record.fanOut !== undefined && !record.fanOut.narrowed) continue;
+      if (record.fanOut === undefined) {
+        if (record.status === "never-ran") continue;
+      } else if (!record.fanOut.narrowed) continue;
       const identity = (record.action as Partial<TelemetryAnnotations>)
         .schedulerObservationIdentity;
       const demandRootIds = identity?.demandRootIds ??
