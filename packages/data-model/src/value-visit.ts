@@ -757,7 +757,10 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         const idxNumber = Number(idx);
 
         if (idxNumber !== (lastIdx + 1)) {
-          const result = vis.visitArrayGap(lastIdx + 1, idxNumber - lastIdx);
+          const result = vis.visitArrayGap(
+            lastIdx + 1,
+            idxNumber - lastIdx - 1,
+          );
           if (result?.type === "mainResult") {
             return result;
           }
@@ -787,7 +790,10 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
       if (values.length !== (lastIdx + 1)) {
         // There's a gap at the end of the array.
-        const result = vis.visitArrayGap(lastIdx + 1, values.length - lastIdx);
+        const result = vis.visitArrayGap(
+          lastIdx + 1,
+          values.length - lastIdx - 1,
+        );
         if (result?.type === "mainResult") {
           return result;
         }
