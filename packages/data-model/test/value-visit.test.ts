@@ -5,6 +5,8 @@ import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import {
   type FabricArray,
+  type FabricContainerValue,
+  type FabricInstance,
   type FabricPlainObject,
   type FabricPrimitive,
   type FabricValue,
@@ -13,14 +15,11 @@ import { type PrimitiveValueTag } from "@/value-tags.ts";
 import {
   type BaselineVisitResult,
   ContainerIteratingVisitor,
-  type ContainerIterationResult,
   type DispatchingVisitorResult,
-  DO_RECURSE_KEY,
-  DO_RECURSE_KEY_VALUE,
-  DO_RECURSE_VALUE,
+  DO_RECURSE_KEYS,
+  DO_RECURSE_KEYS_VALUES,
+  DO_RECURSE_VALUES,
   DO_VISIT_SUBTYPE,
-  doIterateArray,
-  doIterateMap,
   EmptyValueVisitor,
   type LeafVisitorResult,
   makeVisitFabricValueFunction,
@@ -36,32 +35,39 @@ import type { Primitive } from "@commonfabric/utils/types";
 type Event = [name: string, ...args: unknown[]];
 
 /**
- * Visitor that iterates every container, recurses into every element, key,
- * and value, and records each call it receives. Each hook can be overridden
- * per test by assigning the matching `on*` property.
+ * Visitor that dispatches every value to its subtype method, recurses into
+ * containers the way `ContainerIteratingVisitor` does by default, and records
+ * each call it receives. Each hook can be overridden per test by assigning the
+ * matching `on*` property.
  */
 class Recorder extends ContainerIteratingVisitor<unknown, unknown> {
   readonly events: Event[] = [];
 
   onValue?: (value: unknown) => DispatchingVisitorResult<unknown, unknown>;
-  onCycle?: (value: unknown) => LeafVisitorResult<unknown, unknown>;
-  onElement?: (
-    index: number,
+  onCycle?: (
     value: unknown,
-  ) => ContainerIterationResult<unknown>;
-  onMapping?: (
-    key: unknown,
-    value: unknown,
-  ) => ContainerIterationResult<unknown>;
-  onGap?: (start: number, count: number) => BaselineVisitResult<unknown>;
+    originalDepth: number,
+    thisDepth: number,
+  ) => LeafVisitorResult<unknown, unknown>;
+  onArray?: (value: FabricArray) => LeafVisitorResult<unknown, unknown>;
+  onPlainObject?: (
+    value: FabricPlainObject,
+  ) => LeafVisitorResult<unknown, unknown>;
+  onInstance?: (value: FabricInstance) => LeafVisitorResult<unknown, unknown>;
   onPrimitive?: (
     value: unknown,
     tag: PrimitiveValueTag,
   ) => LeafVisitorResult<unknown, unknown>;
   onNonFabric?: (value: unknown) => LeafVisitorResult<unknown, unknown>;
-  onPlainObject?: (
-    value: FabricPlainObject,
-  ) => LeafVisitorResult<unknown, unknown>;
+  onVisitedElement?: (
+    index: number,
+    value: unknown,
+  ) => BaselineVisitResult<unknown>;
+  onVisitedGap?: (start: number, count: number) => BaselineVisitResult<unknown>;
+  onVisitedMapping?: (
+    key: unknown,
+    value: unknown,
+  ) => BaselineVisitResult<unknown>;
 
   /** The names of the recorded calls, in order. */
   get names(): string[] {
@@ -81,11 +87,13 @@ class Recorder extends ContainerIteratingVisitor<unknown, unknown> {
     thisDepth: number,
   ): LeafVisitorResult<unknown, unknown> {
     this.events.push(["cycle", value, originalDepth, thisDepth]);
-    return this.onCycle ? this.onCycle(value) : undefined;
+    return this.onCycle
+      ? this.onCycle(value, originalDepth, thisDepth)
+      : undefined;
   }
 
   override visitFabricContainer(
-    value: FabricArray | FabricPlainObject | FabricMap,
+    value: FabricContainerValue,
   ): DispatchingVisitorResult<unknown, unknown> {
     this.events.push(["container", value]);
     return DO_VISIT_SUBTYPE;
@@ -95,7 +103,7 @@ class Recorder extends ContainerIteratingVisitor<unknown, unknown> {
     value: FabricArray,
   ): LeafVisitorResult<unknown, unknown> {
     this.events.push(["array", value]);
-    return super.visitFabricArray(value);
+    return this.onArray ? this.onArray(value) : super.visitFabricArray(value);
   }
 
   override visitFabricPlainObject(
@@ -108,10 +116,13 @@ class Recorder extends ContainerIteratingVisitor<unknown, unknown> {
   }
 
   override visitFabricInstance(
-    value: FabricMap,
+    value: FabricInstance,
   ): LeafVisitorResult<unknown, unknown> {
+    // Unlike the other container hooks, this one does not defer to the
+    // superclass by default: the engine cannot yet iterate an instance, so
+    // the default here is to stop.
     this.events.push(["instance", value]);
-    return undefined;
+    return this.onInstance ? this.onInstance(value) : undefined;
   }
 
   override visitPrimitive(
@@ -129,28 +140,35 @@ class Recorder extends ContainerIteratingVisitor<unknown, unknown> {
     return this.onNonFabric ? this.onNonFabric(value) : undefined;
   }
 
-  override visitArrayElement(
+  override visitedArrayElement(
+    array: FabricArray,
     index: number,
     value: unknown,
-  ): ContainerIterationResult<unknown> {
-    this.events.push(["element", index, value]);
-    return this.onElement ? this.onElement(index, value) : DO_RECURSE_VALUE;
+  ): BaselineVisitResult<unknown> {
+    this.events.push(["visitedElement", array, index, value]);
+    return this.onVisitedElement
+      ? this.onVisitedElement(index, value)
+      : undefined;
   }
 
-  override visitArrayGap(
+  override visitedArrayGap(
+    array: FabricArray,
     start: number,
     count: number,
   ): BaselineVisitResult<unknown> {
-    this.events.push(["gap", start, count]);
-    return this.onGap ? this.onGap(start, count) : undefined;
+    this.events.push(["visitedGap", array, start, count]);
+    return this.onVisitedGap ? this.onVisitedGap(start, count) : undefined;
   }
 
-  override visitMapping(
+  override visitedMapping(
+    container: FabricPlainObject | FabricInstance,
     key: unknown,
     value: unknown,
-  ): ContainerIterationResult<unknown> {
-    this.events.push(["mapping", key, value]);
-    return this.onMapping ? this.onMapping(key, value) : DO_RECURSE_KEY_VALUE;
+  ): BaselineVisitResult<unknown> {
+    this.events.push(["visitedMapping", container, key, value]);
+    return this.onVisitedMapping
+      ? this.onVisitedMapping(key, value)
+      : undefined;
   }
 }
 
@@ -176,41 +194,21 @@ function chain(depth: number, leaf: unknown): unknown {
 describe("value-visit", () => {
   describe("the `DO_*` constants", () => {
     const recurseCases: [string, RecurseForm, boolean, boolean][] = [
-      ["DO_RECURSE_KEY_VALUE", DO_RECURSE_KEY_VALUE, true, true],
-      ["DO_RECURSE_KEY", DO_RECURSE_KEY, true, false],
-      ["DO_RECURSE_VALUE", DO_RECURSE_VALUE, false, true],
+      ["DO_RECURSE_KEYS_VALUES", DO_RECURSE_KEYS_VALUES, true, true],
+      ["DO_RECURSE_KEYS", DO_RECURSE_KEYS, true, false],
+      ["DO_RECURSE_VALUES", DO_RECURSE_VALUES, false, true],
     ];
 
-    for (const [name, form, doKey, doValue] of recurseCases) {
-      it(`makes \`${name}\` a frozen \`recurse\` form with \`doKey\` ${doKey} and \`doValue\` ${doValue}`, () => {
+    for (const [name, form, doKeys, doValues] of recurseCases) {
+      it(`makes \`${name}\` a frozen \`recurse\` form with \`doKeys\` ${doKeys} and \`doValues\` ${doValues}`, () => {
         expect(Object.isFrozen(form)).toBe(true);
-        expect(form).toEqual({ type: "recurse", doKey, doValue });
+        expect(form).toEqual({ type: "recurse", doKeys, doValues });
       });
     }
 
     it("makes `DO_VISIT_SUBTYPE` a frozen `visitSubtype` form", () => {
       expect(Object.isFrozen(DO_VISIT_SUBTYPE)).toBe(true);
       expect(DO_VISIT_SUBTYPE).toEqual({ type: "visitSubtype" });
-    });
-  });
-
-  describe("doIterateArray()", () => {
-    it("returns an `iterateArray` form holding the given array itself", () => {
-      const elements = [1, 2, 3];
-      const form = doIterateArray(elements);
-
-      expect(form.type).toBe("iterateArray");
-      expect(form.elements).toBe(elements);
-    });
-  });
-
-  describe("doIterateMap()", () => {
-    it("returns an `iterateMap` form holding the given mappings themselves", () => {
-      const mappings: [string, number][] = [["a", 1]];
-      const form = doIterateMap(mappings);
-
-      expect(form.type).toBe("iterateMap");
-      expect(form.mappings).toBe(mappings);
     });
   });
 
@@ -231,23 +229,38 @@ describe("value-visit", () => {
         );
       });
     });
+
+    describe("throwShouldntCall()", () => {
+      it("throws an error naming the method and the visitor", () => {
+        class Refusing extends Recorder {
+          override visitPrimitive(): never {
+            return this.throwShouldntCall("visitPrimitive");
+          }
+        }
+
+        expect(() => visitValue(1, new Refusing())).toThrow(
+          /Shouldn't happen: `visitPrimitive\(\)` called on `.*Refusing/,
+        );
+      });
+    });
   });
 
   describe("EmptyValueVisitor", () => {
     it("returns `undefined` from every visitor method", () => {
       const vis = new EmptyValueVisitor<unknown, unknown>();
+      const instance = new FabricMap(new Map());
 
-      expect(vis.visitArrayElement(0, 1)).toBeUndefined();
-      expect(vis.visitArrayGap(0, 1)).toBeUndefined();
       expect(vis.visitCycle(1, 0, 1)).toBeUndefined();
       expect(vis.visitFabricArray([])).toBeUndefined();
       expect(vis.visitFabricContainer([])).toBeUndefined();
-      expect(vis.visitFabricInstance(new FabricMap(new Map()))).toBeUndefined();
+      expect(vis.visitFabricInstance(instance)).toBeUndefined();
       expect(vis.visitFabricPlainObject({})).toBeUndefined();
-      expect(vis.visitMapping("k", 1)).toBeUndefined();
       expect(vis.visitNonFabricValue(new Date(0))).toBeUndefined();
       expect(vis.visitPrimitive(1, "number")).toBeUndefined();
       expect(vis.visitValue(1)).toBeUndefined();
+      expect(vis.visitedArrayElement([1], 0, 1)).toBeUndefined();
+      expect(vis.visitedArrayGap([], 0, 1)).toBeUndefined();
+      expect(vis.visitedMapping({}, "k", 1)).toBeUndefined();
     });
 
     it("completes a visit of a nested value without descending", () => {
@@ -268,16 +281,7 @@ describe("value-visit", () => {
 
   describe("ContainerIteratingVisitor", () => {
     class Iterating extends ContainerIteratingVisitor<never, never> {
-      override visitArrayElement(): ContainerIterationResult<never> {
-        return undefined;
-      }
-      override visitArrayGap(): BaselineVisitResult<never> {
-        return undefined;
-      }
       override visitCycle(): LeafVisitorResult<never, never> {
-        return undefined;
-      }
-      override visitMapping(): ContainerIterationResult<never> {
         return undefined;
       }
       override visitNonFabricValue(): LeafVisitorResult<never, never> {
@@ -295,61 +299,60 @@ describe("value-visit", () => {
       expect(new Iterating().visitFabricContainer([])).toBe(DO_VISIT_SUBTYPE);
     });
 
-    it("returns an `iterateArray` form over the array itself from `visitFabricArray()`", () => {
-      const array = [1, 2];
-      const form = new Iterating().visitFabricArray(array);
-
-      expect(form).toEqual({ type: "iterateArray", elements: array });
-      expect((form as { elements: unknown }).elements).toBe(array);
+    it("returns `DO_RECURSE_VALUES` from `visitFabricArray()`", () => {
+      expect(new Iterating().visitFabricArray([1])).toBe(DO_RECURSE_VALUES);
     });
 
-    it("returns an `iterateMap` form over the entries from `visitFabricPlainObject()`", () => {
-      const form = new Iterating().visitFabricPlainObject({ a: 1, b: 2 });
-
-      expect(form).toEqual({
-        type: "iterateMap",
-        mappings: [["a", 1], ["b", 2]],
-      });
+    it("returns `DO_RECURSE_VALUES` from `visitFabricPlainObject()`", () => {
+      expect(new Iterating().visitFabricPlainObject({ a: 1 })).toBe(
+        DO_RECURSE_VALUES,
+      );
     });
 
-    it("throws from `visitFabricInstance()`", () => {
+    it("returns `DO_RECURSE_KEYS_VALUES` from `visitFabricInstance()`", () => {
       const instance = new FabricMap(new Map());
 
-      expect(() => new Iterating().visitFabricInstance(instance)).toThrow(
-        /not yet visitable/,
+      expect(new Iterating().visitFabricInstance(instance)).toBe(
+        DO_RECURSE_KEYS_VALUES,
       );
+    });
+
+    it("returns `undefined` from every `visited*()` method", () => {
+      const vis = new Iterating();
+
+      expect(vis.visitedArrayElement([1], 0, 1)).toBeUndefined();
+      expect(vis.visitedArrayGap([], 0, 1)).toBeUndefined();
+      expect(vis.visitedMapping({}, "k", 1)).toBeUndefined();
     });
   });
 
   describe("visitValue()", () => {
     describe("dispatch", () => {
-      it("visits a nested value in order, keys before values", () => {
+      it("visits a nested value depth-first, reporting each element and mapping after its value", () => {
         const rec = new Recorder();
-        const root = { a: [1, { b: null }] };
+        const inner = { b: null };
+        const array = [1, inner];
+        const root = { a: array };
 
         expect(visitValue(root, rec)).toBeUndefined();
-        expect(rec.names).toEqual([
-          "value",
-          "container",
-          "object",
-          "mapping",
-          "value",
-          "primitive", // The key `a`.
-          "value",
-          "container",
-          "array",
-          "element",
-          "value",
-          "primitive", // `1`.
-          "element",
-          "value",
-          "container",
-          "object",
-          "mapping",
-          "value",
-          "primitive", // The key `b`.
-          "value",
-          "primitive", // `null`.
+        expect(rec.events).toEqual([
+          ["value", root],
+          ["container", root],
+          ["object", root],
+          ["value", array],
+          ["container", array],
+          ["array", array],
+          ["value", 1],
+          ["primitive", 1, "number"],
+          ["visitedElement", array, 0, 1],
+          ["value", inner],
+          ["container", inner],
+          ["object", inner],
+          ["value", null],
+          ["primitive", null, "null"],
+          ["visitedMapping", inner, "b", null],
+          ["visitedElement", array, 1, inner],
+          ["visitedMapping", root, "a", array],
         ]);
       });
 
@@ -395,7 +398,7 @@ describe("value-visit", () => {
       it("does not call a subtype visitor when `visitFabricContainer()` returns something other than `visitSubtype`", () => {
         class Stopping extends Recorder {
           override visitFabricContainer(
-            value: FabricArray | FabricPlainObject | FabricMap,
+            value: FabricContainerValue,
           ): DispatchingVisitorResult<unknown, unknown> {
             this.events.push(["container", value]);
             return mainResult("stopped");
@@ -471,6 +474,17 @@ describe("value-visit", () => {
         ]);
       });
 
+      it("reports the original element, not its replacement, to `visitedArrayElement()`", () => {
+        const rec = new Recorder();
+        rec.onValue = (v) => (v === "x") ? replace(42) : DO_VISIT_SUBTYPE;
+        const array = ["x"];
+
+        visitValue(array, rec);
+        expect(rec.events.filter((e) => e[0] === "visitedElement")).toEqual([
+          ["visitedElement", array, 0, "x"],
+        ]);
+      });
+
       it("puts a replacement plain object on the cycle stack", () => {
         const replacement: Record<string, unknown> = {};
         replacement.self = replacement;
@@ -486,7 +500,7 @@ describe("value-visit", () => {
       });
 
       for (const path of ["directly", "via subtype dispatch"] as const) {
-        it(`puts a replacement array on the cycle stack when the iterate form is produced ${path}`, () => {
+        it(`puts a replacement array on the cycle stack when the \`recurse\` form is produced ${path}`, () => {
           const replacement: unknown[] = [];
           replacement.push(replacement);
 
@@ -494,7 +508,7 @@ describe("value-visit", () => {
           rec.onValue = (v) => {
             if (v === "x") return replace(replacement);
             if (v === replacement && path === "directly") {
-              return doIterateArray<unknown>(replacement);
+              return DO_RECURSE_VALUES;
             }
             return DO_VISIT_SUBTYPE;
           };
@@ -541,53 +555,75 @@ describe("value-visit", () => {
 
         expect(visitValue(a, rec)).toEqual(mainResult("cycle!"));
       });
+
+      it("honors a `recurse` from `visitCycle()`, re-entering the value at the next depth", () => {
+        const a: Record<string, unknown> = {};
+        a.self = a;
+
+        const rec = new Recorder();
+        rec.onCycle = (_v, _orig, depth) =>
+          (depth < 3) ? DO_RECURSE_VALUES : undefined;
+
+        visitValue(a, rec);
+        expect(rec.events.filter((e) => e[0] === "cycle")).toEqual([
+          ["cycle", a, 0, 1],
+          ["cycle", a, 0, 2],
+          ["cycle", a, 0, 3],
+        ]);
+      });
     });
 
     describe("`mainResult` results", () => {
-      it("ends the visit from an element visitor, skipping later elements", () => {
+      it("ends the visit from `visitedArrayElement()`, skipping later elements", () => {
         const rec = new Recorder();
-        rec.onElement = (i) =>
-          (i === 1) ? mainResult("at 1") : DO_RECURSE_VALUE;
+        rec.onVisitedElement = (i) =>
+          (i === 1) ? mainResult("at 1") : undefined;
+        const array = [10, 20, 30];
 
-        expect(visitValue([10, 20, 30], rec)).toEqual(mainResult("at 1"));
-        expect(rec.events.filter((e) => e[0] === "element")).toEqual([
-          ["element", 0, 10],
-          ["element", 1, 20],
+        expect(visitValue(array, rec)).toEqual(mainResult("at 1"));
+        expect(rec.events.filter((e) => e[0] === "visitedElement")).toEqual([
+          ["visitedElement", array, 0, 10],
+          ["visitedElement", array, 1, 20],
         ]);
+        expect(rec.events.map((e) => e[1])).not.toContain(30);
       });
 
-      it("ends the visit from a mapping visitor", () => {
+      it("ends the visit from `visitedMapping()`, skipping later mappings", () => {
         const rec = new Recorder();
-        rec.onMapping = () => mainResult("first");
+        rec.onVisitedMapping = () => mainResult("first");
+        const object = { a: 1, b: 2 };
 
-        expect(visitValue({ a: 1, b: 2 }, rec)).toEqual(mainResult("first"));
-        expect(rec.events.filter((e) => e[0] === "mapping")).toEqual([
-          ["mapping", "a", 1],
+        expect(visitValue(object, rec)).toEqual(mainResult("first"));
+        expect(rec.events.filter((e) => e[0] === "visitedMapping")).toEqual([
+          ["visitedMapping", object, "a", 1],
         ]);
+        expect(rec.events.map((e) => e[1])).not.toContain(2);
       });
 
       it("ends the visit from a key's recursion, before the value is visited", () => {
         const rec = new Recorder();
+        rec.onPlainObject = () => DO_RECURSE_KEYS_VALUES;
         rec.onPrimitive = (v) => (v === "a") ? mainResult("key") : undefined;
 
         expect(visitValue({ a: 1 }, rec)).toEqual(mainResult("key"));
         expect(rec.events.filter((e) => e[0] === "primitive")).toEqual([
           ["primitive", "a", "string"],
         ]);
+        expect(rec.names).not.toContain("visitedMapping");
       });
 
-      it("ends the visit from a gap visitor, for a gap before an element", () => {
+      it("ends the visit from `visitedArrayGap()`, for a gap before an element", () => {
         const rec = new Recorder();
-        rec.onGap = () => mainResult("gap");
+        rec.onVisitedGap = () => mainResult("gap");
 
         // deno-lint-ignore no-sparse-arrays
         expect(visitValue([, 1], rec)).toEqual(mainResult("gap"));
-        expect(rec.names).not.toContain("element");
+        expect(rec.names).not.toContain("visitedElement");
       });
 
-      it("ends the visit from a gap visitor, for a gap at the end", () => {
+      it("ends the visit from `visitedArrayGap()`, for a gap at the end", () => {
         const rec = new Recorder();
-        rec.onGap = () => mainResult("gap");
+        rec.onVisitedGap = () => mainResult("gap");
 
         // deno-lint-ignore no-sparse-arrays
         expect(visitValue([[1, ,], 2], rec)).toEqual(mainResult("gap"));
@@ -608,30 +644,32 @@ describe("value-visit", () => {
     });
 
     describe("`recurse` results", () => {
-      it("recurses into both key and value for `DO_RECURSE_KEY_VALUE`", () => {
+      it("visits both keys and values of a plain object for `DO_RECURSE_KEYS_VALUES`, each key before its value", () => {
         const rec = new Recorder();
-        rec.onMapping = () => DO_RECURSE_KEY_VALUE;
+        rec.onPlainObject = () => DO_RECURSE_KEYS_VALUES;
+
+        visitValue({ a: 1, b: 2 }, rec);
+        expect(rec.events.filter((e) => e[0] === "primitive")).toEqual([
+          ["primitive", "a", "string"],
+          ["primitive", 1, "number"],
+          ["primitive", "b", "string"],
+          ["primitive", 2, "number"],
+        ]);
+      });
+
+      it("visits only the keys of a plain object for `DO_RECURSE_KEYS`", () => {
+        const rec = new Recorder();
+        rec.onPlainObject = () => DO_RECURSE_KEYS;
 
         visitValue({ a: 1 }, rec);
         expect(rec.events.filter((e) => e[0] === "primitive")).toEqual([
           ["primitive", "a", "string"],
-          ["primitive", 1, "number"],
         ]);
       });
 
-      it("recurses into the key only for `DO_RECURSE_KEY`", () => {
+      it("visits only the values of a plain object for `DO_RECURSE_VALUES`", () => {
         const rec = new Recorder();
-        rec.onMapping = () => DO_RECURSE_KEY;
-
-        visitValue({ a: 1 }, rec);
-        expect(rec.events.filter((e) => e[0] === "primitive")).toEqual([
-          ["primitive", "a", "string"],
-        ]);
-      });
-
-      it("recurses into the value only for `DO_RECURSE_VALUE`", () => {
-        const rec = new Recorder();
-        rec.onMapping = () => DO_RECURSE_VALUE;
+        rec.onPlainObject = () => DO_RECURSE_VALUES;
 
         visitValue({ a: 1 }, rec);
         expect(rec.events.filter((e) => e[0] === "primitive")).toEqual([
@@ -639,26 +677,117 @@ describe("value-visit", () => {
         ]);
       });
 
-      it("recurses into nothing for `DO_RECURSE_KEY` on an array element", () => {
+      it("visits the elements of an array for `DO_RECURSE_VALUES`", () => {
         const rec = new Recorder();
-        rec.onElement = () => DO_RECURSE_KEY;
+        rec.onArray = () => DO_RECURSE_VALUES;
+
+        visitValue([1, 2], rec);
+        expect(rec.events.filter((e) => e[0] === "primitive")).toEqual([
+          ["primitive", 1, "number"],
+          ["primitive", 2, "number"],
+        ]);
+      });
+
+      it("visits the elements of an array for `DO_RECURSE_KEYS_VALUES`, there being no keys", () => {
+        const rec = new Recorder();
+        rec.onArray = () => DO_RECURSE_KEYS_VALUES;
+
+        visitValue([1], rec);
+        expect(rec.events.filter((e) => e[0] === "primitive")).toEqual([
+          ["primitive", 1, "number"],
+        ]);
+      });
+
+      it("reports each mapping to `visitedMapping()` whichever of keys or values is recursed", () => {
+        for (const form of [DO_RECURSE_KEYS, DO_RECURSE_VALUES]) {
+          const rec = new Recorder();
+          rec.onPlainObject = () => form;
+          const object = { a: 1 };
+
+          visitValue(object, rec);
+          expect(rec.events.filter((e) => e[0] === "visitedMapping")).toEqual([
+            ["visitedMapping", object, "a", 1],
+          ]);
+        }
+      });
+
+      it("iterates nothing for `DO_RECURSE_KEYS` on an array", () => {
+        const rec = new Recorder();
+        rec.onArray = () => DO_RECURSE_KEYS;
 
         visitValue([1, 2], rec);
         expect(rec.names).not.toContain("primitive");
+        expect(rec.names).not.toContain("visitedElement");
       });
 
-      it("recurses into nothing for `undefined`", () => {
+      it("iterates nothing for a `recurse` form with both flags `false`, on a plain object", () => {
         const rec = new Recorder();
-        rec.onElement = () => undefined;
-        rec.onMapping = () => undefined;
+        rec.onPlainObject = () => ({
+          type: "recurse",
+          doKeys: false,
+          doValues: false,
+        });
 
-        visitValue({ a: [1] }, rec);
+        visitValue({ a: 1 }, rec);
         expect(rec.names).not.toContain("primitive");
+        expect(rec.names).not.toContain("visitedMapping");
+      });
+
+      it("honors a `recurse` returned directly from `visitValue()`, without subtype dispatch", () => {
+        const rec = new Recorder();
+        rec.onValue = (v) =>
+          Array.isArray(v) ? DO_RECURSE_VALUES : DO_VISIT_SUBTYPE;
+
+        visitValue([1], rec);
+        expect(rec.names).toEqual([
+          "value",
+          "value",
+          "primitive",
+          "visitedElement",
+        ]);
+      });
+
+      it("throws for a `recurse` from `visitValue()` on a primitive", () => {
+        const rec = new Recorder();
+        rec.onValue = () => DO_RECURSE_VALUES;
+
+        expect(() => visitValue(1, rec)).toThrow(
+          /Cannot use `recurse` result with non-container: `1`/,
+        );
+      });
+
+      it("throws for a `recurse` from `visitPrimitive()`", () => {
+        const rec = new Recorder();
+        rec.onPrimitive = () => DO_RECURSE_VALUES;
+
+        expect(() => visitValue("x", rec)).toThrow(
+          /Cannot use `recurse` result with non-container: /,
+        );
+      });
+
+      it("throws for a `recurse` from `visitNonFabricValue()`", () => {
+        const rec = new Recorder();
+        rec.onNonFabric = () => DO_RECURSE_VALUES;
+
+        expect(() => visitValue(new Date(0), rec)).toThrow(
+          /Cannot use `recurse` result with non-container: /,
+        );
+      });
+
+      it("throws for a `recurse` on a `FabricInstance`", () => {
+        const rec = new Recorder();
+        rec.onInstance = () => DO_RECURSE_KEYS_VALUES;
+        const instance = new FabricMap(new Map());
+
+        expect(() => visitValue(instance, rec)).toThrow(/not yet visitable/);
       });
     });
 
     describe("array gaps", () => {
-      const cases: [string, unknown[], Event[]][] = [
+      /** Expected gap and element events, without the array argument. */
+      type Expected = [name: string, ...args: unknown[]][];
+
+      const cases: [string, unknown[], Expected][] = [
         // deno-lint-ignore no-sparse-arrays
         ["a leading hole", [, 5], [["gap", 0, 1], ["element", 1, 5]]],
         // deno-lint-ignore no-sparse-arrays
@@ -685,23 +814,37 @@ describe("value-visit", () => {
           const rec = new Recorder();
 
           visitValue(array, rec);
-          expect(
-            rec.events.filter((e) => e[0] === "gap" || e[0] === "element"),
-          ).toEqual(expected);
+
+          const actual = rec.events
+            .filter((e) => e[0] === "visitedGap" || e[0] === "visitedElement")
+            .map(([name, arr, ...rest]) => {
+              expect(arr).toBe(array);
+              return [name === "visitedGap" ? "gap" : "element", ...rest];
+            });
+          expect(actual).toEqual(expected);
         });
       }
-    });
 
-    describe("`iterateArray` validation", () => {
-      it("throws when the elements array carries a named property", () => {
+      it("throws when an array taken as valid carries a named property", () => {
+        // The shallow check does not take such an array to be a
+        // `FabricArray`, so the only way to reach the iteration with one is
+        // to assert validity.
+        const rec = new Recorder() as unknown as ValueVisitor<never, unknown>;
+        const array: unknown[] & { extra?: number } = [1];
+        array.extra = 2;
+
+        expect(() => visitFabricValue(array as FabricValue, rec)).toThrow(
+          /Non-index property in alleged `FabricArray`: `extra`/,
+        );
+      });
+
+      it("routes an array carrying a named property to `visitNonFabricValue()` under the shallow check", () => {
         const rec = new Recorder();
-        rec.onPlainObject = () => {
-          const elements: unknown[] & { extra?: number } = [1];
-          elements.extra = 2;
-          return doIterateArray<unknown>(elements);
-        };
+        const array: unknown[] & { extra?: number } = [1];
+        array.extra = 2;
 
-        expect(() => visitValue({}, rec)).toThrow(/Improper array/);
+        visitValue(array, rec);
+        expect(rec.events).toEqual([["value", array], ["nonFabric", array]]);
       });
     });
 
@@ -714,17 +857,6 @@ describe("value-visit", () => {
         expect(rec.events).toEqual([["value", date], ["nonFabric", date]]);
       });
 
-      it("routes a non-fabric value synthesized under a valid root to `visitNonFabricValue()`", () => {
-        const rec = new Recorder();
-        const date = new Date(0);
-        rec.onPlainObject = () => doIterateMap<unknown>([["d", date]]);
-
-        visitValue({ ok: 1 }, rec);
-        expect(rec.events.filter((e) => e[0] === "nonFabric")).toEqual([
-          ["nonFabric", date],
-        ]);
-      });
-
       it("treats an array holding a function as a `FabricArray` under the shallow check, and routes the function to `visitNonFabricValue()`", () => {
         const rec = new Recorder();
         const fn = () => 1;
@@ -734,9 +866,9 @@ describe("value-visit", () => {
           "value",
           "container",
           "array",
-          "element",
           "value",
           "nonFabric",
+          "visitedElement",
         ]);
       });
 
@@ -811,17 +943,12 @@ describe("value-visit", () => {
   });
 
   describe("visitFabricValue()", () => {
-    it("visits a value and returns the visitor's `mainResult`", () => {
-      class Count extends Recorder {
-        override visitPrimitive(): LeafVisitorResult<unknown, unknown> {
-          return undefined;
-        }
-      }
-
-      const vis = new Count() as unknown as ValueVisitor<never, number>;
+    it("visits a value and returns `undefined` absent a `mainResult`", () => {
+      const rec = new Recorder() as unknown as ValueVisitor<never, number>;
       const value = { a: [1, 2] } as FabricValue;
 
-      expect(visitFabricValue(value, vis)).toBeUndefined();
+      expect(visitFabricValue(value, rec)).toBeUndefined();
+      expect((rec as unknown as Recorder).names).toContain("primitive");
     });
 
     it("returns a `mainResult` typed by the visitor's `ResultType`", () => {
@@ -849,6 +976,16 @@ describe("value-visit", () => {
       const lying = [1, new Date(0)] as unknown as FabricValue;
 
       expect(() => visitFabricValue(lying, rec)).toThrow(/assume valid/);
+    });
+
+    it("throws for a `recurse` on a value that is not a `FabricValue`", () => {
+      const rec = new Recorder();
+      rec.onValue = () => DO_RECURSE_VALUES;
+      const lying = new Date(0) as unknown as FabricValue;
+
+      expect(() =>
+        visitFabricValue(lying, rec as unknown as ValueVisitor<never, unknown>)
+      ).toThrow(/Cannot use `recurse` result with non-container: /);
     });
   });
 
