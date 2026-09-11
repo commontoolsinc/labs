@@ -154,6 +154,7 @@ import {
   type SchedulerGraphSnapshotState,
 } from "./graph-snapshot.ts";
 import { entityKey, entityNameKey } from "./keys.ts";
+import { tempTrace } from "../temp-trace.ts";
 import { SpeculationLineage } from "./lineage.ts";
 import {
   type ActionTimingState,
@@ -3048,11 +3049,19 @@ export class Scheduler {
       ]),
     );
     this.#headEventLoadPark = { eventId: event.id, keys, generations };
+    // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
+    tempTrace(`TEMP-PARK event ${event.id} parks on`, keys);
     const settled = this.runtime.storageManager.loadsSettled?.(keys) ??
       Promise.resolve();
     settled.then(
-      () => this.#releaseHeadEventLoadPark(event.id),
-      (error) => this.#failHeadEventLoadPark(event, error),
+      () => {
+        tempTrace(`TEMP-PARK event ${event.id} released`);
+        this.#releaseHeadEventLoadPark(event.id);
+      },
+      (error) => {
+        tempTrace(`TEMP-PARK event ${event.id} load failed`, keys, error);
+        this.#failHeadEventLoadPark(event, error);
+      },
     );
   }
 
