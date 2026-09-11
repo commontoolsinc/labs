@@ -437,12 +437,23 @@ export function claimSlugInTx(
   const slugWithTx = slugCellFor(pieces, validSlug).withTx(tx);
   const metadataTargetWithTx = metadataTarget?.withTx(tx);
 
+  // The claim, ahead of every write so that declining stages nothing: the
+  // reads here join the commit's read set, so a change to what the name
+  // holds under this transaction rejects it and the body re-runs against
+  // what the change left.
   const binding = slugBindingOf(pieces, slugWithTx, takeFrom !== null);
   const held = binding.held;
   if (!options?.force && binding.claim !== takeFrom) {
+    // A `null` reference is a refusal too: a caller that named what to
+    // take the name from has not got it, whether somebody else holds the
+    // name now or nobody does.
     return { held: binding.ref };
   }
 
+  // The name is being taken from a holder, so the holder stops claiming
+  // it. Only its own name is cleared: another name pointing at the same
+  // root is not this assignment's to drop. Ahead of the stamp below, so a
+  // root that is both the old holder and the new one ends up stamped.
   const previousRoot = held === undefined
     ? undefined
     : heldStampRoot(pieces, held, tx);
@@ -455,10 +466,14 @@ export function claimSlugInTx(
     : slugStampRoot(metadataTargetWithTx);
   stampRoot?.setMetaRaw("slug", validSlug, rawMetaWriteAuthorization);
   slugWithTx.setMetaRaw("slug", validSlug, rawMetaWriteAuthorization);
+  // Only the redirect write carries the schema; the meta write above keeps
+  // the bare handle, whose sync stays the one the name was read through.
   const redirectWrite = slugWithTx.asSchema(SLUG_REDIRECT_SCHEMA);
   redirectWrite.setRawUntyped(
     targetWithTx.getAsWriteRedirectLink({ base: redirectWrite }),
   );
+  // The index entry rides the slug's own transaction, so a listing can
+  // never see a name without its slug or a slug without its name.
   slugIndexCell(pieces).withTx(tx).key(validSlug).set(true);
   return undefined;
 }

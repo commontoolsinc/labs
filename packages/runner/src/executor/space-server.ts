@@ -389,15 +389,8 @@ const neverAPieceRootId = (id: string): boolean =>
   id.startsWith("cid:");
 
 /**
- * One space's serving loop. The SpaceServer IS the seal destination — a
- * stable dispatcher over rotating wave accumulators, so an action tx
- * that commits between waves opens the next wave rather than erroring
- * (natural double-buffering: commits arriving mid-wave belong to the
- * NEXT wave, serving-loop.md §3).
- */
-/**
  * A pattern-lifecycle verb the serving loop runs on the space's runtime on
- * a requester's behalf — an `upload`, `instantiate`, or `setsrc` request
+ * a requester's behalf — an `upload` or `instantiate` request
  * (docs/features/server-pattern-lifecycle.md). The loop runs `run` as a
  * step of a wave cycle, ahead of that cycle's event drain, so every
  * transaction the verb seals joins the cycle's wave. The request settles
@@ -456,6 +449,13 @@ type RanLifecycleVerb = QueuedLifecycleVerb & {
   stagedWrites: ReadonlyArray<{ id: string; scopeKey: "space" }>;
 };
 
+/**
+ * One space's serving loop. The SpaceServer IS the seal destination — a
+ * stable dispatcher over rotating wave accumulators, so an action tx
+ * that commits between waves opens the next wave rather than erroring
+ * (natural double-buffering: commits arriving mid-wave belong to the
+ * NEXT wave, serving-loop.md §3).
+ */
 export class SpaceServer implements TransactionSealDestination {
   readonly #options: SpaceServerOptions;
   readonly #holder: string;
@@ -4592,12 +4592,20 @@ export class SpaceServer implements TransactionSealDestination {
     // and for the same reason: their seals join this cycle's wave, whose
     // commit at the cycle's end is what settles them (`#serveWave`'s
     // outcome is what `#settleLifecycleVerbs` reads through `confirm`).
+    // A verb that ran is settled either way: with its receipt or its
+    // error after the wave commits, or with the cycle's own error if the
+    // wave never gets that far.
     const verbs = await this.#runQueuedLifecycleVerbs(runtime);
     try {
       await this.#serveWave(runtime);
-    } finally {
-      await this.#settleLifecycleVerbs(runtime, verbs);
+    } catch (error) {
+      // A cycle that throws parks the space without committing its wave,
+      // so nothing the verbs sealed is durable; their `confirm` reads
+      // would see the replica the wave never withdrew from.
+      for (const entry of verbs) entry.reject(error);
+      throw error;
     }
+    await this.#settleLifecycleVerbs(runtime, verbs);
   }
 
   /**

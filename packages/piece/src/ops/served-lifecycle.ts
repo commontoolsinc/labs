@@ -14,10 +14,6 @@
 // update carries module-update authority the runner publishes only from a
 // transaction that commits to storage itself, and refuses from a wave.
 
-import type { PiecesController } from "./pieces-controller.ts";
-import { pieceId as pieceIdOf } from "../piece-id.ts";
-import { claimSlugInTx, prepareSlugClaim } from "../slugs.ts";
-import { prepareSourceClosureVerification } from "../../../runner/src/compilation-cache/cell-cache.ts";
 import {
   type Cell,
   compileAndSavePattern,
@@ -30,6 +26,11 @@ import {
   type RuntimeProgram,
 } from "@commonfabric/runner";
 import { pieceListSchema } from "@commonfabric/runner/schemas";
+
+import { pieceId as pieceIdOf } from "../piece-id.ts";
+import { claimSlugInTx, prepareSlugClaim } from "../slugs.ts";
+import { prepareSourceClosureVerification } from "../../../runner/src/compilation-cache/cell-cache.ts";
+import type { PiecesController } from "./pieces-controller.ts";
 
 /** A content-addressed pattern pointer: the closure and the export run. */
 export type ServedPatternRef = { identity: string; symbol: string };

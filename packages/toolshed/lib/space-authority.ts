@@ -143,6 +143,15 @@ export const NOT_WRITER_MESSAGE =
   '`cf id did "$CF_IDENTITY"`.';
 
 /**
+ * A writer check's answer: admitted, or the denial {@link SpaceAuthority}
+ * carries. It hands back no ACL, since a deployment with enforcement off
+ * admits without reading one.
+ */
+export type SpaceWriterAuthority =
+  | { ok: true }
+  | Extract<SpaceAuthority, { ok: false }>;
+
+/**
  * Authorize `callerDid` to write into `space`: the memory server's own
  * answer for an authored commit, with the wildcard grant and the service
  * principals it honors. A deployment with ACL enforcement off admits every
@@ -157,8 +166,8 @@ export async function authorizeSpaceWriter(
   deps: SpaceAuthorityDeps,
   space: string,
   callerDid: string,
-): Promise<SpaceAuthority> {
-  const deny = (logDetail: string): SpaceAuthority => ({
+): Promise<SpaceWriterAuthority> {
+  const deny = (logDetail: string): SpaceWriterAuthority => ({
     ok: false,
     kind: "not-owner",
     message: NOT_WRITER_MESSAGE,
@@ -167,7 +176,7 @@ export async function authorizeSpaceWriter(
   if (!isValidSpaceDid(space)) return deny("space did failed shape check");
   const hosts = deps.hostsSpace ?? (() => true);
   if (!hosts(space)) return deny("space not hosted by this deployment");
-  if (deps.aclMode === "off") return { ok: true, acl: {} as ACL };
+  if (deps.aclMode === "off") return { ok: true };
   let acl: ACL | null;
   try {
     acl = await new ACLManager(deps.runtime, space as DID).get();
@@ -179,7 +188,7 @@ export async function authorizeSpaceWriter(
   if (role !== "owner" && role !== "writer") {
     return deny(`caller role on ${space} is ${role ?? "none"}, need writer`);
   }
-  return { ok: true, acl };
+  return { ok: true };
 }
 
 /**

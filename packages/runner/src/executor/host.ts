@@ -48,6 +48,21 @@ import {
 
 export type { LifecycleVerb } from "./space-server.ts";
 
+/**
+ * Thrown by {@link ExecutorHost.runLifecycleVerb} when this process cannot
+ * serve the space the verb names: the host is closed, or another process
+ * holds the space's execution lease.
+ */
+export class SpaceNotServedError extends Error {
+  constructor(space: MemorySpace) {
+    super(
+      `space ${space} is not served by this process (host closed, or ` +
+        "its execution lease is held elsewhere)",
+    );
+    this.name = "SpaceNotServedError";
+  }
+}
+
 const logger = getLogger("executor-host", { enabled: true, level: "warn" });
 
 // The failure-park re-activation backoff (the lunch-wall cascade flag):
@@ -236,8 +251,8 @@ export class ExecutorHost {
    * consult do not apply. A verb the space parked under before running
    * is queued once more on the successor tenure.
    *
-   * Throws when this process cannot serve the space — the host is
-   * closed, or another process holds the space's lease.
+   * Throws {@link SpaceNotServedError} when this process cannot serve the
+   * space — the host is closed, or another process holds the space's lease.
    */
   async runLifecycleVerb<T>(
     space: MemorySpace,
@@ -256,10 +271,7 @@ export class ExecutorHost {
       await this.#activate(space, []);
       const server = this.#spaces.get(space);
       if (server === undefined || !server.active) {
-        throw new Error(
-          `space ${space} is not served by this process (host closed, or ` +
-            "its execution lease is held elsewhere)",
-        );
+        throw new SpaceNotServedError(space);
       }
       try {
         return await server.runLifecycleVerb(verb);

@@ -20,9 +20,10 @@ import {
   servedUploadPattern,
 } from "@commonfabric/piece/ops";
 import type { Runtime, RuntimeProgram } from "@commonfabric/runner";
-import type {
-  ExecutorHost,
-  LifecycleVerb,
+import {
+  type ExecutorHost,
+  type LifecycleVerb,
+  SpaceNotServedError,
 } from "@commonfabric/runner/executor/host";
 import {
   authorizeSpaceWriter,
@@ -57,6 +58,7 @@ export type LifecycleErrorCode =
   | "space-not-served"
   | "internal";
 
+/** What a verb answers: its receipt on 200, or a refusal with its code. */
 export type LifecycleResult<T> =
   | { status: 200; body: T }
   | {
@@ -161,7 +163,7 @@ async function runServedVerb<T>(
       return refuse(REFUSAL_STATUS[error.code], error.code, error.message);
     }
     const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("is not served by this process")) {
+    if (error instanceof SpaceNotServedError) {
       return refuse(503, "space-not-served", message);
     }
     deps.logger?.warn(
@@ -172,6 +174,7 @@ async function runServedVerb<T>(
   }
 }
 
+/** The `upload` verb: compile `program` into the space it names. */
 export function processUpload(
   deps: LifecycleDeps,
   callerDid: string,
@@ -186,6 +189,11 @@ export function processUpload(
   });
 }
 
+/**
+ * The `instantiate` verb: create a piece from the request's pattern, named
+ * and registered as asked, and name its root as the loop's demand so the
+ * cycle after the creation's commit derives it.
+ */
 export function processInstantiate(
   deps: LifecycleDeps,
   callerDid: string,
