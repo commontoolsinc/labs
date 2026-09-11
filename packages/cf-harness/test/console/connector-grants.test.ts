@@ -253,7 +253,12 @@ describe("connector-grants", () => {
       expect(result.unnamed[0]?.reason).toContain("email, finance");
     });
 
-    it("reports the second of two handles that declare the same class", () => {
+    it("names both handles by class and connection when two share a class", () => {
+      // `email` alone would say which data it is and not which of two
+      // mailboxes. Both take the longer form rather than first-come-wins, so a
+      // grant's name does not depend on the order loom happened to write the
+      // receipt in.
+
       const second = {
         name: "cf-gmail-messages--gmail-home",
         sqlite_sources: [
@@ -267,8 +272,55 @@ describe("connector-grants", () => {
         ]),
         piecesJson: piecesJson([MAIL_PIECE, second]),
       }));
-      expect(result.grants.map((grant) => grant.ref)).toEqual([MAIL_REF]);
-      expect(result.unnamed[0]?.reason).toContain("gmail-work");
+
+      expect(result.grants.map((grant) => grant.name)).toEqual([
+        "email-gmail-work",
+        "email-gmail-home",
+      ]);
+      expect(result.unnamed).toEqual([]);
+    });
+
+    it("names a handle by its class alone when no other handle shares it", () => {
+      const result = resolveConnectorGrants(records());
+
+      expect(result.grants.map((grant) => grant.name)).toEqual([
+        "email",
+        "finance",
+      ]);
+    });
+
+    it("gives the same names whichever order the receipt lists the handles in", () => {
+      // The property first-come-wins could not have: a reseed that reorders
+      // the receipt must not rename a grant a session already holds.
+
+      const second = {
+        name: "cf-gmail-messages--gmail-home",
+        sqlite_sources: [
+          source("gmail-home", { subject: labeledColumn("email") }),
+        ],
+      };
+      const pieces = piecesJson([MAIL_PIECE, second]);
+      const work = handle(
+        "cf-gmail-messages--gmail-work",
+        "gmail-work",
+        MAIL_REF,
+      );
+      const home = handle(
+        "cf-gmail-messages--gmail-home",
+        "gmail-home",
+        BANK_REF,
+      );
+
+      const forward = resolveConnectorGrants(
+        records({ handlesJson: handlesJson([work, home]), piecesJson: pieces }),
+      );
+      const reversed = resolveConnectorGrants(
+        records({ handlesJson: handlesJson([home, work]), piecesJson: pieces }),
+      );
+
+      const byRef = (r: typeof forward) =>
+        Object.fromEntries(r.grants.map((g) => [g.ref, g.name]));
+      expect(byRef(forward)).toEqual(byRef(reversed));
     });
 
     it("reports a handle whose reference does not name an entity", () => {
