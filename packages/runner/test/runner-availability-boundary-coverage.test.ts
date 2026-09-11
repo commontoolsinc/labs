@@ -5,7 +5,7 @@ import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import type { Module, Pattern } from "../src/builder/types.ts";
+import type { JSONSchema, Module, Pattern } from "../src/builder/types.ts";
 import { getDerivedInternalCell } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { EventHandler } from "../src/scheduler/types.ts";
@@ -68,6 +68,61 @@ describe("runner availability boundary coverage", () => {
     return await output.pull();
   }
 
+  async function registerCapturedHandler(
+    observed: unknown,
+    observedSchema: JSONSchema,
+  ): Promise<EventHandler> {
+    const stateSchema: JSONSchema = {
+      type: "object",
+      properties: { observed: observedSchema },
+      required: ["observed"],
+    };
+    const { handler, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const onEvent = handler(
+      { type: "number" },
+      stateSchema,
+      () => {},
+    );
+    const HandlerPattern = pattern(
+      ({ observed }) => ({ stream: onEvent({ observed }) }),
+      stateSchema,
+      {
+        type: "object",
+        properties: { stream: { type: "object" } },
+        required: ["stream"],
+      },
+    );
+    Object.assign(HandlerPattern.nodes[0].module, {
+      type: "javascript-availability",
+      unavailableInputPolicy: [{
+        path: ["$event"],
+        reasons: ["pending"],
+      }],
+    });
+
+    const addHandler = spy(runtime.scheduler, "addEventHandler");
+    try {
+      const resultCell = runtime.getCell(
+        signer.did(),
+        `availability-handler-${nextId++}`,
+      );
+      const result = await runtime.runSynced(
+        resultCell,
+        HandlerPattern,
+        { observed } as never,
+      );
+      await result.pull();
+
+      const registered = addHandler.calls[0]?.args[0] as
+        | EventHandler
+        | undefined;
+      expect(registered?.inputReadiness).toBeDefined();
+      return registered!;
+    } finally {
+      addHandler.restore();
+    }
+  }
+
   it("requires policy metadata on availability modules", async () => {
     let calls = 0;
     await expect(runNode({
@@ -121,73 +176,41 @@ describe("runner availability boundary coverage", () => {
   });
 
   it("checks captured handler readiness without event-only policy", async () => {
-    const { handler, pattern } = createTrustedBuilder(runtime).commonfabric;
-    const onEvent = handler(
-      { type: "number" },
+    const registered = await registerCapturedHandler(
+      DataUnavailable.error(new Error("captured failure")),
       {
-        type: "object",
-        properties: {
-          observed: {
-            anyOf: [{ type: "string" }, { type: "object" }],
-          },
-        },
-        required: ["observed"],
-      },
-      () => {},
-    );
-    const HandlerPattern = pattern(
-      ({ observed }) => ({ stream: onEvent({ observed }) }),
-      {
-        type: "object",
-        properties: {
-          observed: {
-            anyOf: [{ type: "string" }, { type: "object" }],
-          },
-        },
-        required: ["observed"],
-      },
-      {
-        type: "object",
-        properties: { stream: { type: "object" } },
-        required: ["stream"],
+        anyOf: [{ type: "string" }, { type: "object" }],
       },
     );
-    Object.assign(HandlerPattern.nodes[0].module, {
-      type: "javascript-availability",
-      unavailableInputPolicy: [{
-        path: ["$event"],
-        reasons: ["pending"],
-      }],
-    });
-
-    const addHandler = spy(runtime.scheduler, "addEventHandler");
+    let materializations = 0;
+    runtime.runner.accessForTestingOnly.javascriptArgumentObserver = () => {
+      materializations++;
+    };
+    const readinessTx = runtime.edit();
     try {
-      const resultCell = runtime.getCell(
-        signer.did(),
-        `availability-handler-${nextId++}`,
-      );
-      const result = await runtime.runSynced(
-        resultCell,
-        HandlerPattern,
-        { observed: DataUnavailable.error(new Error("captured failure")) },
-      );
-      await result.pull();
-
-      const registered = addHandler.calls[0]?.args[0] as
-        | EventHandler
-        | undefined;
-      expect(registered?.inputReadiness).toBeDefined();
-      const readinessTx = runtime.edit();
-      try {
-        expect(registered!.inputReadiness!(readinessTx, 1)).toEqual({
-          ready: false,
-          reason: "error",
-        });
-      } finally {
-        readinessTx.abort("readiness probe complete");
-      }
+      expect(registered.inputReadiness!(readinessTx, 1)).toEqual({
+        ready: false,
+        reason: "error",
+      });
+      expect(materializations).toBe(0);
     } finally {
-      addHandler.restore();
+      readinessTx.abort("readiness probe complete");
+      runtime.runner.accessForTestingOnly.javascriptArgumentObserver =
+        undefined;
+    }
+  });
+
+  it("leaves captured schema validation to dispatch", async () => {
+    const registered = await registerCapturedHandler("not a number", {
+      type: "number",
+    });
+    const readinessTx = runtime.edit();
+    try {
+      expect(registered.inputReadiness!(readinessTx, 1)).toEqual({
+        ready: true,
+      });
+    } finally {
+      readinessTx.abort("readiness probe complete");
     }
   });
 });

@@ -10752,17 +10752,19 @@ export class Runner {
         undefined,
         readinessTx,
       );
-      const readiness = this.#readJavaScriptArgument(
-        capturedInputModule,
-        inputsCell,
+      // Readiness classifies availability only. Dispatch owns ordinary schema
+      // validation, so a probe never materializes the captured context.
+      const availability = preflightUnavailableInputs(
+        inputsCell.getRaw(),
+        capturedInputModule.argumentSchema,
+        capturedInputModule.unavailableInputPolicy,
+        this.#runtime,
         readinessTx,
-        {
-          writableProxy: (module as { writableProxy?: boolean }).writableProxy,
-        },
+        inputsCell,
       );
-      return readiness.isValidArgument ? { ready: true } : {
+      return availability.unavailable === undefined ? { ready: true } : {
         ready: false,
-        reason: readiness.unavailable?.reason ?? "schema-mismatch",
+        reason: availability.unavailable.value.reason,
       };
     };
 
