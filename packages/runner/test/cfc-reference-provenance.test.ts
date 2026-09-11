@@ -1648,6 +1648,125 @@ describe("cfc-reference-provenance", () => {
     tx.abort();
   });
 
+  for (const frozen of [false, true]) {
+    it(`retains nested stored reference history in a raw read (frozen=${frozen})`, async () => {
+      const { target } = await selectedTarget();
+      const holder = await seed("nested-raw-holder", {
+        links: [target.getAsLink()],
+      }, [{
+        path: ["links", "0"],
+        observes: "followRef",
+        origin: "link",
+        label: { confidentiality: [selection] },
+      }]);
+      const read = runtime.edit();
+      const raw = (frozen
+        ? holder.withTx(read).getRawUntyped()
+        : holder.withTx(read).getRawUntyped({ frozen: false })) as {
+          links: FabricValue[];
+        };
+      expect(deriveFlowJoin(read).confidentiality).toContainEqual(selection);
+      expect(deriveFlowJoin(read).confidentiality).not.toContainEqual(content);
+      expect(
+        read.getCfcState().dereferenceTraces.some(({ target: address }) =>
+          address.id === target.getAsNormalizedFullLink().id
+        ),
+      ).toBe(false);
+      read.abort();
+      expect(Object.isFrozen(raw)).toBe(frozen);
+      expect(getCfcReferenceProvenance(raw.links[0])?.confidentiality)
+        .toContainEqual(selection);
+      const write = runtime.edit();
+      const output = runtime.getCell(
+        space,
+        "copied-raw-holder",
+        undefined,
+        write,
+      );
+      output.setRawUntyped(raw);
+      expect((await write.commit()).ok).toBeDefined();
+      expect(
+        getCfcReferenceProvenance(
+          output.withTx(undefined).key("links", "0").resolveAsCell(),
+        )?.confidentiality,
+      ).toContainEqual(selection);
+    });
+
+    it(`isolates stored raw reference acquisitions across source handles (frozen=${frozen})`, async () => {
+      const { target } = await selectedTarget();
+      const holder = await seed("shared-raw-holder", [target.getAsLink()], [{
+        path: ["0"],
+        observes: "followRef",
+        origin: "link",
+        label: {},
+      }]);
+      const selectedHolder = await seed(
+        "selected-raw-holder",
+        holder.getAsLink(),
+        [{
+          path: [],
+          observes: "followRef",
+          origin: "link",
+          label: { confidentiality: [selection] },
+        }],
+      );
+      const tx = runtime.edit();
+      const privateHandle = selectedHolder.withTx(tx).resolveAsCell();
+      const privateRaw = (frozen
+        ? privateHandle.getRawUntyped()
+        : privateHandle.getRawUntyped({ frozen: false })) as FabricValue[];
+      const publicRaw = (frozen
+        ? holder.withTx(tx).getRawUntyped()
+        : holder.withTx(tx).getRawUntyped({ frozen: false })) as FabricValue[];
+      tx.abort();
+      expect(privateRaw[0]).not.toBe(publicRaw[0]);
+      expect(getCfcReferenceProvenance(privateRaw[0])?.confidentiality)
+        .toContainEqual(selection);
+      expect(getCfcReferenceProvenance(publicRaw[0])?.confidentiality)
+        .not.toContainEqual(selection);
+    });
+  }
+
+  it("retains stored reference history when setup replaces another argument slot", async () => {
+    const { selected } = await selectedTarget();
+    const pattern = trustExecutable(runtime, {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          links: { type: "array", items: {} },
+        },
+      },
+      resultSchema: { type: "string" },
+      result: "ready",
+      nodes: [],
+    } as Pattern);
+    const tx = runtime.edit();
+    const result = runtime.getCell(space, "stored-slot-replay", undefined, tx);
+    runtime.setup(tx, pattern, {
+      title: "original",
+      links: [selected.withTx(tx).resolveAsCell().getAsLink()],
+    }, result);
+    expect((await tx.commit()).ok).toBeDefined();
+
+    const replay = runtime.edit();
+    runtime.setup(
+      replay,
+      pattern,
+      { title: "replacement" },
+      result.withTx(replay),
+    );
+    expect((await replay.commit()).ok).toBeDefined();
+    const argument = runtime.getCellFromLink(
+      getMetaLink(result.withTx(undefined), "argument")!,
+    );
+    expect(argument.key("title").get()).toBe("replacement");
+    expect(
+      getCfcReferenceProvenance(argument.key("links", "0").resolveAsCell())
+        ?.confidentiality,
+    ).toContainEqual(selection);
+  });
+
   it("refuses legacy acquisition history while allowing independent host addresses", async () => {
     const { target } = await selectedTarget();
     const legacy = await seed("legacy", target.getAsLink(), [], 1);

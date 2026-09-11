@@ -32,7 +32,6 @@ import {
   codecOf,
   NULL_LIVE_ENVIRONMENT,
 } from "@commonfabric/data-model/codec-common";
-import { isFabricDataUri } from "@commonfabric/data-model/codec-data-uri";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import {
   deepFrozenCloneAndInternSchema,
@@ -3327,10 +3326,10 @@ export class CellImpl<T extends FabricValue>
    * snapshot; pass `{ frozen: false }` for a mutable deep copy.
    *
    * **Frozenness contract:** Defaults to `{ frozen: true }`, returning a
-   * deep-frozen `FabricValue` snapshot via `cloneIfNecessary()`. The underlying
-   * storage already holds a deep-frozen tree, so the clone is typically a
-   * no-op. The `{ frozen: false }` variant returns a fresh mutable deep copy
-   * and never aliases storage state.
+   * deep-frozen `FabricValue` snapshot. Precise CFC reads isolate reference
+   * carriers and retain the acquisition at every stored reference slot. The
+   * `{ frozen: false }` variant returns a fresh mutable deep copy and never
+   * aliases storage state.
    */
   getRaw(options?: RawCellReadOptions): Immutable<T> | undefined {
     return this.getRawUntyped(options) as Immutable<T> | undefined;
@@ -3367,12 +3366,11 @@ export class CellImpl<T extends FabricValue>
     // Deep-copy with desired frozenness, without native unwrapping — getRaw()
     // and getRawUntyped() return fabric-layer values, not native ("wild
     // west") values.
-    const preciseImmutable = tx.getCfcState().flowLabelsMode === "persist" &&
-      isFabricDataUri(resolved.id);
-    // Decoded URI objects can be shared by equal-byte carriers. Each live
-    // acquisition needs isolated objects before its private proofs attach.
+    const precise = tx.getCfcState().flowLabelsMode === "persist";
+    // Stored and decoded URI objects can be shared by equal-byte carriers.
+    // Each live acquisition needs isolated objects for its private proofs.
     const result = cloneIfNecessary(value, {
-      frozen: preciseImmutable ? false : frozen,
+      frozen: precise ? false : frozen,
     });
     const acquireReference = (rawLink: SigilLink, path: readonly string[]) => {
       acquireRawReference(
@@ -3390,9 +3388,9 @@ export class CellImpl<T extends FabricValue>
         "read",
       );
     };
-    if (preciseImmutable) {
-      // The URI contains bytes only. Restore each decoded reference from the
-      // live immutable carrier's exact source slot, preserving mutable reads.
+    if (precise) {
+      // Raw snapshots retain each reference's exact source acquisition so
+      // copying an enclosing record preserves the nested references' policy.
       convertCellsToLinks(result, {
         allowLinkFreeFabricInstances: true,
         transformLink: (_cell, _link, path) => {
@@ -3407,7 +3405,7 @@ export class CellImpl<T extends FabricValue>
     } else if (isLinkRef(result)) {
       acquireReference(result as SigilLink, []);
     }
-    return preciseImmutable && frozen ? deepFreeze(result) : result;
+    return precise && frozen ? deepFreeze(result) : result;
   }
 
   setRaw(value: (NoInfer<T> & FabricValue) | undefined): void {

@@ -26,6 +26,9 @@ schemas, with external references inlined for the immutable document. Eager and
 lazy schema reads that box inline array objects capture references at their
 original slots and rebase inherited scope caps onto the immutable result. A
 later target-label change is resolved on the next content observation.
+Raw reads acquire nested references from their exact stored slots and isolate
+the returned carriers from other reads. Replaying a partial argument update
+therefore retains the acquisition history of every untouched reference slot.
 Collection removals capture surviving references at their original slots before
 compacting indices; neither nested references nor their selection history become
 raw, unauthenticated links during that move.
