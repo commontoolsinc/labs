@@ -4,6 +4,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import { createNodeFactory } from "../../src/builder/module.ts";
+import { SpaceReplica } from "../../src/storage/v2.ts";
 import {
   collectionIndex,
   type CollectionIndexInput,
@@ -341,13 +342,31 @@ describe("collection-index", () => {
         restored.key("index").key("buckets").key(bucket).sink(() => {}),
       );
       expect(await second.start(restored)).toBe(true);
+      await second.idle();
       // The coordinator holds its resume reconciliation until each durable
-      // input has confirmed, through syncs it tracks in the storage manager's
-      // settled pool, and re-runs when they land. idle() waits for reactive
-      // quiescence only, so it can return between the confirmations and the
-      // re-run they schedule (docs/development/waiting-in-tests.md); the
-      // storage barrier is what covers the confirmations.
-      await second.storageManager.synced();
+      // input has confirmed, one round of syncs per input group, and re-runs
+      // when each round lands. idle() waits for reactive quiescence only, so
+      // it can return between a round's confirmations and the re-run they
+      // schedule (docs/development/waiting-in-tests.md). The repair the
+      // reconciliation makes is a write to the descriptor document, so a
+      // document sink is the event to wait on; a pull would force the keys
+      // enumeration this case expects not to run.
+      const indexCell = restored.key("index").resolveAsCell();
+      const hasKeyEntries = (value: unknown): boolean =>
+        value !== null && typeof value === "object" &&
+        Object.hasOwn(value, "keyEntries");
+      const repaired = Promise.withResolvers<void>();
+      if (hasKeyEntries(indexCell.getRawUntyped())) repaired.resolve();
+      cancellations.push(
+        (second.storageManager.open(signer.did()).replica as SpaceReplica)
+          .sinkDocument(
+            indexCell.getAsNormalizedFullLink().id,
+            (document) => {
+              if (hasKeyEntries(document?.value)) repaired.resolve();
+            },
+          ),
+      );
+      await repaired.promise;
       await second.idle();
       expect(keyRuns[1]).toBe(0);
       expect(restored.key("index").resolveAsCell().getRawUntyped())
