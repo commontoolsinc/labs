@@ -230,6 +230,23 @@ describe("engine-read-through", () => {
     return { clientResult, clientArg };
   };
 
+  /** Finds the authored write without including a later watermark commit. */
+  const authoredWriteSeq = (
+    engine: Engine.Engine,
+    fromSeq: number,
+    id: URI,
+  ): number => {
+    const writes = Engine.selectCommitsSince(engine, { fromSeq }).filter(
+      (commit) =>
+        commit.class === "authored" &&
+        commit.writes.some((write) =>
+          write.id === id && write.scopeKey === "space"
+        ),
+    );
+    expect(writes).toHaveLength(1);
+    return writes[0].seq;
+  };
+
   /** Commits `n` from the client and waits for the serving loop's derived
    * `total` to reach the client's subscription. */
   const deriveFromClient = async (
@@ -240,8 +257,13 @@ describe("engine-read-through", () => {
     const engine = await server.engineForSpace(space);
     const tx = clientRuntime.edit();
     clientArg.withTx(tx).set({ n });
+    const beforeCommit = Engine.serverSeq(engine);
     expect((await tx.commit()).error).toBeUndefined();
-    const authoredSeq = Engine.serverSeq(engine);
+    const authoredSeq = authoredWriteSeq(
+      engine,
+      beforeCommit,
+      clientArg.getAsNormalizedFullLink().id,
+    );
     await waitUntil(
       () => readWatermarkSeq(engine) >= authoredSeq,
       "watermark to reach the authored commit",
@@ -673,9 +695,10 @@ describe("engine-read-through", () => {
     });
     const creating = clientRuntime.edit();
     cell.withTx(creating).set({ made: true });
-    expect((await creating.commit()).error).toBeUndefined();
-    const authoredSeq = Engine.serverSeq(engine);
+    const beforeCommit = Engine.serverSeq(engine);
     const refreshesBefore = host.stats().storeRefreshes;
+    expect((await creating.commit()).error).toBeUndefined();
+    const authoredSeq = authoredWriteSeq(engine, beforeCommit, id);
     await waitUntil(
       () => readWatermarkSeq(engine) >= authoredSeq,
       "the watermark to cover the creating commit",
