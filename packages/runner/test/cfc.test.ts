@@ -1240,6 +1240,30 @@ describe("hoistNestedCfcSchemaDefs()", () => {
     });
   });
 
+  it("chooses a lifted name apart from one a ref already uses", () => {
+    // The ref at `stale` resolved nothing under the stored layout, and it
+    // keeps resolving nothing: the lift does not hand it a definition.
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        stale: { $ref: "#/$defs/__cfc_legacy_scope_0_Inner" },
+        nested: {
+          $ref: "#/$defs/Inner",
+          $defs: { Inner: { type: "string" } },
+        },
+      },
+    };
+
+    expect(hoistNestedCfcSchemaDefs(schema)).toEqual({
+      type: "object",
+      properties: {
+        stale: { $ref: "#/$defs/__cfc_legacy_scope_0_Inner" },
+        nested: { $ref: "#/$defs/__cfc_legacy_scope_1_Inner" },
+      },
+      $defs: { __cfc_legacy_scope_1_Inner: { type: "string" } },
+    });
+  });
+
   it("returns a document whose root `$defs` is not a map as the same object", () => {
     const schema = {
       type: "object",

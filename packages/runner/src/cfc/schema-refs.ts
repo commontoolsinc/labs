@@ -315,12 +315,18 @@ export const hoistNestedCfcSchemaDefs = (schema: JSONSchema): JSONSchema => {
   const merged = new Map<string, JSONSchema>(
     rootDefinitions === undefined ? [] : Object.entries(rootDefinitions),
   );
-  // Every name any map in the document declares. A lifted name is chosen
-  // apart from all of them, so that no scope lifted later declares the name
-  // a ref below it was already rewritten to.
+  // Every name any map in the document declares, and every name a local ref
+  // in it names. A lifted name is chosen apart from all of them, so that no
+  // scope lifted later declares the name a ref below it was already rewritten
+  // to, and no ref that resolved nothing comes to resolve a lifted
+  // definition.
   const reserved = new Set(merged.keys());
   const collect = (fragment: JSONSchema): JSONSchema => {
     if (!isObjectOrArray(fragment)) return fragment;
+    if (typeof fragment.$ref === "string") {
+      const name = localDefinitionName(fragment.$ref);
+      if (name !== undefined) reserved.add(name);
+    }
     if (isObjectNotArray(fragment.$defs)) {
       for (const [name, definition] of Object.entries(fragment.$defs)) {
         reserved.add(name);
