@@ -3,8 +3,11 @@ import {
   Default,
   generateObject,
   handler,
+  hasError,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   UI,
   type VNode,
   Writable,
@@ -645,9 +648,16 @@ export default pattern<Input, Output>(
       return parts.filter(Boolean).join("\n\n");
     });
 
-    const aiResponse = generateObject<AIResponseSuggestion>({
+    const aiResponseRequest = generateObject<AIResponseSuggestion>({
       system: RESPONSE_SYSTEM_PROMPT,
       prompt: currentExpandedPrompt,
+    });
+    const aiResponse = resultOf(aiResponseRequest);
+    const suggestedResponse = computed(() => {
+      if (isPending(aiResponseRequest) || hasError(aiResponseRequest)) {
+        return "";
+      }
+      return aiResponse.suggestedResponse ?? "";
     });
 
     // ==========================================================================
@@ -1130,7 +1140,7 @@ export default pattern<Input, Output>(
                       </cf-button>
                     </div>
 
-                    {/* Response content - reads aiResponse directly at pattern body level */}
+                    {/* Response content uses the guarded success-only response. */}
                     <div
                       style={{
                         fontSize: "14px",
@@ -1138,14 +1148,14 @@ export default pattern<Input, Output>(
                         marginBottom: "16px",
                       }}
                     >
-                      {aiResponse.pending
+                      {isPending(aiResponseRequest)
                         ? (
                           <span style={{ color: "#888" }}>
                             Generating response...
                           </span>
                         )
-                        : aiResponse.result?.suggestedResponse
-                        ? <div>{aiResponse.result?.suggestedResponse}</div>
+                        : suggestedResponse
+                        ? <div>{suggestedResponse}</div>
                         : (
                           <span style={{ color: "#888" }}>
                             Expand a comment to generate an AI response
@@ -1160,17 +1170,15 @@ export default pattern<Input, Output>(
                       <cf-button
                         variant="primary"
                         type="button"
-                        disabled={aiResponse.pending ||
-                          !aiResponse.result?.suggestedResponse}
+                        disabled={isPending(aiResponseRequest) ||
+                          hasError(aiResponseRequest) || !suggestedResponse}
                         onClick={prepareReply({
                           docUrl: docUrlCell,
                           comments: commentsCell,
                           commentId: computed(() =>
                             expandedCommentIdCell.get() ?? ""
                           ),
-                          responseText: computed(() =>
-                            aiResponse.result?.suggestedResponse ?? ""
-                          ),
+                          responseText: computed(() => suggestedResponse),
                           resolve: false,
                           pendingAction: pendingActionCell,
                         })}
@@ -1180,17 +1188,15 @@ export default pattern<Input, Output>(
                       <cf-button
                         variant="secondary"
                         type="button"
-                        disabled={aiResponse.pending ||
-                          !aiResponse.result?.suggestedResponse}
+                        disabled={isPending(aiResponseRequest) ||
+                          hasError(aiResponseRequest) || !suggestedResponse}
                         onClick={prepareReply({
                           docUrl: docUrlCell,
                           comments: commentsCell,
                           commentId: computed(() =>
                             expandedCommentIdCell.get() ?? ""
                           ),
-                          responseText: computed(() =>
-                            aiResponse.result?.suggestedResponse ?? ""
-                          ),
+                          responseText: computed(() => suggestedResponse),
                           resolve: true,
                           pendingAction: pendingActionCell,
                         })}

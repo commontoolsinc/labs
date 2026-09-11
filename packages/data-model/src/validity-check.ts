@@ -25,6 +25,7 @@ import { isPlainObject, unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
 import { BaseFabricInstance } from "./fabric-bases/BaseFabricInstance.ts";
 import { BaseFabricPrimitive } from "./fabric-bases/BaseFabricPrimitive.ts";
+import { isCanonicalDataUnavailable } from "./fabric-instances/data-unavailable-brand.ts";
 import {
   type FabricNativeObject,
   type FabricPlainObject,
@@ -59,6 +60,11 @@ export function isValidFabricValueLayer(
 
     case "object": {
       if (value === null) {
+        return true;
+      }
+      // Split bundles can duplicate the FabricSpecialObject base while the
+      // canonical DataUnavailable private brand remains shared globally.
+      if (isCanonicalDataUnavailable(value)) {
         return true;
       }
       // `FabricSpecialObject` -- already a valid `FabricValue`.

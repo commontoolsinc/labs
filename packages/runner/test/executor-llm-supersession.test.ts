@@ -3,6 +3,10 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import {
+  type DataUnavailableVariant,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
 import { LLMClient, type LLMResponse } from "@commonfabric/llm";
 import { resolveScopeKey } from "@commonfabric/memory/v2";
@@ -33,7 +37,7 @@ type View = {
   result?: unknown;
 
   /** Streaming text. */
-  partial?: string;
+  partial?: string | DataUnavailableVariant;
 
   /** Settled model failure. */
   error?: string;
@@ -290,7 +294,14 @@ export default pattern<{ prompt: string }, { output: any }>(({ prompt }) => ({
             const pending = Engine.readState(engine, target)?.document
               ?.value as View;
             expect(pending.pending).toBe(true);
-            expect(pending.partial).toBeUndefined();
+            if (builtin === "llm") {
+              expect(pending.partial).toBeUndefined();
+            } else {
+              expect(
+                isDataUnavailable(pending.partial) &&
+                  pending.partial.reason === "pending",
+              ).toBe(true);
+            }
             const current = returnToA ? 0 : 1;
             const stale = returnToA ? 1 : 0;
             if (fails) {
@@ -316,8 +327,19 @@ export default pattern<{ prompt: string }, { output: any }>(({ prompt }) => ({
             expect(errors).toEqual([]);
             expect(actual.pending).toBe(false);
             if (fails) {
-              expect(actual.error).toBe(`${returnToA ? "A" : "B"}-failure`);
-              expect(actual.result).toBeUndefined();
+              const message = `${returnToA ? "A" : "B"}-failure`;
+              expect(actual.error).toBe(message);
+              if (builtin === "llm") {
+                expect(actual.result).toBeUndefined();
+              } else {
+                expect(isDataUnavailable(actual.result)).toBe(true);
+                if (isDataUnavailable(actual.result)) {
+                  expect(actual.result.reason).toBe("error");
+                  if (actual.result.reason === "error") {
+                    expect(actual.result.error.message).toBe(message);
+                  }
+                }
+              }
             } else {
               expect(actual.error).toBeUndefined();
               const wanted = `${returnToA ? "A" : "B"}-result`;

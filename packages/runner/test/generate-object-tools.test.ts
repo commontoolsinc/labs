@@ -14,7 +14,12 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commonfabric/api";
 import { cfcAtom } from "@commonfabric/api/cfc";
+import {
+  DataUnavailable,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import {
   addMockObjectResponse,
   addMockResponse,
@@ -27,6 +32,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { defer } from "@commonfabric/utils/defer";
 
 import { createBuilder } from "../src/builder/factory.ts";
+import { generateObjectState } from "../src/builder/built-in.ts";
 import type { Cell, FactoryInput, JSONSchema } from "../src/builder/types.ts";
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
@@ -60,7 +66,8 @@ describe("generateObject with tools", () => {
   let patternTool: ReturnType<
     typeof createBuilder
   >["commonfabric"]["patternTool"];
-  let generateObject: ReturnType<
+  let generateObject: typeof generateObjectState;
+  let registeredGenerateObject: ReturnType<
     typeof createBuilder
   >["commonfabric"]["generateObject"];
   let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
@@ -84,13 +91,14 @@ describe("generateObject with tools", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     ({
       pattern,
-      generateObject,
+      generateObject: registeredGenerateObject,
       handler,
       Cell,
       lift,
       patternTool,
       str,
     } = commonfabric);
+    generateObject = generateObjectState;
     dummyPattern = pattern(() => ({}), { type: "object" });
   });
 
@@ -343,7 +351,12 @@ describe("generateObject with tools", () => {
         const result = generateObject({
           prompt: testPrompt,
           schema: resultSchema,
-          tools: {},
+          tools: {
+            dummy: {
+              description: "Force the tool-calling path",
+              pattern: dummyPattern,
+            },
+          },
         });
         return result;
       },
@@ -363,8 +376,10 @@ describe("generateObject with tools", () => {
 
     // Should handle the error gracefully
     expect(result.key("pending").get()).toBe(false);
-    // Result should be undefined after error
-    expect(result.key("result").get()).toBeUndefined();
+    const unavailable = result.key("result").resolveAsCell()
+      .getRaw() as DataUnavailable;
+    expect(unavailable.reason).toBe("error");
+    expect(unavailable.error?.message).toContain("presentResult");
     expect(typeof result.key("error").get()).toBe("string");
   });
 
@@ -1762,7 +1777,7 @@ describe("generateObject with tools", () => {
         type: "string",
         ifc: { confidentiality: [promptRisk, promptInfluence] },
       });
-      return commonfabric.generateObject({
+      return commonfabric.generateObjectStream({
         prompt: "schema-sanitize-generateObject",
         schema: resultSchema,
         context: { briefing: briefing as any },
@@ -1783,11 +1798,15 @@ describe("generateObject with tools", () => {
       await tx.commit();
 
       const generatedResult = patternOutputCell(resultCell, testPattern);
-      await waitForLlmSettled(runtime, generatedResult);
+      await waitForCellValue(
+        runtime,
+        generatedResult,
+        (value) => value !== undefined && !isDataUnavailable(value),
+      );
 
       const liveResult = generatedResult.withTx();
       await liveResult.sync();
-      const resolvedResult = liveResult.key("result").resolveAsCell();
+      const resolvedResult = liveResult.resolveAsCell();
       expect(resolvedResult.get()).toEqual({
         action: "reject",
         approved: false,
@@ -2365,7 +2384,7 @@ describe("generateObject with tools", () => {
     );
 
     const testPattern = pattern<Record<string, never>>(() =>
-      generateObject({
+      registeredGenerateObject({
         prompt: "parent-in-flight",
         schema: parentSchema,
         tools: {
@@ -2395,11 +2414,18 @@ describe("generateObject with tools", () => {
       expect(capturedDelegateOutput).toBeUndefined();
 
       held.resolve();
-      await waitForLlmSettled(runtime, result);
+      const settledResult = await waitForCellValue<{ ok: boolean }>(
+        runtime,
+        result,
+        (value) =>
+          !isDataUnavailable(value) ||
+          value.reason === "error" ||
+          value.reason === "schema-mismatch",
+      );
 
       expect(capturedDelegateOutput).toMatchObject({ type: "json" });
       expect(JSON.stringify(capturedDelegateOutput)).toContain("approved");
-      expect(result.key("result").get()).toEqual({ ok: true });
+      expect(settledResult).toEqual({ ok: true });
     } finally {
       setMockResponseGate(undefined);
     }

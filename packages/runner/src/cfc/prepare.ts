@@ -24,6 +24,7 @@ import {
   refuseFabricInstance,
   valueEqual,
 } from "@commonfabric/data-model";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { STREAM_ENTRIES_DOC_PREFIX } from "@commonfabric/memory/v2";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
@@ -2063,12 +2064,20 @@ export const flowReadExcluded = (
 // non-link leaf (string, number, boolean, null) makes the value content.
 // Such writes get `structure` (shape-only) stamps instead of covering
 // `derived` ones — see `pureLinkContainerPaths`.
-// A `FabricPrimitive` is a content leaf like any other: its state is private,
-// so enumerating it finds no members and would classify a byte blob as
-// pure structure. A `FabricInstance` is refused rather than classified.
+// A `FabricSpecialObject` is a content leaf like any other: its state is
+// private, so enumerating it finds no members and would classify a byte blob
+// or an unavailable-result marker as pure structure. This classifier has a
+// complete answer for that case without walking the private state: no special
+// object is pure link structure.
 const isPureLinkStructure = (value: unknown): boolean => {
   if (value === undefined) return true;
   if (isPrimitiveCellLink(value)) return true;
+  if (
+    isDataUnavailable(value) || value instanceof FabricInstance ||
+    value instanceof FabricPrimitive
+  ) {
+    return false;
+  }
   if (Array.isArray(value)) {
     return value.every((member) => isPureLinkStructure(member));
   }
@@ -2095,6 +2104,12 @@ const pureLinkContainerPaths = (
   out: (readonly string[])[],
 ): void => {
   if (isPrimitiveCellLink(value) || value === undefined) {
+    return;
+  }
+  if (
+    isDataUnavailable(value) || value instanceof FabricInstance ||
+    value instanceof FabricPrimitive
+  ) {
     return;
   }
   if (Array.isArray(value)) {
@@ -3447,10 +3462,13 @@ const policySchemaMatchesValue = (
   // `FabricLink` out of the walk question's way as well; a modern argument
   // link arriving here is what makes that load-bearing rather than tidy.
   //
-  // A `FabricPrimitive` carries no property for a `properties` condition to
-  // read, so it falls past this arm.
+  // A `FabricSpecialObject` carries no property for a `properties` condition
+  // to read, so it falls past this arm. `DataUnavailable` is a FabricInstance
+  // that can legitimately reach a policy boundary as an atomic control value;
+  // asking the strict structural-walk predicate about it would throw instead
+  // of evaluating the surrounding write policy.
   if (
-    !isPrimitiveCellLink(value) && isWalkableObjectOrArray(value) &&
+    !isPrimitiveCellLink(value) && isKeyableObjectOrArray(value) &&
     isObjectOrArray(schema.properties)
   ) {
     return Object.entries(schema.properties).every(([key, childSchema]) =>

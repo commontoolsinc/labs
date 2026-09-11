@@ -90,6 +90,7 @@ export type {
   FabricExecPlainObject,
   FabricExecValue,
   FabricValue,
+  FactoryCallInput,
   FactoryInput,
   FsProjection,
   Handler,
@@ -134,6 +135,8 @@ export type {
   UiActionProps,
   UiDisclosureProps,
   UiPromptSlotProps,
+  UnavailableInputPolicy,
+  UnavailableInputPolicyEntry,
   UnwrapCell,
   VNode,
 } from "@commonfabric/api";
@@ -168,7 +171,14 @@ export function isStreamValue(value: unknown): value is StreamValue {
 
 declare module "@commonfabric/api" {
   export interface Module {
-    type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
+    type:
+      | "ref"
+      | "javascript"
+      | "javascript-availability"
+      | "pattern"
+      | "raw"
+      | "isolated"
+      | "passthrough";
     implementation?: ((...args: any[]) => any) | Pattern | string;
 
     /**
@@ -445,8 +455,10 @@ type IntentionallyUnrequired =
   | "CELL_INNER_TYPE"
   | "CELL_LIKE"
   | "CELL_RESULT_TYPE"
+  | "COMPILE_RESULT"
   | "DEFAULT_MARKER"
   | "FRAMEWORK_PROVIDED_MARKER"
+  | "PARTIAL_RESULT"
   | "SCOPE_BRAND"
   | "SQLITE_DB_BRAND"
   // The CFC authoring vocabulary. `packages/api/index.ts` re-exports the types

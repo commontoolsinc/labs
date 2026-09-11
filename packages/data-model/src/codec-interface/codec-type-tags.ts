@@ -55,6 +55,9 @@ export const CODEC_TYPE_TAGS = Object.freeze(
     /** Constant for class `FabricError`. */
     Error: "Error@1",
 
+    /** Constant for class `DataUnavailable`. */
+    DataUnavailable: "DataUnavailable@1",
+
     /** Constant for class `ProblematicValue`. */
     Problematic: "Problematic@1",
 

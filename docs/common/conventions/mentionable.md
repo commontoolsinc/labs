@@ -93,7 +93,8 @@ Patterns can discover mentionables in the current space using `wish()`:
 
 ```tsx
 // Shown inside a pattern body.
-const mentionable = wish<MentionablePiece[]>({ query: "#mentionable" }).result;
+const mentionableWish = wish<MentionablePiece[]>({ query: "#mentionable" });
+const mentionable = resultOf(mentionableWish.result);
 ```
 
 Or with the `scope` parameter:
@@ -117,7 +118,8 @@ Pass the mentionable cell to `cf-prompt-input` via the `$mentionable` attribute:
 
 ```tsx
 // Shown inside a pattern body.
-const mentionable = wish<MentionablePiece[]>({ query: "#mentionable" }).result;
+const mentionableWish = wish<MentionablePiece[]>({ query: "#mentionable" });
+const mentionable = resultOf(mentionableWish.result);
 
 <cf-prompt-input
   $mentionable={mentionable}
@@ -135,7 +137,8 @@ Pass mentionable and mentioned cells to `cf-code-editor`:
 
 ```tsx
 // Shown inside a pattern body.
-const mentionable = wish<MentionablePiece[]>({ query: "#mentionable" }).result;
+const mentionableWish = wish<MentionablePiece[]>({ query: "#mentionable" });
+const mentionable = resultOf(mentionableWish.result);
 const mentioned = new Writable<MentionablePiece[]>([]);
 
 <cf-code-editor

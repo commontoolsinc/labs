@@ -43,6 +43,7 @@ import type {
 import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model-schema";
 import { FabricPrimitive } from "@commonfabric/data-model";
 import type { FabricValue } from "@commonfabric/data-model";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
@@ -165,7 +166,7 @@ const EXCLUDED_REJECTED: JSONSchema = Object.freeze({
   $comment: "rejectedProperty",
 });
 
-const isExcluded = (schema: JSONSchema): boolean =>
+export const isSchemaViewExcluded = (schema: JSONSchema): boolean =>
   isObjectOrArray(schema) &&
   (schema.$comment === "emptyProperties" ||
     schema.$comment === "missingProperty" ||
@@ -260,24 +261,6 @@ const branchWithOuter = (
  * the cell among the results (`mergeMatches`); collapsing to the branch is the
  * same answer, decided on the schema instead.
  */
-const preferAsCellBranch = (schema: JSONSchema): JSONSchema => {
-  if (!isObjectOrArray(schema)) return schema;
-  const branches = schema.anyOf ?? schema.oneOf;
-  if (!Array.isArray(branches)) return schema;
-  const resolved = branches.map((branch) => resolveBranch(branch, schema));
-  if (
-    resolved.some((branch) =>
-      ContextualFlowControl.getAsCellValues(branch).length > 0
-    )
-  ) {
-    const chosen = resolved.find((branch) =>
-      ContextualFlowControl.getAsCellValues(branch).length > 0
-    )!;
-    return branchWithOuter(schema, chosen);
-  }
-  return schema;
-};
-
 /**
  * A branch with its `$ref` resolved against the union's `$defs`, which take
  * the place of any the branch declares of its own; a union declaring none
@@ -328,9 +311,9 @@ const resolveBranch = (
  * surviving branch narrows to it; several merge the way an eager read merges
  * them; none is a mismatch.
  */
-const narrowForValue = (
+export const narrowSchemaForValue = (
   schema: JSONSchema | undefined,
-  value: FabricValue,
+  value: unknown,
 ): JSONSchema | undefined => {
   if (!isObjectOrArray(schema)) return schema;
   const rawBranches = schema.anyOf ?? schema.oneOf;
@@ -343,7 +326,13 @@ const narrowForValue = (
   // ref on its own but has no `$defs` to resolve it against, which is where the
   // "Unresolved $ref in schema" warnings come from.
   const branches = rawBranches.map((branch) => resolveBranch(branch, schema));
-  const matching = branches.filter((branch) => canBranchMatch(branch, value));
+  let matching = branches.filter((branch) => canBranchMatch(branch, value));
+  if (value === undefined) {
+    const valueBranches = matching.filter((branch) =>
+      ContextualFlowControl.getAsCellValues(branch).length === 0
+    );
+    if (valueBranches.length > 0) matching = valueBranches;
+  }
   if (matching.length === 0) return false;
   if (matching.length === 1) return branchWithOuter(schema, matching[0]);
   // Prefer a branch that declares `asCell`. An eager read evaluates every
@@ -364,7 +353,8 @@ const requiredKeys = (schema: JSONSchema | undefined): readonly string[] =>
     ? schema.required as string[]
     : [];
 
-const childSchema = (
+/** Returns the child schema a lazy schema view applies at `key`. */
+export const schemaViewChildSchema = (
   schema: JSONSchema | undefined,
   key: string,
 ): JSONSchema => {
@@ -377,7 +367,11 @@ const childSchema = (
     EXCLUDED_MISSING,
   );
   if (narrowed !== false || !isObjectOrArray(schema)) {
-    return preferAsCellBranch(narrowed);
+    // Keep compound child schemas intact until the child read has followed its
+    // link and can select a branch from the reached value. Choosing an asCell
+    // arm here would turn a linked `undefined` in `undefined | Cell<T>` into a
+    // handle before its actual value was known.
+    return narrowed;
   }
   // `schemaAtPath` decides which children exist from the schema's `type`, so a
   // schema that declares `properties` or `items` and omits `type` narrows to
@@ -493,7 +487,16 @@ export function materializeSchemaView(
     }
   }
 
-  const schema = narrowForValue(link.schema, value);
+  // Availability markers are control-flow leaves, not user containers. The
+  // eager traverser preserves them through any declared result schema; the
+  // lazy view must make the same decision before narrowing or container-shape
+  // checks can reject their object representation.
+  if (isDataUnavailable(value)) {
+    tx.readValueOrThrow(link, { nonRecursive: true });
+    return value;
+  }
+
+  const schema = narrowSchemaForValue(link.schema, value);
   if (schema === false) {
     return mismatch("no branch of the schema matches this value");
   }
@@ -588,7 +591,7 @@ export function materializeSchemaView(
   }
 
   for (const key of requiredKeys(schema)) {
-    const narrowed = childSchema(schema, key);
+    const narrowed = schemaViewChildSchema(schema, key);
     if (!Object.hasOwn(value, key)) {
       // A declared default stands in for an absent required key, exactly as it
       // does for an eager read.
@@ -600,7 +603,7 @@ export function materializeSchemaView(
     // `required` says the result has to hold it. An eager read voids the whole
     // object here rather than dropping the property, which is what it does for
     // the same schema on an optional one.
-    if (isExcluded(narrowed)) {
+    if (isSchemaViewExcluded(narrowed)) {
       return mismatch(
         `required property ${JSON.stringify(key)} is not selected`,
       );
@@ -625,12 +628,16 @@ const visibleKeys = (
   value: Record<string, FabricValue>,
 ): string[] => {
   const keys = Object.keys(value).filter((key) =>
-    !isExcluded(childSchema(schema, key))
+    !isSchemaViewExcluded(schemaViewChildSchema(schema, key))
   );
   if (isObjectOrArray(schema) && isObjectOrArray(schema.properties)) {
     for (const key of Object.keys(schema.properties)) {
       if (Object.hasOwn(value, key)) continue;
-      if (declaredDefault(childSchema(schema, key)) === undefined) continue;
+      if (
+        declaredDefault(schemaViewChildSchema(schema, key)) === undefined
+      ) {
+        continue;
+      }
       keys.push(key);
     }
   }
@@ -716,8 +723,8 @@ function createObjectView(
   const schema = link.schema;
   const required = new Set(requiredKeys(schema));
   const resolveChild = (key: string): unknown => {
-    const narrowed = childSchema(schema, key);
-    if (isExcluded(narrowed)) return undefined;
+    const narrowed = schemaViewChildSchema(schema, key);
+    if (isSchemaViewExcluded(narrowed)) return undefined;
     if (!Object.hasOwn(value, key)) {
       // Register the read even though there is nothing there. An absent key is
       // usually a computed that has not produced yet, and the reader has to run
@@ -838,8 +845,8 @@ function createArrayView(
   const schema = link.schema;
   const resolveElement = (index: number): unknown => {
     const key = String(index);
-    const itemSchema = childSchema(schema, key);
     const item = value[index];
+    const itemSchema = schemaViewChildSchema(schema, key);
     const slotLink: NormalizedFullLink = {
       ...link,
       path: [...link.path, key],

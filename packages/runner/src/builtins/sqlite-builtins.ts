@@ -6,13 +6,14 @@
 //
 // - sqliteDatabase yields a SqliteDb handle cell whose value is the SqliteDbRef
 //   ({ id, tables }); the id is the handle cell's own (causal, opaque) entity id.
-// - sqliteQuery issues a server read after commit and writes { pending, result,
-//   error } back; re-runs when its `reactOn`/inputs change (it is an effect).
+// - sqliteQuery issues a server read after commit and writes a direct
+//   availability-aware value plus legacy state fields for old compiled graphs;
+//   re-runs when its `reactOn`/inputs change (it is an effect).
 //
 // Writes are NOT here — they are the imperative `SqliteDb.exec` (cell.ts), which
 // folds a `sqlite` op into the caller's commit (atomic with cell writes), and
 // shares param encoding via `encodeSqliteParams` (cell.ts). See
-// docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md.
+// docs/specs/sqlite-builtin/01-api.md.
 //
 // `_cf_link` result columns ARE decoded here when the transformer injects a
 // `rowSchema` (asCell columns -> sigil objects; see decodeRowLinkColumns). The
@@ -20,6 +21,7 @@
 // this read path.
 
 import type { CfcAtom } from "@commonfabric/api/cfc";
+import { popFrame, pushFrame } from "../builder/pattern.ts";
 import { parseLink } from "../link-utils.ts";
 import { settleAbandonedRequest } from "./abandoned-request.ts";
 import {
@@ -31,7 +33,7 @@ import type { RawBuiltinResult } from "../module.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
-import type { CellScope } from "../builder/types.ts";
+import type { CellScope, JSONSchema } from "../builder/types.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
@@ -49,6 +51,10 @@ import {
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model";
+import {
+  DataUnavailable,
+  type DataUnavailableVariant,
+} from "@commonfabric/data-model/fabric-instances";
 import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import {
   columnDeclaresIfc,
@@ -58,6 +64,9 @@ import {
   sqliteRowToWire,
 } from "@commonfabric/memory/v2";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { selectUnavailableInput } from "../data-unavailability.ts";
+import type { SqliteQueryResult } from "@commonfabric/api";
+import { validateSchemaValue } from "../cfc/schema-sanitization.ts";
 
 import { type Cell, createCell, encodeSqliteParams } from "../cell.ts";
 import type { CfcConfClause } from "../cfc/clause.ts";
@@ -77,6 +86,11 @@ type WireParams = SqliteParamsWire | undefined;
 
 const errMsg = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+const queryError = (error: unknown): DataUnavailableVariant =>
+  DataUnavailable.error(
+    error instanceof Error ? error : new Error(String(error)),
+  );
 
 /**
  * The acting principal THIS run carries, for the sqlite builtins' identity
@@ -234,7 +248,7 @@ function staticConfidentialityOf(
 /**
  * Result columns to decode from a sigil-link STRING to a sigil-link OBJECT: the
  * keys the transformer-injected `rowSchema` marks `asCell`. A consumer reading
- * `q.result[i].<col>` under its own `<Row>` schema (Cell<T> -> asCell) then
+ * `resultOf(q).rows[i].<col>` under its own `<Row>` schema (Cell<T> -> asCell) then
  * rehydrates the object to a live Cell (link-resolution only recognizes link
  * OBJECTS, not JSON strings). Untyped queries inject no rowSchema -> no decode
  * (the column reads back as the raw sigil string; see sqlite-cf-link-decode.test).
@@ -250,6 +264,34 @@ function asCellColumnsFromRowSchema(rowSchema: unknown): string[] {
       Array.isArray((v as { asCell?: unknown }).asCell)
     )
     .map(([k]) => k);
+}
+
+/**
+ * The row schema describes the value a pattern observes after link
+ * materialization, while SQLite stores an asCell column as an encoded link and
+ * this builtin writes its decoded sigil object. Validate those transport
+ * objects as objects rather than following the field's `$ref` and requiring
+ * the linked value itself to be embedded in the row.
+ *
+ * SQLite rows are flat, so only direct row properties can name result columns.
+ */
+function rowSchemaForDecodedLinks(
+  rowSchema: JSONSchema,
+  linkColumns: readonly string[],
+): JSONSchema {
+  if (
+    typeof rowSchema !== "object" || rowSchema === null ||
+    linkColumns.length === 0 ||
+    typeof rowSchema.properties !== "object" ||
+    rowSchema.properties === null
+  ) {
+    return rowSchema;
+  }
+  const properties = { ...rowSchema.properties };
+  for (const column of linkColumns) {
+    properties[column] = { type: "object" };
+  }
+  return { ...rowSchema, properties };
 }
 
 /** Replace each asCell column's stored sigil-link STRING with the parsed sigil
@@ -474,7 +516,7 @@ export const growOnlyMergeDbTables = (
  * CFC read-labeling: from each result column's TRUE origin (table, column),
  * build a schema for the result-cell's `result` array whose per-field `ifc`
  * carries the origin column's declared confidentiality — so a consumer reading
- * `q.result[i].<col>` inherits it (re-establishing label propagation across the
+ * `resultOf(q).rows[i].<col>` inherits it (re-establishing label propagation across the
  * opaque SQLite boundary).
  *
  * A `null`-origin column (expression/literal/aggregate) does NOT refuse the
@@ -541,9 +583,18 @@ export function labelResultSchema(
     }
   }
   if (!anyLabeled) return {};
+  const rowsSchema = {
+    type: "array",
+    items: {
+      type: "object",
+      additionalProperties: true,
+      properties: itemProps,
+    },
+  };
   // `additionalProperties: true` at BOTH object levels so the write preserves
-  // every field it isn't labeling — the QueryState siblings (`pending`,
-  // `requestHash`, `error`) and every unlabeled result column — while the
+  // every field it isn't labeling — the legacy state siblings (`pending`,
+  // `requestHash`, `error`), the direct value channel, and every unlabeled
+  // result column — while the
   // declared columns carry their `ifc`. A partial schema would otherwise shape
   // those away.
   return {
@@ -551,12 +602,14 @@ export function labelResultSchema(
       type: "object",
       additionalProperties: true,
       properties: {
-        result: {
-          type: "array",
-          items: {
-            type: "object",
-            additionalProperties: true,
-            properties: itemProps,
+        // Legacy raw state reads this alias. New public queries read the same
+        // labeled row documents through value.rows.
+        result: rowsSchema,
+        value: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            rows: rowsSchema,
           },
         },
       },
@@ -727,7 +780,10 @@ export function sqliteDatabase(
 
 type QueryState = {
   pending: boolean;
-  result?: unknown[];
+  /** Direct availability-aware channel for newly compiled graphs. */
+  value?: SqliteQueryResult<unknown> | DataUnavailableVariant;
+  /** Legacy rows channel retained for persisted compiled graphs. */
+  result?: unknown;
   error?: unknown;
   requestHash?: string;
 
@@ -816,24 +872,33 @@ export function sqliteQuery(
     // cannot read, a result already stored, a query already in flight — leaves
     // the ending of an earlier query with nothing of this node's to write to.
     currentStaging = undefined;
-    const inputs = inputsCell.withTx(tx).get() as {
-      db?: unknown;
-      sql?: string;
-      params?: WireParams;
-      reactOn?: unknown;
-      // Transformer-injected from `db.query<Row>` / `sqliteQuery<Row>`; absent
-      // for untyped queries.
-      rowSchema?: unknown;
-      // CFC Phase 3: declared output ceiling + what to do when a row's label
-      // exceeds it ("fail" default | "skip"). The typed alternative is
-      // MaxConfidentiality<> on the Row schema (rowSchema.ifc).
-      maxConfidentiality?: CfcConfClause[];
-      onExceed?: unknown;
-      // CFC Phase 3.b: opt into read-time clearance — filter rows to those the
-      // acting reader may read (a declared existence release). Requires the
-      // touched rule-bearing table to permit it (rowLabelReadClearance).
-      readClearance?: unknown;
-    } | undefined;
+    const rawInputs = inputsCell.withTx(tx).getRaw();
+    const unavailableInput = selectUnavailableInput(rawInputs, {
+      runtime,
+      tx,
+      base: inputsCell,
+    });
+    const inputs =
+      (unavailableInput === undefined
+        ? inputsCell.withTx(tx).get()
+        : undefined) as {
+          db?: unknown;
+          sql?: string;
+          params?: WireParams;
+          reactOn?: unknown;
+          // Transformer-injected from `db.query<Row>` / `sqliteQuery<Row>`; absent
+          // for untyped queries.
+          rowSchema?: unknown;
+          // CFC Phase 3: declared output ceiling + what to do when a row's label
+          // exceeds it ("fail" default | "skip"). The typed alternative is
+          // MaxConfidentiality<> on the Row schema (rowSchema.ifc).
+          maxConfidentiality?: CfcConfClause[];
+          onExceed?: unknown;
+          // CFC Phase 3.b: opt into read-time clearance — filter rows to those the
+          // acting reader may read (a declared existence release). Requires the
+          // touched rule-bearing table to permit it (rowLabelReadClearance).
+          readClearance?: unknown;
+        } | undefined;
 
     // The query result holds rows from a scope-partitioned db, so it must be at
     // least as narrow as the db's scope; also honor any scope declared on the
@@ -870,7 +935,25 @@ export function sqliteQuery(
       resultScope = scope;
     }
 
-    if (!inputs?.db || typeof inputs.sql !== "string") return;
+    if (unavailableInput !== undefined) {
+      result.withTx(tx).set({
+        pending: unavailableInput.reason === "pending" ||
+          unavailableInput.reason === "syncing",
+        value: unavailableInput,
+        ...(unavailableInput.reason === "error"
+          ? { error: unavailableInput.error.message }
+          : {}),
+      });
+      return;
+    }
+
+    if (!inputs?.db || typeof inputs.sql !== "string") {
+      result.withTx(tx).set({
+        pending: false,
+        value: DataUnavailable.schemaMismatch(),
+      });
+      return;
+    }
 
     // A result read under the runtime's ceiling is this runtime's view of the
     // rows, and a runtime is one session, so the result has to be one this
@@ -911,7 +994,11 @@ export function sqliteQuery(
     try {
       db = readDbRef(inputs.db);
     } catch (error) {
-      result.withTx(tx).set({ pending: false, error: errMsg(error) });
+      result.withTx(tx).set({
+        pending: false,
+        value: queryError(error),
+        error: errMsg(error),
+      });
       return;
     }
     const linkCols = asCellColumnsFromRowSchema(inputs.rowSchema);
@@ -919,7 +1006,11 @@ export function sqliteQuery(
     try {
       params = encodeSqliteParams(inputs.sql, inputs.params);
     } catch (error) {
-      result.withTx(tx).set({ pending: false, error: errMsg(error) });
+      result.withTx(tx).set({
+        pending: false,
+        value: queryError(error),
+        error: errMsg(error),
+      });
       return;
     }
     // The acting reader of THIS run (OW53): the run-carried principal on a
@@ -1011,7 +1102,11 @@ export function sqliteQuery(
     if (decision === "dedupe") return;
     const staging = Symbol(hash);
     currentStaging = staging;
-    result.withTx(tx).set({ pending: true, requestHash: hash });
+    result.withTx(tx).set({
+      pending: true,
+      value: DataUnavailable.pending(),
+      requestHash: hash,
+    });
 
     const sql = inputs.sql;
     // Per-target dedupe key (stage-G round-2 headline): the bare
@@ -1081,6 +1176,9 @@ export function sqliteQuery(
               // scheduler's report of the dropped write.
               result.withTx(settleTx).set({
                 pending: false,
+                value: queryError(
+                  "sqliteQuery request was refused before it started",
+                ),
                 error: "sqliteQuery request was refused before it started",
                 requestHash: hash,
               });
@@ -1131,6 +1229,7 @@ export function sqliteQuery(
               if (result.withTx(wtx).get()?.requestHash !== hash) return;
               result.withTx(wtx).set({
                 pending: false,
+                value: queryError(error),
                 error,
                 requestHash: hash,
               });
@@ -1148,6 +1247,37 @@ export function sqliteQuery(
             // OBJECTS so a typed consumer's asCell schema rehydrates them to live
             // Cells (Piece A). Untyped queries (no rowSchema) keep raw strings.
             const rows = decodeRowLinkColumns(res.rows, linkCols);
+            if (
+              inputs.rowSchema !== undefined &&
+              (typeof inputs.rowSchema === "object" ||
+                typeof inputs.rowSchema === "boolean")
+            ) {
+              const rowSchema = rowSchemaForDecodedLinks(
+                inputs.rowSchema as JSONSchema,
+                linkCols,
+              );
+              const failure = rows.map((row) =>
+                validateSchemaValue(rowSchema, row)
+              ).find((item) => item !== undefined);
+              if (failure !== undefined) {
+                const wrote = await runtime.editWithRetry((wtx) => {
+                  markEffectCompletion(wtx, effectKey);
+                  applyRunIdentity(wtx);
+                  if (result.withTx(wtx).get()?.requestHash !== hash) return;
+                  result.withTx(wtx).set({
+                    pending: false,
+                    value: DataUnavailable.schemaMismatch(),
+                    requestHash: hash,
+                  });
+                });
+                if (wrote.error) {
+                  await failQuery(
+                    wrote.error.message ?? "sqlite: result write failed",
+                  );
+                }
+                return;
+              }
+            }
             // CFC read-labeling (per-column static `ifc`): when the db declares
             // `ifc`, the server returns each result column's TRUE origin; map it to
             // the column's confidentiality and write the rows under a schema that
@@ -1288,19 +1418,29 @@ export function sqliteQuery(
             );
             const needsEntryRowSchema = resultRows.some(Array.isArray) &&
               (labelSchema !== undefined || anyPerRow);
+            const entryRowsSchema = {
+              type: "array",
+              prefixItems: rowSchemas,
+              items: false,
+            } as const;
             const writeSchema = needsEntryRowSchema
               ? {
                 type: "object",
                 additionalProperties: true,
                 properties: {
-                  result: {
-                    type: "array",
-                    prefixItems: rowSchemas,
-                    items: false,
+                  result: entryRowsSchema,
+                  value: {
+                    type: "object",
+                    additionalProperties: true,
+                    properties: { rows: entryRowsSchema },
                   },
                 },
               }
               : labelSchema;
+            const legacyRowsLink = result.key("value").key("rows").getAsLink({
+              base: result,
+              includeSchema: true,
+            });
             const wrote = await runtime.editWithRetry((wtx) => {
               markEffectCompletion(wtx, effectKey);
               applyRunIdentity(wtx);
@@ -1322,8 +1462,8 @@ export function sqliteQuery(
                   ...base,
                   id: toURI(createRef({ id: i }, {
                     parent: { id: base.id, space: base.space },
-                    path: [...base.path, "result"],
-                    context: "sqlite-entry-row",
+                    path: [...base.path, "value", "rows"],
+                    context: `sqlite-entry-row:${hash}`,
                   })),
                   path: [],
                   schema: {
@@ -1337,15 +1477,36 @@ export function sqliteQuery(
                 rowCell.set(row);
                 return rowCell;
               });
-              const target = writeSchema
-                ? result.asSchema(writeSchema).withTx(wtx)
-                : result.withTx(wtx);
-              target.set({
-                pending: false,
-                result: storedRows,
-                requestHash: hash,
-                ...(withheld !== undefined ? { withheld } : {}),
+              // The async writeback has no builder frame of its own. Supply a
+              // request-stable internal frame so the ordinary Cell.set array
+              // walk gives object rows entity identities without inheriting
+              // an unrelated runtime's ambient frame. A new request gets new
+              // row docs, allowing its data-derived label to change.
+              const rowFrame = pushFrame({
+                cause: `sqlite-query-rows:${hash}`,
+                runtime,
+                tx: wtx,
+                space: base.space,
               });
+              try {
+                const target = writeSchema
+                  ? result.asSchema(writeSchema).withTx(wtx)
+                  : result.withTx(wtx);
+                target.set({
+                  pending: false,
+                  value: {
+                    rows: storedRows,
+                    ...(withheld !== undefined ? { withheld } : {}),
+                  },
+                  // Persist one row collection. The legacy channel resolves this
+                  // relative link, while the public channel reads value.rows.
+                  result: legacyRowsLink,
+                  requestHash: hash,
+                  ...(withheld !== undefined ? { withheld } : {}),
+                });
+              } finally {
+                popFrame(rowFrame);
+              }
               // Per-row label attachment (CFC Phase 3): object rows split into
               // entity docs. Labeled entry-list rows are anchored explicitly
               // because arrays otherwise remain inline. Both forms attach the
@@ -1357,7 +1518,8 @@ export function sqliteQuery(
                   if (!ifc) {
                     continue;
                   }
-                  const rowCell = result.key("result").key(i).withTx(wtx);
+                  const rowCell = result.key("value").key("rows").key(i)
+                    .withTx(wtx);
                   const raw = rowCell.getRaw();
                   const link = parseLink(raw);
                   if (!link?.id) {
@@ -1404,4 +1566,25 @@ export function sqliteQuery(
     });
   };
   return { action };
+}
+
+/** Direct structured-result module used by newly compiled graphs. */
+export function sqliteQueryResult(
+  inputsCell: Cell<any>,
+  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
+  addCancel: (cancel: () => void) => void,
+  cause: Cell<any>[],
+  parentCell: Cell<any>,
+  runtime: Runtime,
+  outputBinding?: NormalizedFullLink,
+): RawBuiltinResult {
+  return sqliteQuery(
+    inputsCell,
+    (tx, state: Cell<QueryState>) => sendResult(tx, state.key("value")),
+    addCancel,
+    cause,
+    parentCell,
+    runtime,
+    outputBinding,
+  );
 }

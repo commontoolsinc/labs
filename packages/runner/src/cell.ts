@@ -1,11 +1,13 @@
 import type {
   AnyBrandedCell,
+  AsyncResult,
   CollectionIndexData,
   CollectionIndexKey,
   CollectionIndexKeyEntry,
   GroupIndex,
   KeyIndex,
   ReadonlyCell,
+  SqliteQueryResult,
 } from "@commonfabric/api";
 import {
   assertValidFabricValueLayer,
@@ -30,6 +32,7 @@ import {
   entityRefFromString,
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
@@ -166,6 +169,8 @@ import {
   resolveSchema,
   schemaHasIfc,
   validateAndTransform,
+  type ValidateAndTransformResult,
+  validateAndTransformResult,
 } from "./schema.ts";
 import { isCellScope, narrowerScopeCap, normalizeCellScope } from "./scope.ts";
 import {
@@ -1340,6 +1345,19 @@ export class CellImpl<T extends FabricValue>
   }
 
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>> {
+    const result = this.getWithStatus({
+      ...options,
+      unavailableAsStatus: false,
+    });
+    return ("ok" in result ? result.ok : undefined) as Readonly<
+      StripDefaultBrand<T>
+    >;
+  }
+
+  getWithStatus(options?: {
+    traverseCells?: boolean;
+    unavailableAsStatus?: boolean;
+  }): ValidateAndTransformResult {
     if (!this.#synced) this.sync(); // No await, just kicking this off
 
     // Per-transaction read cache: within one ready transaction, repeatedly
@@ -1360,17 +1378,19 @@ export class CellImpl<T extends FabricValue>
       // invalidation is load-bearing: bypass the cache so a post-prepare read
       // still goes through readOrThrow() and invalidates the prepared digest.
       tx.getCfcState().prepare.status !== "prepared";
-    const variant = `${options?.traverseCells ?? false}|${this.#synced}`;
+    const variant = `${options?.traverseCells ?? false}|${this.#synced}|${
+      options?.unavailableAsStatus ?? true
+    }`;
     const cacheKey = cacheable ? this.#viewRefHash() : undefined;
     if (cacheable) {
       const cached = tx.getCachedReadResult!(cacheKey!, variant);
       if (cached !== undefined) {
-        return cached.value as Readonly<StripDefaultBrand<T>>;
+        return cached.value as ValidateAndTransformResult;
       }
     }
 
     logger.timeStart("cell", "get");
-    const value = validateAndTransform(
+    const result = validateAndTransformResult(
       this.runtime,
       this.tx,
       this.#viewRef,
@@ -1389,9 +1409,9 @@ export class CellImpl<T extends FabricValue>
       // Re-read `#_link`: validateAndTransform (via viewRef -> link) may have
       // run `#ensureLink()` and replaced it with the completed link object, which
       // is the identity subsequent get()s will hash.
-      tx.setCachedReadResult!(this.#viewRefHash(), variant, value);
+      tx.setCachedReadResult!(this.#viewRefHash(), variant, result);
     }
-    return value;
+    return result;
   }
 
   /**
@@ -1539,7 +1559,7 @@ export class CellImpl<T extends FabricValue>
    * Only valid on a `"sqlite"`-kind cell and inside a transaction (e.g. a
    * handler). Throws on an `undefined` param (it may be a value that isn't ready
    * yet — pass a resolved value, or `null` for SQL NULL). See
-   * docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md.
+   * docs/specs/sqlite-builtin/01-api.md.
    */
   exec(
     sql: string,
@@ -3626,9 +3646,7 @@ export class CellImpl<T extends FabricValue>
       readClearance?: boolean;
       scope?: CellScope;
     },
-  ): Reactive<
-    { pending: boolean; result?: Row[]; error?: unknown; withheld?: number }
-  > {
+  ): Reactive<AsyncResult<SqliteQueryResult<Row>>> {
     // The scope binds the node the way `.asScope` binds the builder export:
     // the runner folds the node's default scope into the result cell's link.
     // Validated at the boundary: an invalid scope must not reach the link.
@@ -3654,9 +3672,7 @@ export class CellImpl<T extends FabricValue>
       // options object) to the node so the builtin can decode `_cf_link`
       // columns. Read loosely — it is not part of the public options type.
       rowSchema: (options as { rowSchema?: unknown } | undefined)?.rowSchema,
-    }) as Reactive<
-      { pending: boolean; result?: Row[]; error?: unknown; withheld?: number }
-    >;
+    }) as Reactive<AsyncResult<SqliteQueryResult<Row>>>;
   }
 
   /**
@@ -4089,6 +4105,22 @@ export function setCellUnlinkedSpace(
   asCellImpl(cell)?.setUnlinkedSpace(space);
 }
 
+/**
+ * Runner-internal status-bearing schema read. Kept out of the pattern-visible
+ * Cell interface because traversal failure is an execution concern, not an
+ * authoring capability.
+ */
+export function getCellWithStatus(
+  cell: Cell<unknown>,
+  options?: { traverseCells?: boolean },
+): ValidateAndTransformResult {
+  const implementation = asCellImpl(cell);
+  if (implementation === undefined) {
+    throw new TypeError("Expected a runner Cell implementation");
+  }
+  return implementation.getWithStatus(options);
+}
+
 function asCellImpl(cell: unknown): CellImpl<FabricValue> | undefined {
   if (cell === null || cell === undefined) return undefined;
   const maybeToCell = (cell as { [toCell]?: () => Cell<unknown> })[toCell];
@@ -4431,12 +4463,13 @@ function validateStaticData(value: unknown): void {
       // enumerable own properties, so `Object.keys()` is empty and the
       // descent ends -- and a leaf holds no cell for this validation to find.
       //
-      // A `FabricInstance` is refused instead. Its codec contents can hold a
-      // `Cell`, which is exactly what this validation exists to reject, and
-      // those contents are not reachable by property name -- so passing one
-      // through _smuggles_ a cell into static data past the check meant to
-      // stop it. That is not a completeness gap; it is the validation failing
-      // open.
+      // A general `FabricInstance` is refused instead. Its codec contents can
+      // hold a `Cell`, which is exactly what this validation exists to reject,
+      // and those contents are not reachable by property name -- so passing
+      // one through _smuggles_ a cell into static data past the check meant to
+      // stop it. `DataUnavailable` is the narrow exception: it is a
+      // runtime-owned atomic control value whose codec state is closed over
+      // its fixed reason and, for the error variant, a frozen FabricError.
       //
       // Nothing reaches this in production today, de facto rather than by
       // construction: a `FabricError` is ungated and exposed to pattern
@@ -4445,7 +4478,7 @@ function validateStaticData(value: unknown): void {
       //
       // TODO(danfuzz): descend by codec-mediated traversal into instance
       // state, at which point this becomes a walk rather than a refusal.
-      if (obj instanceof FabricInstance) {
+      if (obj instanceof FabricInstance && !isDataUnavailable(obj)) {
         refuseFabricInstance(obj, `in \`Cell.of()\` static data`);
       }
 
@@ -4699,10 +4732,12 @@ function convertOneToLinks(
       // layer, so the two tests below run once over the pair.
       const layer = minted ?? (value as FabricValueLayer);
 
-      if (layer instanceof FabricPrimitive) {
+      if (layer instanceof FabricPrimitive || isDataUnavailable(layer)) {
         // An opaque scalar whose state lives in private fields, so it has zero
         // enumerable own properties and the object branch below would rebuild
-        // it from its (empty) entries as a bare `{}`. It leaves whole instead.
+        // it from its (empty) entries as a bare `{}`. `DataUnavailable` is the
+        // control-value counterpart: its codec state is closed and contains no
+        // live cell for this conversion to find. Both leave whole instead.
         return layer;
       } else if (layer instanceof FabricInstance) {
         // Not a leaf: a container reached by its codec contents, which this

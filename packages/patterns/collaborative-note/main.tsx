@@ -1,10 +1,12 @@
 import {
   computed,
   Default,
+  hasError,
   ifElse,
   NAME,
   pattern,
   type PerSpace,
+  resultOf,
   UI,
   type VNode,
   wish,
@@ -72,12 +74,18 @@ export default pattern<CollaborativeNoteInput, CollaborativeNoteOutput>(
       query: "#profile",
     });
     const profileNameWish = wish<string>({ query: "#profileName" });
+    const profile = hasError(profileWish.result)
+      ? undefined
+      : resultOf(profileWish.result);
+    const profileName = hasError(profileNameWish.result)
+      ? ""
+      : resultOf(profileNameWish.result);
     const participantName = computed(() =>
-      normalizePresenceParticipantName(profileNameWish.result ?? "")
+      normalizePresenceParticipantName(profileName)
     );
     const hasProfile = computed(() =>
-      normalizePresenceParticipantName(profileNameWish.result ?? "") !== "" &&
-      profileWish.result !== undefined
+      normalizePresenceParticipantName(profileName) !== "" &&
+      profile !== undefined
     );
 
     return {
@@ -99,7 +107,7 @@ export default pattern<CollaborativeNoteInput, CollaborativeNoteOutput>(
                 hasProfile,
                 <cf-profile-badge
                   variant="chip"
-                  $profile={profileWish.result}
+                  $profile={profile}
                 />,
                 <div id="collaborative-note-profile-setup">
                   {profileWish[UI]}

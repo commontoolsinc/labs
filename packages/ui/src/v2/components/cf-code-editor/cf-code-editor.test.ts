@@ -9,6 +9,7 @@ import {
 } from "@codemirror/autocomplete";
 import { EditorState, type TransactionSpec } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { NAME } from "@commonfabric/runner/shared";
 import { type CellHandle, type CellRef } from "@commonfabric/runtime-client";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
@@ -77,6 +78,29 @@ describe("CFCodeEditor", () => {
 
     expect(element.autofocus).toBe(true);
     expect(element.cursorPosition).toBe("end");
+  });
+
+  it("treats an unavailable mentionable list as empty while resolving IDs", async () => {
+    let mentionedUpdates = 0;
+    const mentionable = {
+      get: () => DataUnavailable.pending(),
+    };
+    const fakeThis = {
+      mentionable,
+      _resolvedPieceIds: new Map<number, string>(),
+      _resolveGeneration: 0,
+      _deferredMentionedContent: null,
+      _updateMentionedFromContent: () => mentionedUpdates++,
+      _refreshCompletion: () => {},
+    };
+    const resolvePieceIds = (CFCodeEditor.prototype as unknown as {
+      _resolvePieceIds(this: unknown): Promise<void>;
+    })._resolvePieceIds;
+
+    await resolvePieceIds.call(fakeThis);
+
+    expect(fakeThis._resolvedPieceIds.size).toBe(0);
+    expect(mentionedUpdates).toBe(1);
   });
 
   it("should focus the editor when autofocus becomes true", () => {

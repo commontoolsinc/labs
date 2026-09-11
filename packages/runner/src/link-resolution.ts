@@ -23,6 +23,7 @@ import {
 import type {
   IExtendedStorageTransaction,
   INotFoundError,
+  MemorySpace,
 } from "./storage/interface.ts";
 import { linkResolutionProbe } from "./storage/reactivity-log.ts";
 import { ContextualFlowControl } from "./cfc.ts";
@@ -240,15 +241,9 @@ const canFollowLinkHop = (
 const kickDocPull = (
   runtime: Runtime,
   link: NormalizedFullLink,
-  reserved: boolean,
+  sourceSpace?: MemorySpace,
 ): void => {
-  const mgr = runtime.storageManager;
-  const { space, id, scope } = link;
-  mgr.trackUntilSettled(
-    runtime.getCellFromLink(link).sync().catch(() => {
-      if (reserved) mgr.retractDocPullKick?.(space, id, scope);
-    }),
-  );
+  runtime.prefetchLinkedDoc(link, sourceSpace);
 };
 
 /**
@@ -413,7 +408,9 @@ const resolutionMemoVariant = (
  * @param tx - The storage transaction to read from.
  * @param link - The link to read.
  * @param lastNode - The last node in the path.
- * @param options - `preserveOverwrite` keeps the `overwrite` field if needed.
+ * @param options - `preserveOverwrite` keeps the `overwrite` field if needed;
+ *   `prefetch` can suppress cross-space target prefetch for a side-effect-free
+ *   topology verification pass.
  *   `onScopeBlocked` is invoked when a narrower-scope follow is blocked by a
  *   schema scope cap (the chain then terminates at an undefined-data link);
  *   it is the only way to distinguish that cut from a chain that genuinely
@@ -427,6 +424,7 @@ export function resolveLink(
   lastNode: LastNode = "value",
   options: {
     preserveOverwrite?: boolean;
+    prefetch?: boolean;
     onScopeBlocked?: () => void;
 
     /**
@@ -467,6 +465,7 @@ export function resolveLinkTracingDereferences(
   lastNode: LastNode = "value",
   options: {
     preserveOverwrite?: boolean;
+    prefetch?: boolean;
     onScopeBlocked?: () => void;
 
     /**
@@ -498,8 +497,10 @@ export function resolveLinkTracingDereferences(
         markIfcBearingLinkCrossing(tx, hop.space, hop.schema, hop.id);
       }
     }
-    for (const target of cached.crossSpaceTargets) {
-      kickDocPull(runtime, target, false);
+    if (options.prefetch !== false) {
+      for (const target of cached.crossSpaceTargets) {
+        kickDocPull(runtime, target);
+      }
     }
     return {
       // A copy, so a caller that mutates what it got back cannot reach into
@@ -732,6 +733,7 @@ export function resolveLinkTracingDereferences(
         });
       }
       const nextLink = nextHop.link;
+      const sourceSpace = link.space;
       const crossSpace = nextLink.space !== link.space;
       // The hop consumed `nextHop.depth` of our path and re-rooted the rest
       // under the target. Caps recorded for the consumed prefix have done
@@ -777,16 +779,13 @@ export function resolveLinkTracingDereferences(
           ? nextLink
           : { ...nextLink, scopeCaps: carriedCaps };
       }
-      const mgr = runtime.storageManager;
-      const reserved = !crossSpace &&
-        mgr.shouldPullDoc?.(link.space, link.id, link.scope) === true;
-      if (crossSpace || reserved) {
+      if (options.prefetch !== false) {
         // Only the cross-space kick is replayed. A same-space one is taken
         // against a reservation, so a second resolution of this link would not
         // kick it either — and if the sync fails and retracts the reservation,
         // the read that retries is in a later transaction with its own memo.
         if (crossSpace) crossSpaceTargets.push(link);
-        kickDocPull(runtime, link, reserved);
+        kickDocPull(runtime, link, sourceSpace);
       }
       addressKey = linkAddressKey(link);
     } else {

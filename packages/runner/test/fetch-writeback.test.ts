@@ -25,6 +25,10 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import {
+  DataUnavailable,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
@@ -330,10 +334,9 @@ describe("fetch builtins: a completion writeback the storage layer refuses", () 
         await fetchJsonAwaitingItsResponse("fetch-writeback-refused");
 
       // The writeback is the transaction that carries the response into the
-      // builtin's result document. The error writeback that follows does not
-      // write it — it clears a result that is already absent — so naming the
-      // document refuses the completion write and nothing else. One
-      // transaction matches, which the count states rather than assumes.
+      // builtin's result document. The error writeback that follows writes an
+      // error marker there, so it matches too, but only the first matching
+      // commit is refused.
       const refused = refuseCommits(
         (written) => written.includes(resultDocument),
         1,
@@ -341,14 +344,20 @@ describe("fetch builtins: a completion writeback the storage layer refuses", () 
       respond();
       await runtime.settled();
 
-      expect(refused()).toBe(1);
+      expect(refused()).toBe(2);
       // Not silence, and not a success: the response's failure to land is
       // reported as the node's error, which is retryable and input-driven.
       const error = result.key("error").get() as { message?: string };
       expect(error?.message).toBe(
         `fetchJson completion write failed: ${REFUSAL.message}`,
       );
-      expect(result.key("result").get()).toBeUndefined();
+      const unavailable = result.key("result").get();
+      expect(isDataUnavailable(unavailable)).toBe(true);
+      if (isDataUnavailable(unavailable) && unavailable.reason === "error") {
+        expect(unavailable.error.message).toBe(
+          `fetchJson completion write failed: ${REFUSAL.message}`,
+        );
+      }
       // The claim is released, so the node is not left showing a spinner.
       expect(result.key("pending").get()).toBe(false);
       // Nothing rejected: an error-shaped result is a completion. The count
@@ -391,9 +400,9 @@ describe("fetch builtins: a completion writeback the storage layer refuses", () 
         `fetchJson completion write failed: ${REFUSAL.message}`,
       );
       // Neither writeback landed, so the claim stays as the request left it:
-      // pending, with no result and no error recorded.
+      // pending, with its explicit pending marker and no error recorded.
       expect(result.key("pending").get()).toBe(true);
-      expect(result.key("result").get()).toBeUndefined();
+      expect(result.key("result").get()).toBe(DataUnavailable.pending());
       expect(result.key("error").get()).toBeUndefined();
     });
   });

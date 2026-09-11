@@ -28,6 +28,7 @@ import {
   JSONSchema,
   NAME,
   pattern,
+  resultOf,
   Stream,
   TILE_UI,
   toIndentedDebugString,
@@ -754,6 +755,7 @@ export default pattern<PatternInput, PatternOutput>(
     // Current time for due-date urgency calculations. Ticks once per minute so
     // day-count labels and overdue urgency refresh as time passes.
     const nowCell = wish<number>({ query: "#now/60" });
+    const nowCellValue = resultOf(nowCell.result);
 
     // ==========================================================================
     // DEDUPLICATION AND TRACKING
@@ -768,12 +770,8 @@ export default pattern<PatternInput, PatternOutput>(
       // Get due date overrides
       const overrides = dueDateOverrides.get() || {};
 
-      // Current time, resolved from the reactive #now cell. Skip work until it
-      // is available so urgency is never computed against a missing clock.
-      const nowMs = nowCell.result;
-      if (nowMs == null) {
-        return [];
-      }
+      // Current time, resolved from the reactive #now cell.
+      const nowMs = nowCellValue;
 
       // Sort emails by date (newest first) so we keep most recent data
       if (!rawAnalyses || rawAnalyses.length === 0) {

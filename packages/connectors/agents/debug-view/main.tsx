@@ -10,6 +10,7 @@ import {
   type OpaqueCell,
   pattern,
   RepresentsCurrentUser,
+  resultOf,
   Stream,
   UI,
   type VNode,
@@ -2208,7 +2209,7 @@ const DebugView = pattern<DebugInput, DebugOutput>(
                             <td title={session.updatedAt ?? undefined}>
                               {formatIdleFor(
                                 session.updatedAt,
-                                now.result ?? null,
+                                resultOf(now.result),
                               )}
                             </td>
                             <td

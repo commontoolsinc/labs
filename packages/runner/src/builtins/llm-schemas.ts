@@ -68,6 +68,7 @@ export const LLMDialogResultSchema = internSchema(
     properties: {
       pending: { type: "boolean", default: false },
       result: {},
+      error: { type: "string" },
       addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
       cancelGeneration: { asCell: ["stream"] },
       pinCell: {
@@ -294,9 +295,19 @@ export const GenerateTextResultSchema = internSchema(
       pending: { type: "boolean", default: false },
       // `result`/`partial` are model output; stamped at the writeback (llm.ts),
       // not declared here — see {@link LLM_DERIVED_RESULT_STAMP_SCHEMA}.
-      result: { type: "string" },
+      result: {
+        anyOf: [
+          { type: "string" },
+          // DataUnavailable is a FabricInstance object. The runtime owns the
+          // concrete brand/reason check; this arm keeps the control value
+          // materializable without admitting it as text.
+          { type: "object" },
+        ],
+      },
       error: { type: "string" },
-      partial: { type: "string" },
+      // The partial channel is pending until the first streamed chunk and
+      // carries the terminal unavailable marker when generation fails.
+      partial: { anyOf: [{ type: "string" }, { type: "object" }] },
       requestHash: { type: "string" },
       groundingSources: {
         type: "array",
@@ -310,6 +321,9 @@ export const GenerateTextResultSchema = internSchema(
         },
       },
     },
+    // Older persisted failures predate concrete unavailable result markers and
+    // contain only pending/error. Keep those states materializable; current
+    // producers still always write result for pending and terminal outcomes.
     required: ["pending"],
   } as const,
 );
@@ -327,11 +341,15 @@ export const GenerateObjectResultSchema = internSchema(
       result: { type: "object" },
       messages: { type: "array", items: LLMMessageSchema },
       error: { type: "string" },
-      partial: { type: "string" },
+      // Direct object generation may never emit partial text; in that case the
+      // channel remains pending while the final result becomes usable.
+      partial: { anyOf: [{ type: "string" }, { type: "object" }] },
       requestHash: { type: "string" },
       // No `groundingSources` here — generateObject's JSON-mode path returns
       // only the object, not the grounded response. Use generateText for sources.
     },
+    // See GenerateTextResultSchema: result is optional for persisted legacy
+    // failures, while current writes include a concrete value or marker.
     required: ["pending"],
   } as const,
 );

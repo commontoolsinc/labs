@@ -3,6 +3,7 @@ import {
   FabricSpecialObject,
   isWalkableObjectOrArray,
 } from "@commonfabric/data-model";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isSubschema } from "../schema-walk.ts";
 import { cfcOpaqueLinkForPath } from "./observation.ts";
@@ -443,7 +444,7 @@ const sanitizeValueWithOpaqueLinks = (
     });
     return { value: items, linkedStringCount, sealedPaths };
   }
-  if (value instanceof FabricSpecialObject) {
+  if (isDataUnavailable(value) || value instanceof FabricSpecialObject) {
     // Sealed, not shown and not walked. A special object holds its state
     // behind no property name, so the record arm below cannot measure it
     // against the schema the way the unmodeled-key policy measures a record --

@@ -350,6 +350,64 @@ export interface FabricErrorConstructor {
 
 export declare const FabricError: FabricErrorConstructor;
 
+/** Reasons why a runtime value is not currently usable by a computation. */
+export type DataUnavailableReason =
+  | "pending"
+  | "error"
+  | "syncing"
+  | "schema-mismatch";
+
+/**
+ * Pattern-visible surface of a runtime-owned unavailable-data marker.
+ *
+ * There is intentionally no public constructor. Plain objects with the same
+ * fields are ordinary authored data and are rejected by the guard helpers.
+ */
+export interface DataUnavailable extends FabricInstance {
+  readonly reason: DataUnavailableReason;
+  readonly pending?: true | undefined;
+  readonly error?: FabricError | undefined;
+  readonly syncing?: true | undefined;
+  readonly schemaMismatch?: true | undefined;
+}
+
+/** A pending unavailable value. */
+export type IsPending = DataUnavailable & {
+  readonly reason: "pending";
+  readonly pending: true;
+};
+
+/** An unavailable value carrying a producer error. */
+export type HasError = DataUnavailable & {
+  readonly reason: "error";
+  readonly error: FabricError;
+};
+
+/** An unavailable value whose storage coverage is still synchronizing. */
+export type IsSyncing = DataUnavailable & {
+  readonly reason: "syncing";
+  readonly syncing: true;
+};
+
+/** An unavailable value which failed its declared schema. */
+export type HasSchemaMismatch = DataUnavailable & {
+  readonly reason: "schema-mismatch";
+  readonly schemaMismatch: true;
+};
+
+/** All concrete unavailable variants. */
+export type DataUnavailableVariant =
+  | IsPending
+  | HasError
+  | IsSyncing
+  | HasSchemaMismatch;
+
+/** Selects unavailable variants by their reason discriminator. */
+export type DataUnavailableFor<K extends DataUnavailableReason> = Extract<
+  DataUnavailableVariant,
+  { readonly reason: K }
+>;
+
 // TODO(danfuzz): `FabricMap` and `FabricSet` are deliberately absent from the
 // declarations above. Both need substantial rework before they are useful, and
 // declaring them here would imply a utility they do not yet have. Their

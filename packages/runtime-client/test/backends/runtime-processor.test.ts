@@ -13,7 +13,10 @@ import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
-import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import {
+  DataUnavailable,
+  FabricError,
+} from "@commonfabric/data-model/fabric-instances";
 import type { WorkerReconciler } from "@commonfabric/html/worker";
 import {
   FabricBytes,
@@ -4462,6 +4465,20 @@ describe("runtime-processor", () => {
       expect(
         (mapCellRefsToSigilLinks({ b: bytes }) as { b: unknown }).b,
       ).toBe(bytes);
+    });
+
+    it("hands back `DataUnavailable` whole, nested or not", () => {
+      const unavailable = DataUnavailable.pending();
+
+      expect(mapCellRefsToSigilLinks(unavailable)).toBe(unavailable);
+      expect(
+        (mapCellRefsToSigilLinks({ unavailable }) as {
+          unavailable: unknown;
+        }).unavailable,
+      ).toBe(unavailable);
+      expect((mapCellRefsToSigilLinks([unavailable]) as unknown[])[0]).toBe(
+        unavailable,
+      );
     });
 
     it("refuses a `FabricInstance`, naming the class and the situation", () => {

@@ -4,6 +4,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { compileAndRun } from "../src/builtins/compile-and-run.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 
 Deno.test("compileAndRun initializes outputs and handles invalid programs", async () => {
   const identity = await Identity.fromPassphrase("compile and run coverage");
@@ -49,7 +50,10 @@ Deno.test("compileAndRun initializes outputs and handles invalid programs", asyn
     assertEquals(cancels.length, 1);
     assertEquals(sendResultCount, 1);
     assertEquals(outputs.pending.withTx(tx).get(), false);
-    assertEquals(outputs.result.withTx(tx).get(), undefined);
+    assertEquals(
+      outputs.result.withTx(tx).resolveAsCell().getRaw(),
+      DataUnavailable.schemaMismatch(),
+    );
     assertEquals(outputs.error.withTx(tx).get(), undefined);
     assertEquals(outputs.errors.withTx(tx).get(), undefined);
 
@@ -67,7 +71,17 @@ Deno.test("compileAndRun initializes outputs and handles invalid programs", asyn
       outputs.error.withTx(tx).get(),
       '"/missing.tsx" not found in files',
     );
-
+    const missingResult = outputs.result.withTx(tx).resolveAsCell()
+      .getRaw();
+    assertEquals(missingResult.reason, "error");
+    assertEquals(
+      missingResult.error.message,
+      '"/missing.tsx" not found in files',
+    );
+    assertEquals(
+      missingResult.error.diagnostics,
+      [],
+    );
     await tx.commit();
   } finally {
     await runtime.dispose();

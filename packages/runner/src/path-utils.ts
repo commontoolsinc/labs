@@ -3,6 +3,7 @@ import {
   isWalkableObjectOrArray,
   valueEqual,
 } from "@commonfabric/data-model";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 
 /**
  * Read one path segment out of a data container WITHOUT falling through to the
@@ -54,7 +55,11 @@ export function setValueAtPath(
     // through it would raise a `TypeError` on a frozen value or graft a
     // property its codec never reads onto an unfrozen one. `null` is replaced
     // for the same reason, its `typeof` being `"object"` as well.
-    if (!isWalkableObjectOrArray(ownSegment(parent, key))) {
+    const segment = ownSegment(parent, key);
+    if (
+      isDataUnavailable(segment) ||
+      !isWalkableObjectOrArray(segment)
+    ) {
       parent[key] = typeof path[i + 1] === "number" ? [] : {};
     }
     parent = parent[key];

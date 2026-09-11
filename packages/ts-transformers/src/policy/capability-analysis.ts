@@ -7,6 +7,7 @@ import ts from "typescript";
 
 import {
   classifyArrayCallbackContainerCall,
+  detectCallKind,
   getNodeText,
   isCellLikeType,
   isWildcardTraversalCall,
@@ -828,6 +829,33 @@ function isCallOrNewArgumentUsage(
   return false;
 }
 
+function isKnownIdentityCallArgumentUsage(
+  usage: ts.Expression,
+  checker?: ts.TypeChecker,
+): boolean {
+  const parent = usage.parent;
+  return !!(
+    parent &&
+    ts.isCallExpression(parent) &&
+    parent.arguments.includes(usage) &&
+    isKnownIdentityArgumentCall(parent, checker)
+  );
+}
+
+function isAvailabilityGuardArgumentUsage(
+  usage: ts.Expression,
+  checker?: ts.TypeChecker,
+): boolean {
+  const parent = usage.parent;
+  return !!(
+    checker &&
+    parent &&
+    ts.isCallExpression(parent) &&
+    parent.arguments.includes(usage) &&
+    detectCallKind(parent, checker)?.kind === "availability-guard"
+  );
+}
+
 function isArrayIdentityWriterArgumentUsage(
   usage: ts.Expression,
 ): boolean {
@@ -1172,7 +1200,9 @@ function isKnownIdentityArgumentCall(
   checker?: ts.TypeChecker,
 ): boolean {
   return isKnownIdentityEqualsCall(call, checker) ||
-    isKnownIdentityNavigationCallee(call.expression, checker);
+    isKnownIdentityNavigationCallee(call.expression, checker) ||
+    (checker !== undefined &&
+      detectCallKind(call, checker)?.kind === "availability-guard");
 }
 
 function isAliasShape(binding: AliasBinding): binding is AliasShape {
@@ -2294,11 +2324,12 @@ export function analyzeFunctionCapabilities(
     const markIdentityUseRef = (
       ref: SourceRef,
       expr?: ts.Expression,
-      options?: { comparable?: boolean },
+      options?: { comparable?: boolean; cellLike?: boolean },
     ): void => {
-      const cellLike = expr
-        ? isCellLikeExpression(expr) || !isPrimitiveLikeExpression(expr)
-        : false;
+      const cellLike = options?.cellLike ??
+        (expr
+          ? isCellLikeExpression(expr) || !isPrimitiveLikeExpression(expr)
+          : false);
       const record = options?.comparable
         ? recordComparablePath
         : recordIdentityPath;
@@ -2797,12 +2828,12 @@ export function analyzeFunctionCapabilities(
                 )
               )
             ) {
-              const identityOnlyArgumentUse = !!(
-                parent &&
-                ts.isCallExpression(parent) &&
-                parent.arguments.includes(usage) &&
-                isKnownIdentityArgumentCall(parent, checker)
+              const identityOnlyArgumentUse = isKnownIdentityCallArgumentUsage(
+                usage,
+                checker,
               );
+              const availabilityGuardArgumentUse =
+                isAvailabilityGuardArgumentUsage(usage, checker);
               const identityArrayLocal =
                 getIdentityArrayLocalNameForElementUsage(usage);
               const identityOnlyArrayElementUse = !!identityArrayLocal &&
@@ -2845,7 +2876,8 @@ export function analyzeFunctionCapabilities(
                 ) {
                   if (identityOnlyArgumentUse) {
                     recordIdentityPath(resolvedSource.root, [], {
-                      cellLike: isCellLikeExpression(usage),
+                      cellLike: !availabilityGuardArgumentUse &&
+                        isCellLikeExpression(usage),
                     });
                   }
                   markPassthrough(
@@ -2858,7 +2890,8 @@ export function analyzeFunctionCapabilities(
                   identityOnlyArgumentUse && !resolvedSource.dynamic
                 ) {
                   recordIdentityPath(resolvedSource.root, resolvedSource.path, {
-                    cellLike: isCellLikeExpression(usage),
+                    cellLike: !availabilityGuardArgumentUse &&
+                      isCellLikeExpression(usage),
                   });
                 } else if (
                   (identityOnlyArrayElementUse ||
@@ -2894,6 +2927,10 @@ export function analyzeFunctionCapabilities(
           if (
             !(parent && ts.isCallExpression(parent) &&
               parent.expression === node) &&
+            !isAvailabilityGuardArgumentUsage(
+              outermostTransparentWrapper(node),
+              checker,
+            ) &&
             !isOptionalAliasInitializerMemberUsage(node) &&
             // A member-access argument (e.g. `state.auth`) whose callee parameter
             // type already supplied the capability is accounted for, same as a
@@ -2966,6 +3003,8 @@ export function analyzeFunctionCapabilities(
         }
 
         const identityEqualsCall = isKnownIdentityEqualsCall(node, checker);
+        const availabilityGuardCall = checker !== undefined &&
+          detectCallKind(node, checker)?.kind === "availability-guard";
         const identityArgumentCall = isKnownIdentityArgumentCall(node, checker);
         const capabilityHandledArgs = new Set<number>();
         const calleeSummary = resolveInterproceduralSummary(node);
@@ -3255,6 +3294,7 @@ export function analyzeFunctionCapabilities(
             if (source) {
               markIdentityUseRef(source, argument, {
                 comparable: identityEqualsCall,
+                ...(availabilityGuardCall ? { cellLike: false } : {}),
               });
             }
           }

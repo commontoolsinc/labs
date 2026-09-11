@@ -143,17 +143,17 @@ export default pattern(() => {
     textContent(tickets[TILE_UI]).length > 0
   );
 
-  const assert_screens_render = assert(() =>
-    textContent(united[UI]).length > 0 &&
-    textContent(library[UI]).length > 0 &&
-    textContent(school[UI]).length > 0 &&
-    textContent(usps[UI]).length > 0 &&
-    textContent(calendarChanges[UI]).length > 0 &&
-    textContent(tickets[UI]).length > 0 &&
-    textContent(hotels[UI]).length > 0 &&
-    textContent(foods[UI]).length > 0 &&
-    textContent(flightCalendar[UI]).length > 0
-  );
+  const screenAssertions = [
+    assert(() => textContent(united[UI]).length > 0),
+    assert(() => textContent(library[UI]).length > 0),
+    assert(() => textContent(school[UI]).length > 0),
+    assert(() => textContent(usps[UI]).length > 0),
+    assert(() => textContent(calendarChanges[UI]).length > 0),
+    assert(() => textContent(tickets[UI]).length > 0),
+    assert(() => textContent(hotels[UI]).length > 0),
+    assert(() => textContent(foods[UI]).length > 0),
+    assert(() => textContent(flightCalendar[UI]).length > 0),
+  ];
 
   return {
     [TESTS]: [
@@ -168,7 +168,7 @@ export default pattern(() => {
       { assertion: assert_foods_empty },
       { assertion: assert_flight_calendar_disconnected },
       { assertion: assert_tiles_render },
-      { assertion: assert_screens_render },
+      ...screenAssertions.map((assertion) => ({ assertion })),
     ],
     united,
     library,

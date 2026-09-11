@@ -12,12 +12,13 @@ import {
 } from "@commonfabric/data-model-schema";
 import {
   cloneIfNecessary,
-  fabricAwareEqual,
   type FabricPlainObject,
   FabricPrimitive,
   type FabricValue,
   isFabricPlainObject,
+  valueEqual,
 } from "@commonfabric/data-model";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   isObjectNotArray,
   isObjectOrArray,
@@ -87,9 +88,66 @@ const asTypeArray = (type: unknown): string[] =>
     ? [type]
     : [];
 
+const decimalAsScaledInteger = (
+  value: number,
+): { coefficient: bigint; scale: number } => {
+  const match = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(
+    value.toString(),
+  );
+  if (match === null) {
+    throw new Error(`Cannot represent finite number ${value} as a decimal`);
+  }
+  const fraction = match[3] ?? "";
+  let coefficient = BigInt(`${match[1]}${match[2]}${fraction}`);
+  let scale = fraction.length - Number(match[4] ?? 0);
+  if (scale < 0) {
+    coefficient *= 10n ** BigInt(-scale);
+    scale = 0;
+  }
+  return { coefficient, scale };
+};
+
+const isExactMultiple = (value: number, multiple: number): boolean => {
+  const left = decimalAsScaledInteger(value);
+  const right = decimalAsScaledInteger(multiple);
+  const commonScale = Math.max(left.scale, right.scale);
+  const scaledValue = left.coefficient *
+    10n ** BigInt(commonScale - left.scale);
+  const scaledMultiple = right.coefficient *
+    10n ** BigInt(commonScale - right.scale);
+  return scaledValue % scaledMultiple === 0n;
+};
+
 const isFabricPlainObjectValue = (
   value: unknown,
 ): value is FabricPlainObject => isFabricPlainObject(value as FabricValue);
+
+/** JSON Schema compares numbers by mathematical value, so 0 and -0 are equal. */
+const schemaValueEqual = (left: unknown, right: unknown): boolean => {
+  if (typeof left === "function" || typeof right === "function") {
+    return left === right;
+  }
+  if (typeof left === "number" && typeof right === "number") {
+    return left === right;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((entry, index) => schemaValueEqual(entry, right[index]));
+  }
+  if (isFabricPlainObjectValue(left) && isFabricPlainObjectValue(right)) {
+    const leftKeys = Object.keys(left);
+    return leftKeys.length === Object.keys(right).length &&
+      leftKeys.every((key) =>
+        Object.hasOwn(right, key) && schemaValueEqual(left[key], right[key])
+      );
+  }
+  try {
+    return valueEqual(left as FabricValue, right as FabricValue);
+  } catch {
+    return deepEqual(left, right);
+  }
+};
 
 export const isPrimitiveJsonValue = (value: unknown): boolean =>
   value === null ||
@@ -1106,7 +1164,7 @@ const validateSchemaDefinitionInternal = (
       for (let index = 0; index < schema.enum.length; index++) {
         if (
           schema.enum.slice(0, index).some((entry) =>
-            fabricAwareEqual(entry, schema.enum![index])
+            schemaValueEqual(entry, schema.enum![index])
           )
         ) {
           return `${path}.enum: values must be unique`;
@@ -1854,13 +1912,13 @@ const validateAgainstSchemaUncached = (
 
     if (
       Array.isArray(schema.enum) &&
-      !schema.enum.some((entry) => fabricAwareEqual(entry, value))
+      !schema.enum.some((entry) => schemaValueEqual(entry, value))
     ) {
       return mismatch("value is not in enum");
     }
     if (
       Object.hasOwn(schema, "const") &&
-      !fabricAwareEqual(schema.const, value)
+      !schemaValueEqual(schema.const, value)
     ) {
       return mismatch("value does not match const");
     }
@@ -2100,11 +2158,9 @@ function validateStrictSchemaConstraints(
       );
     }
     if (schema.multipleOf !== undefined) {
-      const quotient = value / schema.multipleOf;
-      const tolerance = Number.EPSILON * Math.max(1, Math.abs(quotient)) * 4;
       if (
         schema.multipleOf <= 0 ||
-        Math.abs(quotient - Math.round(quotient)) > tolerance
+        !isExactMultiple(value, schema.multipleOf)
       ) {
         return mismatch(`value is not a multiple of ${schema.multipleOf}`);
       }
@@ -2143,7 +2199,7 @@ function validateStrictSchemaConstraints(
         if (!Object.hasOwn(value, index)) continue;
         if (
           value.slice(0, index).some((entry) =>
-            fabricAwareEqual(entry, value[index])
+            schemaValueEqual(entry, value[index])
           )
         ) {
           return mismatch("array items are not unique");

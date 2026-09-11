@@ -181,6 +181,13 @@ function sameShortNames(
     keys.every((key) => a[key] === b[key]);
 }
 
+function availableMentionables(
+  handle: CellHandle<MentionableArray>,
+): MentionableArray {
+  const value = handle.get();
+  return Array.isArray(value) ? value : [];
+}
+
 function escapeMarkdownImageAltText(text: string): string {
   return text.replace(/\\/g, "\\\\")
     .replace(/\[/g, "\\[")
@@ -834,7 +841,7 @@ export class CFCodeEditor extends BaseElement {
       return [];
     }
 
-    const mentionableData = (handle.get() ?? []) as MentionableArray;
+    const mentionableData = availableMentionables(handle);
 
     if (mentionableData.length === 0) {
       return [];
@@ -936,7 +943,7 @@ export class CFCodeEditor extends BaseElement {
     const handle = this.mentionable;
     if (!handle) return null;
 
-    const mentionableData = (handle.get() ?? []) as MentionableArray;
+    const mentionableData = availableMentionables(handle);
 
     const queryLower = query.toLowerCase();
 
@@ -1527,7 +1534,7 @@ export class CFCodeEditor extends BaseElement {
     const handle = this.mentionable;
     if (!handle) return null;
 
-    const mentionableData = (handle.get() ?? []) as MentionableArray;
+    const mentionableData = availableMentionables(handle);
 
     if (mentionableData.length === 0) return null;
 
@@ -1604,7 +1611,7 @@ export class CFCodeEditor extends BaseElement {
 
     this._mentionResolutionPending = true;
 
-    const mentionableData = (handle.get() ?? []) as MentionableArray;
+    const mentionableData = availableMentionables(handle);
 
     // Keep a reference to the current mentionable to detect a rebind, and a
     // generation to detect a newer pass over the SAME handle: contents can
@@ -3276,12 +3283,12 @@ export class CFCodeEditor extends BaseElement {
     const mentionedHandle = this.mentioned;
     if (!mentionedHandle) return curIds;
 
-    const currentSource = (mentionedHandle.get() ?? []) as MentionableArray;
+    const currentSource = availableMentionables(mentionedHandle);
 
     const mentionableHandle = this.mentionable;
     if (!mentionableHandle) return curIds;
 
-    const mentionableData = (mentionableHandle.get() ?? []) as MentionableArray;
+    const mentionableData = availableMentionables(mentionableHandle);
 
     // For each current mentioned value, find its ID by matching in mentionable
     for (const mentionedValue of currentSource) {

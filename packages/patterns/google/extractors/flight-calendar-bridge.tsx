@@ -22,8 +22,10 @@
  */
 import {
   computed,
+  hasError,
   NAME,
   pattern,
+  resultOf,
   toIndentedDebugString,
   UI,
   type VNode,
@@ -475,8 +477,12 @@ export default pattern<PatternInput, PatternOutput>(() => {
   const profileWish = wish<ProfileOutput>({ query: "#profile" });
 
   // Access the result from wish (WishState has a result property)
-  const flightTrackerResult = flightTrackerWish.result;
-  const profileResult = profileWish.result;
+  const flightTrackerResult = hasError(flightTrackerWish.result)
+    ? undefined
+    : resultOf(flightTrackerWish.result);
+  const profileResult = hasError(profileWish.result)
+    ? undefined
+    : resultOf(profileWish.result);
 
   // Extract upcomingFlights from the piece result
   const upcomingFlights = flightTrackerResult?.upcomingFlights ?? [];

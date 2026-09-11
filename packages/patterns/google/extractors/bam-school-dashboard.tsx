@@ -21,10 +21,13 @@ import {
   Default,
   generateObject,
   handler,
+  hasError,
+  isPending,
   JSONSchema,
   NAME,
   pattern,
   type PatternFactory,
+  resultOf,
   TILE_UI,
   UI,
   type VNode,
@@ -154,7 +157,7 @@ type ReactiveArray<T> = T[] & {
 const analyzeSchoolEmail = pattern<Email, SchoolEmailAnalysis>((email) => {
   const sourceType = computed(() => classifySource(email.from || ""));
 
-  const analysis = generateObject<SchoolEventResult>({
+  const analysisRequest = generateObject<SchoolEventResult>({
     prompt: computed((): string | undefined => {
       if (!email.markdownContent) {
         return undefined;
@@ -189,6 +192,20 @@ Extract:
     schema: SCHOOL_EVENT_SCHEMA,
     model: "anthropic:claude-haiku-4-5",
   });
+  const analysisResult = resultOf(analysisRequest);
+  const analysis = computed(() => {
+    if (isPending(analysisRequest)) {
+      return { pending: true, error: undefined, result: undefined };
+    }
+    if (hasError(analysisRequest)) {
+      return {
+        pending: false,
+        error: analysisRequest.error.message,
+        result: undefined,
+      };
+    }
+    return { pending: false, error: undefined, result: analysisResult };
+  });
 
   const emailDate = computed(() => email.date || "");
 
@@ -198,9 +215,9 @@ Extract:
     emailDate,
     sourceType,
     analysis,
-    pending: analysis.pending,
-    error: analysis.error,
-    result: analysis.result,
+    pending: computed(() => analysis.pending),
+    error: computed(() => analysis.error),
+    result: computed(() => analysis.result),
   };
 });
 
@@ -387,6 +404,7 @@ export default pattern<PatternInput, PatternOutput>(
     // minute so relative-time labels ("Today", "In 3 days") refresh across day
     // boundaries.
     const nowCell = wish<number>({ query: "#now/60" });
+    const nowCellValue = resultOf(nowCell.result);
 
     // Build Gmail query to find BAM school emails
     // Excludes fundraising emails (schoolsfund.berkeley.net)
@@ -461,8 +479,7 @@ export default pattern<PatternInput, PatternOutput>(
       }
 
       // Sort by: urgent first, then by date (soonest first), then by source priority
-      if (nowCell.result == null) return events;
-      const today = new Date(nowCell.result);
+      const today = new Date(nowCellValue);
       today.setHours(0, 0, 0, 0);
 
       return events.sort((a, b) => {
@@ -484,11 +501,11 @@ export default pattern<PatternInput, PatternOutput>(
 
     // Filter events by category/criteria
     const urgentEvents = computed(() => {
-      const today = nowCell.result == null ? null : new Date(nowCell.result);
-      today?.setHours(0, 0, 0, 0);
+      const today = new Date(nowCellValue);
+      today.setHours(0, 0, 0, 0);
 
       return allEvents.filter((e) => {
-        const days = today == null ? 999 : daysUntil(e.date, today);
+        const days = daysUntil(e.date, today);
         // Urgent if: marked urgent, has action required, or is within 7 days
         return (
           e.isUrgent ||
@@ -501,8 +518,7 @@ export default pattern<PatternInput, PatternOutput>(
     });
 
     const upcomingEvents = computed(() => {
-      if (nowCell.result == null) return [];
-      const today = new Date(nowCell.result);
+      const today = new Date(nowCellValue);
       today.setHours(0, 0, 0, 0);
 
       return allEvents
@@ -781,10 +797,9 @@ export default pattern<PatternInput, PatternOutput>(
                               style={{
                                 padding: "4px 10px",
                                 backgroundColor: computed(() => {
-                                  if (nowCell.result == null) {
-                                    return getUrgencyColor(999, event.isUrgent);
-                                  }
-                                  const today = new Date(nowCell.result);
+                                  const today = new Date(
+                                    nowCellValue,
+                                  );
                                   today.setHours(0, 0, 0, 0);
                                   return getUrgencyColor(
                                     daysUntil(event.date, today),
@@ -798,8 +813,9 @@ export default pattern<PatternInput, PatternOutput>(
                               }}
                             >
                               {computed(() => {
-                                if (nowCell.result == null) return "";
-                                const today = new Date(nowCell.result);
+                                const today = new Date(
+                                  nowCellValue,
+                                );
                                 today.setHours(0, 0, 0, 0);
                                 return getDateLabel(
                                   daysUntil(event.date, today),
@@ -1052,10 +1068,7 @@ export default pattern<PatternInput, PatternOutput>(
                           textAlign: "center",
                           padding: "8px",
                           backgroundColor: computed(() => {
-                            if (nowCell.result == null) {
-                              return getUrgencyColor(999, event.isUrgent);
-                            }
-                            const today = new Date(nowCell.result);
+                            const today = new Date(nowCellValue);
                             today.setHours(0, 0, 0, 0);
                             return getUrgencyColor(
                               daysUntil(event.date, today),
@@ -1074,8 +1087,7 @@ export default pattern<PatternInput, PatternOutput>(
                           }}
                         >
                           {computed(() => {
-                            if (nowCell.result == null) return "";
-                            const today = new Date(nowCell.result);
+                            const today = new Date(nowCellValue);
                             today.setHours(0, 0, 0, 0);
                             return getDateLabel(daysUntil(event.date, today));
                           })}

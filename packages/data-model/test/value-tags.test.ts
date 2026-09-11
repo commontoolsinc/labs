@@ -507,6 +507,24 @@ describe("value-tags", () => {
       expect(tagFromNativeValueElseNull(exotic)).toBe(VALUE_TAGS.JsError);
     });
 
+    it("retains native error recognition after Error.isError is tamed", () => {
+      const foreign = new Error("foreign realm");
+      Object.setPrototypeOf(foreign, {
+        constructor: class ForeignError {},
+      });
+      const errorConstructor = Error as unknown as {
+        isError?: (value: unknown) => boolean;
+      };
+      const errorIsError = errorConstructor.isError;
+      try {
+        errorConstructor.isError = undefined;
+        expect(foreign instanceof Error).toBe(false);
+        expect(tagFromNativeValueElseNull(foreign)).toBe(VALUE_TAGS.JsError);
+      } finally {
+        errorConstructor.isError = errorIsError;
+      }
+    });
+
     it("returns `JsError` tag for an `Error` whose prototype was severed", () => {
       const severed = new Error("severed");
       Object.setPrototypeOf(severed, null);

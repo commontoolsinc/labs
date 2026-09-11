@@ -15,6 +15,7 @@ import {
   isWalkableObjectNotArray,
   toIndentedDebugString,
 } from "@commonfabric/data-model";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
   DEFAULT_SELECTOR,
@@ -1609,7 +1610,9 @@ export function mergeAnyOfMatches<T>(
     // special object among them sends the whole set to the first-match return
     // below: it has no properties for `Object.assign` to copy, so merging one
     // yields `{}` and the value is lost.
-    if (matches.every((v) => isWalkableObjectNotArray(v))) {
+    if (
+      matches.every((v) => !isDataUnavailable(v) && isWalkableObjectNotArray(v))
+    ) {
       const unified: Record<string, T> = {};
       for (const match of matches) {
         for (const [key, value] of Object.entries(match as object)) {
@@ -1925,7 +1928,8 @@ export abstract class BaseObjectTraverser {
           };
           const val = this.traverseDAG(
             itemDoc,
-            isWalkableObjectNotArray(defaultValue)
+            !isDataUnavailable(defaultValue) &&
+              isWalkableObjectNotArray(defaultValue)
               ? (defaultValue as JSONObject)[k]
               : undefined,
           )!;
@@ -4118,7 +4122,12 @@ export class SchemaObjectTraverser<V extends FabricValue>
       );
       return { ok: this.objectCreator.createObject(newLink, doc.value) };
     }
-    if (doc.value === undefined) {
+    if (isDataUnavailable(doc.value)) {
+      // Availability markers are control-flow leaves, not user containers.
+      // They must survive projection through any declared result schema so
+      // consumers can propagate or inspect the exact unavailable reason.
+      return { ok: doc.value };
+    } else if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
       const defaultValue = this.#applyDefault(doc, resolved);
@@ -4346,6 +4355,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     reads: PlainSchemaReads,
   ): TraverseResult<FabricValue> | undefined {
     if (isSigilLink(doc.value)) return undefined;
+    if (isDataUnavailable(doc.value)) return { ok: doc.value };
 
     if (plan.kind === "primitive") {
       return getPlainJsonType(doc.value) === plan.type
@@ -5415,7 +5425,7 @@ function getPlainJsonType(
 }
 
 /** Refine the broad JSON Schema type so integer values can be distinguished. */
-function getJsonType(value: unknown): JSONSchemaTypes | null {
+export function getJsonType(value: unknown): JSONSchemaTypes | null {
   return (typeof value === "number")
     ? getJsonNumberType(value)
     : getPlainJsonType(value);

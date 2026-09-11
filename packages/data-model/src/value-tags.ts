@@ -18,11 +18,20 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
+import { isCanonicalDataUnavailable } from "./fabric-instances/data-unavailable-brand.ts";
 import { toCompactDebugString } from "./value-debug.ts";
 import {
   BaseFabricPrimitive,
   VALUE_TAG,
 } from "@/fabric-bases/BaseFabricPrimitive.ts";
+
+// SES replaces the host Error constructor with a tamed one that does not
+// currently expose Error.isError(). Capture the native brand check before
+// lockdown so errors minted by either side of that boundary remain
+// recognizable without relying on spoofable shape or display-tag checks.
+const nativeErrorIsError = (Error as typeof Error & {
+  isError?: (candidate: unknown) => boolean;
+}).isError?.bind(Error);
 
 /**
  * The tags a `FabricPrimitive` reports, one per primitive class this package
@@ -237,6 +246,10 @@ export function tagFromFabricValueElseNull(
     return VALUE_TAGS.Array;
   } else if (isPlainObject(value)) {
     return VALUE_TAGS.Object;
+  } else if (isCanonicalDataUnavailable(value)) {
+    // Split bundles can duplicate the FabricInstance base while sharing the
+    // canonical DataUnavailable private brand.
+    return VALUE_TAGS.FabricInstance;
   } else if (value instanceof FabricPrimitive) {
     return tagFromFabricPrimitiveElseNull(value);
   } else if (value instanceof FabricInstance) {
@@ -353,11 +366,18 @@ export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
     return VALUE_TAGS.Array;
   }
 
+  // Split bundles can duplicate the FabricInstance base while sharing the
+  // canonical DataUnavailable private brand. Recognize that control value
+  // before consulting realm-specific prototypes and base-class identity.
+  if (isCanonicalDataUnavailable(value)) {
+    return VALUE_TAGS.FabricInstance;
+  }
+
   const proto = Object.getPrototypeOf(value);
 
   if (proto === Object.prototype) {
     return VALUE_TAGS.Object;
-  } else if (Error.isError(value)) {
+  } else if (nativeErrorIsError?.(value)) {
     return VALUE_TAGS.JsError;
   } else if (proto === null) {
     // After the `isError()` check above, the only recognized possibility of a

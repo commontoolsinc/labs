@@ -4,6 +4,7 @@ import {
   isWalkableObjectOrArray,
   toCompactDebugString,
 } from "@commonfabric/data-model";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
@@ -942,7 +943,11 @@ function assignComputedCellKinds(
     // collect nothing and leave a cell root inside it undisqualified from the
     // `computed` tag -- the ack-and-drop this function exists to prevent. A
     // `FabricInstance` is refused here.
-    if (isWalkableObjectOrArray(target) && !isReactive(target)) {
+    if (
+      !isDataUnavailable(target) &&
+      isWalkableObjectOrArray(target) &&
+      !isReactive(target)
+    ) {
       const properties = isObjectNotArray(schema.properties)
         ? schema.properties
         : undefined;

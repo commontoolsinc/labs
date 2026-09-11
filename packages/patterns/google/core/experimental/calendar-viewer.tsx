@@ -13,6 +13,7 @@ import {
   handler,
   NAME,
   pattern,
+  resultOf,
   UI,
   wish,
   Writable,
@@ -114,6 +115,7 @@ export default pattern<{
   // Reactive clock (ticks every 60s) used for relative date labels and the
   // upcoming-events filter so they refresh as time passes.
   const nowCell = wish<number>({ query: "#now/60" });
+  const nowCellValue = resultOf(nowCell.result);
 
   const eventCount = events?.length ?? 0;
 
@@ -131,8 +133,7 @@ export default pattern<{
 
   // Upcoming events (sorted by start date, filtered by hidden calendars)
   const upcomingEvents = computed(() => {
-    if (nowCell.result == null) return [];
-    const now = new Date(nowCell.result);
+    const now = new Date(nowCellValue);
     const hiddenSet = new Set(hiddenCalendars.get() || []);
     return [...(events || [])]
       .filter((e: CalendarEvent) =>
@@ -333,9 +334,9 @@ export default pattern<{
                           <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: "600" }}>{evt.title}</div>
                             <div style={{ fontSize: "14px", color: "#666" }}>
-                              {nowCell.result == null ? "" : getRelativeLabel(
+                              {getRelativeLabel(
                                 evt.startDate,
-                                nowCell.result,
+                                nowCellValue,
                               )} {evt.isAllDay
                                 ? "(All day)"
                                 : formatTime(evt.startDate)}

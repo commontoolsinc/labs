@@ -1,13 +1,19 @@
 import {
   action,
+  computed,
   Default,
   equals,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   lift,
   NAME,
   pattern,
   type PerSession,
   type ReadonlyCell,
+  resultOf,
   Stream,
   UI,
   type VNode,
@@ -240,10 +246,13 @@ export interface TopicIndexRow {
  * question about the cell contract rather than about this pattern, and it is
  * not answered here.
  */
-export function mentionListsOf<M>(
+export function mentionListsOf<M extends readonly unknown[]>(
   sources: readonly ({ get(): { mentions: M } | undefined } | undefined)[],
 ): (M | undefined)[] {
-  return Array.from(sources, (source) => source?.get()?.mentions);
+  return Array.from(sources, (source) => {
+    const mentions = source?.get()?.mentions;
+    return Array.isArray(mentions) ? mentions : undefined;
+  });
 }
 
 /**
@@ -563,9 +572,27 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, names }) => {
   // the fields once here would pin the composer to the empty profile the board
   // started with: the Start button never enables, and a topic filed through it
   // carries blank attribution.
-  const profileName = profileWish.result?.name ?? "";
-  const profileAvatar = profileWish.result?.avatar ?? "";
+  const profileName = computed(() => {
+    if (
+      hasError(profileWish.result) || isPending(profileWish.result) ||
+      isSyncing(profileWish.result) ||
+      hasSchemaMismatch(profileWish.result)
+    ) return "";
+    return resultOf(profileWish.result).name ?? "";
+  });
+  const profileAvatar = computed(() => {
+    if (
+      hasError(profileWish.result) || isPending(profileWish.result) ||
+      isSyncing(profileWish.result) ||
+      hasSchemaMismatch(profileWish.result)
+    ) return "";
+    return resultOf(profileWish.result).avatar ?? "";
+  });
   const hasProfile = profileName.trim().length > 0;
+  const profileView = computed(() => ({
+    name: profileName,
+    avatar: profileAvatar,
+  }));
 
   const addTopic = action<AddTopicEvent, AddTopicResult>((
     { title, body, agentName },
@@ -643,7 +670,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, names }) => {
                 {hasProfile
                   ? (
                     <cf-profile-badge
-                      $profile={profileWish.result}
+                      $profile={profileView}
                       size="sm"
                       noNavigate
                     />

@@ -3,12 +3,11 @@
  *
  * The smoke and outbox suites cover the success path — a request that returns a
  * response. These cover the other half: when the LLM call itself fails, the
- * builtin has to write the failure back to the result cell as `error`, clear
- * `pending`, and leave `result` undefined so a retry can run. The builtins
- * funnel every rejection through one `handleLLMError`, but each wires it up at
- * its own catch site (`llm`, `generateText`, the direct `generateObject` path,
- * and the tool-calling `generateObject` path), so each site needs a request
- * that rejects to exercise it.
+ * legacy `llm` writes the failure back to its state wrapper as `error`.
+ * `generateText` and `generateObject` expose the same failure directly as a
+ * DataUnavailable error marker. The builtins funnel every rejection through
+ * one `handleLLMError`, but each wires it up at its own catch site, so each site
+ * needs a request that rejects to exercise it.
  *
  * The failure is injected by replacing the client method the builtin awaits
  * with one that throws. The builtin cannot tell that apart from a real upstream
@@ -26,6 +25,7 @@ import {
   resetMockMode,
 } from "@commonfabric/llm/client";
 import { LLMClient } from "@commonfabric/llm";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { waitForLlmSettled } from "./support/llm-result.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -108,11 +108,9 @@ describe("LLM builtin error surfacing", () => {
       const result = runtime.run(tx, testPattern, {}, resultCell);
       tx.commit();
 
-      const settled = await waitForLlmSettled(runtime, result);
+      await runtime.settledFor(result);
 
-      expect(settled.pending).toBe(false);
-      expect(settled.error).toBe("upstream generateText failure");
-      expect(result.key("result").get()).toBeUndefined();
+      expectDirectError(result.get(), "upstream generateText failure");
     } finally {
       LLMClient.prototype.sendRequest = original;
     }
@@ -140,11 +138,9 @@ describe("LLM builtin error surfacing", () => {
       const result = runtime.run(tx, testPattern, {}, resultCell);
       tx.commit();
 
-      const settled = await waitForLlmSettled(runtime, result);
+      await runtime.settledFor(result);
 
-      expect(settled.pending).toBe(false);
-      expect(settled.error).toBe("upstream generateObject failure");
-      expect(result.key("result").get()).toBeUndefined();
+      expectDirectError(result.get(), "upstream generateObject failure");
     } finally {
       LLMClient.prototype.generateObject = original;
     }
@@ -181,13 +177,19 @@ describe("LLM builtin error surfacing", () => {
       const result = runtime.run(tx, testPattern, {}, resultCell);
       tx.commit();
 
-      const settled = await waitForLlmSettled(runtime, result);
+      await runtime.settledFor(result);
 
-      expect(settled.pending).toBe(false);
-      expect(settled.error).toBe("upstream generateObject tools failure");
-      expect(result.key("result").get()).toBeUndefined();
+      expectDirectError(result.get(), "upstream generateObject tools failure");
     } finally {
       LLMClient.prototype.sendRequest = original;
     }
   });
 });
+
+function expectDirectError(value: unknown, message: string): void {
+  expect(value).toBeInstanceOf(DataUnavailable);
+  if (!(value instanceof DataUnavailable) || value.reason !== "error") {
+    throw new Error("expected a direct DataUnavailable error");
+  }
+  expect(value.error?.message).toBe(message);
+}

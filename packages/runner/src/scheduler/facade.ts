@@ -103,6 +103,7 @@ import { runSchedulerAction, type SchedulerActionRunState } from "./run.ts";
 import {
   addSchedulerEventHandler,
   dropQueuedEvent,
+  eventScopeIdentity,
   isHeadEventParked as isHeadEventParkedState,
   processPullQueuedEventDuringExecute,
   queueSchedulerEvent,
@@ -165,6 +166,7 @@ import type {
   ActionRunTraceEntry,
   EventHandler,
   EventPreflightTraceContext,
+  HandlerInputReadiness,
   QueuedEvent,
   ReactivityLog,
   SchedulerObservationIdentity,
@@ -269,9 +271,18 @@ export {
   markReadAsAttemptedWrite,
 };
 
+export type ExternalDependencyActionToken = Readonly<{
+  action: Action;
+  generation: number;
+}>;
+
 export class Scheduler {
   readonly #eventQueue: QueuedEvent[] = [];
   #eventHandlers: [NormalizedFullLink, EventHandler][] = [];
+  readonly #eventInputWaits = new Map<
+    QueuedEvent,
+    { action: Action; parked: boolean }
+  >();
   readonly #lineage = new SpeculationLineage({
     dropQueuedEvent: (event, reason) => this.#dropEvent(event, reason),
     queueExecution: () => this.queueExecution(),
@@ -415,6 +426,8 @@ export class Scheduler {
    * first.
    */
   #executingAction: Action | null = null;
+  #executingActionGeneration: number | undefined;
+  readonly #actionExecutionGenerations = new WeakMap<Action, number>();
 
   #currentActionId?: string;
   #dependencyGraphState!: DependencyGraphState;
@@ -684,12 +697,41 @@ export class Scheduler {
    */
   withExecutingAction<T>(action: Action, fn: () => T): T {
     const prev = this.#executingAction;
+    const prevGeneration = this.#executingActionGeneration;
+    const generation = prev === action && prevGeneration !== undefined
+      ? prevGeneration
+      : this.#beginActionExecution(action);
     this.#executingAction = action;
+    this.#executingActionGeneration = generation;
     try {
       return fn();
     } finally {
       this.#executingAction = prev;
+      this.#executingActionGeneration = prevGeneration;
     }
+  }
+
+  getExecutingActionToken(): ExternalDependencyActionToken | undefined {
+    return this.#executingAction !== null &&
+        this.#executingActionGeneration !== undefined
+      ? {
+        action: this.#executingAction,
+        generation: this.#executingActionGeneration,
+      }
+      : undefined;
+  }
+
+  scheduleExternalDependencySettlement(
+    token: ExternalDependencyActionToken,
+  ): boolean {
+    if (
+      this.#actionExecutionGenerations.get(token.action) !== token.generation ||
+      this.#nodes.get(token.action) === undefined
+    ) {
+      return false;
+    }
+    this.#markAndScheduleInvalidAction(token.action);
+    return true;
   }
 
   /**
@@ -2045,6 +2087,9 @@ export class Scheduler {
     this.runtime.storageManager.unsubscribe?.(this.#storageSubscription);
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
+    for (const event of [...this.#eventInputWaits.keys()]) {
+      this.#clearEventInputWait(event);
+    }
     this.#disposed = true;
     this.#gates.cancelWake();
     if (this.#pendingQueueTaskTimer !== null) {
@@ -2705,6 +2750,7 @@ export class Scheduler {
       },
       hasPendingLineageHeadEvent: () => this.#hasPendingLineageHeadEvent(),
       hasLoadParkedHeadEvent: () => this.#hasLoadParkedHeadEvent(),
+      hasInputParkedHeadEvent: () => this.#hasInputParkedHeadEvent(),
       scheduleWake: (at) => this.#gates.scheduleWake(at),
       hasWakeTimer: () => this.#gates.hasWakeTimer(),
       setScheduled: (scheduled) => {
@@ -2753,6 +2799,10 @@ export class Scheduler {
       parkHeadEventForLoads: (event, keys) =>
         this.#parkHeadEventForLoads(event, keys),
       isHeadEventLoadParked: (event) => this.#isHeadEventLoadParked(event),
+      isEventWaitingForInput: (event) => this.#isEventWaitingForInput(event),
+      parkEventUntilInputChanges: (event, dependencies) =>
+        this.#parkEventUntilInputChanges(event, dependencies),
+      clearEventInputWait: (event) => this.#clearEventInputWait(event),
       nodes: this.#nodes,
       pending: this.#pending,
       get eventPreflightTelemetryEnabled() {
@@ -2854,11 +2904,13 @@ export class Scheduler {
         this.#markActionInvalid(target, undefined, options),
       queueExecution: () => this.queueExecution(),
       setExecutingAction: (target, targetActionId) => {
+        this.#executingActionGeneration = this.#beginActionExecution(target);
         this.#executingAction = target;
         this.#currentActionId = targetActionId;
       },
       clearExecutingAction: () => {
         this.#executingAction = null;
+        this.#executingActionGeneration = undefined;
         this.#currentActionId = undefined;
       },
     };
@@ -3204,6 +3256,7 @@ export class Scheduler {
       servedOutcome?: ServedEventFailureOutcome;
     } = {},
   ): void {
+    this.#clearEventInputWait(event);
     if (this.#headEventLoadPark?.eventId === event.id) {
       this.#headEventLoadPark = null;
     }
@@ -3259,6 +3312,79 @@ export class Scheduler {
   #hasLoadParkedHeadEvent(): boolean {
     const head = this.#eventQueue[0];
     return head !== undefined && this.#headEventLoadPark?.eventId === head.id;
+  }
+
+  #parkEventUntilInputChanges(
+    event: QueuedEvent,
+    dependencies: ReactivityLog,
+  ): void {
+    this.#clearEventInputWait(event);
+
+    const wakeAction: Action = () => {
+      const wait = this.#eventInputWaits.get(event);
+      if (wait?.action !== wakeAction || !wait.parked) return;
+
+      // Keep the node registered through its own finalize path. Its empty run
+      // log clears the one-shot trigger surface; the next event preflight
+      // removes the dormant node before rechecking readiness.
+      wait.parked = false;
+      this.queueExecution();
+    };
+    this.#eventInputWaits.set(event, { action: wakeAction, parked: true });
+    this.resubscribe(wakeAction, dependencies, { isEffect: true });
+
+    // Re-run readiness under the one-shot wake action's identity. Linked-doc
+    // traversal can then register this action as a settlement waiter, so an
+    // authoritative absence (which produces no storage write) still wakes the
+    // parked FIFO. If the input settled between preflight and this probe,
+    // release the park immediately instead of waiting for a write that may
+    // never arrive.
+    const readTx = this.runtime.edit();
+    readTx.setReadOnly?.("scheduler.parkEventUntilInputChanges()");
+    const identity = eventScopeIdentity(event);
+    if (identity !== undefined) readTx.tx.scopeKeyIdentity = identity;
+    let readiness: HandlerInputReadiness | undefined;
+    try {
+      readiness = this.withExecutingAction(
+        wakeAction,
+        () => event.handler.inputReadiness?.(readTx, event.event),
+      );
+    } catch (error) {
+      this.#handleError(error as Error, event.handler);
+    } finally {
+      readTx.clearReadOnly?.();
+      readTx.abort(new Error("handler input readiness probe complete"));
+    }
+    if (
+      readiness === undefined || readiness.ready ||
+      (readiness.reason !== "pending" && readiness.reason !== "syncing")
+    ) {
+      const wait = this.#eventInputWaits.get(event);
+      if (wait?.action === wakeAction) wait.parked = false;
+      this.queueExecution();
+    }
+  }
+
+  #clearEventInputWait(event: QueuedEvent): void {
+    const wait = this.#eventInputWaits.get(event);
+    if (wait === undefined) return;
+    this.#eventInputWaits.delete(event);
+    this.unsubscribe(wait.action);
+  }
+
+  #isEventWaitingForInput(event: QueuedEvent): boolean {
+    return this.#eventInputWaits.get(event)?.parked === true;
+  }
+
+  #hasInputParkedHeadEvent(): boolean {
+    const head = this.#eventQueue[0];
+    return head !== undefined && this.#isEventWaitingForInput(head);
+  }
+
+  #beginActionExecution(action: Action): number {
+    const generation = (this.#actionExecutionGenerations.get(action) ?? 0) + 1;
+    this.#actionExecutionGenerations.set(action, generation);
+    return generation;
   }
 
   #canAutomaticallyDebounce(action: Action): boolean {

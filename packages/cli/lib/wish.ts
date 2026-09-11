@@ -1,4 +1,5 @@
 import type { DID } from "@commonfabric/identity";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import {
   type Cell,
   createBuilder,
@@ -181,7 +182,22 @@ export async function resolveWish(
     // only one of the two is an absent result: the matched one still has an
     // address, which is the whole of what a marked position asks for.
     const matched = resolved.getRaw() !== undefined;
-    const value: unknown = resolved.get();
+    const value: unknown = spec.schema === undefined
+      ? resolved.get()
+      : resolved.resolveAsCell().asSchema(undefined).asSchema(spec.schema)
+        .get();
+
+    if (isDataUnavailable(value)) {
+      const unavailableError = value.reason === "error"
+        ? value.error?.message
+        : undefined;
+      return {
+        result: null,
+        error: typeof error === "string" && error.length > 0
+          ? error
+          : unavailableError,
+      };
+    }
 
     return {
       // `?? null` covers the matched-but-unset target a caller selected

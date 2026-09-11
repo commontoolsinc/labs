@@ -567,7 +567,7 @@ describe("snapshot memo", () => {
     );
   });
 
-  it("kicks the cross-space pull again for a memoized resolution", async () => {
+  it("coalesces a memoized cross-space resolution with its in-flight load", async () => {
     // A transaction opens a writer for one space at a time, so the other
     // space's document is written in its own.
     const otherTx = runtime.edit();
@@ -587,10 +587,10 @@ describe("snapshot memo", () => {
     );
     holder.setRaw({ target: target.key("value").getAsLink() });
     const link = holder.key("target").getAsNormalizedFullLink();
-    // The origin server never pushes other-space documents, so the kick is
-    // unreserved and fires on every resolution. A memoized one has to fire it
-    // too, or a reader whose first resolution predates the arrival never asks
-    // again.
+    // The origin server never pushes other-space documents, so the first
+    // resolution starts a load. The runtime keeps the resulting subscription
+    // live, and a memoized resolution joins that load instead of duplicating
+    // it.
     const kicks: unknown[] = [];
     const manager = runtime.storageManager as {
       trackUntilSettled: (work: Promise<unknown>) => void;
@@ -606,7 +606,7 @@ describe("snapshot memo", () => {
       resolveLink(runtime, tx, link);
 
       expect(afterFirst).toBeGreaterThan(0);
-      expect(kicks.length).toBeGreaterThan(afterFirst);
+      expect(kicks.length).toBe(afterFirst);
     } finally {
       manager.trackUntilSettled = tracked;
     }

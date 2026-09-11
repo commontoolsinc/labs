@@ -1,11 +1,13 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertInstanceOf } from "@std/assert";
 
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
 
 import { lift } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { getDerivedInternalCell } from "../src/link-utils.ts";
 import { trustPattern } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -78,7 +80,12 @@ Deno.test("computed throws error", async () => {
   const afterError = (await resultCell.pull()) as any;
 
   assertEquals(afterError.poisoned, undefined);
-  assertEquals(afterError.healthy, undefined);
+  const healthyOutput = getDerivedInternalCell(resultCell, {
+    partialCause: "healthy",
+    kind: "computed",
+  }).getRaw();
+  assertInstanceOf(healthyOutput, DataUnavailable);
+  assertEquals(healthyOutput.reason, "schema-mismatch");
 
   assertEquals(errorCaught, true);
 

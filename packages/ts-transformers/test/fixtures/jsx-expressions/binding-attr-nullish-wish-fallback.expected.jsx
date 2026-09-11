@@ -21,9 +21,9 @@ interface BadgeState {
 const __cfLift_1 = __cfHelpers.lift<{
     profileInput?: Profile | undefined;
     profileWish: {
-        result: Profile | undefined;
+        result: Profile | __cfHelpers.IsPending | __cfHelpers.HasError | __cfHelpers.IsSyncing | __cfHelpers.HasSchemaMismatch;
     };
-}, Profile | undefined>(({ profileInput, profileWish }) => profileInput ?? profileWish.result, {
+}, __cfHelpers.AsyncResult<Profile>>(({ profileInput, profileWish }) => profileInput ?? profileWish.result, {
     type: "object",
     properties: {
         profileInput: {
@@ -33,9 +33,14 @@ const __cfLift_1 = __cfHelpers.lift<{
             type: "object",
             properties: {
                 result: {
-                    $ref: "#/$defs/Profile"
+                    anyOf: [{
+                            $ref: "#/$defs/Profile"
+                        }, {
+                            type: "object"
+                        }]
                 }
-            }
+            },
+            required: ["result"]
         }
     },
     required: ["profileWish"],
@@ -55,9 +60,9 @@ const __cfLift_1 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     anyOf: [{
-            type: "undefined"
-        }, {
             $ref: "#/$defs/Profile"
+        }, {
+            type: "object"
         }],
     $defs: {
         Profile: {

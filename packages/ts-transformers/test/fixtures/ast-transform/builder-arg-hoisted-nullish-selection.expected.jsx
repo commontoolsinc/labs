@@ -61,9 +61,9 @@ interface CardState {
 const __cfLift_1 = __cfHelpers.lift<{
     profile?: __cfHelpers.Cell<Profile> | undefined;
     profileWish: {
-        result: Profile | undefined;
+        result: Profile | __cfHelpers.IsPending | __cfHelpers.HasError | __cfHelpers.IsSyncing | __cfHelpers.HasSchemaMismatch;
     };
-}, Profile | __cfHelpers.Cell<Profile> | undefined>(({ profile, profileWish }) => profile ?? profileWish.result, {
+}, __cfHelpers.Cell<Profile> | AsyncResult<Profile>>(({ profile, profileWish }) => profile ?? profileWish.result, {
     type: "object",
     properties: {
         profile: {
@@ -78,9 +78,14 @@ const __cfLift_1 = __cfHelpers.lift<{
             type: "object",
             properties: {
                 result: {
-                    $ref: "#/$defs/Profile"
+                    anyOf: [{
+                            $ref: "#/$defs/Profile"
+                        }, {
+                            type: "object"
+                        }]
                 }
-            }
+            },
+            required: ["result"]
         }
     },
     required: ["profileWish"],
@@ -97,12 +102,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     anyOf: [{
-            type: "undefined"
-        }, {
             $ref: "#/$defs/Profile"
         }, {
             $ref: "#/$defs/Profile",
             asCell: ["cell"]
+        }, {
+            type: "object"
         }],
     $defs: {
         Profile: {

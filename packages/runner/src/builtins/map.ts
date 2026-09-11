@@ -1,4 +1,5 @@
 import { internSchema } from "@commonfabric/data-model-schema";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { getLogger } from "@commonfabric/utils/logger";
 
@@ -31,6 +32,7 @@ import {
 import { listInstanceCoordinator } from "./list-instance-coordinator.ts";
 import { seedResultContainerWhenPullSettles } from "./list-result-container-seed.ts";
 import { issueResultContainerSetup } from "./list-result-container.ts";
+import { shouldAwaitResumedListInput } from "./list-resume-state.ts";
 import { resumeSettleRunKind } from "./resume-republish.ts";
 import { exposedResultCell } from "./scope-policy.ts";
 
@@ -244,7 +246,7 @@ function createMapInstance(
       parentCell,
       outputBinding,
     );
-    const { opPattern, argumentUsage, listCell, list } = plan;
+    const { opPattern, argumentUsage, listCell, list, rawList } = plan;
     const listScope = plan.scope;
 
     // Whether this reconcile issues the container's links: a container it
@@ -286,6 +288,15 @@ function createMapInstance(
     const resultWithLog = result.asSchema(RESULT_PRESENCE_SCHEMA)
       .withTx(tx);
 
+    if (isDataUnavailable(rawList)) {
+      resultWithLog.setRawUntyped(rawList, true);
+      for (const entry of elementRuns.values()) {
+        runtime.runner.stop(entry.resultCell);
+      }
+      elementRuns.clear();
+      return;
+    }
+
     const createRunInput = (element: Cell<any>, index: number) => ({
       ...(argumentUsage.usesElement ? { element } : {}),
       ...(argumentUsage.usesIndex ? { index } : {}),
@@ -310,6 +321,7 @@ function createMapInstance(
         { ...linkResolutionProbe, ...machineryRead },
         fn,
       );
+    const rawResult = probeScoped(() => result!.getRaw());
     // Resume against confirmed state, not the not-yet-loaded value: on the
     // resume reconcile an undefined container is its durable value still
     // streaming in (a map that has run persisted at least []). Reconciling now
@@ -319,6 +331,7 @@ function createMapInstance(
     // reconcile, which then no-ops against the durable value.
     if (
       elementAwaitSync &&
+      !isDataUnavailable(rawResult) &&
       probeScoped(() => resultWithLog.get()) === undefined
     ) {
       // The container's durable value is still streaming in; its arrival
@@ -352,8 +365,12 @@ function createMapInstance(
     const priorSlots = probeScoped(() => resultWithLog.get());
     const priorLen = Array.isArray(priorSlots) ? priorSlots.length : 0;
     if (
-      elementAwaitSync && priorLen > 0 &&
-      (list === undefined || (Array.isArray(list) && list.length === 0))
+      shouldAwaitResumedListInput(
+        elementAwaitSync,
+        rawResult,
+        list,
+        priorLen,
+      )
     ) {
       awaitInputThenSettle(listCell);
       return;

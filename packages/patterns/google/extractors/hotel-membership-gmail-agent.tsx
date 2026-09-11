@@ -13,6 +13,7 @@ import {
   handler,
   NAME,
   pattern,
+  resultOf,
   UI,
   type VNode,
   wish,
@@ -303,6 +304,7 @@ const HotelMembershipExtractorV2 = pattern<
     // prompt at scan time, not a live-updating display, so a one-shot stamp is
     // sufficient.
     const nowCell = wish<number>({ query: "#now" });
+    const nowCellValue = resultOf(nowCell.result);
 
     // IMPORTANT: Do NOT derive from memberships! Changing the goal during a scan
     // triggers an infinite loop (goal changes → agent restarts → finds membership
@@ -312,10 +314,8 @@ const HotelMembershipExtractorV2 = pattern<
       const scanMode = currentScanMode;
       const isQuickMode = max > 0;
       const isRecentMode = scanMode === "recent";
-      const nowMs = nowCell.result;
-      const dateFilter = isRecentMode && nowMs != null
-        ? getRecentDateFilter(nowMs)
-        : "";
+      const nowMs = nowCellValue;
+      const dateFilter = isRecentMode ? getRecentDateFilter(nowMs) : "";
 
       return `Find hotel loyalty program membership numbers in my Gmail.
 
@@ -931,9 +931,6 @@ Report memberships as you find them. Don't wait until the end.`,
                   </div>
                   <div style={{ fontFamily: "monospace" }}>
                     Agent Pending: {searcher.agentPending ? "Yes ⏳" : "No ✓"}
-                  </div>
-                  <div style={{ fontFamily: "monospace" }}>
-                    Agent Result: {searcher.agentResult ? "Yes ✓" : "No"}
                   </div>
                   <div style={{ fontFamily: "monospace" }}>
                     Max Searches: {maxSearches}

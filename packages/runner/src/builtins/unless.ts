@@ -1,4 +1,5 @@
 import { type Cell } from "../cell.ts";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { type Action } from "../scheduler.ts";
 import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -7,6 +8,7 @@ import { ownedCell } from "./runtime-owned-store.ts";
 import { ownedResultCause, resolvedCellScope } from "./scope-policy.ts";
 import { parseLink } from "../link-utils.ts";
 import type { RawNodeCause } from "../module.ts";
+import { readAvailabilityAwareCell } from "../data-unavailability.ts";
 
 /**
  * unless(condition, fallback) - || semantics
@@ -37,7 +39,16 @@ export function unless(
     const resultWithLog = result.withTx(tx);
     const inputsWithLog = inputsCell.withTx(tx);
 
-    const condition = inputsWithLog.key("condition").get();
+    const condition = readAvailabilityAwareCell(
+      tx,
+      inputsWithLog.key("condition"),
+      { surfaceReplicaSyncing: true },
+    );
+
+    if (isDataUnavailable(condition)) {
+      resultWithLog.setRawUntyped(condition, true);
+      return;
+    }
 
     // || semantics: if truthy, return condition; if falsy, return fallback
     const ref = condition

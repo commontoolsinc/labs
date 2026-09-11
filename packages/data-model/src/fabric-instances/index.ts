@@ -1,6 +1,7 @@
 import type { Constructor } from "@commonfabric/utils/types";
 
 import type { FabricClassWithNonterminalCodec } from "@/codec-interface/interface.ts";
+import { DataUnavailable } from "./DataUnavailable.ts";
 import { FabricError } from "./FabricError.ts";
 import { FabricLink } from "./FabricLink.ts";
 import { FabricMap } from "./FabricMap.ts";
@@ -9,6 +10,22 @@ import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 
 export { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
+export {
+  type DataUnavailableFor,
+  type DataUnavailableReason,
+  type DataUnavailableState,
+  type DataUnavailableVariant,
+  type HasError,
+  hasError,
+  type HasSchemaMismatch,
+  hasSchemaMismatch,
+  isDataUnavailable,
+  type IsPending,
+  isPending,
+  type IsSyncing,
+  isSyncing,
+} from "./DataUnavailable.ts";
+export { DataUnavailable };
 export { FabricError, type FabricErrorState } from "./FabricError.ts";
 export { FabricLink } from "./FabricLink.ts";
 export { FabricMap } from "./FabricMap.ts";
@@ -42,6 +59,7 @@ export function codecClasses(): readonly InstanceCodecClass[] {
 }
 
 const CODEC_CLASSES: readonly InstanceCodecClass[] = Object.freeze([
+  DataUnavailable,
   FabricError,
   FabricLink,
   FabricMap,

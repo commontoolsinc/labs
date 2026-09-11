@@ -1,5 +1,6 @@
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { isWalkableObjectOrArray } from "@commonfabric/data-model";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
@@ -514,7 +515,13 @@ const mergeDefaults = (
   if (candidate === undefined) {
     return existing;
   }
-  if (isWalkableObjectOrArray(existing) && isWalkableObjectOrArray(candidate)) {
+  if (isDataUnavailable(existing) || isDataUnavailable(candidate)) {
+    return candidate;
+  }
+  if (
+    isWalkableObjectOrArray(existing) &&
+    isWalkableObjectOrArray(candidate)
+  ) {
     return { ...existing, ...candidate };
   }
   return candidate;

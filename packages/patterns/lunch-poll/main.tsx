@@ -59,10 +59,9 @@
  * (`nowTick`): the runtime's shared per-space clock, coarsened to five
  * minutes, written immediately on subscribe (and refreshed on reload), then
  * advanced on aligned boundaries — so an open tab rolls to the new day at
- * midnight on its own. It reads null until the wish resolves (shown as an
- * empty vote view and a placeholder date) and stays null on pre-#4740
- * runtimes, where the vote and visit handlers no-op rather than read an
- * ambient clock the runtime may not provide. The day boundary is the
+ * midnight on its own. It remains unavailable until the wish resolves, so
+ * dependent computations and vote or visit handlers wait instead of reading
+ * an ambient clock the runtime may not provide. The day boundary is the
  * runtime's local timezone (the viewer's, in the browser); two viewers in
  * different timezones can see different vote sets around midnight.
  */
@@ -75,10 +74,16 @@ import {
   equals,
   getEntityId,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   type PerSpace,
   type PerUser,
+  resultOf,
   Stream,
   UI,
   type VNode,
@@ -91,13 +96,8 @@ import { safeImageUrl } from "./generated-art.tsx";
 import { memoBy } from "./voter-memo.ts";
 
 /**
- * The minimal profile shape this pattern reads: the stable identity cell for
- * `<cf-profile-badge>` binding and `equals()` comparison. Deliberately just
- * `{ name?, avatar? }` — a richer wish schema (bio / externalLinks /
- * verifiedIdentities Cell[]) makes the cross-space `#profile` result fail to
- * resolve, so the badge falls back to "Unknown profile". The display NAME is
- * never read off this cell; it comes from the `#profileName` string wish and
- * is snapshotted at join.
+ * The minimal profile shape requested from `#profile`. The display name and
+ * avatar are requested separately and snapshotted at join.
  */
 export interface LunchProfile {
   readonly name?: string;
@@ -792,10 +792,9 @@ const castVote = handler<CastVoteEvent, {
   // the roster by profile cell, the same comparison joined-ness itself uses.
   if (!(users.get() ?? []).some((u) => equals(u.profile, voter))) return;
   // Stamp with the shared `#now/300` tick — fresh to five minutes, all a
-  // day-granularity stamp needs, and it keeps the deployed source compatible
-  // with Loom runtimes from before handler-scoped Date.now(). Null until the
-  // wish resolves (and always on pre-#4740 runtimes, which also show no
-  // votes): voting no-ops rather than reading an ambient clock.
+  // day-granularity stamp needs. Availability propagation keeps this handler
+  // from running until the wish has resolved; the guard also keeps a directly
+  // invoked handler from substituting an ambient clock for an absent tick.
   const now = nowTick;
   if (!now) return;
   // My vote for this option has a deterministic address, so this reads and
@@ -922,9 +921,9 @@ const logVisit = handler<LogVisitEvent, {
     // Only today's votes are "current opinion": stale votes are hidden from
     // the UI, so they stay out of the snapshot too. Same day source as the
     // UI's `todaysVotes` (the shared `#now/300` tick), so the snapshot
-    // captures exactly what the host is looking at, by construction. While
-    // the wish is still unresolved (null `nowTick`) the board shows no votes,
-    // so the snapshot stays empty for that window too.
+    // captures exactly what the host is looking at, by construction.
+    // Availability propagation keeps this handler from running while that
+    // tick is unresolved.
     const nowRef = nowTick;
     const nowDay = nowRef ? dayKeyOf(nowRef) : null;
     const titleById = new Map(options.get().map((o) => [o.id, o.title]));
@@ -1217,8 +1216,8 @@ export interface CozyPollOutput {
   userCount: number;
   optionCount: number;
   voteCount: number;
-  // The current local day ("YYYY-MM-DD") that votes are filtered to; ""
-  // until the `#now/300` wish resolves.
+  // The current local day ("YYYY-MM-DD") that votes are filtered to;
+  // unavailable until the `#now/300` wish resolves.
   todayDate: string;
   // Votes cast on the current day — the only votes the UI shows and tallies.
   todaysVotes: readonly Vote[];
@@ -1294,12 +1293,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // durably captures the piece's FIRST-EVER load time and never advances
     // again, which would freeze the current-day filter (and every new
     // `castAt`) at the poll's birth day. The body cannot read the ambient
-    // clock, so `nowTick` reads null until the wish resolves — and forever on
-    // pre-#4740 runtimes, which lack `#now` — and every downstream read
-    // guards that window (an empty vote view, a placeholder date, and vote /
-    // visit handlers that no-op).
+    // clock, so `nowTick` remains unavailable until the wish resolves.
     const nowTickWish = wish<number>({ query: "#now/300" });
-    const nowTick = computed(() => nowTickWish.result ?? null);
+    const nowTick = resultOf(nowTickWish.result);
     // Two-step confirmation for destructive actions. Stores the optionId
     // pending remove-confirm (null or undefined = nothing pending). Same idiom as
     // parking-coordinator's `removePersonConfirmTarget`.
@@ -1319,6 +1315,22 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const profileWish = wish<LunchProfile>({ query: "#profile" });
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+    const observedProfile = observeAvailability(profileWish.result);
+    const observedProfileName = observeAvailability(profileNameWish.result);
+    const observedProfileAvatar = observeAvailability(
+      profileAvatarWish.result,
+    );
+    const observedViewerOverrideProfile = observeAvailability(viewer.profile);
+    const observedProfileSetupUI = observeAvailability(profileWish[UI]);
+    const viewerProfileSetupUI = computed(() => {
+      if (
+        hasError(observedProfileSetupUI) ||
+        isPending(observedProfileSetupUI) ||
+        isSyncing(observedProfileSetupUI) ||
+        hasSchemaMismatch(observedProfileSetupUI)
+      ) return <></>;
+      return observedProfileSetupUI;
+    });
     // The override cell when a test has claimed an identity, else the resolved
     // wish. The predicate gates on the claim's NAME STRING, never on the
     // profile cell: a presence test on a cell-typed field lowers to an
@@ -1327,24 +1339,51 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // on an empty slot, parking every browser viewer on the empty override
     // path instead of the wish (stored floating aliases; badges stuck on
     // "Unknown profile"). Strings lower as values and are honestly "" when
-    // unset; the seam's contract is that a claim always carries a name. The
-    // ternary lowers to a reactive ifElse, so production (which never sends
-    // the override) stays on the wish, and a test's claim takes effect when
-    // written. Profile-backed rendering is verified at the browser tier (the
-    // scrabble/battleship precedent).
+    // unset; the seam's contract is that a claim always carries a name.
+    // Availability is handled inside each computation so a missing production
+    // profile cannot block a test override. Profile-backed rendering is
+    // verified at the browser tier (the scrabble/battleship precedent).
     const hasViewerOverride = computed(() =>
       trimmedName(viewer.name ?? "") !== ""
     );
-    const viewerProfileCell = hasViewerOverride
-      ? viewer.profile
-      : profileWish.result;
-    // Strings, unlike cells, are honestly absent when unset, so `??` is safe.
-    const viewerProfileName = computed(() =>
-      trimmedName(viewer.name ?? profileNameWish.result ?? "")
+    const viewerProfileState = computed(() => {
+      if (hasViewerOverride) {
+        return {
+          available: true,
+          profile: resultOf(observedViewerOverrideProfile),
+        };
+      }
+      if (
+        hasError(observedProfile) || isPending(observedProfile) ||
+        isSyncing(observedProfile) || hasSchemaMismatch(observedProfile)
+      ) {
+        return { available: false, profile: {} as LunchProfile };
+      }
+      return { available: true, profile: resultOf(observedProfile) };
+    });
+    const viewerProfileCell = computed(() =>
+      hasViewerOverride ? viewer.profile : viewerProfileState.profile
     );
-    const viewerProfileAvatar = computed(() =>
-      (viewer.avatar ?? profileAvatarWish.result ?? "").trim()
-    );
+    const viewerProfileName = computed(() => {
+      if (hasViewerOverride) return trimmedName(viewer.name ?? "");
+      if (!viewerProfileState.available) return "";
+      if (
+        hasError(observedProfileName) || isPending(observedProfileName) ||
+        isSyncing(observedProfileName) ||
+        hasSchemaMismatch(observedProfileName)
+      ) return "";
+      return trimmedName(resultOf(observedProfileName));
+    });
+    const viewerProfileAvatar = computed(() => {
+      if (hasViewerOverride) return (viewer.avatar ?? "").trim();
+      if (!viewerProfileState.available) return "";
+      if (
+        hasError(observedProfileAvatar) || isPending(observedProfileAvatar) ||
+        isSyncing(observedProfileAvatar) ||
+        hasSchemaMismatch(observedProfileAvatar)
+      ) return "";
+      return resultOf(observedProfileAvatar).trim();
+    });
     // Who this viewer is in THIS poll: their roster entry, found by comparing
     // profile cells. Derived, never stored per-user — so a viewer is recognised
     // on any device the moment their profile resolves, and no per-user state
@@ -1375,7 +1414,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       profile: viewerProfileCell,
       profileName: viewerProfileName,
       profileAvatar: viewerProfileAvatar,
-      profileSetupUI: profileWish[UI],
+      profileSetupUI: viewerProfileSetupUI,
     });
     const boundOverrideViewer = overrideViewer({ viewer });
     const boundAddOption = addOption({
@@ -1437,11 +1476,12 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const optionCount = options.length;
     const voteCount = votes.length;
     // Current-day filter: the UI only shows votes cast on the current day
-    // (local calendar), per the shared tick. While `#now/300` is still
-    // resolving, the day key reads "" and the current-day vote set is empty.
-    const todayKey = computed(() => (nowTick ? dayKeyOf(nowTick) : ""));
+    // (local calendar), per the shared tick. Derived at top level so every
+    // remote voter's vote entity resolves (same reason `ranked` is computed
+    // here, not per-option — see the swatch comment below). Both derived
+    // values remain unavailable while `#now/300` is resolving.
+    const todayKey = computed(() => dayKeyOf(nowTick));
     const todaysVotes = computed(() => {
-      if (!nowTick) return EMPTY_VOTES;
       const key = dayKeyOf(nowTick);
       return votes.filter((v) =>
         typeof v.castAt === "number" && dayKeyOf(v.castAt) === key

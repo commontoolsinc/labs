@@ -6,11 +6,16 @@ import {
   Default,
   equals,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   lift,
   NAME,
   pattern,
   type PerSession,
   type ReadonlyCell,
+  resultOf,
   SELF,
   Stream,
   UI,
@@ -1382,9 +1387,27 @@ export default pattern<TopicInput, TopicOutput>(
     // the fields once here would pin the page to the empty profile the topic
     // opened with: the composer's controls never enable, and a comment or edit
     // made through them carries blank attribution.
-    const profileName = profileWish.result?.name ?? "";
-    const profileAvatar = profileWish.result?.avatar ?? "";
-    const hasProfile = profileName.trim().length > 0;
+    const profileName = computed(() => {
+      if (
+        hasError(profileWish.result) || isPending(profileWish.result) ||
+        isSyncing(profileWish.result) ||
+        hasSchemaMismatch(profileWish.result)
+      ) return "";
+      return resultOf(profileWish.result).name ?? "";
+    });
+    const profileAvatar = computed(() => {
+      if (
+        hasError(profileWish.result) || isPending(profileWish.result) ||
+        isSyncing(profileWish.result) ||
+        hasSchemaMismatch(profileWish.result)
+      ) return "";
+      return resultOf(profileWish.result).avatar ?? "";
+    });
+    const hasProfile = computed(() => profileName.trim().length > 0);
+    const profileView = computed(() => ({
+      name: profileName,
+      avatar: profileAvatar,
+    }));
     const createdByView = createdByOf({ createdBy });
     // The board has already derived the table; this is a lookup by identity,
     // and it is written as one.
@@ -1788,7 +1811,7 @@ export default pattern<TopicInput, TopicOutput>(
                 {hasProfile
                   ? (
                     <cf-profile-badge
-                      $profile={profileWish.result}
+                      $profile={profileView}
                       size="sm"
                       noNavigate
                     />

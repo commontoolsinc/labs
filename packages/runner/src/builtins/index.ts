@@ -1,4 +1,5 @@
 import type {
+  AsyncResult,
   BuiltInGenerateObjectParams,
   BuiltInGenerateTextParams,
 } from "@commonfabric/api";
@@ -11,7 +12,7 @@ import { cellFromUrl } from "./cell-from-url.ts";
 import { collectionIndex } from "./collection-index.ts";
 import { collectionIndexKeys } from "./collection-index-keys.ts";
 import { collectionIndexMember } from "./collection-index-member.ts";
-import { compileAndRun } from "./compile-and-run.ts";
+import { compileAndRun, compileAndRunResult } from "./compile-and-run.ts";
 import { fetchProgram } from "./fetch-program.ts";
 import {
   fetchBinary,
@@ -27,12 +28,17 @@ import { llmDialog } from "./llm-dialog.ts";
 import { generateObject, generateText, llm } from "./llm.ts";
 import { map } from "./map.ts";
 import { navigateTo } from "./navigate-to.ts";
-import { sqliteDatabase, sqliteQuery } from "./sqlite-builtins.ts";
+import {
+  sqliteDatabase,
+  sqliteQuery,
+  sqliteQueryResult,
+} from "./sqlite-builtins.ts";
 import { str, STR_ARGUMENT_SCHEMA } from "./str.ts";
-import { streamData } from "./stream-data.ts";
+import { streamData, streamDataResult } from "./stream-data.ts";
 import { unless } from "./unless.ts";
 import { when } from "./when.ts";
 import { wish } from "./wish.ts";
+import { latestComplete } from "./latest-complete.ts";
 
 const WISH_DEBOUNCE_MS = 50;
 
@@ -75,7 +81,9 @@ export function registerBuiltins(runtime: Runtime) {
     raw(fetchJsonUnchecked),
   );
   moduleRegistry.addModuleByRef("fetchProgram", raw(fetchProgram));
+  moduleRegistry.addModuleByRef("latestComplete", raw(latestComplete));
   moduleRegistry.addModuleByRef("streamData", raw(streamData));
+  moduleRegistry.addModuleByRef("streamDataResult", raw(streamDataResult));
   moduleRegistry.addModuleByRef("llm", raw(llm, { isEffect: true }));
   moduleRegistry.addModuleByRef("llmDialog", raw(llmDialog));
   moduleRegistry.addModuleByRef(
@@ -89,6 +97,10 @@ export function registerBuiltins(runtime: Runtime) {
   moduleRegistry.addModuleByRef("when", raw(when));
   moduleRegistry.addModuleByRef("unless", raw(unless));
   moduleRegistry.addModuleByRef("compileAndRun", raw(compileAndRun));
+  moduleRegistry.addModuleByRef(
+    "compileAndRunResult",
+    raw(compileAndRunResult),
+  );
   moduleRegistry.addModuleByRef("sqliteDatabase", raw(sqliteDatabase));
   // sqliteQuery does a server round-trip and writes results back, so it is an
   // effect (like generateText/llm), and re-runs when its `reactOn` input
@@ -99,10 +111,14 @@ export function registerBuiltins(runtime: Runtime) {
     raw(sqliteQuery, { isEffect: true }),
   );
   moduleRegistry.addModuleByRef(
+    "sqliteQueryResult",
+    raw(sqliteQueryResult, { isEffect: true }),
+  );
+  moduleRegistry.addModuleByRef(
     "generateObject",
     raw<BuiltInGenerateObjectParams, {
       pending: Cell<boolean>;
-      result: Cell<Record<string, unknown> | undefined>;
+      result: Cell<AsyncResult<Record<string, unknown>>>;
       error: Cell<string | undefined>;
       partial: Cell<string | undefined>;
       requestHash: Cell<string | undefined>;
@@ -112,7 +128,7 @@ export function registerBuiltins(runtime: Runtime) {
     "generateText",
     raw<BuiltInGenerateTextParams, {
       pending: Cell<boolean>;
-      result: Cell<string | undefined>;
+      result: Cell<AsyncResult<string>>;
       error: Cell<string | undefined>;
       partial: Cell<string | undefined>;
       requestHash: Cell<string | undefined>;

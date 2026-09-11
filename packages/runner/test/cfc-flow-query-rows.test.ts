@@ -20,6 +20,10 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
+import {
+  type DataUnavailable,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
 import type { SqliteDbRef, SqliteParamsWire } from "@commonfabric/memory/v2";
 import type { FabricValue } from "@commonfabric/data-model";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -46,9 +50,8 @@ interface QueryRow {
   subject: string;
 }
 
-interface QueryState {
-  pending?: boolean;
-  result?: QueryRow[];
+interface QueryResult {
+  rows: QueryRow[];
 }
 
 describe("CFC flow labels: the rows of a query result", () => {
@@ -115,16 +118,17 @@ describe("CFC flow labels: the rows of a query result", () => {
    * confidentiality a consumer of the summary derives — which is what the
    * piece a run leaves behind would carry.
    */
-  const summaryConfidentiality = async (
+  const summaryConfidentiality = async <Input>(
     cause: string,
-    summarize: (query: QueryState) => unknown,
+    select: (query: QueryResult) => Input,
+    summarize: (input: Input) => unknown,
   ): Promise<{ confidentiality: string[]; summary: unknown }> => {
     const { commonfabric: cf } = createTrustedBuilder(runtime!);
     const { lift } = cf as unknown as {
-      lift: (
-        fn: (value: QueryState) => unknown,
+      lift: <Value>(
+        fn: (value: Value) => unknown,
         argumentSchema?: unknown,
-      ) => (value: unknown) => unknown;
+      ) => (value: Value) => unknown;
     };
     const db = labeledDb();
     await seed(
@@ -135,11 +139,12 @@ describe("CFC flow labels: the rows of a query result", () => {
 
     const summarizer = lift(summarize);
     const p = cf.pattern(() => {
-      const query = cf.sqliteQuery.asScope("session")(
+      const request = cf.sqliteQuery.asScope("session")(
         // deno-lint-ignore no-explicit-any -- the builtin's input is untyped
         { db, reactOn: db, sql: SELECT_ROWS } as any,
       );
-      return { query, summary: summarizer(query) };
+      const query = cf.resultOf(request) as unknown as QueryResult;
+      return { query: request, summary: summarizer(select(query)) };
     });
 
     const tx = runtime!.edit();
@@ -147,11 +152,11 @@ describe("CFC flow labels: the rows of a query result", () => {
     const result = runtime!.run(tx, p, {}, resultCell);
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
-    await waitForCellValue<QueryState>(
+    await waitForCellValue<QueryResult | DataUnavailable>(
       runtime!,
       // deno-lint-ignore no-explicit-any -- the query's state, as the builtin writes it
       result.key("query") as any,
-      (state) => state?.pending === false,
+      (state) => !isDataUnavailable(state),
     );
     await result.pull();
     await runtime!.idle();
@@ -190,8 +195,9 @@ describe("CFC flow labels: the rows of a query result", () => {
 
     const { confidentiality, summary } = await summaryConfidentiality(
       "query-rows-arm-a",
+      (query) => query,
       (query) => {
-        const rows = query?.result ?? [];
+        const rows = query.rows;
         const kept = rows.filter((row) =>
           String(row?.subject ?? "").includes("invoice")
         );
@@ -214,7 +220,8 @@ describe("CFC flow labels: the rows of a query result", () => {
 
     const { confidentiality, summary } = await summaryConfidentiality(
       "query-rows-arm-b",
-      (query) => ({ count: (query?.result ?? []).length }),
+      (query) => query.rows.length,
+      (count) => ({ count }),
     );
 
     expect(summary).toEqual({ count: 2 });

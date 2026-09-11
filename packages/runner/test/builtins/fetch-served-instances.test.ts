@@ -5,6 +5,7 @@ import { spy, stub } from "@std/testing/mock";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import {
   ExecutionLeaseCycle,
@@ -457,7 +458,9 @@ describe("fetch-served-instances", () => {
     await fixture.commit(empty);
     const read = runtime.readTx();
     expect(fixture.resultCells.pending.withTx(read).get()).toBe(false);
-    expect(fixture.resultCells.result.withTx(read).get()).toBeUndefined();
+    expect(fixture.resultCells.result.withTx(read).get()).toEqual(
+      DataUnavailable.schemaMismatch(),
+    );
     expect(fixture.resultCells.error.withTx(read).get()).toBeUndefined();
     expect(request.calls).toHaveLength(1);
   });

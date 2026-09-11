@@ -54,9 +54,12 @@ import {
   fetchProgram,
   fetchText,
   generateObject,
+  generateObjectStream,
   generateText,
+  generateTextStream,
   ifElse,
   inspectConfLabel,
+  latestComplete,
   llm,
   llmDialog,
   navigateTo,
@@ -83,6 +86,15 @@ import {
   handler,
   lift,
 } from "./module.ts";
+import {
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
+  observeAvailability,
+  partialResultOf,
+  resultOf,
+} from "./data-unavailable.ts";
 import { isTrustedPattern, setPatternProgram } from "./pattern-metadata.ts";
 import { pattern } from "./pattern.ts";
 import type {
@@ -212,6 +224,16 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     assertCapture,
     assertRenderParts,
 
+    // Pure unavailable-data observation helpers
+    isPending,
+    hasError,
+    isSyncing,
+    hasSchemaMismatch,
+    observeAvailability,
+    partialResultOf,
+    resultOf,
+    latestComplete,
+
     // Built-in modules
     str: trustedStr,
     ifElse,
@@ -221,7 +243,9 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     llm,
     llmDialog,
     generateObject,
+    generateObjectStream,
     generateText,
+    generateTextStream,
     fetchBinary,
     cellFromUrl,
     fetchText,

@@ -27,11 +27,18 @@ import {
   computed,
   Default,
   generateObject,
+  generateObjectStream,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   type JSONSchema,
   NAME,
   navigateTo,
+  observeAvailability,
   pattern,
+  resultOf,
   Stream,
   toIndentedDebugString,
   UI,
@@ -136,6 +143,16 @@ export interface PendingSubmission {
   userApproved: boolean; // Has user approved submission
   submittedAt?: number; // When submitted (if submitted)
 }
+
+type PiiScreeningResult = {
+  hasPII: boolean;
+  piiFound: string[];
+  isGeneralizable: boolean;
+  generalizabilityIssues: string[];
+  sanitizedQuery: string;
+  confidence: number;
+  recommendation: "share" | "share_with_edits" | "do_not_share";
+};
 
 // ============================================================================
 // INPUT/OUTPUT TYPES
@@ -428,7 +445,7 @@ const searchGmailHandler = handler<
     debugLog: Writable<DebugLogEntry[]>;
     localQueries: Writable<LocalQuery[]>;
     communityQueryRefs: Writable<CommunityQueryRef[]>;
-    registryWish: Writable<any>;
+    registry: any;
     agentTypeUrl: Writable<string>;
     lastExecutedQueryIdCell: Writable<string | null>;
   }
@@ -671,8 +688,7 @@ const searchGmailHandler = handler<
         );
         if (matchingCommunityQuery) {
           // Get the registry to call upvoteQuery
-          const wishResult = state.registryWish.get();
-          const registry = wishResult?.result;
+          const registry = state.registry;
           if (registry?.upvoteQuery) {
             const typeUrl = state.agentTypeUrl.get();
             if (DEBUG_AGENT) {
@@ -1162,12 +1178,12 @@ const GmailAgenticSearch = pattern<
     // Ticks every 60 seconds so the expiry warning re-evaluates as the clock
     // advances toward the token's expiresAt timestamp.
     const nowCell = wish<number>({ query: "#now/60" });
+    const nowCellValue = resultOf(nowCell.result);
 
     // Check if token may be expired based on expiresAt timestamp
     const tokenMayBeExpired = computed(() => {
       if (!authValue?.expiresAt) return false;
-      const nowMs = nowCell.result;
-      if (nowMs == null) return false;
+      const nowMs = nowCellValue;
       // Add 5 minute buffer - if within 5 min of expiry, consider it potentially expired
       const bufferMs = 5 * 60 * 1000;
       return nowMs > (authValue.expiresAt - bufferMs);
@@ -1237,21 +1253,24 @@ const GmailAgenticSearch = pattern<
     const registryWish = wish<GmailSearchRegistryOutput>({
       query: "#gmailSearchRegistry",
     });
+    const registryResult = registryWish.result;
+    const usableRegistry = resultOf(registryResult);
+    const registry: any = computed(() => {
+      if (
+        hasError(registryResult) || isPending(registryResult) ||
+        isSyncing(registryResult) || hasSchemaMismatch(registryResult)
+      ) return null;
+      return usableRegistry;
+    });
 
     // Extract community queries for this agent type (with IDs for upvoting)
     // Conditional enablement is handled here, not in the wish call
     const communityQueryRefs = computed((): CommunityQueryRef[] => {
-      const wishResult = registryWish as any;
       const typeUrl = agentTypeUrl;
       const enabled = enableCommunityQueries;
       // Guard: skip if community queries disabled or no agent type URL
       if (!enabled || !typeUrl) return [];
-      if (!wishResult?.result) return [];
-      // wishResult.result is a Cell reference, use .key() for dynamic access
-      const registryCell = wishResult.result;
-      const registriesCell = registryCell?.key?.("registries");
-      if (!registriesCell) return [];
-      const agentRegistry = registriesCell.key(typeUrl)?.get?.();
+      const agentRegistry = registry?.registries?.[typeUrl];
       if (!agentRegistry) return [];
       // Return top queries sorted by score, keeping IDs for upvoting
       return [...(agentRegistry.queries || [])]
@@ -1329,7 +1348,7 @@ const GmailAgenticSearch = pattern<
             debugLog,
             localQueries,
             communityQueryRefs,
-            registryWish,
+            registry,
             agentTypeUrl,
             lastExecutedQueryIdCell,
           }),
@@ -1381,7 +1400,7 @@ When you're done searching, STOP calling tools and produce your final structured
     });
 
     // Create the agent
-    const agent = generateObject({
+    const agentRequest = generateObjectStream<Record<string, any>>({
       system: fullSystemPrompt,
       prompt: agentPrompt,
       tools: allTools,
@@ -1404,11 +1423,31 @@ When you're done searching, STOP calling tools and produce your final structured
         };
       }),
     });
-
-    const { result: agentResult, pending: agentPending } = agent;
-
-    // Detect when agent completes
-    const scanCompleted = isScanning && !agentPending && !!agentResult;
+    const usableAgentResult = resultOf(agentRequest);
+    // This presenter must emit stable booleans and UI before a scan starts, so
+    // it explicitly observes every request state instead of waiting for T.
+    const observedAgentRequest = observeAvailability(agentRequest);
+    const agentResult = computed(() => {
+      if (
+        isPending(observedAgentRequest) ||
+        hasError(observedAgentRequest) ||
+        isSyncing(observedAgentRequest) ||
+        hasSchemaMismatch(observedAgentRequest)
+      ) return null;
+      return usableAgentResult;
+    });
+    const agentAvailability = computed(() => {
+      const pending = isPending(observedAgentRequest) ||
+        isSyncing(observedAgentRequest);
+      const failed = hasError(observedAgentRequest) ||
+        hasSchemaMismatch(observedAgentRequest);
+      return {
+        pending: isScanning && pending,
+        completed: isScanning && !pending && !failed,
+      };
+    });
+    const agentPending = agentAvailability.pending;
+    const scanCompleted = agentAvailability.completed;
 
     // Detect auth errors from agent result or token validation
     const hasAuthError = computed(() => {
@@ -2314,13 +2353,11 @@ Return a sanitized version that:
     });
 
     // Only run PII screening when there's a prompt
-    const piiScreeningResult = computed(() => {
-      if (!piiScreeningPrompt) return null;
-      return generateObject({
-        prompt: piiScreeningPrompt,
-        schema: piiScreeningSchema,
-        system:
-          `You are a privacy analyst and query curator for a community knowledge base.
+    const piiScreeningRequest = generateObject<PiiScreeningResult>({
+      prompt: piiScreeningPrompt as any,
+      schema: piiScreeningSchema,
+      system:
+        `You are a privacy analyst and query curator for a community knowledge base.
 
 Your job is to evaluate Gmail search queries for:
 1. PRIVACY: Detect and remove/sanitize PII (emails, names, specific identifiers)
@@ -2331,24 +2368,13 @@ Major hotel chains, airlines, common retailers, and widespread services are good
 Personal domains, local businesses, and hyper-specific searches should not be shared.
 
 Be conservative: when in doubt, recommend "do_not_share".`,
-      });
     });
+    const piiScreeningResult = resultOf(piiScreeningRequest);
 
     // Update pending submissions with screening results
     // This is a side effect that runs when screening completes
     computed(() => {
-      const result = piiScreeningResult as any;
-      if (!result || !result.result) return;
-
-      const screeningData = result.result as {
-        hasPII: boolean;
-        piiFound: string[];
-        isGeneralizable: boolean;
-        generalizabilityIssues: string[];
-        sanitizedQuery: string;
-        confidence: number;
-        recommendation: "share" | "share_with_edits" | "do_not_share";
-      };
+      const screeningData = piiScreeningResult;
 
       const pendingWritable: Writable<PendingSubmission[]> = pendingSubmissions;
       const submissions = (pendingWritable.get() || []).filter((
@@ -2685,12 +2711,11 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                     {/* Submit all approved button */}
                     {computed(() => {
                       const subs = pendingSubmissions as PendingSubmission[];
-                      const registry = registryWish as any;
                       const typeUrl = agentTypeUrl as string;
                       const approvedCount = (subs || []).filter((s) =>
                         s.userApproved && !s.submittedAt
                       ).length;
-                      const hasRegistry = !!registry?.result?.submitQuery;
+                      const hasRegistry = !!registry?.submitQuery;
 
                       return approvedCount > 0
                         ? (
@@ -2712,8 +2737,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                 ) =>
                                   s.userApproved && !s.submittedAt
                                 );
-                                const submitHandler = registry?.result
-                                  ?.submitQuery;
+                                const submitHandler = registry?.submitQuery;
                                 const pendingWritable: Writable<
                                   PendingSubmission[]
                                 > = pendingSubmissions;

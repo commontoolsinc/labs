@@ -7,6 +7,7 @@ import {
   shallowMutableClone,
 } from "@commonfabric/data-model";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
@@ -369,14 +370,13 @@ function extractDefaultValuesInternal(
       // A fabric-valued default takes this return alongside the scalars: it
       // carries no properties for the assembly below to build on, and is
       // already the whole of what the schema declares.
-      if (
-        Object.hasOwn(canonical, "default") &&
-        !isWalkableObjectOrArray(canonical.default)
-      ) {
+      const hasDefault = Object.hasOwn(canonical, "default");
+      const hasObjectDefault = hasDefault &&
+        !isDataUnavailable(canonical.default) &&
+        isWalkableObjectOrArray(canonical.default);
+      if (hasDefault && !hasObjectDefault) {
         return canonical.default;
       }
-      const hasObjectDefault = Object.hasOwn(canonical, "default") &&
-        isWalkableObjectOrArray(canonical.default);
       // Mutable top-level copy of the schema default, so injecting top-level
       // property defaults below doesn't mutate the schema's own default object.
       // Only top-level keys are written here, and the result is normalized
@@ -385,7 +385,7 @@ function extractDefaultValuesInternal(
       // children as inexpensive defense-in-depth against accidental deeper
       // mutation of the shared default.
       const obj = shallowMutableClone(
-        isWalkableObjectOrArray(canonical.default) ? canonical.default : {},
+        hasObjectDefault ? canonical.default : {},
       ) as Record<string, FabricValue>;
       for (
         const [propKey, propSchema] of Object.entries(canonical.properties)

@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import type {
+  DataUnavailableVariant,
   Default,
   FactoryInput,
   HandlerFactory,
@@ -91,6 +92,17 @@ const _wrongRoomBinding: MustBeTrue<
   AssertNotAssignable<WrongRoomBinding, FactoryInput<StripCell<RoomInput>>>
 > = true;
 
+type UnavailableRoomBinding = {
+  player1: DataUnavailableVariant;
+};
+
+const _unavailableFactoryInput: MustBeTrue<
+  AssertAssignable<
+    UnavailableRoomBinding,
+    Parameters<PatternFactory<StripCell<RoomInput>, unknown>>[0]
+  >
+> = true;
+
 type SchemaPatternOverloadAcceptsFactoryInput = PatternFunction extends {
   <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
     fn: (
@@ -127,9 +139,10 @@ Deno.test("FactoryInput accepts reactive cell handles in factory bindings", () =
       _handlerFactory,
       _patternFactory,
       _wrongRoomBinding,
+      _unavailableFactoryInput,
       _schemaPatternOverload,
       _schemaWishOverload,
     ],
-    ["object", true, true, true, true, true, true, true],
+    ["object", true, true, true, true, true, true, true, true],
   );
 });

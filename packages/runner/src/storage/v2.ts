@@ -118,6 +118,7 @@ import {
   SealedCommitVerdict,
   SealedNativeCommit,
   State,
+  StorageConnectionState,
   StorageNotification,
   StorageTransactionRejected,
   StoreReadThrough,
@@ -939,6 +940,12 @@ export class StorageManager implements IStorageManager {
 
   #settings: IRemoteStorageProviderSettings;
   #providers = new Map<MemorySpace, Provider>();
+  #connectionStates = new Map<MemorySpace, StorageConnectionState>();
+  #connectionStateSubscribers = new Map<
+    MemorySpace,
+    Set<(state: StorageConnectionState) => void>
+  >();
+  #connectionTeardownDepth = 0;
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
 
@@ -1541,6 +1548,8 @@ export class StorageManager implements IStorageManager {
         syncReplayDependencies: (document) =>
           this.#syncCfcSchemaDocument(space, document),
         getTelemetry: () => this.#telemetry,
+        onConnectionState: (state) =>
+          this.#publishConnectionState(space, state),
         eventAppendQueueStore: this.#eventAppendQueueStore,
         eventAppendPacing: this.#eventAppendPacing,
       });
@@ -1559,6 +1568,75 @@ export class StorageManager implements IStorageManager {
       });
     }
     return provider;
+  }
+
+  subscribeConnectionState(
+    space: MemorySpace,
+    callback: (state: StorageConnectionState) => void,
+  ): Cancel {
+    let subscribers = this.#connectionStateSubscribers.get(space);
+    if (subscribers === undefined) {
+      subscribers = new Set();
+      this.#connectionStateSubscribers.set(space, subscribers);
+    }
+    subscribers.add(callback);
+    this.#notifyConnectionStateSubscriber(
+      callback,
+      this.#connectionStates.get(space) ?? { status: "idle", epoch: 0 },
+    );
+    return () => {
+      const current = this.#connectionStateSubscribers.get(space);
+      current?.delete(callback);
+      if (current?.size === 0) {
+        this.#connectionStateSubscribers.delete(space);
+      }
+    };
+  }
+
+  #publishConnectionState(
+    space: MemorySpace,
+    state: StorageConnectionState,
+  ): void {
+    if (this.#connectionTeardownDepth > 0 && state.status !== "closed") {
+      return;
+    }
+    const previous = this.#connectionStates.get(space);
+    // `closed` is terminal for its connection generation. A live provider may
+    // supersede a terminal session with a newer ready epoch; the teardown gate
+    // above rejects that exception throughout manager teardown. Reject every
+    // other late notification from the closed generation.
+    if (
+      previous?.status === "closed" &&
+      !(state.status === "ready" && state.epoch > previous.epoch)
+    ) {
+      return;
+    }
+    if (
+      previous?.status === state.status && previous.epoch === state.epoch
+    ) {
+      return;
+    }
+    this.#connectionStates.set(space, state);
+    for (
+      const callback of [...this.#connectionStateSubscribers.get(space) ?? []]
+    ) {
+      // A subscriber may synchronously close the manager or otherwise publish
+      // a newer state. Once that happens, the remainder of this snapshot must
+      // not receive the superseded notification after the newer one.
+      if (this.#connectionStates.get(space) !== state) break;
+      this.#notifyConnectionStateSubscriber(callback, state);
+    }
+  }
+
+  #notifyConnectionStateSubscriber(
+    callback: (state: StorageConnectionState) => void,
+    state: StorageConnectionState,
+  ): void {
+    try {
+      callback(state);
+    } catch (error) {
+      console.error("storage connection-state subscriber threw:", error);
+    }
   }
 
   /**
@@ -1869,6 +1947,7 @@ export class StorageManager implements IStorageManager {
   }
 
   async close(): Promise<void> {
+    this.#connectionTeardownDepth++;
     // A detached-session resume names the session id this close rotates;
     // presenting it afterwards would mount the OLD id under a stale token.
     this.#detachedSessionResumes.clear();
@@ -1878,7 +1957,22 @@ export class StorageManager implements IStorageManager {
     // inside this session's epoch, not after the clear.
     try {
       if (this.#providers.size === 0) {
+        this.#connectionStates.clear();
         return;
+      }
+      // Teardown itself owns the terminal transition. A provider may still be
+      // waiting for its session factory, so relying on that late session's
+      // client.close() notification would leave subscribers stuck at idle (or
+      // lost) until the factory eventually settles. Publishing first also
+      // makes #publishConnectionState's terminal guard reject a late ready.
+      const closeCause = new Error("storage manager closed");
+      for (const space of this.#providers.keys()) {
+        const epoch = this.#connectionStates.get(space)?.epoch ?? 0;
+        this.#publishConnectionState(space, {
+          status: "closed",
+          epoch,
+          cause: closeCause,
+        });
       }
       // allSettled: one rejecting teardown must not release the lease (the
       // finally below) while sibling teardowns are still draining frames.
@@ -1893,19 +1987,32 @@ export class StorageManager implements IStorageManager {
       }
       this.#providers.clear();
       this.#dataURISyncs.clear();
+      this.#connectionStates.clear();
       this.#sessionId = crypto.randomUUID();
     } finally {
       this.#schemaRegistryLease?.();
       this.#schemaRegistryLease = undefined;
+      this.#connectionTeardownDepth--;
     }
   }
 
   async closeNow(): Promise<void> {
+    this.#connectionTeardownDepth++;
     this.#detachedSessionResumes.clear();
     this.#genesisPhase.clear();
     try {
       if (this.#providers.size === 0) {
+        this.#connectionStates.clear();
         return;
+      }
+      const closeCause = new Error("storage manager closed");
+      for (const space of this.#providers.keys()) {
+        const epoch = this.#connectionStates.get(space)?.epoch ?? 0;
+        this.#publishConnectionState(space, {
+          status: "closed",
+          epoch,
+          cause: closeCause,
+        });
       }
       const outcomes = await Promise.allSettled(
         [...this.#providers.values()].map((provider) => provider.destroyNow()),
@@ -1918,10 +2025,12 @@ export class StorageManager implements IStorageManager {
       }
       this.#providers.clear();
       this.#dataURISyncs.clear();
+      this.#connectionStates.clear();
       this.#sessionId = crypto.randomUUID();
     } finally {
       this.#schemaRegistryLease?.();
       this.#schemaRegistryLease = undefined;
+      this.#connectionTeardownDepth--;
     }
   }
 
@@ -2682,6 +2791,9 @@ type ProviderOptions = {
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
 
+  /** Reports this space replica's transport lifecycle to its manager. */
+  onConnectionState?: (state: StorageConnectionState) => void;
+
   /** The LT9 event-intent persistence seam (see Options). */
   eventAppendQueueStore?: EventAppendQueueStore;
 
@@ -2705,10 +2817,19 @@ type ProviderOptions = {
   storeReadThrough?: () => StoreReadThrough | undefined;
 };
 
-type SpaceReplicaOptions = Omit<ProviderOptions, "createSession"> & {
-  routeGeneration: number;
-  createSession: () => Promise<OpenedSpaceSession>;
-};
+type SpaceReplicaOptions =
+  & Omit<
+    ProviderOptions,
+    "createSession" | "onConnectionState"
+  >
+  & {
+    routeGeneration: number;
+    createSession: () => Promise<OpenedSpaceSession>;
+    onConnectionState?: (
+      state: StorageConnectionState,
+      sessionGeneration: number,
+    ) => void;
+  };
 
 type ProviderSyncRequest = {
   uri: URI;
@@ -2767,6 +2888,64 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
       routeGeneration,
       createSession: () =>
         this.options.createSession(routeGeneration, routeSignal),
+      onConnectionState: (state, sessionGeneration) =>
+        this.#handleReplicaConnectionState(
+          routeGeneration,
+          sessionGeneration,
+          state,
+        ),
+    });
+  }
+
+  #connectionEpoch = 0;
+  #connectionSource:
+    | {
+      routeGeneration: number;
+      sessionGeneration: number;
+      sessionEpoch: number;
+    }
+    | undefined;
+
+  #handleReplicaConnectionState(
+    routeGeneration: number,
+    sessionGeneration: number,
+    state: StorageConnectionState,
+  ): void {
+    if (
+      this.#destroyed ||
+      routeGeneration !== this.options.routeState.generation
+    ) {
+      return;
+    }
+
+    if (state.status === "idle") {
+      return;
+    }
+
+    if (state.status !== "ready") {
+      this.options.onConnectionState?.({
+        ...state,
+        epoch: this.#connectionEpoch,
+      });
+      return;
+    }
+
+    const source = this.#connectionSource;
+    if (
+      source === undefined || source.routeGeneration !== routeGeneration ||
+      source.sessionGeneration !== sessionGeneration ||
+      state.epoch > source.sessionEpoch
+    ) {
+      this.#connectionEpoch++;
+    }
+    this.#connectionSource = {
+      routeGeneration,
+      sessionGeneration,
+      sessionEpoch: state.epoch,
+    };
+    this.options.onConnectionState?.({
+      status: "ready",
+      epoch: this.#connectionEpoch,
     });
   }
 
@@ -2970,8 +3149,20 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
       return;
     }
     const previous = this.replica;
-    this.#routeAbort.abort(new Error("memory replica route replaced"));
-    this.options.routeState.generation++;
+    const replacementCause = new Error("memory replica route replaced");
+    const replacementGeneration = ++this.options.routeState.generation;
+    this.options.onConnectionState?.({
+      status: "disconnected",
+      epoch: this.#connectionEpoch,
+      cause: replacementCause,
+    });
+    if (
+      this.#destroyed ||
+      this.options.routeState.generation !== replacementGeneration
+    ) {
+      return;
+    }
+    this.#routeAbort.abort(replacementCause);
     this.#routeAbort = new AbortController();
     const replacement = this.#createReplica();
     this.replica = replacement;
@@ -3247,6 +3438,7 @@ export class SpaceReplica
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
   }>;
+  #sessionGeneration = 0;
 
   /** The client of the last RESOLVED session handle — for synchronous
    *  capability reads (`sqliteServerCommitRowLabelEval`). */
@@ -3409,6 +3601,11 @@ export class SpaceReplica
   #closed = false;
   readonly #closeSignal = Promise.withResolvers<void>();
   #getTelemetry: () => TelemetrySink | undefined;
+  #onConnectionState?: (
+    state: StorageConnectionState,
+    sessionGeneration: number,
+  ) => void;
+  #cancelConnectionState?: Cancel;
   #caughtUpLocalSeq = 0;
 
   /**
@@ -3571,6 +3768,7 @@ export class SpaceReplica
     this.#scopeKeyIdentity = options.scopeKeyIdentity;
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
+    this.#onConnectionState = options.onConnectionState;
     this.#settings = options.settings;
     this.#routeState = options.routeState;
     this.#routeGeneration = options.routeGeneration;
@@ -4058,6 +4256,8 @@ export class SpaceReplica
       return;
     }
     this.#aclChangedSinceMount = false;
+    this.#cancelConnectionState?.();
+    this.#cancelConnectionState = undefined;
     this.#sessionHandle = undefined;
     this.#sessionClient = undefined;
     // Dropping the terminated session drops the `closeError` half of
@@ -4579,6 +4779,8 @@ export class SpaceReplica
 
   async close(): Promise<void> {
     this.#closed = true;
+    this.#cancelConnectionState?.();
+    this.#cancelConnectionState = undefined;
     this.#closeSignal.resolve();
     this.#eventAppendQueue?.close();
     this.#resetConflictAdmissionState();
@@ -4744,6 +4946,8 @@ export class SpaceReplica
 
   closeNow(): void {
     this.#closed = true;
+    this.#cancelConnectionState?.();
+    this.#cancelConnectionState = undefined;
     this.#closeSignal.resolve();
     this.#eventAppendQueue?.close();
     this.#resetConflictAdmissionState();
@@ -8426,6 +8630,7 @@ export class SpaceReplica
     // place every read and commit passes through on its way to a session.
     this.#consumeOwedSessionRemount();
     if (this.#sessionHandle === undefined) {
+      const sessionGeneration = ++this.#sessionGeneration;
       // Defer the factory call until after #sessionHandle is installed. Session
       // setup can synchronously re-enter provider work (notably home-space ACL
       // bootstrap); calling the factory inline leaves a window where that work
@@ -8442,8 +8647,35 @@ export class SpaceReplica
             await resolved.client.close();
             throw error;
           }
+          this.#cancelConnectionState?.();
+          this.#cancelConnectionState = undefined;
           this.#sessionClient = resolved.client;
           this.#sessionSession = resolved.session;
+          const publishConnectionState = (state: StorageConnectionState) => {
+            if (
+              this.#closed || this.#sessionGeneration !== sessionGeneration ||
+              this.#sessionHandle !== handle
+            ) {
+              return;
+            }
+            this.#onConnectionState?.(state, sessionGeneration);
+          };
+          const subscribeConnectionState = (
+            resolved.session as MemoryV2Client.SpaceSession & {
+              subscribeConnectionState?:
+                MemoryV2Client.SpaceSession["subscribeConnectionState"];
+            }
+          ).subscribeConnectionState;
+          if (typeof subscribeConnectionState === "function") {
+            this.#cancelConnectionState = subscribeConnectionState.call(
+              resolved.session,
+              publishConnectionState,
+            );
+          } else {
+            // Compatibility for structural test doubles that predate the
+            // lifecycle capability: an opened session is usable now.
+            publishConnectionState({ status: "ready", epoch: 1 });
+          }
           // Session replacement resets the marker epoch: markers for the
           // parked accepts' localSeqs can never arrive from the fresh
           // session, so apply them immediately (the same rule as consumer

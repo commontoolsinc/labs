@@ -5,6 +5,7 @@ import {
   isWalkableObjectOrArray,
   valueEqual,
 } from "@commonfabric/data-model";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { isPrimitiveCellLink } from "./link-utils.ts";
 import { normalizeCellScope } from "./scope.ts";
@@ -118,7 +119,8 @@ export function addressesToPathByEntity(
  * below name the shared predicate directly.
  */
 function isKeyable(value: unknown): boolean {
-  return value instanceof FabricInstance || isWalkableObjectOrArray(value);
+  return isDataUnavailable(value) || value instanceof FabricInstance ||
+    isWalkableObjectOrArray(value);
 }
 
 /**

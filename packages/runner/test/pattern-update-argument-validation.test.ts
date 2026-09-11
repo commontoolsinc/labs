@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
@@ -80,6 +81,18 @@ const typedCount = (marker: string): RuntimeProgram =>
   programOf([
     "import { pattern } from 'commonfabric';",
     "interface Args { count?: number; [key: string]: any }",
+    "export default pattern<Args, { marker: string }>(() => {",
+    `  return { marker: ${JSON.stringify(marker)} };`,
+    "});",
+    "",
+  ].join("\n"));
+
+/** A candidate whose profile slot normally holds a plain object. */
+const typedProfile = (marker: string): RuntimeProgram =>
+  programOf([
+    "import { pattern } from 'commonfabric';",
+    "interface Profile { name?: string }",
+    "interface Args { profile?: Profile; [key: string]: any }",
     "export default pattern<Args, { marker: string }>(() => {",
     `  return { marker: ${JSON.stringify(marker)} };`,
     "});",
@@ -256,6 +269,27 @@ describe("pattern update validates the stored argument", () => {
       "the refused setup stamped its completion marker, so a later boot would " +
         "read the root as fully staged for a version that never staged it",
     ).toBe(vintageIdentity);
+  });
+
+  it("accepts an authenticated unavailable value in a typed stored slot", async () => {
+    const unavailable = DataUnavailable.syncing();
+    const { cell } = await setupVintage(
+      openArgument("v1"),
+      { profile: unavailable },
+      "roll-forward-unavailable-profile",
+    );
+
+    const { error, identity } = await rollForward(cell, typedProfile("v2"));
+
+    expect(
+      error,
+      "the source update treated a transient availability marker as the " +
+        "profile's business value and permanently refused the candidate",
+    ).toBeUndefined();
+    expect(getPatternSetupIdentityRef(cell)?.identity).toBe(identity);
+    const argument = rt.getCellFromLink(getMetaLink(cell, "argument")!)
+      .getRaw();
+    expect((argument as { profile?: unknown }).profile).toBe(unavailable);
   });
 
   it("accepts an optional property a handler stored as undefined", async () => {

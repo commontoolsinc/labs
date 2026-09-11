@@ -1,9 +1,10 @@
 /**
- * The two special-object kinds get opposite treatment, and neither is the
- * object branch. A `FabricPrimitive` is a leaf and stands whole, where a walk
- * that rebuilt it from its entries would give a bare `{}`. A `FabricInstance`
- * is a container reached by its codec contents, which this walk cannot do, so
- * it refuses rather than converting one wrongly.
+ * Special-object kinds do not enter the plain-object branch. A
+ * `FabricPrimitive` is a leaf and stands whole, where a walk that rebuilt it
+ * from its entries would give a bare `{}`. `DataUnavailable` is also an atomic
+ * control value and stands whole. Other `FabricInstance` containers are
+ * reached by their codec contents, which this walk cannot do, so it refuses
+ * rather than converting one wrongly.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -13,7 +14,10 @@ import {
   FabricBytes,
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
-import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import {
+  DataUnavailable,
+  FabricError,
+} from "@commonfabric/data-model/fabric-instances";
 
 import {
   type Cell,
@@ -64,6 +68,13 @@ describe("convert-cells-to-links-special-objects", () => {
 
     expect(result.x).toBeInstanceOf(FabricEpochNsec);
     expect((result.x as FabricEpochNsec).value).toBe(1_000_000_000n);
+  });
+
+  it("returns `DataUnavailable` whole as an atomic control value", () => {
+    const unavailable = DataUnavailable.pending();
+    const result = convertCellsToLinks({ x: unavailable }) as { x: unknown };
+
+    expect(result.x).toBe(unavailable);
   });
 
   it("throws for a `FabricInstance` rather than converting one wrongly", () => {
