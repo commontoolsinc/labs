@@ -12,6 +12,21 @@ import { initializePiecesController } from "./pieces-controller.ts";
 import { settleView, waitForSettledText } from "./cfc-browser-helpers.ts";
 import { waitForPieceView } from "./topics-navigation-helpers.ts";
 
+const networkControlUrl = Deno.env.get("CF_ROW_RECONNECT_CONTROL_URL");
+
+/** Controls the local relay used by the optional browser reconnect run. */
+async function controlNetwork(action: "pause" | "resume"): Promise<void> {
+  if (!networkControlUrl) return;
+  const response = await fetch(new URL(action, networkControlUrl), {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`Network relay ${action}: ${response.status}`);
+  }
+  const result = await response.json();
+  if (action === "pause") expect(result.closedSockets).toBeGreaterThan(0);
+}
+
 const root = join(import.meta.dirname!, "..");
 const fixtureRoot = join(import.meta.dirname!, "fixtures/reactive-vote-rows");
 
@@ -162,6 +177,7 @@ describe("rendered vote rows across replicas", () => {
           await page.screenshot(join(artifactDir, `${artifactName}-cold.png`));
         }
         for (const color of ["green", "yellow"]) {
+          await controlNetwork("pause");
           const sent = await cc.runtime.editWithRetry((tx) =>
             output.key("cast").withTx(tx).send({
               key: "alice",
@@ -172,6 +188,7 @@ describe("rendered vote rows across replicas", () => {
           if (sent.error) throw new Error(sent.error.message);
           await cc.runtime.settled(Infinity);
           await cc.synced();
+          await controlNetwork("resume");
           await waitForSettledText(
             page,
             variant === "mapped"
@@ -199,6 +216,7 @@ describe("rendered vote rows across replicas", () => {
             expect(swatches).toEqual([color]);
           }
         }
+        await controlNetwork("pause");
         const renamed = await cc.runtime.editWithRetry((tx) => {
           if (externalProfiles) {
             externalProfiles.withTx(tx).elementById("alice").key("name")
@@ -213,6 +231,7 @@ describe("rendered vote rows across replicas", () => {
         if (renamed.error) throw new Error(renamed.error.message);
         await cc.runtime.settled(Infinity);
         await cc.synced();
+        await controlNetwork("resume");
         await waitForSettledText(
           page,
           '[data-row="one"][title="Alice Updated"]',
@@ -261,6 +280,7 @@ describe("rendered vote rows across replicas", () => {
               {
                 variant,
                 profileLocation,
+                reconnect: Boolean(networkControlUrl),
                 url: `${env.FRONTEND_URL}${spaceName}/${piece.id}`,
                 assertions: [
                   "linked values and profiles before first browser materialization",
@@ -278,12 +298,14 @@ describe("rendered vote rows across replicas", () => {
           );
         }
         for (const key of ["bob", "carol"]) {
+          await controlNetwork("pause");
           const removed = await cc.runtime.editWithRetry((tx) =>
             output.key("retract").withTx(tx).send({ key })
           );
           if (removed.error) throw new Error(removed.error.message);
           await cc.runtime.settled(Infinity);
           await cc.synced();
+          await controlNetwork("resume");
           await waitForSettledText(
             page,
             `[data-row="two"][title="${key === "bob" ? "carol" : ""}"]`,
@@ -335,9 +357,13 @@ describe("rendered vote rows across replicas", () => {
         expect(errors).toEqual([]);
       } finally {
         try {
-          await browser?.close();
+          await controlNetwork("resume");
         } finally {
-          await cc.dispose();
+          try {
+            await browser?.close();
+          } finally {
+            await cc.dispose();
+          }
         }
       }
     });

@@ -5,7 +5,7 @@ import {
   type SqliteDbRef,
   type SqliteQueryResult,
 } from "@commonfabric/memory/v2";
-import type { Cell } from "@commonfabric/runner";
+import { type Cell, readResultSchemaMeta } from "@commonfabric/runner";
 import { cfcLabelViewForCellFailClosed } from "@commonfabric/runner/cfc";
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
@@ -651,7 +651,7 @@ const describeInFabric = async (
     const referent =
       (link.path.length === 0 ? root : root.key(...link.path)) as Cell<unknown>;
     const labels = describedLabels(referent);
-    const documentSchema = root.getMetaRaw("schema") as JSONSchema | undefined;
+    const documentSchema = readResultSchemaMeta(root);
     const declared = await declaredSchema(
       root,
       referent,
