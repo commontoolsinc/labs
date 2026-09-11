@@ -140,9 +140,11 @@ export async function collectRecords(
     throw new Error("a declared variant must not be empty");
   }
   const records: TestRecord[] = [];
-  // The registration preload leaves a name-to-file map in the spool, and
-  // it is the only thing that can tell a bdd leaf's file: Deno names a
-  // case by its describe chain and puts that chain in the classname too.
+  // The registration preload leaves a name-to-file map in the spool.
+  // Where it installed, every class name names the wrapper it put in
+  // front of `Deno.test`, so the map is the only thing that can tell a
+  // bdd leaf its file; where it did not, the spool holds no map and
+  // ingestion reads the report's own class names.
   const fileByName = options.spoolDir === undefined
     ? new Map<string, string>()
     : await readNameMaps(options.spoolDir);
