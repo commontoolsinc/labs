@@ -156,10 +156,15 @@ describe("well-known-grants", () => {
       const { table, grants } = await mintWellKnownGrants(undefined, "run-4", [
         { name: "email", ref: `${MAIL_REF}  `, source: MAIL_GRANT.source },
       ]);
+
+      // Against the canonical spelling itself, not against whatever the table
+      // happens to hold: comparing the record with the entry passes whenever
+      // the two agree, including when they agree on the caller's.
+      expect(grants[0]!.ref).toBe(MAIL_REF);
       const entry = table.entries.find((candidate) =>
         candidate.token === grants[0]!.token
       )!;
-      expect(grants[0]!.ref).toBe(entry.ref);
+      expect(entry.ref).toBe(MAIL_REF);
     });
 
     it("carries a connector grant's source onto the record run state keeps", async () => {
