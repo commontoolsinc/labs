@@ -631,6 +631,62 @@ describe("engine-read-through", () => {
     }
   });
 
+  it("integrates a feed refresh at the seq a local commit already confirmed, since the store's document may carry what the commit merged", async () => {
+    // A commit of this replica's own write promotes its record to the
+    // commit's seq with the value it materialized locally; the store's
+    // document at that seq can hold more — content the engine merged in
+    // beside a mergeable write — and the refresh that carries it is the
+    // replica's first delivery of that seq, never a repeat.
+    const store = new Map<
+      string,
+      { seq: number; doc: { value: FabricValue } }
+    >();
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: manager,
+    });
+    try {
+      manager.installStoreReadThrough(space, ({ id, scopeKey }) => {
+        const entry = store.get(id);
+        return {
+          branch: "",
+          id,
+          scope: "space",
+          scopeKey,
+          ...(entry === undefined
+            ? { seq: 0, deleted: true as const }
+            : { seq: entry.seq, doc: entry.doc }),
+        };
+      });
+      const cell = runtime.getCell<{ n: number; merged?: boolean }>(
+        space,
+        "read-through-promoted",
+        undefined,
+      );
+      const id = cell.getAsNormalizedFullLink().id;
+      const tx = runtime.edit();
+      cell.withTx(tx).set({ n: 1 });
+      expect((await tx.commit()).error).toBeUndefined();
+      const replica = manager.open(space).replica as SpaceReplica;
+      const confirmed = replica.get({ id, path: [], scope: "space" })?.since;
+      expect(confirmed).toBeGreaterThan(0);
+      store.set(id, {
+        seq: confirmed!,
+        doc: { value: { n: 1, merged: true } },
+      });
+      expect(
+        manager.integrateStoreWrites(space, [{ id, scopeKey: "space" }]),
+      ).toBe(1);
+      expect(replica.getDocument(id)?.value).toEqual({ n: 1, merged: true });
+    } finally {
+      await runtime.dispose();
+      await manager.close();
+    }
+  });
+
   it("does not read the store for a pull whose scope the identity cannot resolve", async () => {
     // Such a scope keys by its name, which names no store row: the store
     // would read the name as the space scope and answer with the wrong

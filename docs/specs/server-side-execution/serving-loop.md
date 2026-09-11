@@ -199,8 +199,10 @@ SpaceServer outbox ──(e)──► network; results re-enter via (a)
   the schema once, over what it actually reads, and the memory server
   never walks it for the serving session at all. The one chase the read-through
   keeps is the frame validator's delivery guarantee: the `cid:` schema
-  documents a read document's link positions reference are read with
-  it, to a fixpoint, exactly as a session's frame carries them. Reads
+  documents a read document's link positions and its `schema` metadata
+  member reference, and those a schema document's own refs name, are
+  read with it, to a fixpoint, exactly as a session's frame carries
+  them. Reads
   run at the engine's head, as delivered frames do; writes and
   foreign-space reads stay on the session. Two rules a session frame
   follows hold here in the read-through's own form. Protocol.md §3's

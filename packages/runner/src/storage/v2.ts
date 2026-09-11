@@ -8223,10 +8223,15 @@ export class SpaceReplica
    * them. An address the store holds nothing at — a `deleted` entry at
    * seq 0, which no session frame ever carries — is kept out of the
    * frame and remembered in `#storeAbsences` instead; a document read
-   * present clears that memory. A read that finds a held record at the
-   * seq the replica already confirmed is kept out of the frame too: the
-   * content under a seq cannot differ, so integrating it again would
-   * only re-validate and re-notify what the replica holds.
+   * present clears that memory. A read at the seq of the last delivery
+   * this replica absorbed for the instance is kept out of the frame too:
+   * the content under a delivered seq cannot differ, so integrating it
+   * again would only re-validate and re-notify what the replica holds.
+   * The confirmed seq is not that judge: a commit of the replica's own
+   * write promotes its record to the commit's seq with the value it
+   * materialized locally, and the store's document at that seq may hold
+   * more — content the engine merged in beside a mergeable write — so
+   * the first read at a seq no delivery has reached integrates.
    */
   #integrateReadThrough(
     upserts: SessionSyncUpsert[],
@@ -8244,7 +8249,9 @@ export class SpaceReplica
         return false;
       }
       this.#storeAbsences.delete(key);
-      return this.#docs.get(key)?.confirmed.seq !== upsert.seq;
+      const delivered = this.#delivered.get(key);
+      return delivered === undefined || delivered.seq !== upsert.seq ||
+        delivered.deleted !== (upsert.deleted === true);
     };
     const roots = upserts.filter(moves);
     if (roots.length === 0) return;
