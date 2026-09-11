@@ -70,6 +70,7 @@ import {
   when,
   wish,
 } from "./built-in.ts";
+import { tagCollectionKey } from "./collection-key.ts";
 import { getPatternEnvironment } from "./env.ts";
 import { h, UiAction, UiDisclosure, UiPromptSlot } from "./h.ts";
 import {
@@ -353,6 +354,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
 
     // Value comparison helper exposed for pattern code
     valueEqual,
+    tagCollectionKey,
   };
 
   // The helpers object the transformer's output reaches for is this same

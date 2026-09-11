@@ -224,6 +224,10 @@ const OPAQUE_DERIVATION_METHODS = new Set([
   "minByWithPattern",
   "maxBy",
   "maxByWithPattern",
+  "groupBy",
+  "groupByWithPattern",
+  "keyBy",
+  "keyByWithPattern",
 
   "flatMap",
   "flatMapWithPattern",
@@ -246,6 +250,10 @@ const PRECISE_CHAIN_METHODS = new Set([
   "minByWithPattern",
   "maxBy",
   "maxByWithPattern",
+  "groupBy",
+  "groupByWithPattern",
+  "keyBy",
+  "keyByWithPattern",
 
   "filter",
   "filterWithPattern",
