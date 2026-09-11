@@ -445,11 +445,11 @@ type RanLifecycleVerb = QueuedLifecycleVerb & {
   outcome: { failed: false; ok: unknown } | { failed: true; error: unknown };
 
   /**
-   * The wave the verb's transactions sealed into, and the range of its
-   * contributions there — what the wave's commit outcome is read by to
-   * settle the verb. `undefined` when the verb sealed nothing.
+   * The verb's own contributions, each by the wave it sealed into and its
+   * index there — what the wave's commit outcome is read by to settle the
+   * verb. Empty when the verb sealed nothing.
    */
-  sealed: { wave: WaveAccumulator; from: number; to: number } | undefined;
+  contributions: ReadonlyArray<{ wave: WaveAccumulator; index: number }>;
 
   /** The roots the verb named as demand, loaded once its wave committed. */
   demandRoots: ReadonlyArray<string>;
@@ -833,12 +833,19 @@ export class SpaceServer implements TransactionSealDestination {
   readonly #lifecycleVerbs: QueuedLifecycleVerb[] = [];
 
   /**
-   * The space-scoped documents the currently running verb's transactions
-   * have sealed, recorded by `seal()` while `#runQueuedLifecycleVerbs`
-   * awaits the verb.
+   * What the currently running verb's transactions seal, recorded by
+   * `seal()` while `#runQueuedLifecycleVerbs` awaits the verb: the
+   * space-scoped documents they write, and each accepted seal's
+   * contribution, by wave and index. Seals are chained one at a time, so
+   * the count right after a seal resolves names that seal's contribution
+   * — another action's transaction sealing meanwhile gets its own entry
+   * nowhere here, and cannot settle the verb.
    */
-  #runningLifecycleVerbWrites:
-    | Map<string, { id: string; scopeKey: "space" }>
+  #runningLifecycleVerb:
+    | {
+      writes: Map<string, { id: string; scopeKey: "space" }>;
+      contributions: { wave: WaveAccumulator; index: number }[];
+    }
     | undefined;
 
   /**
@@ -1704,9 +1711,16 @@ export class SpaceServer implements TransactionSealDestination {
     }
     const wave = this.#openWave();
     this.#waveByTx.set(tx, wave);
+    const runningVerb = this.#runningLifecycleVerb;
     this.#recordLifecycleVerbWrites(tx);
     const sealed = this.#sealChain.then(() => wave.seal(tx)).then(
       (result) => {
+        if (result.error === undefined && runningVerb !== undefined) {
+          runningVerb.contributions.push({
+            wave,
+            index: wave.contributionCount - 1,
+          });
+        }
         if (result.error !== undefined) {
           // An EVENT-STAMPED tx that failed its seal requeues its
           // event (owner review P1-2): the served navigateTo's intent
@@ -4655,12 +4669,10 @@ export class SpaceServer implements TransactionSealDestination {
       }
       const start = performance.now();
       const staged = new Map<string, { id: string; scopeKey: "space" }>();
-      this.#runningLifecycleVerbWrites = staged;
-      const from = this.#currentWave?.contributionCount ?? 0;
+      const running = { writes: staged, contributions: [] };
+      this.#runningLifecycleVerb = running;
       try {
         const ok = await queued.verb.run(runtime);
-        const wave = this.#currentWave;
-        const to = wave?.contributionCount ?? from;
         const demandRoots = queued.verb.demandRoots?.(ok) ?? [];
         for (const id of demandRoots) {
           staged.set(toDirtyKey(id, "space"), { id, scopeKey: "space" });
@@ -4670,9 +4682,7 @@ export class SpaceServer implements TransactionSealDestination {
         ran.push({
           ...queued,
           outcome: { failed: false, ok },
-          sealed: wave === undefined || to === from
-            ? undefined
-            : { wave, from, to },
+          contributions: running.contributions,
           demandRoots,
           stagedWrites,
         });
@@ -4686,12 +4696,12 @@ export class SpaceServer implements TransactionSealDestination {
         ran.push({
           ...queued,
           outcome: { failed: true, error },
-          sealed: undefined,
+          contributions: [],
           demandRoots: [],
           stagedWrites: [],
         });
       } finally {
-        this.#runningLifecycleVerbWrites = undefined;
+        this.#runningLifecycleVerb = undefined;
       }
       stats.runs += 1;
       timing.time(start, "executor", "wave", "lifecycle-verb");
@@ -4707,22 +4717,23 @@ export class SpaceServer implements TransactionSealDestination {
    * committed, or when the verb sealed nothing.
    */
   #lifecycleVerbNotDurable(entry: RanLifecycleVerb): string | undefined {
-    if (entry.sealed === undefined) return undefined;
+    if (entry.contributions.length === 0) return undefined;
     const served = this.#servedWave;
-    if (served === undefined || served.wave !== entry.sealed.wave) {
-      return "the wave carrying its writes was not committed";
+    for (const { wave, index } of entry.contributions) {
+      if (served === undefined || served.wave !== wave) {
+        return "the wave carrying its writes was not committed";
+      }
+      if (served.outcome.aborted !== undefined) {
+        return `the wave carrying its writes aborted (${served.outcome.aborted})`;
+      }
+      const disposition = served.outcome.dispositions[index];
+      if (disposition === undefined || disposition.kind !== "committed") {
+        return `a contribution of its was ${
+          disposition?.kind ?? "unaccounted for"
+        } at the wave commit`;
+      }
     }
-    if (served.outcome.aborted !== undefined) {
-      return `the wave carrying its writes aborted (${served.outcome.aborted})`;
-    }
-    const dispositions = served.outcome.dispositions.slice(
-      entry.sealed.from,
-      entry.sealed.to,
-    );
-    const withdrawn = dispositions.find((d) => d.kind !== "committed");
-    return withdrawn === undefined
-      ? undefined
-      : `a contribution of its was ${withdrawn.kind} at the wave commit`;
+    return undefined;
   }
 
   /**
@@ -4750,7 +4761,7 @@ export class SpaceServer implements TransactionSealDestination {
    * journal at its seal; no-op outside a verb's run.
    */
   #recordLifecycleVerbWrites(tx: IExtendedStorageTransaction): void {
-    const staged = this.#runningLifecycleVerbWrites;
+    const staged = this.#runningLifecycleVerb?.writes;
     if (staged === undefined) return;
     for (const detail of tx.tx.getWriteDetails?.(this.#options.space) ?? []) {
       const { id, scope } = detail.address;
