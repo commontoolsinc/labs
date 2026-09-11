@@ -160,10 +160,11 @@ export interface DescribeHandleLabel {
 }
 
 /**
- * Describes the SHAPE of a handle's referent and nothing else: property
- * names, types, nesting, and required-ness. No datum is ever reported, so a
- * reply here says what a reference is, never what it holds. This is what lets
- * an agent write code over a reference it was handed
+ * Describes the SHAPE of a handle's referent: property names, types, nesting,
+ * and required-ness — and, for a database, how full each of its tables is. No
+ * datum is ever reported, so a reply here says what a reference is and how much
+ * of it there is, never what it holds. This is what lets an agent write code
+ * over a reference it was handed
  * — you cannot compute over data whose shape you do not know — and what lets
  * an orchestrator verify a chain of transformations without reading the data
  * flowing through it.

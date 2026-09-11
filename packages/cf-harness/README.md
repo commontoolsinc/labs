@@ -1061,9 +1061,13 @@ structure before any of it crosses. An address the session can state no shape
 for is reported as shapeless rather than as a failed call.
 
 `describe_handle` is declared `effectClass: "read"`. It reads no value except a
-database handle's own table declaration, and it reports no datum from any of
-them. Answering from the fabric establishes the run's fabric session — loading
-the identity key and opening a remote connection — so the first call in a run
+database handle's own table declaration, and — where that handle names a
+database it can query — the count of its rows and of the non-NULL values in each
+disclosed column. It reports no datum from any of them: a count is derived from
+every row and identifies none, it is taken of a whole table and of whole columns
+rather than under a predicate a caller chose, and no cell value crosses with it.
+Answering from the fabric establishes the run's fabric session — loading the
+identity key and opening a remote connection — so the first call in a run
 carries that cost and that effect.
 
 Shape is also what makes a chain of steps checkable. An orchestrator that passes
