@@ -20,6 +20,7 @@ import {
   FabricPrimitive,
   FabricValue,
 } from "./interface.ts";
+import { isFabricArray, isFabricPlainObject } from "./type-check.ts";
 import {
   isValidFabricValue,
   isValidFabricValueLayer,
@@ -41,31 +42,6 @@ import { toCompactDebugString } from "./value-debug.ts";
 export type DomainFor<DomainExtra> = FabricValue | DomainExtra;
 
 /**
- * An `iterateArray` form. This is returned by visitor methods which wish to
- * treat the value they received as a container of array-like contents. `value`
- * indicates the contents of the container, and by returning this, the engine
- * will iterate over the contents, calling `ValueVisitor.visitArrayElement()` on
- * each element.
- */
-export type IterateArrayForm<DomainExtra> = {
-  type: "iterateArray";
-  elements: readonly DomainFor<DomainExtra>[];
-};
-
-/**
- * An `iterateMap` form. This is returned by visitor methods which wish to treat
- * the value they received as a container of map-like contents. `value`
- * indicates the contents of the container as `[key, value]` pairs (similar to
- * the return value from `Map.entries()` or `Object.entries()`), and by
- * returning this, the engine will iterate over the contents, calling
- * `ValueVisitor.visitMapping()` on each key-value pair in the mappings.
- */
-export type IterateMapForm<DomainExtra> = {
-  type: "iterateMap";
-  mappings: readonly [DomainFor<DomainExtra>, DomainFor<DomainExtra>][];
-};
-
-/**
  * A `mainResult` form. `value` is a value that is to be returned from the
  * original main (top-level) `visit()` call, and by returning this form, a
  * visitor indicates that the `visit()` should end promptly (do no further
@@ -77,14 +53,16 @@ export type MainResultForm<ResultType> = {
 };
 
 /**
- * A `recurse` form. This is returned by visitor methods which are used to
- * iterate over container contents. By returning this form, a visitor indicates
- * that the container elements should be visited by the engine, recursively,
- * such that each element is known by the engine to be contained by the
- * container which is being iterated over.
+ * A `recurse` form. This is returned by visitor methods which visit containers.
+ * (It is never a valid result for a non-container-specific visit method.) By
+ * returning this form, a visitor indicates that the container's elements or
+ * mappings should be visited by the engine, recursively, such that each visited
+ * item is known by the engine to be contained by the container which is being
+ * iterated over.
  *
- * The two `boolean` properties indicate which of the keys and/or values is to
- * be recursed over. `doKey` is ignored in a context where there is no key.
+ * The two `boolean` properties indicate whether the container's keys and/or
+ * values is to be recursed over. `doKey` is ignored in a context where there is
+ * no key.
  *
  * **Note:** The visit calls per-mapping are specifically in key-then-value
  * order, and if the result of visiting a key is a `mainResult`, then that ends
@@ -96,8 +74,8 @@ export type MainResultForm<ResultType> = {
  */
 export type RecurseForm = {
   type: "recurse";
-  doKey: boolean;
-  doValue: boolean;
+  doKeys: boolean;
+  doValues: boolean;
 };
 
 /**
@@ -125,8 +103,8 @@ export type VisitSubtypeForm = { type: "visitSubtype" };
  * The `DO_` prefix is intended to make it clear at use sites that it is telling
  * the visitor engine to "do" something.
  */
-export const DO_RECURSE_KEY_VALUE: RecurseForm = Object.freeze(
-  { type: "recurse", doKey: true, doValue: true } as const,
+export const DO_RECURSE_KEYS_VALUES: RecurseForm = Object.freeze(
+  { type: "recurse", doKeys: true, doValues: true } as const,
 );
 
 /**
@@ -136,8 +114,8 @@ export const DO_RECURSE_KEY_VALUE: RecurseForm = Object.freeze(
  * The `DO_` prefix is intended to make it clear at use sites that it is telling
  * the visitor engine to "do" something.
  */
-export const DO_RECURSE_KEY: RecurseForm = Object.freeze(
-  { type: "recurse", doKey: true, doValue: false } as const,
+export const DO_RECURSE_KEYS: RecurseForm = Object.freeze(
+  { type: "recurse", doKeys: true, doValues: false } as const,
 );
 
 /**
@@ -147,8 +125,8 @@ export const DO_RECURSE_KEY: RecurseForm = Object.freeze(
  * The `DO_` prefix is intended to make it clear at use sites that it is telling
  * the visitor engine to "do" something.
  */
-export const DO_RECURSE_VALUE: RecurseForm = Object.freeze(
-  { type: "recurse", doKey: false, doValue: true } as const,
+export const DO_RECURSE_VALUES: RecurseForm = Object.freeze(
+  { type: "recurse", doKeys: false, doValues: true } as const,
 );
 
 /**
@@ -160,30 +138,6 @@ export const DO_RECURSE_VALUE: RecurseForm = Object.freeze(
 export const DO_VISIT_SUBTYPE: VisitSubtypeForm = Object.freeze(
   { type: "visitSubtype" } as const,
 );
-
-/**
- * Constructs an `iterateArray` form.
- *
- * The `do` prefix is intended to make it clear at use sites that it is telling
- * the visitor engine to "do" something.
- */
-export function doIterateArray<DomainExtra>(
-  elements: readonly DomainFor<DomainExtra>[],
-): IterateArrayForm<DomainExtra> {
-  return { type: "iterateArray", elements };
-}
-
-/**
- * Constructs an `iterateMap` form.
- *
- * The `do` prefix is intended to make it clear at use sites that it is telling
- * the visitor engine to "do" something.
- */
-export function doIterateMap<DomainExtra>(
-  mappings: readonly [DomainFor<DomainExtra>, DomainFor<DomainExtra>][],
-): IterateMapForm<DomainExtra> {
-  return { type: "iterateMap", mappings };
-}
 
 //
 // `visit*()` method result union types
@@ -204,29 +158,6 @@ export type BaselineVisitResult<ResultType = FabricValue> =
   | undefined;
 
 /**
- * Possible results from a value-in-container visitor method, that is, methods
- * which are called per container element as part of an iteration.
- *
- * See the included result types for details on what they mean.
- */
-export type ContainerIterationResult<ResultType = FabricValue> =
-  | BaselineVisitResult<ResultType>
-  | RecurseForm;
-
-/**
- * Possible results from a visitor method which covers two or more subtypes of
- * value that the visitor engine can dispatch to.
- *
- * See the included result types for details on what they mean.
- */
-export type DispatchingVisitorResult<
-  DomainExtra = never,
-  ResultType = FabricValue,
-> =
-  | LeafVisitorResult<DomainExtra, ResultType>
-  | VisitSubtypeForm;
-
-/**
  * Possible results from a visitor method which accepts leaf (non-container)
  * values when not _directly_ being the subject of an iteration.
  *
@@ -239,9 +170,34 @@ export type DispatchingVisitorResult<
  */
 export type LeafVisitorResult<DomainExtra = never, ResultType = FabricValue> =
   | BaselineVisitResult<ResultType>
-  | ReplaceForm<DomainExtra>
-  | IterateArrayForm<DomainExtra>
-  | IterateMapForm<DomainExtra>;
+  | ReplaceForm<DomainExtra>;
+
+/**
+ * Possible results from container-specific visitor methods, that is, `visit*()`
+ * methods which are only ever passed container values. This type includes
+ * everything also allowed by `LeafVisitorResult`.
+ *
+ * See the included result types for details on what they mean.
+ */
+export type ContainerVisitorResult<
+  DomainExtra = never,
+  ResultType = FabricValue,
+> =
+  | LeafVisitorResult<DomainExtra, ResultType>
+  | RecurseForm;
+
+/**
+ * Possible results from a visitor method which covers two or more subtypes of
+ * value that the visitor engine can dispatch to.
+ *
+ * See the included result types for details on what they mean.
+ */
+export type DispatchingVisitorResult<
+  DomainExtra = never,
+  ResultType = FabricValue,
+> =
+  | ContainerVisitorResult<DomainExtra, ResultType>
+  | VisitSubtypeForm;
 
 //
 // Visitor interface and exported implementations thereof
@@ -263,18 +219,19 @@ export type LeafVisitorResult<DomainExtra = never, ResultType = FabricValue> =
  */
 export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   /**
-   * Visits an item from an `iterateArray` result.
+   * Visits an element of an array. This method is called as a result of the
+   * visitor returning a `recurse` result for a visited array.
    */
   visitArrayElement(
     index: number,
     value: DomainFor<DomainExtra>,
-  ): ContainerIterationResult<ResultType>;
+  ): BaselineVisitResult<ResultType>;
 
   /**
-   * Visits a gap (one or more holes) in an `iterateArray` result. `start` is
-   * the start index of the gap (integer `>= 0`), and `count` is the number of
-   * holes in the gap (integer `>= 1`). The return type _does not_ include
-   * `recurse` as a possibility; there's nothing to recurse over.
+   * Visits a gap (one or more holes) in an array. `start` is the start index of
+   * the gap (integer `>= 0`), and `count` is the number of holes in the gap
+   * (integer `>= 1`). This method is called as a result of the visitor
+   * returning a `recurse` result for a visited array.
    */
   visitArrayGap(
     start: number,
@@ -328,12 +285,14 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   ): DispatchingVisitorResult<DomainExtra, ResultType>;
 
   /**
-   * Visits an item from an `iterateMap` result.
+   * Visits an item from a map-like container (`FabricPlainObject` or
+   * `FabricInstance`). This method is called as a result of the visitor
+   * returning a `recurse` result for a visited map-like container.
    */
   visitMapping(
     key: DomainFor<DomainExtra>,
     value: DomainFor<DomainExtra>,
-  ): ContainerIterationResult<ResultType>;
+  ): BaselineVisitResult<ResultType>;
 
   /**
    * Visits a value determined to _not_ be a valid `FabricValue`.
@@ -381,7 +340,7 @@ export abstract class BaseValueVisitor<
   abstract visitArrayElement(
     index: number,
     value: DomainFor<DomainExtra>,
-  ): ContainerIterationResult<ResultType>;
+  ): BaselineVisitResult<ResultType>;
 
   /** @inheritDoc */
   abstract visitArrayGap(
@@ -420,7 +379,7 @@ export abstract class BaseValueVisitor<
   abstract visitMapping(
     key: DomainFor<DomainExtra>,
     value: DomainFor<DomainExtra>,
-  ): ContainerIterationResult<ResultType>;
+  ): BaselineVisitResult<ResultType>;
 
   /** @inheritDoc */
   abstract visitNonFabricValue(
@@ -462,7 +421,7 @@ export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
   visitArrayElement(
     _index: number,
     _value: DomainFor<DomainExtra>,
-  ): ContainerIterationResult<ResultType> {
+  ): BaselineVisitResult<ResultType> {
     return undefined;
   }
 
@@ -515,7 +474,7 @@ export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
   visitMapping(
     _key: DomainFor<DomainExtra>,
     _value: DomainFor<DomainExtra>,
-  ): ContainerIterationResult<ResultType> {
+  ): BaselineVisitResult<ResultType> {
     return undefined;
   }
 
@@ -552,33 +511,10 @@ export abstract class ContainerIteratingVisitor<
   ResultType = FabricValue,
 > extends BaseValueVisitor<DomainExtra, ResultType> {
   /** @inheritDoc */
-  visitFabricArray(
-    value: FabricArray,
-  ): LeafVisitorResult<DomainExtra, ResultType> {
-    return doIterateArray<DomainExtra>(value);
-  }
-
-  /** @inheritDoc */
-  visitFabricInstance(
-    _value: FabricInstance,
-  ): LeafVisitorResult<DomainExtra, ResultType> {
-    // TODO(danfuzz): This is where we finally need to sort out `FabricInstance`
-    // iteration.
-    throw new Error("`FabricInstance` not yet visitable");
-  }
-
-  /** @inheritDoc */
-  visitFabricPlainObject(
-    value: FabricPlainObject,
-  ): LeafVisitorResult<DomainExtra, ResultType> {
-    return doIterateMap<DomainExtra>(Object.entries(value));
-  }
-
-  /** @inheritDoc */
   visitFabricContainer(
     _value: FabricContainerValue,
   ): DispatchingVisitorResult<DomainExtra, ResultType> {
-    return DO_VISIT_SUBTYPE;
+    return DO_RECURSE_KEYS_VALUES;
   }
 }
 
@@ -598,21 +534,16 @@ type VisitSubtypeOfForm<DomainExtra> = {
 };
 
 /**
- * Similar to `VisitSubtypeOfForm`, but for `iterateArray`.
+ * Similar to `VisitSubtypeOfForm`, but for `recurse`. Unlike that one, though,
+ * this one is _always_ propagated in the engine after getting a plain `recurse`
+ * result, on the theory that if we're going to iterate the one extra allocation
+ * is small potatoes, and it keeps the code a wee bit simpler.
  */
-type IterateArrayOfForm<DomainExtra> = {
-  type: "iterateArrayOf";
-  value: DomainFor<DomainExtra>;
-  elements: readonly DomainFor<DomainExtra>[];
-};
-
-/**
- * Similar to `VisitSubtypeOfForm`, but for `iterateMap`.
- */
-type IterateMapOfForm<DomainExtra> = {
-  type: "iterateMapOf";
-  value: DomainFor<DomainExtra>;
-  mappings: readonly [DomainFor<DomainExtra>, DomainFor<DomainExtra>][];
+type RecurseOfForm = {
+  type: "recurseOf";
+  container: FabricContainerValue;
+  doKeys: boolean;
+  doValues: boolean;
 };
 
 /**
@@ -695,23 +626,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
     }
     // deno-coverage-ignore-stop
 
-    const result = this.#visitValue(value);
-
-    if (result === undefined) {
-      return undefined;
-    } else if (result.type === "mainResult") {
-      return result;
-    } else {
-      // deno-coverage-ignore-start
-
-      // This is a defense-in-depth protection against bugs in this file:
-      // `#visitValue()` consumes every iterate form, so nothing but a
-      // `mainResult` can reach here.
-      throw new Error(
-        `Shouldn't happen: Got result type \`${result.type}\` from top-level visit.`,
-      );
-    }
-    // deno-coverage-ignore-stop
+    return this.#visitValue(value);
   }
 
   /**
@@ -720,30 +635,30 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   #visitValue(value: DomainFor<DomainExtra>): BaselineVisitResult<ResultType> {
     const result = this.#visitResolvingSubtype(value);
 
-    if (result === undefined) {
-      return result;
-    }
-
-    switch (result.type) {
-      case "iterateArray": {
-        return this.#subvisitArray(value, result.elements);
-      }
-
-      case "iterateArrayOf": {
-        return this.#subvisitArray(result.value, result.elements);
-      }
-
-      case "mainResult": {
+    switch (result?.type) {
+      case "mainResult":
+      case undefined: {
         return result;
       }
 
-      case "iterateMap": {
-        return this.#subvisitMap(value, result.mappings);
+      case "recurseOf": {
+        return isFabricArray(result.container)
+          ? this.#iterateArray(result)
+          : this.#iterateMap(result);
       }
 
-      case "iterateMapOf": {
-        return this.#subvisitMap(result.value, result.mappings);
+      default: {
+        // deno-coverage-ignore-start
+
+        // This is a defense-in-depth protection against bugs in this file. The
+        // above is meant to cover all declared result types, so anything else
+        // is a bug, either in this method or in result production.
+        const type = (result as { type: string }).type;
+        throw new Error(
+          `Shouldn't happen: Got result type \`${type}\` from dispatched visitor method.`,
+        );
       }
+        // deno-coverage-ignore-stop
     }
   }
 
@@ -755,8 +670,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   #visitResolvingSubtype(
     value: DomainFor<DomainExtra>,
   ):
-    | IterateArrayOfForm<DomainExtra>
-    | IterateMapOfForm<DomainExtra>
+    | RecurseOfForm
     | Exclude<
       LeafVisitorResult<DomainExtra, ResultType>,
       ReplaceForm<DomainExtra>
@@ -768,6 +682,11 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       const resolvedResult = this.#visitResolvingCyclesAndReplacement(value);
 
       switch (resolvedResult?.type) {
+        case "recurse": {
+          // No dispatch required, but we do need to adjust the result form.
+          return this.#adjustResultForm(origValue, value, resolvedResult);
+        }
+
         case "visitSubtype": {
           // Need dispatch. `value` _has not_ been replaced.
           break;
@@ -836,8 +755,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       }
 
       switch (result?.type) {
-        case "iterateArray":
-        case "iterateMap": {
+        case "recurse": {
           return this.#adjustResultForm(origValue, value, result);
         }
 
@@ -860,8 +778,6 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   #visitResolvingCyclesAndReplacement(
     value: DomainFor<DomainExtra>,
   ):
-    | IterateArrayOfForm<DomainExtra>
-    | IterateMapOfForm<DomainExtra>
     | VisitSubtypeOfForm<DomainExtra>
     | Exclude<
       DispatchingVisitorResult<DomainExtra, ResultType>,
@@ -877,8 +793,6 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         : vis.visitCycle(value, cycleAt, this.#stack.depth);
 
       switch (result?.type) {
-        case "iterateArray":
-        case "iterateMap":
         case "visitSubtype": {
           return this.#adjustResultForm(origValue, value, result);
         }
@@ -896,27 +810,39 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   }
 
   /**
-   * Visits the items in an `iterateArray` result, recursing or returning as
-   * directed by `ValueVisitor.visitArrayElement()`.
+   * Iterates over all the elements in an array, in response to a `recurse`
+   * result.
    */
-  #subvisitArray(
-    value: DomainFor<DomainExtra>,
-    values: readonly DomainFor<DomainExtra>[],
-  ): BaselineVisitResult<ResultType> {
+  #iterateArray(result: RecurseOfForm) {
     const vis = this.#visitor;
+    const { container, doValues }: {
+      container: FabricContainerValue;
+      doValues: boolean;
+    } = result;
+    const array = container as FabricArray;
 
-    this.#stack.push(value);
+    if (!doValues) {
+      // `result` represents a no-op `recurse`. Though pointless, nothing
+      // prevents a client from returning it as a visit result, so just handle
+      // it gracefully here.
+      return;
+    }
+
+    this.#stack.push(array);
 
     let lastIdx = -1;
     try {
-      for (const idx in values) {
+      for (const idx in array) {
         if (!isArrayIndexPropertyName(idx)) {
-          throw new Error("Improper array returned in `iterateArray` result.");
+          throw new Error(
+            `Non-index property in alleged \`FabricArray\`: \`${idx}\``,
+          );
         }
 
         const idxNumber = Number(idx);
 
         if (idxNumber !== (lastIdx + 1)) {
+          // There's a gap just before this element.
           const result = vis.visitArrayGap(
             lastIdx + 1,
             idxNumber - lastIdx - 1,
@@ -928,31 +854,26 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
         lastIdx = idxNumber;
 
-        const item = values[idxNumber]!;
-        const result = vis.visitArrayElement(idxNumber, item);
+        const element = array[idxNumber]!;
+        const elemResult = this.#visitValue(element);
+        if (elemResult?.type === "mainResult") {
+          return elemResult;
+        }
 
-        if (result !== undefined) {
-          switch (result.type) {
-            case "mainResult": {
-              return result;
-            }
-            case "recurse": {
-              if (result.doValue) {
-                const recurseResult = this.#visitValue(item);
-                if (recurseResult?.type === "mainResult") {
-                  return recurseResult;
-                }
-              }
-            }
-          }
+        // TODO(danfuzz): When we have a non-`mainResult` visit-result type,
+        // we'll want to pass the result value from `elemResult` into
+        // `visitArrayElement()` and not the original `element`.
+        const result = vis.visitArrayElement(idxNumber, element);
+        if (result?.type === "mainResult") {
+          return result;
         }
       }
 
-      if (values.length !== (lastIdx + 1)) {
+      if (array.length !== (lastIdx + 1)) {
         // There's a gap at the end of the array.
         const result = vis.visitArrayGap(
           lastIdx + 1,
-          values.length - lastIdx - 1,
+          array.length - lastIdx - 1,
         );
         if (result?.type === "mainResult") {
           return result;
@@ -961,53 +882,67 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
       return undefined;
     } finally {
-      this.#stack.popExpect(value);
+      this.#stack.popExpect(array);
     }
   }
 
   /**
-   * Visits the items in an `iterateMap` result, recursing or returning as
-   * directed by `ValueVisitor.visitMapping()`.
+   * Iterates over all the elements in a map-like value, in response to a
+   * `recurse` result.
    */
-  #subvisitMap(
-    value: DomainFor<DomainExtra>,
-    mappings: readonly [DomainFor<DomainExtra>, DomainFor<DomainExtra>][],
-  ): BaselineVisitResult<ResultType> {
+  #iterateMap(result: RecurseOfForm) {
     const vis = this.#visitor;
+    const { container, doKeys, doValues }: {
+      container: FabricContainerValue;
+      doKeys: boolean;
+      doValues: boolean;
+    } = result;
 
-    this.#stack.push(value);
+    if (!(doKeys || doValues)) {
+      // `result` represents a no-op `recurse`. Though pointless, nothing
+      // prevents a client from returning it as a visit result, so just handle
+      // it gracefully here.
+      return;
+    }
+
+    const mappings = isFabricPlainObject(container)
+      ? Object.entries(container)
+      : (() => {
+        // TODO(danfuzz): This is where we finally need to sort out
+        // `FabricInstance` iteration.
+        throw new Error("`FabricInstance` not yet visitable");
+      })();
+
+    this.#stack.push(container);
 
     try {
-      for (const [key, item] of mappings) {
-        const result = vis.visitMapping(key, item);
-
-        if (result !== undefined) {
-          switch (result.type) {
-            case "mainResult": {
-              return result;
-            }
-            case "recurse": {
-              if (result.doKey) {
-                const keyResult = this.#visitValue(key);
-                if (keyResult?.type === "mainResult") {
-                  return keyResult;
-                }
-              }
-
-              if (result.doValue) {
-                const itemResult = this.#visitValue(item);
-                if (itemResult?.type === "mainResult") {
-                  return itemResult;
-                }
-              }
-            }
+      for (const [key, value] of mappings) {
+        if (doKeys) {
+          const keyResult = this.#visitValue(key);
+          if (keyResult?.type === "mainResult") {
+            return keyResult;
           }
+        }
+
+        if (doValues) {
+          const keyResult = this.#visitValue(key);
+          if (keyResult?.type === "mainResult") {
+            return keyResult;
+          }
+        }
+
+        // TODO(danfuzz): When we have a non-`mainResult` visit-result type,
+        // we'll want to pass the result value(s) from the visits immediately
+        // above instead of the original `key` and `value`.
+        const result = vis.visitMapping(key, value);
+        if (result?.type === "mainResult") {
+          return result;
         }
       }
 
       return undefined;
     } finally {
-      this.#stack.popExpect(value);
+      this.#stack.popExpect(container);
     }
   }
 
@@ -1016,77 +951,66 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   //
 
   /**
-   * Adjusts an `iterateArray`, `iterateMap`, or `visitSubtype` form if
-   * necessary, if it is meant to represent action on a replacement value.
+   * Adjusts a `recurse` or `visitSubtype` form if necessary, if it is meant to
+   * represent action on a replacement value.
    */
   #adjustResultForm(
     origValue: DomainFor<DomainExtra>,
     finalValue: DomainFor<DomainExtra>,
-    result:
-      | IterateArrayForm<DomainExtra>
-      | IterateMapForm<DomainExtra>,
-  ):
-    | IterateArrayForm<DomainExtra>
-    | IterateArrayOfForm<DomainExtra>
-    | IterateMapForm<DomainExtra>
-    | IterateMapOfForm<DomainExtra>;
+    result: RecurseForm,
+  ): RecurseOfForm;
   #adjustResultForm(
     origValue: DomainFor<DomainExtra>,
     finalValue: DomainFor<DomainExtra>,
-    result:
-      | IterateArrayForm<DomainExtra>
-      | IterateMapForm<DomainExtra>
-      | VisitSubtypeForm,
+    result: VisitSubtypeForm,
   ):
-    | IterateArrayForm<DomainExtra>
-    | IterateArrayOfForm<DomainExtra>
-    | IterateMapForm<DomainExtra>
-    | IterateMapOfForm<DomainExtra>
     | VisitSubtypeForm
     | VisitSubtypeOfForm<DomainExtra>;
   #adjustResultForm(
     origValue: DomainFor<DomainExtra>,
     finalValue: DomainFor<DomainExtra>,
-    result:
-      | IterateArrayForm<DomainExtra>
-      | IterateMapForm<DomainExtra>
-      | VisitSubtypeForm,
+    result: RecurseForm | VisitSubtypeForm,
   ):
-    | IterateArrayForm<DomainExtra>
-    | IterateArrayOfForm<DomainExtra>
-    | IterateMapForm<DomainExtra>
-    | IterateMapOfForm<DomainExtra>
+    | RecurseOfForm
     | VisitSubtypeForm
     | VisitSubtypeOfForm<DomainExtra> {
-    // On the use of `Object.is()`: Even though it's unlikely to be done in
-    // practice, this class _does_ let a visitor treat a number as a container,
-    // so this choice of comparison is the most correct option.
-    if (Object.is(origValue, finalValue)) {
-      return result;
-    }
-
     switch (result.type) {
-      case "iterateArray": {
-        return {
-          type: "iterateArrayOf",
-          value: finalValue,
-          elements: result.elements,
-        };
-      }
+      case "recurse": {
+        // We always transform `recurse` to `recurseOf`. See comment on the
+        // definition of `RecurseOfForm` for details.
 
-      case "iterateMap": {
+        const tag = this.#tagFromValueElseNull(finalValue);
+        if (
+          (tag !== VALUE_TAGS.Object) && (tag !== VALUE_TAGS.FabricInstance)
+        ) {
+          const desc = toCompactDebugString(finalValue, {
+            backtickQuote: true,
+          });
+          throw new Error(
+            `Cannot use \`recurse\` result with non-container: ${desc}`,
+          );
+        }
+
         return {
-          type: "iterateMapOf",
-          value: finalValue,
-          mappings: result.mappings,
+          type: "recurseOf",
+          container: finalValue as FabricContainerValue,
+          doKeys: result.doKeys,
+          doValues: result.doValues,
         };
       }
 
       case "visitSubtype": {
-        return {
-          type: "visitSubtypeOf",
-          value: finalValue,
-        };
+        // On the use of `Object.is()`: As of this writing, the recursion stack only
+        // ever has objects, but that could theoretically change, and this
+        // comparison function will always remain the most correct option.
+        if (Object.is(origValue, finalValue)) {
+          return result;
+        } else {
+          return {
+            type: "visitSubtypeOf",
+            value: finalValue,
+          };
+        }
       }
     }
   }
