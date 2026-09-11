@@ -338,6 +338,13 @@ describe("CFC projection claims", () => {
 
       const persistedId = parseLink(cell.getAsLink()).id!;
       const entries = readPersistedEntries(storageManager, persistedId);
+      // The source struct's own declared entry stands in the same label map,
+      // so an absent `latitude` entry is a fact about a map that was written.
+      expect(
+        entries?.find((e) =>
+          e.path.length === 1 && e.path[0] === "measurement"
+        ),
+      ).toBeDefined();
       expect(
         entries?.find((e) => e.path.length === 1 && e.path[0] === "latitude"),
       ).toBeUndefined();

@@ -311,7 +311,7 @@ describe("run_pattern publish render gate", () => {
   ): Promise<RunPatternToolSuccessOutput> => {
     const engine = createEngine(index);
     const result = await engine.invokeBuiltinTool("run_pattern", input);
-    await engine.flushPatternIndexPublications();
+    await engine.flushPatternIndexLedger();
     return result.output as RunPatternToolSuccessOutput;
   };
 
@@ -327,8 +327,8 @@ describe("run_pattern publish render gate", () => {
       runId: `publish-gate-${crypto.randomUUID()}`,
       fabricSessionFactory: () => Promise.resolve({ pieces, identity: signer }),
     });
-    expect(engine.patternIndexPublications).toBeUndefined();
-    await engine.flushPatternIndexPublications();
+    expect(engine.patternIndexLedger).toBeUndefined();
+    await engine.flushPatternIndexLedger();
 
     const result = await engine.invokeBuiltinTool("run_pattern", {
       sourceText: DOUBLER,
@@ -371,7 +371,7 @@ describe("run_pattern publish render gate", () => {
       inputs: { n: 21 },
       description: "Doubles a number",
     });
-    await engine.flushPatternIndexPublications();
+    await engine.flushPatternIndexLedger();
     expect((result.output as RunPatternToolSuccessOutput).status).toBe("ok");
     expect(calls.some((call) => call.fn === "publishPattern")).toBe(true);
   });
@@ -473,7 +473,7 @@ describe("run_pattern publish render gate", () => {
       description: "Sortable table that reads its cells",
       hashtags: ["table"],
     });
-    await engine.flushPatternIndexPublications();
+    await engine.flushPatternIndexLedger();
     const output = result.output as RunPatternToolSuccessOutput;
 
     expect(output.patternPublication?.status).toBe("discoverable");
@@ -512,7 +512,7 @@ describe("run_pattern publish render gate", () => {
       inputs: {},
       description: "Renders a rating",
     });
-    await engine.flushPatternIndexPublications();
+    await engine.flushPatternIndexLedger();
     const output = result.output as RunPatternToolSuccessOutput;
 
     expect(output.patternPublication?.reason).toBe("ui-rendered");
@@ -612,7 +612,7 @@ describe("run_pattern publish render gate", () => {
         { signal: AbortSignal },
       ],
     );
-    await engine.flushPatternIndexPublications();
+    await engine.flushPatternIndexLedger();
     return result.output as RunPatternToolSuccessOutput & { message?: string };
   };
 
@@ -733,7 +733,7 @@ describe("run_pattern publish render gate", () => {
       inputs: { rows: [{ name: "Avery", score: 12 }] },
       description: "Sortable table that reads its cells",
     });
-    await engine.flushPatternIndexPublications();
+    await engine.flushPatternIndexLedger();
     const output = result.output as RunPatternToolSuccessOutput;
     expect(output.patternPublication?.reason).toBe("probe-failed");
     expect(output.patternPublication?.status).toBe("recorded");
@@ -788,7 +788,7 @@ describe("run_pattern publish render gate", () => {
       inputs: { n: 3 },
       description: "Doubles a number and shows it",
     });
-    await engine.flushPatternIndexPublications();
+    await engine.flushPatternIndexLedger();
     const output = result.output as RunPatternToolSuccessOutput;
 
     // A verdict, not `probe-failed` — the composed import resolved inside the
@@ -812,7 +812,7 @@ describe("run_pattern publish render gate", () => {
         hashtags: ["table"],
       });
     }
-    await engine.flushPatternIndexPublications();
+    await engine.flushPatternIndexLedger();
 
     const calls = published(index);
     expect(calls).toHaveLength(2);
@@ -840,7 +840,7 @@ describe("run_pattern publish render gate", () => {
       inputs: { n: 21 },
       description: "Doubles a number",
     });
-    await engine.flushPatternIndexPublications();
+    await engine.flushPatternIndexLedger();
 
     const calls = published(index);
     expect(calls).toHaveLength(2);

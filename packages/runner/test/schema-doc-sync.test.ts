@@ -3,7 +3,10 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type { FabricValue, JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import type { SessionSync } from "@commonfabric/memory/v2";
+import {
+  encodeMemoryBoundary,
+  type SessionSync,
+} from "@commonfabric/memory/v2";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import {
@@ -120,13 +123,27 @@ describe("schema-doc-sync", () => {
   });
 
   it("leaves a forged schema document unregistered on arrival, with resolution closed", async () => {
-    const claimed = internSchemaAsTaggedHashString({
+    const claimedSchema = {
       type: "object",
       properties: { forgedSyncTarget: { type: "string" } },
+    } as const;
+    const claimed = internSchemaAsTaggedHashString(claimedSchema);
+    await writeDocs({ [`cid:${claimed}`]: claimedSchema as FabricValue });
+    // The commit boundary admits nothing under an id its content does not
+    // hash to, so a forgery reaches storage only out of band — direct
+    // database manipulation, as genuine corruption would.
+    const engine = await server.engineForSpace(space);
+    engine.database.prepare(
+      `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
+    ).run({
+      data: encodeMemoryBoundary({
+        value: { type: "string", title: "forged sync content" },
+      }),
+      id: `cid:${claimed}`,
     });
-    await writeDocs({
-      [`cid:${claimed}`]: { type: "string", title: "forged sync content" },
-    });
+    engine.database.prepare(
+      `UPDATE head SET seq = seq + 1 WHERE id = :id`,
+    ).run({ id: `cid:${claimed}` });
 
     const result = await readerStorage.open(space).sync(
       `cid:${claimed}` as URI,
@@ -355,7 +372,7 @@ describe("schema-doc-sync", () => {
       [`cid:${leafHash}`]: { type: "number", title: "forged dep" },
     });
     expect(String(result.error?.message)).toContain(
-      "whose included content does not verify",
+      "whose content does not hash to its id",
     );
   });
 

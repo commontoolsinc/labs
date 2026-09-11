@@ -1,3 +1,4 @@
+import type { JSONSchema } from "@commonfabric/api";
 import {
   cloneIfNecessary,
   fabricFromNativeValue,
@@ -48,6 +49,7 @@ import {
   type BrowserWorkerPresetParams,
   type Cancel,
   type Cell,
+  ContextualFlowControl,
   convertCellsToLinks,
   encodeSqliteParams,
   entityIdFrom,
@@ -194,6 +196,7 @@ import {
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
   type SetMemoryMessageCompressionRequest,
+  type SetReadStatsEnabledRequest,
   type SetSettleStatsEnabledRequest,
   type SetTelemetryEnabledRequest,
   type SettleStatsHistoryResponse,
@@ -2159,10 +2162,20 @@ export class RuntimeProcessor {
   }
 
   /**
-   * Handles a `PieceGetRequest`. Resolves a redirect here rather than through
-   * the runner's slug resolution, which `handleSlugResolve()` uses. Do not copy
-   * the bare `parseLink()` below into a new caller: a slug cell can be written
-   * by a foreign client over the memory protocol, and `parseSlugRedirect()` in
+   * Handles a `PieceGetRequest`. The answer is an address — a cell carrying
+   * the schema it is read under — so what this loads is what deciding the
+   * address takes: the requested document, and behind a redirect the document
+   * the redirect lands in, whose metadata says whether it is a piece and what
+   * result schema a cell inside it takes. Serving a slug document, the server
+   * resolves the redirect through the links on its path, which is the floor
+   * for an address a redirect answers. Nothing here reads the target's value,
+   * so whatever that value reaches stays cold until a caller subscribes to
+   * the cell it was handed.
+   *
+   * Resolves a redirect here rather than through the runner's slug
+   * resolution, which `handleSlugResolve()` uses. Do not copy the bare
+   * `parseLink()` below into a new caller: a slug cell can be written by a
+   * foreign client over the memory protocol, and `parseSlugRedirect()` in
    * `packages/runner/src/slug-resolution.ts` exists to fold the `TypeError` a
    * sigil-shaped payload with broken internals throws into a typed refusal.
    * These are one walk with two implementations, and this is the copy to
@@ -2185,6 +2198,9 @@ export class RuntimeProcessor {
       undefined,
       request.scope,
     );
+    // Schema-less, so the selector rejects the value's subtree: the document
+    // arrives, plus what the server resolves at the address itself when the
+    // value stored there is a link.
     await requestedCell.sync();
     const redirect = parseLink(
       requestedCell.getRaw(),
@@ -2196,27 +2212,51 @@ export class RuntimeProcessor {
         space: redirect.space ?? cc.getSpace(),
         scope: redirect.scope ?? "space",
       });
-      await target.sync();
       const targetLink = target.getAsNormalizedFullLink();
-      const hasPattern = getPatternIdentityRef(target) !== undefined ||
-        target.getMetaRaw("pattern") !== undefined;
-      if (!hasPattern || targetLink.path.length > 0) {
-        const pieceCell = hasPattern && targetLink.path.length > 0
-          ? target.asSchemaFromLinks()
-          : target;
-        await pieceCell.pull();
-        return {
-          piece: createPieceRef(pieceCell),
-        };
+      // The document the redirect lands in, at its root. Whether it is a
+      // piece, and the result schema a cell inside it takes, are its
+      // metadata. Synced at the root rather than at the redirect's path, so
+      // the watch this leaves behind covers the document alone rather than
+      // every link the server resolves along that path.
+      const landing = targetLink.path.length === 0
+        ? target
+        : this.#runtime.getCellFromLink({
+          id: targetLink.id,
+          space: targetLink.space,
+          scope: targetLink.scope,
+          path: [],
+        });
+      await landing.sync();
+      const hasPattern = getPatternIdentityRef(landing) !== undefined ||
+        landing.getMetaRaw("pattern") !== undefined;
+      if (!hasPattern) {
+        return { piece: createPieceRef(target) };
       }
-
-      const cell = await cc.getPieceCell(
-        target,
-        request.runIt ?? false,
-      );
-      return {
-        piece: createPieceRef(cell),
-      };
+      if (targetLink.path.length > 0) {
+        // The schema a cell inside a piece is read under: what the links
+        // along its path carry, as `getPieceCell()` resolves a piece cell
+        // reached with a path; else what the redirect itself carries; else
+        // the piece's result schema at that path. Reached through the
+        // landing document, whose sync it shares, so that nothing here
+        // starts a watch at the path.
+        const inside = landing.key(...targetLink.path);
+        const linked = inside.asSchemaFromLinks();
+        if (linked.getAsNormalizedFullLink().schema !== undefined) {
+          return { piece: createPieceRef(linked) };
+        }
+        if (targetLink.schema !== undefined) {
+          return { piece: createPieceRef(inside.asSchema(targetLink.schema)) };
+        }
+        const resultSchema = landing.getMetaRaw("schema") as
+          | JSONSchema
+          | undefined;
+        const cell = resultSchema === undefined ? inside : inside.asSchema(
+          ContextualFlowControl.schemaAtPath(resultSchema, targetLink.path),
+        );
+        return { piece: createPieceRef(cell) };
+      }
+      const cell = await cc.getPieceCell(landing, request.runIt ?? false);
+      return { piece: createPieceRef(cell) };
     }
 
     const cell = await cc.getPieceCell(
@@ -2591,6 +2631,11 @@ export class RuntimeProcessor {
     this.#runtime.scheduler.setEventPreflightTelemetryEnabled(request.enabled);
   }
 
+  /** Sets body accounting independently of telemetry transport. */
+  setReadStatsEnabled(request: SetReadStatsEnabledRequest): void {
+    this.#runtime.scheduler.setReadStatsEnabled(request.enabled);
+  }
+
   /** Changes memory-message compression for every remote storage session. */
   async setMemoryMessageCompression(
     request: SetMemoryMessageCompressionRequest,
@@ -2916,6 +2961,8 @@ export class RuntimeProcessor {
         return this.setLoggerEnabled(request);
       case RequestType.SetTelemetryEnabled:
         return this.setTelemetryEnabled(request);
+      case RequestType.SetReadStatsEnabled:
+        return this.setReadStatsEnabled(request);
       case RequestType.SetMemoryMessageCompression:
         return await this.setMemoryMessageCompression(request);
       case RequestType.ResetLoggerBaselines:

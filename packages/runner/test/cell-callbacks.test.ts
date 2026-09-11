@@ -931,6 +931,56 @@ describe("Cell commit callbacks", () => {
         expect(resolved.get()).toEqualIgnoringSymbols({ name: "first" });
       });
 
+      it("invalidates resolved nested arrays when their inline parent changes", async () => {
+        const source = runtime.getCell<{ children: string[] }[]>(
+          space,
+          "resolve-inline-parent-updates",
+          undefined,
+          tx,
+        );
+        source.setRaw([{ children: [] }, { children: ["unchanged"] }]);
+        const output = runtime.getCell<readonly string[]>(
+          space,
+          "resolve-inline-parent-output",
+          undefined,
+          tx,
+        );
+        output.set(["sentinel"]);
+        await tx.commit();
+
+        let runs = 0;
+        const action = (actionTx: IExtendedStorageTransaction) => {
+          runs++;
+          const children = source.withTx(actionTx).key(0).key("children")
+            .resolveAsCell().get();
+          output.withTx(actionTx).set(children);
+        };
+        const setupTx = runtime.edit();
+        action(setupTx);
+        const log = txToReactivityLog(setupTx);
+        await setupTx.commit();
+        runtime.scheduler.subscribe(action, log, { isEffect: false });
+        expect(await output.withTx().pull()).toEqual([]);
+
+        const updateTx = runtime.edit();
+        source.withTx(updateTx).setRaw([
+          { children: ["green"] },
+          { children: ["unchanged"] },
+        ]);
+        await updateTx.commit();
+        expect(await output.withTx().pull()).toEqual(["green"]);
+
+        const runsBeforeNeighborEdit = runs;
+        const neighborTx = runtime.edit();
+        source.withTx(neighborTx).setRaw([
+          { children: ["green"] },
+          { children: ["changed"] },
+        ]);
+        await neighborTx.commit();
+        expect(await output.withTx().pull()).toEqual(["green"]);
+        expect(runs).toBe(runsBeforeNeighborEdit);
+      });
+
       it("resolves array element links to the target cell", () => {
         const target = runtime.getCell<{ value: number }>(
           space,

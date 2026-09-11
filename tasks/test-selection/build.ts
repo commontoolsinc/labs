@@ -32,6 +32,7 @@ import {
   type IdentityState,
   type Observation,
   parseContext,
+  readCostsForward,
   sampleDuration,
   scoreInputs,
   sealDay,
@@ -208,13 +209,15 @@ export function parseAggregate(text: string): AggregateState | undefined {
       state.unclaimed.every((key) => typeof key === "string")
     ? state.unclaimed as string[]
     : undefined;
+  const states = state.states as Record<string, IdentityState>;
+  for (const identity of Object.values(states)) readCostsForward(identity);
   return {
     schema: MANIFEST_SCHEMA_VERSION,
     day: state.day,
     folded: state.folded as string[],
     context: serializeContext(parseContext(state.context)),
     compacted,
-    states: state.states as Record<string, IdentityState>,
+    states,
     ...(unclaimed === undefined ? {} : { unclaimed }),
   };
 }
@@ -261,7 +264,7 @@ export interface ReadReport {
   /** Where each identity in it runs, by identity key. */
   surfaces: Map<string, Surface>;
 
-  /** Every measured duration, by identity key and then by day. */
+  /** Every passing duration, by identity key and then by day. */
   durations: Map<string, Map<string, number[]>>;
 }
 
@@ -315,7 +318,11 @@ export function readReport(
         source: where.source,
         place: where.place,
       });
-      if (record.outcome === "skip") continue;
+      // A cost predicts what a lane will spend running this test again,
+      // and only a passing execution measures that. A failure ended
+      // where the failure was reached, and where a wait's safety net
+      // ended it, its duration is that net's bound.
+      if (record.outcome !== "pass") continue;
       let byDay = durations.get(key);
       if (byDay === undefined) {
         byDay = new Map();
@@ -497,15 +504,6 @@ export interface BuildInput {
   calibration?: Partial<Calibration>;
 }
 
-/** Decimal places a manifest records a flake share to. */
-const SHARE_PLACES = 4;
-
-/** A number with the digits past `places` dropped. */
-function round(value: number, places: number): number {
-  const scale = 10 ** places;
-  return Math.round(value * scale) / scale;
-}
-
 /**
  * The last day this identity is known to have run. The run counts are
  * kept per day and aged rather than kept forever, so an identity nothing
@@ -531,29 +529,21 @@ export function buildManifest(input: BuildInput): Manifest {
     const surface = input.surfaces.get(key) ?? recordSurface(test, undefined);
     const inputs = scoreInputs(state, input.today);
     const evidence = flakeCounts(state, input.today);
-    // Rounded before anything reads it, so the figure the manifest
-    // carries is the figure every decision here was taken on, and a
-    // consumer applying the same threshold reaches the same answer. A
-    // share that is not zero is held above zero, because zero is the one
-    // point the execution count steps at: once below it, at least twice
-    // above. A rounding that reached zero would take that step on how
-    // many times the test had run.
-    const measured = flakeRate(state, input.today);
-    const rate = measured === 0
-      ? 0
-      : Math.max(round(measured, SHARE_PLACES), 10 ** -SHARE_PLACES);
-    // Rounded because the digits past these are noise, and because a
-    // manifest carries one entry per identity: at twenty thousand of them
-    // the difference between a rounded float and a full one is megabytes.
-    inputs.catches = round(inputs.catches, 2);
-    inputs.churn = round(inputs.churn, 6);
+    // Every figure here is written as it was measured. Thresholds are
+    // compared against these, so a figure rounded on the way in decides
+    // at the rounding rather than at the threshold: a share rounded to
+    // four places reaches zero once a test has twenty thousand runs
+    // behind one disagreement, and zero is what the execution count
+    // steps at. Reading these is what rounds them, and a reader that
+    // shows one to a person rounds it there.
+    const rate = flakeRate(state, input.today);
     const ran = lastRun(state);
     entries.push({
       test,
       suite: surface.suite,
       unit: surface.unit,
-      cost: round(costSeconds(state, input.today), 3),
-      score: round(value(inputs, input.today), 4),
+      cost: costSeconds(state, input.today),
+      score: value(inputs, input.today),
       inputs,
       flakeRate: rate,
       flakeEvidence: evidence,

@@ -28,10 +28,14 @@ import {
 import { parseManifest, serializeManifest } from "./manifest.ts";
 import type { Suite } from "../test-topology/suite.ts";
 import {
+  costSeconds,
   daysBetween,
   emptyState,
   flakeRate,
   type IdentityState,
+  samplesOf,
+  sealDay,
+  value,
 } from "./score.ts";
 import {
   COST_WINDOW_DAYS,
@@ -237,17 +241,32 @@ describe("build", () => {
       expect(read.observations[0]!.day).toBe("2026-08-20");
     });
 
-    it("keeps the durations of everything that ran", () => {
+    it("keeps the durations of the executions that passed", () => {
       const read = readReport(
         stored(CI_NAME, context(), [
           record({ durationMs: 10 }),
           record({ durationMs: 90 }),
           record({ outcome: "skip", durationMs: 5000 }),
+          record({ outcome: "fail", durationMs: 300_000 }),
         ]),
         NO_ALIASES,
       );
       const byDay = [...read.durations.values()][0]!;
       expect(byDay.get("2026-08-20")).toEqual([10, 90]);
+    });
+
+    it("keeps a failed execution as an observation all the same", () => {
+      // Its duration is left out of the cost; the execution itself is
+      // what the churn and flake terms are counted from.
+      const read = readReport(
+        stored(CI_NAME, context(), [record({
+          outcome: "fail",
+          durationMs: 300_000,
+        })]),
+        NO_ALIASES,
+      );
+      expect(read.observations.map((seen) => seen.outcome)).toEqual(["fail"]);
+      expect([...read.durations.keys()]).toEqual([]);
     });
 
     it("reads nothing from a group whose start time is not a time", () => {
@@ -499,6 +518,19 @@ describe("build", () => {
       aggregate.unclaimed = [KEY];
       expect(parseAggregate(JSON.stringify(aggregate))?.unclaimed)
         .toEqual([KEY]);
+    });
+
+    it("gives back the cost a day carrying a percentile was giving", () => {
+      // The shape a state written before the samples were kept carries.
+      const aggregate = emptyAggregate("2026-08-20");
+      const held = emptyState();
+      (held.costByDay as Record<string, unknown>)["2026-08-20"] = {
+        p90: 4000,
+        count: 45,
+      };
+      aggregate.states[KEY] = held;
+      const parsed = parseAggregate(JSON.stringify(aggregate))!;
+      expect(costSeconds(parsed.states[KEY]!, "2026-08-20")).toBe(4);
     });
 
     it("reads a malformed unplaced list as nothing to compare against", () => {
@@ -813,17 +845,29 @@ describe("what buildManifest() does with the states it is given", () => {
     expect(manifest.entries[0]!.repeats).toBe(FLAKE_MIN_EXECUTIONS);
   });
 
-  it("holds a share that is not zero above the precision it records", () => {
-    // One disagreement among enough runs that the share rounds to
-    // nothing. Zero is what says a test has never been seen to disagree,
-    // so the execution count would read this as a test that never has.
+  it("records a share as measured, however small it is", () => {
+    // One disagreement among a hundred thousand runs. Zero is what says
+    // a test has never been seen to disagree, and the execution count
+    // steps at it, so a share written to a few places would read this as
+    // a test that never has and run it once.
     const state = emptyState();
     state.runsByDay["2026-08-20"] = 100_000;
     state.failuresByDay["2026-08-20"] = 1;
     state.flakesByDay["2026-08-20"] = 1;
     const entry = built(new Map([[KEY, state]])).entries[0]!;
-    expect(entry.flakeRate).toBeGreaterThan(0);
+    expect(entry.flakeRate).toBe(1 / 100_000);
     expect(entry.repeats).toBe(FLAKE_MIN_EXECUTIONS);
+  });
+
+  it("records a cost and a score as measured", () => {
+    // Both are compared against thresholds, and a lane's budget is a sum
+    // of costs, so what is written is what was worked out.
+    const state = emptyState();
+    state.runsByDay["2026-08-20"] = 3;
+    sealDay(state, "2026-08-20", samplesOf([37, 41, 43]));
+    const entry = built(new Map([[KEY, state]])).entries[0]!;
+    expect(entry.cost).toBe(costSeconds(state, "2026-08-20"));
+    expect(entry.score).toBe(value(entry.inputs, "2026-08-20"));
   });
 
   it("carries the counts the share was taken from", () => {

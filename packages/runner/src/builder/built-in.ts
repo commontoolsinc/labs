@@ -119,7 +119,6 @@ export const llmDialog = createNodeFactory({
   type: "ref",
   implementation: "llmDialog",
   resultSchema: LLMDialogResultSchema,
-  propagateInputIfc: false,
 }) as (
   params: FactoryInput<BuiltInLLMParams>,
 ) => Reactive<BuiltInLLMDialogState>;
