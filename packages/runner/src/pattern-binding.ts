@@ -645,11 +645,17 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         ? sourceCell.key(...link.path.slice(sourceLink.path.length))
         : sourceCell).asSchema(link.schema);
       const reference = getCfcReferenceProvenance(projected)!;
+      // A field's cap governs outgoing hops. Projecting within its existing
+      // scoped document retains that cap without making another hop to it.
       if (
         reference.scopeCaps?.length &&
-        (!underSource || reference.scopeCaps.some((cap) =>
-          cap.scope !== "any" && scopeRank(link.scope) > scopeRank(cap.scope)
-        ))
+        (!underSource ||
+          ((link.id !== sourceLink.id || link.space !== sourceLink.space ||
+            link.scope !== sourceLink.scope) &&
+            reference.scopeCaps.some((cap) =>
+              cap.scope !== "any" &&
+              scopeRank(link.scope) > scopeRank(cap.scope)
+            )))
       ) {
         throw new Error("Reference alias exceeds its acquired scope cap");
       }

@@ -55,6 +55,14 @@ labels. Preserving a stored name is a separate content copy whose read
 contributes the name's confidentiality, including a covering label or labeled
 absence.
 
+The Runtime admits an unchanged root Cell output as a repeated projection. It
+marks the exact comparison activities and binds their evidence to the stored
+revision. This exception to
+`writeAuthorizedBy` covers only those runtime comparisons: an ordinary no-op
+attempt or an overlapping payload write in the same transaction still requires
+the declared writer. Reference confidentiality and linked content floors remain
+independent checks.
+
 `LinkReference` integrity records a relationship. It does not endorse B's
 contents. A receiver's `addIntegrity` declaration cannot satisfy a floor on a
 different content subject. The schema attached to a handle is a read projection;
@@ -98,6 +106,9 @@ explicit later schema projection that widens those caps remains ineligible for
 storage. Generated scope redirects retain these caps in a scope-only schema,
 including an intermediate user hop. A same-binding write can remain a no-op only
 when the stored reference already enforces the newly required scope restriction.
+An alias may project a field within an already-held scoped document while
+retaining that field's outgoing follow cap. That cap still governs links followed
+from the field; it does not reject the scope of its existing container.
 
 A content assertion can itself reveal protected information through success or
 failure. Its evidence, including traversed bindings and protected metadata, must

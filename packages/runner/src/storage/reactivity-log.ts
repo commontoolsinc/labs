@@ -512,23 +512,24 @@ export function reactivityLogFromActivities(
   };
   for (const activity of activities) {
     if ("read" in activity && activity.read) {
-      if (isReadIgnoredForScheduling(activity.read.meta)) {
-        continue;
-      }
+      const ignored = isReadIgnoredForScheduling(activity.read.meta);
+      const attempted = isReadMarkedAsAttemptedWrite(activity.read.meta);
+      if (ignored && !attempted) continue;
       const address: IMemorySpaceAddress = {
         space: activity.read.space,
         scope: normalizeCellScope(activity.read.scope),
         id: activity.read.id,
         path: [...activity.read.path],
       };
+      if (attempted) {
+        log.attemptedWrites ??= [];
+        log.attemptedWrites.push(address);
+      }
+      if (ignored) continue;
       if (activity.read.nonRecursive === true) {
         log.shallowReads.push(address);
       } else {
         log.reads.push(address);
-      }
-      if (isReadMarkedAsAttemptedWrite(activity.read.meta)) {
-        log.attemptedWrites ??= [];
-        log.attemptedWrites.push(address);
       }
       continue;
     }

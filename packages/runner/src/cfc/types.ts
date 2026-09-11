@@ -497,6 +497,13 @@ export type WritePolicyInput =
     readonly schemaRole?: "output";
   }
   | {
+    /** A trusted runtime output comparison that retained its stored reference. */
+    readonly kind: "output-reissue";
+    readonly target: CfcAddress;
+    readonly readStart: number;
+    readonly readEnd: number;
+  }
+  | {
     readonly kind: "structural-provenance";
     readonly target: CfcAddress;
     readonly claim: string;

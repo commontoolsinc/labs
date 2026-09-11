@@ -8,6 +8,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { recordRelevantSchemaWritePolicyInput } from "../src/cell.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { deriveFlowJoin } from "../src/cfc/prepare.ts";
+import { withCfcReferenceConfidentiality } from "../src/cfc/reference-provenance.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
   runtimeWritePolicyAuthorization,
@@ -114,6 +115,165 @@ describe("cfc-constructor-seeding", () => {
     existing.setMetaRaw("schema", protectedString, rawMetaWriteAuthorization);
     writeOutput(tx, "existing", "new-constructor");
     expect((await tx.commit()).error?.message).toContain("writeAuthorizedBy");
+  });
+
+  it("reissues an unchanged constructor output without authorizing ordinary no-op writes", async () => {
+    const initial = runtime.edit();
+    writeOutput(initial, "stable-output", "stable-constructor");
+    expect((await initial.commit()).error).toBeUndefined();
+
+    const repeat = runtime.edit();
+    writeOutput(repeat, "stable-output", "stable-constructor");
+    expect((await repeat.commit()).error).toBeUndefined();
+
+    const ordinary = runtime.edit();
+    const output = runtime.getCell(
+      space,
+      "stable-output",
+      protectedString,
+      ordinary,
+    );
+    const target = runtime.getCell(space, "stable-constructor", {
+      ...protectedString,
+      default: "initial",
+    }, ordinary);
+    output.set(target);
+    expect((await ordinary.commit()).error?.message).toContain(
+      "writeAuthorizedBy",
+    );
+  });
+
+  for (const order of ["before", "after"] as const) {
+    it(`refuses an ordinary no-op ${order} an output reissue in the same transaction`, async () => {
+      const initial = runtime.edit();
+      writeOutput(initial, "stable-output", "stable-constructor");
+      expect((await initial.commit()).error).toBeUndefined();
+
+      const tx = runtime.edit();
+      const ordinaryWrite = () => {
+        runtime.getCell(space, "stable-output", protectedString, tx).set(
+          runtime.getCell(space, "stable-constructor", {
+            ...protectedString,
+            default: "initial",
+          }, tx),
+        );
+      };
+      if (order === "before") ordinaryWrite();
+      writeOutput(tx, "stable-output", "stable-constructor");
+      if (order === "after") ordinaryWrite();
+      expect((await tx.commit()).error?.message).toContain("writeAuthorizedBy");
+    });
+  }
+
+  for (const change of ["reference", "contents"] as const) {
+    it(`refuses changed ${change} after an output reissue in the same transaction`, async () => {
+      const initial = runtime.edit();
+      writeOutput(initial, "stable-output", "stable-constructor");
+      expect((await initial.commit()).error).toBeUndefined();
+
+      const tx = runtime.edit();
+      const { target } = writeOutput(tx, "stable-output", "stable-constructor");
+      if (change === "reference") {
+        writeOutput(tx, "stable-output", "replacement");
+      } else {
+        target.set("unauthorized");
+      }
+      expect((await tx.commit()).error?.message).toContain("writeAuthorizedBy");
+    });
+  }
+
+  it("refuses a public marker claiming an ordinary write is an output reissue", async () => {
+    const initial = runtime.edit();
+    writeOutput(initial, "stable-output", "stable-constructor");
+    expect((await initial.commit()).error).toBeUndefined();
+
+    const tx = runtime.edit();
+    const output = runtime.getCell(space, "stable-output", protectedString, tx);
+    const readStart = tx.currentActivityIndex?.()!;
+    output.set(runtime.getCell(space, "stable-constructor", undefined, tx));
+    tx.recordCfcWritePolicyInput({
+      kind: "output-reissue",
+      target: output.getAsNormalizedFullLink(),
+      readStart,
+      readEnd: tx.currentActivityIndex?.()!,
+    });
+    expect((await tx.commit()).error?.message).toContain("writeAuthorizedBy");
+  });
+
+  it("refuses an ordinary raw no-op after an output reissue", async () => {
+    const initial = runtime.edit();
+    writeOutput(initial, "stable-output", "stable-constructor");
+    expect((await initial.commit()).error).toBeUndefined();
+
+    const tx = runtime.edit();
+    const { receiver } = writeOutput(tx, "stable-output", "stable-constructor");
+    const address = receiver.getAsNormalizedFullLink();
+    tx.writeValueOrThrow(address, tx.readValueOrThrow(address));
+    expect((await tx.commit()).error?.message).toContain("writeAuthorizedBy");
+  });
+
+  it("checks the linked content floor when an unchanged output is reissued", async () => {
+    const initial = runtime.edit();
+    writeOutput(initial, "stable-output", "stable-constructor");
+    expect((await initial.commit()).error).toBeUndefined();
+
+    const tx = runtime.edit();
+    writeOutput(tx, "stable-output", "stable-constructor", {
+      type: "string",
+      ifc: { ...protection, requiredIntegrity: ["approved-content"] },
+    });
+    expect((await tx.commit()).error?.message).toMatch(
+      /requiredIntegrity|write.floor|linked content evidence/,
+    );
+  });
+
+  it("rejects an output reissue if the stored reference changes before commit", async () => {
+    const initial = runtime.edit();
+    writeOutput(initial, "stable-output", "stable-constructor");
+    expect((await initial.commit()).error).toBeUndefined();
+
+    const repeat = runtime.edit();
+    writeOutput(repeat, "stable-output", "stable-constructor");
+    runtime.getCell(space, "dependent-result", undefined, repeat).set("ready");
+    runtime.prepareTxForCommit(repeat);
+
+    const update = runtime.edit();
+    update.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "constructor-edit-handler",
+    });
+    writeOutput(update, "stable-output", "replacement");
+    expect((await update.commit()).error).toBeUndefined();
+    await storage.synced();
+
+    expect((await repeat.commit()).error).toBeDefined();
+  });
+
+  it("checks reference confidentiality when an unchanged output is reissued", async () => {
+    const initial = runtime.edit();
+    const { target } = writeOutput(
+      initial,
+      "stable-output",
+      "stable-constructor",
+    );
+    expect((await initial.commit()).error).toBeUndefined();
+
+    const tx = runtime.edit();
+    const output = runtime.getCell(space, "stable-output", protectedString, tx);
+    const selected = runtime.getCellFromLink(
+      target.getAsNormalizedFullLink(),
+      undefined,
+      tx,
+      withCfcReferenceConfidentiality(undefined, ["private-selection"]),
+    );
+    const link = output.getAsNormalizedFullLink();
+    recordRelevantSchemaWritePolicyInput(tx, link, protectedString, "output");
+    diffAndUpdate(runtime, tx, link, selected, undefined, {
+      schemaRole: "output",
+    });
+    expect((await tx.commit()).error?.message).toContain(
+      "writer-fit confidentiality misfit",
+    );
   });
 
   it("refuses an untrusted public seed marker on a new protected document", async () => {

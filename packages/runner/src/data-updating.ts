@@ -95,7 +95,10 @@ import type {
   IExtendedStorageTransaction,
   IReadOptions,
 } from "./storage/interface.ts";
-import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
+import {
+  authorizationRead,
+  ignoreReadForScheduling,
+} from "./storage/reactivity-log.ts";
 import { resolveSchemaRefsCanonical, schemaAcceptsType } from "./traverse.ts";
 import { toURI } from "./uri-utils.ts";
 
@@ -493,6 +496,30 @@ export interface DiffWalkState {
     array: unknown;
     values: readonly unknown[];
   };
+}
+
+/** Records the comparison interval for an unchanged root output reference. */
+function recordOutputReissue(
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  readStart: number | undefined,
+  readEnd: number | undefined,
+): void {
+  if (readStart === undefined || readEnd === undefined) return;
+  // The authorization dependency binds this comparison to the stored
+  // reference. Prepare exempts only these attempts, and only while no
+  // payload write overlaps the output in this transaction.
+  tx.recordCfcWritePolicyInput({
+    kind: "output-reissue",
+    target: {
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+      path: link.path,
+    },
+    readStart,
+    readEnd,
+  }, runtimeWritePolicyAuthorization);
 }
 
 /**
@@ -1182,9 +1209,20 @@ export function normalizeAndDiff(
   }
 
   // Get current value to compare against (use precomputed if available)
+  const outputComparison = linkOriginFromCell &&
+    options?.schemaRole === "output" && link.path.length === 0 &&
+    precomputedCurrent === NO_PRECOMPUTED &&
+    tx.getCfcState().flowLabelsMode === "persist";
+  const readStart = outputComparison ? tx.currentActivityIndex?.() : undefined;
   let currentValue = precomputedCurrent === NO_PRECOMPUTED
-    ? tx.readValueOrThrow(link, options)
+    ? tx.readValueOrThrow(
+      link,
+      outputComparison
+        ? { ...options, meta: { ...options?.meta, ...authorizationRead } }
+        : options,
+    )
     : precomputedCurrent;
+  const readEnd = outputComparison ? tx.currentActivityIndex?.() : undefined;
 
   // A new alias can overwrite a previous alias. No-op if the same.
   if (isWriteRedirectLink(newValue)) {
@@ -1207,6 +1245,7 @@ export function normalizeAndDiff(
         "diff",
         () => `[BRANCH_WRITE_REDIRECT] Same redirect, no-op at path=${pathStr}`,
       );
+      recordOutputReissue(tx, link, readStart, readEnd);
       if (
         tx.getCfcState().flowLabelsMode === "persist" ||
         cfcLabelViewHasValues(carriedCfcLabelView)
@@ -1360,6 +1399,7 @@ export function normalizeAndDiff(
         "diff",
         () => `[BRANCH_CELL_LINK] Same cell link, no-op at path=${pathStr}`,
       );
+      recordOutputReissue(tx, link, readStart, readEnd);
       if (
         tx.getCfcState().flowLabelsMode === "persist" ||
         cfcLabelViewHasValues(carriedCfcLabelView)

@@ -2124,6 +2124,56 @@ describe("cfc-reference-provenance", () => {
     });
   }
 
+  for (const targetScope of ["space", "session"] as const) {
+    it(`binds a capped field in a session container and enforces its ${targetScope} target scope`, async () => {
+      const setup = runtime.edit();
+      const scoped = (name: string, scope: "space" | "session") =>
+        runtime.getCellFromLink(
+          {
+            ...runtime.getCell(space, name).getAsNormalizedFullLink(),
+            scope,
+          },
+          undefined,
+          setup,
+        );
+      const target = scoped("nested-cap-target", targetScope);
+      target.set("visible");
+      const container = scoped("nested-cap-container", "session");
+      container.set({ params: { value: target } });
+      expect((await setup.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      const argument = container.withTx(tx).asSchema({
+        type: "object",
+        properties: {
+          params: {
+            type: "object",
+            properties: {
+              value: {
+                type: "string",
+                asCell: [{ kind: "cell", scope: "space" }],
+              },
+            },
+          },
+        },
+      });
+      const output = runtime.getCell(space, "nested-cap-output", undefined, tx);
+      const bound = unwrapOneLevelAndBindToDoc(
+        { $alias: { cell: "argument", path: ["params", "value"] } },
+        argument.getAsNormalizedFullLink(),
+        output,
+        { targetSchema: { type: "string" } },
+      );
+      output.set(bound);
+      expect((await tx.commit()).ok).toBeDefined();
+      const read = runtime.edit();
+      expect(output.withTx(read).get()).toBe(
+        targetScope === "space" ? "visible" : undefined,
+      );
+      read.abort();
+    });
+  }
+
   it("retains alias acquisition when a transaction strengthens an off Runtime to persist", async () => {
     const argument = await seed("strengthened-alias-source", {
       value: "visible",

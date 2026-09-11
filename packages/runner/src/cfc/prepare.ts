@@ -73,6 +73,7 @@ import {
   isInternalVerifierRead,
   isLinkResolutionProbe,
   isMachineryRead,
+  isReadMarkedAsAttemptedWrite,
   isSchedulerDependencyRead,
 } from "../storage/reactivity-log.ts";
 import {
@@ -1033,6 +1034,57 @@ const writeIsSeedMaterialization = (
     canonicalizeLogicalPath(detail.address.path).length === 0 &&
     detail.previousValue === undefined
   );
+};
+
+// Re-emitting an existing action output preserves its reference. Each attempted
+// comparison needs its own runtime mark; any payload write or ordinary attempt
+// at the same output still requires the declared writer identity.
+const writeIsUnchangedOutput = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  path: readonly string[],
+): boolean => {
+  if (canonicalizeLogicalPath(path).length !== 0) return false;
+  const reissues = tx.getCfcState().writePolicyInputs.filter((input) =>
+    input.kind === "output-reissue" && tx.isRuntimeWritePolicyInput(input) &&
+    input.target.space === target.space && input.target.id === target.id &&
+    normalizeCellScope(input.target.scope) === target.scope &&
+    canonicalizeLogicalPath(input.target.path).length === 0
+  );
+  if (reissues.length === 0) return false;
+  const isTargetPayload = (address: {
+    space: MemorySpace;
+    id: URI;
+    scope?: ReturnType<typeof normalizeCellScope>;
+    path: readonly string[];
+  }) =>
+    address.space === target.space && address.id === target.id &&
+    normalizeCellScope(address.scope) === target.scope &&
+    (address.path.length === 0 || address.path[0] === "value");
+  // The author ledger includes raw value-equal writes elided by storage.
+  if (tx.getCfcValueWriteAuthor({ ...target, path: [] }) !== undefined) {
+    return false;
+  }
+  let sawAttempt = false;
+  for (const read of tx.getReadActivities?.() ?? []) {
+    if (!isTargetPayload(read) || !isReadMarkedAsAttemptedWrite(read.meta)) {
+      continue;
+    }
+    sawAttempt = true;
+    const index = read.journalIndex;
+    if (
+      index === undefined ||
+      !reissues.some((input) =>
+        input.kind === "output-reissue" &&
+        index >= input.readStart && index < input.readEnd
+      )
+    ) return false;
+  }
+  return sawAttempt;
 };
 
 // Result projection records the internal fields it initializes. Only writes
@@ -4035,13 +4087,13 @@ const verifyInputRequirements = (
       target.space,
       identityForPath(entry.path),
     );
-    const setupProjection = setupProjectionSourceMatchesValue(
-      tx,
-      target,
-      entry.path,
-    ) || writeIsPatternSetupInitialization(tx, target, entry.path) ||
-      writeIsSeedMaterialization(tx, target);
-    if (writeAuthorizedByFailure !== undefined && !setupProjection) {
+    if (
+      writeAuthorizedByFailure !== undefined &&
+      !setupProjectionSourceMatchesValue(tx, target, entry.path) &&
+      !writeIsPatternSetupInitialization(tx, target, entry.path) &&
+      !writeIsSeedMaterialization(tx, target) &&
+      !writeIsUnchangedOutput(tx, target, entry.path)
+    ) {
       return { reason: writeAuthorizedByFailure, verdict: true };
     }
     // Provenance-only reads (link/origin/current-principal, no

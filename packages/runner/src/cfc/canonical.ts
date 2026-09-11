@@ -208,6 +208,7 @@ const compareWritePolicyInput = (
   let primary = 0;
   switch (left.kind) {
     case "schema":
+    case "output-reissue":
     case "structural-provenance":
     case "trusted-event":
     case "link-write": {
@@ -272,6 +273,7 @@ export const canonicalizeWritePolicyInput = (
 ): WritePolicyInput => {
   switch (input.kind) {
     case "schema":
+    case "output-reissue":
       return { ...input, target: canonicalizeAttemptedWrite(input.target) };
     case "structural-provenance":
       return {
