@@ -317,10 +317,12 @@ describe("CFC runtime stamp lifetime", () => {
     });
   }
 
-  it("ignores batch deletions of absent paths when recording authorship", () => {
+  it("ignores batch deletions of absent paths when recording authorship", async () => {
+    const seed = runtime.edit();
+    const cell = runtime.getCell(space, "batch-absent-delete");
+    cell.withTx(seed).set({ present: "user" });
+    expect((await seed.commit()).error).toBeUndefined();
     const tx = runtime.edit();
-    const cell = runtime.getCell(space, "batch-absent-delete", undefined, tx);
-    cell.set({ present: "user" });
     const address = cell.getAsNormalizedFullLink();
     tx.setCfcImplementationIdentity(builtin);
     tx.writeValuesOrThrow!([
@@ -332,7 +334,7 @@ describe("CFC runtime stamp lifetime", () => {
       { address: { ...address, path: ["other"] }, value: "model" },
     ]);
     expect(
-      tx.getCfcValueWriteAuthor({ ...address, path: ["missing"] })?.identity,
+      tx.getCfcValueWriteAuthor({ ...address, path: ["missing"] }),
     )
       .toBeUndefined();
     expect(tx.getCfcValueWriteAuthor({ ...address, path: ["other"] })?.identity)

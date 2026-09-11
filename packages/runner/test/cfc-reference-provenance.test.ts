@@ -44,7 +44,7 @@ import {
   createQueryResultProxy,
   getCellOrThrow,
 } from "../src/query-result-proxy.ts";
-import { stub } from "@std/testing/mock";
+import { spy, stub } from "@std/testing/mock";
 import { createLLMFriendlyLink } from "../src/link-types.ts";
 import { getMetaLink, parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -1840,6 +1840,31 @@ describe("cfc-reference-provenance", () => {
     cell.withTx(tx).getAsLink();
     expect(deriveFlowJoin(tx).confidentiality).toContainEqual(selection);
     tx.abort();
+  });
+
+  it("retains selection confidentiality when a resolved proxy outlives its transaction", async () => {
+    const { target, selected } = await selectedTarget();
+    const acquire = runtime.edit();
+    const result = selected.withTx(acquire).getAsQueryResult() as {
+      public: string;
+    };
+    expect(getCellOrThrow(result).getAsNormalizedFullLink().id).toBe(
+      target.getAsNormalizedFullLink().id,
+    );
+    acquire.abort();
+
+    using reads = spy(runtime, "readTx");
+    expect(result.public).toBe("visible");
+    const observed = reads.calls.flatMap(({ returned }) =>
+      returned?.getCfcState().referenceObservations ?? []
+    );
+    expect(observed.flatMap((entry) => entry.confidentiality))
+      .toContainEqual(selection);
+    expect(
+      reads.calls.flatMap(({ returned }) =>
+        returned === undefined ? [] : deriveFlowJoin(returned).confidentiality
+      ),
+    ).toContainEqual(selection);
   });
 
   it("retains reference history on an eagerly materialized object", async () => {

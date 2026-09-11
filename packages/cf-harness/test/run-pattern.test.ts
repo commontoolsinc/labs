@@ -5,6 +5,7 @@ import {
 } from "../../runner/test/cfc-seed-envelope.ts";
 import { isSealedOpaqueLinkObject } from "../src/structured-result.ts";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -1459,6 +1460,62 @@ describe("run-pattern", () => {
         expect(output.policyRefusal?.inputKeys).toEqual(
           expect.arrayContaining(["source", "alsoSource"]),
         );
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("continues release attribution after one live input cannot be read", async () => {
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const missingRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "unavailable-attribution-input",
+        );
+        const sourceRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "readable-attribution-input",
+        );
+        const missing = runtime.getCell(space, "unavailable-attribution-input");
+        const missingId = missing.getAsNormalizedFullLink().id;
+        const prototype = Object.getPrototypeOf(missing) as Cell<unknown>;
+        const originalPull = prototype.pull;
+        let failedReads = 0;
+        using _pull = stub(prototype, "pull", function (this: Cell<unknown>) {
+          if (this.getAsNormalizedFullLink().id === missingId) {
+            failedReads++;
+            return Promise.reject(new Error("input became unavailable"));
+          }
+          return originalPull.call(this);
+        });
+
+        const result = await createStrictEngine(
+          piecesWithUnresolvableArgument(pieces),
+        ).invokeBuiltinTool("run_pattern", {
+          sourceText: [
+            "import { computed, pattern, Reactive } from 'commonfabric';",
+            "interface Source { secret: string; }",
+            "interface Input {",
+            "  amount: number;",
+            "  unavailable: Reactive<Source>;",
+            "  source: Reactive<Source>;",
+            "}",
+            "export default pattern<Input, { total: number }>(({ amount, source }) => ({",
+            "  total: computed(() => amount + source.secret.length),",
+            "}));",
+          ].join("\n"),
+          inputs: { unavailable: missingRef, source: sourceRef, amount: 2 },
+          resultSchema: TOTAL_RESULT_SCHEMA,
+        });
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(failedReads).toBeGreaterThan(0);
+        expect(output.value).toBeUndefined();
+        expect(output.policyRefusal?.inputKeys).toEqual(["source"]);
+        expect(output.policyRefusal?.offendingAtoms).toEqual(['"secret"']);
+        expect(output.policyRefusal?.attribution).toBe("complete");
       } finally {
         await dispose();
       }
