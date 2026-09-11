@@ -2041,6 +2041,8 @@ function probeForcedStreamCell(cell: any, name: string): any | null {
   ) {
     return null;
   }
+  // For inline values, the cast's stream schema survives link resolution,
+  // so isStream() can answer true solely from the caller's assertion.
   const streamRoot = cell.asSchema({
     type: "object",
     properties: {
@@ -2216,7 +2218,13 @@ export class UnknownPieceVerbError extends Error {
       space: config.space,
       scope: config.pieceScope ?? "space",
     });
-    const names = verbs.map((verb) => `\`${verb.name}\``).join(", ");
+    const names = verbs.map((verb) => {
+      const marks = [
+        ...(verb.tier === "wrapper" ? ["wrapper"] : []),
+        ...(verb.deprecated ? ["deprecated"] : []),
+      ];
+      return `\`${verb.name}\`${marks.length ? ` (${marks.join(", ")})` : ""}`;
+    }).join(", ");
     super(
       `Unknown verb \`${callableName}\` on piece \`${config.piece}\`.\n` +
         `Available verbs (including wrappers and deprecated verbs): ${

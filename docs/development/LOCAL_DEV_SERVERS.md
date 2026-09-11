@@ -78,6 +78,8 @@ cf newer than its server is the normal local-dev state (the checkout moved
 on; the server kept running) and prints nothing on a command that succeeds —
 its note is held for failures, as context naming how far behind the server is.
 Commit distance alone does not establish incompatibility or explain a failure.
+For a local server you control, restarting it from the CLI's checkout aligns
+the versions.
 `cf piece call` suppresses the held note for a confirmed unknown verb, a rejected
 payload, or argument validation that fails before dispatch. A cf **older** than
 its server is the

@@ -11,6 +11,7 @@ import {
   executePieceCallable,
   getCellValue,
   type PieceCallableDependencies,
+  UnknownPieceVerbError,
 } from "../lib/piece.ts";
 import {
   deferSkewNoteUntilFailureExit,
@@ -41,6 +42,48 @@ export default pattern<Record<string, never>, Board>(() => {
 };
 
 describe("piece-call-discovery", () => {
+  it("identifies the error and marks wrapper and deprecated recovery choices", () => {
+    const error = new UnknownPieceVerbError("listItems", {
+      apiUrl: "http://localhost:8000",
+      identity: "/nonexistent/test-key",
+      space: "did:key:discovery",
+      piece: "of:discovery-board",
+    }, [
+      { name: "addItem", kind: "handler", on: "result", inputSchema: true },
+      {
+        name: "submitForm",
+        kind: "handler",
+        on: "result",
+        inputSchema: true,
+        tier: "wrapper",
+      },
+      {
+        name: "legacyAdd",
+        kind: "handler",
+        on: "result",
+        inputSchema: true,
+        deprecated: true,
+      },
+      {
+        name: "legacyForm",
+        kind: "handler",
+        on: "result",
+        inputSchema: true,
+        tier: "wrapper",
+        deprecated: true,
+      },
+    ]);
+    expect(String(error)).toContain(
+      "UnknownPieceVerbError: Unknown verb `listItems`",
+    );
+    expect(error.message).toContain(
+      "Available verbs (including wrappers and deprecated verbs): " +
+        "`addItem`, `submitForm` (wrapper), `legacyAdd` (deprecated), " +
+        "`legacyForm` (wrapper, deprecated).",
+    );
+    expect(Object.keys(error)).toEqual([]);
+  });
+
   it("reports a guessed verb before dispatch and leaves the board readable and callable", async () => {
     // Real cells exercise the permissive stream cast. A double that only
     // recognizes the authored verb would reject the guess on its own.

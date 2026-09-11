@@ -799,16 +799,17 @@ memo, which names a space once for the life of the process.
 When ordinary callable lookup finds no verb, `cf piece call` checks the deployed
 pattern's catalog before attempting a stream cast. A name absent from an
 available catalog is refused without dispatching: stderr lists the public verbs,
-including wrappers and deprecated verbs, and commands to discover and read
-fields. The call exits 1 and writes no invocation result. Stored callables
+including labeled wrappers and deprecated verbs, and commands to discover and
+read fields. The call exits 1 and writes no invocation result. Stored callables
 remain callable without a catalog, and unavailable pattern metadata leaves the
 stream fallback usable.
 
 An unknown-verb refusal, rejected payload, or pre-dispatch argument validation
 failure suppresses the deferred CLI-ahead version note. Other failures can carry
 neutral version context: commit distance alone does not establish
-incompatibility or explain a failure. Warnings for an older CLI, diverged
-versions, or unknown ancestry retain their connection-time behavior.
+incompatibility or explain a failure. For a local server you control, restarting
+it from the CLI's checkout aligns the versions. Warnings for an older CLI,
+diverged versions, or unknown ancestry retain their connection-time behavior.
 
 `cf piece call` judges the payload against the verb's declared event schema
 before anything is sent, so a refusal costs nothing: the invocation id was never

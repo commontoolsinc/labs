@@ -9,7 +9,8 @@ The running piece is authoritative. Choose discovery by what you need:
   `skills/topics/references/reading.md`.
 - To discover a piece's readable fields and operations, use
   `deno task cf piece describe --cell "$TOPICS_BOARD" --json`. It documents
-  fields; `cell get` reads their values.
+  fields; `deno task cf cell get --cell "$TOPICS_BOARD" <field>` reads their
+  values.
 - To choose an operation to call, list the deployed verbs:
 
 ```bash

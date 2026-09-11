@@ -2036,6 +2036,7 @@ describe("forced-stream fallback dispatch", () => {
       isStdinTerminal: () => true,
     });
     await expect(call).rejects.toThrow(UnknownPieceVerbError);
+    await expect(call).rejects.toHaveProperty("name", "UnknownPieceVerbError");
     await expect(call).rejects.toThrow(
       "Available verbs (including wrappers and deprecated verbs): none.",
     );

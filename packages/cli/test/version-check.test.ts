@@ -49,6 +49,11 @@ Deno.test("versionMismatchWarning", async (t) => {
     expect(warning).toContain(
       "Commit distance alone does not establish incompatibility",
     );
+    expect(warning).toContain("explain this failure.");
+    expect(warning).toContain(
+      "If this is a local server you control, restarting it from this cf's",
+    );
+    expect(warning).toContain("checkout aligns the versions.");
     expect(warning).not.toMatch(/possible cause|redeploy|Restart/);
     assert(!warning.includes("OUTDATED"));
   });

@@ -148,7 +148,9 @@ export function versionMismatchWarning(
         `${origin} — the server\n` +
         `    (${serverSha}) is ${behind} this cf (${cliSha}).\n` +
         `    Commit distance alone does not establish incompatibility or ` +
-        `explain this failure;\n` +
+        `explain this failure.\n` +
+        `    If this is a local server you control, restarting it from this cf's\n` +
+        `    checkout aligns the versions.\n` +
         `    ` + SILENCE_HINT;
     }
     case "cli-behind":
