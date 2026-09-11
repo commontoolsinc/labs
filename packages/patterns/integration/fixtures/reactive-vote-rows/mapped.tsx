@@ -1,7 +1,7 @@
 /** Renders reactive rows over ranked tallies containing resolved voter profiles. */
 
 import { computed, NAME, pattern, UI } from "commonfabric";
-import { cast, type Input, rename } from "./model.ts";
+import { cast, type Input, rename, retract } from "./model.ts";
 
 export default pattern<Input>(({ options, votes, profiles }) => {
   const ranked = computed(() =>
@@ -45,5 +45,6 @@ export default pattern<Input>(({ options, votes, profiles }) => {
     rows,
     cast: cast({ votes, profiles }),
     rename: rename({ profiles }),
+    retract: retract({ votes }),
   };
 });

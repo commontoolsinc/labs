@@ -42,11 +42,18 @@ import {
 } from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import {
+  type CellScope,
   type DeliveryAttention,
   type DeliveryDeferral,
   eventAttentionEntryKey,
   eventAttentionIndexKey,
+  identityOfScopeKey,
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+  scopeOfScopeKey,
   SERVER_EXECUTION_ATTENTION_DOC_ID,
+  SERVER_EXECUTION_EFFECTS_DOC_ID,
+  SERVER_EXECUTION_WATERMARK_DOC_ID,
   type StreamEventEntry,
   type StreamEventsDocValue,
   toDirtyKey,
@@ -85,6 +92,7 @@ import {
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Runtime, ServerRunInfo } from "../runtime.ts";
 import type {
+  CommitError,
   IExtendedStorageTransaction,
   IStorageTransaction,
   ITransactionSealSink,
@@ -93,10 +101,10 @@ import type {
   Result,
   SealedCommitVerdict,
   SealedNativeCommit,
+  StoreReadThrough,
   TransactionSealDestination,
   Unit,
 } from "../storage/interface.ts";
-import type { CommitError, StoreReadThrough } from "../storage/interface.ts";
 import {
   ensurePieceRunningVerdict,
   type EnsurePieceVerdict,
@@ -123,15 +131,6 @@ import { effectCompletionKeyOf } from "./effect-completion.ts";
 import { markRendererTrustedEvent } from "../cfc/ui-contract.ts";
 import { EVENT_DEFERRAL_DROP_THRESHOLD } from "../scheduler/constants.ts";
 import { LT1_LATE_SEAL_REFUSED } from "../scheduler/types.ts";
-import {
-  type CellScope,
-  identityOfScopeKey,
-  resolveScopeKey,
-  type ScopeKeyIdentity,
-  scopeOfScopeKey,
-  SERVER_EXECUTION_EFFECTS_DOC_ID,
-  SERVER_EXECUTION_WATERMARK_DOC_ID,
-} from "@commonfabric/memory/v2";
 import type { PostCommitSideEffect } from "../cfc/types.ts";
 import {
   attentionForExpiredDeliveryFailure,
