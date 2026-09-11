@@ -4,6 +4,9 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Index maintenance phase counts](development/performance/2026-09-11-index-maintenance-phases.md) — completed action-body counts for both index types across membership edits, key edits and lookup retargeting at three sizes.
+
+- [Demand-driven index enumeration](development/performance/2026-09-11-demanded-index-enumeration.md) — 2026-09-11: 512-row lookup and enumeration measurements, skewed-bucket costs, and the unresolved mixed-key representation boundary.
 - [Lazy scalar read width](development/performance/2026-09-11-lazy-scalar-read-width.md) — D2 eager/lazy one-scalar and all-row baseline at 74, 296, and 1,184 inline rows, with journal counts and timing limits.
 
 - [2026-09-11-nested-collection-scan-diagnostic.md](development/performance/2026-09-11-nested-collection-scan-diagnostic.md) — E3 warning acceptance across 413 pattern entries and 1,731 modules: seven occurrences at five source sites, guarded-UI limits, and callback-local exclusions.
@@ -115,6 +118,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Shipped or superseded designs and decision records
 
+- [Mixed index key enumeration decision](features/2026-09-11-index-key-enumeration-decision.md) — 2026-09-11: approved Q7 tagged enumeration contract, caller consequences, alternatives, and pending acceptance requirements.
+
 - [APRIME-LINEAGE-HANDOFF.md](packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md) — the authored-source lineage investigation, per-channel hazards, probes, and execution record for the CT-1868/1869/1870 arc, completed August 2026.
 - [agent-connector-owner-identity-break.md](agent-connector-owner-identity-break.md) — decision record for the agent connector debug pattern's pre-deployment cutover to explicit owner identity and one protected writable command cell, August 2026.
 - [features/llm-message-role-narrowing-break.md](features/llm-message-role-narrowing-break.md) — decision record for dropping the `system` role from `BuiltInLLMMessage` and `LLMMessageSchema`: why an enum in a deployed contract cannot narrow compatibly, why the role was a surface the guard in front of the model and the AI SDK both already refused, and why the narrowing strands no state because the runtime does not enforce an enum on read or write, September 2026.
@@ -129,6 +134,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [lobby-admin-floor-contract-break.md](lobby-admin-floor-contract-break.md) — decision record for the lobby admin-roster contract break: why the roster's `requiredIntegrity` floor had to mint the atom it names, why the other four admin-registry rules already held so the mint is the whole correction, and why a piece holding a roster loses nothing it could have written, August 2026.
 - [lot-watch-admin-floor-contract-break.md](lot-watch-admin-floor-contract-break.md) — decision record for the Lot Watch admin-roster contract break: why an unsatisfiable `requiredIntegrity` floor had to gain the mint, the single atom, the plain per-user flag and the reviewed writer together, and why a piece holding a roster loses nothing it could have written, August 2026.
 - [pattern-result-ifc-contract-break.md](pattern-result-ifc-contract-break.md) — decision record for the pattern-result `ifc` contract break: why the builder stopped synthesizing a covering confidentiality clause at a pattern's result-schema root, why CFC §8.12.8 puts a dependency measurement in the derived component rather than the declared one, and what a piece deployed under the wider contract keeps and loses, September 2026.
+- [pattern-level-cfc-output-walk.md](pattern-level-cfc-output-walk.md) — measurement behind removing the pattern-level CFC output walk: where its swallowed `setSchema` fired across the authored pattern corpus, why letting the attachment through would have labeled the render-policy demo's own controls, and what the three affected patterns lost, September 2026.
 - [parking-admin-profile-subject-break.md](parking-admin-profile-subject-break.md) — decision record for the parking-coordinator admin-subject contract break: why a parking-admin role stopped naming a person by name and started naming their profile cell, and how a space starting over on the new contract recovers an admin, August 2026.
 - [lunch-poll-identity-break.md](lunch-poll-identity-break.md) — decision record for the lunch-poll identity contract break: display-name identity replaced by profile cells; stored rows survive the vintage replay, but the root argument contract requires migrating the populated poll to a fresh piece.
 - [action-id-per-instance-decision.md](specs/action-id-per-instance-decision.md) — per-instance action identity.
