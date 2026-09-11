@@ -39,6 +39,9 @@ installFakeClock({
     // The engine read-through suite drives the same live ExecutorHost
     // under the same wall-clock policies.
     "engine-read-through",
+    // The compiled-child suite runs the same live serving host. Its lease
+    // renew interval must advance in real time while compiler work settles.
+    "executor-compile-and-run",
     // Same wall-clock pacing, same machinery (the SpaceServer's renew
     // interval and flush deadline), one level down: the stage-G
     // recovery-seam tests drive a real SpaceServer directly.

@@ -118,6 +118,7 @@ import {
   updateDeliveryCheckpointStats,
 } from "./stats.ts";
 import { type SealedEffectBatch, SpaceOutbox } from "./outbox.ts";
+import { abandonRunnerAcceptanceEffects } from "./runner-acceptance.ts";
 import { effectCompletionKeyOf } from "./effect-completion.ts";
 import { markRendererTrustedEvent } from "../cfc/ui-contract.ts";
 import { EVENT_DEFERRAL_DROP_THRESHOLD } from "../scheduler/constants.ts";
@@ -1051,7 +1052,11 @@ export class SpaceServer implements TransactionSealDestination {
     });
     this.#outbox = outbox;
     runtime.asyncWorkObserver = (work) => outbox.observeAsyncWork(work);
-    runtime.effectMemoObserver = () => {
+    runtime.effectMemoObserver = (event) => {
+      if (event.kind === "superseded") {
+        this.#options.stats.outbox.superseded += 1;
+        return;
+      }
       this.#options.stats.memo.hits += 1;
     };
     // Stage P2-F (the F1 fold-in, RULED 2026-08-13): a piece-start
@@ -1683,6 +1688,7 @@ export class SpaceServer implements TransactionSealDestination {
     const wave = this.#waveByTx.get(tx);
     if (wave === undefined) return false;
     if (!this.#active || this.#outbox === undefined || wave.closed) {
+      abandonRunnerAcceptanceEffects(effects, "Serving wave is closed");
       // The park-race straggler (the stage-G review's m-3): a tx that
       // sealed into a wave this server has since abandoned — or whose
       // commit resolves while the space is parking/parked — hands its
@@ -5087,6 +5093,10 @@ export class SpaceServer implements TransactionSealDestination {
       pendingEffects !== undefined && pendingEffects.length > 0
     ) {
       this.#outbox?.admitSealedEffects(pendingEffects);
+    } else if (pendingEffects !== undefined) {
+      for (const batch of pendingEffects) {
+        abandonRunnerAcceptanceEffects(batch.effects, outcome.aborted);
+      }
     }
     if (outcome.aborted === "lease-lost") {
       // PARK, never continue (W-soundness): the abort WITHDREW the
@@ -5382,6 +5392,11 @@ export class SpaceServer implements TransactionSealDestination {
     // from memo keys on re-activation). In-flight effect work is not
     // awaited (park never awaits the network); its writebacks fail
     // against the disposed runtime and are caught by the builtins.
+    for (const batches of this.#pendingEffectsByWave.values()) {
+      for (const batch of batches) {
+        abandonRunnerAcceptanceEffects(batch.effects, reason);
+      }
+    }
     this.#pendingEffectsByWave.clear();
     // Phase 6: wake budget-held dispatches into the closed check so
     // they DROP (the crash-equivalent path) instead of firing network

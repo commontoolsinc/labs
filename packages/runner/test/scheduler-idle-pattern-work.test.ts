@@ -158,7 +158,7 @@ describe("idleWithPendingCommits covers pattern work (OW45 S-B)", () => {
     const compileGate = Promise.withResolvers<unknown>();
     compileManager.inProgressCompilations.set(
       "ow45-synthetic-compile",
-      compileGate.promise as Promise<never>,
+      { promise: compileGate.promise as Promise<never>, spaces: new Set() },
     );
     expect(runtime.patternManager.hasPendingPatternWork()).toBe(true);
     let compileBarrierResolved = false;
@@ -199,7 +199,7 @@ describe("idleWithPendingCommits covers pattern work (OW45 S-B)", () => {
     });
     manager.inProgressCompilations.set(
       "ow45-rejecting-compile",
-      tracked as Promise<never>,
+      { promise: tracked as Promise<never>, spaces: new Set() },
     );
     expect(runtime.patternManager.hasPendingPatternWork()).toBe(true);
     let resolved = false;

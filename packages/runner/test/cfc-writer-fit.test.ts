@@ -9,6 +9,7 @@ import {
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
 import { Runtime } from "../src/runtime.ts";
 import { runtimeOwnedStoreOwnerKey } from "../src/cfc/runtime-owned-stores.ts";
 import type { NormalizedFullLink } from "../src/link-types.ts";
@@ -322,7 +323,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       const derivedId = derived.getAsNormalizedFullLink().id;
       tx.prepareCfc();
       const result = await tx.commit();
-      expect(result.error).toBeDefined();
+      expect(isCfcEnforcementRejection(result.error)).toBe(true);
       // SC-18c error contract: stable reason naming the rule id and path.
       expect(result.error?.message).toContain(
         "writer-fit confidentiality misfit",
@@ -508,7 +509,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       partial.set({ copied: `${raw.secret}!` });
       tx.prepareCfc();
       const result = await tx.commit();
-      expect(result.error).toBeDefined();
+      expect(isCfcEnforcementRejection(result.error)).toBe(true);
       expect(result.error?.message).toContain(
         "writer-fit confidentiality misfit",
       );
@@ -1496,7 +1497,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         tx.prepareCfc();
 
         const result = await tx.commit();
-        expect(result.error).toBeDefined();
+        expect(isCfcEnforcementRejection(result.error)).toBe(true);
         expect(result.error?.message).toContain(
           "writer-fit confidentiality misfit",
         );
@@ -1621,7 +1622,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         tx.prepareCfc();
 
         const result = await tx.commit();
-        expect(result.error).toBeDefined();
+        expect(isCfcEnforcementRejection(result.error)).toBe(true);
         expect(result.error?.message).toContain(
           "writer-fit confidentiality misfit",
         );
@@ -1708,6 +1709,11 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       const plainId = plain.getAsNormalizedFullLink().id;
       tx.prepareCfc();
       expect((await tx.commit()).ok).toBeDefined();
+      // The stored value pins the document the label map is read from, so the
+      // empty map below is that document's own.
+      expect(storedDocument(storageManager, plainId)?.value).toEqual({
+        note: "public",
+      });
       expect(replicaEntries(storageManager, plainId)).toEqual([]);
       expect(
         tx.getCfcState().diagnostics.filter((d) => d.includes("writer-fit")),
@@ -2302,6 +2308,11 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           "writer-fit confidentiality misfit",
         );
         expect(committed.error?.message).toContain(`for ${storeId} at /`);
+        // The stored value pins the store the forged marker named, so the
+        // absent declaration below is that document's own.
+        expect(storedDocument(storageManager, storeId)?.value).toEqual({
+          copied: "public",
+        });
         expect(
           replicaEntries(storageManager, storeId).some((entry) =>
             entry.origin === "declared"
@@ -3335,6 +3346,11 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
             flag.includes(`${substrateId} at /`)
           ),
         ).toBe(true);
+        // The stored value pins the flagged document, so the absent
+        // declaration below is that document's own.
+        expect(storedDocument(storageManager, substrateId)?.value).toEqual({
+          copied: "s3cr3t!",
+        });
         expect(
           replicaEntries(storageManager, substrateId)
             .filter((entry) => entry.origin === "declared"),
@@ -3460,6 +3476,11 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         expect(committed.error?.message).toContain(
           "writer-fit confidentiality misfit",
         );
+        // The stored value pins the bystander, so the absent declaration
+        // below is that document's own.
+        expect(storedDocument(storageManager, bystanderId)?.value).toEqual({
+          note: "public",
+        });
         expect(
           replicaEntries(storageManager, bystanderId)
             .filter((entry) => entry.origin === "declared"),

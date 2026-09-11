@@ -1,0 +1,216 @@
+{
+  "updated": "2026-09-10T23:47:28.440003+00:00",
+  "title": "Pattern computation cost",
+  "design": "https://github.com/commontoolsinc/labs/pull/7155",
+  "pr": "https://github.com/commontoolsinc/labs/pull/7241",
+  "activity": "Row invalidation fix #7265 merged after all 69 gates and clean reviews. A4 count-limit work exposed a separate union-branch schema-scope issue; its isolated fix passes focused tests.",
+  "review": "Latest Cubic and antagonistic reviews are clean for the dashboard. The merged #7265 tracker update is being revalidated before landing this checkpoint.",
+  "checks": [
+    "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
+    "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
+    "#7257: full runner passed 1,410 tests / 8,765 steps. Full CLI completed: 1,821 tests passed and two known baseline color tests failed. Rebased focused tests and all 46 type-check groups pass.",
+    "#7261 merged as c8a64af840: all CI gates passed; latest Cubic reported zero issues; antagonistic review clean. Browser recordings remain available below.",
+    "#7265: merged as 3aee034aff after all 69 CI gates, zero-issue latest Cubic review, and clean antagonistic review."
+  ],
+  "stages": [
+    {
+      "id": "A0",
+      "title": "Controlled workload and baseline",
+      "status": "done",
+      "detail": "Controlled workload and attributed baseline landed in #7241 with all review and CI gates passing."
+    },
+    {
+      "id": "A1",
+      "title": "Reactive read accounting",
+      "status": "done",
+      "detail": "Core instrumentation shipped in #7246; additional accounting and reporting regressions landed in #7241."
+    },
+    {
+      "id": "A2",
+      "title": "Attributed CLI reports",
+      "status": "done",
+      "detail": "Core instrumentation shipped in #7246; additional accounting and reporting regressions landed in #7241."
+    },
+    {
+      "id": "A3",
+      "title": "Read budgets and whole-step coverage",
+      "status": "review",
+      "detail": "Six initial findings fixed. Current-main integration passes 1,417 runner tests / 8,843 steps plus new guard accounting and selector-failure regressions. Fresh publication, CI, and review remain."
+    },
+    {
+      "id": "A4",
+      "title": "Read-side benchmark",
+      "status": "active",
+      "detail": "Browser benchmark landed in #7261 with three recorded sizes. Remaining A4 work: assert read-count regression limits after A3 lands."
+    },
+    {
+      "id": "A5",
+      "title": "Browser and cross-space comparison",
+      "status": "todo",
+      "detail": "Match workload and explain probe/product differences."
+    },
+    {
+      "id": "C1",
+      "title": "Multi-replica reproductions",
+      "status": "active",
+      "detail": "Four synthetic browser cases pass: nested filters and mapped swatches, with same-space and cross-space profiles, remote colors, profile-only edits, membership additions, and ranking. Cold-materialization verification, removal, and reconnect cases remain."
+    },
+    {
+      "id": "B1",
+      "title": "Grouping and unique-key indexing",
+      "status": "todo",
+      "detail": "Settle key, duplicate, ordering, identity, and complexity contracts."
+    },
+    {
+      "id": "B2",
+      "title": "Keyed lookup and join",
+      "status": "todo",
+      "detail": "Specify cardinality and invalidation, then implement."
+    },
+    {
+      "id": "B3",
+      "title": "Deterministic aggregates",
+      "status": "done",
+      "detail": "Named aggregates landed in #7259 with numeric and identity contracts, cold-resume regressions, and measured comparisons. Index and keyed-lookup contracts are the next collection-operator work."
+    },
+    {
+      "id": "B4",
+      "title": "Operator documentation",
+      "status": "active",
+      "detail": "Aggregate contracts, examples, public types, and measured complexity are included in #7259. Index and join documentation remains pending."
+    },
+    {
+      "id": "C2",
+      "title": "Partial materialization correctness",
+      "status": "todo",
+      "detail": "Repair only after C1 establishes the failure."
+    },
+    {
+      "id": "C3",
+      "title": "Remote row invalidation",
+      "status": "active",
+      "detail": "Inline-element dependency fix landed in #7265 with four browser cases and narrow invalidation tests. Remaining acceptance checks and production workaround removal stay open."
+    },
+    {
+      "id": "C4",
+      "title": "Reactive lunch-poll rows",
+      "status": "todo",
+      "detail": "Remove workaround after both regressions pass."
+    },
+    {
+      "id": "B5",
+      "title": "Lunch-poll operator migration",
+      "status": "todo",
+      "detail": "Preserve behavior and add measured budgets."
+    },
+    {
+      "id": "B6",
+      "title": "End-to-end savings",
+      "status": "todo",
+      "detail": "Compare maintenance and user-visible cost on matched rigs."
+    },
+    {
+      "id": "D1",
+      "title": "Lazy materialization coordination",
+      "status": "todo",
+      "detail": "Follow the owning plan; avoid duplicate implementation."
+    },
+    {
+      "id": "D2",
+      "title": "Baseline after dependency changes",
+      "status": "todo",
+      "detail": "Separate fewer reads from cheaper reads."
+    },
+    {
+      "id": "D3",
+      "title": "Scoped snapshot memo verification",
+      "status": "todo",
+      "detail": "Implementation exists; verify isolation and measure reuse."
+    },
+    {
+      "id": "E1",
+      "title": "Computed versus lift measurements",
+      "status": "todo",
+      "detail": "Measure current defaults and declared read width."
+    },
+    {
+      "id": "E2",
+      "title": "Author guidance",
+      "status": "todo",
+      "detail": "Publish measured advice using shipped operators."
+    },
+    {
+      "id": "E3",
+      "title": "Nested-scan diagnostic",
+      "status": "todo",
+      "detail": "Warning with negative cases and corpus noise assessment."
+    }
+  ],
+  "questions": [
+    {
+      "id": "Q1",
+      "title": "Where should the dashboard live?",
+      "proposal": "Keep the dashboard local as it is.",
+      "blocks": "None.",
+      "status": "Approved"
+    },
+    {
+      "id": "Q2",
+      "title": "Merge automatically after all gates pass?",
+      "proposal": "Mike authorizes continued implementation and merging after checks, antagonistic review, and clean latest Cubic review.",
+      "blocks": "None; review and CI gates still apply.",
+      "status": "Approved"
+    },
+    {
+      "id": "Q3",
+      "title": "Any priority, deadline, or environment constraints?",
+      "proposal": "No constraints at this time.",
+      "blocks": "None.",
+      "status": "Answered"
+    },
+    {
+      "id": "Q4",
+      "title": "Which deployed lunch-poll board should anchor A5/B6?",
+      "proposal": "Do not touch the live poll until coordinated with Mike. Continue synthetic local workloads.",
+      "blocks": "Live poll access only.",
+      "status": "Coordination required"
+    },
+    {
+      "id": "Q5",
+      "title": "Push coverage fix and dashboard checkpoint to GitHub?",
+      "status": "Approved",
+      "proposal": "Mike authorized pushing the coverage fix and dashboard checkpoint to the existing PR #7241 branch in commontoolsinc/labs.",
+      "blocks": "None."
+    },
+    {
+      "id": "Q6",
+      "title": "May I post signed code-review replies?",
+      "proposal": "Signed implementation review replies and fresh Cubic review requests are authorized.",
+      "blocks": "None.",
+      "status": "Approved"
+    }
+  ],
+  "milestones": [
+    {
+      "title": "Observe read costs",
+      "state": "Available",
+      "detail": "Explore the recorded 74-vote workload below. These are actual measurements, not simulated speedups."
+    },
+    {
+      "title": "See budget failures",
+      "state": "Available \u00b7 A3",
+      "detail": "Five real CLI recordings below show passing budgets, initialization failure, many cheap derivations exceeding a total, and one expensive body exceeding its per-run limit."
+    },
+    {
+      "title": "See remote updates",
+      "state": "Planned \u00b7 C1\u2013C4",
+      "detail": "Show two participants and the affected row updating correctly."
+    },
+    {
+      "title": "Compare optimized vote updates",
+      "state": "Planned \u00b7 B5\u2013B6",
+      "detail": "Compare the same interaction before and after migration, with read work and measured time."
+    }
+  ],
+  "validatedRevision": "7aaac0b7fe"
+}

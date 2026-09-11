@@ -10,6 +10,7 @@ import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
 import {
   canResolveScopeKey,
   type CommitPrecondition,
+  getCommitPreconditionsConfig,
   type PatchOp,
   resolveScopeKey,
   type ScopeKey,
@@ -21,6 +22,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { PathKeyMap } from "@commonfabric/utils/path-key-map";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
+import { readStatsActive, recordDocumentRead } from "../read-stats.ts";
 import {
   patchOpIsStructural,
   patchOpPointerFields,
@@ -1113,8 +1115,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     return new this(manager);
   }
 
-  isSchemaDocPersisted(space: MemorySpace, hash: string): boolean {
-    return this.#storage.isSchemaDocPersisted?.(space, hash) ?? false;
+  isContentAddressedDocPersisted(space: MemorySpace, hash: string): boolean {
+    return this.#storage.isContentAddressedDocPersisted?.(space, hash) ?? false;
   }
 
   status(): StorageTransactionStatus {
@@ -1175,6 +1177,27 @@ export class V2StorageTransaction implements IStorageTransaction {
     space: MemorySpace,
   ): readonly CommitPrecondition[] | undefined {
     return this.#commitPreconditions.get(space);
+  }
+
+  /**
+   * Every precondition `space`'s commit carries: the ones a caller attached
+   * and the ones its create-only marks stand for. This is what the commit
+   * sends and what the claim check reads to see which documents the server
+   * judges for itself, so the two cannot drift apart.
+   */
+  #commitPreconditionsFor(space: MemorySpace): CommitPrecondition[] {
+    const attached = this.#commitPreconditions.get(space);
+    const createOnlyMarks = this.#createOnlyMarks.get(space);
+    // Most commits pin nothing, and this runs on every one of them.
+    if (attached === undefined && createOnlyMarks === undefined) return [];
+    return [
+      ...(attached ?? []),
+      ...[...(createOnlyMarks?.values() ?? [])].map(({ id, scope }) => ({
+        kind: "entity-absent" as const,
+        id,
+        scope,
+      })),
+    ];
   }
 
   markCreateOnly(
@@ -1334,19 +1357,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   getNativeCommit(space: MemorySpace): NativeStorageCommit | undefined {
     const branch = this.#branches.get(space);
-    const preconditions = this.#commitPreconditions.get(space);
-    const createOnlyMarks = this.#createOnlyMarks.get(space);
-    const createOnlyPreconditions = [...(createOnlyMarks?.values() ?? [])].map(
-      ({ id, scope }) => ({
-        kind: "entity-absent" as const,
-        id,
-        scope,
-      }),
-    );
-    const nativePreconditions = [
-      ...(preconditions ?? []),
-      ...createOnlyPreconditions,
-    ];
+    const nativePreconditions = this.#commitPreconditionsFor(space);
     const sqliteOps = this.#sqliteOps.get(space);
     if (
       !branch &&
@@ -1558,6 +1569,9 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const branch = this.#branch(address.space);
     const { doc } = this.#document(branch, address);
+    if (readStatsActive && !hasDataUriScheme(address.id)) {
+      recordDocumentRead(this, doc);
+    }
     // The one place a read chooses which root it is reading. A materialized
     // read walking under an epoch describes the state that epoch names; every
     // other read describes the transaction's current state. The epoch is only
@@ -1830,6 +1844,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const branch = this.#branch(address.space);
     const { doc } = this.#document(branch, address);
     if (hasDataUriScheme(address.id)) return { ok: {} };
+    if (readStatsActive) recordDocumentRead(this, doc);
 
     const readMeta = options?.meta ?? EMPTY_META;
     const skipCommitPrecondition = isUiInputBlindWriteTx(this);
@@ -1968,7 +1983,7 @@ export class V2StorageTransaction implements IStorageTransaction {
    */
   #mustDeliverSchemaDoc(space: MemorySpace, id: string): boolean {
     return id.startsWith("cid:") &&
-      !this.isSchemaDocPersisted(space, id.slice("cid:".length));
+      !this.isContentAddressedDocPersisted(space, id.slice("cid:".length));
   }
 
   /**
@@ -2637,6 +2652,16 @@ export class V2StorageTransaction implements IStorageTransaction {
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     for (let i = 0; i < commits.length; i++) {
       const { space, native } = commits[i];
+      // The claim check that admitted the transaction ran before the first
+      // space's round trip, which this loop has since awaited; this space's
+      // read set is built inside the call below, from its replica as it is
+      // now, so the check runs again for this space right here.
+      if (i > 0) {
+        const revalidation = this.#revalidateLaterSpace(space, i);
+        if (revalidation.error) {
+          return revalidation;
+        }
+      }
       const replica = this.#replicaForCommit(space);
       if (!replica.commitNative) {
         throw new Error("memory v2 replica does not support commitNative()");
@@ -2671,6 +2696,70 @@ export class V2StorageTransaction implements IStorageTransaction {
       }
     }
     return { ok: {} };
+  }
+
+  /**
+   * Helper for the per-space close loops, which re-runs the claim check on
+   * `space`, the `index`th space to close. A failure is logged the way any
+   * later space's rejected close is: the earlier spaces stay closed, and
+   * this one and the rest are left unclosed.
+   */
+  #revalidateLaterSpace(
+    space: MemorySpace,
+    index: number,
+  ): Result<Unit, IStorageTransactionInconsistent> {
+    const branch = this.#branches.get(space);
+    if (branch === undefined) return { ok: {} };
+    const result = this.#validateBranch(space, branch);
+    if (result.error) {
+      multiSpaceCommitLogger.error(
+        "multi-space-commit-stale",
+        `Cross-space close of ${space} found a document changed after ` +
+          `${index} space(s) closed; earlier spaces are not rolled back and ` +
+          `later spaces are skipped`,
+        result.error,
+      );
+    }
+    return result;
+  }
+
+  /**
+   * Helper for `#validateBranch()`, which names the documents `space`'s
+   * commit pins for the server to evaluate against durable state before it
+   * applies anything.
+   *
+   * Such a document needs no local claim check, and must not get one: an
+   * `entity-absent` pin fails as `PreconditionFailedError`, which callers
+   * treat as decided on the committed data's own merits rather than as a
+   * basis a re-run repairs, so a local retryable rejection in its place
+   * turns a settled outcome into a retry. Skipping loses no soundness,
+   * because each pin is the stronger claim: a commit naming a document that
+   * exists, or whose value no longer hashes to the pinned one, is refused
+   * outright.
+   *
+   * The bound is the `commitPreconditions` flag. With it off, the commit
+   * carries only its `entity-value-hash` pins — an `entity-absent` pin is
+   * filtered out before the wire and the server never evaluates it — so
+   * only the pins that survive that filter earn the exemption. Naming the
+   * exempt kinds rather than the ineligible ones is what keeps a kind added
+   * later from being exempted before anyone decides it should be.
+   */
+  #serverJudgedDocuments(space: MemorySpace): ReadonlySet<string> {
+    const judged = new Set<string>();
+    const absencePinsActive = getCommitPreconditionsConfig() === true;
+    for (const precondition of this.#commitPreconditionsFor(space)) {
+      const pinned = precondition.kind === "entity-value-hash" ||
+        (precondition.kind === "entity-absent" && absencePinsActive);
+      if (!pinned) continue;
+      judged.add(
+        this.#docKey({
+          id: precondition.id as URI,
+          type: DOCUMENT_MIME,
+          scope: precondition.scope,
+        }),
+      );
+    }
+    return judged;
   }
 
   /**
@@ -2782,6 +2871,15 @@ export class V2StorageTransaction implements IStorageTransaction {
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     for (let i = 0; i < commits.length; i++) {
       const { space, native } = commits[i];
+      // Same re-check as runSplitCommits: the sink builds this space's read
+      // set inside the call below, after the earlier spaces' handoffs were
+      // awaited.
+      if (i > 0) {
+        const revalidation = this.#revalidateLaterSpace(space, i);
+        if (revalidation.error) {
+          return revalidation;
+        }
+      }
       // Stop at the first per-space failure, exactly like runSplitCommits:
       // spaces already sealed are not unwound here — the wave accumulator
       // owns the sealed writes' lifecycle from the moment it accepts them.
@@ -3077,58 +3175,87 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   validateReplicaRoutes(): Result<Unit, IStorageTransactionInconsistent> {
     for (const [space, branch] of this.#branches) {
-      const currentReplica = this.#storage.open(space).replica;
-      if (currentReplica !== branch.replica) {
-        const firstDocument = branch.docs.values().next().value;
-        if (firstDocument !== undefined) {
-          const { address, value: expected } = firstDocument.initial;
-          const actual = toTransactionDocumentValue(
-            isDurableReadTx(this) &&
-              currentReplica.getNonSpeculativeDocument
-              ? currentReplica.getNonSpeculativeDocument(
-                address.id as URI,
-                address.scope,
-                this.#scopeKeyIdentity,
-              )
-              : currentReplica.getDocument(
-                address.id as URI,
-                address.scope,
-                this.#scopeKeyIdentity,
-              ),
-          );
-          return {
-            error: StateInconsistency({
-              address,
-              expected,
-              actual,
-              space,
-            }),
-          };
-        }
+      const route = this.#validateReplicaRoute(space, branch);
+      if (route.error) return route;
+    }
+    return { ok: {} };
+  }
+
+  #validateReplicaRoute(
+    space: MemorySpace,
+    branch: SpaceBranch,
+  ): Result<Unit, IStorageTransactionInconsistent> {
+    const currentReplica = this.#storage.open(space).replica;
+    if (currentReplica === branch.replica) return { ok: {} };
+    const firstDocument = branch.docs.values().next().value;
+    if (firstDocument === undefined) return { ok: {} };
+    const { address, value: expected } = firstDocument.initial;
+    const actual = toTransactionDocumentValue(
+      isDurableReadTx(this) &&
+        currentReplica.getNonSpeculativeDocument
+        ? currentReplica.getNonSpeculativeDocument(
+          address.id as URI,
+          address.scope,
+          this.#scopeKeyIdentity,
+        )
+        : currentReplica.getDocument(
+          address.id as URI,
+          address.scope,
+          this.#scopeKeyIdentity,
+        ),
+    );
+    return {
+      error: StateInconsistency({
+        address,
+        expected,
+        actual,
+        space,
+      }),
+    };
+  }
+
+  /**
+   * The commit-time claim check over every space this transaction touched:
+   * each snapshotted document is re-read from its replica, and a value that
+   * differs from the snapshot rejects the transaction before its read set
+   * is built (03-commit-model.md §3.3.4).
+   */
+  #validate(): Result<Unit, IStorageTransactionInconsistent> {
+    for (const [space, branch] of this.#branches) {
+      const result = this.#validateBranch(space, branch);
+      if (result.error) {
+        return result;
       }
     }
     return { ok: {} };
   }
 
-  #validate(): Result<Unit, IStorageTransactionInconsistent> {
-    const routes = this.validateReplicaRoutes();
-    if (routes.error) {
-      return routes;
-    }
-    for (const branch of this.#branches.values()) {
-      for (const doc of branch.docs.values()) {
-        if (!doc.validated) {
-          continue;
-        }
-        const result = claim(
-          doc.initial,
-          branch.replica,
-          this.#scopeKeyIdentity,
-          isDurableReadTx(this),
-        );
-        if (result.error) {
-          return { error: result.error };
-        }
+  /**
+   * Like `#validate()`, except over one space. A transaction closed as one
+   * commit per space runs this again for each space after the first, right
+   * before that space's read set is built, because the earlier spaces'
+   * round trips are awaited in between and a frame can change this space's
+   * documents while they are.
+   */
+  #validateBranch(
+    space: MemorySpace,
+    branch: SpaceBranch,
+  ): Result<Unit, IStorageTransactionInconsistent> {
+    const route = this.#validateReplicaRoute(space, branch);
+    if (route.error) return route;
+    const serverJudged = this.#serverJudgedDocuments(space);
+    for (const [key, doc] of branch.docs) {
+      if (!doc.validated || serverJudged.has(key)) {
+        continue;
+      }
+      const result = claim(
+        doc.initial,
+        branch.replica,
+        this.#scopeKeyIdentity,
+        isDurableReadTx(this),
+      );
+      if (result.error) {
+        return { error: result.error };
       }
     }
     return { ok: {} };

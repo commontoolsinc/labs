@@ -5,6 +5,7 @@ import {
   type FabricValue,
   type MutableFabricPlainObjectLayer,
   shallowMutableClone,
+  taggedHashStringOf,
 } from "@commonfabric/data-model";
 import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
@@ -101,6 +102,7 @@ import {
   prepareCfcGrantWrite,
   preparedDigestFor,
   type PreparedDigestInput,
+  reportCfcDenial,
   type RuntimeWritePolicyAuthorization,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
@@ -719,6 +721,27 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    */
   noteCfcDiagnostic(message: string): void {
     this.#cfcState.diagnostics.push(message);
+  }
+
+  // A refusal this transaction has already reported. Prepare decides and
+  // reports; commit reports the refusals prepare never saw.
+  #cfcDenialReported = false;
+
+  /**
+   * The dials behind a write-gate decision. They decide the outcome, and they
+   * are configured on the Runtime, out of sight of the code whose write the
+   * gate refused.
+   */
+  #cfcDials(): Record<string, unknown> {
+    return {
+      enforcement: this.#cfcState.enforcementMode,
+      flowLabels: this.#cfcState.flowLabelsMode,
+      writeFloor: this.#cfcState.writeFloorMode,
+      triggerReadGating: this.#cfcState.triggerReadGating,
+      policyEvaluation: this.#cfcState.policyEvaluationMode,
+      labelMetadataProtection: this.#cfcState.labelMetadataProtectionMode,
+      declaredMonotonicity: this.#cfcState.declaredMonotonicityMode,
+    };
   }
 
   getCfcState(): Readonly<CfcTxState> {
@@ -2192,6 +2215,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #ensuredSchemaDocs = new Set<string>();
 
   /**
+   * `"<space>|<hash>"` pairs of content-addressed documents this
+   * transaction has already staged by value, kept apart from the
+   * schema-document set because the two never share a hash but do share
+   * the reason for the dedupe: a repeat write would invalidate a prepared
+   * CFC digest.
+   */
+  #stagedContentAddressedDocs = new Set<string>();
+
+  /**
    * The write-side delivery guarantee of content-addressed schemas
    * (`docs/specs/content-addressed-schemas.md`): every schema document a
    * written link references travels in the same transaction, into the same
@@ -2289,7 +2321,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       const key = `${space}|${hash}`;
       if (this.#ensuredSchemaDocs.has(key)) continue;
       this.#ensuredSchemaDocs.add(key);
-      if (this.tx.isSchemaDocPersisted?.(space, hash) === true) continue;
+      if (this.tx.isContentAddressedDocPersisted?.(space, hash) === true) {
+        continue;
+      }
       const document = lookupSchemaDocument(hash);
       if (document === undefined) {
         logger.warn(
@@ -2312,6 +2346,31 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       });
       pending.push(...collectExternalSchemaRefHashes(document));
     }
+  }
+
+  /**
+   * Like {@link stageSchemaDocClosure}, except the document is the value
+   * itself with no closure behind it and the caller supplies the content
+   * rather than a hash: the id is derived here, so a document can never
+   * be installed under a hash its content does not produce. Elision is
+   * server-confirmed only, for the reason the schema staging gives.
+   */
+  stageContentAddressedDocument(space: MemorySpace, value: FabricValue): URI {
+    const hash = taggedHashStringOf(value);
+    const id = `cid:${hash}` as URI;
+    const key = `${space}|${hash}`;
+    if (this.#stagedContentAddressedDocs.has(key)) return id;
+    this.#stagedContentAddressedDocs.add(key);
+    if (this.tx.isContentAddressedDocPersisted?.(space, hash) === true) {
+      return id;
+    }
+    this.#runPrivilegedSystemWrite(() => {
+      this.writeOrThrow(
+        { space, id, type: "application/json", path: [] },
+        { value },
+      );
+    });
+    return id;
   }
 
   /**
@@ -2477,13 +2536,38 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (reasons.length > 0) {
       const plainReasons = reasons.map(plainReason);
       const refusedSet = new Set(plainReasons);
+      const refusals = this.#cfcState.refusalDetails.filter((detail) =>
+        refusedSet.has(detail.reason)
+      );
       this.#cfcInstrumentation.onPrepareReject?.({
         reasons: plainReasons,
-        refusals: this.#cfcState.refusalDetails.filter((detail) =>
-          refusedSet.has(detail.reason)
-        ),
+        refusals,
         terminal: isTerminalRefusal(reasons),
       });
+      // A prepare that records reasons has decided: an enforcing transaction
+      // can no longer commit whether or not it goes on to try. Below the
+      // enforcing modes the commit proceeds, and the reasons stay on the
+      // transaction's diagnostics.
+      if (
+        cfcEnforcementStrictness(this.#cfcState.enforcementMode) >=
+          CFC_ENFORCING_STRICTNESS
+      ) {
+        this.#cfcDenialReported = true;
+        reportCfcDenial(
+          this.#commitPreparationCrash === undefined
+            ? "write-policy-gate"
+            : "write-prepare-crashed",
+          this.#commitPreparationCrash === undefined
+            ? "a policy check refused the commit"
+            : "commit preparation crashed before the gate decided",
+          () => ({
+            reasons: plainReasons,
+            refusals,
+            crash: this.#commitPreparationCrash,
+            dials: this.#cfcDials(),
+          }),
+        );
+      }
       // A recorded reason makes the transaction CFC-relevant by definition.
       // Without this mark, a reasoned transaction whose reads/writes never
       // tripped an eager mark (e.g. a schema-less labeled flow feeding a
@@ -3087,6 +3171,32 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           ? this.#cfcState.prepare.reasons
           : [];
         const detail = reasons.length > 0 ? `: ${plainReason(reasons[0])}` : "";
+        const plainReasons = reasons.map(plainReason);
+        // Pair each detail to a reason that actually refused. A gate records
+        // its detail when it decides, which is also how it records an
+        // observe-mode diagnostic and a reason a later resolution cleared —
+        // neither of those refused this commit, and neither may ride out on
+        // an error that says they did.
+        const refusedSet = new Set(plainReasons);
+        const refusals = this.#cfcState.refusalDetails.filter((entry) =>
+          refusedSet.has(entry.reason)
+        );
+        // The reasons as they stand here are the set that refused, covering
+        // both a reason prepare recorded and one a later invalidation added.
+        if (!this.#cfcDenialReported) {
+          this.#cfcDenialReported = true;
+          reportCfcDenial(
+            reasons.length > 0 ? "write-policy-gate" : "write-unprepared",
+            reasons.length > 0
+              ? "a policy check refused the commit"
+              : "a CFC-relevant transaction reached commit without preparing",
+            () => ({
+              reasons: plainReasons,
+              refusals,
+              dials: this.#cfcDials(),
+            }),
+          );
+        }
         const message =
           `${CFC_ENFORCEMENT_REJECTION_PREFIX}: relevant transaction was not prepared${detail}`;
         // WATCH(cfc-verdict): a refusal is terminal only when EVERY reason is
@@ -3105,21 +3215,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             },
           });
         }
-        const plainReasons = reasons.map(plainReason);
-        // Pair each detail to a reason that actually refused. A gate records
-        // its detail when it decides, which is also how it records an
-        // observe-mode diagnostic and a reason a later resolution cleared —
-        // neither of those refused this commit, and neither may ride out on
-        // an error that says they did.
-        const refusedSet = new Set(plainReasons);
         return this.#rejectCommitBeforeStorage({
           error: {
             name: "CfcCommitRefusalError",
             message,
             reasons: plainReasons,
-            refusals: this.#cfcState.refusalDetails.filter((detail) =>
-              refusedSet.has(detail.reason)
-            ),
+            refusals,
           },
         });
       }
@@ -3131,6 +3232,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         if (currentDigest !== this.#cfcState.prepare.digest) {
           this.invalidateCfc("prepared-digest-mismatch");
           if (this.#cfcState.enforcementMode !== "observe") {
+            reportCfcDenial(
+              "write-prepared-digest-mismatch",
+              "the transaction's CFC activity changed after it prepared",
+              () => ({
+                reasons: this.#cfcState.prepare.status === "invalidated"
+                  ? this.#cfcState.prepare.reasons.map(plainReason)
+                  : [],
+                dials: this.#cfcDials(),
+              }),
+            );
             return this.#rejectCommitBeforeStorage({
               error: {
                 name: "StorageTransactionAborted",
@@ -3436,6 +3547,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   stageSchemaDocClosure(space: MemorySpace, rootHash: string): void {
     this.#wrapped.stageSchemaDocClosure(space, rootHash);
+  }
+
+  stageContentAddressedDocument(space: MemorySpace, value: FabricValue): URI {
+    return this.#wrapped.stageContentAddressedDocument(space, value);
   }
 
   setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {
