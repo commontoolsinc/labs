@@ -223,7 +223,7 @@ export function startServerExecutionHost(options: {
     ensureSpaceRoots,
     server: options.server,
     serviceIdentity: options.identity.did(),
-    createRuntime: (space) => {
+    createRuntime: (space, context) => {
       const storageManager = LoopbackStorageManager.connect(options.server, {
         as: options.identity,
         // Phase 5 (protocol.md §2's grant-scoped read design): the
@@ -232,6 +232,14 @@ export function startServerExecutionHost(options: {
         // delegated-scoped-read precondition.
         servingHomeSpace: space,
       });
+      // Installed ahead of the runtime, so no read this factory could ever
+      // perform reaches the session.
+      if (context.storeReadThrough !== undefined) {
+        storageManager.installStoreReadThrough(
+          space,
+          context.storeReadThrough,
+        );
+      }
       const runtime = new Runtime({
         apiUrl: options.apiUrl,
         storageManager,

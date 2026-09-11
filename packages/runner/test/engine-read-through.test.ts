@@ -25,6 +25,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import {
+  type RuntimeFactoryContext,
   type SpaceServerPolicy,
   STORE_REFRESH_ATTEMPTS,
 } from "../src/executor/space-server.ts";
@@ -80,11 +81,18 @@ describe("engine-read-through", () => {
   let failRefreshes: "once" | "always" | undefined;
   let refreshCalls = 0;
 
+  /** The context the SpaceServer handed the runtime factory at the last
+   * activation. The factory does not install what it carries — it reads
+   * nothing before returning — so the SpaceServer's own install is what
+   * the tests exercise. */
+  let factoryContext: RuntimeFactoryContext | undefined;
+
   const newHost = (policy: SpaceServerPolicy): ExecutorHost =>
     new ExecutorHost({
       server,
       serviceIdentity: serviceSigner.did(),
-      createRuntime: () => {
+      createRuntime: (_space, context) => {
+        factoryContext = context;
         const manager = SharedServerStorageManager.connectTo(server, {
           as: serviceSigner,
         });
@@ -239,6 +247,7 @@ describe("engine-read-through", () => {
     });
     failRefreshes = undefined;
     refreshCalls = 0;
+    factoryContext = undefined;
     clientManager = SharedServerStorageManager.connectTo(server, {
       as: aliceSigner,
     });
@@ -264,6 +273,9 @@ describe("engine-read-through", () => {
       storeReadThrough: true,
     });
     const { clientResult, clientArg } = await demandFromClient();
+    // The SpaceServer offers the factory the tenure's read-through, so a
+    // factory that reads before returning can install it ahead of that.
+    expect(factoryContext?.storeReadThrough).toBeDefined();
 
     await deriveFromClient(clientArg, clientResult, 41);
     // A serving runtime under the posture may open no session at all —
@@ -290,6 +302,7 @@ describe("engine-read-through", () => {
     await instantiatePiece();
     host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
     const { clientResult, clientArg } = await demandFromClient();
+    expect(factoryContext?.storeReadThrough).toBeUndefined();
 
     await deriveFromClient(clientArg, clientResult, 41);
     expect(serviceSessions().some((session) => session.watches.length > 0))

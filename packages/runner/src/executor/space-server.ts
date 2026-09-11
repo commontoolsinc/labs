@@ -96,7 +96,7 @@ import type {
   TransactionSealDestination,
   Unit,
 } from "../storage/interface.ts";
-import type { CommitError } from "../storage/interface.ts";
+import type { CommitError, StoreReadThrough } from "../storage/interface.ts";
 import {
   ensurePieceRunningVerdict,
   type EnsurePieceVerdict,
@@ -274,6 +274,15 @@ export type SpaceServerPolicy = {
   storeReadThrough?: boolean;
 };
 
+/** What a SpaceServer hands its runtime factory (see
+ * SpaceServerOptions.createRuntime). */
+export type RuntimeFactoryContext = {
+  /** The tenure's store read-through, present under
+   * `SpaceServerPolicy.storeReadThrough`, for a factory to install on its
+   * storage manager before any home-space read it performs itself. */
+  storeReadThrough?: StoreReadThrough;
+};
+
 export type SpaceServerOptions = {
   space: MemorySpace;
   server: MemoryServer;
@@ -286,8 +295,11 @@ export type SpaceServerOptions = {
 
   /** Build the serving runtime over the LOOPBACK storage plane
    * (serving-loop.md §1 plane (a)). The factory owns auth and options;
-   * the SpaceServer asserts the posture (flag ON). */
-  createRuntime: () => Promise<{
+   * the SpaceServer asserts the posture (flag ON). A factory that reads
+   * the home space before returning installs `context.storeReadThrough`
+   * on its storage manager first, when the context carries one; the
+   * SpaceServer installs it on the returned runtime either way. */
+  createRuntime: (context: RuntimeFactoryContext) => Promise<{
     runtime: Runtime;
     dispose: () => Promise<void>;
   }>;
@@ -966,10 +978,24 @@ export class SpaceServer implements TransactionSealDestination {
     this.#lastRenewAt = Date.now();
     this.#options.stats.lease.held += 1;
 
+    // The tenure's store read-through, handed to the factory so a factory
+    // that reads the home space before returning installs it first, and
+    // installed again below for one that does not: the tenure's first
+    // read is a miss, and a miss served from the engine is the whole
+    // point.
+    const storeReadThrough = this.#options.policy?.storeReadThrough === true
+      ? engineReadThrough(engine, {
+        onRead: () => {
+          this.#options.stats.storeReads += 1;
+        },
+      })
+      : undefined;
     let runtime: Runtime;
     let dispose: () => Promise<void>;
     try {
-      ({ runtime, dispose } = await this.#options.createRuntime());
+      ({ runtime, dispose } = await this.#options.createRuntime(
+        storeReadThrough === undefined ? {} : { storeReadThrough },
+      ));
     } catch (error) {
       // A failed activation must not strand the acquired lease row for
       // the TTL — a successor (or this host's retry) should be able to
@@ -1001,17 +1027,8 @@ export class SpaceServer implements TransactionSealDestination {
     }
     this.#runtime = runtime;
     this.#disposeRuntime = dispose;
-    if (this.#options.policy?.storeReadThrough === true) {
-      // Installed before anything reads: the tenure's first read is a
-      // miss, and a miss served from the engine is the whole point.
-      runtime.storageManager.installStoreReadThrough?.(
-        space,
-        engineReadThrough(engine, {
-          onRead: () => {
-            this.#options.stats.storeReads += 1;
-          },
-        }),
-      );
+    if (storeReadThrough !== undefined) {
+      runtime.storageManager.installStoreReadThrough?.(space, storeReadThrough);
     }
     // MINOR-2: the fresh runtime's demand-root counters start at 0.
     this.#lastFoldedDemandEnters = 0;

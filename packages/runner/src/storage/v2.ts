@@ -3336,13 +3336,14 @@ export class SpaceReplica
   readonly #storeReadThrough: () => StoreReadThrough | undefined;
 
   /**
-   * Depth of read-through integrations in progress. A read-through
-   * integrates through `#applySessionSync()`, whose differential checkout
-   * snapshots the touched documents through `get()`; a nonzero depth
-   * keeps that snapshot from reading the store a second time for the
-   * document being integrated.
+   * Depth of frame integrations in progress (`#applySessionSync()`). A
+   * read made while a frame integrates — the differential checkout's
+   * snapshot through `get()`, the arrived-cfc hydration's `getDocument()`
+   * — must not start a store read-through, which would integrate a
+   * second frame from inside the first; a nonzero depth turns the
+   * read-through off for that read.
    */
-  #readThroughDepth = 0;
+  #frameApplyDepth = 0;
 
   /**
    * The last `SessionSync` snapshot _absorbed_ for each watched key — its
@@ -7022,6 +7023,23 @@ export class SpaceReplica
     sync: SessionSync,
     type: "pull" | "integrate",
   ): void {
+    // No read during a frame's integration — the differential checkout's
+    // snapshot, the arrived-cfc hydration — starts a store read-through:
+    // that would integrate a second frame from inside this one.
+    this.#frameApplyDepth += 1;
+    try {
+      this.#applySessionSyncFrame(sync, type);
+    } finally {
+      this.#frameApplyDepth -= 1;
+    }
+  }
+
+  /** Helper for `#applySessionSync()`, which carries the integration
+   * itself. */
+  #applySessionSyncFrame(
+    sync: SessionSync,
+    type: "pull" | "integrate",
+  ): void {
     for (const delivery of sync.operationFields ?? []) {
       for (const callback of this.#operationSinks.get(delivery.watchId) ?? []) {
         try {
@@ -8087,7 +8105,7 @@ export class SpaceReplica
     identity?: ScopeKeyIdentity,
     explicit?: ScopeKey,
   ): void {
-    if (this.#readThroughDepth > 0) return;
+    if (this.#frameApplyDepth > 0) return;
     const read = this.#storeReadThrough();
     if (read === undefined) return;
     const instance = this.instanceKey(scope, identity, explicit);
@@ -8144,18 +8162,13 @@ export class SpaceReplica
       ? upserts
       : this.#withSchemaDependencies(read, upserts);
     const seqs = frame.map((upsert) => upsert.seq);
-    this.#readThroughDepth += 1;
-    try {
-      this.#applySessionSync({
-        type: "sync",
-        fromSeq: Math.min(...seqs),
-        toSeq: Math.max(...seqs),
-        upserts: frame,
-        removes: [],
-      }, type);
-    } finally {
-      this.#readThroughDepth -= 1;
-    }
+    this.#applySessionSync({
+      type: "sync",
+      fromSeq: Math.min(...seqs),
+      toSeq: Math.max(...seqs),
+      upserts: frame,
+      removes: [],
+    }, type);
   }
 
   /**
