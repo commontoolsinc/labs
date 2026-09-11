@@ -5,6 +5,7 @@ import {
   byDayThenName,
   dayPartitions,
   inputChoice,
+  liveBaselines,
   namingSurfaces,
   parseArgs,
   partitionOf,
@@ -31,6 +32,10 @@ import {
 import type { Suite } from "./test-topology/suite.ts";
 import { join } from "@std/path";
 import { stateObjectName } from "./test-selection/store.ts";
+import {
+  type CoverageBaseline,
+  emptyManifest,
+} from "./test-selection/manifest.ts";
 
 /**
  * A topology holding the one suite these cases record against. Supplied
@@ -1291,5 +1296,48 @@ describe("publish() reporting what no lane can hold", () => {
     expect(line).toBeDefined();
     expect(line).toContain("space > writes");
     expect(line).toContain("400.0s");
+  });
+});
+
+describe("the baselines a publish carries", () => {
+  const carried: CoverageBaseline[] = [{
+    suite: "workspace-unit",
+    member: "packages/bakery",
+    commit: "abc",
+    createdAt: "2026-09-09T00:00:00.000Z",
+    uncoveredLines: 7,
+  }];
+  const now = new Date("2026-09-10T00:00:00.000Z");
+
+  it("brings the newest manifest's baselines forward", async () => {
+    let given: readonly CoverageBaseline[] | undefined;
+    const published = await liveBaselines(
+      now,
+      () =>
+        Promise.resolve({
+          manifest: { ...emptyManifest(), coverageBaselines: carried },
+        }),
+      (_now, known) => {
+        given = known;
+        return Promise.resolve([...known]);
+      },
+    );
+    expect(given).toEqual(carried);
+    expect(published).toEqual(carried);
+  });
+
+  it("brings nothing forward where there is no manifest to read", async () => {
+    // The walk over recent runs is then the only source, which is what
+    // rebuilds the window over the publishes that follow.
+    let given: readonly CoverageBaseline[] | undefined;
+    await liveBaselines(
+      now,
+      () => Promise.resolve({ absent: "listing failed" }),
+      (_now, known) => {
+        given = known;
+        return Promise.resolve([]);
+      },
+    );
+    expect(given).toEqual([]);
   });
 });

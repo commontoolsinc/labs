@@ -4,12 +4,14 @@ import {
   type BaselineRun,
   type BaselineSource,
   collectCoverageBaselines,
+  liveBaselineSource,
   publishableBaselines,
   splitMeasuredSet,
 } from "./baselines.ts";
 import {
   coverageMetricForGroup,
   measuredSetCoverageMetric,
+  PERF_METRICS_ARTIFACT_NAME,
 } from "../ci-check-lib.ts";
 import { LOCAL_COVERAGE_BASELINE_DAYS } from "./policy.ts";
 
@@ -277,6 +279,87 @@ describe("baselines", () => {
         NOW,
       );
       expect(baselines).toEqual([]);
+    });
+  });
+
+  describe("reading the repository's own runs and artifacts", () => {
+    /** One artifact, with only the fields the source reads. */
+    const artifact = (
+      over: Partial<{ id: number; name: string; expired: boolean }> = {},
+    ) => ({
+      id: 1,
+      name: PERF_METRICS_ARTIFACT_NAME,
+      expired: false,
+      created_at: "2026-09-09T00:00:00.000Z",
+      ...over,
+      // deno-lint-ignore no-explicit-any
+    } as any);
+
+    it("names each run by its commit and the moment it was created", async () => {
+      const source = liveBaselineSource({
+        list: () =>
+          Promise.resolve({
+            // deno-lint-ignore no-explicit-any
+            workflow_runs: [{
+              id: 7,
+              head_sha: "abc",
+              created_at: "2026-09-09T10:00:00Z",
+              // deno-lint-ignore no-explicit-any
+            }] as any,
+          }),
+      });
+      expect(await source.runs()).toEqual([
+        { id: 7, commit: "abc", createdAt: "2026-09-09T10:00:00Z" },
+      ]);
+    });
+
+    it("reads the uncovered count out of each metric the artifact holds", async () => {
+      const source = liveBaselineSource({
+        artifacts: () => Promise.resolve([artifact()]),
+        baseline: () =>
+          Promise.resolve({
+            metrics: new Map([["coverage-debt: tasks uncovered lines", {
+              uncoveredLines: 12,
+            }]]),
+          }),
+      });
+      expect([...(await source.metrics(7))!]).toEqual([
+        ["coverage-debt: tasks uncovered lines", 12],
+      ]);
+    });
+
+    it("passes over an artifact that has expired or is named otherwise", async () => {
+      const asked: number[] = [];
+      const source = liveBaselineSource({
+        artifacts: () =>
+          Promise.resolve([
+            artifact({ id: 2, expired: true }),
+            artifact({ id: 3, name: "something-else" }),
+          ]),
+        baseline: (id) => {
+          asked.push(id);
+          return Promise.resolve({ metrics: new Map() });
+        },
+      });
+      expect(await source.metrics(7)).toBeUndefined();
+      expect(asked).toEqual([]);
+    });
+
+    it("answers with nothing where the run's artifacts cannot be listed", async () => {
+      // A publish reads many runs, and one that cannot be read
+      // contributes no baseline rather than ending the publish.
+      const source = liveBaselineSource({
+        artifacts: () => Promise.reject(new Error("the interface said no")),
+      });
+      expect(await source.metrics(7)).toBeUndefined();
+    });
+
+    it("answers with nothing where the artifact cannot be parsed", async () => {
+      const source = liveBaselineSource({
+        artifacts: () => Promise.resolve([artifact()]),
+        baseline: () => Promise.resolve(null),
+      });
+      expect(await source.metrics(7)).toBeUndefined();
     });
   });
 

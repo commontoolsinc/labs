@@ -151,11 +151,29 @@ function measuredSetFigures(
  */
 const BASELINE_RUNS = 100;
 
+/** What the live source reaches for, so a test can hand it something. */
+export interface BaselineReads {
+  /** The runs a listing path names. */
+  list?: (path: string) => Promise<{ workflow_runs: WorkflowRun[] }>;
+
+  /** The artifacts one run left behind. */
+  artifacts?: (runId: number) => Promise<Artifact[]>;
+
+  /** What one artifact holds, or nothing where it cannot be read. */
+  baseline?: (
+    artifactId: number,
+  ) => Promise<{ metrics: Map<string, { uncoveredLines: number }> } | null>;
+}
+
 /** The runs and artifacts of the repository this is running in. */
-export function liveBaselineSource(): BaselineSource {
+export function liveBaselineSource(reads: BaselineReads = {}): BaselineSource {
+  const list = reads.list ??
+    ((path: string) => githubGet<{ workflow_runs: WorkflowRun[] }>(path));
+  const artifactsOf = reads.artifacts ?? fetchArtifactsForRun;
+  const baselineOf = reads.baseline ?? downloadAndParseCoverageBaseline;
   return {
     async runs() {
-      const response = await githubGet<{ workflow_runs: WorkflowRun[] }>(
+      const response = await list(
         workflowRunsPathForBaseline(BASELINE_RUNS),
       );
       return response.workflow_runs.map((run) => ({
@@ -167,7 +185,7 @@ export function liveBaselineSource(): BaselineSource {
     async metrics(runId: number) {
       let artifacts: Artifact[];
       try {
-        artifacts = await fetchArtifactsForRun(runId);
+        artifacts = await artifactsOf(runId);
       } catch {
         return undefined;
       }
@@ -177,7 +195,7 @@ export function liveBaselineSource(): BaselineSource {
         ),
       )[0];
       if (artifact === undefined) return undefined;
-      const parsed = await downloadAndParseCoverageBaseline(artifact.id);
+      const parsed = await baselineOf(artifact.id);
       if (parsed === null) return undefined;
       return new Map(
         [...parsed.metrics].map(([name, sample]) => [

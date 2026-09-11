@@ -62,6 +62,7 @@ import type { Suite } from "./test-topology/suite.ts";
 import {
   fetchManifest,
   manifestBody,
+  type ManifestFetch,
   manifestObjectName,
   manifestPrefix,
   newestAtOrBefore,
@@ -390,12 +391,17 @@ async function readAggregate(store: StoreAccess): Promise<AggregateRead> {
  * published. Reading the previous manifest is one public read and is
  * what keeps a publish from asking about every run in the window.
  */
-async function liveBaselines(now: Date): Promise<CoverageBaseline[]> {
-  const previous = await fetchManifest({ at: now.toISOString() });
-  return await publishableBaselines(
-    now,
-    previous.manifest?.coverageBaselines ?? [],
-  );
+export async function liveBaselines(
+  now: Date,
+  newest: (at: string) => Promise<ManifestFetch> = (at) =>
+    fetchManifest({ at }),
+  publishable: (
+    now: Date,
+    known: readonly CoverageBaseline[],
+  ) => Promise<CoverageBaseline[]> = publishableBaselines,
+): Promise<CoverageBaseline[]> {
+  const previous = await newest(now.toISOString());
+  return await publishable(now, previous.manifest?.coverageBaselines ?? []);
 }
 
 /**
