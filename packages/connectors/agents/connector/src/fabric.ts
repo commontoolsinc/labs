@@ -55,6 +55,19 @@ export interface AgentFabricCells {
   receipts: Cell<unknown>;
 }
 
+/** What the indexes say about one session, read without its transcript. */
+export interface PublishedSessionState {
+  key: string;
+  sourceId: string;
+  nativeSessionId: string;
+  driver: string;
+  updatedAt: string | null;
+  archived: boolean | null;
+  active: boolean | null;
+  contentHash: string;
+  syncStatus: IndexEntry["syncStatus"];
+}
+
 export interface AgentFabricPublishOptions {
   preserveUntouchedStatus?: boolean;
   observationSequence?: number;
@@ -882,6 +895,42 @@ export class AgentFabricTarget implements CommandTarget {
     );
   }
 
+  /**
+   * The published state of every session the complete index holds. A host
+   * consults it before a collection to retain sessions whose inventory
+   * summaries show nothing changed.
+   */
+  async publishedSessions(): Promise<
+    ReadonlyMap<string, PublishedSessionState>
+  > {
+    this.#assertStorageClaimed();
+    const index = asIndex(
+      await readStableCellGraphValue(
+        this.conn,
+        this.cells.allIndex,
+        new Map(),
+        { preserveLinkFields: new Set(["manifest"]) },
+      ),
+      this.conn.ownerDid,
+      "all",
+    );
+    const states = new Map<string, PublishedSessionState>();
+    for (const entry of index?.sessions ?? []) {
+      states.set(entry.key, {
+        key: entry.key,
+        sourceId: entry.sourceId,
+        nativeSessionId: entry.nativeSessionId,
+        driver: entry.driver,
+        updatedAt: entry.updatedAt ?? null,
+        archived: typeof entry.archived === "boolean" ? entry.archived : null,
+        active: typeof entry.active === "boolean" ? entry.active : null,
+        contentHash: entry.contentHash,
+        syncStatus: entry.syncStatus,
+      });
+    }
+    return states;
+  }
+
   beginSessionObservation(): number {
     this.#assertStorageClaimed();
     const sequence = this.#nextObservationSequence;
@@ -959,6 +1008,12 @@ export class AgentFabricTarget implements CommandTarget {
       }
     }
     throwIfPublicationCanStop();
+    const priorStatusByKey = new Map(
+      [
+        ...(previousRecent?.sessions ?? []),
+        ...(previousAll?.sessions ?? []),
+      ].map((entry) => [entry.key, entry.syncStatus] as const),
+    );
     const entriesByKey = new Map<string, IndexEntry>(
       [
         ...(previousRecent?.sessions ?? []),
@@ -1120,6 +1175,34 @@ export class AgentFabricTarget implements CommandTarget {
           await flushGraphs();
         }
       }
+      // A retained session keeps the row and graph its last read produced.
+      // Retention rests on a complete copy being there; where one is not,
+      // the inventory cannot vouch for the session and stops being complete,
+      // so nothing absent from it is deleted on its word.
+      let sourceComplete = source.complete;
+      const sourceErrors = [...source.errors];
+      for (const summary of source.retained ?? []) {
+        throwIfPublicationCanStop();
+        const key = sessionKey(source.source.id, summary.nativeSessionId);
+        currentKeys.add(key);
+        if (isSuperseded(key)) continue;
+        const prior = entriesByKey.get(key);
+        if (prior === undefined || priorStatusByKey.get(key) !== "complete") {
+          sourceComplete = false;
+          sourceErrors.push({
+            nativeSessionId: summary.nativeSessionId,
+            message: "retained session has no complete published copy",
+          });
+          continue;
+        }
+        const { deletedAt: _deletedAt, ...rest } = prior;
+        entriesByKey.set(key, {
+          ...rest,
+          capabilities: { ...capabilities },
+          syncStatus: "complete",
+        });
+        observedSessionKeys.add(key);
+      }
       for (const prior of priorForSource) {
         if (currentKeys.has(prior.key)) continue;
         entriesByKey.set(prior.key, {
@@ -1127,7 +1210,7 @@ export class AgentFabricTarget implements CommandTarget {
           capabilities: { ...capabilities },
         });
       }
-      if (source.complete) {
+      if (sourceComplete) {
         observedCompleteSourceIds.add(source.source.id);
         for (const prior of priorForSource) {
           if (!currentKeys.has(prior.key) && !isSuperseded(prior.key)) {
@@ -1141,7 +1224,7 @@ export class AgentFabricTarget implements CommandTarget {
           }
         }
       } else {
-        for (const error of source.errors) {
+        for (const error of sourceErrors) {
           if (!error.nativeSessionId) continue;
           const key = sessionKey(source.source.id, error.nativeSessionId);
           if (isSuperseded(key)) continue;
@@ -1164,9 +1247,10 @@ export class AgentFabricTarget implements CommandTarget {
           id: source.source.id,
           driver,
           capabilities,
-          complete: source.complete,
-          sessionCount: source.sessions.length,
-          errors: source.errors,
+          complete: sourceComplete,
+          sessionCount: source.sessions.length +
+            (source.retained?.length ?? 0),
+          errors: sourceErrors,
         });
       }
     }

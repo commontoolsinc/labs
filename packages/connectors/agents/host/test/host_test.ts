@@ -8,6 +8,7 @@ import {
   CommandLedger,
   type NativeSessionSnapshot,
   type PromptInput,
+  type PublishedSessionState,
   type SessionPage,
 } from "@commonfabric/agents-connector";
 import {
@@ -51,6 +52,7 @@ class FakeDriver implements AgentDriver {
   failStart = false;
   stopFailures = 0;
   refreshCount = 0;
+  readCount = 0;
   activeLists = 0;
   maxActiveLists = 0;
   activePrompt = false;
@@ -136,6 +138,7 @@ class FakeDriver implements AgentDriver {
 
   readSession(): Promise<NativeSessionSnapshot> {
     this.refreshCount++;
+    this.readCount++;
     return Promise.resolve(structuredClone(this.snapshot));
   }
 
@@ -180,6 +183,8 @@ class FakeDriver implements AgentDriver {
 class FakeTarget implements AgentsHostTarget {
   healthValues: Record<string, unknown>[] = [];
   publications: CollectedSource[][] = [];
+  published = new Map<string, PublishedSessionState>();
+  failPublishedLookup = false;
   allocatedObservationSequences: number[] = [];
   observationSequences: number[] = [];
   checkoutDirectories: string[][] = [];
@@ -204,6 +209,13 @@ class FakeTarget implements AgentsHostTarget {
     release: PromiseWithResolvers<void>;
   };
   #nextObservationSequence = 1;
+
+  publishedSessions(): Promise<ReadonlyMap<string, PublishedSessionState>> {
+    if (this.failPublishedLookup) {
+      return Promise.reject(new Error("index unavailable"));
+    }
+    return Promise.resolve(this.published);
+  }
 
   beginSessionObservation(): number {
     const sequence = this.#nextObservationSequence++;
@@ -1244,6 +1256,75 @@ Deno.test("AgentsHost continues stopping after a synchronous driver failure", as
     );
     assertEquals(second.stopped, true);
     assertEquals(host.health().status, "stopped");
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("AgentsHost retains a session whose published copy matches its inventory", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const target = new FakeTarget();
+    const driver = new FakeDriver("codex");
+    const summary = driver.snapshot.summary;
+    const key = "codex/codex-session";
+    const published = (updatedAt: string | null): PublishedSessionState => ({
+      key,
+      sourceId: "codex",
+      nativeSessionId: summary.nativeSessionId,
+      driver: "codex-app-server",
+      updatedAt,
+      archived: summary.archived,
+      active: summary.active,
+      contentHash: "sha256:prior",
+      syncStatus: "complete",
+    });
+    target.published.set(key, published(summary.updatedAt));
+    const host = new AgentsHost({
+      sources: [sourceConfig("codex")],
+      target,
+      targetDescription: TARGET_DESCRIPTION,
+      ledger: await openLedger(directory),
+      createDriver: () => driver,
+      clock: clock(),
+    });
+
+    await host.start({ acceptCommands: false });
+    assertEquals(driver.readCount, 0);
+    assertEquals(target.publications[0][0].sessions, []);
+    assertEquals(
+      target.publications[0][0].retained?.map((retained) =>
+        retained.nativeSessionId
+      ),
+      ["codex-session"],
+    );
+    assertEquals(
+      host.health().activity.find((entry) =>
+        entry.type === "source-collection-completed"
+      )?.details,
+      { complete: true, errorCount: 0, sessionCount: 0, retainedCount: 1 },
+    );
+
+    // A different update time means the copy is behind, so it is read.
+    target.published.set(key, published("2026-07-20T00:00:30.000Z"));
+    await host.synchronize("changed");
+    assertEquals(driver.readCount, 1);
+    assertEquals(target.publications[1][0].retained, []);
+    assertEquals(target.publications[1][0].sessions.length, 1);
+
+    // Without the index, nothing can be retained and everything is read.
+    target.published.set(key, published(summary.updatedAt));
+    target.failPublishedLookup = true;
+    await host.synchronize("unreadable-index");
+    assertEquals(driver.readCount, 2);
+    assertEquals(target.publications[2][0].retained, []);
+    assertEquals(
+      host.health().activity.some((entry) =>
+        entry.type === "published-sessions-unavailable"
+      ),
+      true,
+    );
+    await host.stop();
   } finally {
     await Deno.remove(directory, { recursive: true });
   }

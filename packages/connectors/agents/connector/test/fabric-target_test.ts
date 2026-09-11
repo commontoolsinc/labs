@@ -2280,3 +2280,117 @@ Deno.test("Fabric target binds producer queues and reads commands from every bou
     await storageManager.close();
   }
 });
+
+Deno.test("publication keeps a retained session and vouches only for complete copies", async () => {
+  const signer = await Identity.fromPassphrase(
+    "agent connector retained session test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const space = signer.did();
+  const connection = { runtime, spaceDid: space, ownerDid: space };
+  try {
+    const target = await AgentFabricTarget.open(connection);
+    const source: SourceDescriptor = {
+      id: "claude-code:test",
+      driver: "claude-agent-sdk",
+      capabilities: {
+        inventory: true,
+        read: true,
+        prompt: true,
+        cancel: true,
+        rename: true,
+        setMode: true,
+        setConfigOption: true,
+      },
+    };
+    const snapshot: NativeSessionSnapshot = {
+      summary: {
+        nativeSessionId: "session-1",
+        title: "Read once",
+        cwd: null,
+        createdAt: "2026-09-11T10:00:00.000Z",
+        updatedAt: "2026-09-11T10:01:00.000Z",
+        archived: null,
+        active: null,
+        raw: { id: "session-1" },
+      },
+      events: [{ text: "hello" }],
+      normalizedMessages: [],
+      complete: true,
+    };
+    await target.publish([{
+      source,
+      sessions: [snapshot],
+      errors: [],
+      complete: true,
+    }], { observationSequence: target.beginSessionObservation() });
+    const before = await target.publishedSessions();
+    const priorState = before.get("claude-code%3Atest/session-1");
+    assertEquals(priorState?.syncStatus, "complete");
+    assertEquals(priorState?.updatedAt, "2026-09-11T10:01:00.000Z");
+    assertEquals(priorState?.driver, "claude-agent-sdk");
+
+    await target.publish([{
+      source,
+      sessions: [],
+      retained: [snapshot.summary],
+      errors: [],
+      complete: true,
+    }], { observationSequence: target.beginSessionObservation() });
+    const retainedIndex = await readStableCellGraphValue(
+      connection,
+      target.cells.allIndex,
+    ) as Record<string, unknown>;
+    const rows = retainedIndex.sessions as Array<Record<string, unknown>>;
+    assertEquals(
+      rows.map((row) => [row.nativeSessionId, row.syncStatus, row.contentHash]),
+      [["session-1", "complete", priorState!.contentHash]],
+    );
+    assertEquals(
+      ((rows[0].manifest as Record<string, unknown>).summary as Record<
+        string,
+        unknown
+      >).title,
+      "Read once",
+    );
+    const sourceRow = (retainedIndex.sources as Array<Record<string, unknown>>)[
+      0
+    ];
+    assertEquals(sourceRow.complete, true);
+    assertEquals(sourceRow.sessionCount, 1);
+
+    await target.publish([{
+      source,
+      sessions: [],
+      retained: [{ ...snapshot.summary, nativeSessionId: "session-2" }],
+      errors: [],
+      complete: true,
+    }], { observationSequence: target.beginSessionObservation() });
+    const afterIndex = await readStableCellGraphValue(
+      connection,
+      target.cells.allIndex,
+    ) as Record<string, unknown>;
+    assertEquals(
+      (afterIndex.sessions as Array<Record<string, unknown>>).map((row) => [
+        row.nativeSessionId,
+        row.syncStatus,
+      ]),
+      [["session-1", "stale"]],
+    );
+    const afterSource = (afterIndex.sources as Array<Record<string, unknown>>)[
+      0
+    ];
+    assertEquals(afterSource.complete, false);
+    assertEquals(afterSource.errors, [{
+      nativeSessionId: "session-2",
+      message: "retained session has no complete published copy",
+    }]);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});

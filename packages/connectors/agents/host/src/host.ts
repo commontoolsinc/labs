@@ -8,6 +8,9 @@ import {
   type CommandTaskFailure,
   CommandWorker,
   type DriverCapabilities,
+  type PublishedSessionState,
+  sessionKey,
+  type SessionSummary,
 } from "@commonfabric/agents-connector";
 import type { CommandLedger } from "@commonfabric/agents-connector/command-ledger";
 import { abortable } from "./abort.ts";
@@ -98,6 +101,7 @@ export interface AgentsHostHealth {
 }
 
 export interface AgentsHostTarget extends CommandTarget {
+  publishedSessions(): Promise<ReadonlyMap<string, PublishedSessionState>>;
   beginSessionObservation(): number;
   publish(
     collected: CollectedSource[],
@@ -667,9 +671,10 @@ export class AgentsHost {
 
     try {
       await this.#publishHealth(signal);
+      const published = await this.#publishedSessions(signal);
       const collected = await Promise.all(
         [...this.#drivers.entries()].map(([sourceId, driver]) =>
-          this.#collectSource(sourceId, driver, signal)
+          this.#collectSource(sourceId, driver, published, signal)
         ),
       );
       signal?.throwIfAborted();
@@ -757,9 +762,32 @@ export class AgentsHost {
     }
   }
 
+  /**
+   * What the indexes hold, for retaining unchanged sessions. A lookup failure
+   * retains nothing, so the collection reads every session it lists.
+   */
+  async #publishedSessions(
+    signal?: AbortSignal,
+  ): Promise<ReadonlyMap<string, PublishedSessionState>> {
+    try {
+      const published = await this.#target.publishedSessions();
+      signal?.throwIfAborted();
+      return published;
+    } catch (error) {
+      signal?.throwIfAborted();
+      this.#recordActivity(
+        "published-sessions-unavailable",
+        "Published session lookup failed; every listed session will be read",
+        { error: errorMessage(error) },
+      );
+      return new Map();
+    }
+  }
+
   async #collectSource(
     sourceId: string,
     driver: AgentDriver,
+    published: ReadonlyMap<string, PublishedSessionState>,
     signal?: AbortSignal,
   ): Promise<CollectedSource> {
     const state = this.#sources.get(sourceId)!;
@@ -769,9 +797,20 @@ export class AgentsHost {
       undefined,
       sourceId,
     );
+    // A session is retained when its inventory summary matches a complete
+    // published copy in every field the summary can change.
+    const retain = (summary: SessionSummary): boolean => {
+      const prior = published.get(
+        sessionKey(sourceId, summary.nativeSessionId),
+      );
+      return prior !== undefined && prior.syncStatus === "complete" &&
+        prior.driver === driver.source.driver &&
+        summary.updatedAt !== null && prior.updatedAt === summary.updatedAt &&
+        prior.archived === summary.archived && prior.active === summary.active;
+    };
     let collected: CollectedSource;
     try {
-      collected = await collectSource(driver, signal);
+      collected = await collectSource(driver, { signal, retain });
     } catch (error) {
       signal?.throwIfAborted();
       collected = {
@@ -782,8 +821,9 @@ export class AgentsHost {
       };
     }
 
+    const retainedCount = collected.retained?.length ?? 0;
     state.capabilities = structuredClone(driver.source.capabilities);
-    state.sessionCount = collected.sessions.length;
+    state.sessionCount = collected.sessions.length + retainedCount;
     state.complete = collected.complete;
     state.errors = structuredClone(collected.errors);
     state.lastCollectionCompletedAt = this.#now();
@@ -796,6 +836,7 @@ export class AgentsHost {
         complete: collected.complete,
         errorCount: collected.errors.length,
         sessionCount: collected.sessions.length,
+        retainedCount,
       },
       sourceId,
     );
