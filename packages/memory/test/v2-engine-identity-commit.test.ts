@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { toFileUrl } from "@std/path";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 
 import {
   applyCommit,
@@ -11,6 +12,10 @@ import {
   open,
 } from "../v2/engine.ts";
 import { DEFAULT_BRANCH, ProtocolError } from "../v2.ts";
+
+/** The id a content-addressed schema document is stored under. */
+const cidOf = (schema: Record<string, unknown>) =>
+  `cid:${internSchemaAsTaggedHashString(schema)}`;
 
 const setOp = (id: string, value: unknown) =>
   ({ op: "set", id, value: { value } }) as never;
@@ -990,11 +995,11 @@ describe("applyCommit() with an identity commit", () => {
 
   it("accepts an identical content-addressed re-set beside an identical set over a stale read", () => {
     const installSeq = installThenRewrite();
+    const schema = { type: "string" };
+    const schemaId = cidOf(schema);
     applyCommit(engine, {
       sessionId: "s:a",
-      commit: commit(2, {
-        operations: [setOp("cid:fid1:closure", { type: "string" })],
-      }),
+      commit: commit(2, { operations: [setOp(schemaId, schema)] }),
     });
 
     const verdict = applyCommit(engine, {
@@ -1005,7 +1010,7 @@ describe("applyCommit() with an identity commit", () => {
           pending: [],
         },
         operations: [
-          setOp("cid:fid1:closure", { type: "string" }),
+          setOp(schemaId, schema),
           setOp("of:doc", { n: 2 }),
         ],
       }),
@@ -1017,6 +1022,7 @@ describe("applyCommit() with an identity commit", () => {
 
   it("refuses a content-addressed set of new content over a stale read", () => {
     const installSeq = installThenRewrite();
+    const schema = { type: "number" };
 
     expect(() =>
       applyCommit(engine, {
@@ -1027,7 +1033,7 @@ describe("applyCommit() with an identity commit", () => {
             pending: [],
           },
           operations: [
-            setOp("cid:fid1:fresh", { type: "number" }),
+            setOp(cidOf(schema), schema),
             setOp("of:doc", { n: 2 }),
           ],
         }),
