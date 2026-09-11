@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import { Identity } from "@commonfabric/identity";
 import { isStream, type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -133,6 +134,36 @@ describe("cf wish headless read (resolveWish)", () => {
     }
     expect(thrown).toBe(denial);
     expect((thrown as Error).name).toBe("AuthorizationError");
+  });
+
+  it("leaves no run registered once it has answered", async () => {
+    await seedProfile();
+    const { result } = await resolveWish(runtime, userIdentity.did(), {
+      query: "#profileName",
+    });
+    expect(result).toBe("Ada Lovelace");
+    expect(runtime.runner.cancels.size).toBe(0);
+  });
+
+  it("throws and leaves no run registered when its setup commit is refused", async () => {
+    // The setup transaction is aborted as its commit begins, so the commit
+    // settles with an error through the ordinary path, commit callbacks and
+    // all.
+    const edit = runtime.edit.bind(runtime);
+    using _edit = stub(runtime, "edit", () => {
+      const tx = edit();
+      const commit = tx.commit.bind(tx);
+      tx.commit = () => {
+        tx.abort("refused by the test");
+        return commit();
+      };
+      return tx;
+    });
+
+    await expect(
+      resolveWish(runtime, userIdentity.did(), { query: "#profileName" }),
+    ).rejects.toThrow('Cannot set up the headless read of "#profileName": ');
+    expect(runtime.runner.cancels.size).toBe(0);
   });
 
   it("appends extra path segments to the resolved target", async () => {

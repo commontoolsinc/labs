@@ -259,9 +259,11 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   /**
    * Install a store read-through for SPACE's replica: from then on a
    * document the replica does not hold is read synchronously from the
-   * store on first access, and a `sync()` against the space resolves
-   * from the store without registering a watch. Optional: only a manager
-   * co-hosted with the store can serve one.
+   * store on first access, a `sync()` of one resolves from the store
+   * without registering a watch, and a `sync()` of a held document is
+   * answered from the replica — `integrateStoreWrites` is what moves a
+   * held record. Optional: only a manager co-hosted with the store can
+   * serve one.
    */
   installStoreReadThrough?(space: MemorySpace, read: StoreReadThrough): void;
 
@@ -2097,6 +2099,29 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * pattern-authored code whether a given piece is running here.
    */
   isRuntimeOwnedStore(
+    space: string,
+    id: string,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): boolean;
+
+  /**
+   * Whether the store at `id` in `space` is one no schema declares a policy
+   * on — named by an authorized whole-document
+   * `CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE` marker on this transaction.
+   *
+   * The §8.12.4 writer-fit measurement quantifies over the paths a schema
+   * could have declared a policy at, and skips the ones it cannot ask about.
+   * Two of those it reads off the id alone; this is the answer for a document
+   * whose id says nothing, which the runtime names as it writes it.
+   *
+   * This transaction alone, with no enrollment beside it: the measurement runs
+   * over documents the asking transaction wrote, so a marker recorded beside
+   * the write always covers the question.
+   *
+   * Takes the runtime's mark for the same reason {@link isRuntimeOwnedStore}
+   * does: the gate acts on the claim rather than measuring it.
+   */
+  isUndeclarablePolicyStore(
     space: string,
     id: string,
     authorization?: RuntimeWritePolicyAuthorization,

@@ -1,13 +1,20 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import type { PreparedSourceUpdate } from "../src/pattern-manager.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import type { JSONSchema, Pattern } from "../src/builder/types.ts";
+import type { Cell } from "../src/cell.ts";
 import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
 import { computeModuleHashes } from "../src/harness/module-identity.ts";
 import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import {
   compiledDocKey,
   deriveModuleDelegations,
@@ -19,6 +26,11 @@ import {
   writeCompiledDocs,
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
+import {
+  getPieceSourceSnapshot,
+  type PieceSourceTransition,
+  preparePieceSourceTransitionBaseline,
+} from "../src/runner.ts";
 
 await ensureCompilerStack();
 
@@ -42,6 +54,54 @@ function moduleFor(program: RuntimeProgram): CacheableModule {
     imports: [],
   };
 }
+
+/**
+ * Seed a document whose `secret` field carries a confidentiality clause, so a
+ * transaction reading it takes that clause into its flow join. This stands for
+ * the piece argument a source transition reads on the same transaction that
+ * stages the successor's delegation union.
+ */
+const seedLabeledSource = async (
+  runtime: Runtime,
+  name: string,
+): Promise<void> => {
+  const seed = runtime.edit();
+  const id = runtime.getCell(space, name, {
+    type: "object",
+    properties: { secret: { type: "string" } },
+  }).getAsNormalizedFullLink().id;
+  writeSeedEnvelopeDoc(seed, space);
+  seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+    value: { secret: "s3cr3t" },
+    cfc: {
+      version: 1,
+      schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+      labelMap: {
+        version: 1,
+        entries: [{
+          path: ["secret"],
+          label: { confidentiality: ["secret"] },
+        }],
+      },
+    },
+  });
+  expect((await seed.commit()).ok).toBeDefined();
+};
+
+/** The persisted label-map entries on `id`, for pinning that a join landed. */
+const replicaEntries = (
+  storage: ReturnType<typeof StorageManager.emulate>,
+  id: string,
+): { label: { confidentiality?: string[] } }[] => {
+  const replica = storage.open(space).replica as unknown as {
+    getDocument(id: string): {
+      cfc?: {
+        labelMap?: { entries: { label: { confidentiality?: string[] } }[] };
+      };
+    } | undefined;
+  };
+  return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+};
 
 const protectedSchema = {
   type: "object",
@@ -658,4 +718,447 @@ describe("module identity delegation", () => {
     expect(denied.error?.message).toContain("writeAuthorizedBy failed");
     expect(protectedCell.get()).toEqual({ value: "seed" });
   });
+
+  describe("Runtime.grantsModuleDelegation()", () => {
+    it("returns `true` for a direct or inherited predecessor in the registering space only", () => {
+      const otherSpace = "did:key:z6MkModuleDelegationGrantOtherSpace";
+      runtime.registerModuleDelegations(
+        space,
+        new Map([
+          ["successor", new Set(["predecessor"])],
+          ["predecessor", new Set(["ancestor", "successor"])],
+        ]),
+      );
+
+      expect(runtime.grantsModuleDelegation(space, "successor", "predecessor"))
+        .toBe(true);
+      expect(runtime.grantsModuleDelegation(space, "successor", "ancestor"))
+        .toBe(true);
+      expect(runtime.grantsModuleDelegation(space, "ancestor", "successor"))
+        .toBe(false);
+      expect(runtime.grantsModuleDelegation(space, "successor", "stranger"))
+        .toBe(false);
+      expect(
+        runtime.grantsModuleDelegation(otherSpace, "successor", "predecessor"),
+      ).toBe(false);
+    });
+  });
+
+  describe("PatternManager.readInheritedAuthority()", () => {
+    const oldIdentity = computeModuleHashes(moduleProgram("old")).get(
+      "/writer.ts",
+    )!;
+    const successor = moduleFor(moduleProgram("new"));
+
+    const storeSuccessorSource = async (): Promise<void> => {
+      const sourceTx = runtime.edit();
+      writeSourceDocs(
+        runtime,
+        space,
+        [successor],
+        successor.identity,
+        sourceTx,
+        new Map([[successor.identity, new Set([oldIdentity])]]),
+      );
+      runtime.prepareTxForCommit(sourceTx);
+      expect((await sourceTx.commit()).error).toBeUndefined();
+    };
+
+    it("returns `undefined` for a keyless identity, only itself as predecessor, or every predecessor already granted", () => {
+      const pm = runtime.patternManager;
+      expect(pm.readInheritedAuthority(space, "keyless:session", [oldIdentity]))
+        .toBeUndefined();
+      expect(pm.readInheritedAuthority(space, oldIdentity, [oldIdentity]))
+        .toBeUndefined();
+      expect(pm.readInheritedAuthority(space, oldIdentity, [])).toBeUndefined();
+
+      runtime.registerModuleDelegations(
+        space,
+        new Map([[successor.identity, new Set([oldIdentity])]]),
+      );
+      expect(
+        pm.readInheritedAuthority(space, successor.identity, [
+          oldIdentity,
+          successor.identity,
+        ]),
+      ).toBeUndefined();
+    });
+
+    it("returns a read when any predecessor is ungranted, though another is granted", async () => {
+      runtime.registerModuleDelegations(
+        space,
+        new Map([[successor.identity, new Set([oldIdentity])]]),
+      );
+
+      const read = runtime.patternManager.readInheritedAuthority(
+        space,
+        successor.identity,
+        [oldIdentity, "ungranted-predecessor"],
+      );
+
+      expect(read).toBeInstanceOf(Promise);
+      await read;
+    });
+
+    it("registers the delegation the successor's stored source closure carries", async () => {
+      await storeSuccessorSource();
+      expect(
+        runtime.grantsModuleDelegation(space, successor.identity, oldIdentity),
+      ).toBe(false);
+
+      const read = runtime.patternManager.readInheritedAuthority(
+        space,
+        successor.identity,
+        [oldIdentity],
+      );
+      expect(read).toBeInstanceOf(Promise);
+      await read;
+
+      expect(
+        runtime.grantsModuleDelegation(space, successor.identity, oldIdentity),
+      ).toBe(true);
+    });
+
+    it("grants nothing when the space holds no source closure for the successor", async () => {
+      await runtime.patternManager.readInheritedAuthority(
+        space,
+        successor.identity,
+        [oldIdentity],
+      );
+
+      expect(
+        runtime.grantsModuleDelegation(space, successor.identity, oldIdentity),
+      ).toBe(false);
+    });
+
+    it("settles without a grant when reading the successor's closure fails", async () => {
+      await storeSuccessorSource();
+
+      {
+        using _failingRead = stub(runtime, "getCell", () => {
+          throw new Error("injected read failure");
+        });
+        await runtime.patternManager.readInheritedAuthority(
+          space,
+          successor.identity,
+          [oldIdentity],
+        );
+      }
+
+      expect(
+        runtime.grantsModuleDelegation(space, successor.identity, oldIdentity),
+      ).toBe(false);
+    });
+  });
+  describe("a successor another runtime moved a piece to", () => {
+    // `runtime` moves the piece from v1 to v2 through a source update.
+    // `observer` shares its store and compiled v2 beforehand, so it resolves
+    // the piece's new pattern from memory, without the closure load that
+    // would register v2's grant from v1. Events queue in the runtime that
+    // sends them, so the observer's own handler run is what is checked.
+    const writerProgram = (version: string): RuntimeProgram => ({
+      main: "/app/main.tsx",
+      files: [
+        {
+          name: "/app/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import {",
+            "  handler,",
+            "  pattern,",
+            "  Writable,",
+            "  WriteAuthorizedBy,",
+            '} from "commonfabric";',
+            'import { revision } from "../shared/revision.ts";',
+            "",
+            "const setName = handler<",
+            "  { name: string },",
+            "  { name: Writable<string> }",
+            ">((event, state) => {",
+            '  state.name.set(revision + ":" + event.name);',
+            "});",
+            "",
+            "export default pattern<{ seed?: string }>(() => {",
+            "  const name = new Writable<",
+            "    WriteAuthorizedBy<string, typeof setName>",
+            '  >("initial").for("name");',
+            "  return { name, setName: setName({ name }) };",
+            "});",
+          ].join("\n"),
+        },
+        {
+          name: "/shared/revision.ts",
+          contents: `export const revision = ${JSON.stringify(version)};`,
+        },
+      ],
+    });
+
+    let observer: Runtime;
+    let v2: Pattern;
+    let piece: Cell<any>;
+    let observed: Cell<any>;
+
+    beforeEach(async () => {
+      observer = new Runtime({
+        apiUrl: new URL("http://toolshed.test"),
+        storageManager,
+      });
+      const v1 = await runtime.patternManager.compilePattern(
+        writerProgram("v1"),
+        { space },
+      );
+      v2 = await runtime.patternManager.compilePattern(writerProgram("v2"), {
+        space,
+      });
+      await observer.patternManager.compilePattern(writerProgram("v2"), {
+        space,
+      });
+      piece = runtime.getCell(
+        space,
+        "module-delegation-moved-piece",
+        v1.resultSchema,
+      );
+      await runtime.runSynced(piece, v1, {});
+      observed = observer.getCellFromLink(
+        piece.getAsNormalizedFullLink(),
+        v1.resultSchema,
+      );
+    });
+
+    afterEach(async () => {
+      // The storage manager belongs to `runtime`, which the outer
+      // `afterEach` disposes after this one.
+      await observer.dispose({ closeStorage: false });
+    });
+
+    const setName = async (
+      target: Runtime,
+      cell: Cell<any>,
+      name: string,
+    ): Promise<unknown> => {
+      await target.editWithRetry((tx) =>
+        cell.key("setName").withTx(tx).send({ name })
+      );
+      await target.idle();
+      return await cell.key("name").pull();
+    };
+
+    const moveToV2 = async (): Promise<void> => {
+      const expected = getPieceSourceSnapshot(
+        piece,
+        runtime.runner.sessionPatternPointerFor(piece),
+      )!;
+      const transition: PieceSourceTransition = {
+        revisionId: crypto.randomUUID(),
+        baseline: await preparePieceSourceTransitionBaseline(
+          runtime,
+          piece,
+          expected,
+        ),
+        timestamp: Date.now(),
+        operation: "edit",
+        origin: null,
+        expected,
+      };
+      await runtime.runSynced(piece, v2, {}, {
+        expectedPatternIdentity: expected.pattern,
+        pieceSourceTransition: transition,
+      });
+    };
+
+    it("lets the successor write its predecessor's fields after swapping a running piece", async () => {
+      await observer.start(observed);
+      expect(await setName(observer, observed, "before")).toBe("v1:before");
+
+      await moveToV2();
+      await observer.idle();
+      await observer.runner.idlePointerMaintenance();
+
+      expect(await setName(observer, observed, "after")).toBe("v2:after");
+    });
+
+    it("lets the successor write its predecessor's fields after starting the piece", async () => {
+      expect(await setName(runtime, piece, "before")).toBe("v1:before");
+      await moveToV2();
+
+      await observer.start(observed);
+
+      expect(await setName(observer, observed, "after")).toBe("v2:after");
+    });
+
+    it("does not start a piece stopped while the authority read is in flight", async () => {
+      await moveToV2();
+      const entered = Promise.withResolvers<void>();
+      const reading = Promise.withResolvers<void>();
+
+      using _heldRead = stub(
+        observer.patternManager,
+        "readInheritedAuthority",
+        () => {
+          entered.resolve();
+          return reading.promise;
+        },
+      );
+      const started = observer.start(observed);
+      await entered.promise;
+      observer.runner.stop(observed);
+      reading.resolve();
+
+      expect(await started).toBe(false);
+    });
+
+    it("starts a piece whose source history is invalid without reading authority", async () => {
+      const seed = runtime.edit();
+      piece.withTx(seed).setMetaRaw("pieceSourceHistory", [{
+        revisionId: "broken",
+        timestamp: 42,
+      }], rawMetaWriteAuthorization);
+      expect((await seed.commit()).error).toBeUndefined();
+
+      expect(await observer.start(observed)).toBe(true);
+
+      expect(await setName(observer, observed, "after")).toBe("v1:after");
+    });
+  });
+
+  for (
+    const stage of [
+      {
+        name: "writes the closure",
+        write: (
+          runtime: Runtime,
+          tx: ReturnType<Runtime["edit"]>,
+          modules: readonly CacheableModule[],
+          entryIdentity: string,
+          predecessor: string,
+          version: string,
+        ) => {
+          const delegations = new Map([
+            [entryIdentity, new Set([predecessor])],
+          ]);
+          writeSourceDocs(
+            runtime,
+            space,
+            modules,
+            entryIdentity,
+            tx,
+            delegations,
+          );
+          writeCompiledDocs(runtime, space, modules, entryIdentity, {
+            runtimeVersion: version,
+            moduleDelegations: delegations,
+          }, tx);
+        },
+      },
+      {
+        name: "stages a delegation union",
+        write: (
+          runtime: Runtime,
+          tx: ReturnType<Runtime["edit"]>,
+          _modules: readonly CacheableModule[],
+          entryIdentity: string,
+          predecessor: string,
+          version: string,
+        ) => {
+          stageModuleDelegations(
+            runtime,
+            space,
+            new Map([[entryIdentity, new Set([predecessor])]]),
+            version,
+            tx,
+          );
+        },
+      },
+    ]
+  ) {
+    it(`commits a cache write carrying a flow join when it ${stage.name}`, async () => {
+      // A cache document is a store no pattern declares a policy on: its id is
+      // a content address of module bytes. Measuring it refuses any
+      // transaction that both reads labeled data and reaches a cache write,
+      // which a piece's source transition does by construction. The assertion
+      // is the COMMIT rather than the marker, so a write target the marker
+      // does not reach fails this: the import edge below is stored in a
+      // document of its own, which `anchorValueAsEntity` has to carry the
+      // claim down to.
+      const strict = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        cfcEnforcementMode: "enforce-strict",
+        cfcFlowLabels: "persist",
+      });
+      try {
+        const dependency = moduleFor(moduleProgram("dependency"));
+        const previous = moduleFor(moduleProgram("old"));
+        const entry = {
+          ...moduleFor(moduleProgram("new")),
+          imports: [{
+            specifier: "./dependency.ts",
+            targetIdentity: dependency.identity,
+          }],
+        };
+        const modules = [entry, dependency];
+        const version = "delegation-undeclarable-marker";
+        // Staging reads the artifacts back, so both sets have to be there.
+        expect(
+          (await strict.editWithRetry((tx) => {
+            writeSourceDocs(strict, space, modules, entry.identity, tx);
+            writeCompiledDocs(strict, space, modules, entry.identity, {
+              runtimeVersion: version,
+            }, tx);
+          })).error,
+        ).toBeUndefined();
+        await seedLabeledSource(strict, "module-delegation-secret");
+
+        const tx = strict.edit();
+        try {
+          // The read that puts a confidentiality clause in the flow join,
+          // standing for the piece argument a source transition reads.
+          const secret = strict.getCell(
+            space,
+            "module-delegation-secret",
+            undefined,
+            tx,
+          );
+          expect((secret.getRaw() as { secret?: string }).secret)
+            .toBe("s3cr3t");
+          stage.write(
+            strict,
+            tx,
+            modules,
+            entry.identity,
+            previous.identity,
+            version,
+          );
+          tx.prepareCfc();
+          const result = await tx.commit();
+          expect(result.error?.message).toBeUndefined();
+          // The commit is the assertion, and on its own it passes whether or
+          // not the transaction ever carried a clause — so pin both halves.
+          // The stamp on the record says the join reached this write, which
+          // is the thing the old refusal was about; the stored value says the
+          // write itself landed.
+          const stamped = replicaEntries(
+            storageManager,
+            strict.getCell(space, sourceDocKey(entry.identity), undefined, tx)
+              .getAsNormalizedFullLink().id,
+          ).flatMap((label) => label.label.confidentiality ?? []);
+          expect(stamped).toContain("secret");
+          const readTx = strict.edit();
+          try {
+            const stored = strict.getCell<
+              { delegatedModuleIdentities?: string[] }
+            >(space, sourceDocKey(entry.identity), undefined, readTx).get();
+            expect(stored?.delegatedModuleIdentities)
+              .toContain(previous.identity);
+          } finally {
+            readTx.abort();
+          }
+        } finally {
+          if (tx.status().status === "ready") tx.abort();
+        }
+      } finally {
+        await strict.dispose();
+      }
+    });
+  }
 });
