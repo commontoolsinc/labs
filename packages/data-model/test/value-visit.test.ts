@@ -28,7 +28,7 @@ import {
   type ValueVisitor,
   visitFabricValue,
   visitValue,
-} from "@/value-visit.ts";
+} from "@/value-visit";
 import type { Primitive } from "@commonfabric/utils/types";
 
 /** One recorded call into a `Recorder`. */
