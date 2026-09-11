@@ -247,6 +247,104 @@ export default pattern<{seed?: ${seedType}}>(() => {
     }
   });
 
+  describe("in a runtime that evaluated the successor before another runtime updated the source", () => {
+    // `runtime` performs the update. `observer` shares its store but
+    // evaluated the successor for a piece of its own first, so it resolves
+    // the updated piece's pattern from memory rather than from storage.
+    let observer: Runtime;
+    let observerPieces: PiecesController;
+
+    beforeEach(async () => {
+      observer = new Runtime({
+        apiUrl: new URL("http://toolshed.test"),
+        storageManager,
+      });
+      observerPieces = new PiecesController(
+        await createSession({
+          identity: signer,
+          spaceName: pieces.getSpaceName()!,
+        }),
+        observer,
+      );
+      await observerPieces.synced();
+      await observerPieces.create(authorizedWriterProgram("v2"), {
+        input: {},
+      });
+    });
+
+    afterEach(async () => {
+      // The storage manager belongs to `runtime`, which the outer `afterEach`
+      // disposes after this one.
+      await observer.dispose({ closeStorage: false });
+    });
+
+    const invokeSetName = async (
+      piece: Awaited<ReturnType<PiecesController["get"]>>,
+      name: string,
+    ): Promise<unknown> => {
+      const result = await piece.result.getCell();
+      result.key("setName").send({ name });
+      await result.pull();
+      return await piece.result.get(["name"]);
+    };
+
+    it("authorizes the successor's writes to a piece it swaps over", async () => {
+      const piece = await pieces.create(authorizedWriterProgram("v1"), {
+        input: {},
+      });
+      const observed = await observerPieces.get(piece.id, true);
+      expect(await invokeSetName(observed, "before")).toBe("v1:before");
+
+      await piece.setPattern(authorizedWriterProgram("v2"));
+      await observer.idle();
+      // The swap waits on the read of the successor's authority, which the
+      // watcher tracks apart from the scheduler.
+      await observer.runner.idlePointerMaintenance();
+
+      expect(await invokeSetName(observed, "after")).toBe("v2:after");
+    });
+
+    it("authorizes the successor's writes to a piece it starts afterwards", async () => {
+      const piece = await pieces.create(authorizedWriterProgram("v1"), {
+        input: {},
+      });
+      const updater = await pieces.get(piece.id, true);
+      expect(await invokeSetName(updater, "before")).toBe("v1:before");
+      await piece.setPattern(authorizedWriterProgram("v2"));
+      await pieces.synced();
+
+      const observed = await observerPieces.get(piece.id, true);
+
+      expect(await invokeSetName(observed, "after")).toBe("v2:after");
+    });
+
+    it("authorizes the successor's writes for every earlier pattern in the piece's history, not just the latest", async () => {
+      // `observer` first registers v2's grant from v1 through one piece. A
+      // second piece then goes v0 → v1 → v2, which extends v2's stored
+      // grants to v0 as well; its field is still bound to v0.
+      const first = await pieces.create(authorizedWriterProgram("v1"), {
+        input: {},
+      });
+      await first.setPattern(authorizedWriterProgram("v2"));
+      await pieces.synced();
+      const firstObserved = await observerPieces.get(first.id, true);
+      expect(await invokeSetName(firstObserved, "first")).toBe("v2:first");
+
+      const second = await pieces.create(authorizedWriterProgram("v0"), {
+        input: {},
+      });
+      const updater = await pieces.get(second.id, true);
+      expect(await invokeSetName(updater, "before")).toBe("v0:before");
+      await second.setPattern(authorizedWriterProgram("v1"));
+      await second.setPattern(authorizedWriterProgram("v2"));
+      await pieces.synced();
+
+      const observed = await observerPieces.get(second.id, true);
+
+      expect(await invokeSetName(observed, "after")).toBe("v2:after");
+    });
+  });
+
   it("merges predecessor chains into an already-stored successor closure", async () => {
     const first = await pieces.create(authorizedWriterProgram("v1"), {
       input: {},
