@@ -187,6 +187,7 @@ function fixture(voteCount: number) {
               voteCount: number;
               voterCount: number;
               optionCount: number;
+              requireExistingProfiles?: boolean;
             };
           }
         >(program, { start: true, input });
@@ -197,6 +198,7 @@ function fixture(voteCount: number) {
               voteCount: number;
               voterCount: number;
               optionCount: number;
+              requireExistingProfiles?: boolean;
             };
           }
         >(piece.getCell());
@@ -207,6 +209,7 @@ function fixture(voteCount: number) {
               voteCount,
               voterCount,
               optionCount: OPTIONS,
+              requireExistingProfiles: profileLocation === "cross-space",
             })
           );
           if (sent.error) throw new Error(sent.error.message);

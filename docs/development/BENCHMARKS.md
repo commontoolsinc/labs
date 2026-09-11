@@ -358,8 +358,10 @@ voters respectively. `CF_READ_SCALE_PROFILE_LOCATION` selects `same-space`
 (the default) or `cross-space` voter profiles. Both variants use separately
 stored profiles with identical names, vote counts, and option counts. The
 cross-space variant seeds profiles in a dedicated space before seeding the
-poll, so no seed transaction writes across spaces. The benchmark verifies the
-first vote's resolved voter space and records the location in its artifacts.
+poll, so no seed transaction writes across spaces. That seed requires existing
+profiles and rejects an unavailable profile instead of creating it. The
+benchmark verifies the first vote's resolved voter space and records the
+location in its artifacts.
 Seeding, navigation, sign-in, viewer selection, warmup, and teardown are outside
 the timed interval. The timer includes click-helper readiness, browser/protocol
 overhead, and a trusted green-vote click through view

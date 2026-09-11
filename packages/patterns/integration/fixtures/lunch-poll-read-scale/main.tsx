@@ -29,6 +29,9 @@ interface SeedEvent {
 
   /** Number of rendered options. */
   optionCount: number;
+
+  /** Requires every supplied profile to be readable before seeding. */
+  requireExistingProfiles?: boolean;
 }
 
 /** Observable controls and results shared by CLI and browser fixtures. */
@@ -73,7 +76,7 @@ const seed = handler<
     votes: Writable<Vote[]>;
   }
 >((
-  { voteCount, voterCount, optionCount },
+  { voteCount, voterCount, optionCount, requireExistingProfiles },
   { profiles, users, options, votes },
 ) => {
   if (
@@ -98,6 +101,11 @@ const seed = handler<
     const profile = profiles.elementById(String(index));
     const name = `Voter ${index}`;
     if (profile.get() === undefined) {
+      if (requireExistingProfiles) {
+        throw new Error(
+          "Supplied voter profiles must be available before seeding",
+        );
+      }
       profile.set({ name });
       profiles.addUnique(profile);
     }
