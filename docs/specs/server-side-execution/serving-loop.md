@@ -1406,14 +1406,27 @@ docs never materialized, verification-coverage.md OW46) is a
 health-stats fact instead of an undifferentiated share of the
 per-attempt `structureLoadDeferred` aggregate; the streak clears when
 the root starts or terminalizes;
-`structureLoadTerminal`/`structureLoadRearmed` carry the
-demand-cycle terminal state (stage P2-F, the OW19 design): a root
-confirmed synced with no pattern meta parks TERMINAL — counted per
-terminalization, no per-cycle churn — and a commit touching one of
-the load's observed docs RE-ARMS it (the retry is settle-gated so it
-reads the re-arming commit's applied state); the demanded-structure
-load pass itself runs UNDER §3's flush deadline (single-flighted
-across cycles), so a slow ensure throttles nothing; `watermarkClamped` counts
+`structureLoadTerminal`/`structureLoadRearmed` carry the demand-cycle terminal
+state. A root with no pattern metadata is confirmed by a second owning-result
+traversal, including the scoped-to-space fallback. Each traversal syncs the
+complete addresses it reads; cycle detection distinguishes scopes. Confirmation
+does not subscribe to additional addresses formed by combining observed IDs
+with other scopes. A confirmed root parks terminal, counted once, and a commit
+touching an observed document re-arms it. Admissions racing either traversal
+invalidate a no-metadata verdict when they touch an observed document; pending
+foreign novelty hidden by a sealed write also prevents terminalization. These
+invalidated attempts count as deferrals.
+
+The retry follows frame application within the settle loop. Its structure load
+and demanded derivations finish before the watermark covers the triggering
+input. A shadowed retry waits for the replica's shadow-flip signal, allowing
+the wave to commit the sealed writes that make its input visible. The load pass
+runs under §3's flush deadline and is single-flighted across cycles of one
+tenure. Demand departure drops terminal decisions; a new tenure starts its own
+pass. Park cancels structure loading at its next asynchronous boundary, before
+any subsequent piece start. Completion from a parked tenure cannot publish a
+terminal decision; park does not wait for unresolved pattern loading.
+`watermarkClamped` counts
 non-exhausted cycles whose foreign-write shadow floor is below an input batch
 head above W. An event-visibility floor can constrain the same cycle, so the
 counter does not isolate the marginal effect of the shadow floor. The shadow
