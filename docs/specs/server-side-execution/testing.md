@@ -25,7 +25,9 @@ implemented as the gates below. Method inherited from the v1 learning run
   observations unless a control proves otherwise. In particular,
   `wavesBudgetExhausted / waves` is not the fraction of committed waves that
   exhausted: the numerator includes zero-delta cycles, while the denominator
-  counts wave closures, including vacuous or aborted outcomes.
+  counts completed wave closures, including effect-only or aborted outcomes.
+  The zero-delta branch with no contributions, watermark advance, or pending
+  effects returns before incrementing `waves`.
 - Keep uninstrumented end-to-end runs separate from profiling. Name nested
   and overlapping intervals: demand-pass wall time includes awaited structure
   loading, so it cannot isolate terminal confirmation or be added to that

@@ -34,7 +34,7 @@
 export type ServingLoopStats = {
   activeSpaces: number;
 
-  /** Wave closures, including vacuous and aborted outcomes. */
+  /** Completed wave closures, including effect-only and aborted outcomes. */
   waves: number;
 
   /** Exhausted cycles, including zero-delta cycles that close no wave. */

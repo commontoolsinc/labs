@@ -22,7 +22,6 @@ import {
 const space = (await Identity.fromPassphrase("terminal campaign space")).did();
 const signer = await Identity.fromPassphrase("terminal campaign service");
 const server = newLoopbackServer({ subscriptionRefreshDelayMs: "manual" });
-const engine = await server.engineForSpace(space);
 const stats = emptyServingLoopStats();
 const roots = ["of:campaign-plain-a"];
 const facade = new Proxy(server, {
@@ -64,6 +63,7 @@ async function fireGrace(): Promise<void> {
 }
 
 try {
+  const engine = await server.engineForSpace(space);
   globalThis.setTimeout = new Proxy(setTimer, {
     apply(target, receiver, args) {
       const stack = new Error().stack ?? "";
@@ -207,12 +207,16 @@ try {
 
     roots.push("of:campaign-plain-b");
     const passes = stats.demand.demandPasses;
+    const waveClosures = stats.waves;
+    const engineSeq = Engine.serverSeq(engine);
     for (let index = 0; index < 20; index++) serving.noteDemandChanged();
     expect(graceArms).toBe(1);
     expect(stats.demand.demandPasses).toBe(passes);
     await fireGrace();
     expect(stats.structureLoadTerminal).toBe(2);
-    expect(stats.demand.demandPasses).toBeGreaterThan(passes);
+    expect(stats.demand.demandPasses).toBe(passes + 2);
+    expect(stats.waves).toBe(waveClosures);
+    expect(Engine.serverSeq(engine)).toBe(engineSeq);
     snapshot("twenty-notes-one-grace-callback");
 
     roots.push("of:campaign-plain-c");

@@ -27,7 +27,7 @@ manifest = {
     "head": head, "command": command, "cwd": str(repo),
     "sourceSha256": digest(probe), "patchSha256": digest(patch),
     "controllerSha256": digest(Path(__file__).read_bytes()),
-    "runtime": subprocess.check_output(["deno", "--version"], cwd=repo, text=True),
+    "runtime": subprocess.check_output(["zsh", "-lc", "deno --version"], cwd=repo, text=True),
     "fixture": "Three plain durable roots; synthetic demand notifications and one admitted system input; fresh emulated store",
     "cache": "Fresh process/runtime/store; no prior pattern compilation",
     "posture": "Serving runtime ON, asserted by probe; no browser/client/baked shell in this mechanism rig",
@@ -38,14 +38,10 @@ def save():
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 def guard(phase):
     current = git("status", "--porcelain=v1", "--untracked-files=all")
-    if git("rev-parse", "HEAD").decode().strip() != head:
-        raise RuntimeError(f"{phase}: HEAD changed during capture")
-    if current != status:
-        raise RuntimeError(f"{phase}: checkout status changed during capture")
-    if git("diff", "--binary", "HEAD") != patch:
-        raise RuntimeError(f"{phase}: checkout diff changed during capture")
-    if (repo / helper).read_bytes() != probe:
-        raise RuntimeError(f"{phase}: probe source changed during capture")
+    assert git("rev-parse", "HEAD").decode().strip() == head
+    assert current == status
+    assert git("diff", "--binary", "HEAD") == patch
+    assert (repo / helper).read_bytes() == probe
     manifest["sourceChecks"].append({"phase": phase, "status": current.decode()})
     save()
 guard("before")
