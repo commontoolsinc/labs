@@ -1281,7 +1281,16 @@ the durable rows of §5 carry APPENDS, never effect state).
   commit's catch-up marker can never arrive, so parking one wedges
   retirement permanently — the completion-visibility wedge; the
   retirement barrier stays as the belt over that structural
-  guarantee). When several accepted contributions to one document share a
+  guarantee). And completion writebacks commit AUTHORITATIVELY:
+  their memo-state writes go through even where the replica's
+  optimistic view — possibly a doomed sealed overlay a later wave
+  supersede-drops (§3d) — calls them no-ops, so a drop can never
+  tear the stored hash from the result it serves; the all-no-op
+  short-circuit above accordingly fires only for genuinely
+  write-free writebacks, and identical re-asserts are idempotent at
+  the store. For appends, idempotence is the `eventId` dedupe
+  horizon.
+- When several accepted contributions to one document share a
   wave sequence, their settled local value includes every contribution in
   local sealing order. Local promotion also preserves that order between
   verdicts, including in the view that excludes speculative pending layers.
@@ -1291,15 +1300,6 @@ the durable rows of §5 carry APPENDS, never effect state).
   precedence. `memory-v2-wave-promotion.test.ts` covers this boundary across
   space, user, and session instances, including reordered verdict delivery,
   withdrawal, and noncommutative appends.
-  And completion writebacks commit AUTHORITATIVELY:
-  their memo-state writes go through even where the replica's
-  optimistic view — possibly a doomed sealed overlay a later wave
-  supersede-drops (§3d) — calls them no-ops, so a drop can never
-  tear the stored hash from the result it serves; the all-no-op
-  short-circuit above accordingly fires only for genuinely
-  write-free writebacks, and identical re-asserts are idempotent at
-  the store. For appends, idempotence is the `eventId` dedupe
-  horizon.
 - Authority: the capability handle bound at wiring time (README §3.8);
   the outbox holds provider credentials via the existing broker; the
   SpaceServer's runtime never sees raw secrets.

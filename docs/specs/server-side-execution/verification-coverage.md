@@ -2680,8 +2680,8 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   shared physical bindings across actors, independent bindings sharing a pending
   result, stale-peer takeover after refusal publication, and withdrawn
   publication. A refused request may publish its binding without owning the
-  resolution represented by a peer's cache claim. These controls exercise local program
-  responses; cancellation of resolver network requests remains separate.
+  resolution represented by a peer's cache claim. These controls exercise local
+  program responses; cancellation of resolver network requests remains separate.
 
   The program lifecycle controls also admit duplicate accepted contributions
   through the real `SpaceOutbox` under a held dispatch budget. A release refusal
