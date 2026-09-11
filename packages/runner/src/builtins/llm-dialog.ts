@@ -5,6 +5,8 @@ import {
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
+  isWalkableObjectOrArray,
+  refuseFabricInstance,
 } from "@commonfabric/data-model";
 import {
   entityRefToString,
@@ -47,7 +49,11 @@ import {
   recordRelevantSchemaWritePolicyInput,
 } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { cfcSchemaChildRoot } from "../cfc/schema-refs.ts";
+import {
+  cfcSchemaChildRoot,
+  cfcSchemaToObject,
+  resolveCfcSchemaRefs,
+} from "../cfc/schema-refs.ts";
 import { isExternalSchemaRef } from "../schema-decompose.ts";
 import type { CfcConfClause } from "../cfc/clause.ts";
 import {
@@ -65,7 +71,6 @@ import {
   uniqueCfcAtoms,
 } from "../cfc/observation.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
-import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { settleAbandonedRequest } from "./abandoned-request.ts";
 import { markEffectCompletion } from "../executor/effect-completion.ts";
@@ -76,7 +81,6 @@ import {
 } from "../cfc/types.ts";
 import { getEntityId } from "../create-ref.ts";
 import { entityUriSchemePrefix } from "../entity-kind.ts";
-import { refuseFabricInstance } from "../fabric-special-object.ts";
 import { resolveLink } from "../link-resolution.ts";
 import {
   createLLMFriendlyLink,
@@ -282,24 +286,25 @@ function resolveRefsForLLM(
     // Recurse into object properties (does not increment refDepth)
     //
     // TODO(danfuzz): this rebuild recurses into every object-valued key, so it
-    // also descends into `default`/`examples` VALUES — and a
-    // `FabricSpecialObject` there comes out as `{}` (`Object.entries` sees none
-    // of its state). The sibling `simplifySchemaForContext` carries `default`
-    // by reference via `PRESERVE_KEYS`; this walk wants the same treatment for
-    // value-bearing keys.
+    // also descends into `default`/`examples` VALUES, and rewrites whatever
+    // schema keywords it finds spelled inside one. The sibling
+    // `simplifySchemaForContext` carries `default` by reference via
+    // `PRESERVE_KEYS`; this walk wants the same treatment for value-bearing
+    // keys.
+    //
+    // A `FabricPrimitive` is carried by reference either way: the rebuild
+    // reads a node by property name and would return `{}` for one. A
+    // `FabricInstance` is refused rather than carried, as everywhere else.
     const result: any = {};
     for (const [key, value] of Object.entries(nodeObj)) {
       if (key === "$defs") continue; // strip $defs from output
       if (Array.isArray(value)) {
         result[key] = value.map((item) =>
-          typeof item === "object" && item !== null || typeof item === "boolean"
+          isWalkableObjectOrArray(item) || typeof item === "boolean"
             ? resolve(item, refDepth, activeRefs)
             : item
         );
-      } else if (
-        typeof value === "object" && value !== null ||
-        typeof value === "boolean"
-      ) {
+      } else if (isWalkableObjectOrArray(value) || typeof value === "boolean") {
         result[key] = resolve(value, refDepth, activeRefs);
       } else {
         result[key] = value;

@@ -36,6 +36,7 @@ cf.key.*
 .knowledge
 local-dev-toolshed.log
 local-dev-shell.log
+local-dev-console.log
 .playwright-mcp/
 .worktrees
 tmp/

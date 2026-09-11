@@ -79,8 +79,7 @@ import { type Announce } from "./announce.ts";
 import { connectionEntries, type HeldConnection } from "./connection.ts";
 import { resolveHandle } from "./handles.ts";
 import { renderVerbList, renderVerbPage, type VerbHelp } from "./help.ts";
-import { splitLine } from "./line.ts";
-import { quoteToken } from "./line.ts";
+import { quoteToken, splitLine } from "./line.ts";
 import {
   type ListingHandles,
   listingLines,
@@ -2287,7 +2286,7 @@ const THE_VALUE_ITSELF = "the value itself";
  *
  * What makes the list closed is that it is read off the admission test rather
  * than composed beside it. `isValidFabricValueLayer`
- * (`packages/data-model/src/type-check.ts`) switches on `typeof` and, for an
+ * (`packages/data-model/src/validity-check.ts`) switches on `typeof` and, for an
  * `object`, branches four ways; this walk answers the same arms:
  *
  * - `undefined`, `bigint` and a registry-interned `symbol` are admitted and

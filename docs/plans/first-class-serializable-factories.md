@@ -221,8 +221,8 @@ Expected implementation and test files:
 - [ ] Update `packages/data-model/src/native-conversion.ts` so admitted
   factories are recognized through `tryFactoryState()`, and unbranded functions
   remain invalid. Codec dispatch remains the serialization layer's job.
-- [ ] Update `packages/data-model/src/type-check.ts` and compatibility guards so
-  `FabricFactory` is the only valid function-shaped `FabricValue`.
+- [ ] Update `packages/data-model/src/validity-check.ts` and compatibility
+  guards so `FabricFactory` is the only valid function-shaped `FabricValue`.
 - [ ] Update `packages/data-model/src/deep-freeze.ts` to seal/freeze canonical
   state and then freeze the callable. Factory handling must precede the current
   shortcut that treats functions as already frozen.
@@ -243,7 +243,7 @@ Expected implementation and test files:
 Focused tests:
 
 - `packages/data-model/test/native-conversion.test.ts`
-- `packages/data-model/test/type-check.test.ts`
+- `packages/data-model/test/validity-check.test.ts`
 - `packages/data-model/test/deep-freeze.test.ts`
 - `packages/data-model/test/cloneIfNecessary.test.ts`
 - `packages/data-model/test/cloneForMutation.test.ts`

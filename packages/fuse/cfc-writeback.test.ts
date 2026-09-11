@@ -1,4 +1,11 @@
-import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
+import { CFC_ENFORCEMENT_MODES } from "@commonfabric/runner/cfc";
+
 import { FsTree } from "./tree.ts";
 import {
   CfcProjectionAnnotator,
@@ -21,7 +28,6 @@ import {
   CfcWritebackStore,
   metadataFieldsForSetattrFlags,
   normalizeCfcWritebackXattrName,
-  parseCfcMode,
   resolveCfcMode,
   safeReconcileCfcWritebacks,
   shouldEnableCfcAnnotations,
@@ -104,12 +110,11 @@ function prepareJson(
   });
 }
 
-Deno.test("CFC mode parsing and annotation defaults match runner modes", () => {
-  assertEquals(parseCfcMode("disabled"), "disabled");
-  assertEquals(parseCfcMode("observe"), "observe");
-  assertEquals(parseCfcMode("enforce-explicit"), "enforce-explicit");
-  assertEquals(parseCfcMode("enforce-strict"), "enforce-strict");
-  assertEquals(parseCfcMode("bogus"), undefined);
+Deno.test("CFC mode resolution and annotation defaults match runner modes", () => {
+  for (const mode of CFC_ENFORCEMENT_MODES) {
+    assertEquals(resolveCfcMode({ cliMode: mode }), mode);
+    assertEquals(resolveCfcMode({ envMode: mode }), mode);
+  }
 
   assertEquals(
     resolveCfcMode({ cliMode: "observe", envMode: "enforce-strict" }),
@@ -120,6 +125,10 @@ Deno.test("CFC mode parsing and annotation defaults match runner modes", () => {
     "enforce-explicit",
   );
   assertEquals(resolveCfcMode({}), "disabled");
+  // An empty string is a source that stated nothing, not a name off the
+  // ladder: the mount reads an absent flag as "" and so does an exported but
+  // unset environment variable.
+  assertEquals(resolveCfcMode({ cliMode: "", envMode: "" }), "disabled");
 
   assertEquals(
     shouldEnableCfcAnnotations({
@@ -141,6 +150,31 @@ Deno.test("CFC mode parsing and annotation defaults match runner modes", () => {
       mode: "observe",
     }),
     true,
+  );
+});
+
+Deno.test("an off-ladder CFC mode is reported rather than coerced", () => {
+  // A misspelled enforcing mode is refused, not resolved onto the weakest
+  // rung.
+  for (
+    const [options, source] of [
+      [{ cliMode: "enforce-stricct" }, "--cfc-mode"],
+      [{ envMode: "enforce-stricct" }, "CF_CFC_MODE"],
+    ] as const
+  ) {
+    const error = assertThrows(
+      () => resolveCfcMode(options),
+      Error,
+      `${source}=enforce-stricct is not a CFC enforcement mode`,
+    );
+    assertStringIncludes(error.message, CFC_ENFORCEMENT_MODES.join(", "));
+  }
+
+  // Only the source that decides is checked, so a flag naming a mode starts a
+  // mount whose environment holds something else.
+  assertEquals(
+    resolveCfcMode({ cliMode: "enforce-strict", envMode: "enforce-stricct" }),
+    "enforce-strict",
   );
 });
 

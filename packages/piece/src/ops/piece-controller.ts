@@ -1,5 +1,6 @@
 import type { CellKind, LinkScope } from "@commonfabric/api";
-import { taggedHashStringOf } from "@commonfabric/data-model";
+import { fabricAwareEqual, taggedHashStringOf } from "@commonfabric/data-model";
+import { schemaWithProperties } from "@commonfabric/data-model-schema";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   applyPieceSourceTransition,
@@ -10,6 +11,7 @@ import {
   deepEqual,
   extractDefaultValues,
   formatFabricRef,
+  getCellOrThrow,
   getMetaLink,
   getPatternIdentityRef,
   getPatternRepository,
@@ -18,6 +20,7 @@ import {
   getPieceSourceSnapshot,
   getValueAtPath,
   isCell,
+  isCellResultForDereferencing,
   isLink,
   isStream,
   type JSONSchema,
@@ -42,6 +45,7 @@ import {
   type RuntimeProgram,
   sanitizeSchemaForLinks,
   schemaAcceptsOpaqueCellValue,
+  schemaPathSelection,
   setPieceReconciliation,
 } from "@commonfabric/runner";
 import { storedArgumentRefusalDetail } from "@commonfabric/runner/shared";
@@ -60,6 +64,7 @@ import { pieceId } from "../piece-id.ts";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
+  schemasHaveSameContract,
 } from "../schema-compatibility.ts";
 import {
   cloneInternalManifest,
@@ -69,6 +74,7 @@ import {
   preloadCloneValue,
   snapshotCloneValue,
 } from "./clone-data-snapshot.ts";
+import { assertPieceInputPath } from "./piece-input-path.ts";
 import {
   acceptEnteredOrigin,
   qualifyFabricOrigin,
@@ -90,7 +96,7 @@ interface PieceCellIo {
     produce: (stored: unknown) => { value: unknown } | undefined,
     path?: CellPath,
   ): Promise<{ wrote: boolean }>;
-  getCell(): Promise<Cell<unknown>>;
+  getCell(path?: CellPath): Promise<Cell<unknown>>;
 }
 
 interface CloneInternalSnapshot {
@@ -487,13 +493,11 @@ export interface PieceSourceCompatibilityIssues {
  * validation failure, or a CFC schema-envelope rejection at the setup-commit
  * boundary — so a caller fixes one and meets the next.
  *
- * Every verdict here comes from driving the REAL rule in dry-run, never a
- * restatement of it: a preflight that reimplements the rules drifts from
- * enforcement and starts lying. It agrees with the apply path on the VERDICT
- * and the CAUSE. Not on identical prose — `setPattern` reports in
- * enforcement's own words, and making the strings match would mean running
- * this review ahead of the swap, which changes what `setPattern` accepts
- * (see the comment there, and `test/setsrc-cold-argument.test.ts`).
+ * Preflight uses the same contract checks and stored-argument validator as
+ * setup. Unreadable documents and linked slots defer to reactive reads, so a
+ * compatible verdict does not establish that every input value has loaded.
+ * Apply enforces the rules in the setup transaction and may format its
+ * refusal differently from this report.
  *
  * It is a point-in-time answer. The piece's argument, its current source, or
  * the candidate file can all move between the check and a later apply, so a
@@ -524,6 +528,22 @@ export interface PatternUpdateReceipt extends PieceSourceSetResult {
     | { status: "failed"; warning: string };
 }
 
+/**
+ * The verdict {@link PieceController.changeSource} returns: `applied` when
+ * storage accepted the transaction carrying the source transition, and
+ * `incompatible` when the candidate cannot run over the piece's retained
+ * state, with the prepared change a caller may confirm to apply anyway. An
+ * update that finds its active origin already current makes no transition;
+ * it reports `applied` after recording that finding.
+ *
+ * A transition's `applied` is its transaction's own outcome, never a read of
+ * the piece beside the call — a read answers what the piece points at now,
+ * which a concurrent later change may have moved, and it resolves from local
+ * cache over a provider failure. `executionWarning` reports a failure in the work
+ * that refreshes the running piece after its transition committed; such a
+ * failure does not undo the accepted transition, the same split
+ * {@link PatternUpdateReceipt}'s `refresh` arm reports for a direct edit.
+ */
 export type PieceSourceActionResult =
   | { status: "applied"; executionWarning?: string }
   | {
@@ -1811,20 +1831,17 @@ function linkMatchesCommittedState(
   baseCell: Cell<unknown>,
   basePath: readonly (string | number)[],
 ): boolean {
-  // No undefined guard needed: `parseLinkOrThrow` has already rejected any
-  // supplied value that is not a real link record, so `suppliedLink.value`
-  // can never equal an absent committed slot here.
+  // Live Cells prove preservation in `derivePreserveDecision`, not equality
+  // to stored bytes. They are not serialized FabricValues.
+  if (isCell(suppliedLink.value)) return false;
+  // After excluding live Cells, `parseLinkOrThrow` guarantees a serialized
+  // link, which cannot equal an absent committed slot.
   const committedRoot = baseCell.withTx().getRaw();
   const committed = getValueAtPath(committedRoot, [
     ...basePath,
     ...suppliedLink.path,
   ]);
-  // TODO(danfuzz): `deepEqual` compares class instances by enumerable
-  // own-props, of which a `FabricLink` has none — under the modern cell rep
-  // any two `FabricLink`s compare equal, so a link pointing somewhere else
-  // entirely passes as "restoring committed bytes" and skips the rebuild
-  // rules. Fails open; `valueEqual` is the fabric-aware comparison.
-  return deepEqual(committed, suppliedLink.value);
+  return fabricAwareEqual(committed, suppliedLink.value);
 }
 
 /** Wrap a per-concern failure in the uniform supplied-link rejection. */
@@ -1913,8 +1930,8 @@ function deriveTargetContracts(
 /**
  * Parse a supplied link and recover its producer's durable schema contract.
  * A metadata-less linked document is held to the prior argument contract on
- * a pattern update (see the `priorArgumentSchema` option's doc on
- * `assertSuppliedLinkSchemasCompatible`); otherwise it is refused outright.
+ * a pattern update. Dynamic binding can explicitly accept an unproven source;
+ * other supplied-link operations require the durable contract.
  */
 function resolveDurableSource(
   suppliedLink: SuppliedLink,
@@ -1924,10 +1941,11 @@ function resolveDurableSource(
   pieces: PiecesController,
   priorArgumentSchema: JSONSchema | undefined,
   displayPath: string,
+  allowUnprovenSource: boolean,
 ): {
   link: NormalizedLink;
   linkedCell: Cell<unknown>;
-  durableSource: DurableSourceContract;
+  durableSource: DurableSourceContract | undefined;
 } {
   const link = parseLinkOrThrow(suppliedLink.value, linkBase);
   const linkedCell = pieces.runtime.getCellFromLink(
@@ -1937,7 +1955,7 @@ function resolveDurableSource(
   );
   // A direct Cell view can be narrowed with asSchema() just as easily as a
   // serialized alias can carry a narrowed schema. Neither is a future-value
-  // invariant, so every durable link needs producer-owned Piece metadata.
+  // invariant, so a static producer proof needs producer-owned metadata.
   let durableSource = durableSourceContract(linkedCell, pieces);
   if (durableSource === undefined && priorArgumentSchema !== undefined) {
     // Pattern update over existing state: hold a metadata-less linked doc to
@@ -1953,11 +1971,36 @@ function resolveDurableSource(
       }],
     };
   }
-  if (durableSource === undefined) {
+  if (durableSource === undefined && !allowUnprovenSource) {
     throw incompatibleLinkError(
       displayPath,
       "source has no durable schema contract",
     );
+  }
+  if (durableSource === undefined) {
+    // An ordinary document is dynamic; a known Piece document whose contract
+    // cannot be recovered is unproved. Check both metadata partitions, as for
+    // scoped producer-contract recovery, before admitting a dynamic binding.
+    const sourceLink = linkedCell.getAsNormalizedFullLink();
+    const scopes = sourceLink.scope === "space"
+      ? [sourceLink.scope]
+      : [sourceLink.scope, "space"] as const;
+    for (const scope of scopes) {
+      const root = pieces.runtime.getCellFromLink(
+        { ...sourceLink, path: [], schema: undefined, scope },
+        undefined,
+        linkedCell.tx,
+      );
+      if (
+        root.getMetaRaw("result") !== undefined ||
+        getPatternIdentityRef(root) !== undefined
+      ) {
+        throw incompatibleLinkError(
+          displayPath,
+          "source Piece metadata cannot establish a durable schema contract",
+        );
+      }
+    }
   }
   return { link, linkedCell, durableSource };
 }
@@ -2169,11 +2212,10 @@ function policePreservedEnvelope(
   // so only the serialized case needs this check (`policeRebuiltAlias`
   // polices the same forgery for rebuilt links). A serialized link only
   // reaches here when it is identical to already-committed state, but
-  // committed does not mean vetted — raw write paths
-  // (`PiecesController.link`) commit links without ever running this
+  // committed does not mean vetted — stored links can originate outside this
   // validator — so re-assert it: a carried wrapper's `asCell` STACK (kind
-  // and scope, per `asCellShapesMatch`; payload schemas are proved
-  // separately against the durable contracts) has to match every durable
+  // and scope, per `asCellShapesMatch`; payload compatibility is decided
+  // after these wrapper checks) has to match every durable
   // contract of the source. (Loom's injected links carry no envelope —
   // `PiecesController.link` serializes with `KeepAsCell.OnlyStream` — so the
   // real restore case is unaffected.)
@@ -2294,6 +2336,55 @@ function provePreservedContracts(
 }
 
 /**
+ * Whether an update retains both a committed handle and its input contract.
+ * The producer's policy remains on the linked document; preserving the same
+ * handle under the same contract changes neither its policy nor its authority.
+ * This proves consumer-contract continuity, not that the producer contract
+ * was checked at link creation or has stayed unchanged. Producer enforcement
+ * on access and commit governs the retained handle.
+ */
+function retainsInputHandleContract(
+  suppliedLink: SuppliedLink,
+  baseCell: Cell<unknown>,
+  basePath: readonly (string | number)[],
+  priorArgumentSchema: JSONSchema | undefined,
+  targetContracts: readonly PathSchemaContract[],
+): boolean {
+  if (
+    priorArgumentSchema === undefined ||
+    !linkMatchesCommittedState(suppliedLink, baseCell, basePath)
+  ) return false;
+  try {
+    const priorContracts = deriveTargetContracts(
+      priorArgumentSchema,
+      priorArgumentSchema,
+      false,
+      basePath,
+      suppliedLink.path,
+      suppliedLink.path.join(".") || "<root>",
+    );
+    const sameContract = (
+      prior: PathSchemaContract,
+      target: PathSchemaContract,
+    ): boolean =>
+      prior.mayBeMissing === target.mayBeMissing &&
+      schemasHaveSameContract(prior.schema, target.schema, {
+        sourceRoot: prior.root,
+        targetRoot: target.root,
+      });
+    return priorContracts.every((prior) =>
+      targetContracts.some((target) => sameContract(prior, target))
+    ) &&
+      targetContracts.every((target) =>
+        priorContracts.some((prior) => sameContract(prior, target))
+      );
+  } catch {
+    // An unprovable contract still needs the full producer-side proof.
+    return false;
+  }
+}
+
+/**
  * Validate every supplied link against the destination schema's contract,
  * one helper per concern, and return the links that preserve a direct handle
  * to their source (see `derivePreserveDecision`) — the subset a restoring
@@ -2312,8 +2403,19 @@ export function assertSuppliedLinkSchemasCompatible(
     destinationRoot?: JSONSchema;
 
     /**
+     * Admit a live source handle without producer-owned schema metadata. This
+     * preserves ordinary-cell and externally injected capability bindings in
+     * `PiecesController.link`; it provides no static payload or capability
+     * proof for such a source. Destination scope checks still apply. A source
+     * with a durable contract always undergoes the full proof; known Piece
+     * ownership without a recoverable contract is refused.
+     */
+    allowUnprovenSource?: boolean;
+
+    /**
      * The prior pattern's argument schema, supplied only on a pattern update
-     * over existing state. A linked document with no producer-owned metadata —
+     * over existing state. For callers without `allowUnprovenSource`, a
+     * linked document with no producer-owned metadata —
      * e.g. a mergeable-push element doc, which is created under the piece's
      * own write authority and never carries any — is then held to the prior
      * contract at the link's own path instead of failing closed outright: the
@@ -2321,6 +2423,9 @@ export function assertSuppliedLinkSchemasCompatible(
      * away values the piece may already hold is still rejected. Absent this
      * option (every non-update flow), an unprovable source stays a hard error,
      * so a fresh link to an arbitrary contract-less document is still refused.
+     * With `linksPreservedVerbatim`, this also proves an existing direct
+     * handle's consumer contract unchanged. Such a handle keeps the linked
+     * producer's policy without requiring that policy on the consumer schema.
      */
     priorArgumentSchema?: JSONSchema;
 
@@ -2374,6 +2479,7 @@ export function assertSuppliedLinkSchemasCompatible(
       pieces,
       options.priorArgumentSchema,
       displayPath,
+      options.allowUnprovenSource === true && isCell(suppliedLink.value),
     );
     const { localizedTargets, targetOuter } = localizeTargetOuter(
       targetContracts,
@@ -2388,6 +2494,9 @@ export function assertSuppliedLinkSchemasCompatible(
     );
     if (preservedOuter !== undefined) preservedDirectHandles.add(suppliedLink);
 
+    assertSourceScopeFits(targetContracts, linkedCell, displayPath);
+    if (durableSource === undefined) continue;
+
     const { rawSourceContracts, sourceContracts } = buildSourceContracts(
       durableSource,
       preservedOuter !== undefined,
@@ -2401,8 +2510,6 @@ export function assertSuppliedLinkSchemasCompatible(
         displayPath,
       );
     }
-    assertSourceScopeFits(targetContracts, linkedCell, displayPath);
-
     if (preservedOuter === undefined) {
       proveRebuiltContracts(sourceContracts, targetContracts, displayPath);
     } else {
@@ -2414,6 +2521,17 @@ export function assertSuppliedLinkSchemasCompatible(
         preservedOuter,
         displayPath,
       );
+      if (
+        options.linksPreservedVerbatim === true &&
+        options.destinationIsStream !== true &&
+        retainsInputHandleContract(
+          suppliedLink,
+          baseCell,
+          basePath,
+          options.priorArgumentSchema,
+          targetContracts,
+        )
+      ) continue;
       provePreservedContracts(
         localized.sourceContracts,
         localized.targetContracts,
@@ -2847,6 +2965,21 @@ class PiecePropIo implements PieceCellIo {
 
   async get(path?: CellPath) {
     const targetCell = await this.#getTargetCell();
+    if (this.#type === "input" && path?.length) {
+      assertPieceInputPath(targetCell, path, { allowArrayLength: true });
+      const { conditionalDepth } = schemaPathSelection(
+        targetCell.getAsNormalizedFullLink().schema,
+        path,
+        { allowArrayLength: true },
+      );
+      if (conditionalDepth !== undefined) {
+        return await this.#getFromRoot(
+          targetCell.key(...path.slice(0, conditionalDepth)),
+          path.slice(conditionalDepth),
+          true,
+        );
+      }
+    }
     if (!path?.length) {
       return await this.#getFromRoot(targetCell, []);
     }
@@ -2884,7 +3017,11 @@ class PiecePropIo implements PieceCellIo {
     return selected;
   }
 
-  async #getFromRoot(targetCell: Cell<unknown>, path: CellPath) {
+  async #getFromRoot(
+    targetCell: Cell<unknown>,
+    path: CellPath,
+    requireProjection = false,
+  ) {
     // Preserve the existing missing-path diagnostics and the distinction
     // between an absent field and a schema-valid undefined value.
     await targetCell.pull();
@@ -2894,14 +3031,78 @@ class PiecePropIo implements PieceCellIo {
     // those members instead of voiding to `undefined` while every child-path
     // read succeeds. See schemaWithScopedLinkRequiredsRelaxed for the
     // #4746-compatible rationale.
-    return resolveCellPath(
-      cellWithScopedLinkRequiredsRelaxed(targetCell),
-      path,
-    );
+    let root = cellWithScopedLinkRequiredsRelaxed(targetCell);
+    if (requireProjection) {
+      // A handle is a separate read boundary: syncing its outer projection
+      // only materializes the handle, so demand its payload before choosing
+      // a branch within it.
+      while (true) {
+        const schema = root.getAsNormalizedFullLink().schema;
+        if (
+          typeof schema === "object" && schema.asCell === undefined &&
+          (schema.anyOf || schema.oneOf || schema.allOf)
+        ) {
+          const localized = localizeOuterCellContract({ schema, root: schema });
+          if (localized.issue === undefined && localized.outer !== undefined) {
+            // A union of uniform handles is one handle over a payload union.
+            // Hoisting keeps handle construction and scope enforcement in the
+            // runtime; removing the wrapper would remove its read cap.
+            const { kind, scope } = localized.outer;
+            root = root.asSchema(
+              schemaWithProperties(localized.contract.schema, {
+                asCell: [
+                  { kind, ...(scope === undefined ? {} : { scope }) },
+                  ...ContextualFlowControl.getAsCellValues(
+                    localized.contract.schema,
+                  ),
+                ],
+              }),
+            );
+          }
+        }
+        const value = root.get();
+        if (!isCell(value)) break;
+        root = cellWithScopedLinkRequiredsRelaxed(value);
+        await root.pull();
+      }
+    }
+    return resolveCellPath(root, path, { requireProjection });
   }
 
-  getCell(): Promise<Cell<unknown>> {
-    return this.#getTargetCell();
+  /** Returns the root cell, or a path admitted through the input projection. */
+  async getCell(path?: CellPath): Promise<Cell<unknown>> {
+    const cell = await this.#getTargetCell();
+    if (!path?.length) return cell;
+    const selectedCell = cell.key(...path);
+    if (this.#type === "input") {
+      assertPieceInputPath(cell, path, { allowArrayLength: true });
+      const { conditionalDepth } = schemaPathSelection(
+        cell.getAsNormalizedFullLink().schema,
+        path,
+        { allowArrayLength: true },
+      );
+      if (conditionalDepth !== undefined) {
+        const value = await this.#getFromRoot(
+          cell.key(...path.slice(0, conditionalDepth)),
+          path.slice(conditionalDepth),
+          true,
+        );
+        // A projected container's backpointer retains its active branch.
+        // Primitives have no backpointer; carry their selected default onto
+        // the original Cell so absent slots preserve the same read value.
+        if (isCellResultForDereferencing(value)) return getCellOrThrow(value);
+        if (
+          value === undefined || value === null || typeof value === "string" ||
+          typeof value === "number" || typeof value === "boolean"
+        ) {
+          return selectedCell.asSchema(schemaWithProperties(
+            selectedCell.getAsNormalizedFullLink().schema ?? true,
+            { default: value },
+          ));
+        }
+      }
+    }
+    return selectedCell;
   }
 
   async set(value: unknown, path?: CellPath) {
@@ -2949,6 +3150,7 @@ class PiecePropIo implements PieceCellIo {
       let targetCell: Cell<unknown>;
       if (this.#type === "input") {
         targetCell = pieces.getArgument(piece);
+        assertPieceInputPath(targetCell, path ?? []);
       } else {
         const resultCell = pieces.getResult(piece);
         const durableSchema = resultCell.getMetaRaw("schema") as
@@ -3618,13 +3820,25 @@ export class PieceController<T = unknown> {
   }
 
   /**
+   * Helper for the meta reads below, which is the piece cell with no schema.
+   * A meta read registers a load of the document under the reading cell's
+   * schema, and this cell's is the pattern's result schema, so a read
+   * through it asks storage for every document the result reaches — a
+   * board's whole index — to answer one meta field. The schema-less view
+   * loads the document alone.
+   */
+  #metaView(): Cell<T> {
+    return this.#cell.asSchema(undefined);
+  }
+
+  /**
    * The piece's pattern pointer: the durable meta, or — for a KEYLESS piece
    * in the session that set it up — the runner's session-side pointer (the
    * never-durable contract, L3(a) RULED 2026-08-27: a keyless piece stamps
    * nothing durably; a fresh session correctly finds neither).
    */
   #patternPointer(): { identity: string; symbol: string } | undefined {
-    return getPatternIdentityRef(this.#cell) ??
+    return getPatternIdentityRef(this.#metaView()) ??
       this.#pieces.runtime.runner.sessionPatternPointerFor(this.#cell);
   }
 
@@ -3638,9 +3852,9 @@ export class PieceController<T = unknown> {
         ref: { kind: "uri", scheme: "pattern", hash: ref.identity },
       }),
     };
-    const repository = getPatternRepository(this.#cell);
+    const repository = getPatternRepository(this.#metaView());
     if (repository !== undefined) source.repository = repository;
-    const trackedSource = getPatternSource(this.#cell);
+    const trackedSource = getPatternSource(this.#metaView());
     if (trackedSource !== undefined) source.origin = trackedSource;
 
     try {
@@ -3755,7 +3969,10 @@ export class PieceController<T = unknown> {
   }
 
   async #loadCurrentPattern(
-    { projectResult = true }: { projectResult?: boolean } = {},
+    { projectResult = true, repairCache = true }: {
+      projectResult?: boolean;
+      repairCache?: boolean;
+    } = {},
   ): Promise<{
     pattern: Pattern;
     ref: { identity: string; symbol: string };
@@ -3769,6 +3986,7 @@ export class PieceController<T = unknown> {
       ref.identity,
       ref.symbol,
       this.#pieces.getSpace(),
+      { repairCache },
     );
     if (!pattern) {
       throw new Error(
@@ -3978,6 +4196,11 @@ export class PieceController<T = unknown> {
         baseline,
       );
       const mutationVersion = ++this.#mutationVersion;
+      // The transaction's own verdict: `editWithRetry` reports a rejected
+      // commit in its result, so past that check the transition is written.
+      // What can still fail is the schema refresh `#runMutation` runs after
+      // the operation, which does not undo the accepted detach.
+      let committed = false;
       try {
         await this.#runMutation(mutationVersion, async () => {
           const result = await this.#pieces.runtime.editWithRetry((tx) => {
@@ -3991,11 +4214,12 @@ export class PieceController<T = unknown> {
             return true;
           });
           if (result.error !== undefined) throw result.error;
+          committed = true;
           return this.#cell;
         });
         return { status: "applied" };
       } catch (error) {
-        if (await this.#sourceTransitionCommitted(transition.revisionId)) {
+        if (committed) {
           return {
             status: "applied",
             executionWarning: pieceSourceErrorMessage(error),
@@ -4147,9 +4371,7 @@ export class PieceController<T = unknown> {
         }
       }
 
-      candidate = await compileProgram(this.#pieces, program, {
-        previousEntryIdentity: previousRef.identity,
-      });
+      candidate = await compileProgram(this.#pieces, program);
       const candidateRef = this.#pieces.runtime.patternManager
         .getArtifactEntryRef(candidate);
       if (candidateRef === undefined) {
@@ -4220,48 +4442,61 @@ export class PieceController<T = unknown> {
       { selectedRevisionId: prepared.selectedRevisionId },
     );
     const mutationVersion = ++this.#mutationVersion;
+    // The accepted setup transaction's receipt, held exactly when storage
+    // accepted this change's transaction: from the resolved update, or from
+    // the post-commit error that carries it. It is what lets the catch below
+    // tell a transition that landed from one that did not.
+    let commit: PatternSetupCommitReceipt | undefined;
     try {
       await this.#runMutation(mutationVersion, async () => {
-        return await execute(
-          this.#pieces,
-          this.id,
-          candidate,
-          undefined,
-          {
-            start: true,
-            expectedPatternIdentity: previousRef,
-            validateCurrentArgument: acceptedReview === undefined
-              ? undefined
-              : (argumentCell) => {
-                const evidence = pieceSourceArgumentEvidence(
-                  argumentCell,
-                  this.#pieces,
-                );
-                if (evidence !== acceptedReview.argumentEvidence) {
-                  throw new Error(
-                    "the retained piece input changed after compatibility was checked",
+        try {
+          const result = await executePatternUpdate(
+            this.#pieces,
+            this.id,
+            candidate,
+            undefined,
+            {
+              expectedPatternIdentity: previousRef,
+              validateCurrentArgument: acceptedReview === undefined
+                ? undefined
+                : (argumentCell) => {
+                  const evidence = pieceSourceArgumentEvidence(
+                    argumentCell,
+                    this.#pieces,
                   );
+                  if (evidence !== acceptedReview.argumentEvidence) {
+                    throw new Error(
+                      "the retained piece input changed after compatibility was checked",
+                    );
+                  }
+                },
+              validateArgumentLinks: (argumentCell, argumentSchema) => {
+                try {
+                  assertPieceSourceRetainedLinksCompatible(
+                    argumentCell,
+                    argumentSchema,
+                    this.#pieces,
+                    previousPattern.argumentSchema,
+                  );
+                } catch (error) {
+                  const message = error instanceof Error
+                    ? error.message
+                    : String(error);
+                  if (acceptedReview?.issues.retainedLinks === message) return;
+                  throw error;
                 }
               },
-            validateArgumentLinks: (argumentCell, argumentSchema) => {
-              try {
-                assertPieceSourceRetainedLinksCompatible(
-                  argumentCell,
-                  argumentSchema,
-                  this.#pieces,
-                  previousPattern.argumentSchema,
-                );
-              } catch (error) {
-                const message = error instanceof Error
-                  ? error.message
-                  : String(error);
-                if (acceptedReview?.issues.retainedLinks === message) return;
-                throw error;
-              }
+              sourceTransition: transition,
             },
-            sourceTransition: transition,
-          },
-        ) as Cell<T>;
+          );
+          commit = result.commit;
+          return result.cell as Cell<T>;
+        } catch (error) {
+          if (error instanceof PatternSetupPostCommitError) {
+            commit = error.commit;
+          }
+          throw error;
+        }
       });
       // The transition cleared whatever the last reconciliation concluded,
       // and this is the fresh answer: the piece now runs what this origin
@@ -4287,15 +4522,20 @@ export class PieceController<T = unknown> {
       }
       return { status: "applied" };
     } catch (error) {
-      if (await this.#sourceTransitionCommitted(transition.revisionId)) {
+      if (commit !== undefined) {
         // The transition committed and running its source then failed, so
         // neither outcome is true: the piece did not decline this source, and
         // it is not demonstrably running it either. The warning below says
         // what happened, and the next reconciliation settles what the piece
-        // is doing rather than this guessing now.
+        // is doing rather than this guessing now. The wrapper's own message
+        // only restates that split, so the warning carries the cause — the
+        // failure itself — as `setPattern`'s refresh arm does.
+        const cause = error instanceof PatternSetupPostCommitError
+          ? error.cause
+          : error;
         return {
           status: "applied",
-          executionWarning: pieceSourceErrorMessage(error),
+          executionWarning: pieceSourceErrorMessage(cause),
         };
       }
       if (isOverridableArgumentCompatibilityError(error)) {
@@ -4326,28 +4566,21 @@ export class PieceController<T = unknown> {
   }
 
   /**
-   * Would `setPattern(program)` be accepted? Answers without changing the piece.
-   *
-   * Drives the SAME review the apply path runs — no second copy of the rules,
-   * because a preflight that reimplements them drifts and starts lying.
-   *
-   * It is not, however, a pure read. Compiling the candidate goes through
-   * `compileAndSavePattern`, which writes the compiled module set and its
-   * source docs into the space's content-addressed store (CT-1623) — the same
-   * write the apply would do, idempotent, and attached to nothing. What it
-   * does NOT do is touch the piece: no pointer move, no argument re-stage, no
-   * source transition, no revision. So a refused check leaves the piece
-   * running exactly what it was running, which is the guarantee a caller
-   * actually needs; it does not leave the space byte-identical.
+   * Review a candidate with the same compatibility rules used by source setup.
+   * Compilation and source loading reuse verified caches without writing to
+   * storage or creating module-update authority. Reads retain their normal
+   * server-demand semantics. Apply validates retained input and source currency
+   * again at commit time.
    */
   async checkPattern(
     program: RuntimeProgram,
   ): Promise<PatternCompatibilityReport> {
-    const { pattern: previousPattern, ref: previousRef } = await this
-      .#loadCurrentPattern();
-    const candidate = await compileProgram(this.#pieces, program, {
-      previousEntryIdentity: previousRef.identity,
-    });
+    const { pattern: previousPattern } = await this
+      .#loadCurrentPattern({ repairCache: false });
+    const candidate = await this.#pieces.runtime.patternManager.compilePattern(
+      program,
+      { space: this.#pieces.getSpace(), persist: false },
+    );
     const candidateRef = this.#pieces.runtime.patternManager
       .getArtifactEntryRef(candidate);
     if (candidateRef === undefined) {
@@ -4480,30 +4713,15 @@ export class PieceController<T = unknown> {
             ? { allowUnavailable: true }
             : {},
         );
-        const pattern = await compileProgram(
-          this.#pieces,
-          program,
-          baseline.kind === "retain"
-            ? { previousEntryIdentity: previousRef.identity }
-            : {},
-        );
+        const pattern = await compileProgram(this.#pieces, program);
         const candidate = this.#pieces.runtime.patternManager
           .getArtifactEntryRef(pattern);
         if (candidate === undefined) {
           throw new Error("the candidate source has no pattern identity");
         }
-        // Enforcement is this assertion plus the execute-time validators
-        // below, and it must stay that way. Do not move the aggregate
-        // compatibility review (`pieceSourceCompatibilityReview`, what
-        // `checkPattern` runs) in front of it.
-        //
-        // The review materializes and validates the stored argument. When the
-        // whole argument document is cold, Runner deliberately defers
-        // validation and preserves its bytes; running the review here would
-        // instead validate `undefined` and refuse the update.
-        //
-        // Callers who want every reason at once run `checkPattern()`, which is
-        // exactly what `--check` is for.
+        // Enforce the contract here and the stored-input checks inside the
+        // setup transaction. `checkPattern()` collects the same checks for
+        // preflight; its read-time verdict cannot replace commit-time checks.
         if (!options?.dangerouslyAllowIncompatibleSchema) {
           // Reached only when the load above succeeded: a failed load
           // without the flag rethrows there.
@@ -4664,24 +4882,6 @@ export class PieceController<T = unknown> {
     }
   }
 
-  async #sourceTransitionCommitted(revisionId: string): Promise<boolean> {
-    try {
-      if (
-        getPieceSourceRevisions(this.#cell).some((revision) =>
-          revision.revisionId === revisionId
-        )
-      ) {
-        return true;
-      }
-      await this.#cell.sync();
-      return getPieceSourceRevisions(this.#cell).some((revision) =>
-        revision.revisionId === revisionId
-      );
-    } catch {
-      return false;
-    }
-  }
-
   async readingFrom(): Promise<PieceController[]> {
     const cells = await this.#pieces.getReadingFrom(this.#cell);
     return cells.map((cell) => new PieceController(this.#pieces, cell));
@@ -4751,6 +4951,55 @@ function samePieceSourceSnapshot(
 
 const RETAINED_INPUT_COMPATIBILITY_PREFIX =
   "piece source is incompatible with retained input: ";
+
+async function syncRetainedLinkMetadata(
+  argumentCell: Cell<unknown>,
+  pieces: PiecesController,
+): Promise<void> {
+  const roots = new Map<string, Cell<unknown>>();
+  for (const supplied of suppliedLinks(argumentCell.getRaw())) {
+    let base = argumentCell;
+    for (const segment of supplied.path) {
+      base = base.key(segment as keyof unknown) as Cell<unknown>;
+    }
+    const link = parseLinkOrThrow(supplied.value, base);
+    const root = pieces.runtime.getCellFromLink({
+      ...link,
+      path: [],
+      schema: undefined,
+    });
+    const { space, id, scope } = root.getAsNormalizedFullLink();
+    roots.set(JSON.stringify([space, id, scope]), root);
+  }
+  await Promise.all([...roots.values()].map(async (root) => {
+    // Naming the source root loads the document with its metadata; a value
+    // crossing loads only the selected value and does not establish that
+    // contract evidence. The owner result an argument or internal document
+    // names through its `result` backlink is a document of its own, named
+    // in turn: the contract reads its metadata, and the store delivers no
+    // link target with the document that carries the link.
+    await root.sync();
+    const link = root.getAsNormalizedFullLink();
+    let metaRoot = root;
+    if (
+      link.scope !== "space" && root.getMetaRaw("schema") === undefined &&
+      root.getMetaRaw("result") === undefined
+    ) {
+      // Scoped input redirects keep their producer metadata in base scope;
+      // scoped results instead own their metadata in the selected partition.
+      metaRoot = pieces.runtime.getCellFromLink({ ...link, scope: "space" });
+      await metaRoot.sync();
+    }
+    const ownerLink = getMetaLink(metaRoot, "result");
+    if (ownerLink !== undefined) {
+      await pieces.runtime.getCellFromLink({
+        ...ownerLink,
+        path: [],
+        schema: undefined,
+      }).sync();
+    }
+  }));
+}
 
 function assertPieceSourceRetainedLinksCompatible(
   argumentCell: Cell<unknown>,
@@ -4842,26 +5091,21 @@ async function pieceSourceCompatibilityReview(
   }
 
   const argumentCell = pieces.getArgument(piece);
-  await argumentCell.sync();
-  const materializedArgument = argumentCell.asSchema(undefined).get();
-  const validationArgument = mergeSchemaDefaults(
-    materializedArgument,
-    extractDefaultValues(candidate.argumentSchema),
-    candidate.argumentSchema,
-    { mergeMaterializedLinks: true },
-  );
-  const validationFailure = validateSchemaValue(
-    candidate.argumentSchema,
-    validationArgument,
-    candidate.argumentSchema,
-    { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
-  );
-  if (validationFailure !== undefined) {
-    issues.argument =
-      `updated arguments do not match the candidate schema: ${validationFailure}`;
+  // The candidate can select inputs the current pattern does not expose.
+  // Sync its projection before validating the newly selected values.
+  await argumentCell.asSchema(candidate.argumentSchema).sync();
+  try {
+    pieces.runtime.runner.validateStoredArgument(
+      pieces.runtime.readTx(),
+      piece,
+      candidate,
+    );
+  } catch (error) {
+    issues.argument = pieceSourceErrorMessage(error);
   }
 
   try {
+    await syncRetainedLinkMetadata(argumentCell, pieces);
     assertPieceSourceRetainedLinksCompatible(
       argumentCell,
       candidate.argumentSchema,
@@ -5006,6 +5250,12 @@ function pieceSourceTransition(
   };
 }
 
+/**
+ * Helper for `setInput()`, which re-runs the piece's current pattern over a
+ * caller-supplied argument. A source change goes through
+ * `executePatternUpdate` below instead, which carries the transition and
+ * returns the accepted transaction's receipt.
+ */
 async function execute(
   pieces: PiecesController,
   pieceId: string,
@@ -5014,15 +5264,6 @@ async function execute(
   options?: {
     start?: boolean;
     expectedPatternIdentity?: { identity: string; symbol: string };
-    validateCurrentArgument?: (
-      argumentCell: Cell<unknown>,
-    ) => void;
-    validateArgumentLinks?: (
-      argumentCell: Cell<unknown>,
-      argumentSchema: JSONSchema,
-    ) => void;
-    repository?: string;
-    sourceTransition?: PieceSourceTransition;
   },
 ): Promise<Cell<unknown>> {
   return await pieces.runWithPattern(pattern, pieceId, input, options);

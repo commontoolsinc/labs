@@ -31,6 +31,7 @@ import {
   friendlyError,
   github,
   githubDownload,
+  groupDigits,
   median,
   sparkline,
 } from "../lib.ts";
@@ -72,11 +73,6 @@ const startOf = (day: string): number => Date.parse(`${day}T00:00:00Z`);
 // Both windows below are counted in whole days from the start of today, so
 // which days they hold does not turn on what time of day the tile collected.
 const todayAt = (now: number): number => Math.floor(now / DAY_MS) * DAY_MS;
-
-/** An integer with its thousands separated, the same in every locale. */
-export function groupDigits(value: number): string {
-  return String(Math.round(value)).replace(/\B(?=(\d{3})+$)/g, ",");
-}
 
 /** The tail of `samples` the median is taken over: the recent days. */
 export function trendWindow(

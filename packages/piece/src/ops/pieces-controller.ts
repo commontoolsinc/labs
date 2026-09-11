@@ -30,6 +30,7 @@ import {
   getPatternSetupIdentityRef,
   getPatternSource,
   getPieceSourceSnapshot,
+  idStringForEntityAddress,
   isCell,
   isLink,
   isStoredArgumentSchemaRefusal,
@@ -88,7 +89,15 @@ import {
   HOME_PATTERN_SOURCE,
   patternSourceUrl,
 } from "../system-pattern-url.ts";
-import { PieceController } from "./piece-controller.ts";
+import {
+  assertSuppliedLinkSchemasCompatible,
+  assertWritablePiecePath,
+  PieceController,
+} from "./piece-controller.ts";
+import {
+  assertPieceInputPath,
+  PieceInputPathError,
+} from "./piece-input-path.ts";
 import { reconcilePieceSource } from "./piece-origin.ts";
 import { compileProgram } from "./utils.ts";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
@@ -458,10 +467,21 @@ export class PiecesController<T = unknown> {
       );
   }
 
+  /**
+   * Whether this space's identifier index holds the entity `id` addresses,
+   * without reading what it holds there. `undefined` where the server does not
+   * advertise the lookup, which is neither a yes nor a no.
+   *
+   * The address takes either spelling of an unkinded entity, as
+   * {@link PiecesController.getPieceCell} takes one. Both spellings are in
+   * circulation here: a registered piece reports its own id as the bare tagged
+   * hash, and the index keys on the `of:` id over it, so an address read back
+   * off a listing asks about the piece that listing named.
+   */
   async entityIdExists(id: string): Promise<boolean | undefined> {
     await this.ready;
     return await this.runtime.storageManager.open(this.#space).entityIdExists?.(
-      id,
+      idStringForEntityAddress(id),
     );
   }
 
@@ -1723,14 +1743,18 @@ export class PiecesController<T = unknown> {
   }
 
   /**
-   * Set the target cell's argument cell at target path to be a link to the
-   * link cell's content at linkPath.
+   * Links the source result at `linkPath` into the target argument at
+   * `targetPath`. A target piece must declare the path in its current input
+   * schema; raw cell targets accept paths without a piece-schema check.
    *
-   * @param linkPieceId
-   * @param linkPath
-   * @param targetPieceId
-   * @param targetPath
-   * @param options
+   * Piece inputs validate the binding against durable producer metadata in
+   * the write transaction. Sources without that metadata remain dynamic
+   * bindings without a static producer-contract proof. Binding a Stream
+   * stores its handle; it does not send an event.
+   *
+   * @throws {PieceInputPathError} If the target piece's input schema does not
+   * expose the path. Update its source with `cf piece setsrc` to declare the
+   * input before linking it.
    */
   async link(
     linkPieceId: string,
@@ -1744,7 +1768,7 @@ export class PiecesController<T = unknown> {
     },
   ): Promise<void> {
     const start = options?.start ?? true;
-    let linkCell = this.runtime.getCellFromEntityId(
+    const linkCell = this.runtime.getCellFromEntityId(
       this.#space,
       entityIdFrom(linkPieceId),
       [],
@@ -1753,8 +1777,6 @@ export class PiecesController<T = unknown> {
       options?.sourceScope,
     );
     await linkCell.sync();
-    linkCell = linkCell.asSchemaFromLinks(); // Make sure we have the full schema
-    linkCell = linkCell.key(...linkPath);
     // Keep Piece result links anchored at the public result projection. Its
     // durable, monotonically narrowing result schema is the producer contract;
     // resolving through an alias here would discard that contract and point at
@@ -1766,10 +1788,13 @@ export class PiecesController<T = unknown> {
         this,
         targetPieceId,
         "Target",
-        options,
+        { ...options, start: false },
       );
 
     const result = await this.runtime.editWithRetry((tx) => {
+      // Recover the producer view in the transaction that commits the binding,
+      // so a concurrent contract change invalidates the transaction's reads.
+      const source = linkCell.withTx(tx).asSchemaFromLinks().key(...linkPath);
       let targetInputCell = targetCell.withTx(tx);
       if (targetIsPiece) {
         // For pieces, target fields are in the result cell's argument
@@ -1789,19 +1814,49 @@ export class PiecesController<T = unknown> {
           undefined,
           tx,
         );
+        assertPieceInputPath(targetInputCell, targetPath);
+        const targetSchema = targetArgumentLink.schema ?? true;
+        assertWritablePiecePath(
+          targetSchema,
+          targetPath,
+          true,
+          false,
+          targetInputCell,
+        );
+        assertSuppliedLinkSchemasCompatible(
+          [{ path: targetPath, value: source }],
+          targetSchema,
+          targetInputCell,
+          this,
+          { allowUnprovenSource: true },
+        );
       }
 
       targetInputCell.key(...targetPath).setRawUntyped(
-        linkCell.getAsLink({
+        source.getAsLink({
           base: targetInputCell,
           includeSchema: true,
           keepAsCell: KeepAsCell.OnlyStream,
         }),
       );
     });
-    if (result.error) throw result.error;
+    if (result.error) {
+      if (
+        result.error.name === "StorageTransactionAborted" &&
+        result.error.reason instanceof PieceInputPathError
+      ) {
+        throw result.error.reason;
+      }
+      throw new Error(
+        `Cannot link ${linkPieceId}/${linkPath.join("/")} to ${targetPieceId}/${
+          targetPath.join("/")
+        }: ${result.error.message}`,
+        { cause: result.error },
+      );
+    }
 
     if (targetIsPiece && start) {
+      await this.runtime.start(targetCell);
       await this.getResult(targetCell).pull();
     }
     await this.synced();
@@ -2301,6 +2356,9 @@ export class PiecesController<T = unknown> {
         this.getSpace(),
       );
       if (pattern === undefined) return root;
+      // The re-stage writes over the stored setup's cells, which are named
+      // before the transaction that writes them opens.
+      await this.runtime.runner.syncStoredPieceCells(root, pattern);
       const result = await timePiecePhase(
         "ensureDefaultPattern.restageRootSetup",
         () =>

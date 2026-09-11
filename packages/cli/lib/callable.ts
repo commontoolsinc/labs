@@ -45,9 +45,11 @@ import {
   type CellSelection,
   CellSelectionError,
   deriveSelectedValue,
+  LINK_MARKER_KEY,
 } from "./cell-selection.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
+import { timeCliPhase } from "./trace-timing.ts";
 import { noteWroteTo, transactionWroteTo } from "./write-receipt.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
@@ -458,6 +460,19 @@ function isOpaqueReference(value: unknown): boolean {
  * where a caller may write a link in place of a value. */
 function carriesCellMarker(node: Record<string, unknown>): boolean {
   return node.asCell !== undefined || node.asStream !== undefined;
+}
+
+/**
+ * The address inside the `{"$link": "/of:…"}` object a marked read renders
+ * (`composeLinkAddresses`, cell-selection.ts), whether the address stands
+ * alone there or the contents the same read projected sit beside it.
+ * `undefined` for every other value, a `$link` holding no string included:
+ * `{"$link": true}` is the projection-schema marker, not an address.
+ */
+function printedAddressOf(value: unknown): string | undefined {
+  if (!isObjectNotArray(value)) return undefined;
+  const address = (value as Record<string, unknown>)[LINK_MARKER_KEY];
+  return typeof address === "string" ? address : undefined;
 }
 
 /**
@@ -872,7 +887,11 @@ export function verbInputSchemaError(
  * event schema keeps and a link-derived dispatch schema does not, see
  * `CallableResolution.declaredEvent` — a string holding the address a read
  * emits (`/of:…`, the canonical fabric reference) converts to the link
- * envelope dispatch already accepts.
+ * envelope dispatch already accepts. So does the `{"$link": "/of:…"}` object
+ * a marked read renders that address in, alone or joined by the contents the
+ * same read projected: the address inside is what the position takes, and
+ * the contents beside it are the target's own fields, which a reference
+ * never stores.
  * An address printed by one command is now a verb argument in the next,
  * which is the property the CLI surface states for commands, one level in.
  *
@@ -909,10 +928,11 @@ export function resolveEmittedAddressArguments(
   // authored cell wrapper was declared, so the pre-resolution node is
   // checked as well as the target.
   if (!atRoot && (carriesCellMarker(schema) || carriesCellMarker(node))) {
-    if (typeof value === "string") {
+    const spelled = printedAddressOf(value) ?? value;
+    if (typeof spelled === "string") {
       let parsed: NormalizedLLMFriendlyRef | undefined;
       try {
-        parsed = normalizeLLMFriendlyRef(value);
+        parsed = normalizeLLMFriendlyRef(spelled);
       } catch {
         parsed = undefined;
       }
@@ -926,7 +946,8 @@ export function resolveEmittedAddressArguments(
       ) {
         return {
           value,
-          refusal: `${JSON.stringify(value)} at ${path} is not an address — ` +
+          refusal:
+            `${JSON.stringify(spelled)} at ${path} is not an address — ` +
             `the position declares a reference, and takes the /of:… form ` +
             `a read prints`,
         };
@@ -1135,7 +1156,12 @@ function carriesInlineObject(value: unknown, atRoot = true): boolean {
   );
 }
 
-function cloneWithoutBoundToolKeys(
+/**
+ * A tool's argument schema as a caller sees it: the schema less the `result`
+ * slot and every parameter the tool binds through `extraParams`, which a
+ * caller cannot set.
+ */
+export function cloneWithoutBoundToolKeys(
   schema: JSONSchema,
   extraParams: Record<string, unknown>,
 ): JSONSchema {
@@ -1617,24 +1643,29 @@ export async function executeResolvedCallable(
       throw new Error("--no-wait requires an invocation id");
     }
     deps.onPhase?.("dispatched");
-    const tx = await new Promise<IExtendedStorageTransaction>(
-      (resolve, reject) => {
-        try {
-          if (invocation !== undefined) {
-            resolved.callableCell.send(dispatchInput, resolve, {
-              // The id and the session that chose it travel together: an id
-              // is the caller's own word, and only the pair decides which
-              // receipt this handling files under.
-              eventId: invocation.id,
-              session: invocation.session,
-            });
-          } else {
-            resolved.callableCell.send(dispatchInput, resolve);
+    // The span runs from the send to the handling's final commit callback:
+    // the dispatch-to-commit time the `--verbose` phases report, beside the
+    // readback spans below.
+    const tx = await timeCliPhase(
+      "executeCallable.dispatch",
+      () =>
+        new Promise<IExtendedStorageTransaction>((resolve, reject) => {
+          try {
+            if (invocation !== undefined) {
+              resolved.callableCell.send(dispatchInput, resolve, {
+                // The id and the session that chose it travel together: an
+                // id is the caller's own word, and only the pair decides
+                // which receipt this handling files under.
+                eventId: invocation.id,
+                session: invocation.session,
+              });
+            } else {
+              resolved.callableCell.send(dispatchInput, resolve);
+            }
+          } catch (error) {
+            reject(error);
           }
-        } catch (error) {
-          reject(error);
-        }
-      },
+        }),
     );
     // Acknowledgment is transaction-local (verb contract, Settlement): the
     // commit callback above fires on THIS handling's final commit. Awaiting
@@ -1703,7 +1734,10 @@ export async function executeResolvedCallable(
     let links: Record<string, InvocationResultLink> | undefined;
     if (link) {
       const receipt = resolved.pieces.runtime.getCellFromLink<any>(link);
-      const value = await receipt.pull();
+      const value = await timeCliPhase(
+        "executeCallable.receipt.pull",
+        () => receipt.pull(),
+      );
       // A value-less verb's receipt is an empty record — existence-only.
       // Presence is decided on the receipt's STORED value, never on the
       // materialized one: a `FabricInstance` crossing the cell read arrives
@@ -1726,11 +1760,9 @@ export async function executeResolvedCallable(
         // nothing, and that omission is the distinction the empty receipt
         // exists to draw.
         if (deps.selection !== undefined) {
-          result = await selectCallResult(
-            resolved,
-            receipt,
-            deps.selection,
-            deps,
+          result = await timeCliPhase(
+            "executeCallable.select",
+            () => selectCallResult(resolved, receipt, deps.selection!, deps),
           );
         }
         // Whatever the value in hand came from — the whole receipt, or the
@@ -1742,13 +1774,17 @@ export async function executeResolvedCallable(
         // has, and the bound below engages only where one does not.
         const cycle = circularResultPath(result);
         if (cycle !== undefined) {
-          result = await boundCyclicResult(
-            resolved,
-            receipt,
-            result,
-            cycle,
-            link.id,
-            deps,
+          result = await timeCliPhase(
+            "executeCallable.boundCyclic",
+            () =>
+              boundCyclicResult(
+                resolved,
+                receipt,
+                result,
+                cycle,
+                link.id,
+                deps,
+              ),
           );
         }
       }

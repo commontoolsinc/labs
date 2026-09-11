@@ -20,6 +20,7 @@ import {
   type HarnessPromptSlotBindingSource,
 } from "./contracts/cfc-policy-snapshot.ts";
 import {
+  ADDRESS_HANDLE_TOKEN_PREFIX,
   HANDLE_TOKEN_PATTERN,
   type HarnessHandleEntry,
   type HarnessHandleTable,
@@ -124,7 +125,6 @@ import {
   type CreateHarnessEngineOptions,
 } from "./engine.ts";
 import { OpenAICompatibleGatewayClient } from "./gateway/openai-client.ts";
-import { ADDRESS_HANDLE_TOKEN_PREFIX } from "./contracts/handle-table.ts";
 import {
   createHarnessHandleTable,
   defineOwnEntry,
@@ -2840,6 +2840,7 @@ export class CfHarnessPromptLoop {
       // neither tool.
       skillRegistryAvailable: this.engine.config.skillsRoot !== undefined,
       docsCorpusAvailable: this.engine.docsCorpusAvailable,
+      loomAuthoringAvailable: this.engine.config.loomAuthoring !== undefined,
     };
   }
 
@@ -2927,16 +2928,21 @@ export class CfHarnessPromptLoop {
   }
 
   /**
-   * Runs the loop, then sends whatever this session staged for the pattern
-   * index.
+   * Runs the loop, then sends whatever this session owes the pattern index:
+   * the pattern it staged for publication, and the reports its runs made
+   * about the indexed patterns they ran.
    *
    * The flush belongs here rather than at each `run_pattern` because the
    * ledger publishes once per capability per SESSION, and a session's last
-   * word on a capability is only known once the session is over. It runs on
-   * the failure paths too: a run that ends in an error still authored
-   * whatever it authored, and the alternative is silently discarding it.
-   * A flush failure is logged by the ledger and never displaces the loop's
-   * own result or its error.
+   * word on a capability is only known once the session is over. A report is
+   * sent as soon as the run makes it, and is waited for here because the
+   * process ends by exiting rather than by running out of work, so a report
+   * nothing waits for is a report that can be cut off in flight. The flush
+   * runs on the failure paths too: a run that ends in an error still authored
+   * whatever it authored and still ran whatever it ran, and the alternative
+   * is silently discarding it. The ledger catches and logs each write's own
+   * failure, so the flush answers with nothing to displace the loop's own
+   * result or its error.
    */
   async runTranscript(
     options: RunHarnessTranscriptOptions,
@@ -2944,7 +2950,7 @@ export class CfHarnessPromptLoop {
     try {
       return await this.#runTranscript(options);
     } finally {
-      await this.engine.flushPatternIndexPublications();
+      await this.engine.flushPatternIndexLedger();
     }
   }
 
@@ -3292,18 +3298,22 @@ export class CfHarnessPromptLoop {
 
   /**
    * Helper for `#invokeToolCall()`, which replaces handle tokens in a parsed
-   * tool input with their canonical address strings. Two tools are exempt:
+   * tool input with their canonical address strings. Custody-checking tools are exempt:
    * `delegate_task`, whose `goal` and `context` reach the child as the model
    * wrote them (its `skillHandle` is resolved separately, trusted-side,
    * before dispatch), and `describe_handle`, whose input names a token rather
-   * than a referent — it looks the token up in the table itself. Returns
+   * than a referent — it looks the token up in the table itself. `loom_compose`
+   * also proves membership before resolving a Pattern Instance. Returns
    * `input` itself when no substitution applies.
    */
   #resolveHandleTokensInToolInput(
     toolId: string,
     input: Record<string, unknown>,
   ): Record<string, unknown> {
-    if (toolId === "delegate_task" || toolId === "describe_handle") {
+    if (
+      toolId === "delegate_task" || toolId === "describe_handle" ||
+      toolId === "loom_compose"
+    ) {
       return input;
     }
     const table = this.engine.handleTable;

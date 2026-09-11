@@ -1,0 +1,29 @@
+diff --git a/packages/runner/src/runner-utils.ts b/packages/runner/src/runner-utils.ts
+index c15bc246c5..ce673aa8cc 100644
+--- a/packages/runner/src/runner-utils.ts
++++ b/packages/runner/src/runner-utils.ts
+@@ -726,6 +726,7 @@ function mergeSchemaDefaultsInternal(
+ 
+     const existing = valuePresent ? value as Record<string, unknown> : {};
+     const result: Record<string, unknown> = { ...existing };
++    let unchanged = valuePresent;
+     // Object-shaped unions (including Common Fabric's non-standard
+     // `type: ["object", "undefined"]`) still need presence-aware merging. A
+     // generic merge cannot distinguish an absent property from an own property
+@@ -773,6 +774,7 @@ function mergeSchemaDefaultsInternal(
+           }) === undefined
+         )
+       ) {
++        unchanged &&= hasExistingValue && Object.is(merged, existing[key]);
+         Object.defineProperty(result, key, {
+           value: merged,
+           enumerable: true,
+@@ -781,7 +783,7 @@ function mergeSchemaDefaultsInternal(
+         });
+       }
+     }
+-    return valuePresent && schemaDefaultValueEqual(result, value)
++    return unchanged || (valuePresent && schemaDefaultValueEqual(result, value))
+       ? value
+       : result;
+   } finally {

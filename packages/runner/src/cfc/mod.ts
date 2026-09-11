@@ -245,6 +245,10 @@ export type {
   CfcPrepareInstrumentation,
   StoredCfcEnvelope,
 } from "./prepare.ts";
+export {
+  reportCfcDenial,
+  resetCfcDenialAnnouncements,
+} from "./denial-report.ts";
 export { cfcMetadataPresent, readStoredCfcMetadata } from "./metadata.ts";
 export { cfcSchemaMergeIssue } from "./schema-merge.ts";
 export type { CfcSchemaMergeIssue, IfcKey } from "./schema-merge.ts";
@@ -269,6 +273,7 @@ export {
   stampExternalIngest,
 } from "./external-ingest.ts";
 export {
+  CFC_DIAL_LADDERS,
   cfcPostureReport,
   inheritedCfcPostureReport,
   projectedCfcPostureReport,

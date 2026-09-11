@@ -10,6 +10,7 @@ import {
   indexChangeOf,
   type IndexPreflight,
   type IndexSnapshot,
+  main,
   parseMeasurementSuite,
   preflightCellSpec,
   preflightPosture,
@@ -21,7 +22,6 @@ import {
   resolveImportedPatternOrigins,
   runTask,
 } from "../scripts/run-measurement-batch.ts";
-import { main } from "../scripts/run-measurement-batch.ts";
 import { emptyTotals as emptyMeasurementTotals } from "../scripts/measure-runs.ts";
 import observedStatus from "./support/measurement-console-status.json" with {
   type: "json",
@@ -49,8 +49,6 @@ const renderBatchReport = (
     consolePreflight: CONSOLE_PREFLIGHT,
     cellSpec: { kind: "unasked" },
   });
-
-const TOKEN = "cf_harness_console_token=fixture-token";
 
 /**
  * One event stream, delivered a chunk at a time.
@@ -172,19 +170,13 @@ const startFakeConsole = (options: FakeConsoleOptions): FakeConsole => {
   }, async (request) => {
     const url = new URL(request.url);
     if (url.pathname === "/") {
-      return new Response("<!doctype html>", {
-        headers: {
-          "set-cookie": `${TOKEN}; SameSite=Strict; HttpOnly; Path=/`,
-        },
-      });
+      return new Response("<!doctype html>");
     }
-    // The fabric server is a different host from the console and gates
-    // nothing on the console's token, so this answers before the gate.
     if (url.pathname === "/api/meta") {
       return Response.json(options.meta ?? META);
     }
-    if (request.headers.get("cookie") !== TOKEN) {
-      return new Response("forbidden", { status: 403 });
+    if (url.pathname === "/api/health") {
+      return Response.json({ ok: true });
     }
     if (url.pathname === "/api/task") {
       const body = await request.json() as { text: string };
@@ -622,17 +614,17 @@ describe("run-measurement-batch", () => {
 
   describe("ConsoleClient", () => {
     describe("open()", () => {
-      it("throws for a server that hands out no token cookie", async () => {
+      it("throws naming the status for a server whose health does not answer", async () => {
         const server = Deno.serve(
           { port: 0, onListen: () => {} },
-          () => new Response("no cookie here"),
+          () => new Response("not a console", { status: 404 }),
         );
         try {
           await expect(
             ConsoleClient.open(
               `http://127.0.0.1:${(server.addr as Deno.NetAddr).port}`,
             ),
-          ).rejects.toThrow("handed out no cf_harness_console_token cookie");
+          ).rejects.toThrow("/api/health answered 404");
         } finally {
           await server.shutdown();
         }
@@ -1285,10 +1277,8 @@ describe("run-measurement-batch", () => {
     it("refuses a status answer that is not an object", async () => {
       const server = Deno.serve({ port: 0, onListen: () => {} }, (request) => {
         const url = new URL(request.url);
-        if (url.pathname === "/") {
-          return new Response("", {
-            headers: { "set-cookie": `${TOKEN}; Path=/` },
-          });
+        if (url.pathname === "/api/health") {
+          return Response.json({ ok: true });
         }
         return Response.json("not an object");
       });
@@ -1364,10 +1354,8 @@ describe("run-measurement-batch", () => {
     it("throws for a console that answered without a session and turn", async () => {
       const server = Deno.serve({ port: 0, onListen: () => {} }, (request) => {
         const url = new URL(request.url);
-        if (url.pathname === "/") {
-          return new Response("", {
-            headers: { "set-cookie": `${TOKEN}; Path=/` },
-          });
+        if (url.pathname === "/api/health") {
+          return Response.json({ ok: true });
         }
         return Response.json({ nothing: true });
       });

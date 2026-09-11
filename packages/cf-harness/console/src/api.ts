@@ -5,6 +5,7 @@
  */
 
 import type { HarnessChatEventEnvelope } from "../../src/contracts/interactive-chat.ts";
+import { consolePath, pageMount } from "./mount.ts";
 import type {
   PatternIndexEvent,
   PatternIndexListEventsRequest,
@@ -48,6 +49,13 @@ export type {
   PatternIndexSearchResponse,
 };
 
+/**
+ * A server path as THIS page addresses it: under the mount the page was
+ * opened at (`./mount.ts`). Written once here so no route is fetched from
+ * the origin's root by habit.
+ */
+const api = (path: string): string => consolePath(pageMount(), path);
+
 /** A started turn, and the session it runs in. */
 export interface StartedTask {
   sessionId: string;
@@ -84,7 +92,7 @@ export const startTask = async (
   sessionId?: string,
 ): Promise<StartedTask> =>
   await json<StartedTask>(
-    await fetch("/api/task", {
+    await fetch(api("/api/task"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(
@@ -103,7 +111,7 @@ export const cancelTurn = async (
   turnId?: string,
 ): Promise<void> => {
   await json<unknown>(
-    await fetch("/api/cancel", {
+    await fetch(api("/api/cancel"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sessionId, turnId }),
@@ -115,12 +123,12 @@ export const listSessions = async (): Promise<
   readonly ConsoleSessionSummary[]
 > =>
   (await json<{ sessions: readonly ConsoleSessionSummary[] }>(
-    await fetch("/api/sessions"),
+    await fetch(api("/api/sessions")),
   )).sessions;
 
 export const listRuns = async (): Promise<readonly ConsoleRunSummary[]> =>
   (await json<{ runs: readonly ConsoleRunSummary[] }>(
-    await fetch("/api/runs"),
+    await fetch(api("/api/runs")),
   )).runs;
 
 /** The durable external result of one completed turn. */
@@ -128,12 +136,12 @@ export const readTurnResult = async (
   turnId: string,
 ): Promise<ConsoleTurnResult> =>
   await json<ConsoleTurnResult>(
-    await fetch(`/api/turns/${encodeURIComponent(turnId)}/result`),
+    await fetch(api(`/api/turns/${encodeURIComponent(turnId)}/result`)),
   );
 
 export const readRun = async (runId: string): Promise<ConsoleRunDetail> =>
   await json<ConsoleRunDetail>(
-    await fetch(`/api/runs/${encodeURIComponent(runId)}`),
+    await fetch(api(`/api/runs/${encodeURIComponent(runId)}`)),
   );
 
 /**
@@ -143,13 +151,13 @@ export const readRun = async (runId: string): Promise<ConsoleRunDetail> =>
  */
 export const readRunGraph = async (runId: string): Promise<ConsoleGraph> =>
   await json<ConsoleGraph>(
-    await fetch(`/api/runs/${encodeURIComponent(runId)}/graph`),
+    await fetch(api(`/api/runs/${encodeURIComponent(runId)}/graph`)),
   );
 
 /** The conversation map of a run and the children beneath it. */
 export const readRunFlow = async (runId: string): Promise<ConsoleFlow> =>
   await json<ConsoleFlow>(
-    await fetch(`/api/runs/${encodeURIComponent(runId)}/flow`),
+    await fetch(api(`/api/runs/${encodeURIComponent(runId)}/flow`)),
   );
 
 /**
@@ -162,7 +170,7 @@ const callIndex = async <Value>(
   body?: Record<string, unknown>,
 ): Promise<Value> =>
   await json<Value>(
-    await fetch("/api/index/call", {
+    await fetch(api("/api/index/call"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body === undefined ? { fn } : { fn, body }),
@@ -206,9 +214,11 @@ export const readRunFile = async (
   name: string,
 ): Promise<string> => {
   const response = await fetch(
-    `/api/runs/${encodeURIComponent(runId)}/${kind}/${
-      encodeURIComponent(name)
-    }`,
+    api(
+      `/api/runs/${encodeURIComponent(runId)}/${kind}/${
+        encodeURIComponent(name)
+      }`,
+    ),
   );
   if (!response.ok) {
     throw new Error(`${name} is not readable`);

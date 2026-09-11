@@ -15,6 +15,8 @@ import {
   ExtendedStorageTransaction,
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
+import { refuseAtCommitBoundary } from "./refused-commit.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test stream-data outbox");
@@ -222,10 +224,14 @@ describe("stream-data outbox mechanism", () => {
     );
 
     const rejectedTx = runtime.edit();
-    rejectedTx.markCfcRelevant("streamData retry regression");
+    refuseAtCommitBoundary(
+      rejectedTx,
+      space,
+      "streamData retry regression",
+    );
     action(rejectedTx);
     const rejectedResult = await rejectedTx.commit();
-    expect(rejectedResult.error).toBeDefined();
+    expect(isCfcEnforcementRejection(rejectedResult.error)).toBe(true);
     await runtime.settled();
     expect(fetchCalls).toEqual([]);
 

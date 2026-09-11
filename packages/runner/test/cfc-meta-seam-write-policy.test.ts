@@ -6,6 +6,7 @@ import type { URI } from "@commonfabric/memory/interface";
 
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
@@ -121,7 +122,7 @@ describe("cfc-meta-seam-write-policy", () => {
       }, "user-slug");
       tx.prepareCfc();
       const result = await tx.commit();
-      expect(result.error).toBeDefined();
+      expect(isCfcEnforcementRejection(result.error)).toBe(true);
       expect(String((result.error as Error).message)).toContain(
         "missing schema write-policy input",
       );

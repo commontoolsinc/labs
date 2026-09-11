@@ -46,9 +46,9 @@ const traverserOver = (
   uri: string,
   value: FabricValue,
   selector: SchemaPathSelector,
-  // `includeMeta: false` (the query path's setting) enables the plain-schema
-  // fast path (`traverseCells` gates it off otherwise).
-  includeMeta = true,
+  // `traverseCells: false` (a value read's setting) enables the plain-schema
+  // fast path; the query path's `true` gates it off.
+  traverseCells = true,
   linkedValues: Record<string, FabricValue> = {},
 ) => {
   const store = new Map<string, Revision<State>>();
@@ -75,7 +75,7 @@ const traverserOver = (
   const traverser = new SchemaObjectTraverser(
     storeTx,
     selector,
-    createDefaultTraversalContext(TEST_SCOPE_IDENTITY, includeMeta),
+    createDefaultTraversalContext(TEST_SCOPE_IDENTITY, traverseCells),
   );
   const doc: IMemorySpaceValueAttestation = {
     address: {

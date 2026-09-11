@@ -151,6 +151,51 @@ export const newestOrders = (orders: SqliteDb, since: number) =>
   );
 ```
 
+## A connector store's tombstones, and a query that returns no rows
+
+A connector-backed database carries the conventions of the connector that fills
+it, and a pattern reading one is held to them. Two conventions for a deleted row
+are in use. One marks a live row with a NULL timestamp, so `deleted_at IS NULL`
+selects the rows still standing. The other keeps every text column never-NULL
+and puts the state in an integer flag beside it: `deleted = 0` is a live row,
+and `deleted_at` holds `''` until a tombstone stamps it. Where a table declares
+a `deleted` flag, filter on the flag — a NULL test against the text column of
+such a table selects nothing at all, because no row in it ever holds NULL
+there.
+
+The table declaration is what to read before writing the predicate. It names the
+columns and the label each one carries; which value in a column means a deleted
+row is the connector's convention, and the declaration does not state it. So a
+predicate carried over from another database is a guess about the one being
+queried: every column it names may be there while the value it tests for means
+something else. Two databases in one task can disagree about this, and each is
+right about itself.
+
+An empty result is a value rather than a failure. A statement matching nothing
+settles the way one matching everything does — `pending` false, `error` absent,
+`result` an empty list — and every field computed from it is empty in turn, so
+the view renders its empty state and nothing reports a problem. The run
+succeeded; the emptiness is data.
+
+That is what makes an empty source worth one check before it is believed. Count
+the table without the predicate you are least sure of — the one testing a
+sentinel — and compare the two: rows under the count and none under the
+predicate put the disagreement in the predicate rather than in the store. Where
+the emptiness is then reported onward, name the predicate that produced it, so a
+reader of the result learns which condition emptied the source rather than that
+the source was empty.
+
+```tsx
+// Shown at module scope.
+export const liveOrders = (orders: SqliteDb) => ({
+  rows: orders.query<{ id: number; glaze: string }>(
+    "SELECT id, glaze FROM orders WHERE deleted = 0 " +
+      "ORDER BY id DESC LIMIT 200",
+  ),
+  total: orders.query<{ n: number }>("SELECT count(*) AS n FROM orders"),
+});
+```
+
 ## Session-scoped results
 
 Where the runtime carries a read ceiling — a lens on what this particular run

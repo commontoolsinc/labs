@@ -253,19 +253,19 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     // The lunch poll's identity moved from display names to profile cells
     // (see docs/history/lunch-poll-identity-break.md). The proof reports two
     // paths here: the published name-keyed admin result went away, and the
-    // visit array's nested defaults changed when legacy roster links were
-    // replaced by optional profile links. The latter cannot be proven stable
-    // under default insertion even though the vintage replay preserves the
-    // stored visit rows.
+    // visit array's legacy roster links were replaced by optional profile
+    // links. Cell metadata is stable under default insertion, so the proof
+    // identifies the incompatible link at `loggedBy`. The
+    // vintage replay still preserves the stored visit rows.
     pattern: "lunch-poll/main.tsx",
     baselines: ["20260729T022742Z-5bjUubcOZ-gpvz7F"],
-    paths: ["argument.visits[]", "result.adminName"],
+    paths: ["argument.visits[].loggedBy", "result.adminName"],
     reason: "Lunch-poll identity moved from display names to profile cells. " +
       "The published `adminName` result cannot survive the removal of " +
-      "name-keyed identity; `argument.visits[]` is the proof's summary path " +
-      "for nested default changes introduced while legacy roster links became " +
-      "optional profile links. The vintage replay preserves those rows, but " +
-      "the root argument contract cannot be updated in place.",
+      "name-keyed identity; `argument.visits[].loggedBy` identifies the " +
+      "legacy roster link that became an optional profile link. The vintage " +
+      "replay preserves those rows, but the root argument contract cannot " +
+      "be updated in place.",
     record: "docs/history/lunch-poll-identity-break.md",
   },
   {
@@ -398,9 +398,10 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     ],
     // The one spelling seen from the two roles a contract has: an optional
     // property carries no default, so the demand's defaults move, and the
-    // published row stops requiring the name.
+    // published row stops requiring the name. Stable cell metadata lets the
+    // proof identify the incompatible type at `shortName`.
     paths: [
-      "argument.items[]",
+      "argument.items[].shortName",
       "result.index[].shortName",
     ],
     reason:
@@ -501,5 +502,65 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "The `system` role leaving `LLMMessageSchema`, recorded once for both " +
       "patterns it breaks.",
     record: "docs/history/features/llm-message-role-narrowing-break.md",
+  },
+  {
+    // A pattern's result schema no longer carries the least upper bound of
+    // its argument schema's `ifc.confidentiality` at its root. That clause was
+    // a dependency measurement written into the component CFC §8.12.8 reserves
+    // for declared store policy, and at a document root it covers every field,
+    // `$UI` included — which is what denied the whole rendered sub-view of any
+    // pattern holding a confidential argument. The author's own per-field
+    // declarations are untouched.
+    pattern: "budget-tracker/confidential.tsx",
+    baselines: [
+      "20260818T045519Z-gy2rtE24CYfgovy8",
+    ],
+    // `ifc` is compared for exact equality, so dropping the synthesized clause
+    // reads as a break. It sat at the result root, which the proof names as
+    // the whole role.
+    paths: [
+      "result",
+    ],
+    reason:
+      "The builder synthesized a covering confidentiality clause at the " +
+      "result schema's root from the argument schema's shape, measuring no " +
+      "transaction. Stored, it labels every field of the result document, so " +
+      "the display ceiling denies the pattern's entire view. No shape of the " +
+      "pattern avoids the change: the clause came from the builder rather " +
+      "than from the source. A deployed piece keeps its stored labels, which " +
+      "are grow-only; what it loses is the ability to be updated in place " +
+      "onto the narrowed contract.",
+    record: "docs/history/pattern-result-ifc-contract-break.md",
+  },
+  {
+    // The second pattern of the same ruling. Its baseline appears in no other
+    // entry, so the pairs stay disjoint.
+    pattern: "cfc-input-cell-demo/briefing.tsx",
+    baselines: [
+      "20260828T041445Z-xK1PX5XOqtJknIj6",
+    ],
+    paths: [
+      "result",
+    ],
+    reason: "The synthesized result-root confidentiality clause leaving the " +
+      "builder, recorded once for all three patterns it breaks. This one " +
+      "exists to show that its two results carry different labels, which a " +
+      "clause on the object containing them contradicted.",
+    record: "docs/history/pattern-result-ifc-contract-break.md",
+  },
+  {
+    // The third pattern of the same ruling.
+    pattern: "cfc-input-cell-demo/seed.tsx",
+    baselines: [
+      "20260828T041445Z-77e4kMM67vF8OWFf",
+    ],
+    paths: [
+      "result",
+    ],
+    reason: "The synthesized result-root confidentiality clause leaving the " +
+      "builder, recorded once for all three patterns it breaks. This one " +
+      "seeds one labeled cell beside one unlabeled cell, which a clause over " +
+      "both defeated.",
+    record: "docs/history/pattern-result-ifc-contract-break.md",
   },
 ];

@@ -117,16 +117,31 @@ candidate pattern generates it during setup. This admits the forward migration;
 add a result default as well when an older concurrently running generation must
 still be able to write its previous result shape.
 
-A verb's event is the one place inside a result where that reasoning does not
-hold, and the direction is decided by which side supplies the value rather
-than by where the node sits. A verb declares its event below a stream marker
-in the result, but the pattern does not generate the event — a caller does. So
-a field the candidate event newly requires is a demand on every call already
-written, and each one omitting it is refused at dispatch after the update has
-landed. Below a verb node a newly required field therefore needs a default,
-exactly as an argument does. A field that carried the same default before and
-after may become required, because a caller that omits it still materializes
-one.
+Cell wrappers (`asCell`), storage scopes (`scope`), and the write markers
+(`readOnly`, `writeOnly`) are default-stable: they say how a value is
+delivered, stored, or written, not what shape it has, so a default beneath one
+may be introduced or changed under the same rules as beneath a plain object
+node. That covers an empty-object default on a record reached through a
+`$ref`, a default that changes value on an unchanged cell, a verb's event
+below its stream marker (a newly required event field is rescued by a valid
+default the candidate carries, including a newly introduced one), and a
+durable-link proof whose target declares a default below a cell. The metadata
+itself must still compare equal across an update: a changed `asCell`, `scope`,
+`readOnly`, or `writeOnly` is refused on its own. Value constraints that
+default insertion can invalidate, such as `maxProperties`, continue to require
+equal defaults beneath them.
+
+`ifc` is the one semantic extension deliberately not on that list: a label is
+policy the write-authority comparison reasons about, and whether a materialized
+default satisfies a labeled node's floor is that comparison's question, so a
+changed default beneath an `ifc` stays refused until it is decided there.
+
+A verb's event follows argument compatibility rules even when declared in a
+result. A caller supplies the event, so it does not receive the result-side
+exemption for newly required fields that a pattern generates itself. A field
+the candidate event newly requires therefore needs a valid default, exactly
+as an argument does. Dispatch fills missing fields in a present event object
+from defaults; an entirely absent event payload remains absent.
 
 ## Tier 2 — state continuity
 

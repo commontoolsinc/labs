@@ -45,6 +45,8 @@ import type { AppliedCommit } from "./engine.ts";
 import type { Server } from "./server.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
+import { logIncomingFrame, logOutgoingFrame } from "./frame-log.ts";
+import { memoryMessageFrameBytes } from "./message-compression.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
 
 const logger = getLogger("memory.v2.client", {
@@ -344,7 +346,9 @@ export class Client {
     // observes the rejection.
     pending.promise.catch(() => {});
     this.#pending.set(requestId, pending);
-    await this.#transport.send(encodeMemoryBoundary(message));
+    const encoded = encodeMemoryBoundary(message);
+    logOutgoingFrame(message, memoryMessageFrameBytes(encoded));
+    await this.#transport.send(encoded);
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
@@ -356,6 +360,10 @@ export class Client {
       if (result.error.retryAfterSeq !== undefined) {
         (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
           result.error.retryAfterSeq;
+      }
+      if (result.error.conflicts !== undefined) {
+        (error as Error & { conflicts?: unknown }).conflicts =
+          result.error.conflicts;
       }
       if (result.error.retriable !== undefined) {
         (error as Error & { retriable?: boolean }).retriable =
@@ -478,18 +486,18 @@ export class Client {
     this.#helloPending = ack;
     const expectedFlags = getMemoryProtocolFlags();
     try {
-      await Promise.all([
-        this.#transport.send(encodeMemoryBoundary({
-          type: "hello",
-          protocol: MEMORY_PROTOCOL,
-          flags: {
-            ...expectedFlags,
-            messageCompressionV1: expectedFlags.messageCompressionV1 &&
-              this.#transport.supportsMessageCompression === true,
-          },
-        })),
-        ack.promise,
-      ]);
+      const hello = {
+        type: "hello",
+        protocol: MEMORY_PROTOCOL,
+        flags: {
+          ...expectedFlags,
+          messageCompressionV1: expectedFlags.messageCompressionV1 &&
+            this.#transport.supportsMessageCompression === true,
+        },
+      };
+      const encoded = encodeMemoryBoundary(hello);
+      logOutgoingFrame(hello, memoryMessageFrameBytes(encoded));
+      await Promise.all([this.#transport.send(encoded), ack.promise]);
       this.#connected = true;
       this.#noteStateChange();
     } finally {
@@ -503,6 +511,7 @@ export class Client {
       const decodeStart = performance.now();
       message = decodeMemoryBoundary(payload);
       logger.time(decodeStart, "receive", "decodeBoundary");
+      logIncomingFrame(message, memoryMessageFrameBytes(payload));
       // A frame whose raw text lacks every reserved reference prefix cannot
       // carry a schema reference (strings serialize verbatim — see the note
       // on encodeMemoryBoundary), so the expansion walk over its upserts is
@@ -529,6 +538,13 @@ export class Client {
       const helloOk = parseHelloOk(message);
       if (helloOk !== null) {
         const expectedFlags = getMemoryProtocolFlags();
+        if (!helloOk.flags.stableExpressionResultIds) {
+          this.#helloPending.reject(permanentProtocolError(
+            "The memory server does not enforce stable expression result " +
+              "identities. Update the server before connecting this runtime.",
+          ));
+          return;
+        }
         if (!compatibleMemoryProtocolFlags(helloOk.flags, expectedFlags)) {
           // A data-model wire-contract mismatch: this client and server cannot
           // talk at all, and no retry changes that. Mark it permanent so a
@@ -1170,7 +1186,10 @@ export class SpaceSession {
     );
   }
 
-  /** Removes watches from both the live session and reconnect intent. */
+  /**
+   * Removes watches from both the live session and reconnect intent, retaining
+   * unrelated watches acquired by preceding mutations during concurrent refresh.
+   */
   async watchRemoveSync(
     watchIds: readonly string[],
   ): Promise<WatchMutationResult> {
@@ -1206,6 +1225,7 @@ export class SpaceSession {
           sync: result.sync,
         };
       },
+      "apply",
     );
   }
 
@@ -1508,11 +1528,16 @@ export class SpaceSession {
    * Serialize a watch mutation (`watch.set` / `watch.add`). `send` issues the
    * request; `apply` mutates the session view (`#watchSpecs` / `#watchView`)
    * from the response. Splitting them lets concurrent mode overlap the request
-   * round trips while keeping application ordered.
+   * round trips while keeping application ordered. A mutation whose request is
+   * derived from session state (`watchRemoveSync`) passes `sendAfter: "apply"`,
+   * which also holds `send` until every preceding response has been applied;
+   * it still claims its place in issue order, so later mutations wait behind
+   * it.
    */
   async #runWatchMutation<R, T>(
     send: () => Promise<R>,
     apply: (result: R) => T,
+    sendAfter: "issue" | "apply" = "issue",
   ): Promise<T> {
     this.#assertOpen();
     if (!this.#concurrentWatchRefresh) {
@@ -1533,14 +1558,21 @@ export class SpaceSession {
     // Concurrent: preserve wire order across the WHOLE watch-mutation family
     // (set + add) by issuing requests in call order, while applying responses
     // in that same order.
-    //  - `#watchIssue` advances as soon as `send()` has been CALLED (its frame
+    //  - `#watchIssue` advances as soon as `send()` has been called (its frame
     //    scheduled ahead of the next mutation's), so an earlier `watch.set` can
     //    never be overtaken on the wire by a later `watch.add`.
     //  - the apply step waits for [prior apply, this response], so `#watchSpecs`
     //    / `#watchView` mutate in call order regardless of which response lands
     //    first.
+    const previousApply = this.#watchApply;
+    // A removal derives a full replacement set from `#watchSpecs`, so its
+    // send must see earlier acquisitions applied. Reserve its place in the
+    // issue chain while waiting, keeping later acquisitions behind it.
+    const readyToIssue = sendAfter === "apply"
+      ? Promise.all([this.#watchIssue, previousApply])
+      : this.#watchIssue;
     let response!: Promise<R>;
-    const issued = this.#watchIssue.catch(() => undefined).then(() => {
+    const issued = readyToIssue.catch(() => undefined).then(() => {
       response = send();
       // Attach a rejection handler immediately: a later request may reject
       // while an earlier mutation is still pending, which would otherwise
@@ -1551,7 +1583,7 @@ export class SpaceSession {
     this.#watchIssue = issued.then(() => undefined, () => undefined);
 
     const current = Promise.all([
-      this.#watchApply.catch(() => undefined),
+      previousApply.catch(() => undefined),
       issued,
     ]).then(() => response).then((result) => apply(result));
     this.#watchApply = current.then(() => undefined, () => undefined);

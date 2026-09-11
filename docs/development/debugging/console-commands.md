@@ -153,7 +153,7 @@ commonfabric.getLoggerFlagsBreakdown()
 // {
 //   "runner": {
 //     "action invalid input": {
-//       "action:myModule": { schema: {...}, raw: {...}, queryResult: "..." }
+//       "action:myModule": { schema: {...}, raw: {...} }
 //     }
 //   }
 // }

@@ -1,5 +1,7 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { spy, stub } from "@std/testing/mock";
+
 import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
@@ -9,6 +11,7 @@ import {
 } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
+  boundReadValue,
   CellSelectionError,
   deriveSelectedValue,
   evaluateSelectionPredicate,
@@ -411,6 +414,30 @@ describe("cf cell get transforms", () => {
     });
     expect(Object.keys((selected as { properties: object }).properties))
       .toEqual(["visible"]);
+  });
+
+  it("drops a required entry named like a prototype member that the mask did not select", () => {
+    // `required` is filtered to the SELECTED properties. That test must ask
+    // whether the selection holds the key as its own: a `required` entry
+    // spelled `toString` is found on every object by `in`, and an unselected
+    // one used to survive into the selected schema's `required`.
+    const properties: Record<string, JSONSchema> = {
+      label: { type: "string" },
+    };
+    properties["toString"] = { type: "string" };
+    const source: JSONSchema = {
+      type: "object",
+      properties,
+      required: ["label", "toString"],
+    };
+    const selected = selectSourceSchema(source, {
+      type: "object",
+      properties: { label: true },
+      additionalProperties: false,
+    }) as { properties: object; required?: string[] };
+
+    expect(Object.keys(selected.properties)).toEqual(["label"]);
+    expect(selected.required).toEqual(["label"]);
   });
 
   it("collapses overlapping concise paths without exposing siblings", async () => {
@@ -2053,6 +2080,75 @@ describe("cf cell get transforms", () => {
     }
   });
 
+  it("sets up the projection once and returns its result without runtime-owned setup", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "accepted-projection-setup",
+      { type: "object", properties: { id: { type: "number" } } },
+      tx,
+    );
+    source.set({ id: 1 });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    // Count caller-provided setup and refuse runtime-owned setup so neither
+    // path can silently introduce a second setup transaction.
+    using setups = spy(runtime, "setup");
+    using ownedSetups = stub(runtime, "editWithRetry", () =>
+      Promise.resolve({
+        error: {
+          name: "StorageTransactionAborted",
+          message: "forced setup rejection",
+          reason: "forced setup rejection",
+        },
+      }));
+    expect(
+      await deriveSelectedValue(runtime, space, source, {
+        projection: parseSelectProjection("id"),
+      }),
+    ).toEqual({ id: 1 });
+    expect(setups.calls).toHaveLength(1);
+    expect(ownedSetups.calls).toHaveLength(0);
+  });
+
+  for (const failure of ["sync", "start", "missing"] as const) {
+    it(`reports projection startup failure: ${failure}`, async () => {
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        space,
+        "projection-startup-failure",
+        { type: "object", properties: { id: { type: "number" } } },
+        tx,
+      );
+      source.set({ id: 1 });
+      expect((await tx.commit()).ok).toBeDefined();
+
+      using injected = failure === "sync"
+        ? stub(
+          runtime.runner,
+          "syncStoredPieceCells",
+          () => Promise.reject(new Error("dependency sync failed")),
+        )
+        : stub(
+          runtime,
+          "start",
+          () =>
+            failure === "start"
+              ? Promise.reject("pattern start failed")
+              : Promise.resolve(false),
+        );
+      const message = failure === "sync"
+        ? "dependency sync failed"
+        : failure === "start"
+        ? "pattern start failed"
+        : "projection did not start";
+      await expect(deriveSelectedValue(runtime, space, source, {
+        projection: parseSelectProjection("id"),
+      })).rejects.toThrow(`Could not apply get transform: ${message}`);
+      expect(injected.calls).toHaveLength(1);
+    });
+  }
+
   it("returns projection-ordered output without a storage-wide sync", async () => {
     const setup = runtime.edit();
     const source = runtime.getCell(
@@ -2143,6 +2239,78 @@ describe("cf cell get transforms", () => {
     expect(JSON.stringify(result)).toBe(
       '{"label":"first","id":1,"alpha":"a","toString":"own","zeta":"z"}',
     );
+  });
+
+  it("orders an open projection's declared keys first across an array of objects", async () => {
+    const setup = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "transform-open-projection-array-order-source",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "number" },
+            label: { type: "string" },
+            extra: { type: "string" },
+          },
+        },
+      },
+      setup,
+    );
+    source.set([
+      { id: 1, label: "first", extra: "kept" },
+      { id: 2, label: "second", extra: "kept" },
+    ]);
+    expect((await setup.commit()).ok).toBeDefined();
+
+    // The open × array combination: `projectValue` decomposes the array
+    // projection to its item schema, and each element renders its declared
+    // keys in schema order (label before id) with the retained extra after.
+    const result = await deriveSelectedValue(runtime, space, source, {
+      projection: await parseSelectionProjection(
+        '{"type":"array","items":{"type":"object","properties":{"label":true,"id":true},"additionalProperties":true}}',
+      ),
+    });
+    expect(JSON.stringify(result)).toBe(
+      '[{"label":"first","id":1,"extra":"kept"},{"label":"second","id":2,"extra":"kept"}]',
+    );
+  });
+
+  it("a bound read composes no address for a marked position the value does not hold, prototype names included", async () => {
+    // A declared result whose recursion re-enters at a property spelled like
+    // an `Object.prototype` member: the cut marks that position, and the
+    // bound read composes an address for it only where the value holds the
+    // key as its own. `in` found `Object.prototype.toString` on a value
+    // without one and composed an address for a key the value never had.
+    const setup = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "transform-bound-read-prototype-source",
+      { type: "object", properties: { label: { type: "string" } } },
+      setup,
+    );
+    source.set({ label: "held" });
+    expect((await setup.commit()).ok).toBeDefined();
+
+    const nodeProperties: Record<string, JSONSchema> = {
+      label: { type: "string" },
+    };
+    nodeProperties["toString"] = { $ref: "#/$defs/Node" };
+    const declared: JSONSchema = {
+      $defs: { Node: { type: "object", properties: nodeProperties } },
+      $ref: "#/$defs/Node",
+    };
+
+    const result = await boundReadValue(
+      source,
+      declared,
+      { label: "held" },
+      space,
+    ) as Record<string, unknown>;
+    expect(Object.keys(result)).toEqual(["label"]);
+    expect(Object.hasOwn(result, "toString")).toBe(false);
   });
 
   it("a closed projection emits only keys the value holds, prototype names included", async () => {

@@ -173,6 +173,9 @@ describe("RuntimeInternals navigation", () => {
     const options = createRuntimeClientOptions({
       session,
       apiUrl: new URL("http://shell.test/"),
+      // The rung the assertion below reads back, stated rather than left to
+      // the host default.
+      cfcEnforcementMode: "enforce-explicit",
     });
 
     expect(options.cfcEnforcementMode).toBe("enforce-explicit");

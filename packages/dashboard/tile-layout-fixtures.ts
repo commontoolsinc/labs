@@ -136,17 +136,11 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
     view: {
       label: "flaky tests",
       status: "warn",
-      value: "4",
-      sub: "too noisy to judge a change by · 4 tests",
-      extra:
-        `<div class="tile-detail-list" tabindex="0" role="region" aria-label="Flaky test details; scroll for more" title="Scroll for more details">${
-          [
-            "4.2% · package alpha: longest representative test name",
-            "3.7% · package beta: another representative test name",
-            "2.9% · package gamma: a third representative test name",
-            "2.1% · package delta: a fourth representative test name",
-          ].map((line) => `<div title="${line}">${line}</div>`).join("")
-        }</div>`,
+      value: "25 flaky tests",
+      valueLabel: "25 flaky tests",
+      sub: "60 days of runs · 3h old",
+      hint: "flakes ↗",
+      href: "/test-selection#flaky",
     },
   },
   {
@@ -155,8 +149,10 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
       label: "test selection",
       status: "good",
       value: "64%",
-      sub: "640 of 1000 tests · fullest lane 280s of 300s",
-      aside: "12h old",
+      sub: "16,614 of 19,544 tests",
+      aside: `<span class="hfacet" title="12h old">12h old</span>`,
+      hint: "lanes ↗",
+      href: "/test-selection",
     },
   },
   {
@@ -262,7 +258,7 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
       status: "good",
       value: "~$3059/mo",
       valueLabel: "~$3059/mo",
-      aside: `<span class="hmtd" title="$1644 MTD">$1644 MTD</span>`,
+      aside: `<span class="hfacet" title="$1644 MTD">$1644 MTD</span>`,
       extra: spendSub("GitHub · Budget $3100") + history(),
       duration: 30 * DAY,
       hint: "billing ↗",
@@ -277,7 +273,7 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
       status: "good",
       value: "~$820/mo",
       valueLabel: "~$820/mo",
-      aside: `<span class="hmtd" title="$440 MTD">$440 MTD</span>`,
+      aside: `<span class="hfacet" title="$440 MTD">$440 MTD</span>`,
       extra: spendSub("OpenAI • Anthropic • OR $0") + twoLines(),
       duration: 30 * DAY,
     },
@@ -289,7 +285,7 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
       status: "good",
       value: "~$410/mo",
       valueLabel: "~$410/mo",
-      aside: `<span class="hmtd" title="$220 MTD">$220 MTD</span>`,
+      aside: `<span class="hfacet" title="$220 MTD">$220 MTD</span>`,
       sub: "billing account spend",
       extra: history(),
       duration: 30 * DAY,

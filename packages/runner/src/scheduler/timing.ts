@@ -1,5 +1,5 @@
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
-import type { ActionStats } from "../telemetry.ts";
+import type { ActionReadStats, ActionStats } from "../telemetry.ts";
 import type { Action } from "./types.ts";
 
 export interface ActionTimingState {
@@ -12,10 +12,24 @@ export function recordActionTime(
   action: Action,
   elapsed: number,
   now = performance.now(),
+  reads?: ActionReadStats,
 ): void {
   const actionId = state.getActionId(action);
   const existing = state.actionStats.get(actionId);
   if (existing) {
+    existing.lastRunReads = reads;
+    if (reads) {
+      const total = existing.reads;
+      existing.reads = total
+        ? {
+          proxyAccesses: total.proxyAccesses + reads.proxyAccesses,
+          linkResolutions: total.linkResolutions + reads.linkResolutions,
+          distinctDocuments: total.distinctDocuments + reads.distinctDocuments,
+          registeredDependencies: total.registeredDependencies +
+            reads.registeredDependencies,
+        }
+        : { ...reads };
+    }
     existing.runCount++;
     existing.totalTime += elapsed;
     existing.averageTime = existing.totalTime / existing.runCount;
@@ -27,6 +41,7 @@ export function recordActionTime(
     return;
   }
   state.actionStats.set(actionId, {
+    ...(reads ? { reads: { ...reads }, lastRunReads: reads } : {}),
     runCount: 1,
     totalTime: elapsed,
     averageTime: elapsed,

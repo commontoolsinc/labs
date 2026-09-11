@@ -47,6 +47,14 @@ These string-level steps run in `transformCfDirective()`
 (`src/core/cf-helpers.ts`) before any AST transformer, because symbol binding
 happens before the transformer pipeline runs.
 
+TypeScript's subsequent JSX emit uses `__cfHelpers.h` for elements and
+`__cfHelpers.h.fragment` for fragment tags
+(`packages/js-compiler/typescript/options.ts`). Both resolve through the
+reserved helper binding, so authored locals and parameters named `h` retain
+their ordinary meaning inside JSX-producing scopes. The forwarding `h()`
+function remains available for explicit calls and keeps the helper import
+live during binding.
+
 Legacy stored-envelope compatibility is deliberately separate from
 `transformCfDirective()` (#4574, CT-1838):
 
@@ -206,7 +214,8 @@ list — is the authoritative source. As of this writing it recognizes:
   plain calls.)
 - conditional-helper calls: `ifElse`, `when`, `unless`
 - reactive array calls (`map`, `mapWithPattern`, `filter`, `filterWithPattern`,
-  `flatMap`, `flatMapWithPattern`)
+  `flatMap`, `flatMapWithPattern`, `count`, `countWithPattern`, `minBy`,
+  `minByWithPattern`, `maxBy`, `maxByWithPattern`)
 - cell factories (`cell`, `new Cell`, `new OpaqueCell`, `new Stream`, etc.),
   with legacy `.of(...)` still accepted
 - `Cell.for`-style calls
@@ -239,7 +248,8 @@ Remaining fallback behavior is intentionally narrow:
 - shadowed local helpers and object methods with Common Fabric-like names are not
   classified
 - a **synthetic** property call spelled `mapWithPattern` /
-  `filterWithPattern` / `flatMapWithPattern` whose method resolves to **no
+  `filterWithPattern` / `flatMapWithPattern` / `countWithPattern` /
+  `minByWithPattern` / `maxByWithPattern` whose method resolves to **no
   symbol** classifies as the array-method family by spelling alone. The
   closure stage emits these calls against receivers whose static type is
   still the plain array type (a site-lifted collection local, for example),
@@ -252,6 +262,11 @@ Remaining fallback behavior is intentionally narrow:
   not (an untyped receiver classifies as no call kind). Authored spellings
   of every family that fail symbol resolution still require a reactive
   receiver to classify
+
+The `*WithPattern` argument-hoisting path also requires a synthetic callee.
+Only closure-stage output guarantees that callback captures have been threaded
+through the params argument; an authored inline pattern stays in its enclosing
+scope.
 
 Builder-placement validation uses `detectDirectBuilderCall()`, so calls to
 functions returned by builders are not reclassified as direct `lift()` or
@@ -896,6 +911,14 @@ Not every diagnostic comes from a validation transformer. The lowering stages
 report these through the same collector (deduplicated via §2.2's
 `markDiagnosticReported` channel):
 
+- **Warning** `schema-default:unresolved` (`schema-generator.ts`) — the
+  schema generator cannot recover a `Default<>` or `DeepDefault<>` value after
+  trying the node, type, and applicable brand-payload routes. That annotation
+  supplies no schema default; compilation continues. The warning points to the
+  default value type when it belongs to the current file, otherwise to the local
+  schema use.
+  Repeated reports for that source range collapse to one. See §7 of the
+  schema-generator mapping spec and `test/default-empty-record-schema.test.ts`.
 - **Error** `pattern-context:receiver-method-call`
   (`pattern-body-reactive-root-lowering.ts:162`) — the pattern-body
   reactive-root seam could not admit a receiver-method call on a tracked
@@ -1055,6 +1078,15 @@ that root as a capture of its own, and a whole-object capture subsumes the
 narrower paths beside it. The lift is then applied to the whole object and
 re-runs for any field of it, where it could have been applied to the one field
 the body reads.
+
+The set has one deliberately narrow reader on the way out. When the rewriter
+synthesizes an `ifElse`/`when`/`unless` call, `unwrapParentheses` tidies the
+operands placed in the call, and the probe recognizing a zero-arg inline IIFE
+callee reads through the same function: parentheses alone come off. Every
+other transparent wrapper can carry a type, and schema injection still reads
+operand types at those argument positions, so `as`, `<T>x`, `satisfies`, and
+`!` stay on the operands — a ternary branch reading `state.note!` keeps a
+non-nullable operand schema because the assertion stays in the tree.
 
 Key rewrite rules:
 
@@ -1221,7 +1253,11 @@ Result shape:
 
 - `receiver.<method>(fn[, thisArg])` ->
   `receiver.<method>WithPattern(pattern(callbackSchema, resultSchema, newCallback), paramsObj[, thisArg])`
-- currently supported methods are `map`, `filter`, and `flatMap`
+- supported callback methods are `map`, `filter`, `flatMap`, `count`, `minBy`,
+  and `maxBy`; the aggregate forms require explicit cell receivers in the
+  public type surface
+- argument-free `count`, `sum`, `min`, and `max` remain direct builtin-building
+  method calls
 - callback schema includes `{ element, index?, array? }` and adds `params` only
   when captures exist
 - computed destructuring keys are stabilized with generated key constants and
@@ -1930,6 +1966,14 @@ Special path:
   schema).
 - `unknown` is emitted distinctly as `{ type: "unknown" }`; `any` remains `true`
 - arrays of `unknown` emit `items: { type: "unknown" }`
+- empty-record defaults emit `default: {}` in pattern argument schemas,
+  including inside `Writable`. Both `Record<string, unknown> | Default<V>`
+  and `Default<Record<string, unknown>, V>` support `V` written as `{}`,
+  `Record<string, never>`, `Record<PropertyKey, never>`, or an alias of any of
+  these types, including alias chains and imports
+  (`test/default-empty-record-schema.test.ts`). Unresolved default values emit
+  `schema-default:unresolved` warnings (§6.12). The extraction rules
+  live in §7 of the schema-generator mapping spec.
 - the node-based generator analyzes through a `readonly` type operator to
   its wrapped array type. A pattern-scope `.get()` on a `Cell<unknown[]>`
   lowers to a lift with result type `readonly unknown[]` and result schema
