@@ -5403,7 +5403,14 @@ export class SpaceServer implements TransactionSealDestination {
    * A park racing an incoming commit self-heals — the admission hook
    * re-fires on the next admission and the host re-activates. */
   async park(reason: string): Promise<void> {
-    if (!this.#active) return;
+    // A park already in flight — the renew arm's lease-lost park runs
+    // unawaited — is what a second caller waits for: the host's close
+    // must not return while a tenure is still disposing, since the
+    // tenure releases its lease through the engine the host then closes.
+    // Before any park, a not-yet-active server has nothing to wait for.
+    if (!this.#active) {
+      return this.#parkRequested ? this.#parked.promise : undefined;
+    }
     this.#active = false;
     this.#parkRequested = true;
     this.#options.stats.activeSpaces = Math.max(

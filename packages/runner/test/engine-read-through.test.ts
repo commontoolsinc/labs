@@ -241,7 +241,13 @@ describe("engine-read-through", () => {
     const tx = clientRuntime.edit();
     clientArg.withTx(tx).set({ n });
     expect((await tx.commit()).error).toBeUndefined();
-    const authoredSeq = Engine.serverSeq(engine);
+    // The commit's own seq, read off the document it wrote: the watermark
+    // covers authored inputs, and the loop's own derived commit may
+    // already sit above this one at the engine's head.
+    const authoredSeq = Engine.readState(engine, {
+      id: clientArg.getAsNormalizedFullLink().id,
+      scopeKey: "space",
+    })!.seq;
     await waitUntil(
       () => readWatermarkSeq(engine) >= authoredSeq,
       "watermark to reach the authored commit",
@@ -830,6 +836,7 @@ describe("engine-read-through", () => {
     await tx.commit();
 
     // A commit creating the document reaches the replica through the feed.
+    const refreshesBefore = host.stats().storeRefreshes;
     const cell = clientRuntime.getCellFromLink<{ made: boolean }>({
       id,
       space,
@@ -838,8 +845,8 @@ describe("engine-read-through", () => {
     const creating = clientRuntime.edit();
     cell.withTx(creating).set({ made: true });
     expect((await creating.commit()).error).toBeUndefined();
-    const authoredSeq = Engine.serverSeq(engine);
-    const refreshesBefore = host.stats().storeRefreshes;
+    const authoredSeq = Engine.readState(engine, { id, scopeKey: "space" })!
+      .seq;
     await waitUntil(
       () => readWatermarkSeq(engine) >= authoredSeq,
       "the watermark to cover the creating commit",
