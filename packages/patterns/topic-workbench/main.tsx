@@ -113,6 +113,8 @@ export interface Attachment {
   nativeSessionId: string;
   title: string;
   attachedAt: number;
+  /** The workstream the session was attached under, where one applies. */
+  workstreamId?: string;
 }
 
 /** A session as the workbench shows it: the index row joined with whether it
@@ -207,12 +209,12 @@ export interface WorkbenchOutput {
 //
 // Module-scope lifts, because the declared parameter is what bounds the read.
 
-const sessionKey = (sourceId: string, nativeSessionId: string): string =>
+export const sessionKey = (sourceId: string, nativeSessionId: string): string =>
   `${sourceId}/${nativeSessionId}`;
 
 /** Every session the index holds, newest first, with the fields the rows
  * render. Reads the shallow row and nothing under the manifest. */
-const sessionRowsOf = lift((
+export const sessionRowsOf = lift((
   { index, attached }: {
     index?: SessionIndexView;
     attached: Attachment[] | Default<[]>;
@@ -244,7 +246,7 @@ const sessionRowsOf = lift((
 /** The attached sessions, in attach order, each joined with its live row when
  * the index still carries it. A session the index no longer holds still shows,
  * from the attachment's own record, so an attachment never silently vanishes. */
-const attachedRowsOf = lift((
+export const attachedRowsOf = lift((
   { attached, rows }: {
     attached: Attachment[] | Default<[]>;
     rows: SessionRow[];
@@ -295,7 +297,7 @@ const relatedRowsOf = lift((
 });
 
 /** The newest unattached sessions, bounded. */
-const recentRowsOf = lift((
+export const recentRowsOf = lift((
   { rows, limit }: { rows: SessionRow[]; limit: number },
 ): SessionRow[] => rows.filter((r) => !r.attached).slice(0, limit));
 
@@ -309,7 +311,7 @@ const presentLinksOf = lift((
 );
 
 /** The connector's sources, as picker options; Claude sources first. */
-const sourceOptionsOf = lift((
+export const sourceOptionsOf = lift((
   { index }: { index?: SessionIndexView },
 ): CheckoutOption[] =>
   (index?.sources ?? [])
@@ -325,7 +327,7 @@ const sourceOptionsOf = lift((
 );
 
 /** Checkouts the connector discovered, as picker options. */
-const checkoutOptionsOf = lift((
+export const checkoutOptionsOf = lift((
   { index }: { index?: SessionIndexView },
 ): CheckoutOption[] =>
   (index?.checkouts ?? []).flatMap((c) =>
@@ -382,7 +384,8 @@ const kickoffOf = lift((
   ].join("\n\n");
 });
 
-const shellQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
+export const shellQuote = (s: string): string =>
+  `'${s.replace(/'/g, `'\\''`)}'`;
 
 /** The command to paste until the connector can start a session itself. */
 const spawnCommandOf = lift((
@@ -393,7 +396,7 @@ const spawnCommandOf = lift((
     : `claude ${shellQuote(prompt)}`
 );
 
-const whenIso = (iso: string): string =>
+export const whenIso = (iso: string): string =>
   iso ? iso.replace("T", " ").slice(0, 16) : "";
 
 const tail = (path: string, parts = 2): string =>
@@ -401,7 +404,7 @@ const tail = (path: string, parts = 2): string =>
 
 /** The one-line caption under a session's title. Module scope, because a
  * callable used inside a reactive `.map()` must be self-contained. */
-const captionOf = (row: SessionRow): string =>
+export const captionOf = (row: SessionRow): string =>
   [
     row.sourceId,
     row.gitBranch,
@@ -453,7 +456,7 @@ const useDefaultPrompt = handler<void, {
 });
 
 /** A version 4 UUID, which is the shape a Claude session id must have. */
-const mintSessionId = (): string =>
+export const mintSessionId = (): string =>
   "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
     const r = Math.floor(Math.random() * 16);
     return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
