@@ -43,6 +43,7 @@ import {
 import * as Engine from "@commonfabric/memory/v2/engine";
 import {
   type CellScope,
+  type ConfirmedRead,
   type DeliveryAttention,
   type DeliveryDeferral,
   eventAttentionEntryKey,
@@ -900,7 +901,7 @@ export class SpaceServer implements TransactionSealDestination {
   /**
    * Transactions stamped `directCommit` (runtime.ts `ServerRunInfo`),
    * recorded at the stamp: the store seq at that moment, which the commit
-   * re-verifies the documents it writes against, and the run's action id
+   * holds a document it writes without reading to, and the run's action id
    * for the log.
    */
   readonly #directCommits = new WeakMap<
@@ -2064,9 +2065,10 @@ export class SpaceServer implements TransactionSealDestination {
    * admission instead of being refused carriage-less. */
   #stampRun(tx: IExtendedStorageTransaction, info: ServerRunInfo): void {
     if (info.directCommit === true) {
-      // The basis is taken here, ahead of the run's first read, the way a
-      // wave takes its basis when it opens: a document the transaction
-      // writes must not have moved past it by the commit.
+      // The basis for a document the transaction writes without reading,
+      // taken here, ahead of the run's first read, the way a wave takes
+      // its basis when it opens; a document it reads is held to the seq
+      // the read saw.
       if (info.kind !== "bookkeeping") {
         throw new Error(
           `run ${info.actionId} asked for a direct commit as a ` +
@@ -2560,14 +2562,17 @@ export class SpaceServer implements TransactionSealDestination {
    * so the transaction's `commit()` resolves with the store's verdict and
    * nothing the wave later decides can withdraw it.
    *
-   * The store re-verifies every document the transaction writes against
-   * the seq the transaction was stamped at, so a document another commit
-   * moved meanwhile refuses the whole transaction. A document the
-   * transaction only read is not re-verified, and the transaction may have
-   * read state sealed into the open wave: a caller whose commit must not
-   * build on uncommitted state stages that state in an earlier cycle. The
-   * replica takes the writes only once the store has accepted them, so no
-   * run reads them as pending state that a refusal could roll back.
+   * The store validates the transaction's own read set as it does a client
+   * commit's — every read against this replica's records, a document that
+   * moved at a read path since refusing the whole transaction — and holds a
+   * document the transaction writes without reading to the store seq the
+   * transaction was stamped at. A commit the store took but this replica
+   * has not yet applied is therefore a conflict, not a blind overwrite. A
+   * read of state sealed into the open wave names the durable basis beneath
+   * it: a caller whose commit must not build on uncommitted state stages
+   * that state in an earlier cycle. The replica takes the writes only once
+   * the store has accepted them, so no run reads them as pending state that
+   * a refusal could roll back.
    */
   async #commitDirect(
     tx: IExtendedStorageTransaction,
@@ -2621,7 +2626,24 @@ export class SpaceServer implements TransactionSealDestination {
               "ride scheduler runs' wave batches",
           );
         }
-        const { operations, preconditions } = replica.storeCommitOf!(native);
+        const { operations, preconditions, reads } = replica.storeCommitOf!(
+          native,
+          source,
+        );
+        // A pending read saw layers the store has not taken; what the
+        // store can check is the durable basis beneath them.
+        const confirmedReads: ConfirmedRead[] = [
+          ...reads.confirmed,
+          ...reads.pending.map((
+            { id, scope, path, basisSeq, nonRecursive },
+          ) => ({
+            id,
+            ...(scope === undefined ? {} : { scope }),
+            path,
+            seq: basisSeq ?? 0,
+            ...(nonRecursive === undefined ? {} : { nonRecursive }),
+          })),
+        ];
         const annotations: WaveWriteAnnotation[] = [];
         const written: Array<{ id: string; scopeKey: ScopeKey }> = [];
         for (const [opIndex, operation] of operations.entries()) {
@@ -2639,6 +2661,7 @@ export class SpaceServer implements TransactionSealDestination {
           rebasedHeads: [],
           operations,
           preconditions: [...preconditions],
+          confirmedReads,
           annotations,
           consequenceOf: [],
           basisInstances: [],
@@ -2651,9 +2674,6 @@ export class SpaceServer implements TransactionSealDestination {
           );
         }
         committedSeq = outcome.ok.seq;
-        // A wave open now takes contributions sealed from here on as having
-        // observed this commit on the docs it wrote (wave.ts).
-        this.#currentWave?.noteOwnCommit(committedSeq, written);
         // Applied here only now, with the store's verdict already in hand.
         const sealed = replica.sealNative!(
           native,
@@ -2663,12 +2683,19 @@ export class SpaceServer implements TransactionSealDestination {
         const settled = await sealed.settled;
         if (settled.error !== undefined) {
           // The store holds the commit; the replica re-pulls what it
-          // rolled back, through the dirtiness fan-out below.
+          // rolled back, through the dirtiness fan-out below. Runs reading
+          // the rolled-back state meanwhile keep the ordinary conflict on
+          // the docs this commit moved.
           logger.warn("direct-commit-local-rollback", () => [
             `space ${space}: direct commit of ${direct.actionId} landed at ` +
             `seq ${committedSeq} but its local apply was rejected`,
             settled.error,
           ]);
+        } else {
+          // A wave open now takes a contribution sealed from here on, whose
+          // reads of these docs saw this commit, as having observed it
+          // (wave.ts).
+          this.#currentWave?.noteOwnCommit(committedSeq, written);
         }
         return { ok: {} };
       },

@@ -153,7 +153,11 @@ export interface ServedSetSourceRequest {
   /** The pattern the update was proved against; a piece on another refuses. */
   expectedPattern?: ServedPatternRef;
 
-  /** The principal the verb acts for; see {@link ServedInstantiateRequest}. */
+  /**
+   * The principal the verb acts for. The setup transaction carries this
+   * principal's trust snapshot, as a creation's does
+   * ({@link ServedInstantiateRequest}).
+   */
   actingUser: string;
 }
 
@@ -358,8 +362,9 @@ export async function servedInstantiatePiece(
  * checks a client's update runs — the pin against the pattern it was proved
  * on, the compatibility assertions, the retained-argument validators — and
  * one setup transaction that commits directly to the store: the transaction
- * carries the update's module authority, which registers on this runtime
- * from the store's verdict. The piece is not started here. A piece the loop
+ * carries the requester's trust snapshot and the update's module authority,
+ * which registers on this runtime from the store's verdict. The piece is
+ * not started here. A piece the loop
  * runs is swapped by its pointer watcher, and one it does not run waits for
  * demand; the caller names the piece's root as the verb's demand for the
  * latter. The candidate loads without cache repair, so nothing this verb
@@ -401,7 +406,7 @@ export async function servedSetPieceSource(
       ...(request.expectedPattern === undefined
         ? {}
         : { expectedPattern: request.expectedPattern }),
-      served: true,
+      served: { actingUser: request.actingUser },
     });
   } catch (error) {
     throw setSourceRefusal(error);

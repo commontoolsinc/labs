@@ -1508,13 +1508,14 @@ export class PiecesController<T = unknown> {
       /** Fresh source lifecycle revision written atomically with setup. */
       sourceTransition: PieceSourceTransition;
       /**
-       * The update as a serving runtime performs it: the transaction
-       * commits directly to the store rather than sealing into the wave,
-       * the piece is not started, and the post-commit refresh is left to
-       * the serving loop, so the returned cell view is the one the commit
-       * itself reconciled.
+       * The update as a serving runtime performs it on `actingUser`'s
+       * behalf: the transaction carries that principal's trust snapshot
+       * and commits directly to the store rather than sealing into the
+       * wave, the piece is not started, and the post-commit refresh is
+       * left to the serving loop, so the returned cell view is the one the
+       * commit itself reconciled.
        */
-      served?: boolean;
+      served?: { actingUser: string };
     },
   ): Promise<{
     /** Cell view reconciled to the pattern current after post-commit work. */
@@ -1536,12 +1537,16 @@ export class PiecesController<T = unknown> {
         pieceSourceTransition: options.sourceTransition,
         validateCurrentArgument: options.validateCurrentArgument,
         validateArgumentLinks: options.validateArgumentLinks,
-        ...(options.served === true
-          ? { directCommit: true, start: false }
-          : {}),
+        ...(options.served === undefined ? {} : {
+          directCommit: true,
+          start: false,
+          cfcTrustSnapshot: this.runtime.trustSnapshotForPrincipal(
+            options.served.actingUser,
+          ),
+        }),
       },
     );
-    if (options.served === true) return result;
+    if (options.served !== undefined) return result;
     try {
       await this.syncPattern(result.cell);
       await this.getResult(result.cell).pull();

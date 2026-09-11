@@ -27,7 +27,7 @@ a whole stack in memory and is untouched either way.
 
 ## The route
 
-Two POST endpoints under `/api/pattern-lifecycle`, mounted by
+Three POST endpoints under `/api/pattern-lifecycle`, mounted by
 `packages/toolshed/routes/pattern-lifecycle/`. Every body carries `space`,
 the DID of the space acted in. A verb that takes a pattern takes it one of
 two ways, and exactly one: `program` — the program as the client resolved
@@ -141,24 +141,28 @@ into the wave. The `SpaceServer` commits it to the store on its own, as a
 derived-class commit under the space's lease, serialized with the wave's
 seals; the transaction's `commit()` then resolves with the store's verdict,
 and the receipt and authority the runner mints from that verdict claim
-nothing a withdrawal can undo. The store re-verifies every document the
-transaction writes against the store seq the transaction was stamped at,
-ahead of its first read, so a document another commit moved meanwhile
-refuses the whole transaction. A document the transaction only read is not
-re-verified, and the transaction may have read state sealed into the open
-wave; what it writes is checked against the store either way. The replica
-takes the writes only once the store has accepted them, so no run reads
-them as pending state a refusal could roll back.
+nothing a withdrawal can undo. The store validates the transaction's own
+read set as it does a client commit's: every read is held to the seq this
+replica had for the document, so a commit the store took but the replica
+had not applied when the transaction read is a conflict, and a document the
+transaction writes without reading is held to the store seq the
+transaction was stamped at. A read of state sealed into the open wave names
+the durable basis beneath it. The replica takes the writes only once the
+store has accepted them, so no run reads them as pending state a refusal
+could roll back.
 
-A wave open when the direct commit lands learns of it. Its commit step
-treats a document the direct commit wrote, sitting at exactly that commit's
-seq, as observed rather than conflicting for every contribution sealed after
-the commit — those runs read the replica with it applied — and holds the
-store to that exact head when it commits; a contribution sealed before keeps
-the ordinary conflict, since its reads predate the commit. This is what
-lets a piece the update moved re-derive in the same cycle, whether the
-loop's pointer watcher swaps a piece it runs or the demand pass loads one
-the verb staged.
+A wave open when the direct commit lands learns of it once the replica has
+applied it. Its commit step treats a document the direct commit wrote,
+sitting at exactly that commit's seq, as observed rather than conflicting
+for a contribution sealed after the commit whose reads of that document
+all saw the commit, and holds the store to that exact head when it commits.
+A contribution sealed before keeps the ordinary conflict, since its write
+rests on state the commit replaced; one that read the document as it stood
+before the commit is refused at its own commit by the replica's claim check
+and never seals, and the wave holds such a read to the same rule should one
+reach it. This is what lets a piece the update moved
+re-derive in the same cycle, whether the loop's pointer watcher swaps a
+piece it runs or the demand pass loads one the verb staged.
 
 The served `setsrc` verb builds its update on that. It takes a pattern the
 space already holds: a program sent with the request is compiled as an
@@ -167,8 +171,9 @@ commit before the update's setup transaction reads and extends it, and the
 update runs in the cycle after. The transaction is the client-side update's
 — the pin against the pattern the update was proved on, the compatibility
 assertions, the retained-argument validators, the source revision, and the
-delegation the successor inherits — committed directly, with the piece not
-started here. A piece the loop runs is swapped by its pointer watcher; a
+delegation the successor inherits — carrying the requester's trust snapshot
+as a creation's does, committed directly, with the piece not started
+here. A piece the loop runs is swapped by its pointer watcher; a
 piece nothing runs waits for demand, and unless `start` is `false` the verb
 names the piece's root as its demand so the cycle after derives it.
 

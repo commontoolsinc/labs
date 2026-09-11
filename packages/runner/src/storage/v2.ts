@@ -5112,15 +5112,21 @@ export class SpaceReplica
   }
 
   /**
-   * The operations and preconditions `transaction` hands the store, as
-   * {@link sealNative} builds them into a sealed commit, without applying
-   * anything here: for a committer that commits to the store ahead of
-   * sealing the same transaction into this replica, which needs the store's
-   * shape before the replica has seen the writes.
+   * The operations, preconditions, and read set `transaction` hands the
+   * store, as {@link sealNative} builds them into a sealed commit, without
+   * applying anything here: for a committer that commits to the store
+   * ahead of sealing the same transaction into this replica, which needs
+   * the store's shape before the replica has seen the writes. The reads
+   * are `source`'s, against this replica's records as they stand, so a
+   * pending read names the durable basis beneath the layers it saw.
    */
-  storeCommitOf(transaction: NativeStorageCommit): {
+  storeCommitOf(
+    transaction: NativeStorageCommit,
+    source: IStorageTransaction | undefined,
+  ): {
     operations: ClientCommit["operations"];
     preconditions: readonly CommitPrecondition[];
+    reads: ClientCommit["reads"];
   } {
     return {
       operations: storeOperationsOf(
@@ -5128,6 +5134,7 @@ export class SpaceReplica
         transaction.sqliteOps ?? [],
       ),
       preconditions: activeCommitPreconditions(transaction.preconditions),
+      reads: this.#buildReads(source, this.#nextLocalSeq),
     };
   }
 
@@ -5721,29 +5728,7 @@ export class SpaceReplica
         reads: this.#buildReads(source, localSeq),
         // Cell ops first, folded SQLite ops last (applied in array order by the
         // engine; sqlite ops are not entity revisions and carry no id/scope).
-        operations: [
-          ...operations.map((operation) => {
-            switch (operation.op) {
-              case "delete":
-                return operation;
-              case "patch":
-                return {
-                  op: "patch" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  patches: operation.patches,
-                };
-              case "set":
-                return {
-                  op: "set" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  value: operation.value,
-                };
-            }
-          }),
-          ...sqliteOps,
-        ],
+        operations: storeOperationsOf(operations, sqliteOps),
         ...(activePreconditions.length > 0
           ? { preconditions: [...activePreconditions] }
           : {}),

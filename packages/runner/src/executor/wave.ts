@@ -30,6 +30,7 @@
 import type { CellScope } from "@commonfabric/api";
 import {
   type CommitPrecondition,
+  type ConfirmedRead,
   type DerivedWriteAnnotation,
   type Operation,
   resolveScopeKey,
@@ -426,6 +427,13 @@ export interface WaveSpaceCommit {
   operations: Operation[];
 
   preconditions: CommitPrecondition[];
+
+  /** The read set the store validates as it does a client commit's — a
+   * read whose document moved past its seq at its path refuses the whole
+   * batch. A wave's batch carries none, its concurrency check being the
+   * per-doc re-verification above; the serving loop's direct commit
+   * carries its transaction's own reads. */
+  confirmedReads?: ConfirmedRead[];
 
   /** Owning contribution index per precondition — home batch only; lets a
    * reported precondition failure resolve per write class. */
@@ -1011,12 +1019,14 @@ export class WaveAccumulator
 
   /**
    * Record a direct commit of the serving loop's own that landed at `seq`
-   * while this wave is open, writing `docs` (docs/features/
-   * server-pattern-lifecycle.md). The commit step then treats a doc in
-   * `docs` sitting at exactly `seq` as observed, not conflicting, for
-   * every contribution sealed from now on: those runs read the replica
-   * with the commit applied. Contributions sealed earlier keep the
-   * ordinary conflict, since their reads predate it.
+   * and is applied to the replica, while this wave is open, writing `docs`
+   * (docs/features/server-pattern-lifecycle.md). The commit step then
+   * treats a doc in `docs` sitting at exactly `seq` as observed, not
+   * conflicting, for a contribution sealed from now on whose every read of
+   * that doc saw a seq no older than `seq`. A contribution sealed earlier,
+   * or one that read the doc before the commit reached the replica, keeps
+   * the ordinary conflict, since its write rests on state the commit
+   * replaced.
    */
   noteOwnCommit(
     seq: number,
@@ -1796,21 +1806,32 @@ export class WaveAccumulator
 
     /** The head a contribution observed on a conflicted doc through one of
      * the loop's own direct commits, or `undefined` when the doc moved for
-     * some other reason or the contribution was sealed before the commit. */
+     * some other reason, the contribution was sealed before the commit, or
+     * one of its reads of the doc predates it. */
     const observedOwnCommit = (
       key: string,
-      contributionIndex: number,
+      contribution: WaveContribution,
     ): number | undefined => {
       const head = heads.get(key);
-      for (const own of this.#ownCommits) {
-        if (
-          own.seq === head && own.keys.has(key) &&
-          contributionIndex >= own.sealedBefore
-        ) {
-          return head;
-        }
-      }
-      return undefined;
+      const own = this.#ownCommits.find((candidate) =>
+        candidate.seq === head && candidate.keys.has(key) &&
+        contribution.index >= candidate.sealedBefore
+      );
+      if (own === undefined) return undefined;
+      const home = this.#homeSealed(contribution);
+      if (home === undefined) return undefined;
+      const { confirmed, pending } = home.sealed.commit.reads;
+      const readsBefore = [
+        ...confirmed.map((read) => ({ read, seq: read.seq })),
+        ...pending.map((read) => ({ read, seq: read.basisSeq ?? 0 })),
+      ].some(({ read, seq }) =>
+        seq < own.seq &&
+        docInstanceKey(
+            read.id,
+            this.#scopeKeyFor(read.scope, contribution.context),
+          ) === key
+      );
+      return readsBefore ? undefined : head;
     };
 
     const resolveConflicts = async (): Promise<void> => {
@@ -1830,11 +1851,11 @@ export class WaveAccumulator
           ) {
             continue;
           }
-          const observed = observedOwnCommit(key, contribution.index);
+          const observed = observedOwnCommit(key, contribution);
           if (observed !== undefined) {
-            // The doc moved by a direct commit this contribution ran over:
-            // its write stands, and the sink re-verifies the doc still
-            // sits exactly there.
+            // The doc moved by a direct commit this contribution read at
+            // or after: its write stands, and the sink re-verifies the doc
+            // still sits exactly there.
             rebasedDocs[contribution.index].add(key);
             rebasedHeads.set(key, observed);
             continue;

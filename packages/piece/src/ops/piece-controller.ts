@@ -530,14 +530,15 @@ export interface PatternUpdateOptions {
   expectedPattern?: { identity: string; symbol: string };
 
   /**
-   * The update as a serving runtime performs it on a requester's behalf
+   * The update as a serving runtime performs it on `actingUser`'s behalf
    * (docs/features/server-pattern-lifecycle.md): the setup transaction
-   * commits directly to the store rather than sealing into the serving
-   * wave, the piece is not started here, and no post-commit refresh runs.
-   * The loop's own swap watcher replaces a running piece's graph, and its
-   * demand pass runs an unrun one; the receipt's `refresh` is `deferred`.
+   * carries that principal's trust snapshot and commits directly to the
+   * store rather than sealing into the serving wave, the piece is not
+   * started here, and no post-commit refresh runs. The loop's own swap
+   * watcher replaces a running piece's graph, and its demand pass runs an
+   * unrun one; the receipt's `refresh` is `deferred`.
    */
-  served?: boolean;
+  served?: { actingUser: string };
 }
 
 /** Result of a pattern update accepted by the setup transaction. */
@@ -4818,7 +4819,9 @@ export class PieceController<T = unknown> {
                   ),
               repository: options?.repository,
               sourceTransition: transition,
-              ...(options?.served === true ? { served: true } : {}),
+              ...(options?.served === undefined
+                ? {}
+                : { served: options.served }),
             },
           );
           committedRef = result.commit.pattern;
@@ -4866,7 +4869,9 @@ export class PieceController<T = unknown> {
       ref: committedRef!,
       revisionId: transition!.revisionId,
       detachedOrigin: transition!.expected.origin,
-      refresh: { status: options?.served === true ? "deferred" : "completed" },
+      refresh: {
+        status: options?.served === undefined ? "completed" : "deferred",
+      },
     };
   }
 
@@ -5339,7 +5344,7 @@ async function executePatternUpdate(
     ) => void;
     repository?: string;
     sourceTransition: PieceSourceTransition;
-    served?: boolean;
+    served?: { actingUser: string };
   },
 ): Promise<{
   cell: Cell<unknown>;

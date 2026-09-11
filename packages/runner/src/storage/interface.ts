@@ -2826,15 +2826,21 @@ export interface ISpaceReplica extends ISpace {
   ): SealedNativeCommit;
 
   /**
-   * The operations and preconditions `transaction` would hand the store,
-   * as {@link sealNative} builds them into a sealed commit, without applying
-   * anything to this replica. A committer that commits to the store ahead
-   * of sealing the transaction here (the serving loop's direct commit) reads
-   * the store's shape from this. Optional, as {@link sealNative} is.
+   * The operations, preconditions, and read set `transaction` would hand
+   * the store, as {@link sealNative} builds them into a sealed commit,
+   * without applying anything to this replica. A committer that commits to
+   * the store ahead of sealing the transaction here (the serving loop's
+   * direct commit) reads the store's shape from this; the reads are
+   * `source`'s against this replica's records, a pending read naming the
+   * durable basis beneath its layers. Optional, as {@link sealNative} is.
    */
-  storeCommitOf?(transaction: NativeStorageCommit): {
+  storeCommitOf?(
+    transaction: NativeStorageCommit,
+    source: IStorageTransaction | undefined,
+  ): {
     operations: ClientCommit["operations"];
     preconditions: readonly CommitPrecondition[];
+    reads: ClientCommit["reads"];
   };
 
   /**

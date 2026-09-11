@@ -1152,14 +1152,14 @@ under the writing principal. A served source update (the `setsrc`
 lifecycle verb, [server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md))
 moves the pointer in a setup transaction that COMMITS DIRECTLY to the
 store rather than sealing — the serving loop's own derived-class commit,
-serialized with the wave's seals, its written docs re-verified against
-the seq it was stamped at — because module-loading.md lets update
+serialized with the wave's seals, its own read set validated by the
+store as a client commit's — because module-loading.md lets update
 authority publish only from a transaction that commits to storage
-itself. A wave open at that commit takes a contribution sealed AFTER it
-as having observed the docs it wrote (§3d's conflict set exempts them
-for that contribution, and the sink holds the store to that exact
-head), so the swap's first derivation under the new pattern lands in the
-same cycle. Root creation and explicit wish-sidecar opens
+itself. A wave open at that commit takes a contribution sealed AFTER it,
+whose reads of the docs it wrote saw the commit, as having observed them
+(§3d's conflict set exempts them for that contribution, and the sink
+holds the store to that exact head), so the swap's first derivation
+under the new pattern lands in the same cycle. Root creation and explicit wish-sidecar opens
 fetch system source through the serving runtime's API URL. Those fetches remain
 within verification-coverage.md OW55's source-trust obligation; root ensuring
 adds no source-following probe for an existing root.

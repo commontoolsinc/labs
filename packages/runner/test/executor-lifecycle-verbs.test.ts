@@ -315,6 +315,40 @@ describe("ExecutorHost.runLifecycleVerb", () => {
       expect(cell.get()).toEqual({ marker: "client" });
     });
 
+    it("is refused when a document it read moved past the seq it read, even one it does not write", async () => {
+      host = newHost();
+      const guard = (runtime: Runtime) =>
+        runtime.getCell<{ marker: string }>(space, "direct-guard", undefined);
+      const outcome = await host.runLifecycleVerb(space, {
+        name: "mark-guarded",
+        run: async (runtime) => {
+          await guard(runtime).sync();
+          const tx = runtime.edit();
+          runtime.stampServerRun(tx, {
+            actionId: "test-verb/mark-guarded",
+            kind: "bookkeeping",
+            directCommit: true,
+          });
+          // The write depends on a read of another document, which a
+          // client then moves before the commit.
+          const seen = guard(runtime).withTx(tx).get()?.marker ?? "unset";
+          marker(runtime).withTx(tx).set({ marker: `guarded by ${seen}` });
+          const client = clientRuntime();
+          const written = await client.editWithRetry((clientTx) => {
+            guard(client).withTx(clientTx).set({ marker: "moved" });
+          });
+          expect(written.error).toBeUndefined();
+          runtime.prepareTxForCommit(tx);
+          return await tx.commit();
+        },
+      });
+      expect(outcome.error?.message).toContain("direct commit rejected");
+      const reader = clientRuntime();
+      const cell = marker(reader);
+      await cell.sync();
+      expect(cell.get()).toBeUndefined();
+    });
+
     it("lets a piece it stages derive in the same cycle, the derivation written over the documents the commit moved", async () => {
       // No root ensure, so nothing but the verb's own work reaches the
       // cycle's wave: the piece's first derivation, which the demand pass

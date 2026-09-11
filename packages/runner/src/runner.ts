@@ -198,6 +198,7 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type ImplementationIdentity,
   runtimeWritePolicyAuthorization,
+  type TrustSnapshot,
 } from "./cfc/types.ts";
 import {
   prepareSourceClosureVerification,
@@ -1201,6 +1202,16 @@ export interface RunSyncedOptions {
    * its demand pass runs an unrun one.
    */
   start?: boolean;
+
+  /**
+   * The trust snapshot the owned setup transaction carries, set ahead of
+   * its first read on every attempt: a serving runtime acting on a
+   * requester's behalf supplies the requester's, so a label the setup
+   * mints attributes to them rather than to the serving identity. Absent,
+   * the transaction keeps the runtime's ambient snapshot. Not applied to a
+   * caller-owned transaction, which keeps its owner's.
+   */
+  cfcTrustSnapshot?: TrustSnapshot;
 }
 
 /** Options for a pattern setup whose fresh source revision proves a commit. */
@@ -6933,6 +6944,9 @@ export class Runner {
             kind: "bookkeeping",
             ...(options?.directCommit === true ? { directCommit: true } : {}),
           });
+          if (options?.cfcTrustSnapshot !== undefined) {
+            tx.setCfcTrustSnapshot(options.cfcTrustSnapshot);
+          }
           assertExpectedPatternIdentity(resultCell.withTx(tx));
           return this.#setupInternal(
             tx,

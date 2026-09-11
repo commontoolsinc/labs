@@ -2265,15 +2265,22 @@ describe("setup/start", () => {
           expectedPatternIdentity: before.pattern,
           pieceSourceTransition: transition,
           directCommit: true,
+          cfcTrustSnapshot: serving.trustSnapshotForPrincipal(
+            "did:key:requester",
+          ),
         },
       );
       const successor = serving.patternManager.getArtifactEntryRef(candidate)!;
       expect(result.commit.pattern).toEqual(successor);
       // The setup transaction reached the destination stamped as a direct
-      // commit; the swap the pointer write triggers stamps its own.
+      // commit and carrying the requester's trust snapshot; the swap the
+      // pointer write triggers stamps its own.
       const setup = stamped.find((stamp) => stamp.directCommit === true);
       expect(setup?.actionId).toBe(`piece-run-synced/${resultCell.sourceURI}`);
       expect(sealed).toContain(setup?.tx);
+      expect(setup?.tx.getCfcState().trustSnapshot?.actingPrincipal).toBe(
+        "did:key:requester",
+      );
       expect(receiptSourceSnapshot(serving, resultCell).pattern).toEqual(
         successor,
       );
