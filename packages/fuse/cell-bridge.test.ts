@@ -2819,6 +2819,8 @@ describe("cell-bridge", () => {
             ref: { identity: "A".repeat(43), symbol: "default" },
             revisionId: "revision-2",
             detachedOrigin: null,
+            space: "did:key:test" as const,
+            seq: 12,
             refresh: {
               status: "failed" as const,
               warning: "dependency unavailable",
@@ -5877,6 +5879,8 @@ describe("cell-bridge", () => {
         ref: { identity: "A".repeat(43), symbol: "default" },
         revisionId: "revision-2",
         detachedOrigin: null,
+        space: "did:key:test",
+        seq: 12,
         refresh: { status: "failed", warning: "dependency unavailable" },
       })).toBe(
         `Source revision revision-2 committed as cf:module/${
@@ -5891,6 +5895,8 @@ describe("cell-bridge", () => {
         ref: { identity: "A".repeat(43), symbol: "default" },
         revisionId: "revision-2",
         detachedOrigin: null,
+        space: "did:key:test",
+        seq: 12,
         refresh: { status: "completed" },
       })).toBeUndefined();
       // A finalize with no receipt — a metadata write, which updated no source.

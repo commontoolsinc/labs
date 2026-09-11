@@ -2865,6 +2865,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.status();
   }
 
+  committedSeq(space: MemorySpace): number | undefined {
+    return this.tx.committedSeq?.(space);
+  }
+
   read(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
