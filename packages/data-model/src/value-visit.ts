@@ -1144,10 +1144,10 @@ export function makeVisitFabricValueFunction<ResultType = FabricValue>(
  *   `isValidFabricValueLayer()`, see which for details.
  *
  * * The deep check performs a full-depth validity check, based on
- *   `isValidFabricValue()`, anywhere an encountered value to be dispatched might
- *   turn out not to be a valid `FabricValue`, resulting in a guarantee that
- *   anything of type `FabricValue` passed to the visitor is in fact a valid
- *   `FabricValue`.
+ *   `isValidFabricValue()`, anywhere an encountered value to be dispatched
+ *   might turn out not to be a valid `FabricValue`, resulting in a guarantee
+ *   that anything of type `FabricValue` passed to the visitor is in fact a
+ *   valid `FabricValue`.
  *
  *   This can incur significant performance overhead. As a worst-case, it can
  *   result in O(N^2) checks on the number of values in the graph of the
