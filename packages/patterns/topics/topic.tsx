@@ -373,7 +373,7 @@ export interface TopicInput {
   comments?: Writable<StoredTopicComment[] | Default<[]>>;
   links?: Writable<TopicLink[] | Default<[]>>;
   createdAt?: number | Default<0>;
-  createdBy?: Writable<TopicAuthor | undefined>;
+  createdBy?: TopicAuthor;
 
   /** Creator display name recorded without an author kind. */
   createdByName?: string;
