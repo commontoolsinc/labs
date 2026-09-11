@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-11T04:49:55.656447+00:00",
+  "updated": "2026-09-11T11:42:48.685339+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7307",
@@ -155,8 +155,8 @@
     {
       "id": "E3",
       "title": "Nested-scan diagnostic",
-      "status": "todo",
-      "detail": "Warning with negative cases and corpus noise assessment."
+      "status": "review",
+      "detail": "PR #7328 implements and validates the nested-scan warning, with ten focused cases and a 413-entry corpus review. The acceptance report is linked from the tracker. CI and Cubic review govern landing."
     }
   ],
   "questions": [
