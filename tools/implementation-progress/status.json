@@ -1,9 +1,9 @@
 {
-  "updated": "2026-09-11T19:02:17.463912+00:00",
+  "updated": "2026-09-11T19:29:23.868486+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7331",
-  "activity": "Q7 tagged enumeration is implemented and reviewed locally. Full runner sweep: 1,447 passed, two outdated descriptor/setup tests failed; corrected suites pass all seven steps. All 46 type groups and other package checks pass. Publishing for fresh CI and Cubic review; live poll untouched.",
+  "activity": "Producer #7323 current-main integration passes the full runner suite: 1,458 tests and 9,223 steps, zero failures. Final Cubic fixes pass 13 index tests / 57 steps, API 29/7, transformers 1,172/981, static 68/33 plus 24 browser cases, all 46 type groups and 600 documentation blocks. Antagonistic review is clean. Publishing fixes for fresh CI and Cubic review; #7336 has clean Cubic output at 330fd67c47. Live poll remains untouched.",
   "review": "Each slice requires clean current-head CI, actual Cubic review, and antagonistic review before landing. The checks ledger records completed merges.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
@@ -34,7 +34,10 @@
     "#7317 merged as 3e55b4e42dfd70fef3bd1cf4346fa706c4f2d87c: Restore reactive lunch-poll option and voter rows. All 69 exact-head gates passed or skipped on c2e63c1306da1723547b72d98e7c78fc16b878e5; clean Cubic and antagonistic reviews preceded merge.",
     "#7320 merged as 3f2401638594bdca616906816a6c06011a39b643: Separate list coordinator state across serving principals and sessions. All 69 exact-head gates passed or skipped on d843b3be374d9b999f3cbd4975ae9f75d4f5e9c1; clean Cubic and antagonistic reviews preceded merge.",
     "#7321 merged as 2fda18e1acc435f0c6642ff93809d14cd1ecc543: Index pending schema policies to bound document lookup work. All 69 exact-head gates passed or skipped on 8d9937f7192f16fc70cc01641bcae8b24ad83551; clean Cubic and antagonistic reviews preceded merge.",
-    "Q7 local delta: transformers 1,172/981, API29/7, static68/33 plus24 browser cases,46 type groups,600 docs blocks,fmt/lint/cycles pass. Runner sweep1447 passed with2 stale descriptor/setup test failures; repaired suites pass2/7, final legacy recovery1/2, tagged consumers coverbothmodes. Antagonistic review clean. Final full CI required."
+    "Q7 local delta: transformers 1,172/981, API29/7, static68/33 plus24 browser cases,46 type groups,600 docs blocks,fmt/lint/cycles pass. Runner sweep1447 passed with2 stale descriptor/setup test failures; repaired suites pass2/7, final legacy recovery1/2, tagged consumers coverbothmodes. Antagonistic review clean. Final full CI required.",
+    "#7331 merged as cd525a0e5395a72d8e8910353a4e8a8a37bfca24: all 69 exact-head gates passed or skipped; Cubic 103286540159 reported zero issues on da0aa0ecef; final antagonistic review clean.",
+    "#7340 merged: af7c0653e0 passed all 69 checks (66 success, 3 skipped); Cubic found no issues in four files. Initial unrelated engine watermark timeout retained in logs; isolated test and CI job rerun passed. Both final-head synthetic browser variants completed with 134 runs, 1,016 accesses, 896 links, two commits, zero event errors.",
+    "Current-main integration: full runner 1,458 tests / 9,223 steps passed. Final public-descriptor schema fix: focused index 13/57, API 29/7, transformers 1,172/981, static 68/33 plus 24 browser cases, 46 type groups and 600 docs blocks passed. Final current-head CI and Cubic review remain required."
   ],
   "stages": [
     {
@@ -83,13 +86,13 @@
       "id": "B1",
       "title": "Grouping and unique-key indexing",
       "status": "review",
-      "detail": "Tagged keyEntries() and both producer modes pass authored mixed-key/lifecycle acceptance. Full sweep exposed two stale expected-shape tests, now extended and passing. Final CI and Cubic remain before merge."
+      "detail": "Tagged implementation and Cubic fixes pass local validation, including current-main full runner 1,458 tests / 9,223 steps. Publishing for final current-head CI and clean Cubic review."
     },
     {
       "id": "B2",
       "title": "Keyed lookup and join",
-      "status": "todo",
-      "detail": "Typed lookup landed in #7304 with bucket isolation, Cell identity, linked rows, and durable resume. Join implementation remains pending."
+      "status": "review",
+      "detail": "Local/cross-space joins, restart, and demand-only enumeration pass acceptance in #7323. Q7 tagged enumeration is approved and implemented. Final publication gates remain."
     },
     {
       "id": "B3",
@@ -100,8 +103,8 @@
     {
       "id": "B4",
       "title": "Operator documentation",
-      "status": "active",
-      "detail": "Aggregate contracts, examples, public types, and measured complexity are included in #7259. Index and join documentation remains pending."
+      "status": "review",
+      "detail": "Index complexity, joins, tagged enumeration, and public descriptor migration are documented in #7323. Q7 decision record preserves context, consequences, and alternatives. Final publication gates remain."
     },
     {
       "id": "C2",

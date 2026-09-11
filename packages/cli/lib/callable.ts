@@ -3,6 +3,7 @@ import type { PiecesController } from "@commonfabric/piece/ops";
 import {
   type Cell,
   encodeJsonPointer,
+  type EventAppendDeliveryOutcome,
   type IExtendedStorageTransaction,
   isLink,
   type MemorySpace,
@@ -45,6 +46,7 @@ import {
   type CellSelection,
   CellSelectionError,
   deriveSelectedValue,
+  isStoredContainer,
   LINK_MARKER_KEY,
 } from "./cell-selection.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
@@ -185,18 +187,17 @@ export interface CallableExecutionDeps {
    * to arrive in. Answered by the same selection step `cf cell get` reads
    * through, so one grammar covers reads and calls.
    *
-   * It shapes a result that exists rather than deciding what is fetched: the
-   * readback has already materialized the whole receipt by the time this
-   * applies. (A plain result's receipt does carry a descriptive schema of
-   * what it holds — a reactive result's carries none — but either way the
-   * fetch has happened first.) The shared step waits for its computed output
-   * with `Cell.pull()`, whose scheduler and linked-document convergence pool
-   * are runtime/manager-wide; a shaped call can therefore still share a wait
-   * with active work that the plain call's transaction-local acknowledgment
-   * does not. Declared object keys are ordered locally from the projection
-   * after that readiness boundary, with an open projection's retained extras
-   * following in value order. A verb that returns nothing keeps returning
-   * nothing — there is no value for a selection to be about. */
+   * A schemaless receipt holding a stored container is selected before its
+   * linked contents are fetched. Other receipts are materialized before
+   * selection to establish whether a result exists. The shared step waits
+   * for its computed output with `Cell.pull()`, whose scheduler and
+   * linked-document convergence pool are runtime/manager-wide; a shaped call
+   * can therefore still share a wait with active work that the plain call's
+   * transaction-local acknowledgment does not. Declared object keys are ordered
+   * locally from the projection after that readiness boundary, with an open
+   * projection's retained extras following in value order. A verb that returns
+   * nothing keeps returning nothing — there is no value for a selection to be
+   * about. */
   selection?: CellSelection;
 
   /** @internal Seam for tests, mirroring `getCellValue`'s. */
@@ -1643,32 +1644,59 @@ export async function executeResolvedCallable(
       throw new Error("--no-wait requires an invocation id");
     }
     deps.onPhase?.("dispatched");
-    // The span runs from the send to the handling's final commit callback:
-    // the dispatch-to-commit time the `--verbose` phases report, beside the
-    // readback spans below.
+    // Two settlements come back from one send. `appended` is the caller's
+    // own authored act durable: under server execution the event append,
+    // which the server then handles; otherwise the handling's commit, the
+    // same moment as `handled`. `handled` is the handling's final commit
+    // callback — under server execution, the served handling's consequence.
+    // The dispatch span runs to the first, the dispatch-to-commit time the
+    // `--verbose` phases report, and the readback below waits for the second
+    // before it reads the receipt.
+    const handled = Promise.withResolvers<IExtendedStorageTransaction>();
     const tx = await timeCliPhase(
       "executeCallable.dispatch",
       () =>
         new Promise<IExtendedStorageTransaction>((resolve, reject) => {
+          const onAppended = (
+            delivery: EventAppendDeliveryOutcome,
+            appendedTx: IExtendedStorageTransaction,
+          ) => {
+            // A refusal the transaction itself carries — a handling that
+            // threw or whose commit was rejected — is reported below off
+            // the transaction's status, with the runtime error it
+            // recorded; only an append refused on an otherwise clean
+            // transaction is reported here.
+            if (delivery.delivered || appendedTx.status().status === "error") {
+              resolve(appendedTx);
+            } else {
+              reject(new Error(`event append refused: ${delivery.refused}`));
+            }
+          };
+          // The commit callback settles both: a sender that never reports
+          // the append — one whose act IS the commit — is acknowledged
+          // here, and the appended report, when it comes, comes first.
+          const onCommit = (committedTx: IExtendedStorageTransaction) => {
+            resolve(committedTx);
+            handled.resolve(committedTx);
+          };
           try {
-            if (invocation !== undefined) {
-              resolved.callableCell.send(dispatchInput, resolve, {
-                // The id and the session that chose it travel together: an
-                // id is the caller's own word, and only the pair decides
-                // which receipt this handling files under.
+            resolved.callableCell.send(dispatchInput, onCommit, {
+              ...(invocation === undefined ? {} : {
+                // The id and the session that chose it travel together:
+                // an id is the caller's own word, and only the pair
+                // decides which receipt this handling files under.
                 eventId: invocation.id,
                 session: invocation.session,
-              });
-            } else {
-              resolved.callableCell.send(dispatchInput, resolve);
-            }
+              }),
+              onAppended,
+            });
           } catch (error) {
             reject(error);
           }
         }),
     );
     // Acknowledgment is transaction-local (verb contract, Settlement): the
-    // commit callback above fires on THIS handling's final commit. Awaiting
+    // callback above fires on THIS caller's durable act. Awaiting
     // runtime.idle()/pieces.synced() here instead would hold an
     // already-committed write hostage to every derived recomputation it
     // triggered elsewhere in the graph.
@@ -1723,6 +1751,27 @@ export async function executeResolvedCallable(
       };
     }
 
+    // The readback needs the handling itself to have landed, which under
+    // server execution is the served handling's consequence — refused,
+    // errored, or dropped there, the readback would find no receipt. Off
+    // it, `handled` settled with `tx` above.
+    const handledTx = await timeCliPhase(
+      "executeCallable.handled",
+      () => handled.promise,
+    );
+    const handledStatus = handledTx.status();
+    if (
+      handledStatus.status === "error" && handledTx !== tx &&
+      !("precondition" in handledStatus.error &&
+        handledStatus.error.precondition === "receipt-exists")
+    ) {
+      throw new Error(
+        `Handler "${resolved.cellKey}" failed: ${
+          errorMessage(handledStatus.error)
+        }`,
+      );
+    }
+
     // Read the handling's outcome back off its receipt. On a receipt-exists
     // collision this is the ORIGINAL handling's receipt — same id, same
     // outcome — so a retry settles as a success. The receipt is a COMMIT
@@ -1734,10 +1783,27 @@ export async function executeResolvedCallable(
     let links: Record<string, InvocationResultLink> | undefined;
     if (link) {
       const receipt = resolved.pieces.runtime.getCellFromLink<any>(link);
-      const value = await timeCliPhase(
-        "executeCallable.receipt.pull",
-        () => receipt.pull(),
-      );
+      let value: unknown;
+      let raw: unknown;
+      if (deps.selection !== undefined && receipt.schema === undefined) {
+        const stored = receipt.asSchema(false);
+        await timeCliPhase(
+          "executeCallable.receipt.probe",
+          () => stored.pull(),
+        );
+        raw = stored.getRaw();
+      }
+      // A stored container establishes presence without loading its children.
+      // A root link needs materialization: its target can be absent.
+      if (isStoredContainer(raw)) {
+        value = raw;
+      } else {
+        value = await timeCliPhase(
+          "executeCallable.receipt.pull",
+          () => receipt.pull(),
+        );
+        raw = receipt.getRaw();
+      }
       // A value-less verb's receipt is an empty record — existence-only.
       // Presence is decided on the receipt's STORED value, never on the
       // materialized one: a `FabricInstance` crossing the cell read arrives
@@ -1748,7 +1814,6 @@ export async function executeResolvedCallable(
       // the plain empty record; every other stored shape — plain JSON, the
       // link a launched or chained-cell result converts to, an instance's
       // codec form, a keyless raw primitive — is a result.
-      const raw = receipt.getRaw();
       const valueLess = isObjectNotArray(raw) && !isInstance(raw) &&
         Object.keys(raw).length === 0;
       if (value !== undefined && !valueLess) {

@@ -44,6 +44,7 @@ describe("collection index lookup", () => {
       kind: "collection-index",
       mode: "group",
       keys: ["a"],
+      keyEntries: [{ kind: "value", value: "a" }],
       buckets: {
         [collectionKeyBucket({ kind: "string", value: "a" })]: [1],
       },
@@ -54,6 +55,7 @@ describe("collection index lookup", () => {
     >;
     expect(proxy.lookup("a")).toEqual([1]);
     expect(proxy.keys()).toEqual(["a"]);
+    expect(proxy.keyEntries()).toEqual([{ kind: "value", value: "a" }]);
     const data = runtime.getCell<{ lookup: string; keys: string }>(
       space,
       "proxy-data",
@@ -96,6 +98,10 @@ describe("collection index lookup", () => {
       kind: "collection-index",
       mode: "group",
       keys: ["a", "b"],
+      keyEntries: [{ kind: "value", value: "a" }, {
+        kind: "value",
+        value: "b",
+      }],
       buckets: { [a]: [1], [b]: [2] },
     });
     const selected = runtime.getCell<string>(space, "selected", undefined, tx);
@@ -127,6 +133,7 @@ describe("collection index lookup", () => {
       tx = runtime.edit();
       selected.withTx(tx).set("missing");
       index.withTx(tx).key("keys").set(["b"]);
+      index.withTx(tx).key("keyEntries").set([{ kind: "value", value: "b" }]);
       await tx.commit();
       await runtime.idle();
       expect(await result.key("values").pull()).toEqual([]);
@@ -168,6 +175,7 @@ describe("collection index lookup", () => {
       kind: "collection-index",
       mode: "key",
       keys: ["b"],
+      keyEntries: [{ kind: "value", value: "b" }],
       buckets: { [b]: 2 },
     });
     const output = runtime.getCell<{ value: number | null | undefined }>(
@@ -194,6 +202,10 @@ describe("collection index lookup", () => {
       tx = runtime.edit();
       index.withTx(tx).key("buckets").key(b).set(20);
       index.withTx(tx).key("keys").set(["b", "c"]);
+      index.withTx(tx).key("keyEntries").set([
+        { kind: "value", value: "b" },
+        { kind: "value", value: "c" },
+      ]);
       await tx.commit();
       await runtime.idle();
       expect(runs).toBe(0);
@@ -251,6 +263,11 @@ describe("collection index lookup", () => {
       kind: "collection-index",
       mode: "key",
       keys: [first, second, "equal"],
+      keyEntries: [
+        { kind: "cell", cell: first },
+        { kind: "cell", cell: second },
+        { kind: "value", value: "equal" },
+      ],
       buckets: {
         [a]: 1,
         [b]: 2,
@@ -323,6 +340,7 @@ describe("collection index lookup", () => {
       kind: "collection-index",
       mode: "group",
       keys: ["a"],
+      keyEntries: [{ kind: "value", value: "a" }],
       buckets: { [collectionKeyBucket({ kind: "string", value: "a" })]: [row] },
     });
     const result = runtime.run(
