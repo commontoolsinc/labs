@@ -276,9 +276,8 @@ describe("deferred-start-catchup-start", () => {
 
     beforeEach(() => {
       storageManager = StorageManager.emulate({ as: signer });
-      // EXPLICITLY flag-ON, with no serving posture: a flag-ON CLIENT — the
-      // arm the OW45 arm-B defect was caught on (run b04) and the only arm
-      // the catch-up recovery is gated to.
+      // Flag on with no serving posture: a flag-on client, the only arm the
+      // catch-up recovery is gated to.
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
@@ -334,7 +333,8 @@ describe("deferred-start-catchup-start", () => {
         // The refusal really happened, exactly once — the recovery never
         // re-committed a start transaction…
         expect(injector.refusals()).toBe(1);
-        // …the piece is RUNNING (the b04 death left no registration here)…
+        // …the piece is RUNNING (a terminal refusal leaves no registration
+        // here)…
         expect(runtime.runner.cancels.has(key(result))).toBe(true);
         // …and the recovery arm committed NOTHING: not one commit reached
         // the store's door after the refusal.
@@ -821,8 +821,8 @@ describe("deferred-start-catchup-start", () => {
       // session's own accepted layers whose underlying doc advanced; reachable
       // in the same first-hydration race whenever the serving side's commit
       // advances a pending-read target while the confirmed reads pass). Both
-      // recover; leaving the pending sibling terminal would keep the b04 death
-      // alive under that message (review F4).
+      // recover; leaving the pending sibling terminal would leave the piece
+      // with no client-side context under that message.
       const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
       const Piece = pattern<{ value: number }>(({ value }) => ({
         doubled: lift((input: number) => input * 2)(value),

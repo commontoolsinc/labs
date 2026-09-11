@@ -221,7 +221,8 @@ function isPatternCoverageCacheRuntimeVersion(runtimeVersion: string): boolean {
 /**
  * Returns the key under which a compile-cache write-back is tracked: one
  * slot per space, runtime version, and entry identity, so a remembered
- * write-back for one entry point says nothing about another.
+ * write-back for one entry point says nothing about another. Exported for
+ * testing.
  */
 export function compileCachePersistenceSlotKey(
   space: MemorySpace,

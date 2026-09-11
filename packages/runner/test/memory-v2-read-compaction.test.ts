@@ -228,6 +228,7 @@ describe("memory-v2-read-compaction", () => {
       // and re-runs — it just no longer collides with disjoint writers under
       // the referent. This pins the reactivity half (the conflict half is
       // covered by the test above).
+
       const { signer, storage, runtime } = await createRuntime(
         "memory-v2-read-compaction-exclude-reactivity",
       );

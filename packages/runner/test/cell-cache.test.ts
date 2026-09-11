@@ -209,7 +209,7 @@ describe("cell-cache", () => {
     });
   });
 
-  describe("verifySourceDocs (Merkle self-verification)", () => {
+  describe("`verifySourceDocs()` (Merkle self-verification)", () => {
     it("accepts a faithfully-built closure", () => {
       const { modules, entryIdentity } = toModules(PROGRAM);
       const docs = buildSourceDocs(modules, entryIdentity);
@@ -2453,10 +2453,6 @@ describe("cell-cache", () => {
       expect(loaded.size).toBe(3);
     });
   });
-
-  //
-  // End-to-end: two runtimes with DISTINCT user identities over shared storage
-  //
 
   describe("two-identity shared-space compile cache (e2e)", () => {
     // The shared compile-cache space — owned by signerA (its DID is the

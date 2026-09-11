@@ -1,8 +1,9 @@
 /**
- * The `removes` arm of a replica's watch handling: a watch refresh batch
- * carries removals when a watched doc is deleted upstream, and the scripted
- * transport here answers the watch add with a sync that upserts two docs
- * and removes one of them in the same batch, so the arm runs on every run.
+ * The `removes` arm of `SpaceReplica.#applySessionSync()`. A watch refresh
+ * batch carries removals when a watched doc is deleted upstream, and the
+ * scripted transport here answers the watch add with a sync that upserts
+ * two docs and removes one of them in the same batch, so the removes loop
+ * runs while `provider.sync()` is awaited, on every run.
  */
 
 import { expect } from "@std/expect";

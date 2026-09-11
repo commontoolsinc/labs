@@ -2777,7 +2777,7 @@ describe("memory-v2-stacked-commit", () => {
           caughtUpLocalSeq: doomed.localSeq,
         });
         const result = await doomed.promise;
-        expect(result.error).toBeDefined();
+        expect(result.error).toMatchObject({ name: "ConflictError" });
 
         // The drop emptied the shadowed doc's pending set: the foreign
         // value is visible, the floor lifts — and the WAKE fired (pre-fix
@@ -3106,6 +3106,7 @@ describe("memory-v2-stacked-commit", () => {
       // The DEFAULT harness transport models exactly this old server, so the
       // legacy path is what every other fixture in this file exercises; this
       // test pins it explicitly: no parking, promotion at the verdict.
+
       const harness = await createHarness();
       try {
         await seedAccepted(harness, DOCS.A, valueFor("base"));
@@ -5025,7 +5026,9 @@ describe("memory-v2-stacked-commit", () => {
     // sibling's data is unrepresentable in the result. A layer whose ops cannot
     // apply to the base (the spine died with a dropped parent, or a winner
     // replaced it with an incompatible shape) renders skipped: transiently
-    // honest, converging when a frame delivers server truth.
+    // honest, converging when a frame delivers server truth. Under the strict
+    // admission mode such commits become terminal rejections at admission
+    // instead.
 
     it("renders a surviving child whose ops cannot apply to the repaired base as skipped", async () => {
       const harness = await createHarness();
