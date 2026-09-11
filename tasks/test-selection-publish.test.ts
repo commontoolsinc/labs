@@ -53,6 +53,13 @@ const TOPOLOGY: Suite[] = [{
 
 const suites = () => Promise.resolve(TOPOLOGY);
 
+/**
+ * No coverage baselines. Reading real ones asks GitHub what its recent
+ * runs published, which is not a question a test of the fold should
+ * reach the network to answer.
+ */
+const noBaselines = () => Promise.resolve([]);
+
 /** The one unit that topology holds. */
 const UNIT = "packages/memory/test/space.test.ts";
 
@@ -378,13 +385,22 @@ describe("publish()", () => {
     // An absent aggregate is either a genuine first run or one that went
     // missing, and an incremental run cannot tell the two apart.
     const { store, created } = fakeStore(seed());
-    expect(await publish(["--days", "1"], store, NOW, suites)).toBe(1);
+    expect(await publish(["--days", "1"], store, NOW, suites, noBaselines))
+      .toBe(1);
     expect(created.size).toBe(0);
   });
 
   it("writes a manifest and a state from a bootstrap", async () => {
     const { store, created } = fakeStore(seed());
-    expect(await publish(["--bootstrap", "--days", "1"], store, NOW, suites))
+    expect(
+      await publish(
+        ["--bootstrap", "--days", "1"],
+        store,
+        NOW,
+        suites,
+        noBaselines,
+      ),
+    )
       .toBe(0);
     const names = [...created.keys()];
     const manifestName = names.find((name) => name.includes("/manifest-"));
@@ -426,6 +442,7 @@ describe("publish()", () => {
         store,
         NOW,
         () => Promise.resolve([]),
+        noBaselines,
       );
     } finally {
       console.log = log;
@@ -449,10 +466,16 @@ describe("publish()", () => {
     // topology does not account for.
     const objects = seed();
     const { store } = fakeStore(objects);
-    await publish(["--bootstrap", "--days", "1"], store, NOW, needsFile);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      needsFile,
+      noBaselines,
+    );
     objects[CI(DAY, "3")] = object("c3", "pass", "2026-08-20T03:00:00.000Z");
     const lines = await saying(() =>
-      publish(["--days", "1"], store, NOW, needsFile)
+      publish(["--days", "1"], store, NOW, needsFile, noBaselines)
     );
     expect(lines).toContain(
       "1 of them were in this count at the last publish too",
@@ -465,11 +488,17 @@ describe("publish()", () => {
     // list replaced each run would call it new every time it did record.
     const objects = seed();
     const { store } = fakeStore(objects);
-    await publish(["--bootstrap", "--days", "1"], store, NOW, needsFile);
-    await publish(["--days", "1"], store, NOW, needsFile);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      needsFile,
+      noBaselines,
+    );
+    await publish(["--days", "1"], store, NOW, needsFile, noBaselines);
     objects[CI(DAY, "3")] = object("c3", "pass", "2026-08-20T03:00:00.000Z");
     const lines = await saying(() =>
-      publish(["--days", "1"], store, NOW, needsFile)
+      publish(["--days", "1"], store, NOW, needsFile, noBaselines)
     );
     expect(lines).toContain(
       "1 of them were in this count at the last publish too",
@@ -483,7 +512,13 @@ describe("publish()", () => {
     const laneKey = JSON.stringify(["gate", "ci", "ci-lane batch memory"]);
     const objects = seed();
     const { store, created } = fakeStore(objects);
-    await publish(["--bootstrap", "--days", "1"], store, NOW, needsFile);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      needsFile,
+      noBaselines,
+    );
     const older = await newestState(created);
     objects[stateObjectName("2026-08-19", "01AAAA")] = JSON.stringify({
       ...older,
@@ -491,7 +526,7 @@ describe("publish()", () => {
     });
     created.clear();
     objects[CI(DAY, "3")] = object("c3", "pass", "2026-08-20T03:00:00.000Z");
-    await publish(["--days", "1"], store, NOW, needsFile);
+    await publish(["--days", "1"], store, NOW, needsFile, noBaselines);
     expect((await newestState(created)).unclaimed).not.toContain(laneKey);
   });
 
@@ -500,7 +535,13 @@ describe("publish()", () => {
     // a file a suite claims takes its identity out of it.
     const objects = seed();
     const { store, created } = fakeStore(objects);
-    await publish(["--bootstrap", "--days", "1"], store, NOW, needsFile);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      needsFile,
+      noBaselines,
+    );
     objects[CI(DAY, "3")] = object(
       "c3",
       "pass",
@@ -508,7 +549,7 @@ describe("publish()", () => {
       "main",
       UNIT,
     );
-    await publish(["--days", "1"], store, NOW, needsFile);
+    await publish(["--days", "1"], store, NOW, needsFile, noBaselines);
     expect((await newestState(created)).unclaimed).toEqual([]);
   });
 
@@ -532,10 +573,16 @@ describe("publish()", () => {
       ),
     };
     const { store } = fakeStore(objects);
-    await publish(["--bootstrap", "--days", "1"], store, NOW, needsFile);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      needsFile,
+      noBaselines,
+    );
     objects[CI(DAY, "3")] = object("c3", "pass", "2026-08-20T03:00:00.000Z");
     const lines = await saying(() =>
-      publish(["--days", "1"], store, NOW, needsFile)
+      publish(["--days", "1"], store, NOW, needsFile, noBaselines)
     );
     expect(lines).toContain(
       "none of them were in this count at the last publish",
@@ -548,10 +595,16 @@ describe("publish()", () => {
     // that did not move name the worst of theirs.
     const objects = seed();
     const { store } = fakeStore(objects);
-    await publish(["--bootstrap", "--days", "1"], store, NOW, needsFile);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      needsFile,
+      noBaselines,
+    );
     objects[CI(DAY, "3")] = object("c3", "pass", "2026-08-20T03:00:00.000Z");
     const lines = await saying(() =>
-      publish(["--days", "1"], store, NOW, needsFile)
+      publish(["--days", "1"], store, NOW, needsFile, noBaselines)
     );
     expect(lines).toContain(
       "those 1 were recorded by 1 surface(s): unit:memory 1",
@@ -566,7 +619,13 @@ describe("publish()", () => {
     // place and says nothing about whether that is falling.
     const { store } = fakeStore(seed());
     const lines = await saying(() =>
-      publish(["--bootstrap", "--days", "1"], store, NOW, needsFile)
+      publish(
+        ["--bootstrap", "--days", "1"],
+        store,
+        NOW,
+        needsFile,
+        noBaselines,
+      )
     );
     expect(lines).toContain("the topology has no unit for 1 identities");
     expect(lines).not.toContain("at the last publish");
@@ -591,6 +650,7 @@ describe("publish()", () => {
             reason: "the ON arm cannot run it yet",
           }],
         }]),
+      noBaselines,
     );
     const manifestName = [...created.keys()].find((name) =>
       name.includes("/manifest-")
@@ -626,6 +686,7 @@ describe("publish()", () => {
             ...TOPOLOGY[0]!,
             locate: () => ({ level: "suite" as const }),
           }]),
+        noBaselines,
       );
     } finally {
       console.log = log;
@@ -637,7 +698,13 @@ describe("publish()", () => {
 
   it("folds from the state it left rather than the objects again", async () => {
     const { store, created } = fakeStore(seed());
-    await publish(["--bootstrap", "--days", "1"], store, NOW, suites);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      suites,
+      noBaselines,
+    );
     const first = created.size;
     const readObjects: string[] = [];
     const watched: StoreAccess = {
@@ -647,7 +714,8 @@ describe("publish()", () => {
         return store.read(name);
       },
     };
-    expect(await publish(["--days", "1"], watched, NOW, suites)).toBe(0);
+    expect(await publish(["--days", "1"], watched, NOW, suites, noBaselines))
+      .toBe(0);
     expect(readObjects).toEqual([]);
     expect(created.size).toBeGreaterThan(first);
   });
@@ -661,13 +729,20 @@ describe("publish()", () => {
           ? Promise.reject(new Error("unreachable"))
           : store.list(prefix),
     };
-    expect(await publish(["--days", "1"], broken, NOW, suites)).toBe(1);
+    expect(await publish(["--days", "1"], broken, NOW, suites, noBaselines))
+      .toBe(1);
     expect(created.size).toBe(0);
   });
 
   it("refuses to publish from a window it could only partly read", async () => {
     const { store, created } = fakeStore(seed());
-    await publish(["--bootstrap", "--days", "1"], store, NOW, suites);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      suites,
+      noBaselines,
+    );
     const after = created.size;
     const broken: StoreAccess = {
       ...store,
@@ -677,7 +752,8 @@ describe("publish()", () => {
           ? store.list(prefix)
           : Promise.resolve([CI(DAY, "9")]),
     };
-    expect(await publish(["--days", "1"], broken, NOW, suites)).toBe(1);
+    expect(await publish(["--days", "1"], broken, NOW, suites, noBaselines))
+      .toBe(1);
     expect(created.size).toBe(after);
   });
 
@@ -688,6 +764,7 @@ describe("publish()", () => {
       store,
       NOW,
       suites,
+      noBaselines,
     );
     expect(code).toBe(0);
     expect(created.size).toBe(0);
@@ -701,6 +778,7 @@ describe("publish()", () => {
       anonymous,
       NOW,
       suites,
+      noBaselines,
     );
     expect(created.size).toBe(0);
     expect(code).toBe(0);
@@ -708,7 +786,9 @@ describe("publish()", () => {
 
   it("reports a malformed command line rather than publishing", async () => {
     const { store, created } = fakeStore(seed());
-    expect(await publish(["--nonsense"], store, NOW, suites)).toBe(2);
+    expect(await publish(["--nonsense"], store, NOW, suites, noBaselines)).toBe(
+      2,
+    );
     expect(created.size).toBe(0);
   });
 });
@@ -725,6 +805,7 @@ describe("publish() --out", () => {
         store,
         NOW,
         suites,
+        noBaselines,
       );
       expect(code).toBe(0);
       // A dry run creates nothing in the store, and the directory is how
@@ -757,6 +838,7 @@ describe("publish() --out", () => {
           store,
           NOW,
           suites,
+          noBaselines,
         ),
       ).toBe(0);
       expect((await Deno.stat(join(out, "manifest.json"))).isFile).toBe(true);
@@ -784,7 +866,15 @@ describe("publish() over a day that has been compacted", () => {
         return store.read(name);
       },
     };
-    expect(await publish(["--bootstrap", "--days", "1"], watched, NOW, suites))
+    expect(
+      await publish(
+        ["--bootstrap", "--days", "1"],
+        watched,
+        NOW,
+        suites,
+        noBaselines,
+      ),
+    )
       .toBe(0);
     expect(read).toEqual([ROLLUP]);
   });
@@ -796,7 +886,13 @@ describe("publish() over a day that has been compacted", () => {
       ...seed(),
       [ROLLUP]: object("c3", "fail", "2026-08-20T03:00:00.000Z"),
     }, { [DAY]: [ROLLUP] });
-    await publish(["--bootstrap", "--days", "1"], store, NOW, suites);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      suites,
+      noBaselines,
+    );
     const asked: string[] = [];
     const watched: StoreAccess = {
       ...store,
@@ -805,7 +901,8 @@ describe("publish() over a day that has been compacted", () => {
         return store.rollupShards(day);
       },
     };
-    expect(await publish(["--days", "1"], watched, NOW, suites)).toBe(0);
+    expect(await publish(["--days", "1"], watched, NOW, suites, noBaselines))
+      .toBe(0);
     expect(asked).toEqual([]);
   });
 
@@ -824,7 +921,15 @@ describe("publish() over a day that has been compacted", () => {
     }, { [older]: [olderRollup] });
     // The first run's window holds only the newer day, so the older one
     // is a day the aggregate has never seen.
-    expect(await publish(["--bootstrap", "--days", "1"], store, NOW, suites))
+    expect(
+      await publish(
+        ["--bootstrap", "--days", "1"],
+        store,
+        NOW,
+        suites,
+        noBaselines,
+      ),
+    )
       .toBe(0);
     const read: string[] = [];
     const watched: StoreAccess = {
@@ -834,7 +939,8 @@ describe("publish() over a day that has been compacted", () => {
         return store.read(name);
       },
     };
-    expect(await publish(["--days", "2"], watched, NOW, suites)).toBe(0);
+    expect(await publish(["--days", "2"], watched, NOW, suites, noBaselines))
+      .toBe(0);
     expect(read).toContain(olderRollup);
     expect(read).not.toContain(CI(older, "9"));
   });
@@ -844,7 +950,13 @@ describe("publish() over a day that has been compacted", () => {
     // nothing in one of this format says by how much, so the pair that
     // has raw objects in the aggregate keeps taking raw ones.
     const { store } = fakeStore(seed());
-    await publish(["--bootstrap", "--days", "1"], store, NOW, suites);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      suites,
+      noBaselines,
+    );
     const read: string[] = [];
     const asked: string[] = [];
     const later: StoreAccess = {
@@ -860,7 +972,8 @@ describe("publish() over a day that has been compacted", () => {
         return store.read(name);
       },
     };
-    expect(await publish(["--days", "1"], later, NOW, suites)).toBe(0);
+    expect(await publish(["--days", "1"], later, NOW, suites, noBaselines))
+      .toBe(0);
     expect(read).not.toContain(ROLLUP);
     // Nor was the store asked: the aggregate already answers for the pair.
     expect(asked).toEqual([]);
@@ -884,7 +997,15 @@ describe("publish() over a day that has been compacted", () => {
         return store.read(name);
       },
     };
-    expect(await publish(["--bootstrap", "--days", "1"], watched, NOW, suites))
+    expect(
+      await publish(
+        ["--bootstrap", "--days", "1"],
+        watched,
+        NOW,
+        suites,
+        noBaselines,
+      ),
+    )
       .toBe(0);
     expect(read).toContain(ROLLUP);
     expect(read).toContain(local);
@@ -910,7 +1031,15 @@ describe("publish() over a day that has been compacted", () => {
           ? Promise.reject(new Error("that shard is gone"))
           : store.read(name),
     };
-    expect(await publish(["--bootstrap", "--days", "1"], broken, NOW, suites))
+    expect(
+      await publish(
+        ["--bootstrap", "--days", "1"],
+        broken,
+        NOW,
+        suites,
+        noBaselines,
+      ),
+    )
       .toBe(1);
     expect(created.size).toBe(0);
   });
@@ -951,7 +1080,15 @@ describe("publish() over a day that has been compacted", () => {
       );
       whole.add(shards.map((shard) => reportFromText(shard, objects[shard]!)));
       const { store, created } = fakeStore(objects, { [DAY]: shards });
-      expect(await publish(["--bootstrap", "--days", "1"], store, NOW, suites))
+      expect(
+        await publish(
+          ["--bootstrap", "--days", "1"],
+          store,
+          NOW,
+          suites,
+          noBaselines,
+        ),
+      )
         .toBe(0);
       const stateName = [...created.keys()].find((name) =>
         name.includes("/state/")
@@ -1002,7 +1139,15 @@ describe("publish() over a day that has been compacted", () => {
         }
       },
     };
-    expect(await publish(["--bootstrap", "--days", "1"], watched, NOW, suites))
+    expect(
+      await publish(
+        ["--bootstrap", "--days", "1"],
+        watched,
+        NOW,
+        suites,
+        noBaselines,
+      ),
+    )
       .toBe(0);
     expect(read).toEqual(shards);
     expect(peak).toBeLessThanOrEqual(SHARD_CHUNK);
@@ -1014,7 +1159,13 @@ describe("publish() over an aggregate it cannot make sense of", () => {
 
   it("refuses rather than starting again from nothing", async () => {
     const { store, created } = fakeStore(seed());
-    await publish(["--bootstrap", "--days", "1"], store, NOW, suites);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      suites,
+      noBaselines,
+    );
     const state = [...created.keys()].find((name) => name.includes("/state/"))!;
     const after = created.size;
     const broken: StoreAccess = {
@@ -1024,7 +1175,8 @@ describe("publish() over an aggregate it cannot make sense of", () => {
           ? Promise.resolve('{"schema":1,"nonsense":true}')
           : store.readText(name),
     };
-    expect(await publish(["--days", "1"], broken, NOW, suites)).toBe(1);
+    expect(await publish(["--days", "1"], broken, NOW, suites, noBaselines))
+      .toBe(1);
     expect(created.size).toBe(after);
   });
 });
@@ -1065,19 +1217,32 @@ describe("publish() over a store that answers badly", () => {
 
   it("refuses when the aggregate object will not read", async () => {
     const { store, created } = fakeStore(seed());
-    await publish(["--bootstrap", "--days", "1"], store, NOW, suites);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      suites,
+      noBaselines,
+    );
     const after = created.size;
     const broken: StoreAccess = {
       ...store,
       readText: () => Promise.reject(new Error("that object is gone")),
     };
-    expect(await publish(["--days", "1"], broken, NOW, suites)).toBe(1);
+    expect(await publish(["--days", "1"], broken, NOW, suites, noBaselines))
+      .toBe(1);
     expect(created.size).toBe(after);
   });
 
   it("refuses when the submissions cannot be listed", async () => {
     const { store, created } = fakeStore(seed());
-    await publish(["--bootstrap", "--days", "1"], store, NOW, suites);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      suites,
+      noBaselines,
+    );
     const after = created.size;
     const broken: StoreAccess = {
       ...store,
@@ -1086,7 +1251,8 @@ describe("publish() over a store that answers badly", () => {
           ? Promise.reject(new Error("the store is unreachable"))
           : store.list(prefix),
     };
-    expect(await publish(["--days", "1"], broken, NOW, suites)).toBe(1);
+    expect(await publish(["--days", "1"], broken, NOW, suites, noBaselines))
+      .toBe(1);
     expect(created.size).toBe(after);
   });
 });
@@ -1108,7 +1274,15 @@ describe("publish() reporting what no lane can hold", () => {
     const log = console.log;
     console.log = (...parts: unknown[]) => said.push(parts.join(" "));
     try {
-      expect(await publish(["--bootstrap", "--days", "1"], store, NOW, suites))
+      expect(
+        await publish(
+          ["--bootstrap", "--days", "1"],
+          store,
+          NOW,
+          suites,
+          noBaselines,
+        ),
+      )
         .toBe(0);
     } finally {
       console.log = log;

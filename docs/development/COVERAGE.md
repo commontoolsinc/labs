@@ -714,6 +714,15 @@ The marker names the source group — `workspace`, a top-level directory such as
 lines are counted in. Only `packages` splits into a second level, because that is
 where the collection stops rolling a file up; `tasks/foo` names no group.
 
+The same marker also accepts a rise in a measured set, and there it names a
+workspace member, which can sit deeper than a source group:
+`packages/connectors/github`. A name below `packages/` that is deeper than a
+group is read by the coverage gate alone, and this ratchet measures nothing for
+it and passes over it. The coverage gate fails on a name that is neither a
+member nor a group, so a name nothing could ever consult still fails a
+job — this one or that one. Which gate a marker is for follows from the
+name; see [the test-selection contract](../specs/test-selection.md#coverage).
+
 A name can have the shape of a group and still name none — a package that is not
 there, or a misspelling of one that is. Nothing would ever consult such a line,
 so rather than let it pass for an acceptance that had no effect, the check fails

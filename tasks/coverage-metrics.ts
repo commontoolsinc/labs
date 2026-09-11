@@ -162,6 +162,104 @@ export async function collectCoverageDebtMetricsFromLcov(
   return metrics;
 }
 
+export interface MeasuredSetDebtOptions {
+  rootDir: string;
+
+  /** The joined LCOV of everything one measured set's units produced. */
+  lcov: string;
+
+  /** The workspace member whose lines are counted, repository-relative. */
+  member: string;
+
+  /**
+   * Every workspace member, so that a file belonging to a member nested
+   * inside this one is charged to that member's set instead of to this
+   * one. `packages/patterns/auth` sits inside `packages/patterns`, and a
+   * line of it belongs to one of the two rather than to both.
+   */
+  members: readonly string[];
+}
+
+/** What one measured set's report came to over its member's lines. */
+export interface MeasuredSetDebt {
+  /** Tracked source lines of the member nothing in the report covered. */
+  uncoveredLines: number;
+
+  /**
+   * How many of the member's files the report has a record for. Zero
+   * says the report measured nothing rather than that it covered
+   * nothing, which are different things and call for different
+   * treatment.
+   */
+  files: number;
+}
+
+/**
+ * What one measured set's report says about its member: the tracked
+ * source lines of `member` that the report has no covering record for,
+ * and how many of the member's files it has a record for at all.
+ *
+ * A file the report leaves out is charged by the same rule the
+ * repository-wide metric uses, which reads the absence as a file no test
+ * in this set loaded. That reading holds here whatever else the run did,
+ * because a measured set runs every one of its units.
+ */
+export async function collectMeasuredSetDebt(
+  options: MeasuredSetDebtOptions,
+): Promise<MeasuredSetDebt> {
+  const sourceFiles = await collectMemberSourceFiles(
+    options.rootDir,
+    options.member,
+    options.members,
+  );
+  const lcovCoverage = parseLcov(options.lcov);
+  let uncoveredLines = 0;
+  let files = 0;
+  for (const source of sourceFiles) {
+    const coverage = lcovCoverage.get(source.absolutePath);
+    if (coverage) files += 1;
+    uncoveredLines += coverage
+      ? countUncoveredProfileLines(coverage)
+      : await debtWithoutCoverageRecord(source);
+  }
+  return { uncoveredLines, files };
+}
+
+/** The tracked source files one workspace member owns. */
+async function collectMemberSourceFiles(
+  rootDir: string,
+  member: string,
+  members: readonly string[],
+): Promise<SourceFile[]> {
+  const owned = toPosix(member).replace(/^\.\//, "");
+  const nested = members
+    .map((other) => toPosix(other).replace(/^\.\//, ""))
+    .filter((other) => other.startsWith(`${owned}/`))
+    .map((other) => `${other}/`);
+  const files: SourceFile[] = [];
+  const fullRoot = path.join(rootDir, owned);
+  // A member the workspace declares always has a directory. Scoring an
+  // absent one as nothing uncovered would pass a gate over a name that
+  // measures nothing, which is the failure a count of zero cannot be
+  // told apart from.
+  if (!await existsDirectory(fullRoot)) {
+    throw new Error(`no directory for the workspace member ${owned}`);
+  }
+  for await (const file of walkFiles(fullRoot)) {
+    const relativePath = toPosix(path.relative(rootDir, file));
+    if (!isTrackedSourcePath(relativePath)) continue;
+    if (nested.some((prefix) => relativePath.startsWith(prefix))) continue;
+    const content = await Deno.readTextFile(file);
+    files.push({
+      absolutePath: path.normalize(file),
+      relativePath,
+      metricGroup: metricGroupFor(relativePath),
+      trackedLineCount: countTrackedSourceLines(content),
+    });
+  }
+  return files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+}
+
 /**
  * Helper for `collectCoverageDebtMetricsFromLcov()`, which returns the debt
  * charged to a file the report has no record for. Three different things

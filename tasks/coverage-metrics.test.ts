@@ -4,6 +4,7 @@ import * as path from "@std/path";
 import {
   collectCoverageDebtMetrics,
   collectCoverageDebtMetricsFromLcov,
+  collectMeasuredSetDebt,
   collectRegressedLines,
   collectSourceFiles,
   collectUncoveredLinesForFiles,
@@ -723,4 +724,168 @@ Deno.test("collectRegressedLines counts a file the baseline reported and this ru
   } finally {
     await Deno.remove(rootDir, { recursive: true });
   }
+});
+
+/** A tree holding one file of `lines` statements under each named member. */
+async function membersWithSource(
+  members: readonly string[],
+  lines = 4,
+): Promise<string> {
+  const rootDir = await Deno.makeTempDir({ prefix: "measured-set-" });
+  for (const member of members) {
+    const dir = path.join(rootDir, member, "src");
+    await Deno.mkdir(dir, { recursive: true });
+    await Deno.writeTextFile(
+      path.join(dir, "main.ts"),
+      `${
+        Array.from({ length: lines }, (_, at) => `const v${at} = ${at};`)
+          .join("\n")
+      }\n`,
+    );
+  }
+  return rootDir;
+}
+
+/** An LCOV record covering the first `covered` lines of one file. */
+function lcovFor(file: string, lines: number, covered: number): string {
+  const records = Array.from(
+    { length: lines },
+    (_, at) => `DA:${at + 1},${at < covered ? 1 : 0}`,
+  );
+  return `SF:${file}\n${records.join("\n")}\nend_of_record\n`;
+}
+
+Deno.test("collectMeasuredSetDebt counts only the member's own lines", async () => {
+  const rootDir = await membersWithSource([
+    "packages/bakery",
+    "packages/cellar",
+  ]);
+  const bakery = path.join(rootDir, "packages/bakery/src/main.ts");
+  const cellar = path.join(rootDir, "packages/cellar/src/main.ts");
+  // The set's tests covered lines in both members. Only the member the
+  // set is scored over is counted, so what the tests reached elsewhere
+  // cannot pay another set's debt down.
+  const lcov = lcovFor(bakery, 4, 1) + lcovFor(cellar, 4, 4);
+  assertEquals(
+    (await collectMeasuredSetDebt({
+      rootDir,
+      lcov,
+      member: "packages/bakery",
+      members: ["packages/bakery", "packages/cellar"],
+    })).uncoveredLines,
+    3,
+  );
+  assertEquals(
+    (await collectMeasuredSetDebt({
+      rootDir,
+      lcov: "",
+      member: "packages/cellar",
+      members: ["packages/bakery", "packages/cellar"],
+    })).uncoveredLines,
+    4,
+  );
+});
+
+Deno.test("collectMeasuredSetDebt charges a nested member to itself", async () => {
+  const rootDir = await membersWithSource([
+    "packages/bakery",
+    "packages/bakery/cellar",
+  ]);
+  assertEquals(
+    (await collectMeasuredSetDebt({
+      rootDir,
+      lcov: "",
+      member: "packages/bakery",
+      members: ["packages/bakery", "packages/bakery/cellar"],
+    })).uncoveredLines,
+    4,
+  );
+  assertEquals(
+    (await collectMeasuredSetDebt({
+      rootDir,
+      lcov: "",
+      member: "packages/bakery/cellar",
+      members: ["packages/bakery", "packages/bakery/cellar"],
+    })).uncoveredLines,
+    4,
+  );
+});
+
+Deno.test("collectMeasuredSetDebt charges a file no test loaded in full", async () => {
+  const rootDir = await membersWithSource(["packages/bakery"]);
+  assertEquals(
+    (await collectMeasuredSetDebt({
+      rootDir,
+      lcov: "",
+      member: "packages/bakery",
+      members: ["packages/bakery"],
+    })).uncoveredLines,
+    4,
+  );
+});
+
+Deno.test("collectMeasuredSetDebt refuses a member with no tree", async () => {
+  // Scoring it as nothing uncovered would pass a gate over a name that
+  // measures nothing, which a count of zero cannot be told apart from.
+  const rootDir = await membersWithSource(["packages/bakery"]);
+  await assertRejects(
+    () =>
+      collectMeasuredSetDebt({
+        rootDir,
+        lcov: "",
+        member: "packages/nowhere",
+        members: ["packages/bakery"],
+      }),
+    Error,
+    "no directory for the workspace member packages/nowhere",
+  );
+});
+
+Deno.test("collectMeasuredSetDebt counts the files the report named", async () => {
+  const rootDir = await membersWithSource(["packages/bakery"]);
+  const bakery = path.join(rootDir, "packages/bakery/src/main.ts");
+  assertEquals(
+    (await collectMeasuredSetDebt({
+      rootDir,
+      lcov: lcovFor(bakery, 4, 1),
+      member: "packages/bakery",
+      members: ["packages/bakery"],
+    })).files,
+    1,
+  );
+  // An empty report names none of them, which says the measurement
+  // produced nothing rather than that it covered nothing.
+  assertEquals(
+    (await collectMeasuredSetDebt({
+      rootDir,
+      lcov: "",
+      member: "packages/bakery",
+      members: ["packages/bakery"],
+    })).files,
+    0,
+  );
+});
+
+Deno.test("a measured set and its source group are two readings of one report", async () => {
+  const rootDir = await membersWithSource([
+    "packages/bakery",
+    "packages/cellar",
+  ]);
+  const bakery = path.join(rootDir, "packages/bakery/src/main.ts");
+  const lcov = lcovFor(bakery, 4, 2);
+  // The group counts every member's lines the report speaks for; the set
+  // counts one member's. Neither is the other, which is why they are
+  // published under different names.
+  const group = (await collectCoverageDebtMetricsFromLcov({ rootDir, lcov }))
+    .find((metric) => metric.name.includes("packages/bakery"));
+  assertEquals(group?.uncoveredLines, 2);
+  assertEquals(
+    (await collectMeasuredSetDebt({
+      rootDir,
+      lcov,
+      member: "packages/cellar",
+      members: ["packages/bakery", "packages/cellar"],
+    })).uncoveredLines,
+    4,
+  );
 });

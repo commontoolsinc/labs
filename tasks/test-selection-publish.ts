@@ -57,6 +57,7 @@ import {
 } from "./test-selection/build.ts";
 import { isLaneMeasurement } from "./lane-measurement.ts";
 import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
+import { publishableBaselines } from "./test-selection/baselines.ts";
 import type { Suite } from "./test-topology/suite.ts";
 import {
   manifestBody,
@@ -66,7 +67,11 @@ import {
   stateObjectName,
   statePrefix,
 } from "./test-selection/store.ts";
-import { serializeManifest } from "./test-selection/manifest.ts";
+import {
+  type CoverageBaseline,
+  serializeManifest,
+} from "./test-selection/manifest.ts";
+import { fetchManifest } from "./test-selection/store.ts";
 import { plan } from "./test-selection/plan.ts";
 import { LANE_BUDGET_SECONDS, LANES } from "./test-selection/policy.ts";
 
@@ -380,6 +385,20 @@ async function readAggregate(store: StoreAccess): Promise<AggregateRead> {
 }
 
 /**
+ * The coverage baselines the next manifest carries: what the newest one
+ * holds, brought forward, plus whatever the `main` runs since then
+ * published. Reading the previous manifest is one public read and is
+ * what keeps a publish from asking about every run in the window.
+ */
+async function liveBaselines(now: Date): Promise<CoverageBaseline[]> {
+  const previous = await fetchManifest({ at: now.toISOString() });
+  return await publishableBaselines(
+    now,
+    previous.manifest?.coverageBaselines ?? [],
+  );
+}
+
+/**
  * An access token for creating a manifest, when one is reachable. Only
  * the workflow has one: the publisher's identity is federated and pinned
  * to that workflow file, and it is the sole principal holding create on
@@ -400,6 +419,7 @@ export async function publish(
   store: StoreAccess = liveStore(storeBucket()),
   now: Date = new Date(),
   topology: () => Promise<readonly Suite[]> = () => loadTopology(),
+  baselines: (now: Date) => Promise<CoverageBaseline[]> = liveBaselines,
 ): Promise<number> {
   const options = parseArgs(args);
   if (options === undefined) {
@@ -602,6 +622,10 @@ export async function publish(
     commit,
     runs: runs.size,
   });
+  // What the coverage gate compares a pull request against. It comes from
+  // outside the fold, because the counts are published by the full run on
+  // `main` rather than recorded as tests.
+  manifest.coverageBaselines = await baselines(startedAt);
   manifest.unavailable = suites.flatMap((suite) =>
     suite.unavailable.map((entry) => ({
       suite: suite.id,
