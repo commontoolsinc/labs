@@ -1077,6 +1077,15 @@ interface ConflictError extends Error {
   name: "ConflictError";
   /** Server head seq at rejection time (§3.6.4). */
   retryAfterSeq: number;
+  /** First stale confirmed read per branch, entity, and scope. */
+  conflicts?: Array<{
+    of: string;
+    scope: "space" | "user" | "session";
+    /** Absent for the default branch. */
+    branch?: string;
+    seq: number;
+    conflictSeq: number;
+  }>;
 }
 
 interface TransactionError extends Error {
@@ -1176,8 +1185,10 @@ Clients MUST:
 
 - submit pending commits in increasing `localSeq` order per logical session
 - integrate `SessionSync` frames in increasing `toSeq` order
-- buffer incoming sync while building a transaction so one transaction observes
-  one stable snapshot
+- build each commit's read set from one stable snapshot
+  (`03-commit-model.md` §3.3.4): either buffer incoming sync while a
+  transaction builds, or verify at commit that every document the transaction
+  read still holds the value it read
 
 ### 4.11.2 Server-Side Ordering
 

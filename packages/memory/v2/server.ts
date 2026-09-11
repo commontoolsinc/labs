@@ -4063,6 +4063,13 @@ export class Server {
           if (retryAfterSeq !== undefined) {
             responseError.retryAfterSeq = retryAfterSeq;
           }
+          if (
+            error instanceof Engine.ConflictError &&
+            error.conflicts !== undefined &&
+            error.conflicts.length > 0
+          ) {
+            responseError.conflicts = [...error.conflicts];
+          }
           span.recordException(
             error instanceof Error ? error : new Error(messageText),
           );

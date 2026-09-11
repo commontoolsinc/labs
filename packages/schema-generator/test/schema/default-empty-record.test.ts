@@ -12,6 +12,7 @@ describe("default-empty-record", () => {
     describe(form, () => {
       for (
         const value of [
+          "{}",
           "Record<string, never>",
           "Record<number, never>",
           "Record<symbol, never>",
@@ -28,7 +29,8 @@ describe("default-empty-record", () => {
           const { type, checker, typeNode } = await getTypeFromCode(
             `
             interface Default<T, V extends T = T> {}
-            type Value = ${value};
+            type Original = ${value};
+            type Value = Original;
             type SchemaRoot = ${wrapped};
             `,
             "SchemaRoot",
@@ -43,6 +45,10 @@ describe("default-empty-record", () => {
 
       for (
         const value of [
+          "object",
+          ...(form === "two arguments"
+            ? ["{ (): void }", "{ new (): object }"]
+            : []),
           "Record<string, string>",
           "Record<string, unknown>",
           'Record<"required", never>',

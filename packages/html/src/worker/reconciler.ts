@@ -45,6 +45,7 @@ import {
   clauseAlternatives,
   markRendererTrustedEvent,
   type RenderConfidentialityResolver,
+  reportCfcDenial,
   spaceAtomIdsInConfidentiality,
   type SpaceMembershipProvider,
 } from "@commonfabric/runner/cfc";
@@ -366,6 +367,7 @@ export class WorkerReconciler {
             this.#rootRenderPolicy,
           )
         ) {
+          this.#denyCellRender(vnode as Cell<unknown>, this.#rootRenderPolicy);
           this.#reconcileIntoWrapper(
             ctx,
             wrapperState,
@@ -985,26 +987,60 @@ export class WorkerReconciler {
       | Cell<WorkerRenderNode | WorkerRenderNode[]>
       | undefined;
     blocked: boolean;
+    /** The cell whose label the block was decided on, when one was. */
+    blockedBy?: Cell<unknown>;
   } {
     if (node.children === undefined) {
       return { children: undefined, blocked: false };
     }
-    if (!this.#shouldBlockBoundaryChildren(node, policy)) {
+    const blocked = this.#boundaryChildBlocker(node, policy);
+    if (blocked === undefined) {
       return { children: node.children, blocked: false };
     }
-    return { children: [this.#blockedPlaceholderVNode()], blocked: true };
+    return {
+      children: [this.#blockedPlaceholderVNode()],
+      blocked: true,
+      blockedBy: blocked,
+    };
   }
 
-  #shouldBlockBoundaryChildren(
+  /**
+   * Record whether a node's children are blocked, reporting a block the pass
+   * it takes effect rather than each time the policy is asked.
+   */
+  #setChildrenBlocked(
+    state: NodeState,
+    policyChildren: { blocked: boolean; blockedBy?: Cell<unknown> },
+    policy: RenderPolicy,
+  ): void {
+    if (
+      policyChildren.blocked && !state.childrenBlockedByPolicy &&
+      policyChildren.blockedBy !== undefined
+    ) {
+      this.#denyCellRender(policyChildren.blockedBy, policy);
+    }
+    state.childrenBlockedByPolicy = policyChildren.blocked;
+  }
+
+  /**
+   * The value a render boundary protects, when the policy will not admit it —
+   * so the caller both learns that the children are blocked and holds the cell
+   * whose label says why. Undefined means the children render.
+   */
+  #boundaryChildBlocker(
     node: WorkerVNode,
     policy: RenderPolicy,
-  ): boolean {
+  ): Cell<unknown> | undefined {
     if (node.name !== CFC_RENDER_BOUNDARY_TAG) {
-      return false;
+      return undefined;
     }
     const protectedValue = this.#boundaryProtectedValueCell(node);
-    return protectedValue !== undefined &&
-      !this.#canRenderCellUnderPolicy(protectedValue, policy);
+    if (protectedValue === undefined) {
+      return undefined;
+    }
+    return this.#canRenderCellUnderPolicy(protectedValue, policy)
+      ? undefined
+      : protectedValue;
   }
 
   #boundaryProtectedValueCell(
@@ -1293,6 +1329,100 @@ export class WorkerReconciler {
       labelView.entries.flatMap((entry) => [
         ...(entry.label.confidentiality ?? []),
       ]),
+    );
+  }
+
+  /**
+   * The label the render gate decided on, in the form an explanation reports
+   * it: the cell's own view when it has one, the schema's information-flow
+   * constraint as the same conservative fallback the gate uses, and the
+   * read-failure case named rather than left blank.
+   */
+  #renderLabelSummary(cell: Cell<unknown>): {
+    labelSource: "stored" | "schema" | "unreadable";
+    confidentiality: readonly CfcConfClause[];
+    integrity: readonly CfcAtom[];
+  } {
+    let labelView: CfcLabelView | undefined;
+    try {
+      labelView = this.#resolveCellLabelView(cell);
+    } catch {
+      return { labelSource: "unreadable", confidentiality: [], integrity: [] };
+    }
+    if (labelView === undefined) {
+      return {
+        labelSource: "schema",
+        confidentiality: this.#confidentialityLabelsFromCellSchema(
+          cell,
+        ) as readonly CfcConfClause[],
+        integrity: [],
+      };
+    }
+    return {
+      labelSource: "stored",
+      confidentiality: this.#confidentialityLabels(labelView),
+      integrity: this.#integrityLabels(labelView),
+    };
+  }
+
+  /**
+   * Report a cell the render policy would not admit.
+   *
+   * The detail carries the decision's inputs: the label the gate read, the
+   * ceiling, the author declassifications, and the caveat kinds the host
+   * allows. Which of those decided is the fit's business, and the fit reads
+   * them together — a clause outside the ceiling still renders when a
+   * declassification or an admitted caveat kind covers it, and the ungrantable
+   * read-failure marker blocks with no ceiling in force at all.
+   */
+  #denyCellRender(cell: Cell<unknown>, policy: RenderPolicy): void {
+    reportCfcDenial(
+      "render-confidentiality-ceiling",
+      "the render policy did not admit a cell's confidentiality label",
+      () => ({
+        ...this.#renderLabelSummary(cell),
+        ceiling: policy.maxConfidentiality ?? "unbounded",
+        declassified: policy.declassifyConfidentiality,
+        caveatKindAllow: policy.caveatKindAllow,
+      }),
+    );
+  }
+
+  /**
+   * Explain text from a cell that the boundary's integrity floor rejects.
+   * `prop` names the sink when the blocked text was a prop value rather than
+   * a child, so two props blocked on one node stay two decisions.
+   */
+  #denyCellText(
+    cell: Cell<unknown>,
+    policy: RenderPolicy,
+    prop?: string,
+  ): void {
+    reportCfcDenial(
+      "render-text-integrity",
+      "a cell's text does not carry the integrity this boundary requires",
+      () => {
+        const label = this.#renderLabelSummary(cell);
+        return {
+          ...(prop === undefined ? {} : { prop }),
+          labelSource: label.labelSource,
+          integrity: label.integrity,
+          textIntegrity: policy.textIntegrity,
+        };
+      },
+    );
+  }
+
+  /** Explain literal text inside a boundary that admits none. */
+  #denyLiteralText(policy: RenderPolicy, prop?: string): void {
+    reportCfcDenial(
+      "render-literal-text-integrity",
+      "literal text cannot be endorsed, and this boundary admits no " +
+        "unendorsed text",
+      () => ({
+        ...(prop === undefined ? {} : { prop }),
+        textIntegrity: policy.textIntegrity,
+      }),
     );
   }
 
@@ -1686,6 +1816,11 @@ export class WorkerReconciler {
         state.textIntegrityBlockedProps?.delete(key);
         return this.#transformPropValue(key, value);
       }
+      if (sourceCell !== undefined) {
+        this.#denyCellText(sourceCell, state.renderPolicy, key);
+      } else {
+        this.#denyLiteralText(state.renderPolicy, key);
+      }
       const boundaryNodeIds = this.#markTextIntegrityBlocked(
         state.renderPolicy,
       );
@@ -1804,7 +1939,7 @@ export class WorkerReconciler {
         }));
         oldState.renderPolicy = policy;
         oldState.childRenderPolicy = childPolicy;
-        oldState.childrenBlockedByPolicy = policyChildren.blocked;
+        this.#setChildrenBlocked(oldState, policyChildren, childPolicy);
         oldState.sourceChildren = sanitized.children;
         oldState.sourceProps = sanitized.props;
         // Update props in place with proper diffing
@@ -2464,7 +2599,7 @@ export class WorkerReconciler {
 
     state.sourceProps = props;
     state.childRenderPolicy = childPolicy;
-    state.childrenBlockedByPolicy = policyChildren.blocked;
+    this.#setChildrenBlocked(state, policyChildren, childPolicy);
     if (policyChildren.children === undefined) {
       return;
     }
@@ -2512,7 +2647,7 @@ export class WorkerReconciler {
 
     state.sourceProps = props;
     state.childRenderPolicy = childPolicy;
-    state.childrenBlockedByPolicy = policyChildren.blocked;
+    this.#setChildrenBlocked(state, policyChildren, childPolicy);
     this.#initializeTextIntegrityBoundary(childPolicy, state.nodeId);
   }
 
@@ -2785,10 +2920,6 @@ export class WorkerReconciler {
       policy,
       nodeId,
     );
-    const policyChildren = this.#childrenForRenderPolicy(
-      sanitized,
-      childPolicy,
-    );
 
     // Create state
     const state: NodeState = {
@@ -2801,7 +2932,9 @@ export class WorkerReconciler {
       childOrder: [],
       renderPolicy: policy,
       childRenderPolicy: childPolicy,
-      childrenBlockedByPolicy: policyChildren.blocked,
+      // Set from `activePolicyChildren` below, once binding props has had its
+      // chance to resolve a boundary policy prop into `childRenderPolicy`.
+      childrenBlockedByPolicy: false,
       sourceChildren: sanitized.children,
       sourceProps: sanitized.props,
       // `ctx` carries the stamp this node just emitted, if it emitted one, so
@@ -2820,7 +2953,11 @@ export class WorkerReconciler {
       sanitized,
       state.childRenderPolicy,
     );
-    state.childrenBlockedByPolicy = activePolicyChildren.blocked;
+    this.#setChildrenBlocked(
+      state,
+      activePolicyChildren,
+      state.childRenderPolicy,
+    );
     if (activePolicyChildren.children !== undefined) {
       addCancel(
         this.#bindChildren(
@@ -2944,6 +3081,7 @@ export class WorkerReconciler {
     options?: { trustedText?: boolean },
   ): NodeState {
     if (!options?.trustedText && this.#shouldBlockLiteralText(text, policy)) {
+      this.#denyLiteralText(policy);
       return this.#createBlockedPlaceholder(ctx, policy, "integrity");
     }
 
@@ -3555,7 +3693,11 @@ export class WorkerReconciler {
     childState.currentValue = child;
     childState.elementState.renderPolicy = policy;
     childState.elementState.childRenderPolicy = childPolicy;
-    childState.elementState.childrenBlockedByPolicy = policyChildren.blocked;
+    this.#setChildrenBlocked(
+      childState.elementState,
+      policyChildren,
+      childPolicy,
+    );
     // Same reasoning as the keyed path above: an authored node holding this
     // element is not a wrapper, whatever it was before. A key derived from
     // content cannot match an array against a VNode today, so this only holds
@@ -3706,6 +3848,7 @@ export class WorkerReconciler {
       }
 
       if (blockedByPolicy) {
+        this.#denyCellRender(cell, policy);
         if (!isInitialRender) {
           if (currentCancel) {
             currentCancel();
@@ -3741,6 +3884,7 @@ export class WorkerReconciler {
       }
 
       if (blockedByIntegrity) {
+        this.#denyCellText(cell, policy);
         if (!isInitialRender) {
           if (currentCancel) {
             currentCancel();
@@ -3828,8 +3972,11 @@ export class WorkerReconciler {
                   policyChildren.blocked;
               childState.elementState.renderPolicy = policy;
               childState.elementState.childRenderPolicy = childPolicy;
-              childState.elementState.childrenBlockedByPolicy =
-                policyChildren.blocked;
+              this.#setChildrenBlocked(
+                childState.elementState,
+                policyChildren,
+                childPolicy,
+              );
               childState.elementState.sourceChildren = sanitized.children;
               childState.elementState.sourceProps = sanitized.props;
               // Taking over a wrapper for an authored node of the same tag is

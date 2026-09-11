@@ -65,6 +65,7 @@ import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { WaveAccumulator, waveRunContextOf } from "../src/executor/wave.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { waitOnDelivery } from "./support/wait-on-delivery.ts";
 import { waitUntil } from "./support/wait-until.ts";
 
 /** The settle-gate seam (see executor-events-down.test.ts): holds the
@@ -406,10 +407,17 @@ describe("Phase 4 client-effect channel", () => {
     await clientRuntime.storageManager.synced();
 
     const sessionId = clientManager.id;
-    await waitUntil(
-      () => intentsOf(engine, aliceSigner.did(), sessionId).length === 1,
-      "the intent to land in alice's session instance",
-    );
+    // The wait wakes on the client's own delivery of the effects doc —
+    // the intent write fans out to the firing session — and reads the
+    // ENGINE, which holds the entry before any delivery of it.
+    await waitOnDelivery({
+      manager: clientManager,
+      wants: (_space, id, scope) =>
+        id === SERVER_EXECUTION_EFFECTS_DOC_ID && scope === "session",
+      predicate: () =>
+        intentsOf(engine, aliceSigner.did(), sessionId).length === 1,
+      label: "the intent to land in alice's session instance",
+    });
     const [intent] = intentsOf(engine, aliceSigner.did(), sessionId);
 
     // T2.Q2: the §5 shape — nonce, kind navigate, a target link,
@@ -423,16 +431,16 @@ describe("Phase 4 client-effect channel", () => {
     ).get({ seq: intent.issuedIn }) as { class: string } | undefined;
     expect(issuedRow?.class).toBe("derived");
 
-    // The handler's own consequence landed too (same wave family).
-    await waitUntil(
-      () => {
-        const doc = Engine.read(engine, {
-          id: argument.getAsNormalizedFullLink().id,
-        });
-        return ((doc?.value as { value?: number })?.value ?? 0) === 1;
-      },
-      "the handler consequence to land",
-    );
+    // The handler's consequence is visible whenever the entry is: the
+    // handler contribution seals before the intent tx it feeds, a wave
+    // batch applies in one store transaction (commitWave's contract),
+    // and the per-event fold withdraws the intent tx with a withdrawn
+    // handler contribution (the requeue tests pin both directions) —
+    // so the entry's visibility carries the consequence's.
+    const argumentDoc = Engine.read(engine, {
+      id: argument.getAsNormalizedFullLink().id,
+    });
+    expect((argumentDoc?.value as { value?: number })?.value).toBe(1);
 
     // T2.Q1 + protocol §1: the intent write's annotation carries the
     // ADDRESSING (alice's session scope key) AND the acting identity

@@ -107,16 +107,15 @@ describe("CFC observation classes (C2 persist split)", () => {
     });
   };
 
-  const rawDocOf = (
-    id: string,
-  ): { cfc?: { labelMap?: { entries: StoredEntry[] } } } | undefined => {
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica.getDocument(id);
-  };
+  type StoredDocument = {
+    value?: unknown;
+    cfc?: { labelMap?: { entries: StoredEntry[] } };
+  } | undefined;
+
+  const rawDocOf = (id: string): StoredDocument =>
+    (storageManager!.open(space).replica as unknown as {
+      getDocument(id: string): StoredDocument;
+    }).getDocument(id);
 
   const entriesOf = (id: string): StoredEntry[] =>
     rawDocOf(id)?.cfc?.labelMap?.entries ?? [];
@@ -444,6 +443,14 @@ describe("CFC observation classes (C2 persist split)", () => {
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
 
+    // The value/shape pair the probe must not consume is stamped on the
+    // laundered document, and the stored value pins the output document the
+    // entries below are read from.
+    expect(
+      first.entries.filter((e) => e.origin === "derived").map((e) => e.observes)
+        .sort(),
+    ).toEqual(["shape", "value"]);
+    expect(rawDocOf(outId)?.value).toEqual({ probed: true });
     expect(entriesOf(outId).filter((e) => e.origin === "derived")).toEqual([]);
   });
 });
