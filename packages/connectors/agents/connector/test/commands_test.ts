@@ -1488,3 +1488,85 @@ Deno.test("command worker persists and reports publication failures", async () =
     await Deno.remove(directory, { recursive: true });
   }
 });
+
+Deno.test("command worker dispatches `start` with its payload and refreshes the new session", async () => {
+  const dir = await Deno.makeTempDir();
+  const ledger = await CommandLedger.open(`${dir}/ledger.json`);
+  const statuses: string[] = [];
+  const refreshed: string[] = [];
+  const target: CommandTarget = {
+    publishReceipt: (receipt) => {
+      statuses.push(receipt.status);
+      return Promise.resolve();
+    },
+    refreshSession: (_driver, nativeSessionId) => {
+      refreshed.push(nativeSessionId);
+      return Promise.resolve();
+    },
+  };
+  const starts: unknown[] = [];
+  const driver = {
+    source: {
+      id: "claude:labs",
+      driver: "claude-agent-sdk",
+      capabilities: {
+        inventory: true,
+        read: true,
+        prompt: true,
+        startSession: true,
+        cancel: true,
+        rename: true,
+        setMode: false,
+        setConfigOption: false,
+      },
+    },
+    startSession: async (
+      nativeSessionId: string,
+      input: unknown,
+      options: CommandExecutionOptions,
+    ) => {
+      starts.push({ nativeSessionId, input });
+      options.onCancellationReady?.();
+      await options.onSessionActive?.();
+      return { status: "succeeded" as const, result: { nativeSessionId } };
+    },
+  } as unknown as AgentDriver;
+  const worker = new CommandWorker(
+    new Map([[driver.source.id, driver]]),
+    [target],
+    ledger,
+    "did:key:test-owner",
+  );
+  try {
+    await worker.handle([{
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
+      id: "start-1",
+      createdAt: "2026-09-11T00:00:00.000Z",
+      sourceId: "claude:labs",
+      nativeSessionId: "6f1a3c0e-9d2b-4c7a-8e5f-0123456789ab",
+      type: "start",
+      payload: {
+        text: "Work on topic #7",
+        cwd: "/work/labs",
+        title: "topic #7",
+      },
+    }]);
+    await worker.drain();
+    assertEquals(starts, [{
+      nativeSessionId: "6f1a3c0e-9d2b-4c7a-8e5f-0123456789ab",
+      input: { text: "Work on topic #7", cwd: "/work/labs", title: "topic #7" },
+    }]);
+    assertEquals(statuses, ["in-flight", "succeeded"]);
+    // Once while the session is active, once after the terminal outcome.
+    assertEquals(refreshed, [
+      "6f1a3c0e-9d2b-4c7a-8e5f-0123456789ab",
+      "6f1a3c0e-9d2b-4c7a-8e5f-0123456789ab",
+    ]);
+    assertEquals(ledger.get("start-1")?.result, {
+      nativeSessionId: "6f1a3c0e-9d2b-4c7a-8e5f-0123456789ab",
+    });
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});

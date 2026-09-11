@@ -139,20 +139,20 @@ session and checkout indexes unchanged.
 
 The source fields are the connector's `AgentSourceConfig` contract:
 
-| Field                   | Use                                                                             |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| `id`                    | Stable, lowercase source ID                                                     |
-| `driver`                | `claude-agent-sdk`, `codex-app-server`, or `acp`                                |
-| `enabled`               | Whether this host starts the source                                             |
-| `command`               | Complete provider process command; required for an enabled ACP source           |
-| `cwd`                   | Default provider process or prompt working directory                            |
-| `env`                   | Additional provider environment values                                          |
-| `configDir`             | Claude configuration directory                                                  |
-| `codexBin`              | Codex executable used when `command` is absent                                  |
-| `codexHome`             | Codex home directory                                                            |
-| `codexTransport`        | `stdio`, `managed`, or `proxy`                                                  |
-| `codexSocket`           | Socket passed to Codex proxy mode                                               |
-| `allowDangerFullAccess` | Allows the connector's explicitly unrestricted Claude or Codex execution policy |
+| Field                   | Use                                                                                                                                    |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                    | Stable, lowercase source ID                                                                                                            |
+| `driver`                | `claude-agent-sdk`, `codex-app-server`, or `acp`                                                                                       |
+| `enabled`               | Whether this host starts the source                                                                                                    |
+| `command`               | Complete provider process command; required for an enabled ACP source                                                                  |
+| `cwd`                   | Default provider process, prompt, or started-session working directory; for Claude, also the directory whose sessions the source lists |
+| `env`                   | Additional provider environment values                                                                                                 |
+| `configDir`             | Claude configuration directory                                                                                                         |
+| `codexBin`              | Codex executable used when `command` is absent                                                                                         |
+| `codexHome`             | Codex home directory                                                                                                                   |
+| `codexTransport`        | `stdio`, `managed`, or `proxy`                                                                                                         |
+| `codexSocket`           | Socket passed to Codex proxy mode                                                                                                      |
+| `allowDangerFullAccess` | Allows the connector's explicitly unrestricted Claude or Codex execution policy                                                        |
 
 Provider behavior and the native protocols behind these fields are documented in
 the connector's [`docs/interfaces.md`](../connector/docs/interfaces.md).

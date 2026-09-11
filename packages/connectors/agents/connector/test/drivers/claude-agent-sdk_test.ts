@@ -941,3 +941,225 @@ Deno.test("Claude prompt env excludes another source's temporary globals", async
     else Deno.env.set(key, previous);
   }
 });
+
+function sdkWithoutSessions(calls: Array<{ method: string; args: unknown[] }>) {
+  return {
+    listSessions: (options?: Record<string, unknown>) => {
+      calls.push({ method: "listSessions", args: [options] });
+      return Promise.resolve([]);
+    },
+    getSessionInfo: (id: string) => {
+      calls.push({ method: "getSessionInfo", args: [id] });
+      return Promise.resolve(undefined);
+    },
+    getSessionMessages: () => Promise.resolve([]),
+    renameSession: (id: string, title: string) => {
+      calls.push({ method: "renameSession", args: [id, title] });
+      return Promise.resolve();
+    },
+    query: (params: { prompt: string; options?: Record<string, unknown> }) => {
+      calls.push({ method: "query", args: [params] });
+      return fakeQuery([
+        { type: "system", subtype: "init", session_id: "ignored" },
+        { type: "result", subtype: "success" },
+      ]);
+    },
+  };
+}
+
+const NEW_SESSION_ID = "6f1a3c0e-9d2b-4c7a-8e5f-0123456789ab";
+
+Deno.test("Claude driver lists the source directory's sessions when `cwd` is configured", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const scoped = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    sdkWithoutSessions(calls),
+  );
+  await scoped.listSessions();
+  assertEquals(calls, [{
+    method: "listSessions",
+    args: [{ limit: 100, offset: 0, dir: "/work/labs" }],
+  }]);
+
+  calls.length = 0;
+  const unscoped = new ClaudeAgentSdkDriver(
+    { id: "claude-code:default", driver: "claude-agent-sdk", enabled: true },
+    sdkWithoutSessions(calls),
+  );
+  await unscoped.listSessions();
+  assertEquals(calls, [{
+    method: "listSessions",
+    args: [{ limit: 100, offset: 0 }],
+  }]);
+});
+
+Deno.test("Claude driver starts a session under a caller-chosen id, titles it, and remembers its directory", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const events: string[] = [];
+  const sdk = {
+    ...sdkWithoutSessions(calls),
+    query: (params: { prompt: string; options?: Record<string, unknown> }) => {
+      calls.push({ method: "query", args: [params] });
+      const generator = (async function* () {
+        events.push("yield:init");
+        yield { type: "system", subtype: "init", session_id: NEW_SESSION_ID };
+        events.push("yield:result");
+        yield { type: "result", subtype: "success" };
+      })();
+      return Object.assign(generator, {
+        interrupt: () => Promise.resolve(),
+        setPermissionMode: () => Promise.resolve(),
+        setModel: () => Promise.resolve(),
+        close: () => undefined,
+      });
+    },
+  };
+  const driver = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    sdk,
+  );
+
+  const outcome = await driver.startSession(NEW_SESSION_ID, {
+    text: "Work on topic #7",
+    cwd: "/work/labs/packages/patterns",
+    title: "topic #7: the workbench",
+  }, {
+    onSessionActive: () => {
+      events.push("active");
+      return Promise.resolve();
+    },
+  });
+  assertEquals(outcome.status, "succeeded");
+  assertEquals(outcome.result, {
+    nativeSessionId: NEW_SESSION_ID,
+    cwd: "/work/labs/packages/patterns",
+    title: "topic #7: the workbench",
+    titled: true,
+  });
+  // The session is refreshed only once the SDK has emitted for it.
+  assertEquals(events, ["yield:init", "active", "yield:result"]);
+  const query = calls.find((call) => call.method === "query")?.args[0] as {
+    prompt: string;
+    options: Record<string, unknown>;
+  };
+  assertEquals(query.prompt, "Work on topic #7");
+  assertEquals(query.options.sessionId, NEW_SESSION_ID);
+  assertEquals(query.options.cwd, "/work/labs/packages/patterns");
+  assertEquals(query.options.resume, undefined);
+  assertEquals(calls.at(-1), {
+    method: "renameSession",
+    args: [NEW_SESSION_ID, "topic #7: the workbench"],
+  });
+
+  // A prompt that follows resumes in the started directory without a lookup.
+  calls.length = 0;
+  const followUp = await driver.prompt(NEW_SESSION_ID, { text: "Continue" });
+  assertEquals(followUp.status, "succeeded");
+  assertEquals(calls.map((call) => call.method), ["query"]);
+  const resumed = calls[0].args[0] as { options: Record<string, unknown> };
+  assertEquals(resumed.options.resume, NEW_SESSION_ID);
+  assertEquals(resumed.options.cwd, "/work/labs/packages/patterns");
+});
+
+Deno.test("Claude driver refuses to start a session that already exists", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const sdk = {
+    ...sdkWithoutSessions(calls),
+    getSessionInfo: (id: string) => {
+      calls.push({ method: "getSessionInfo", args: [id] });
+      return Promise.resolve({
+        sessionId: id,
+        summary: "Existing",
+        cwd: "/work/labs",
+        lastModified: 1_000,
+      });
+    },
+  };
+  const driver = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    sdk,
+  );
+  const outcome = await driver.startSession(NEW_SESSION_ID, { text: "Hi" });
+  assertEquals(outcome.status, "failed");
+  assertEquals(outcome.error?.code, "claude-session-exists");
+  assertEquals(calls.map((call) => call.method), ["getSessionInfo"]);
+});
+
+Deno.test("Claude driver refuses a start whose id or directory is unusable", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const scoped = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    sdkWithoutSessions(calls),
+  );
+  assertEquals(
+    (await scoped.startSession("not-a-uuid", { text: "Hi" })).error?.code,
+    "claude-session-id-invalid",
+  );
+  assertEquals(
+    (await scoped.startSession(NEW_SESSION_ID, {
+      text: "Hi",
+      cwd: "/work/other",
+    })).error?.code,
+    "claude-start-cwd-outside-source",
+  );
+  assertEquals(
+    (await scoped.startSession(NEW_SESSION_ID, {
+      text: "Hi",
+      cwd: "/work/labs-sibling",
+    })).error?.code,
+    "claude-start-cwd-outside-source",
+  );
+  const unscoped = new ClaudeAgentSdkDriver(
+    { id: "claude-code:default", driver: "claude-agent-sdk", enabled: true },
+    sdkWithoutSessions(calls),
+  );
+  assertEquals(
+    (await unscoped.startSession(NEW_SESSION_ID, { text: "Hi" })).error?.code,
+    "claude-start-cwd-required",
+  );
+  assertEquals(calls, []);
+});
+
+Deno.test("Claude driver reports a start whose title could not be applied", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const sdk = {
+    ...sdkWithoutSessions(calls),
+    renameSession: () => Promise.reject(new Error("rename refused")),
+  };
+  const driver = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    sdk,
+  );
+  const outcome = await driver.startSession(NEW_SESSION_ID, {
+    text: "Hi",
+    title: "Untitled after all",
+  });
+  assertEquals(outcome.status, "succeeded");
+  assertEquals(outcome.result?.titled, false);
+  assertEquals(outcome.result?.titleError, "Error: rename refused");
+});

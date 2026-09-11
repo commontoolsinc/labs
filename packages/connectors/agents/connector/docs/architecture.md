@@ -38,9 +38,9 @@ initialized runtime, destination space, and owner DID through
 ### Agent drivers
 
 An `AgentDriver` is the package's normalized provider boundary. It exposes
-session inventory, session reads, prompts, cancellation, renaming, mode
-selection, and provider configuration changes. Each driver advertises which of
-those operations it supports.
+session inventory, session reads, prompts, session starts, cancellation,
+renaming, mode selection, and provider configuration changes. Each driver
+advertises which of those operations it supports.
 
 Provider-specific code stays behind this interface:
 

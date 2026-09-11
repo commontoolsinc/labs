@@ -156,6 +156,10 @@ class FakeDriver implements AgentDriver {
     };
   }
 
+  startSession(): Promise<CommandExecutionResult> {
+    return Promise.resolve({ status: "unsupported" });
+  }
+
   cancel(): Promise<CommandExecutionResult> {
     return Promise.resolve({ status: "succeeded" });
   }

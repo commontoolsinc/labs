@@ -209,6 +209,7 @@ export class CodexAppServerDriver implements AgentDriver {
         inventory: true,
         read: true,
         prompt: true,
+        startSession: false,
         cancel: true,
         rename: true,
         setMode: false,
@@ -416,6 +417,12 @@ export class CodexAppServerDriver implements AgentDriver {
   ): Promise<CommandExecutionResult> {
     return Promise.resolve(
       unsupported(`unsupported Codex config option: ${key}`),
+    );
+  }
+
+  startSession(): Promise<CommandExecutionResult> {
+    return Promise.resolve(
+      unsupported("Codex sessions are started by the Codex app, not here"),
     );
   }
 }

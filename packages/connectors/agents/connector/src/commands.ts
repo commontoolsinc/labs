@@ -12,6 +12,7 @@ import { stableFabricValue } from "./stable-fabric-value.ts";
 
 export type CommandType =
   | "prompt"
+  | "start"
   | "cancel"
   | "rename"
   | "set-mode"
@@ -230,6 +231,16 @@ function requiredString(
   return value.trim();
 }
 
+function optionalString(
+  value: unknown,
+  field: string,
+  maxLength = 4096,
+): string | undefined {
+  return value === undefined
+    ? undefined
+    : requiredString(value, field, maxLength);
+}
+
 function parseCommand(value: unknown, ownerDid: string): AgentSessionCommand {
   if (typeof value === "string") {
     let decoded: unknown;
@@ -252,9 +263,14 @@ function parseCommand(value: unknown, ownerDid: string): AgentSessionCommand {
   }
   const type = raw.type;
   if (
-    !["prompt", "cancel", "rename", "set-mode", "set-config-option"].includes(
-      String(type),
-    )
+    ![
+      "prompt",
+      "start",
+      "cancel",
+      "rename",
+      "set-mode",
+      "set-config-option",
+    ].includes(String(type))
   ) {
     throw new Error(`unsupported command type: ${String(type)}`);
   }
@@ -419,7 +435,7 @@ export class CommandWorker {
       this.#scheduledCommandIds.add(command.id);
       const key = sessionKey(command.sourceId, command.nativeSessionId);
       let promptAdmission: PromptAdmission | undefined;
-      if (command.type === "prompt") {
+      if (command.type === "prompt" || command.type === "start") {
         const ready = Promise.withResolvers<void>();
         let marked = false;
         promptAdmission = {
@@ -632,6 +648,24 @@ export class CommandWorker {
               "prompt text",
               128 * 1024,
             ),
+          },
+          {
+            force: command.force,
+            onCancellationReady,
+            onSessionActive,
+          },
+        );
+      case "start":
+        return driver.startSession(
+          command.nativeSessionId,
+          {
+            text: requiredString(
+              command.payload.text,
+              "start text",
+              128 * 1024,
+            ),
+            cwd: optionalString(command.payload.cwd, "start cwd"),
+            title: optionalString(command.payload.title, "start title", 512),
           },
           {
             force: command.force,
