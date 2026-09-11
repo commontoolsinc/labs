@@ -543,23 +543,26 @@ That status means “source changed, running deploy unverified,” not rollback:
 `piece render`, `piece inspect`, and `piece getsrc` to determine the live state.
 A receipt alone is never proof that the updated piece starts.
 
-## Where a piece is created and updated
+## Where a piece is created
 
 Against a deployment that runs the serving loop — one whose published posture
 selects `EXPERIMENTAL_SERVER_EXECUTION`, which the connection adopts —
-`cf piece new`, `cf piece setsrc`, and `cf piece setsrc --check` do not compile
-or commit in this process. Each resolves the program from disk, pins its fabric
-imports, and sends it to the deployment's pattern-lifecycle route, signed with
-the identity the command connects as; the space's serving runtime compiles it,
-creates the piece or replaces its source, and answers with the receipt these
-commands print. The identity must hold WRITE or OWNER on the space. The registry
-entry and the slug travel with the creation, so a taken name refuses it before
-anything is created. What stays in this process after `piece new`'s receipt is
-what opening a piece does anyway: the start, which `--no-start` skips. The
-receipt returns once the piece is durable; the serving loop derives it in the
-cycle after, so a reader that needs the derived value pulls it. Against any
-other deployment, and under `cf test`, the commands perform every step
-themselves, as before. The contract, including the refusals and their codes, is
+`cf piece new` does not compile or commit in this process. It resolves the
+program from disk, pins its fabric imports, and sends it to the deployment's
+pattern-lifecycle route, signed with the identity the command connects as; the
+space's serving runtime compiles it, creates the piece, and answers with the
+receipt the command prints. The identity must hold WRITE or OWNER on the space.
+The registry entry and the slug travel with the creation, so a taken name
+refuses it before anything is created. What stays in this process after the
+receipt is what opening a piece does anyway: the start, which `--no-start`
+skips. The receipt returns once the piece is durable; the serving loop derives
+it in the cycle after, so a reader that needs the derived value pulls it.
+Against any other deployment, and under `cf test`, the command performs every
+step itself, as before. `cf piece setsrc` and `cf piece setsrc --check` perform
+every step in this process on every deployment: a source update publishes module
+update authority, which requires an owned setup transaction that commits to
+storage, and a serving wave cannot supply one. The contract, including the
+refusals and their codes, is
 [`server-pattern-lifecycle.md`](../../docs/features/server-pattern-lifecycle.md).
 
 ## Piece discovery

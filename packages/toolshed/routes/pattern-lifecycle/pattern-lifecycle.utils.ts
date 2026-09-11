@@ -10,18 +10,13 @@ import { createSession, type Identity } from "@commonfabric/identity";
 import type { DID, MemorySpace } from "@commonfabric/memory/interface";
 import {
   confirmServedInstantiate,
-  confirmServedSourceUpdate,
-  type PatternCompatibilityReport,
-  type PatternUpdateReceipt,
   PiecesController,
-  servedCheckPieceSource,
   servedInstantiatePiece,
   type ServedInstantiateReceipt,
   ServedLifecycleRefusal,
   type ServedLifecycleRefusalCode,
   type ServedPatternRef,
   type ServedPatternSource,
-  servedSetPieceSource,
   servedUploadPattern,
 } from "@commonfabric/piece/ops";
 import type { Runtime, RuntimeProgram } from "@commonfabric/runner";
@@ -87,9 +82,6 @@ const REFUSAL_STATUS: Record<
 > = {
   "compile-failed": 422,
   "pattern-not-found": 404,
-  "piece-not-found": 404,
-  "incompatible": 409,
-  "source-moved": 409,
   "setup-failed": 422,
   "slug-taken": 409,
   "no-space-root": 422,
@@ -231,64 +223,5 @@ export function processInstantiate(
     confirm: (runtime, receipt) =>
       confirmServedInstantiate(runtime, input.space as MemorySpace, receipt),
     demandRoots: (receipt) => [pieceRootDocId(receipt.pieceId)],
-  });
-}
-
-export type SourceResult =
-  | PatternUpdateReceipt
-  | (PatternCompatibilityReport & { status: "checked" });
-
-export function processSetSource(
-  deps: LifecycleDeps,
-  callerDid: string,
-  input: WireSource & {
-    space: string;
-    piece: string;
-    repository?: string;
-    dangerouslyAllowIncompatibleSchema?: boolean;
-    check?: boolean;
-  },
-): Promise<LifecycleResult<SourceResult>> {
-  const source = wireSource(input);
-  if (source === undefined) {
-    return Promise.resolve(refuse(
-      400,
-      "invalid-source",
-      "Supply exactly one of `program` and `pattern`.",
-    ));
-  }
-  if (input.check === true) {
-    return runServedVerb<SourceResult>(deps, callerDid, input.space, {
-      name: "setsrc --check",
-      run: async (pieces) => ({
-        status: "checked",
-        ...(await servedCheckPieceSource(pieces, input.piece, source)),
-      }),
-      confirm: undefined,
-    });
-  }
-  return runServedVerb<SourceResult>(deps, callerDid, input.space, {
-    name: "setsrc",
-    run: (pieces) =>
-      servedSetPieceSource(pieces, input.piece, {
-        source,
-        ...(input.repository === undefined
-          ? {}
-          : { repository: input.repository }),
-        ...(input.dangerouslyAllowIncompatibleSchema === undefined ? {} : {
-          dangerouslyAllowIncompatibleSchema:
-            input.dangerouslyAllowIncompatibleSchema,
-        }),
-      }),
-    confirm: (runtime, receipt) =>
-      receipt.status === "committed"
-        ? confirmServedSourceUpdate(
-          runtime,
-          input.space as MemorySpace,
-          input.piece,
-          receipt,
-        )
-        : Promise.resolve(),
-    demandRoots: () => [pieceRootDocId(input.piece)],
   });
 }

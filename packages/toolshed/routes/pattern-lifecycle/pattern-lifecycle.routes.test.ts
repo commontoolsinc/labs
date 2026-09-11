@@ -45,7 +45,7 @@ describe("pattern-lifecycle route (transport + middleware)", () => {
   };
 
   it("rejects an unsigned request on every verb", async () => {
-    for (const verb of ["upload", "instantiate", "setsrc"]) {
+    for (const verb of ["upload", "instantiate"]) {
       const res = await post(`${BASE}/${verb}`);
       expect(res.status).toBe(401);
     }
@@ -74,7 +74,7 @@ describe("pattern-lifecycle route (transport + middleware)", () => {
   });
 
   it("rejects a signed request whose body fails schema validation", async () => {
-    const res = await signedRequest("setsrc", { space: "did:key:z6Mk" });
+    const res = await signedRequest("upload", { space: "did:key:z6Mk" });
     expect(res.status).toBe(422);
   });
 });

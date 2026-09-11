@@ -1,12 +1,20 @@
 # Pattern lifecycle verbs on the serving runtime
 
-Under server execution, the three verbs that give a space a pattern —
-upload a program, instantiate a piece from it, and replace a piece's source
-— run on the space's serving runtime. The client's part is to resolve the
-program from disk and request; the serving side compiles, materializes, and
-commits. This document is the contract for that: the route a client calls,
-the authority it needs, where the verb runs, what comes back, and what still
-happens on the client.
+Under server execution, the two verbs that give a space a pattern — upload
+a program, and instantiate a piece from it — run on the space's serving
+runtime. The client's part is to resolve the program from disk and request;
+the serving side compiles, materializes, and commits. This document is the
+contract for that: the route a client calls, the authority it needs, where
+the verb runs, what comes back, and what still happens on the client.
+
+Replacing a piece's source is not a served verb. A source update carries
+module-update authority, and [`module-loading.md`](../specs/module-loading.md)
+requires that authority to be published from an owned setup transaction that
+commits to storage itself; a serving wave's acceptance is withdrawable until
+the wave commits, so the runner refuses a source update sealed into a wave.
+`cf piece setsrc` therefore performs the update in its own process on every
+deployment. Serving it needs the loop to register the update's authority at
+the wave's settlement, which is the follow-up this document does not cover.
 
 The verbs run only when `EXPERIMENTAL_SERVER_EXECUTION` selects the ON arm
 ([`EXPERIMENTAL_OPTIONS.md`](../development/EXPERIMENTAL_OPTIONS.md#serverexecution)).
@@ -16,7 +24,7 @@ a whole stack in memory and is untouched either way.
 
 ## The route
 
-Three POST endpoints under `/api/pattern-lifecycle`, mounted by
+Two POST endpoints under `/api/pattern-lifecycle`, mounted by
 `packages/toolshed/routes/pattern-lifecycle/`. Every body carries `space`,
 the DID of the space acted in. A verb that takes a pattern takes it one of
 two ways, and exactly one: `program` — the program as the client resolved
@@ -28,13 +36,6 @@ the space already holds.
 | ------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | `upload`      | `program`                                                                                         | `{ pattern }` — the pointer the space now holds the program under                  |
 | `instantiate` | `program` or `pattern`; optional `argument`, `repository`, `slug`, `force`, `register`            | `{ pieceId, pattern, slug? }`                                                      |
-| `setsrc`      | `program` or `pattern`; `piece`; optional `repository`, `dangerouslyAllowIncompatibleSchema`, `check` | with `check`, a compatibility report; otherwise the update receipt described below |
-
-The `setsrc` receipt is the same shape the client-side apply produces:
-`status: "committed"`, the pointer written (`ref`), the source revision
-appended (`revisionId`), the origin the write detached (`detachedOrigin`),
-and `refresh`, which reports a failure after the setup sealed — in the
-dependency sync or the start that follows it — without undoing the update.
 
 A refusal is a JSON body `{ error, code }`. `code` is stable and is what a
 client branches on; `error` is prose for a person.
@@ -44,8 +45,8 @@ client branches on; `error` is prose for a person.
 | 400    | `invalid-source`                       | both `program` and `pattern`, or neither                                     |
 | 401    | `unauthorized`                         | no valid first-party request proof                                           |
 | 403    | `forbidden`                            | the caller is not a writer of the space, or there is no such space           |
-| 404    | `pattern-not-found`, `piece-not-found` | the named pattern or piece is not in the space                               |
-| 409    | `incompatible`, `source-moved`, `slug-taken` | the candidate cannot replace the source; the source moved under the request; the slug names something and `force` was not set |
+| 404    | `pattern-not-found`                    | the named pattern is not in the space                                        |
+| 409    | `slug-taken`                           | the slug names something and `force` was not set                             |
 | 413    | `payload-too-large`                    | the body exceeds the limit, checked before authentication                    |
 | 422    | `compile-failed`, `setup-failed`, `no-space-root` | the program did not compile; setup refused the pattern or the argument; nothing to register the piece with |
 | 500    | `internal`                             | the serving side failed for a reason it does not name                        |
@@ -72,8 +73,7 @@ not an existence oracle over the deployment's spaces.
 The verb's own writes are the serving loop's, under the space's lease. The
 instantiation transaction carries the requester's CFC trust snapshot, so a
 label setup mints attributes to the requester rather than to the serving
-identity; a source replacement's setup transaction is the runner's own
-bookkeeping, stamped as the pattern swap's is.
+identity.
 
 ## Where a verb runs
 
@@ -122,9 +122,8 @@ the runtime refuses `runSyncedWithCommit` while a seal destination is
 installed; and the storage manager's full `synced()` waits on the wave commit
 the verb is inside of and would deadlock. The served operations in
 `packages/piece/src/ops/served-lifecycle.ts` therefore compose the lower
-runner calls — `compileAndSavePattern`, `setup` with a transaction the verb
-stamps, `runSynced` — and mint their receipts from the transition they
-applied.
+runner calls — `compileAndSavePattern`, and `setup` with a transaction the
+verb stamps — and mint their receipts from what they wrote.
 
 The `servingLoop.lifecycleVerbs` block of `/api/health/stats` counts verbs
 whose run completed (`runs`) and verbs whose run threw or whose durable
@@ -140,11 +139,6 @@ receipt is what any client does when it opens a piece: it starts the piece,
 which under the flag runs the graph as speculation while the serving loop
 serves the derived values. `--no-start` skips that. The registry entry and
 the slug are part of the served creation.
-
-`cf piece setsrc --check` and `cf piece setsrc` send the same request with
-and without `check`, and `--dangerously-allow-incompatible-schema` travels
-with it. The verdicts and receipts a person sees are the ones the served
-operations produce, worded as the client-side ones are.
 
 Other clients of the piece controller — the browser shell, the background
 piece service — keep the client-side shape. Moving each is its own change;

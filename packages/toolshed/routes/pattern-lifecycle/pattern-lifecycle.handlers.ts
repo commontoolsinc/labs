@@ -11,13 +11,11 @@ import type { AppRouteHandler } from "@/lib/types.ts";
 import { memoryEngineStoreUrl } from "@/routes/storage/memory-store-url.ts";
 import type {
   InstantiateRoute,
-  SetsrcRoute,
   UploadRoute,
 } from "./pattern-lifecycle.routes.ts";
 import {
   type LifecycleDeps,
   processInstantiate,
-  processSetSource,
   processUpload,
 } from "./pattern-lifecycle.utils.ts";
 
@@ -61,20 +59,6 @@ export const instantiate: AppRouteHandler<InstantiateRoute> = async (c) => {
     return c.json({ error: "Unauthorized", code: "unauthorized" }, 401);
   }
   const result = await processInstantiate(
-    deps(c.get("logger")),
-    callerDid,
-    c.req.valid("json"),
-  );
-  if (result.status === 200) return c.json(result.body, 200);
-  return c.json(result.body, result.status);
-};
-
-export const setsrc: AppRouteHandler<SetsrcRoute> = async (c) => {
-  const callerDid = c.get("verifiedUserDid");
-  if (!callerDid) {
-    return c.json({ error: "Unauthorized", code: "unauthorized" }, 401);
-  }
-  const result = await processSetSource(
     deps(c.get("logger")),
     callerDid,
     c.req.valid("json"),

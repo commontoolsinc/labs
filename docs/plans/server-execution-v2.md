@@ -42,15 +42,19 @@ dispositions and the owner's rollout decision; the flip record alone does not
 establish current readiness.
 
 **Delta 2026-09-09 (the lifecycle verbs as server calls): the seed archived
-at `docs/history/plans/server-pattern-verbs-seed.md` is BUILT. Under ON,
-`cf piece new` and `cf piece setsrc` send the resolved program to
+at `docs/history/plans/server-pattern-verbs-seed.md` is BUILT for `upload`
+and `instantiate`. Under ON, `cf piece new` sends the resolved program to
 `/api/pattern-lifecycle/*`, and the space's serving runtime compiles,
 materializes, and commits inside a wave cycle
 (`docs/features/server-pattern-lifecycle.md`), the registry entry and the
 slug in the creation's own transaction; the receipt returns at the wave
 commit. The client keeps only its start; the shell and the background piece
-service keep the client-side shape until their own migration. OFF is
-byte-identical.**
+service keep the client-side shape until their own migration. `setsrc`
+stays client-side: a source update publishes module update authority, which
+`docs/specs/module-loading.md` requires from an owned setup transaction that
+commits to storage, and the runner refuses one sealed into a wave. Serving it
+is a follow-up: register the update's authority at the wave's settlement. OFF
+is byte-identical.**
 
 **Delta 2026-09-03 (the ROLLBACK): the first-party default returned to OFF
 via the rollback PR (#6840) — the first data-only flip:

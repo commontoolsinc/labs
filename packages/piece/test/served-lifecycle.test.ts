@@ -23,12 +23,9 @@ import { pieceId } from "../src/piece-id.ts";
 import { resolveSlugTargetCell } from "../src/slugs.ts";
 import {
   confirmServedInstantiate,
-  confirmServedSourceUpdate,
-  servedCheckPieceSource,
   servedInstantiatePiece,
   ServedLifecycleRefusal,
   type ServedPatternSource,
-  servedSetPieceSource,
   servedUploadPattern,
 } from "../src/ops/served-lifecycle.ts";
 
@@ -52,33 +49,6 @@ const BASE_PROGRAM = programOf([
   "  ({ seed }) => ({",
   "    [NAME]: 'Served lifecycle',",
   "    label: seed ?? 'unset',",
-  "  }),",
-  ");",
-  "",
-].join("\n"));
-
-/** The same contract with a different body: accepted as a replacement. */
-const COMPATIBLE_PROGRAM = programOf([
-  "import { NAME, pattern } from 'commonfabric';",
-  "export default pattern<{ seed?: string }, { label: string }>(",
-  "  ({ seed }) => ({",
-  "    [NAME]: 'Served lifecycle',",
-  "    label: `seen:${seed ?? 'unset'}`,",
-  "  }),",
-  ");",
-  "",
-].join("\n"));
-
-/**
- * Widens the declared output, which the contract proof refuses; the stored
- * argument still satisfies it, so the dangerous override can apply it.
- */
-const INCOMPATIBLE_PROGRAM = programOf([
-  "import { NAME, pattern } from 'commonfabric';",
-  "export default pattern<{ seed?: string }, { label: string | number }>(",
-  "  ({ seed }) => ({",
-  "    [NAME]: 'Served lifecycle',",
-  "    label: seed === undefined ? 0 : seed,",
   "  }),",
   ");",
   "",
@@ -281,101 +251,6 @@ describe("served lifecycle verbs", () => {
       expect(refusal.code).toBe("compile-failed");
       expect(refusal.message).toContain("undefinedName");
       expect(host.stats().lifecycleVerbs).toEqual({ runs: 1, failures: 1 });
-    });
-  });
-
-  describe("setsrc", () => {
-    let pieceId: string;
-
-    beforeEach(async () => {
-      pieceId = (await instantiate({ program: BASE_PROGRAM }, {
-        seed: "kept",
-      })).pieceId;
-    });
-
-    const check = (source: ServedPatternSource) =>
-      served(
-        "check",
-        (pieces) => servedCheckPieceSource(pieces, pieceId, source),
-      );
-
-    const apply = (
-      source: ServedPatternSource,
-      options: { dangerouslyAllowIncompatibleSchema?: boolean } = {},
-    ) =>
-      served(
-        "setsrc",
-        (pieces) =>
-          servedSetPieceSource(pieces, pieceId, { source, ...options }),
-        (runtime, receipt) =>
-          confirmServedSourceUpdate(runtime, space, pieceId, receipt),
-      );
-
-    it("reports a compatible candidate without moving the piece", async () => {
-      const before = (await (await clientPieces()).get(pieceId)).getCell();
-      const report = await check({ program: COMPATIBLE_PROGRAM });
-      expect(report.compatible).toBe(true);
-      expect(report.candidate.symbol).toBe("default");
-      const after = (await (await clientPieces()).get(pieceId)).getCell();
-      expect(getPatternIdentityRef(after)).toEqual(
-        getPatternIdentityRef(before),
-      );
-    });
-
-    it("reports an incompatible candidate with the rule that refused it", async () => {
-      const report = await check({ program: INCOMPATIBLE_PROGRAM });
-      expect(report.compatible).toBe(false);
-      expect(report.message).toContain("not backward compatible");
-    });
-
-    it("replaces the source, appends the revision, and keeps the argument", async () => {
-      const receipt = await apply({ program: COMPATIBLE_PROGRAM });
-      expect(receipt.status).toBe("committed");
-      expect(receipt.refresh).toEqual({ status: "completed" });
-      expect(receipt.detachedOrigin).toBeNull();
-
-      const pieces = await clientPieces();
-      const piece = await pieces.get(pieceId);
-      expect(getPatternIdentityRef(piece.getCell())).toEqual(receipt.ref);
-      const revisions = getPieceSourceRevisions(piece.getCell());
-      expect(revisions.at(-1)?.revisionId).toBe(receipt.revisionId);
-      expect(revisions.at(-1)?.operation).toBe("edit");
-      const argument = pieces.getArgument<{ seed?: string }>(piece.getCell());
-      await argument.sync();
-      expect(argument.get()).toEqual({ seed: "kept" });
-    });
-
-    it("refuses an incompatible candidate and leaves the piece as it was", async () => {
-      const before = getPatternIdentityRef(
-        (await (await clientPieces()).get(pieceId)).getCell(),
-      );
-      const refusal = await refusalOf(apply({ program: INCOMPATIBLE_PROGRAM }));
-      expect(refusal.code).toBe("incompatible");
-      expect(refusal.message).toContain("not backward compatible");
-      const after = getPatternIdentityRef(
-        (await (await clientPieces()).get(pieceId)).getCell(),
-      );
-      expect(after).toEqual(before);
-    });
-
-    it("applies an incompatible candidate under the dangerous override", async () => {
-      const receipt = await apply({ program: INCOMPATIBLE_PROGRAM }, {
-        dangerouslyAllowIncompatibleSchema: true,
-      });
-      expect(receipt.status).toBe("committed");
-      const piece = await (await clientPieces()).get(pieceId);
-      expect(getPatternIdentityRef(piece.getCell())).toEqual(receipt.ref);
-    });
-
-    it("refuses a piece the space does not hold", async () => {
-      const refusal = await refusalOf(served(
-        "setsrc",
-        (pieces) =>
-          servedSetPieceSource(pieces, "no-such-piece", {
-            source: { program: COMPATIBLE_PROGRAM },
-          }),
-      ));
-      expect(refusal.code).toBe("piece-not-found");
     });
   });
 });

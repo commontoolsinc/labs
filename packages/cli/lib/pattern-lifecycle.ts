@@ -7,10 +7,6 @@
 // writer.
 
 import type { Identity } from "@commonfabric/identity";
-import type {
-  PatternCompatibilityReport,
-  PatternUpdateReceipt,
-} from "@commonfabric/piece/ops";
 import type { RuntimeProgram } from "@commonfabric/runner";
 import { signFirstPartyHttpRequest } from "@commonfabric/runner/toolshed-http-auth";
 
@@ -169,43 +165,4 @@ export async function instantiatePieceOnServer(
     ...(input.force === undefined ? {} : { force: input.force }),
     ...(input.register === undefined ? {} : { register: input.register }),
   });
-}
-
-/** Replace `piece`'s source with `program`. */
-export async function setPieceSourceOnServer(
-  config: LifecycleClientConfig,
-  input: {
-    space: string;
-    piece: string;
-    program: RuntimeProgram;
-    repository?: string;
-    dangerouslyAllowIncompatibleSchema?: boolean;
-  },
-): Promise<PatternUpdateReceipt> {
-  return await call(config, "setsrc", {
-    space: input.space,
-    piece: input.piece,
-    program: wireProgram(input.program),
-    ...(input.repository === undefined ? {} : { repository: input.repository }),
-    ...(input.dangerouslyAllowIncompatibleSchema === undefined ? {} : {
-      dangerouslyAllowIncompatibleSchema:
-        input.dangerouslyAllowIncompatibleSchema,
-    }),
-  });
-}
-
-/** Would `program` be accepted as `piece`'s source? Applies nothing. */
-export async function checkPieceSourceOnServer(
-  config: LifecycleClientConfig,
-  input: { space: string; piece: string; program: RuntimeProgram },
-): Promise<PatternCompatibilityReport> {
-  const { status: _status, ...report } = await call<
-    PatternCompatibilityReport & { status: "checked" }
-  >(config, "setsrc", {
-    space: input.space,
-    piece: input.piece,
-    program: wireProgram(input.program),
-    check: true,
-  });
-  return report;
 }

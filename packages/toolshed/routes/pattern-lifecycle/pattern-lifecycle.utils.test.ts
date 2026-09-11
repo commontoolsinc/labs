@@ -17,7 +17,6 @@ import {
   type LifecycleDeps,
   type LifecycleResult,
   processInstantiate,
-  processSetSource,
   processUpload,
 } from "./pattern-lifecycle.utils.ts";
 
@@ -29,22 +28,6 @@ const PROGRAM = {
       "import { pattern } from 'commonfabric';",
       "export default pattern<{ seed?: string }, { label: string }>(",
       "  ({ seed }) => ({ label: seed ?? 'unset' }),",
-      ");",
-      "",
-    ].join("\n"),
-  }],
-};
-
-/** Widens the output: refused by the contract proof, applicable under
- * the override since the stored argument still satisfies it. */
-const INCOMPATIBLE_PROGRAM = {
-  main: "/main.tsx",
-  files: [{
-    name: "/main.tsx",
-    contents: [
-      "import { pattern } from 'commonfabric';",
-      "export default pattern<{ seed?: string }, { label: string | number }>(",
-      "  ({ seed }) => ({ label: seed === undefined ? 0 : seed }),",
       ");",
       "",
     ].join("\n"),
@@ -200,12 +183,12 @@ describe("pattern-lifecycle verbs (transport half)", () => {
     expect(both.status).toBe(400);
     expect(both.code).toBe("invalid-source");
     const neither = refused(
-      await processSetSource(deps, alice.did(), { space, piece: "p" }),
+      await processInstantiate(deps, alice.did(), { space }),
     );
     expect(neither.status).toBe(400);
   });
 
-  it("instantiates for an owner and for a writer, then updates and checks the piece's source", async () => {
+  it("instantiates for an owner and for a writer, and uploads the pattern they share", async () => {
     const created = ok(
       await processInstantiate(deps, alice.did(), {
         space,
@@ -224,42 +207,9 @@ describe("pattern-lifecycle verbs (transport half)", () => {
       await processUpload(deps, alice.did(), { space, program: PROGRAM }),
     );
     expect(uploaded.pattern).toEqual(created.pattern);
-
-    const checked = ok(
-      await processSetSource(deps, alice.did(), {
-        space,
-        piece: created.pieceId,
-        program: INCOMPATIBLE_PROGRAM,
-        check: true,
-      }),
-    );
-    assert(checked.status === "checked");
-    expect(checked.compatible).toBe(false);
-
-    const incompatible = refused(
-      await processSetSource(deps, alice.did(), {
-        space,
-        piece: created.pieceId,
-        program: INCOMPATIBLE_PROGRAM,
-      }),
-    );
-    expect(incompatible.status).toBe(409);
-    expect(incompatible.code).toBe("incompatible");
-
-    const updated = ok(
-      await processSetSource(deps, alice.did(), {
-        space,
-        piece: created.pieceId,
-        program: INCOMPATIBLE_PROGRAM,
-        dangerouslyAllowIncompatibleSchema: true,
-      }),
-    );
-    assert(updated.status === "committed");
-    expect(updated.ref).toEqual(checked.candidate);
-    expect(updated.revisionId).toMatch(/\S/);
   });
 
-  it("maps a compile failure to 422 and an unknown piece to 404", async () => {
+  it("maps a compile failure to 422", async () => {
     const broken = refused(
       await processInstantiate(deps, alice.did(), {
         space,
@@ -271,15 +221,6 @@ describe("pattern-lifecycle verbs (transport half)", () => {
     );
     expect(broken.status).toBe(422);
     expect(broken.code).toBe("compile-failed");
-    const missing = refused(
-      await processSetSource(deps, alice.did(), {
-        space,
-        piece: "no-such-piece",
-        program: PROGRAM,
-      }),
-    );
-    expect(missing.status).toBe(404);
-    expect(missing.code).toBe("piece-not-found");
   });
 
   it("answers 503 when the space is served elsewhere", async () => {

@@ -75,17 +75,19 @@ this ruling NAMES the landed boundary rather than changing it.
 RULED 2026-08-24 and BUILT: the client-authored classification above is
 the posture of a runtime running the whole stack. A `cf` client connected
 to a deployment running the serving loop no longer performs the
-instantiation or source-replacement transaction itself: `cf piece new`
-and `cf piece setsrc` send the program they resolved to
-`/api/pattern-lifecycle/*`, and the space's serving runtime compiles it
-and materializes the piece — the setup transaction, stamped
+instantiation transaction itself: `cf piece new` sends the program it
+resolved to `/api/pattern-lifecycle/*`, and the space's serving runtime
+compiles it and materializes the piece — the setup transaction, stamped
 `bookkeeping` under the space's lease and carrying the requester's trust
-snapshot — or swaps the source, as a step of a wave cycle
+snapshot — as a step of a wave cycle
 ([docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md)).
 The scheduler tell is unchanged: the verb's writes are still commits made
 outside the scheduler, made now by the serving side on the requester's
 behalf, the registry entry and the slug in the same transaction as the
-piece. Every other client of the piece controller —
+piece. A source replacement stays the client's authored act: it publishes
+module update authority, which module-loading.md requires from an owned
+setup transaction that commits to storage, and a wave's withdrawable
+acceptance cannot supply that. Every other client of the piece controller —
 the shell, the background piece service — keeps the client-side shape
 until its own migration.)*
 

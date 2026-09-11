@@ -10,12 +10,10 @@ import { Identity } from "@commonfabric/identity";
 import { sha256 } from "@commonfabric/content-hash";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import {
-  checkPieceSourceOnServer,
   instantiatePieceOnServer,
   type LifecycleClientConfig,
   lifecycleUrl,
   ServedLifecycleError,
-  setPieceSourceOnServer,
   uploadPatternOnServer,
   wireProgram,
 } from "../lib/pattern-lifecycle.ts";
@@ -183,66 +181,6 @@ describe("pattern-lifecycle client", () => {
           expect(failure).toBeInstanceOf(ServedLifecycleError);
           expect(failure.code).toBe("http-502");
           expect(failure.message).toContain("instantiate failed (502)");
-        },
-      );
-    });
-  });
-
-  describe("setPieceSourceOnServer and checkPieceSourceOnServer", () => {
-    it("sends the piece and the override, and returns the receipt", async () => {
-      const cfg = await configured();
-      const receipt = {
-        status: "committed",
-        ref: { identity: "i", symbol: "s" },
-        revisionId: "r",
-        detachedOrigin: null,
-        refresh: { status: "completed" },
-      };
-      await withStubbedFetch({ body: receipt }, async (calls) => {
-        const seen = await setPieceSourceOnServer(cfg, {
-          space: SPACE_DID,
-          piece: "p1",
-          program: PROGRAM,
-          dangerouslyAllowIncompatibleSchema: true,
-        });
-        expect(seen).toEqual(receipt);
-        expect(calls[0].url.pathname).toBe(
-          "/fabric/api/pattern-lifecycle/setsrc",
-        );
-        expect(JSON.parse(calls[0].body)).toEqual({
-          space: SPACE_DID,
-          piece: "p1",
-          program: PROGRAM,
-          dangerouslyAllowIncompatibleSchema: true,
-        });
-      });
-    });
-
-    it("asks for a check and returns the report without the wire's status", async () => {
-      const cfg = await configured();
-      await withStubbedFetch(
-        {
-          body: {
-            status: "checked",
-            compatible: false,
-            candidate: { identity: "i", symbol: "s" },
-            issues: { schema: "narrowed" },
-            message: "narrowed",
-          },
-        },
-        async (calls) => {
-          const report = await checkPieceSourceOnServer(cfg, {
-            space: SPACE_DID,
-            piece: "p1",
-            program: PROGRAM,
-          });
-          expect(report).toEqual({
-            compatible: false,
-            candidate: { identity: "i", symbol: "s" },
-            issues: { schema: "narrowed" },
-            message: "narrowed",
-          });
-          expect(JSON.parse(calls[0].body).check).toBe(true);
         },
       );
     });

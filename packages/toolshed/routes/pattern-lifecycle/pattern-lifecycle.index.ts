@@ -35,5 +35,4 @@ router.use(`${routes.BASE}/*`, requireFirstPartyHttpAuth());
 
 export default router
   .openapi(routes.upload, handlers.upload)
-  .openapi(routes.instantiate, handlers.instantiate)
-  .openapi(routes.setsrc, handlers.setsrc);
+  .openapi(routes.instantiate, handlers.instantiate);

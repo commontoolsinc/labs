@@ -346,8 +346,8 @@ server](#clients-that-are-not-built-alongside-their-server).
     carrying the watermark (protocol.md §4; `waitForSettled` rides it),
     hosts the pattern-update watcher server-side (serving-loop.md §3e),
     runs the pattern-lifecycle verbs a `cf` client sends it — `cf piece
-    new` and `cf piece setsrc` compile and materialize on the space's
-    serving runtime rather than in the client
+    new` compiles and materializes on the space's serving runtime rather
+    than in the client
     ([`server-pattern-lifecycle.md`](../features/server-pattern-lifecycle.md)),
     and exposes the §7 `servingLoop` counters on `/api/health/stats`.
     Narrowing writes chain the eager via-user hop (scopes.md §2's MUST).

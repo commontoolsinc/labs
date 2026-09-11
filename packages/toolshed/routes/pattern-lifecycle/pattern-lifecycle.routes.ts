@@ -72,13 +72,11 @@ const commonResponses = {
   },
   [HttpStatusCodes.NOT_FOUND]: {
     ...jsonError,
-    description: "The named pattern or piece is not in the space",
+    description: "The named pattern is not in the space",
   },
   [HttpStatusCodes.CONFLICT]: {
     ...jsonError,
-    description:
-      "The candidate cannot replace the piece's source, the source moved, " +
-      "or the requested slug is taken",
+    description: "The requested slug is taken",
   },
   [HttpStatusCodes.REQUEST_TOO_LONG]: {
     ...jsonError,
@@ -179,66 +177,5 @@ export const instantiate = createRoute({
   },
 });
 
-const compatibilityReport = z.object({
-  status: z.literal("checked"),
-  compatible: z.boolean(),
-  candidate: patternRefSchema,
-  issues: z.object({
-    schema: z.string().optional(),
-    argument: z.string().optional(),
-    retainedLinks: z.string().optional(),
-    cfc: z.string().optional(),
-  }),
-  message: z.string().optional(),
-});
-
-const updateReceipt = z.object({
-  status: z.literal("committed"),
-  ref: patternRefSchema,
-  revisionId: z.string(),
-  detachedOrigin: z.string().nullable(),
-  refresh: z.union([
-    z.object({ status: z.literal("completed") }),
-    z.object({ status: z.literal("failed"), warning: z.string() }),
-  ]),
-});
-
-export const setsrc = createRoute({
-  path: `${BASE}/setsrc`,
-  method: "post",
-  tags,
-  request: {
-    body: {
-      content: {
-        "application/json": {
-          schema: z.object({
-            space: spaceField,
-            piece: z.string().describe("The piece's id."),
-            ...sourceFields,
-            repository: z.string().optional(),
-            dangerouslyAllowIncompatibleSchema: z.boolean().optional(),
-            check: z.boolean().optional().describe(
-              "Report whether the source could replace the piece's current " +
-                "one, without updating the piece.",
-            ),
-          }),
-        },
-      },
-    },
-  },
-  responses: {
-    [HttpStatusCodes.OK]: {
-      content: {
-        "application/json": {
-          schema: z.union([updateReceipt, compatibilityReport]),
-        },
-      },
-      description: "The receipt of the update, or the check's report",
-    },
-    ...commonResponses,
-  },
-});
-
 export type UploadRoute = typeof upload;
 export type InstantiateRoute = typeof instantiate;
-export type SetsrcRoute = typeof setsrc;

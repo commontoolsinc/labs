@@ -1717,7 +1717,7 @@ export function durableSourceContract(
  * operates on their transaction-local materializations; the exact envelopes
  * are restored before the final durable write.
  */
-export function suppliedLinks(
+function suppliedLinks(
   value: unknown,
   path: (string | number)[] = [],
   seen = new WeakSet<object>(),
@@ -5077,13 +5077,7 @@ function pieceSourceArgumentEvidence(
   return taggedHashStringOf({ raw, links });
 }
 
-/**
- * Review whether `candidate` can replace `previousPattern` on `piece`:
- * the declared schemas, the stored argument, the retained links, and the
- * CFC envelope, each reported as an issue rather than thrown so a caller
- * can show them all at once.
- */
-export async function pieceSourceCompatibilityReview(
+async function pieceSourceCompatibilityReview(
   previousPattern: Pattern,
   candidate: Pattern,
   piece: Cell<unknown>,
@@ -5207,8 +5201,7 @@ function pieceSourceCfcEnvelopeIssue(
       `envelope stored for this piece: ${issue.message}`;
 }
 
-/** Whether a review found anything that refuses the candidate. */
-export function hasPieceSourceCompatibilityIssues(
+function hasPieceSourceCompatibilityIssues(
   issues: PieceSourceCompatibilityIssues,
 ): boolean {
   return issues.schema !== undefined ||
@@ -5217,8 +5210,7 @@ export function hasPieceSourceCompatibilityIssues(
     issues.cfc !== undefined;
 }
 
-/** Every issue a review found, one per line. */
-export function pieceSourceCompatibilityMessage(
+function pieceSourceCompatibilityMessage(
   issues: PieceSourceCompatibilityIssues,
 ): string {
   return [issues.schema, issues.argument, issues.retainedLinks, issues.cfc]
@@ -5237,8 +5229,7 @@ function pieceSourceErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** A fresh source transition from `expected` to a candidate. */
-export function pieceSourceTransition(
+function pieceSourceTransition(
   expected: PieceSourceSnapshot,
   operation: PieceSourceTransition["operation"],
   origin: string | null,

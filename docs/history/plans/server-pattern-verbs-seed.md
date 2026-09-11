@@ -2,7 +2,7 @@
 status: historical
 created: 2026-08-27
 archived: 2026-09-09
-reason: "Executed seed; upload-pattern, instantiate, and setsrc run on the serving runtime under EXPERIMENTAL_SERVER_EXECUTION, and cf requests them."
+reason: "Executed seed for upload-pattern and instantiate, which run on the serving runtime under EXPERIMENTAL_SERVER_EXECUTION with cf requesting them; setsrc stays client-side because a source update's module authority needs a transaction that commits to storage itself."
 superseded-by: docs/features/server-pattern-lifecycle.md
 ---
 

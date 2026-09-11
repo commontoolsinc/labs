@@ -138,11 +138,7 @@ import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
 import { loadIdentity } from "./identity.ts";
 import { stderrConsoleHandler } from "./json-output.ts";
 import { validateEmbeddedSpaces } from "./llm-friendly-ref.ts";
-import {
-  checkPieceSourceOnServer,
-  instantiatePieceOnServer,
-  setPieceSourceOnServer,
-} from "./pattern-lifecycle.ts";
+import { instantiatePieceOnServer } from "./pattern-lifecycle.ts";
 import { claimProcessDeployment } from "./process-deployment.ts";
 import {
   deriveDiskHandleId,
@@ -475,8 +471,6 @@ interface PieceOperationDependencies extends PieceResolutionDeps {
   getProgramFromFile?: typeof getProgramFromFile;
   getPinnedProgramFromFile?: typeof getPinnedProgramFromFile;
   instantiatePieceOnServer?: typeof instantiatePieceOnServer;
-  setPieceSourceOnServer?: typeof setPieceSourceOnServer;
-  checkPieceSourceOnServer?: typeof checkPieceSourceOnServer;
   reportSearchError?: (
     pieceId: string,
     source: "input data" | "result data" | "metadata",
@@ -1608,17 +1602,9 @@ export async function resolveLinkEndpointAddress(
 }
 
 /**
- * Creates a new piece from source code and optional input.
- *
- * A `slug` that already points somewhere is refused the way `set-slug`
- * refuses one, and `force` takes it. The refusal arrives after the piece
- * exists, so it names the piece as well as the flag: an operator who meant to
- * repoint has an id to name, and one who did not has a piece to find.
- */
-/**
  * Whether the deployment this connection speaks to runs the serving loop,
- * in which case a pattern's lifecycle verbs are its to execute: the
- * connection carries the deployment's own flag posture
+ * in which case creating a piece is its to execute: the connection carries
+ * the deployment's own flag posture
  * (docs/features/server-pattern-lifecycle.md).
  */
 function servesLifecycleVerbs(pieces: PiecesController): boolean {
@@ -1667,6 +1653,14 @@ async function createOnServer(
   return { id: receipt.pieceId, getCell: () => cell };
 }
 
+/**
+ * Creates a new piece from source code and optional input.
+ *
+ * A `slug` that already points somewhere is refused the way `set-slug`
+ * refuses one, and `force` takes it. The refusal arrives after the piece
+ * exists, so it names the piece as well as the flag: an operator who meant to
+ * repoint has an id to name, and one who did not has a piece to find.
+ */
 export async function newPiece(
   config: SpaceConfig,
   entry: EntryConfig,
@@ -1917,25 +1911,6 @@ export async function setPiecePattern(
   );
   const program = await (deps.getPinnedProgramFromFile ??
     getPinnedProgramFromFile)(pieces, entry);
-  if (servesLifecycleVerbs(pieces)) {
-    const receipt = await (deps.setPieceSourceOnServer ??
-      setPieceSourceOnServer)(
-        await lifecycleClient(config, deps),
-        {
-          space: pieces.getSpace(),
-          piece: resolvedConfig.piece,
-          program,
-          ...(entry.repository === undefined
-            ? {}
-            : { repository: entry.repository }),
-          ...(options.dangerouslyAllowIncompatibleSchema
-            ? { dangerouslyAllowIncompatibleSchema: true }
-            : {}),
-        },
-      );
-    noteWroteTo(config.space);
-    return receipt;
-  }
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
@@ -1972,12 +1947,6 @@ export async function checkPiecePattern(
   );
   const program = await (deps.getPinnedProgramFromFile ??
     getPinnedProgramFromFile)(pieces, entry);
-  if (servesLifecycleVerbs(pieces)) {
-    return await (deps.checkPieceSourceOnServer ?? checkPieceSourceOnServer)(
-      await lifecycleClient(config, deps),
-      { space: pieces.getSpace(), piece: resolvedConfig.piece, program },
-    );
-  }
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
