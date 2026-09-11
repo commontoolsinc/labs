@@ -619,6 +619,7 @@ type VisitSubtypeOfForm<DomainExtra> = {
  */
 type RecurseOfForm = {
   type: "recurseOf";
+  containerTag: "Array" | "FabricInstance" | "Object";
   container: FabricContainerValue;
   doKeys: boolean;
   doValues: boolean;
@@ -762,13 +763,6 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       const resolvedResult = this.#visitResolvingCyclesAndReplacement(value);
 
       switch (resolvedResult?.type) {
-        case "recurse": {
-          // No dispatch required, but we do need to validate and adjust the
-          // result form.
-          const tag = this.#tagFromValueElseNull(value);
-          return this.#adjustRecurseForm(resolvedResult, tag, value);
-        }
-
         case "visitSubtype": {
           // Need dispatch. `value` _has not_ been replaced.
           break;
@@ -838,7 +832,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
       switch (result?.type) {
         case "recurse": {
-          return this.#adjustRecurseForm(result, tag, value);
+          return this.#adjustRecurseForm(result, value, tag);
         }
 
         case "replace": {
@@ -860,10 +854,11 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   #visitResolvingCyclesAndReplacement(
     value: DomainFor<DomainExtra>,
   ):
+    | RecurseOfForm
     | VisitSubtypeOfForm<DomainExtra>
     | Exclude<
       DispatchingVisitorResult<DomainExtra, ResultType>,
-      ReplaceForm<DomainExtra>
+      ReplaceForm<DomainExtra> | RecurseForm
     > {
     const vis = this.#visitor;
     const origValue = value;
@@ -875,13 +870,17 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         : vis.visitCycle(value, cycleAt, this.#stack.depth);
 
       switch (result?.type) {
-        case "visitSubtype": {
-          return this.#visitSubtypeFormFor(origValue, value);
+        case "recurse": {
+          return this.#adjustRecurseForm(result, value);
         }
 
         case "replace": {
           value = result.value;
           break;
+        }
+
+        case "visitSubtype": {
+          return this.#visitSubtypeFormFor(origValue, value);
         }
 
         default: {
@@ -1032,15 +1031,20 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    */
   #adjustRecurseForm(
     result: RecurseForm,
-    finalTag: FabricValueTag | null,
     finalValue: DomainFor<DomainExtra>,
+    finalValueTagIfKnown?: FabricValueTag | null | undefined
   ): RecurseOfForm {
-    switch (finalTag) {
+    const tag = (finalValueTagIfKnown === undefined)
+      ? this.#tagFromValueElseNull(finalValue)
+      : finalValueTagIfKnown;
+
+    switch (tag) {
       case VALUE_TAGS.Array:
       case VALUE_TAGS.FabricInstance:
       case VALUE_TAGS.Object: {
         return {
           type: "recurseOf",
+          containerTag: tag,
           container: finalValue as FabricContainerValue,
           doKeys: result.doKeys,
           doValues: result.doValues,
