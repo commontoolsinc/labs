@@ -1071,8 +1071,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
     finalValue: DomainFor<DomainExtra>,
   ):
     | VisitSubtypeForm
-    | VisitSubtypeOfForm<DomainExtra>
-  {
+    | VisitSubtypeOfForm<DomainExtra> {
     if (Object.is(origValue, finalValue)) {
       return DO_VISIT_SUBTYPE;
     }
