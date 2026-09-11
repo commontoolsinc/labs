@@ -25,12 +25,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { unavailableInputPolicy: [{ path: ["request"], reasons: ["pending"] }] });
 const __cfLift_2 = __cfHelpers.lift<{
-    request: (string & __cfHelpers.PartialResultSource<string, string>) | (__cfHelpers.DataUnavailable & { readonly reason: "pending"; readonly pending: true; } & __cfHelpers.PartialResultSource<string, string>) | (__cfHelpers.DataUnavailable & { readonly reason: "error"; readonly error: __cfHelpers.FabricError; } & __cfHelpers.PartialResultSource<string, string>) | (__cfHelpers.DataUnavailable & { readonly reason: "syncing"; readonly syncing: true; } & __cfHelpers.PartialResultSource<string, string>) | (__cfHelpers.DataUnavailable & { readonly reason: "schema-mismatch"; readonly schemaMismatch: true; } & __cfHelpers.PartialResultSource<string, string>);
+    request: string;
 }, boolean>(({ request }) => !!request, {
     type: "object",
     properties: {
         request: {
-            type: ["object", "string"]
+            type: "string"
         }
     },
     required: ["request"]

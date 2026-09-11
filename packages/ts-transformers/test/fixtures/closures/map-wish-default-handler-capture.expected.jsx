@@ -74,14 +74,10 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
                     type: "object",
                     properties: {
                         result: {
-                            anyOf: [{
-                                    type: "array",
-                                    items: {
-                                        $ref: "#/$defs/Item"
-                                    }
-                                }, {
-                                    type: "object"
-                                }],
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/Item"
+                            },
                             "default": []
                         }
                     },

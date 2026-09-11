@@ -1091,6 +1091,49 @@ Deno.test("computed canonicalizes request and resultOf alias to one guarded capt
   );
 });
 
+Deno.test("resultOf keeps a captured Cell capability on its physical source", async () => {
+  const output = await transformSource(
+    `
+    import {
+      AsyncResult,
+      computed,
+      pattern,
+      resultOf,
+      Writable,
+    } from "commonfabric";
+
+    export default pattern((input: {
+      request: AsyncResult<Writable<string[]>>;
+    }) => {
+      const result = resultOf(input.request);
+      const count = computed(() => result.get().length);
+      return { count };
+    });
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+      typeCheck: true,
+    },
+  );
+
+  const root = parseModule(output);
+  const declaration = collect(root, ts.isVariableDeclaration).find((node) =>
+    ts.isIdentifier(node.name) && node.name.text.startsWith("__cfLift_") &&
+    node.initializer?.getText(root).includes(".get()")
+  );
+  assert(
+    declaration?.initializer && ts.isCallExpression(declaration.initializer),
+  );
+  const inputSchema = literalToValue(declaration.initializer.arguments[1]!) as {
+    properties: { input: { properties: { request: unknown } } };
+  };
+  assertEquals(inputSchema.properties.input.properties.request, {
+    type: "array",
+    items: { type: "unknown" },
+    asCell: ["readonly"],
+  });
+});
+
 Deno.test("a synthesized guarded expression canonicalizes its resultOf alias", async () => {
   const output = await transformSource(
     `

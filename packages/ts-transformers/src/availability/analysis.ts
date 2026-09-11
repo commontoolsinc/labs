@@ -315,11 +315,14 @@ export function canonicalizeResultOfCaptures(
   const resultSources: Array<{
     source: ts.Expression;
     identity: StableCaptureIdentity | undefined;
+    projectionType: ts.Type | undefined;
+    capture?: ts.Expression;
   }> = [];
 
   for (const capture of authoredCaptures) {
     const root = captureRootIdentifier(capture);
-    const source = root ? resolveResultOfSource(root, context) : undefined;
+    if (!root) continue;
+    const source = resolveResultOfSource(root, context);
     if (!source) continue;
     const identity = stableCaptureIdentity(source, context);
     if (
@@ -327,7 +330,15 @@ export function canonicalizeResultOfCaptures(
         sameStableCapture(entry.identity, identity)
       )
     ) {
-      resultSources.push({ source, identity });
+      resultSources.push({
+        source,
+        identity,
+        projectionType: getTypeAtLocationWithFallback(
+          root,
+          context.checker,
+          context.options.state?.typeRegistry,
+        ),
+      });
     }
   }
 
@@ -346,14 +357,23 @@ export function canonicalizeResultOfCaptures(
       sameStableCapture(entry.identity, identity)
     );
     if (symbol && shared) {
+      if (!shared.capture) {
+        shared.capture = cloneSourceExpression(shared.source, context.factory);
+        if (shared.projectionType) {
+          context.options.state?.typeRegistry.set(
+            shared.capture,
+            shared.projectionType,
+          );
+        }
+      }
       const sourceRoot = captureRootIdentifier(shared.source);
       const sourceSymbol = sourceRoot
         ? valueSymbolAtIdentifier(sourceRoot, context)
         : undefined;
       if (symbol !== sourceSymbol || resultSource) {
-        aliases.set(symbol, shared.source);
+        aliases.set(symbol, shared.capture);
       }
-      canonical.add(shared.source);
+      canonical.add(shared.capture);
       continue;
     }
     canonical.add(capture);
@@ -404,13 +424,18 @@ export function rewriteResultOfAliasReferences<T extends ts.Node>(
     const source = symbol ? aliases.get(symbol) : undefined;
     if (!source) return undefined;
     const replacement = cloneSourceExpression(source, context.factory);
-    const sourceType = getTypeAtLocationWithFallback(
-      source,
+    // The emitted expression names the physical AsyncResult source, while
+    // this occurrence still has the usable type selected by resultOf(). That
+    // distinction keeps Cell capabilities and structural reads in the input
+    // schema without duplicating the source or hiding its root marker from
+    // runner preflight.
+    const projectionType = getTypeAtLocationWithFallback(
+      identifier,
       context.checker,
       context.options.state?.typeRegistry,
     );
-    if (sourceType) {
-      context.options.state?.typeRegistry.set(replacement, sourceType);
+    if (projectionType) {
+      context.options.state?.typeRegistry.set(replacement, projectionType);
     }
     return replacement;
   };

@@ -180,14 +180,10 @@ const __cfLift_7 = __cfHelpers.lift<{
             type: "object",
             properties: {
                 result: {
-                    anyOf: [{
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }, {
-                            type: "object"
-                        }],
+                    type: "array",
+                    items: {
+                        type: "string"
+                    },
                     "default": []
                 }
             },
