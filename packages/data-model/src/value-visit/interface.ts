@@ -1,0 +1,307 @@
+/**
+ * Types and constants for the visitor engine.
+ */
+
+import { type Primitive } from "@commonfabric/utils/types";
+
+import { type PrimitiveValueTag } from "@/value-tags.ts";
+
+import {
+  type FabricArray,
+  type FabricContainerValue,
+  FabricInstance,
+  type FabricPlainObject,
+  FabricPrimitive,
+  type FabricValue,
+} from "@/interface.ts";
+
+//
+// Individual result form types and associated definitions
+//
+
+/** Full domain for a `ValueVisitor` class, given its `DomainExtra`. */
+export type DomainFor<DomainExtra> = FabricValue | DomainExtra;
+
+/**
+ * A `mainResult` form. `value` is a value that is to be returned from the
+ * original main (top-level) `visit()` call, and by returning this form, a
+ * visitor indicates that the `visit()` should end promptly (do no further
+ * sub-visits), returning this value.
+ */
+export type MainResultForm<ResultType> = {
+  readonly type: "mainResult";
+  readonly value: ResultType;
+};
+
+/**
+ * A `recurse` form. This is returned by visitor methods which visit containers.
+ * This tells the visitor engine that it should recursively visit the contents
+ * of the container, such that each visited item is known by the engine to be
+ * contained by the container which is being iterated over. The two `boolean`
+ * properties indicate whether the container's keys and/or values are to be
+ * recursed over. `doKeys` is ignored in a context where there is no key.
+ *
+ * If a visitor returns an instance of this type which (implicitly) references a
+ * non-container, that situation is detected at runtime and results in a
+ * `throw`n error.
+ *
+ * **Note:** The visit calls per-mapping are specifically in key-then-value
+ * order, and if the result of visiting a key is a `mainResult`, then that ends
+ * the iteration before the corresponding value is visited.
+ *
+ * **Note:** It is technically possible to define a no-op instance of this type,
+ * which is the equivalent to returning `undefined`. This is pointless, but it
+ * is not prevented.
+ */
+export type RecurseForm = {
+  readonly type: "recurse";
+  readonly doKeys: boolean;
+  readonly doValues: boolean;
+};
+
+/**
+ * A `replace` form. `value` is a value that is to be used in place of the value
+ * originally received by the visitor method which returns this. This tells the
+ * visitor engine to redo visitor dispatch with the replacement (as if the
+ * replacement were the value in the same position as the original).
+ */
+export type ReplaceForm<DomainExtra> = {
+  readonly type: "replace";
+  readonly value: DomainFor<DomainExtra>;
+};
+
+/**
+ * A `visitSubtype` form. This is returned by visitor methods which cover
+ * multiple possible subtype dispatches. By returning this form, a visitor
+ * indicates that the engine should in fact do a subtype-based dispatch.
+ */
+export type VisitSubtypeForm = { readonly type: "visitSubtype" };
+
+/**
+ * Standard instance of `RecurseForm` for recursing over keys and values. This
+ * is only meaningful for recursing over mappings.
+ *
+ * The `DO_` prefix is intended to make it clear at use sites that it is telling
+ * the visitor engine to "do" something.
+ */
+export const DO_RECURSE_KEYS_VALUES: RecurseForm = Object.freeze(
+  { type: "recurse", doKeys: true, doValues: true } as const,
+);
+
+/**
+ * Standard instance of `RecurseForm` for recursing over keys only. This is only
+ * meaningful for recursing over mappings.
+ *
+ * The `DO_` prefix is intended to make it clear at use sites that it is telling
+ * the visitor engine to "do" something.
+ */
+export const DO_RECURSE_KEYS: RecurseForm = Object.freeze(
+  { type: "recurse", doKeys: true, doValues: false } as const,
+);
+
+/**
+ * Standard instance of `RecurseForm` for recursing over values only. This
+ * includes array elements and mapping values.
+ *
+ * The `DO_` prefix is intended to make it clear at use sites that it is telling
+ * the visitor engine to "do" something.
+ */
+export const DO_RECURSE_VALUES: RecurseForm = Object.freeze(
+  { type: "recurse", doKeys: false, doValues: true } as const,
+);
+
+/**
+ * Standard instance of `VisitSubtypeForm`.
+ *
+ * The `DO_` prefix is intended to make it clear at use sites that it is telling
+ * the visitor engine to "do" something.
+ */
+export const DO_VISIT_SUBTYPE: VisitSubtypeForm = Object.freeze(
+  { type: "visitSubtype" } as const,
+);
+
+//
+// `visit*()` method result union types
+//
+
+/**
+ * Baseline possible results from arbitrary `visit*()` calls, defining the
+ * result cases common to all of these methods.
+ *
+ * See the included result types for details on what they mean. As for
+ * `undefined`, if a visitor returns it in the context of this type, it means
+ * that the visit of the given value was completed; the visitor engine will not
+ * process it further, and there is no specific value to return from (this part
+ * of) the visit.
+ */
+export type BaselineVisitResult<ResultType = FabricValue> =
+  | MainResultForm<ResultType>
+  | undefined;
+
+/**
+ * Possible results from a `visit*()` method which accepts leaf (non-dispatched)
+ * values. This includes the `recurse` form, which is only valid to return when
+ * the value being visited is in fact a container; this constraint is checked at
+ * runtime and results in a `throw`n error when violated.
+ *
+ * About the name: This is a "leaf" in the sense of visitor dispatch -- there is
+ * not a more-specific subtype-based visitor method to call -- but that said,
+ * the value being visited itself might or might not be a leaf in the sense of
+ * the graph structure of the value.
+ *
+ * See the included result types for details on what they mean.
+ */
+export type LeafVisitorResult<DomainExtra = never, ResultType = FabricValue> =
+  | BaselineVisitResult<ResultType>
+  | RecurseForm
+  | ReplaceForm<DomainExtra>;
+
+/**
+ * Possible results from a visitor method which covers two or more subtypes of
+ * value that the visitor engine can dispatch to. Such a method is also allowed
+ * to take a non-dispatch action, and so all of the `LeafVisitorResults` are
+ * included as options with this type.
+ *
+ * See the included result types for details on what they mean.
+ */
+export type DispatchingVisitorResult<
+  DomainExtra = never,
+  ResultType = FabricValue,
+> =
+  | LeafVisitorResult<DomainExtra, ResultType>
+  | VisitSubtypeForm;
+
+//
+// Visitor interface and exported implementations thereof
+//
+
+/**
+ * Interface for visit receivers.
+ *
+ * Each `visit*()` method accepts a `value` of the (parametric) `Domain` type,
+ * in some cases along with other arguments, and returns a structured result or
+ * `undefined`, which indicates what the visitor engine should do next.
+ * Different methods are allowed to return different subsets of the full
+ * complement of possible results (see their declarations for more detail). Each
+ * structured result type is documented as to its meaning.
+ *
+ * The value domain of visitors always includes `FabricValue`, and the
+ * `DomainExtra` type parameter is available to selectively include another type
+ * (possibly itself compound) as an additional option.
+ */
+export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
+  /**
+   * Visits a value which is already in the process of being visited. The
+   * visitor engine calls this method _before_ calling `visitValue()` when the
+   * value to be visited is already in the middle of being visited as a
+   * container.
+   */
+  visitCycle(
+    /** Value to visit. */
+    value: DomainFor<DomainExtra>,
+    /** Depth at which `value` was originally encountered. */
+    originalDepth: number,
+    /** Depth of the current visit. */
+    thisDepth: number,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
+
+  /**
+   * Visits the given `FabricArray`.
+   */
+  visitFabricArray(
+    value: FabricArray,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
+
+  /**
+   * Visits the given `FabricInstance`.
+   */
+  visitFabricInstance(
+    value: FabricInstance,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
+
+  /**
+   * Visits the given `FabricPlainObject`.
+   */
+  visitFabricPlainObject(
+    value: FabricPlainObject,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
+
+  /**
+   * Visits the given `FabricContainerValue`. If this returns type
+   * `visitSubtype`, then the visitor system will call one of
+   * `visitFabricArray()`, `visitFabricInstance()`, or
+   * `visitFabricPlainObject()`.
+   */
+  visitFabricContainer(
+    value: FabricContainerValue,
+  ): DispatchingVisitorResult<DomainExtra, ResultType>;
+
+  /**
+   * Visits a value determined to _not_ be a valid `FabricValue`.
+   *
+   * **Note:** When this visitor is called using a function that allows for
+   * non-`FabricValue`s, the visitor engine will call this method on an
+   * ostensible `FabricValue` that did not pass its type check.
+   */
+  visitNonFabricValue(
+    value: DomainExtra,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
+
+  /**
+   * Visits the given primitive value, which can be either a native JavaScript
+   * primitive or a `FabricPrimitive`.
+   */
+  visitPrimitive(
+    value: Primitive | FabricPrimitive,
+    tag: PrimitiveValueTag,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
+
+  /**
+   * Visits the given arbitrary value. If this returns type `visitSubtype`, then
+   * the visitor system will call one of `visitFabricContainer()`,
+   * `visitNonFabricValue()`, or `visitPrimitive()`.
+   */
+  visitValue(
+    value: DomainFor<DomainExtra>,
+  ): DispatchingVisitorResult<DomainExtra, ResultType>;
+
+  /**
+   * Indicates that an array element was just visited. This method is called as
+   * a result of the visitor returning a `recurse` result for a visited array
+   * and is called _after_ the element itself was directly visited.
+   */
+  visitedArrayElement(
+    array: FabricArray,
+    index: number,
+    value: DomainFor<DomainExtra>,
+  ): BaselineVisitResult<ResultType>;
+
+  /**
+   * Indicates that an array gap (one or more holes) was just nominally visited.
+   * This method is called as a result of the visitor returning a `recurse`
+   * result for a visited array and is called during iteration as gaps are
+   * encountered. The sequencing of this call is meant to mirror
+   * `visitedArrayElement()`, but since there is nothing to recurse on (it's a
+   * gap, not any actual values), there is no regular `visitValue()` call which
+   * immediately precedes it (hence the visit was "nominal"). `start` is the
+   * start index of the gap (integer `>= 0`), and `count` is the number of holes
+   * in the gap (integer `>= 1`). This method is called as a result of the
+   * visitor returning a `recurse` result for a visited array.
+   */
+  visitedArrayGap(
+    array: FabricArray,
+    start: number,
+    count: number,
+  ): BaselineVisitResult<ResultType>;
+
+  /**
+   * Indicates that a container mapping was just visited. This method is called
+   * as a result of the visitor returning a `recurse` result for a visited
+   * container and is called _after_ the mapping itself was directly visited.
+   */
+  visitedMapping(
+    container: FabricPlainObject | FabricInstance,
+    key: DomainFor<DomainExtra>,
+    value: DomainFor<DomainExtra>,
+  ): BaselineVisitResult<ResultType>;
+}
