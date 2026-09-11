@@ -577,6 +577,57 @@ describe("engine-read-through", () => {
     }
   });
 
+  it("reads the store for a pull of a held document no further, and serves the value the feed last refreshed", async () => {
+    // A held document is kept current by the feed's refresh at every
+    // cycle, the way a session's covered selector is by its watch; a
+    // later sync of it is answered from the replica. The refresh is what
+    // moves it: the store's newer version reaches a sync only through
+    // `integrateStoreWrites()`.
+    const store = new Map<string, { seq: number; doc: FabricValue }>();
+    store.set("of:held", { seq: 1, doc: { value: { n: 1 } } as FabricValue });
+    const reads: string[] = [];
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    try {
+      manager.installStoreReadThrough(space, ({ id, scopeKey }) => {
+        reads.push(id);
+        const entry = store.get(id);
+        return {
+          branch: "",
+          id,
+          scope: "space",
+          scopeKey,
+          ...(entry === undefined
+            ? { seq: 0, deleted: true as const }
+            : { seq: entry.seq, doc: entry.doc }),
+        };
+      });
+      const replica = manager.open(space).replica as SpaceReplica;
+      expect((await replica.sync("of:held" as URI)).ok).toBeDefined();
+      expect(replica.getDocument("of:held" as URI)).toEqual({
+        value: { n: 1 },
+      });
+      store.set("of:held", { seq: 2, doc: { value: { n: 2 } } as FabricValue });
+      expect((await replica.sync("of:held" as URI)).ok).toBeDefined();
+      expect(reads).toEqual(["of:held"]);
+      expect(replica.getDocument("of:held" as URI)).toEqual({
+        value: { n: 1 },
+      });
+      expect(
+        manager.integrateStoreWrites(space, [
+          { id: "of:held", scopeKey: "space" },
+        ]),
+      ).toBe(1);
+      expect(replica.getDocument("of:held" as URI)).toEqual({
+        value: { n: 2 },
+      });
+      expect(reads).toEqual(["of:held", "of:held"]);
+    } finally {
+      await manager.close();
+    }
+  });
+
   it("does not read the store for a pull whose scope the identity cannot resolve", async () => {
     // Such a scope keys by its name, which names no store row: the store
     // would read the name as the space scope and answer with the wrong
