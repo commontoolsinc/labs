@@ -941,8 +941,19 @@ export function writeSourceDocs(
       // transaction never read claims the document absent: the commit is
       // refused as stale, one edge per attempt, until the retry budget runs
       // out and the whole cache write is lost.
+      // The comparison is content against content — the code document is
+      // content-addressed and the edges name documents by identity — so
+      // an undelegated document needs no label to be trusted; a delegated
+      // one carries the compiled-by atom at its delegation list, which is
+      // where the stored list is read from.
       const unchanged = existing !== undefined &&
-        cellCarriesIntegrity(baseCell, COMPILED_INTEGRITY_ATOM, tx) &&
+        (delegatedModuleIdentities.length === 0 ||
+          cellCarriesIntegrity(
+            baseCell,
+            COMPILED_INTEGRITY_ATOM,
+            tx,
+            SOURCE_DELEGATION_PATH,
+          )) &&
         storedSourceDocMatches(
           baseCell,
           identity,
@@ -970,7 +981,7 @@ export function writeSourceDocs(
         const stored = edge.get();
         if (
           stored?.specifier !== specifier ||
-          parseLink(stored.link)?.id !== parseLink(link)?.id
+          !sameDocumentLink(parseLink(stored.link), parseLink(link))
         ) {
           edge.set({ specifier, link });
         }
@@ -1062,6 +1073,26 @@ const SOURCE_DOC_COMPARE_SCHEMA = {
 } as const satisfies JSONSchema;
 
 /**
+ * Whether two parsed links name the same whole document: the id, the
+ * space, and the scope, at the document root. A link that reaches the
+ * right id through another space or below the root is not the edge a
+ * write would record, and is rewritten.
+ */
+function sameDocumentLink(
+  a:
+    | { id?: string; space?: string; path?: readonly string[]; scope?: unknown }
+    | undefined,
+  b:
+    | { id?: string; space?: string; path?: readonly string[]; scope?: unknown }
+    | undefined,
+): boolean {
+  return a !== undefined && b !== undefined && a.id === b.id &&
+    a.space === b.space && (a.path?.length ?? 0) === 0 &&
+    (b.path?.length ?? 0) === 0 &&
+    JSON.stringify(a.scope ?? null) === JSON.stringify(b.scope ?? null);
+}
+
+/**
  * Whether the source document behind `cell` already says what a write of
  * `identity` with `code`, `filename`, `imports`, and `delegated` would say.
  * Annotations are not compared: a write preserves what is stored, so they
@@ -1091,18 +1122,17 @@ function storedSourceDocMatches(
   ) {
     return false;
   }
-  const storedCode = parseLink(stored.code);
-  if (storedCode === undefined || storedCode.id !== parseLink(code)?.id) {
-    return false;
-  }
+  if (!sameDocumentLink(parseLink(stored.code), parseLink(code))) return false;
   const storedImports = stored.imports ?? [];
   if (storedImports.length !== imports.length) return false;
   for (let i = 0; i < imports.length; i += 1) {
     const edge = storedImports[i];
     if (
       edge?.specifier !== imports[i].specifier || !isCell(edge.link) ||
-      edge.link.getAsNormalizedFullLink().id !==
-        imports[i].target.getAsNormalizedFullLink().id
+      !sameDocumentLink(
+        edge.link.getAsNormalizedFullLink(),
+        imports[i].target.getAsNormalizedFullLink(),
+      )
     ) {
       return false;
     }

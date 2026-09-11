@@ -3129,17 +3129,17 @@ export class PatternManager {
     // all chunks equals the single-transaction effective map exactly.
     const committedModuleDelegations = new Map<string, ReadonlySet<string>>();
     for (const chunk of chunks) {
-      // The write-back re-writes source docs whose values carry quote-cell
-      // indirections (one derived doc per import edge). On a cold replica
-      // those derived docs are unknown. The engine reports every stale instance
-      // in one rejection and editWithRetry pulls the whole named set before
-      // re-running. Further retries remain possible when a re-run reaches a
-      // new dependency layer or another writer advances a document again.
-      // The edge-proportional budget is conservative headroom for those
-      // additional layers and concurrent writes, not one retry per edge.
-      // A conflict-free write-back commits on its first attempt. Applying the
-      // floor per chunk would multiply the minimum budget by the chunk count,
-      // so only a single-chunk write-back receives the full floor.
+      // The pre-write sync above loads every document the write reads —
+      // the source documents, their edge documents, and the compiled
+      // documents — so a write-back against a quiet store commits on its
+      // first attempt. The retries are the backstop for another writer
+      // advancing one of those documents between the sync and the commit:
+      // the engine reports every stale instance in one rejection and
+      // editWithRetry pulls the named set before re-running. The
+      // edge-proportional budget is headroom for such concurrent writes.
+      // Applying the floor per chunk would multiply the minimum budget by
+      // the chunk count, so only a single-chunk write-back receives the
+      // full floor.
       const importEdges = chunk.reduce((n, m) => n + m.imports.length, 0);
       const writebackMaxRetries = chunks.length === 1
         ? Math.max(16, 2 * importEdges + 8)

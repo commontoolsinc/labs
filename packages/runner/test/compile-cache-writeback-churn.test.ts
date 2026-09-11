@@ -99,6 +99,19 @@ describe("compile-cache write-back over successive runtime versions", () => {
         );
       };
       const firstEdges = await edgeDocIds(first);
+      // The source documents are independent of the runtime version, so a
+      // later version's write-back leaves them at the revision the first
+      // write left them at; only the compiled documents are new.
+      const engine = await server.engineForSpace(space);
+      const entrySourceId = first.runtime.getCell(
+        space,
+        sourceDocKey(ref.identity),
+      ).getAsNormalizedFullLink().id;
+      const sourceRevision = () =>
+        (engine.database.prepare(
+          "SELECT max(seq) AS seq FROM revision WHERE id = :id",
+        ).get({ id: entrySourceId }) as { seq: number }).seq;
+      const firstRevision = sourceRevision();
       // Two authored imports and the synthetic root link.
       expect(firstEdges.length).toBe(3);
       expect(firstEdges.every((id) => typeof id === "string")).toBe(true);
@@ -125,6 +138,7 @@ describe("compile-cache write-back over successive runtime versions", () => {
           warm.runtime.patternManager.getCompileCacheStats().byIdentityHits,
         ).toBeGreaterThan(0);
         expect(await edgeDocIds(warm)).toEqual(firstEdges);
+        expect(sourceRevision()).toBe(firstRevision);
       }
     } finally {
       restoreVersion();
