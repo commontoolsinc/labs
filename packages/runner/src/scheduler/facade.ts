@@ -2937,10 +2937,17 @@ export class Scheduler {
     const record = this.#nodes.get(action);
     if (!record) return;
     markInvalidRecord(this.#nodes, action, cause, options);
-    // Trailing computation debounce re-arms on every invalidation (§8.1:
-    // debounceReadyAt resets while gated). Arming here — in the one
-    // invalid-setter — covers every path (channel, registration, retry), so
-    // gate QUERIES stay side-effect-free.
+    // A scheduler-owed retry (`options.retry`: a refused run re-queued after
+    // its catch-up) is not an input change — it runs past the node's
+    // freshness gates, and any armed readiness is released (§8.3).
+    if (options?.retry) {
+      this.#gates.releaseForRetry(action);
+      return;
+    }
+    // Trailing computation debounce re-arms on every other invalidation
+    // (§8.1: debounceReadyAt resets while gated). Arming here — in the one
+    // invalid-setter — covers every path (channel, registration), so gate
+    // QUERIES stay side-effect-free.
     if (record.kind === "computation") {
       this.#gates.onInvalidated(
         record,

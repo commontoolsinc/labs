@@ -123,25 +123,48 @@ export async function resolveWish(
       }),
   }));
 
+  // One result cell per invocation, as `cf piece call` mints for a tool run.
+  // A headless read is a throwaway instantiation, and a cell keyed by the
+  // query alone carried the previous invocation's answer into this one: a
+  // refused or unfinished run then read back as that older result, and on a
+  // cold replica the setup commit itself claimed the reused cell absent and
+  // was refused for it (2026-09-11, the estuary profile preflight).
   const tx = runtime.edit();
   const resultCell = runtime.getCell<{
     out?: { result?: unknown; error?: unknown };
-  }>(space, { wish: { headlessRead: spec.query } }, undefined, tx);
+  }>(
+    space,
+    { wish: { headlessRead: spec.query, invocation: crypto.randomUUID() } },
+    undefined,
+    tx,
+  );
   const result = runtime.run(tx, wishPattern, {}, resultCell);
-  await tx.commit();
+  runtime.prepareTxForCommit(tx);
+  const setup = await tx.commit();
+  if (setup.error) {
+    throw new Error(
+      `Cannot set up the headless read of "${spec.query}": ${
+        String((setup.error as { message?: unknown }).message ?? setup.error)
+      }`,
+      { cause: setup.error },
+    );
+  }
 
-  // Let the wish action run, then converge cross-space profile loads. The wish
-  // builtin pulls freshly-created profiles across space boundaries and re-runs
-  // when they materialize; pulling the result and syncing storage drains that.
+  // Drive the wish action's first run and load the result graph, then wait
+  // for the lookup to SETTLE. This runtime is a cold replica: the action
+  // follows links into home records it never synced (the profile list, the
+  // MRU list, each profile's own space), reads each as absent until its load
+  // lands, and has its commit refused — a `seq: 0` claim over a document
+  // that exists — once per such layer, re-running after each catch-up.
+  // `settled()` spans those rounds. `idle()` does not: it returns before a
+  // commit's verdict and sees nothing of a retry parked on its catch-up
+  // gate, so a read there answered from a stale or empty result.
   await result.pull();
-  await runtime.idle();
-  await runtime.storageManager.synced();
+  await runtime.settled();
   // Surface a permanent authorization denial on the wish's own space with the
   // real error. Scoped to `space`: a denied cross-space profile load stays a
   // silent absent read, which is the wish's expected "no profile yet" outcome.
   throwOnSpaceAuthorizationError(runtime.storageManager, space);
-  await result.pull();
-  await runtime.idle();
 
   const outCell = result.key("out");
   const error: unknown = outCell.key("error").get();

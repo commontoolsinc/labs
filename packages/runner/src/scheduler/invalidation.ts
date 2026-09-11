@@ -246,6 +246,21 @@ export interface MarkInvalidOptions {
    * clean), and the siblings stay current. A CAUSE-bearing invalidation
    * ignores this: the cause names its instance (or all). */
   fanOutInstances?: "all" | "keep";
+
+  /** The invalidation is a RETRY the scheduler owes after a WAIT: a run
+   * whose commit was refused for a stale basis, re-queued once the
+   * conflict's catch-up gate resolved. Not an input change — the trailing
+   * debounce coalesces input churn and a throttle spaces runs that produced
+   * output, while a refused run left nothing durable and its wait was its
+   * delay — so the retry is queued past both: the debounce is not re-armed,
+   * and an armed debounce or throttle readiness is released (the
+   * convergence backoff stays). Behind its debounce a retry ran only when a
+   * live demander armed the expiry wake; a one-shot `pull()` has none once
+   * it resolves, and a cold `cf wish` lookup sat on its refused first run
+   * for good (2026-09-11). A re-queue that waited on nothing — a local
+   * inconsistency, a transport error — keeps its gates: there the debounce
+   * is the spacing between the re-run and the local writer it raced. */
+  retry?: boolean;
 }
 
 /**

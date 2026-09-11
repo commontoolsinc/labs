@@ -187,7 +187,10 @@ export function watchReactiveActionCommit(state: {
   readonly pending: Set<Action>;
   readonly commitPromise: ReturnType<IExtendedStorageTransaction["commit"]>;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
-  readonly markInvalid: (action: Action) => void;
+  readonly markInvalid: (
+    action: Action,
+    options?: MarkInvalidOptions,
+  ) => void;
   readonly queueExecution: () => void;
   readonly restoreInvalidCauses: () => void;
   readonly getActionId: (action: Action) => string;
@@ -265,7 +268,8 @@ export function watchReactiveActionCommit(state: {
       state.resubscribe(state.action, state.log);
       const readyToRetry =
         (error as { readyToRetry?: () => unknown }).readyToRetry;
-      if (typeof readyToRetry === "function") {
+      const waitedForCatchUp = typeof readyToRetry === "function";
+      if (waitedForCatchUp) {
         // The readiness gate rejects by design when the session is closed,
         // revoked, or replaced while we wait — an expected control-flow signal,
         // not an error. Swallow it and re-queue anyway: the action stays live
@@ -281,7 +285,20 @@ export function watchReactiveActionCommit(state: {
           );
         }
       }
-      state.markInvalid(state.action);
+      // A re-run that waited on the catch-up gate is the scheduler's own,
+      // not a fresh input change: the wait was its delay, and the refused
+      // run left nothing durable behind. So it is queued past the node's
+      // freshness gates — `retry` skips the trailing-debounce re-arm and
+      // releases an armed debounce or throttle readiness (§8.3; the
+      // convergence backoff stays). Behind its debounce that retry became a
+      // deferred re-run of an "already-ran" computation, which is not idle
+      // work and gets its expiry wake only from a live demander; a one-shot
+      // `pull()` has none once it resolves, so a cold `cf wish` lookup never
+      // re-ran and its refused first output stood in for the answer
+      // (2026-09-11). A local inconsistency waited on nothing, so its re-run
+      // keeps the debounce: that is the spacing between it and the local
+      // writer it raced (an interval `#now` tick's own write, for one).
+      state.markInvalid(state.action, { retry: waitedForCatchUp });
       state.pending.add(state.action);
       state.queueExecution();
       return;
@@ -1083,14 +1100,16 @@ function finalizeReactiveActionCommit(
     resubscribe: fanOutRun === undefined
       ? state.resubscribe
       : (target) => state.resubscribe(target, fanOutUnionLog(fanOutRun.state)),
-    markInvalid: fanOutRun === undefined ? state.markInvalid : (target) => {
-      dirtyFanOutKey(
-        fanOutRun.state,
-        keyAtRatchet(fanOutRun.state, fanOutRun.instance.identity) ??
-          fanOutRun.instance.key,
-      );
-      state.markInvalid(target, { fanOutInstances: "keep" });
-    },
+    markInvalid: fanOutRun === undefined
+      ? state.markInvalid
+      : (target, options) => {
+        dirtyFanOutKey(
+          fanOutRun.state,
+          keyAtRatchet(fanOutRun.state, fanOutRun.instance.identity) ??
+            fanOutRun.instance.key,
+        );
+        state.markInvalid(target, { ...options, fanOutInstances: "keep" });
+      },
     queueExecution: state.queueExecution,
     getActionId: state.getActionId,
     restoreInvalidCauses: () => {

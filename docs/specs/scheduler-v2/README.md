@@ -1041,6 +1041,18 @@ skipped by `collectWorkSet`, and nothing downstream of them runs early
 (downstream is only invalidated by actual changes, P2). A parked head event
 (§7.5) is the same condition surfacing through the event path.
 
+A retry the scheduler owes after a wait — a run whose commit was refused for a
+stale basis, re-queued once the conflict's catch-up gate (§7.6) resolved — is
+not an input change and is queued past the debounce and throttle: the debounce
+is not re-armed and an armed readiness of either is released (the `retry`
+option of `MarkInvalidOptions`; the §7.7 backoff stays). The refused run left
+nothing durable and its wait was its delay. Behind the debounce such a retry
+counted as a deferred re-run of an already-ran computation, which is not idle
+work and gets its expiry wake only from a live demander — a one-shot `pull()`
+has none once it resolves, so the retry never ran. A re-queue that waited on
+nothing (a local inconsistency, a transport error) keeps its gates: there the
+debounce is the spacing between the re-run and the local writer it raced.
+
 ### 8.4 One wake timer
 
 At pass end, if no work is runnable now but some `invalid ∧ live` node (or
