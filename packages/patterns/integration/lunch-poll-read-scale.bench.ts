@@ -127,12 +127,12 @@ function fixture(voteCount: number) {
               "integration/fixtures/lunch-poll-read-scale/main.tsx",
             ),
             root,
-            testPaths: [
+            testPaths: ["main", "296-votes", "1184-votes"].map((name) =>
               join(
                 root,
-                "integration/fixtures/lunch-poll-read-scale/main.test.tsx",
-              ),
-            ],
+                `integration/fixtures/lunch-poll-read-scale/${name}.test.tsx`,
+              )
+            ),
           },
         );
         const piece = await cc.create<

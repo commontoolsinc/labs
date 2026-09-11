@@ -391,3 +391,38 @@ and the latest diagnostic sample per size, after the timed interval. The fixture
 uses a dedicated space and a synthetic viewer. It supplies repeatable local
 measurements; comparisons to a deployed board require matching its execution
 posture, data, and cross-space links.
+
+### Headless render read limits
+
+The fixture's `main.test.tsx`, `296-votes.test.tsx`, and `1184-votes.test.tsx`
+under `packages/patterns/integration/fixtures/lunch-poll-read-scale/` enforce
+read budgets for two headless rendering windows: the seeded poll's first render,
+and a render after changing one vote to yellow. The harness recursively demands
+VDOM cells during each window and removes that demand before the next step.
+These limits cover rematerialization, not a continuously mounted browser update;
+the browser-worker measurements above remain a separate series.
+
+| Votes | First-render total limit | Updated-render total limit | Per-run limit in each render |
+| ----- | ------------------------ | -------------------------- | ---------------------------- |
+| 74    | 36,000                   | 30,000                     | 14,000                       |
+| 296   | 76,000                   | 67,000                     | 31,000                       |
+| 1184  | 236,000                  | 214,000                    | 96,000                       |
+
+Totals count completed transaction-attempt proxy accesses; per-run limits bound
+one reactive body's proxy accesses. The ceilings retain roughly ten percent
+headroom over their measured fixture costs. Setup, vote dispatch, and functional
+assertions occupy separate intervals with no declared limits. The fixture creates
+keyed vote entities and assigns their membership once during setup, avoiding a
+full membership-array update for each seeded vote. No timing limit is added by
+these fixtures.
+
+Run all three from the repository root:
+
+```sh
+deno task cf test packages/patterns/integration/fixtures/lunch-poll-read-scale --verbose
+```
+
+The command reports measured totals and per-run maxima for every interval. Keep
+the functional assertions, declared collection sizes, and render windows when
+adjusting a ceiling; a budget failure should lead to attribution of the added
+reads before changing the limit.
