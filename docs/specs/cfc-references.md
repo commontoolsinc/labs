@@ -121,6 +121,12 @@ also require their retained read dependencies. This marker does not cause a
 read-only transaction with no document operations to submit a storage commit.
 Storage does not interpret CFC policy and verification does not write B.
 
+When an array edit changes its document's CFC metadata, Runtime retains the
+authored array layout in the pending view. A peer update cannot move references
+away from the slot labels that accompany them. Admission validates the retained
+dependencies before accepting the edit. Array edits with unchanged metadata
+retain their mergeable operations.
+
 Mutable content assertions across spaces are rejected when their evidence cannot
 be bound atomically to A's commit. Reference-only forwarding does not require a
 content assertion. The implementation has no persistent target-evidence cache.

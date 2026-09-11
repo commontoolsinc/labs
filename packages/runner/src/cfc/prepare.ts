@@ -8179,6 +8179,12 @@ export const prepareBoundaryCommit = (
       continue;
     }
 
+    // Changed metadata describes this transaction's concrete slot layout.
+    // Replaying a relative array edit over a peer's newer array would expose
+    // slots with missing or mismatched labels before admission rejects it.
+    // The ordinary array diff keeps the authored layout in the pending view.
+    tx.poisonMergeableOp?.({ space, id, scope, path: [] });
+
     if (envelopeRoot === undefined) {
       ensureSchemaDocument(
         tx,
