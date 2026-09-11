@@ -15,10 +15,11 @@ import {
   type SigilLink,
 } from "@commonfabric/runner";
 import {
+  carryCfcReferenceProvenance,
   getCfcReferenceProvenance,
   readStoredCfcMetadata,
 } from "@commonfabric/runner/cfc";
-import { linkRefPayload } from "@commonfabric/runner/shared";
+import { linkRefFrom, linkRefPayload } from "@commonfabric/runner/shared";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
@@ -31,11 +32,12 @@ import {
 import {
   type CellRef,
   ClientNotificationType,
+  type IPCClientRequest,
   NotificationType,
   RequestType,
 } from "@/protocol/mod.ts";
 import type { WorkerClient } from "@/backends/worker-client.ts";
-import { $conn, CellHandle, type RuntimeClient } from "@/mod.ts";
+import { $conn, CellHandle, RuntimeClient } from "@/mod.ts";
 import { createSigilLinkFromParsedLink } from "../../../runner/src/link-utils.ts";
 import { decomposeSchema } from "../../../runner/src/schema-decompose.ts";
 import type { URI } from "@commonfabric/memory/interface";
@@ -115,6 +117,115 @@ describe("reference-registry", () => {
     tx.abort();
     return acquired.withTx(undefined);
   };
+
+  it("acquires an address through the client and worker request boundary", async () => {
+    const target = await seed("client-acquisition", { public: "visible" });
+    const processor = buildProcessor({ runtime, identity: signer, space });
+    const requests: IPCClientRequest[] = [];
+    const conn = {
+      on: () => {},
+      request: (request: IPCClientRequest) => {
+        requests.push(wireCopy(request));
+        return processor.handleRequest(wireCopy(request));
+      },
+    };
+    const client = new (RuntimeClient as unknown as {
+      new (conn: unknown, principal: string): RuntimeClient;
+    })(conn, space);
+    const address = wireCopy(target.getAsNormalizedFullLink());
+    const handle = await client.acquireCell<{ public: string }>(address);
+    expect(requests).toEqual([{ type: RequestType.AcquireCell, address }]);
+    expect(handle.ref().cfcReferenceToken).toBeDefined();
+    expect(await handle.key("public").sync()).toBe("visible");
+    expect(() => getCell(runtime, handle.ref())).toThrow(
+      "Reference acquisition registry is missing",
+    );
+  });
+
+  it("rejects exporting a carrier after its binding is changed", async () => {
+    const acquired = await acquireSelected();
+    const original = acquired.getAsLink();
+    const payload = linkRefPayload(original);
+    for (
+      const altered of [
+        { ...payload, id: "of:other" as const },
+        { ...payload, path: ["other"] },
+        { ...payload, space: undefined },
+        { ...payload, scope: "inherit" as const },
+      ]
+    ) {
+      const link = carryCfcReferenceProvenance(original, linkRefFrom(altered));
+      expect(() => registry.exportLink(link)).toThrow(
+        "Reference acquisition does not match its binding",
+      );
+    }
+    const { scope: _scope, ...unscoped } = payload;
+    const exported = registry.exportLink(
+      carryCfcReferenceProvenance(original, linkRefFrom(unscoped)),
+      acquired,
+    );
+    expect(
+      getCfcReferenceProvenance(registry.importLink(wireCopy(exported)))
+        ?.confidentiality,
+    ).toEqual([selection]);
+  });
+
+  it("issues usable acquisitions for home and newly ensured space roots", async () => {
+    const held = await acquireSelected();
+    const processor = buildProcessor({
+      runtime,
+      identity: signer,
+      space,
+      cc: {
+        getDefaultPattern: () => Promise.resolve(undefined),
+        ensureDefaultPattern: () => Promise.resolve({ getCell: () => held }),
+      },
+    });
+    const home = processor.handleGetHomeSpaceCell({
+      type: RequestType.GetHomeSpaceCell,
+    });
+    expect(home.cell.cfcReferenceToken).toBeDefined();
+    const address = runtime.getHomeSpaceCell().getAsNormalizedFullLink();
+    expect(home.cell).toMatchObject({
+      space: address.space,
+      id: address.id,
+      scope: address.scope,
+      path: address.path,
+    });
+    const root = await processor.handleGetSpaceRootPattern({
+      type: RequestType.GetSpaceRootPattern,
+      space,
+      start: false,
+    });
+    expect(root.piece.cell.cfcReferenceToken).toBeDefined();
+    expect(
+      processor.handleCellGet({
+        type: RequestType.CellGet,
+        cell: { ...root.piece.cell, path: ["public"] },
+      }).value,
+    ).toBe("visible");
+  });
+
+  it("rejects importing a token attached to a relative address", async () => {
+    const acquired = await acquireSelected();
+    const issued = registry.exportLink(acquired.getAsLink(), acquired);
+    const payload = linkRefPayload(issued);
+    expect(payload).toHaveProperty("cfcReferenceToken");
+    for (
+      const relative of [
+        { ...payload, id: undefined },
+        { ...payload, space: undefined },
+      ]
+    ) {
+      expect(() => registry.importLink(linkRefFrom(relative))).toThrow(
+        "Reference acquisition token needs an absolute binding",
+      );
+    }
+    expect(
+      getCfcReferenceProvenance(registry.importLink(wireCopy(issued)))
+        ?.confidentiality,
+    ).toEqual([selection]);
+  });
 
   it("keeps immutable tokens distinct by captured slots while deduplicating identical acquisitions", async () => {
     const held = await acquireSelected();

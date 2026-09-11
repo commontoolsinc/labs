@@ -946,7 +946,51 @@ describe("prepare", () => {
     expect(result.error?.message).toContain("linked content evidence");
   });
 
+  for (const items of [7, [["unendorsed"], 7]]) {
+    it(`refuses a non-array container under a nested wildcard floor (${JSON.stringify(items)})`, async () => {
+      const tx = runtime.edit();
+      const sink = runtime.getCell(signer.did(), "invalid-wildcard-sink", {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "array",
+              items: {
+                type: "string",
+                ifc: { requiredIntegrity: [APPROVED] },
+              },
+            },
+          },
+        },
+      }, tx);
+      sink.set({ items: items as unknown as string[][] });
+      expect((await tx.commit()).error?.message).toContain(
+        "wildcard evidence",
+      );
+    });
+  }
+
   describe("copy assertions", () => {
+    for (const referenceOnInput of [false, true]) {
+      it(`rejects an exact copy between a reference and its value (referenceOnInput=${referenceOnInput})`, async () => {
+        const source = await seed("mixed-copy-source", "same");
+        const tx = runtime.edit();
+        const sink = runtime.getCell(signer.did(), "mixed-copy-sink", {
+          type: "object",
+          properties: {
+            input: { type: "string" },
+            output: { type: "string", ifc: { exactCopyOf: ["input"] } },
+          },
+        }, tx);
+        sink.set({
+          input: referenceOnInput ? source as unknown as string : "same",
+          output: referenceOnInput ? "same" : source as unknown as string,
+        });
+        expect((await tx.commit()).error?.message).toContain("exactCopyOf");
+      });
+    }
+
     it("refuses to certify two missing final fields as copied content", async () => {
       const source = await seed("missing-copy-source", {});
       const destination = await seed("missing-copy-destination", {});

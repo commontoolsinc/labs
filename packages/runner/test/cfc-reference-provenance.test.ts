@@ -49,8 +49,15 @@ import {
   trustExecutable,
 } from "./support/trusted-builder.ts";
 import { diffAndUpdate } from "../src/data-updating.ts";
+import { findAndInlineDataUriLinks } from "../src/data-uri.ts";
 import { unwrapOneLevelAndBindToDoc } from "../src/pattern-binding.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { createNonReactiveTransaction } from "../src/storage/extended-storage-transaction.ts";
+import {
+  authorizationRead,
+  isAuthorizationRead,
+  withAuthorizationReadBasis,
+} from "../src/storage/reactivity-log.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
@@ -122,6 +129,117 @@ describe("cfc-reference-provenance", () => {
     }]);
     return { target, selected };
   };
+
+  it("requires verifier authorization and retains its reads through a sampled transaction", async () => {
+    const { target, selected } = await selectedTarget();
+    const tx = runtime.edit();
+    const sampled = createNonReactiveTransaction(tx);
+    const source = selected.getAsNormalizedFullLink();
+    expect(sampled.acquireCfcReference(source)).toBeUndefined();
+    expect(sampled.resolveCfcContentTarget(source, space)).toBeUndefined();
+    expect(() => withAuthorizationReadBasis(authorizationRead, undefined))
+      .toThrow("Authorization read has no commit revision basis");
+    expect([...tx.getReadActivities!()]).toHaveLength(0);
+    const pending = runtime.getCell(
+      space,
+      "pending-sampled-reference",
+      undefined,
+      sampled,
+    );
+    pending.set(target.withTx(sampled));
+    const acquired = sampled.acquireCfcReference(
+      pending.getAsNormalizedFullLink(),
+      undefined,
+      runtimeWritePolicyAuthorization,
+    );
+    expect(acquired?.binding).toMatchObject(target.getAsNormalizedFullLink());
+    expect(acquired?.confidentiality).toEqual([]);
+    const resolved = sampled.resolveCfcContentTarget(
+      source,
+      space,
+      runtimeWritePolicyAuthorization,
+    );
+    expect(resolved?.address).toMatchObject(target.getAsNormalizedFullLink());
+    expect(resolved?.value).toEqual({ public: "visible", secret: "hidden" });
+    expect(
+      [...tx.getReadActivities!()].some((read) =>
+        isAuthorizationRead(read.meta)
+      ),
+    )
+      .toBe(true);
+    expect(deriveFlowJoin(tx).confidentiality).toEqual([]);
+    const output = runtime.getCell(
+      space,
+      "sampled-write-author",
+      undefined,
+      sampled,
+    );
+    output.set("authored value");
+    expect(sampled.getCfcValueWriteAuthor(output.getAsNormalizedFullLink()))
+      .toEqual({ identity: undefined });
+    tx.abort();
+  });
+
+  it("invalidates preparation when a private reference is observed afterward", async () => {
+    const { selected } = await selectedTarget();
+    const acquire = runtime.edit();
+    const held = selected.withTx(acquire).resolveAsCell().withTx(undefined);
+    acquire.abort();
+    const tx = runtime.edit();
+    const output = runtime.getCell(
+      space,
+      "late-reference-observation",
+      undefined,
+      tx,
+    );
+    output.set("value");
+    const digest = tx.prepareCfc();
+    expect(tx.getCfcState().prepare.status).toBe("prepared");
+    tx.recordCfcReferenceObservation({
+      target: held.getAsNormalizedFullLink(),
+      confidentiality: [],
+      purpose: "identity",
+      journalIndex: tx.currentActivityIndex!()!,
+    });
+    expect(tx.getCfcState().prepare.status).toBe("prepared");
+    held.withTx(tx).getAsLink();
+    expect(tx.getCfcState().prepare.status).not.toBe("prepared");
+    expect(deriveFlowJoin(tx).confidentiality).toContainEqual(selection);
+    expect(tx.prepareCfc()).not.toBe(digest);
+    tx.abort();
+  });
+
+  for (const useActivityClock of [false, true]) {
+    for (const observeFirst of [false, true]) {
+      it(`checks private reference observations against a protected write's prefix (observeFirst=${observeFirst}, useActivityClock=${useActivityClock})`, async () => {
+        const { selected } = await selectedTarget();
+        const acquire = runtime.edit();
+        const held = selected.withTx(acquire).resolveAsCell().withTx(undefined);
+        acquire.abort();
+        const inner = runtime.edit();
+        const tx = useActivityClock ? inner : new Proxy(inner, {
+          get(target, property) {
+            if (property === "currentActivityIndex") return undefined;
+            const value = Reflect.get(target, property, target);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+        const output = runtime.getCell(space, "reference-gated-write", {
+          type: "string",
+          ifc: { maxConfidentiality: [] },
+        }, tx);
+        if (observeFirst) held.withTx(tx).getAsLink();
+        output.set("result");
+        if (!observeFirst) held.withTx(tx).getAsLink();
+        const result = await tx.commit();
+        if (observeFirst) {
+          expect(result.error?.message).toContain("maxConfidentiality");
+        } else {
+          expect(result.error).toBeUndefined();
+        }
+      });
+    }
+  }
 
   describe("external input acquisition", () => {
     it("acquires an explicit address without importing the target's confidentiality", async () => {
@@ -1569,6 +1687,85 @@ describe("cfc-reference-provenance", () => {
     cell.withTx(tx).getAsLink();
     expect(deriveFlowJoin(tx).confidentiality).toContainEqual(selection);
     tx.abort();
+  });
+
+  it("retains reference history on an eagerly materialized object", async () => {
+    const { selected } = await selectedTarget();
+    const read = runtime.edit();
+    read.markLazyMaterialize(false);
+    const value = selected.withTx(read).asSchema({
+      type: "object",
+      properties: { public: { type: "string" } },
+    }).get();
+    expect(value).toEqual({ public: "visible" });
+    expect(getCfcReferenceProvenance(value)?.confidentiality)
+      .toContainEqual(selection);
+    expect(getCfcReferenceProvenance(getCellOrThrow(value))?.confidentiality)
+      .toContainEqual(selection);
+    read.abort();
+  });
+
+  it("blocks narrower-scope references while materializing array elements", async () => {
+    const setup = runtime.edit();
+    const privateCell = runtime.getCell(
+      space,
+      "array-session",
+      undefined,
+      setup,
+      "session",
+    );
+    privateCell.set("private session");
+    expect((await setup.commit()).error).toBeUndefined();
+    const array = await seed(
+      "array-session-holder",
+      [privateCell.getAsLink()],
+      [{
+        path: ["0"],
+        origin: "link",
+        observes: "followRef",
+        label: {},
+      }],
+    );
+    const read = runtime.edit();
+    const value = array.withTx(read).asSchema({
+      type: "array",
+      scope: "space",
+      items: { type: ["string", "undefined"], scope: "space" },
+    }).get();
+    expect(value).toEqual([undefined]);
+    expect(
+      array.withTx(read).asSchema({
+        type: "array",
+        items: { type: "string", scope: "session" },
+      }).get(),
+    ).toEqual(["private session"]);
+    expect(privateCell.withTx(read).get()).toBe("private session");
+    read.abort();
+  });
+
+  it("inlines an immutable error without losing its nested cause or extra fields", () => {
+    const error = new FabricError({
+      type: "Error",
+      message: "failure",
+      stack: undefined,
+      cause: new FabricError({
+        type: "TypeError",
+        message: "source",
+        stack: undefined,
+        cause: undefined,
+      }),
+      extras: { detail: { attempt: 2 } },
+    });
+    const literal = runtime.getImmutableCell(space, error);
+    const result = findAndInlineDataUriLinks(
+      literal.getAsLink(),
+      undefined,
+      true,
+    );
+    expect(result).toBeInstanceOf(FabricError);
+    expect(result.message).toBe("failure");
+    expect(result.cause.message).toBe("source");
+    expect(result.getExtra("detail")).toEqual({ attempt: 2 });
   });
 
   it("acquires a reference handle without inspecting an unavailable target", async () => {

@@ -1512,6 +1512,39 @@ describe("run-pattern", () => {
       }
     });
 
+    it("attributes a declared confidential plain input to its argument key", async () => {
+      const { pieces, dispose } = await createStrictFabric();
+      try {
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: [
+              "import { computed, Confidential, pattern } from 'commonfabric';",
+              "interface Input {",
+              "  secret: Confidential<string, readonly ['secret']>;",
+              "  amount: number;",
+              "}",
+              "export interface Output { total: number; }",
+              "export default pattern<Input, Output>(({ secret, amount }) => ({",
+              "  total: computed(() => secret.length + amount),",
+              "}));",
+            ].join("\n"),
+            inputs: { secret: "private value", amount: 2 },
+            resultSchema: TOTAL_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.value).toBeUndefined();
+        expect(output.policyRefusal?.offendingAtoms).toEqual(['"secret"']);
+        expect(output.policyRefusal?.inputKeys).toEqual(["secret"]);
+        expect(output.policyRefusal?.attribution).toBe("complete");
+        expect(output.valueError).toContain('input "secret"');
+      } finally {
+        await dispose();
+      }
+    });
+
     it("answers at the observe posture, where no gate rejects", async () => {
       // The enforcement ladder decides whether a recorded reason rejects, and
       // at `observe` none of them do. The answer carries the label either

@@ -13,6 +13,8 @@ import {
   jsonFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import {
+  linkRefFrom,
+  linkRefPayload,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
@@ -24,7 +26,10 @@ import {
 } from "../../src/cfc/event-reference-context.ts";
 import { normalizeClause } from "../../src/cfc/clause.ts";
 import { deriveFlowJoin } from "../../src/cfc/prepare.ts";
-import { getCfcReferenceProvenance } from "../../src/cfc/reference-provenance.ts";
+import {
+  carryCfcReferenceProvenance,
+  getCfcReferenceProvenance,
+} from "../../src/cfc/reference-provenance.ts";
 import { parseLink } from "../../src/link-utils.ts";
 import {
   resetContentAddressedSchemasConfig,
@@ -202,6 +207,35 @@ describe("event-reference-context", () => {
     read.abort();
   });
 
+  it("restores shared immutable descendants reached through a subpath", async () => {
+    const held = await selectedReference();
+    const send = runtime.edit();
+    const inner = runtime.getImmutableCell(
+      space,
+      { item: held },
+      undefined,
+      send,
+    );
+    const outer = runtime.getImmutableCell(
+      space,
+      { nested: { first: inner, second: inner } },
+      undefined,
+      send,
+    );
+    const event = serializeRuntimeEvent({ box: outer.key("nested") }, send);
+    send.abort();
+    const read = runtime.edit();
+    const payload = restoreRuntimeEventReferences(
+      roundtrip(event.payload),
+      event.runtimeReferenceContext,
+    );
+    const input = runtime.getImmutableCell(space, payload, undefined, read);
+    expect(input.key("box", "first", "item").get()).toBe("public value");
+    expect(input.key("box", "second", "item").get()).toBe("public value");
+    expect(deriveFlowJoin(read).confidentiality).toContainEqual(secret);
+    read.abort();
+  });
+
   for (const modern of [false, true]) {
     it(`retains current schema caps without transporting projection schemas (modern=${modern})`, async () => {
       setModernCellRepConfig(modern);
@@ -301,6 +335,29 @@ describe("event-reference-context", () => {
     send.abort();
   });
 
+  it("rejects an acquired link whose address changed during encoding", async () => {
+    const held = await selectedReference();
+    const original = held.getAsLink();
+    const changed = carryCfcReferenceProvenance(
+      original,
+      linkRefFrom({
+        ...linkRefPayload(original),
+        path: ["substituted"],
+      }),
+    );
+    const send = runtime.edit();
+    expect(getCfcReferenceProvenance(changed)?.confidentiality)
+      .toContainEqual(secret);
+    expect(() => serializeRuntimeEvent({ item: changed }, send)).toThrow(
+      "Invalid Runtime event reference context",
+    );
+    expect(() =>
+      runtime.getImmutableCell(space, { item: changed }, undefined, send)
+    )
+      .toThrow("Reference acquisition is unresolved");
+    send.abort();
+  });
+
   it("rejects unproven links hidden inside an immutable value", async () => {
     const held = await selectedReference();
     const send = runtime.edit();
@@ -397,6 +454,132 @@ describe("event-reference-context", () => {
       runtime.getImmutableCell(space, payload, undefined, read).key("item")
         .get()
     ).toThrow("complete legacy provenance");
+    read.abort();
+  });
+
+  it("rejects malformed acquisition and view records", async () => {
+    const held = await selectedReference();
+    const send = runtime.edit();
+    const event = serializeRuntimeEvent({ item: held }, send);
+    send.abort();
+    const context = fabricFromJsonValue(event.runtimeReferenceContext!) as {
+      version: number;
+      payloadHash: string;
+      references: Record<string, FabricValue>[];
+    };
+    const record = context.references[0];
+    const reference = record.reference as Record<string, FabricValue>;
+    const binding = reference.binding as Record<string, FabricValue>;
+    const invalidRecords = [
+      { ...record, path: [1] },
+      { ...record, reference: null },
+      { ...record, reference: { ...reference, binding: null } },
+      { ...record, reference: { ...reference, confidentiality: null } },
+      {
+        ...record,
+        reference: { ...reference, binding: { ...binding, scope: "inherit" } },
+      },
+      {
+        ...record,
+        reference: { ...reference, scopeCaps: [{ depth: -1, scope: "space" }] },
+      },
+      { ...record, viewConfidentiality: null },
+      { ...record, immutableReferences: null },
+      { ...record, view: { version: 2, entries: [] } },
+      { ...record, view: { version: 1, entries: null } },
+      ...[
+        { path: [1], label: { confidentiality: [] } },
+        { path: [], label: { confidentiality: null } },
+        { path: [], label: { confidentiality: [], integrity: [] } },
+        { path: [], label: { confidentiality: [] }, observes: "endorse" },
+      ].map((entry) => ({ ...record, view: { version: 1, entries: [entry] } })),
+    ];
+    for (const invalid of invalidRecords) {
+      expect(() =>
+        restoreRuntimeEventReferences(
+          roundtrip(event.payload),
+          jsonFromFabricValue({ ...context, references: [invalid] }),
+        )
+      ).toThrow("Invalid Runtime event reference context");
+    }
+    for (
+      const records of [
+        [record, record],
+        [record, { ...record, path: ["absent"] }],
+      ]
+    ) {
+      expect(() =>
+        restoreRuntimeEventReferences(
+          roundtrip(event.payload),
+          jsonFromFabricValue({ ...context, references: records }),
+        )
+      ).toThrow("Invalid Runtime event reference context");
+    }
+    const restored = restoreRuntimeEventReferences(
+      roundtrip(event.payload),
+      event.runtimeReferenceContext,
+    ) as { item: FabricValue };
+    expect(getCfcReferenceProvenance(restored.item)?.confidentiality)
+      .toContainEqual(secret);
+  });
+
+  it("rejects immutable attestations whose source slot or target binding changed", async () => {
+    const held = await selectedReference();
+    const send = runtime.edit();
+    const box = runtime.getImmutableCell(
+      space,
+      { item: held },
+      undefined,
+      send,
+    );
+    const event = serializeRuntimeEvent({ box }, send);
+    send.abort();
+    const context = fabricFromJsonValue(event.runtimeReferenceContext!) as {
+      version: number;
+      payloadHash: string;
+      references: Record<string, FabricValue>[];
+    };
+    const record = context.references[0];
+    const entries = record.immutableReferences as Record<string, FabricValue>[];
+    expect(entries).toHaveLength(1);
+    const entry = entries[0];
+    const source = entry.source as Record<string, FabricValue>;
+    const reference = entry.reference as Record<string, FabricValue>;
+    const binding = reference.binding as Record<string, FabricValue>;
+    for (
+      const invalid of [
+        { ...entry, reference: null },
+        { ...entry, source: null },
+        { ...entry, source: { ...source, id: binding.id } },
+        { ...entry, source: { ...source, path: [1] } },
+        { ...entry, source: { ...source, path: ["absent"] } },
+        { ...entry, source: { ...source, path: [] } },
+        {
+          ...entry,
+          reference: { ...reference, binding: { ...binding, path: ["other"] } },
+        },
+      ]
+    ) {
+      expect(() =>
+        restoreRuntimeEventReferences(
+          roundtrip(event.payload),
+          jsonFromFabricValue({
+            ...context,
+            references: [{ ...record, immutableReferences: [invalid] }],
+          }),
+        )
+      ).toThrow("Invalid Runtime event reference context");
+    }
+    const read = runtime.edit();
+    const restored = restoreRuntimeEventReferences(
+      roundtrip(event.payload),
+      event.runtimeReferenceContext,
+    );
+    expect(
+      runtime.getImmutableCell(space, restored, undefined, read)
+        .key("box", "item").get(),
+    ).toBe("public value");
+    expect(deriveFlowJoin(read).confidentiality).toContainEqual(secret);
     read.abort();
   });
 
