@@ -51,6 +51,7 @@ function fakeRunningHost(options: {
     initialSessionCount: 2,
     spaceDid: "did:key:space",
     debugPieceId: "debug-piece",
+    commandProducers: [],
     ledgerPath: "/state/command-ledger.json",
     host: {
       health: () => ({
