@@ -65,6 +65,22 @@ leaves the start running. The start may go on to install a registration of
 its own and claim a lifetime for it, by the rule below. A stop of the same
 result instead terminates that start when it resolves.
 
+## List setup across serving instances
+
+A serving runtime can invoke one registered raw action for several principals
+and sessions. Map, filter, and flatMap keep separate coordinator bookkeeping for
+each demander's full resolution identity: result-container setup, element setup,
+resume flags, and pending synchronization. Completing one principal's child
+setup does not satisfy another principal's setup obligation.
+
+Durable child identities continue to derive from the owning container, source
+occurrence, and scope kind. The principal and session select the physical scoped
+instance of those addresses; they do not enter the canonical element key.
+Deferred synchronization and recovery writes retain the resolution identity that
+started them, including empty-container seeding and filter/flatMap republishing.
+The coordinator retains that identity independently of the transaction that
+first invoked it.
+
 ## Independent lifetimes
 
 A result acquires a lifetime of its own when something starts it in its own
