@@ -90,6 +90,28 @@ const HANDLE_PROGRAM: RuntimeProgram = {
   }],
 };
 
+// A handler holding a cell handle the argument passes directly: the handle
+// is an `asCell` position at the root of the schema the handler's plan reads
+// the document under, not one nested past a document the walk enters first.
+const DIRECT_HANDLE_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "import { handler, pattern, type Stream, type Writable } from 'commonfabric';",
+      "type Counter = { n: number };",
+      "const bump = handler<unknown, { counter: Writable<Counter> }>(",
+      "  (_event, { counter }) => { counter.set({ n: counter.get().n + 1 }); },",
+      ");",
+      "export default pattern<{ counter: Writable<Counter> }, {",
+      "  bump: Stream<unknown>;",
+      "}>(({ counter }) => {",
+      "  return { bump: bump({ counter }) };",
+      "});",
+    ].join("\n"),
+  }],
+};
+
 // A child pattern whose authored argument type declares `friend`, a link no
 // child body reads; the child's lift reads `def.name` only. The parent
 // passes `def` through and reads nothing itself.
@@ -378,6 +400,88 @@ describe("resume node plan pre-sync", () => {
     await rt2.idle();
     // The handler reads the handle synchronously; a cold handle document
     // reads as absent and the body throws instead of writing.
+    resumed.key("bump").send({});
+    await rt2.idle();
+    await rt2.storageManager.synced();
+    await rt1.storageManager.synced();
+    const counter1 = rt1.getCellFromLink<{ n: number }>(
+      counter.getAsNormalizedFullLink(),
+    );
+    await counter1.pull();
+    expect(counter1.get().n).toBe(2);
+  });
+
+  it("finds a handle the argument passes directly local at dispatch", async () => {
+    const tx = rt1.edit();
+    const counter = rt1.getCell<{ n: number }>(
+      space,
+      "direct handle counter doc",
+      undefined,
+      tx,
+    );
+    counter.withTx(tx).set({ n: 1 });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    const resumed = await createAndResume(
+      DIRECT_HANDLE_PROGRAM,
+      { counter },
+      "direct handle parent",
+    );
+    // The handle's document is the selector's root, under a handle schema:
+    // what the handler's plan asks for is that document itself, not a
+    // reference to it.
+    expect(localOnB(counter)).toBe(true);
+    await rt2.idle();
+    resumed.key("bump").send({});
+    await rt2.idle();
+    await rt2.storageManager.synced();
+    await rt1.storageManager.synced();
+    const counter1 = rt1.getCellFromLink<{ n: number }>(
+      counter.getAsNormalizedFullLink(),
+    );
+    await counter1.pull();
+    expect(counter1.get().n).toBe(2);
+  });
+
+  it("sees a handle's document written after the resume at dispatch", async () => {
+    // The argument links to a document nothing has written when the piece
+    // resumes: the handler's plan asks for it under a handle schema and finds
+    // it absent. A later write must still reach the resumed replica through
+    // that subscription before the handler runs against it.
+    const tx = rt1.edit();
+    const counter = rt1.getCell<{ n: number }>(
+      space,
+      "late handle counter doc",
+      undefined,
+      tx,
+    );
+    const holder = rt1.getCell<{ counter: unknown }>(
+      space,
+      "late handle holder doc",
+      undefined,
+      tx,
+    );
+    holder.withTx(tx).set({ counter });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    const resumed = await createAndResume(
+      DIRECT_HANDLE_PROGRAM,
+      { counter },
+      "late handle parent",
+    );
+    await rt2.idle();
+
+    const tx2 = rt1.edit();
+    counter.withTx(tx2).set({ n: 1 });
+    expect((await tx2.commit()).error).toBeUndefined();
+    await rt1.storageManager.synced();
+    await rt2.storageManager.synced();
+    const counter2 = rt2.getCellFromLink<{ n: number }>(
+      counter.getAsNormalizedFullLink(),
+    );
+    await counter2.pull();
+    expect(counter2.get()?.n).toBe(1);
+
     resumed.key("bump").send({});
     await rt2.idle();
     await rt2.storageManager.synced();

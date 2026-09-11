@@ -927,6 +927,20 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
   };
 };
 
+/**
+ * Whether `schema` selects a reference rather than the value it names: an
+ * `asCell` or `asStream` wrapper, or `unknown`, at its root. A read under
+ * such a schema hands back a handle or an opaque value rather than reading
+ * through, so the document behind the link is what the reader holds, and it
+ * is asked for root-only.
+ */
+function selectsReferenceOnly(schema: JSONSchema | undefined): boolean {
+  if (!isObjectOrArray(schema)) return false;
+  if (schema.asCell !== undefined || schema.asStream !== undefined) return true;
+  return schema.type === "unknown" ||
+    (Array.isArray(schema.type) && schema.type.includes("unknown"));
+}
+
 export class StorageManager implements IStorageManager {
   readonly id: string;
   readonly as: Signer;
@@ -2703,7 +2717,11 @@ export class StorageManager implements IStorageManager {
             link.id,
             {
               path: link.path.map((segment) => segment.toString()),
-              schema: schema ?? false,
+              // A reader that takes a handle at the link asks for the
+              // document itself, root-only: a selector carrying the handle
+              // wrapper would describe a reference, and the serving replica
+              // holds a document only through a selector that describes it.
+              schema: selectsReferenceOnly(schema) ? false : (schema ?? false),
             },
             scope,
             instance,
