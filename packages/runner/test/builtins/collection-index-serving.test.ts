@@ -124,6 +124,7 @@ describe("collection index serving", () => {
           const indexNames: string[] = [];
           const memberNames: string[] = [];
           const keysNames: string[] = [];
+          const keyEntriesNames: string[] = [];
           const coordinator = collectionIndex(
             inputs,
             (tx, result) => {
@@ -136,12 +137,18 @@ describe("collection index serving", () => {
                 kind: "collection-index",
                 mode,
                 keys: expect.anything(),
+                keyEntries: expect.anything(),
                 buckets: {},
               });
               const keysLink = result.withTx(tx).key("keys").resolveAsCell()
                 .getAsNormalizedFullLink();
               expect(keysLink.scope).toBe(scope);
               keysNames.push(keysLink.id);
+              const entriesLink = result.withTx(tx).key("keyEntries")
+                .resolveAsCell().getAsNormalizedFullLink();
+              expect(entriesLink.scope).toBe(scope);
+              keyEntriesNames.push(entriesLink.id);
+              expect(entriesLink.id).not.toBe(keysLink.id);
               const ownership = tx.getCfcState().writePolicyInputs.find((
                 input,
               ) =>
@@ -170,7 +177,7 @@ describe("collection index serving", () => {
             expect(
               childRuns.calls.length - before,
               `missing member setup for identity ${position}`,
-            ).toBe(2);
+            ).toBe(3);
             const keysChild = childRuns.calls[before].args[3];
             expect(isCell(keysChild)).toBe(true);
             if (!isCell(keysChild)) throw new Error("Expected keys Cell");
@@ -182,7 +189,25 @@ describe("collection index serving", () => {
               getMetaCell(keysChild, "argument", tx).key("state")
                 .resolveAsCell().getAsNormalizedFullLink().scope,
             ).toBe(scope);
-            const call = childRuns.calls[before + 1];
+            const entriesChild = childRuns.calls[before + 1].args[3];
+            expect(isCell(entriesChild)).toBe(true);
+            if (!isCell(entriesChild)) {
+              throw new Error("Expected key entries Cell");
+            }
+            expect(entriesChild.getAsNormalizedFullLink().scope).toBe(scope);
+            expect(
+              entriesChild.withTx(tx).resolveAsCell().getAsNormalizedFullLink()
+                .id,
+            ).toBe(keyEntriesNames[position]);
+            expect(
+              getMetaCell(entriesChild, "argument", tx).key("state")
+                .resolveAsCell().getAsNormalizedFullLink().scope,
+            ).toBe(scope);
+            expect(
+              getMetaCell(entriesChild, "argument", tx).key("tagged").get(),
+            )
+              .toBe(true);
+            const call = childRuns.calls[before + 2];
             const child = call.args[3];
             expect(isCell(child)).toBe(true);
             if (!isCell(child)) throw new Error("Expected member Cell");
@@ -216,6 +241,7 @@ describe("collection index serving", () => {
           expect(indexNames[0]).toBe(indexNames[1]);
           expect(memberNames[0]).toBe(memberNames[1]);
           expect(keysNames[0]).toBe(keysNames[1]);
+          expect(keyEntriesNames[0]).toBe(keyEntriesNames[1]);
         } finally {
           cancel();
           await runtime.dispose({ closeStorage: false });

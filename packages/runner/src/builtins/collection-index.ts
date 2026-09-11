@@ -1,7 +1,6 @@
 /** Owns per-occurrence reactive index maintenance and reconciles membership. */
 
 import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
-import { getLogger } from "@commonfabric/utils/logger";
 
 import { createNodeFactory } from "../builder/module.ts";
 import { pattern } from "../builder/pattern.ts";
@@ -66,7 +65,9 @@ let keysPattern: Pattern | undefined;
 
 /** Builds the graph that projects occupied membership into public keys. */
 function getKeysPattern() {
-  return keysPattern ??= pattern<{ state: CollectionIndexMembership }>(
+  return keysPattern ??= pattern<
+    { state: CollectionIndexMembership; tagged?: boolean }
+  >(
     (input) =>
       createNodeFactory({
         type: "ref",
@@ -149,19 +150,23 @@ function createCollectionIndexInstance(
       if (pending.has(key)) continue;
       pending.add(key);
       runtime.storageManager.trackUntilSettled(
-        syncCellForIdentity(cell.withTx(), identity).then(() => {
+        syncCellForIdentity(cell.withTx(), identity).finally(() =>
+          pending.delete(key)
+        ).then(() => {
           if (!active || !requiredConfirmations.has(key)) return;
           confirmed.add(key);
           if (registeredAction) {
             runtime.scheduler.invalidateAction(registeredAction);
           }
         }).catch((error: unknown) => {
-          getLogger("collection-index").warn(
-            "resume-sync",
-            "confirming index maintenance state failed",
-            { error },
+          if (!active || !requiredConfirmations.has(key)) return;
+          runtime.scheduler.reportError(
+            new Error("Confirming index maintenance state failed", {
+              cause: error,
+            }),
+            registeredAction ?? reconcile,
           );
-        }).finally(() => pending.delete(key)),
+        }),
       );
     }
     return ready;
@@ -229,38 +234,48 @@ function createCollectionIndexInstance(
         });
         setup.needsSetup = true;
       }
-      const keysRunKey = JSON.stringify(["keys", scope, mode]);
-      const needed = new Set<string>([keysRunKey]);
-      let keysEntry = runs.get(keysRunKey);
-      if (!keysEntry) {
-        const child = scopedCell(
-          runtime,
-          tx,
-          runtime.getCell(
-            parent.space,
-            { collectionIndexKeys: index },
-            undefined,
+      const needed = new Set<string>();
+      const enumerations = (["keys", "keyEntries"] as const).map((surface) => {
+        const runKey = JSON.stringify([surface, scope, mode]);
+        needed.add(runKey);
+        let entry = runs.get(runKey);
+        if (!entry) {
+          const child = scopedCell(
+            runtime,
             tx,
-          ),
-          scope,
-        ).withTx();
-        keysEntry = { resultCell: child, lastIndex: -1, needsSetup: true };
-        runs.set(keysRunKey, keysEntry);
-        rollback.created(keysRunKey, keysEntry);
-        keysEntry.needsSetup = true;
-      }
+            runtime.getCell(
+              parent.space,
+              surface === "keys"
+                ? { collectionIndexKeys: index }
+                : { collectionIndexKeyEntries: index },
+              undefined,
+              tx,
+            ),
+            scope,
+          ).withTx();
+          entry = { resultCell: child, lastIndex: -1, needsSetup: true };
+          runs.set(runKey, entry);
+          rollback.created(runKey, entry);
+          entry.needsSetup = true;
+        }
+        return { surface, entry };
+      });
       const occurrences = listElementKeys(elements);
       const neededOccurrences = new Set(occurrences.values());
       tx.runWithAmbientReadMeta(
         { ...ignoreReadForScheduling, ...machineryRead },
         () => {
-          if (index.getRaw() === undefined) {
+          const descriptor = index.getRaw();
+          if (descriptor === undefined) {
             index.set({
               kind: "collection-index",
               mode,
-              keys: keysEntry.resultCell,
+              keys: enumerations[0].entry.resultCell,
+              keyEntries: enumerations[1].entry.resultCell,
               buckets: {},
             });
+          } else if (!Object.hasOwn(descriptor, "keyEntries")) {
+            index.key("keyEntries").set(enumerations[1].entry.resultCell);
           }
           if (state.getRaw() === undefined) {
             state.set({
@@ -287,8 +302,9 @@ function createCollectionIndexInstance(
           }
         },
       );
-      if (keysEntry.needsSetup) {
-        const keysResultCell = keysEntry.resultCell;
+      for (const { surface, entry } of enumerations) {
+        if (!entry.needsSetup) continue;
+        const keysResultCell = entry.resultCell;
         // Child setup reads its stored result links as graph structure. The
         // coordinator does not consume the enumeration those links name.
         tx.runWithAmbientReadMeta(
@@ -297,7 +313,7 @@ function createCollectionIndexInstance(
             runtime.runner.run(
               tx,
               getKeysPattern(),
-              { state },
+              { state, tagged: surface === "keyEntries" },
               keysResultCell,
               {
                 doNotUpdateOnPatternChange: true,
@@ -306,9 +322,9 @@ function createCollectionIndexInstance(
               },
             ),
         );
-        setResultCell(keysEntry.resultCell.withTx(tx), parent);
-        setPatternCell(keysEntry.resultCell.withTx(tx), parent.key("pattern"));
-        rollback.setupIssued(keysEntry);
+        setResultCell(entry.resultCell.withTx(tx), parent);
+        setPatternCell(entry.resultCell.withTx(tx), parent.key("pattern"));
+        rollback.setupIssued(entry);
       }
       if (setup.needsSetup) {
         issueResultContainerSetup(

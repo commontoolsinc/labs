@@ -1394,6 +1394,11 @@ export type CollectionIndexKey =
   | boolean
   | AnyBrandedCell<unknown>;
 
+/** Occupied key with an explicit distinction between value and Cell identity. */
+export type CollectionIndexKeyEntry<K extends CollectionIndexKey> = K extends
+  AnyBrandedCell<unknown> ? { kind: "cell"; cell: K }
+  : { kind: "value"; value: K };
+
 /** Stored descriptor whose buckets are addressed independently by keyed lookup. */
 export interface CollectionIndexData<K extends CollectionIndexKey, V> {
   /** Descriptor marker used to recognize an index receiver. */
@@ -1404,6 +1409,9 @@ export interface CollectionIndexData<K extends CollectionIndexKey, V> {
 
   /** Occupied keys in deterministic typed-key order. */
   readonly keys: K[];
+
+  /** Occupied keys with explicit primitive and Cell identity tags. */
+  readonly keyEntries?: CollectionIndexKeyEntry<K>[];
 
   /** Per-key results addressed by the index's internal typed-key encoding. */
   readonly buckets: Record<string, V>;
@@ -1421,8 +1429,14 @@ export interface CollectionIndexHandle<
     key: T["keys"][number] | null | undefined,
   ): Reactive<T["buckets"][string]>;
 
-  /** Enumerates occupied keys in deterministic typed-key order. */
+  /**
+   * Enumerates occupied keys in deterministic typed-key order.
+   * Use `keyEntries()` for indexes mixing primitive values and Cell identities.
+   */
   keys(): Reactive<T["keys"]>;
+
+  /** Enumerates occupied primitive values and Cell identities with explicit tags. */
+  keyEntries(): Reactive<NonNullable<T["keyEntries"]>>;
 }
 
 /** Index whose missing-key lookup yields an empty group. */
@@ -1447,7 +1461,10 @@ export declare function tagCollectionKey<T>(
  * operations.
  */
 export interface IDerivable<T> {
-  /** Builds a reactive index while retaining original source occurrences. */
+  /**
+   * Builds a reactive index while retaining original source occurrences.
+   * Mixed primitive/Cell keys use `keyEntries()` for tagged enumeration.
+   */
   groupBy<K extends CollectionIndexKey>(
     this: AnyBrandedCell<unknown[]>,
     selector: (
@@ -1465,7 +1482,10 @@ export interface IDerivable<T> {
     params: Record<string, unknown>,
   ): GroupIndex<K, T extends Array<infer U> ? U : T>;
 
-  /** Builds a reactive index while retaining original source occurrences. */
+  /**
+   * Builds a reactive index while retaining original source occurrences.
+   * Mixed primitive/Cell keys use `keyEntries()` for tagged enumeration.
+   */
   keyBy<K extends CollectionIndexKey>(
     this: AnyBrandedCell<unknown[]>,
     selector: (

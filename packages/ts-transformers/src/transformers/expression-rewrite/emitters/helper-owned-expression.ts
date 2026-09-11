@@ -120,6 +120,7 @@ export function rewriteHelperOwnedExpression(
       expression,
       relevantDataFlows,
       context,
+      { filterNestedFunctionLocalCaptures: true },
     );
     if (derived) {
       return derived;
@@ -139,6 +140,7 @@ export function rewriteHelperOwnedExpression(
       context,
       {
         allowDirectExpressionWrap: true,
+        filterNestedFunctionLocalCaptures: true,
       },
     );
     if (forced) {

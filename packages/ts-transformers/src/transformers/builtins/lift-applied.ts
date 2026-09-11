@@ -264,7 +264,7 @@ export function createLiftAppliedCall(
     context,
   );
 
-  // Build result type node from expression type
+  // Infer the expression result when the caller supplies no output type.
   const resultTypeNode = options.resultTypeNode ??
     buildResultTypeNode(expression, context);
 

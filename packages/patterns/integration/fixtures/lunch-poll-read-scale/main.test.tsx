@@ -20,13 +20,13 @@ export default pattern(() => {
           poll.optionCount === 14 && poll.isJoined
         ),
       },
-      { render: poll[UI], readBudget: { total: 36000, perRun: 14000 } },
+      { render: poll[UI], readBudget: { total: 6000, perRun: 300 } },
       {
         action: action(() =>
           poll.castVote.send({ optionId: "option-0", voteType: "yellow" })
         ),
       },
-      { render: poll[UI], readBudget: { total: 30000, perRun: 14000 } },
+      { render: poll[UI], readBudget: { total: 1100, perRun: 300 } },
       {
         assertion: assert(() =>
           poll.voteCount === 74 &&

@@ -75,6 +75,9 @@ export interface MaintainedCollectionIndex {
   /** Occupied keys in deterministic typed order. */
   keys: unknown[];
 
+  /** Occupied keys with explicit value and Cell tags. */
+  keyEntries?: unknown[];
+
   /** Independently published bucket values. */
   buckets: Record<string, unknown>;
 }

@@ -1672,6 +1672,11 @@ export class Scheduler {
     this.#errorHandlers.add(fn);
   }
 
+  /** Reports an action's asynchronous failure through the ordinary error handlers. */
+  reportError(error: Error, action: Action): void {
+    this.#handleError(error, action);
+  }
+
   setEventPreflightTelemetryEnabled(enabled: boolean): void {
     this.#eventPreflightTelemetryEnabled = enabled;
   }

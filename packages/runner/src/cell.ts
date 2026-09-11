@@ -2,6 +2,7 @@ import type {
   AnyBrandedCell,
   CollectionIndexData,
   CollectionIndexKey,
+  CollectionIndexKeyEntry,
   GroupIndex,
   KeyIndex,
   ReadonlyCell,
@@ -720,6 +721,7 @@ const cellMethods = new Set<
   | "query"
   | "lookup"
   | "keys"
+  | "keyEntries"
 >([
   "get",
   "sample",
@@ -772,6 +774,7 @@ const cellMethods = new Set<
   "query",
   "lookup",
   "keys",
+  "keyEntries",
 ]);
 
 // The schema for one element of an array schema, suitable for a standalone
@@ -3494,7 +3497,8 @@ export class CellImpl<T extends FabricValue>
           // Check if this is a method on the cell. `query`/`exec` are gated to
           // SqliteDb cells so they don't shadow same-named data fields.
           const isSqliteOnlyMethod = prop === "query" || prop === "exec";
-          const isIndexOnlyMethod = prop === "lookup" || prop === "keys";
+          const isIndexOnlyMethod = prop === "lookup" || prop === "keys" ||
+            prop === "keyEntries";
           // Array-only method names remain ordinary data fields on non-array refs,
           // including schemaless builder objects. Callable projections cannot
           // be persisted as data because their method/value meaning is ambiguous.
@@ -3719,6 +3723,21 @@ export class CellImpl<T extends FabricValue>
     }
     return index.key("keys").get() as T extends
       CollectionIndexData<infer K, unknown> ? K[] : unknown[];
+  }
+
+  /** Reads tagged key enumeration separately from bucket lookup. */
+  keyEntries(): T extends CollectionIndexData<infer K, unknown>
+    ? CollectionIndexKeyEntry<K>[]
+    : unknown[] {
+    const index = this as unknown as Cell<
+      CollectionIndexData<CollectionIndexKey, unknown>
+    >;
+    if (index.key("kind").get() !== "collection-index") {
+      throw new Error("keyEntries requires a collection index");
+    }
+    return index.key("keyEntries").get() as T extends
+      CollectionIndexData<infer K, unknown> ? CollectionIndexKeyEntry<K>[]
+      : unknown[];
   }
 
   /** @inheritDoc */

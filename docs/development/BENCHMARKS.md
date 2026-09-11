@@ -404,14 +404,15 @@ the browser-worker measurements above remain a separate series.
 
 | Votes | First-render total limit | Updated-render total limit | Per-run limit in each render |
 | ----- | ------------------------ | -------------------------- | ---------------------------- |
-| 74    | 36,000                   | 30,000                     | 14,000                       |
+| 74    | 6,000                    | 1,100                      | 300                          |
 | 296   | 76,000                   | 67,000                     | 31,000                       |
 | 1184  | 236,000                  | 214,000                    | 96,000                       |
 
 Totals count completed transaction-attempt proxy accesses; per-run limits bound
-one reactive body's proxy accesses. The ceilings retain roughly ten percent
-headroom over their measured fixture costs. Setup, vote dispatch, and functional
-assertions occupy separate intervals with no declared limits. The fixture creates
+one reactive body's proxy accesses. The 74-vote limits guard maintained
+per-option tallying; the larger fixtures enforce separate scale ceilings. Setup,
+vote dispatch, and functional assertions occupy separate intervals with no
+declared limits. The fixture creates
 keyed vote entities and assigns their membership once during setup, avoiding a
 full membership-array update for each seeded vote. No timing limit is added by
 these fixtures.

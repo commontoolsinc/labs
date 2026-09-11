@@ -443,8 +443,8 @@ creating pass, provisional demand persists until that first completed run,
 so the materializing run is never lost.
 
 A computation whose output addresses are known at registration may opt into
-`deferUntilDemand`. Registration keeps its declared write surface and marks it
-invalid, but does not inherit provisional parent demand. Readers of that
+`deferUntilDemand`. A new computation keeps its declared write surface and
+`never-ran` status without inheriting provisional parent demand. Readers of that
 surface determine when it first executes. Collection-index key enumeration uses
 this option so lookup-only initialization and resume do not enumerate occupied
 keys. The option requires a nonempty effective write surface and is invalid for
