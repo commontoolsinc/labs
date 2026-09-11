@@ -278,6 +278,10 @@ Mac. Then, in Weaver's settings under Services:
   current loom. A turn runs for minutes; the panel streams throughout, and the
   piece replaces it when the turn ends.
 - `more <text>` continues the last session.
+- `/feedback <patternId> up|down` records one vote on a pattern the index holds,
+  signed with the console's fabric identity; the pill answers "recorded up for
+  <patternId>" or the console's own refusal. An up vote is what promotes a
+  contributed pattern's discoverability.
 - The console at its base URL holds every run: transcript, policy trace, the CFC
   withheld markers, and `deno task cfc-audit <run dir>` audits a family.
 
