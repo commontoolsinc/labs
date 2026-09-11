@@ -671,11 +671,11 @@ describe("engine-read-through", () => {
       space,
       path: [],
     });
+    const refreshesBefore = host.stats().storeRefreshes;
     const creating = clientRuntime.edit();
     cell.withTx(creating).set({ made: true });
     expect((await creating.commit()).error).toBeUndefined();
     const authoredSeq = Engine.serverSeq(engine);
-    const refreshesBefore = host.stats().storeRefreshes;
     await waitUntil(
       () => readWatermarkSeq(engine) >= authoredSeq,
       "the watermark to cover the creating commit",

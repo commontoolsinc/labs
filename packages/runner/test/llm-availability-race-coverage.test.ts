@@ -691,10 +691,11 @@ describe("LLM availability race coverage", () => {
     }
   });
 
-  it("drops a queued tools result superseded before writeback", async () => {
+  it("publishes queued tools results in queue order", async () => {
     const firstPrompt = "tools-queued-old";
     const secondPrompt = "tools-queued-new";
     const queue = "llm-availability-tools-queue";
+    runtime.configureQueue(queue, { maxConcurrency: 1 });
     const tools = dummyTools();
     addPresentResultResponse(firstPrompt, "stale");
     addPresentResultResponse(secondPrompt, "fresh");
