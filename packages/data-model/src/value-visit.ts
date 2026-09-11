@@ -65,7 +65,7 @@ export type MainResultForm<ResultType> = {
  * recursed over. `doKeys` is ignored in a context where there is no key.
  *
  * If a visitor returns an instance of this type which (implicitly) references a
- * a non-container, that situation is detected at runtime and results in a
+ * non-container, that situation is detected at runtime and results in a
  * `throw`n error.
  *
  * **Note:** The visit calls per-mapping are specifically in key-then-value
@@ -529,21 +529,21 @@ export abstract class ContainerIteratingVisitor<
   visitFabricArray(
     _value: FabricArray,
   ): LeafVisitorResult<DomainExtra, ResultType> {
-    ContainerIteratingVisitor.#throwShouldnt("visitFabricArray");
+    this.#throwShouldnt("visitFabricArray");
   }
 
   /** @inheritDoc */
   visitFabricInstance(
     _value: FabricInstance,
   ): LeafVisitorResult<DomainExtra, ResultType> {
-    ContainerIteratingVisitor.#throwShouldnt("visitFabricInstance");
+    this.#throwShouldnt("visitFabricInstance");
   }
 
   /** @inheritDoc */
   visitFabricPlainObject(
     _value: FabricPlainObject,
   ): LeafVisitorResult<DomainExtra, ResultType> {
-    ContainerIteratingVisitor.#throwShouldnt("visitFabricPlainObject");
+    this.#throwShouldnt("visitFabricPlainObject");
   }
 
   /** @inheritDoc */
@@ -553,15 +553,11 @@ export abstract class ContainerIteratingVisitor<
     return DO_RECURSE_KEYS_VALUES;
   }
 
-  //
-  // Static members
-  //
-
   /** Throws a "shouldn't happen" error, as appropriate for this class. */
-  static #throwShouldnt(methodName: string): never {
+  #throwShouldnt(methodName: string): never {
     const desc = `\`${methodName}()\``;
-    const thisCls = toCompactDebugString(this, { backtickQuote: true });
-    throw new Error(`Shouldn't happen: ${desc} called on ${thisCls}`);
+    const thisDesc = toCompactDebugString(this, { backtickQuote: true });
+    throw new Error(`Shouldn't happen: ${desc} called on ${thisDesc}`);
   }
 }
 
