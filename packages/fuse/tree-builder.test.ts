@@ -1444,6 +1444,63 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     type: "object",
     properties: { note: { type: "string" } },
   });
+  const settingsPayloadProjection = {
+    theme: "dark",
+    [toCell]: () =>
+      makeCell(
+        { theme: "over-dereferenced" },
+        {
+          type: "object",
+          properties: { theme: { type: "string" } },
+        },
+      ),
+  };
+  const settingsValueCell = makeCell(settingsPayloadProjection, {
+    type: "object",
+    properties: { theme: { type: "string" } },
+  });
+  const settingsProjection = { [toCell]: () => settingsValueCell };
+  const settingsCell = makeCell(settingsProjection, {
+    type: "object",
+    properties: { theme: { type: "string" } },
+    asCell: ["cell"],
+  });
+  const preferencesSchema = {
+    anyOf: [
+      { type: "null" },
+      {
+        type: "object",
+        properties: { theme: { type: "string" } },
+        asCell: ["cell"],
+      },
+    ],
+  } as const;
+  const profileSchema = {
+    oneOf: [
+      {
+        type: "object",
+        properties: { theme: { type: "string" } },
+        asCell: ["cell"],
+      },
+      { type: "null" },
+    ],
+  } as const;
+  const accountSchema = {
+    anyOf: [{ type: "object" }],
+    oneOf: [
+      {
+        type: "object",
+        properties: { theme: { type: "string" } },
+        asCell: ["cell"],
+      },
+    ],
+  } as const;
+  const preferencesCell = makeCell(
+    settingsProjection,
+    preferencesSchema,
+  );
+  const profileCell = makeCell(settingsProjection, profileSchema);
+  const accountCell = makeCell(settingsProjection, accountSchema);
   const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
   const toolCell = makeCell(
     patternFactoryValue({ source: "bound-source" }),
@@ -1457,6 +1514,14 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
         type: "object",
         properties: { note: { type: "string" } },
       },
+      settings: {
+        type: "object",
+        properties: { theme: { type: "string" } },
+        asCell: ["cell"],
+      },
+      preferences: preferencesSchema,
+      profile: profileSchema,
+      account: accountSchema,
       recordMessage: { type: "object" },
       search: { type: "object" },
     },
@@ -1471,6 +1536,10 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     {
       title: titleCell,
       metadata: metadataCell,
+      settings: settingsCell,
+      preferences: preferencesCell,
+      profile: profileCell,
+      account: accountCell,
       recordMessage: handlerCell,
       search: toolCell,
     },
@@ -1493,6 +1562,10 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
         Promise.resolve({
           title: titleProjection,
           metadata: metadataProjection,
+          settings: settingsProjection,
+          preferences: settingsProjection,
+          profile: settingsProjection,
+          account: settingsProjection,
         }),
     },
   };
@@ -1525,6 +1598,18 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
   const metadataIno = tree.lookup(resultIno!, "metadata");
   assertEquals(metadataIno !== undefined, true);
   assertEquals(getFileContent(tree, metadataIno!, "note"), "kept");
+  const settingsIno = tree.lookup(resultIno!, "settings");
+  assertEquals(settingsIno !== undefined, true);
+  assertEquals(getFileContent(tree, settingsIno!, "theme"), "dark");
+  const preferencesIno = tree.lookup(resultIno!, "preferences");
+  assertEquals(preferencesIno !== undefined, true);
+  assertEquals(getFileContent(tree, preferencesIno!, "theme"), "dark");
+  const profileIno = tree.lookup(resultIno!, "profile");
+  assertEquals(profileIno !== undefined, true);
+  assertEquals(getFileContent(tree, profileIno!, "theme"), "dark");
+  const accountIno = tree.lookup(resultIno!, "account");
+  assertEquals(accountIno !== undefined, true);
+  assertEquals(getFileContent(tree, accountIno!, "theme"), "dark");
   assertEquals(
     tree.lookup(resultIno!, "recordMessage.handler") !== undefined,
     true,

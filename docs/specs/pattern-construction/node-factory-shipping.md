@@ -1968,12 +1968,16 @@ data. That dereference replaces an already-present Cell handle as well as
 filling a sparse root; the handle must not become a directory merely because
 the outer read included the key. This projection applies equally when the root
 schema is carried by its content-addressed reference. Following the handle to
-its current payload also keeps Factory materialization disabled. An ordinary
-object query-result view retains its object projection; the presence of an
-internal back-pointer alone does not make it an `asCell` field. Consequently a
-cold factory cannot block unrelated sibling fields from refreshing in the
-mounted tree, and FUSE observation never turns a context-free shell into an
-executable callable.
+its current payload also keeps Factory materialization disabled. FUSE follows
+exactly the number of Cell boundaries declared by the applicable `asCell`
+array, including an `asCell`-bearing `anyOf` or `oneOf` branch, and does not use
+Cell object identity to decide when to stop. The ordinary query-result view of
+the payload retains its object projection; the presence of an internal
+back-pointer alone does not authorize another dereference. Consequently a cold
+factory cannot block unrelated sibling fields from refreshing in the mounted
+tree, and FUSE observation never turns a context-free shell into an executable
+callable. When a schema carries both union keywords, their branches combine for
+this decision; neither keyword hides an `asCell` declaration in the other.
 
 Authored code may neither supply a literal for such a field nor capture a
 chosen value and forward it. If a required system value or stable tool identity

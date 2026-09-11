@@ -92,6 +92,52 @@ function expandSchemaReference(
   }
 }
 
+/** Number of schema-declared Cell boundaries FUSE projects through. */
+function asCellProjectionDepth(schema: JSONSchema | undefined): number {
+  const fullSchema = expandSchemaReference(schema);
+  const seen = new Set<object>();
+  const visit = (candidate: JSONSchema | undefined): number => {
+    candidate = expandSchemaReference(candidate);
+    if (
+      typeof candidate !== "object" || candidate === null ||
+      Array.isArray(candidate) || seen.has(candidate)
+    ) {
+      return 0;
+    }
+    seen.add(candidate);
+
+    if (
+      typeof candidate.$ref === "string" &&
+      typeof fullSchema === "object" && fullSchema !== null &&
+      !Array.isArray(fullSchema)
+    ) {
+      const resolved = ContextualFlowControl.resolveSchemaRefs(
+        candidate,
+        fullSchema,
+      );
+      if (
+        typeof resolved === "object" && resolved !== null &&
+        !Array.isArray(resolved)
+      ) {
+        candidate = resolved;
+      }
+    }
+
+    const direct = ContextualFlowControl.getAsCellValues(candidate);
+    if (direct.length > 0) return direct.length;
+
+    const anyOf = Array.isArray(candidate.anyOf) ? candidate.anyOf : [];
+    const oneOf = Array.isArray(candidate.oneOf) ? candidate.oneOf : [];
+    const branches = [...anyOf, ...oneOf];
+    for (const branch of branches) {
+      const depth = visit(branch);
+      if (depth > 0) return depth;
+    }
+    return 0;
+  };
+  return visit(fullSchema);
+}
+
 /** Strip asCell markers from a schema for display as input schema. */
 function getInputSchema(
   schema: JSONSchema | undefined,
@@ -3955,22 +4001,18 @@ export class CellBridge {
         const rawValue = childCell.getRaw?.();
         if (isSigilLink(rawValue)) {
           childValue = rawValue;
-        } else if (
-          ContextualFlowControl.getAsCellValues(childSchema).length > 0
-        ) {
-          const visited = new Set<Cell<unknown>>();
-          while (
-            isCell(childValue) ||
-            isCellResultForDereferencing(childValue)
-          ) {
+        } else {
+          const asCellDepth = asCellProjectionDepth(childSchema);
+          for (let remaining = asCellDepth; remaining > 0; remaining--) {
+            if (
+              !isCell(childValue) &&
+              !isCellResultForDereferencing(childValue)
+            ) {
+              break;
+            }
             const projectedCell = isCell(childValue)
               ? childValue
               : getCellOrThrow(childValue);
-            if (visited.has(projectedCell)) {
-              childValue = undefined;
-              break;
-            }
-            visited.add(projectedCell);
             childValue = projectedCell.getWithoutFactoryMaterialization();
           }
         }
