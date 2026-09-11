@@ -15,6 +15,7 @@ import {
   listElementResultCell,
 } from "../src/builtins/list-coordinator-plan.ts";
 import { listInstanceCoordinator } from "../src/builtins/list-instance-coordinator.ts";
+import type { Action } from "../src/scheduler.ts";
 import { useCancelGroup } from "../src/cancel.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { getMetaCell } from "../src/link-utils.ts";
@@ -47,6 +48,48 @@ describe("list-coordinator-instances", () => {
     coordinator.action({} as IExtendedStorageTransaction);
     expect(created).toBe(0);
     expect(ran).toBe(0);
+  });
+
+  it("forwards registration to existing instances and instances created afterward", () => {
+    const [cancel, addCancel] = useCancelGroup();
+    const registrations: Action[][] = [];
+    const coordinator = listInstanceCoordinator(() => {
+      const registered: Action[] = [];
+      registrations.push(registered);
+      return {
+        action: () => {},
+        onActionRegistered: (action) => {
+          registered.push(action);
+        },
+      };
+    }, addCancel);
+    if (typeof coordinator === "function") {
+      throw new Error("Expected coordinator wrapper");
+    }
+    try {
+      const transaction = { tx: {} } as IExtendedStorageTransaction;
+      coordinator.action(transaction);
+      expect(registrations).toEqual([[]]);
+      const first: Action = () => {};
+      coordinator.onActionRegistered?.(first);
+      expect(registrations).toEqual([[first]]);
+      coordinator.action(
+        {
+          tx: { scopeKeyIdentity: { principal: "did:key:second" } },
+        } as IExtendedStorageTransaction,
+      );
+      expect(registrations).toEqual([[first], [first]]);
+      const replacement: Action = () => {};
+      coordinator.onActionRegistered?.(replacement);
+      expect(registrations).toEqual([[first, replacement], [
+        first,
+        replacement,
+      ]]);
+      coordinator.action(transaction);
+      expect(registrations).toHaveLength(2);
+    } finally {
+      cancel();
+    }
   });
 
   for (
