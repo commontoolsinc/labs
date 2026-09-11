@@ -293,31 +293,89 @@ The strict-only delta is:
   piece is then un-updatable under strict because the pattern updater,
   `setsrc`, and setup over an existing piece all stamp meta.
 
-  Computed cells are outside the check at every rung too, and it is the same
-  rule over a document rather than over a path. A computed cell is the
+  Two id classes are outside the check at every rung too, and that is the
+  same rule over a document rather than over a path. A computed cell is the
   derived internal cell the runtime materializes to hold a derivation's
   result, under its own URI scheme (`computed:fid1:<hash>`; see
-  [`computed-cell-identity.md`](./computed-cell-identity.md)). A pattern
-  names the data it declares policy on, and it does not name the
-  intermediates the reactive graph materializes for it, so their ceiling is
-  the empty one and measuring them refuses every derivation that reads
-  labeled data and writes its result — ordinary reactive computation, not an
-  edge case. One predicate covers both surfaces (`isDeclarablePolicyPath` in
-  `prepare.ts`), because they answer one question: could a schema have
-  declared a policy here.
+  [`computed-cell-identity.md`](./computed-cell-identity.md)). A stream's
+  entries document holds that stream's durable event entries and the marks
+  recording which of them have been handled, at an id derived from the
+  stream's link so that the firing client, the serving space's drain and
+  another space's outbox delivery all address the same document with no
+  coordination (`STREAM_ENTRIES_DOC_PREFIX` and `streamEntriesDocId` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts); the code and
+  [`events.md`](./server-side-execution/events.md) also call it the stream's
+  sidecar, which in this section is otherwise a background piece). A pattern
+  names the data it declares policy on, and it names neither of these, so
+  their ceiling is the empty one. Measuring a computed cell refuses every
+  derivation that reads labeled data and writes its result; measuring an
+  entries document refuses every mark a served run writes to record that it
+  handled an event, and every entry a same-space served emission carries into
+  the document on its own transaction. Both are ordinary operation rather
+  than edge cases. One predicate covers those two classes and the meta seam
+  above (`isDeclarablePolicyPath` in `prepare.ts`), because all three answer
+  one question: could a schema have declared a policy here.
+
+  Two id classes is what this is, rather than a rule about documents the
+  runtime mints. The runtime mints many more and route 2 below is what most
+  of them take — the document anchoring splits out of a value has an id
+  derived from its parent's, which no author named either, and it is
+  measured. Adding a class here means arguing that case on its own.
+
+  What an entries document does NOT reach is the client fire. A flag-ON fire
+  from a client hands its event to the append queue, which builds its own
+  commit outside any storage transaction and carries no `cfc` envelope, so
+  that append is outside CFC at every rung and always was. The served arm is
+  the one this section is about.
+
+  The two classes differ in what an id says on its own, and an entries
+  document is the weaker of them. A computed cell carries a scheme of its
+  own, which `entityKindOfIdString` parses and nothing else mints. An entries
+  document carries a prefix inside the `of:` scheme, so its id shape does not
+  by itself say who wrote it. Two gates compose over one instead: this one
+  skips the ceiling, and the memory server owns the shape — an authored write
+  reaches a document under that prefix only as a declared tail append, and
+  only under `EXPERIMENTAL_SERVER_EXECUTION`
+  ([`events.md`](./server-side-execution/events.md) §1, §4). The admission
+  path that processed a commit settles its class and a `ClientCommit` cannot
+  express one, so pattern-authored traffic arrives `authored` whatever id it
+  names.
+
+  An entries document takes this route rather than §8.12.5's route 2 below,
+  and the ownership route 2 asks for is the reason. Route 2 declares a policy
+  out of one piece's flow join, so it reaches stores keyed on that piece's
+  own nodes, and its enrollment lasts as long as those nodes do. An entries
+  document is keyed on the stream, and every party that can reach the stream
+  writes to the same document: a piece the stream was handed to, the serving
+  space's drain, another space's outbox delivery. It also outlives all of
+  them, because it is the durable log a later wave drains. `wish`'s interval
+  clock below is off route 2 on that same keying ground, which is a separate
+  question from the measurement one this section settles above.
+
+  Where the route would lead is measured rather than argued. Route 2 declares
+  at the path the misfit was measured at, and a mark on an entries document
+  that already holds entries is measured at `/entries/<n>/consequenced`. So
+  the declaration lands at that entry's own path, and a second mark on the
+  next entry lands beside it rather than folding into it: two marks carrying
+  different atoms leave two `declared` entries, at `/entries/0/consequenced`
+  and `/entries/1/consequenced`. A declared entry is permanent, so the stored
+  label map would grow by one entry per event the stream ever carried, on a
+  durable log that outlives the pieces that wrote to it.
 
   The skip is scoped to a join the target's own space produced. Every clause
   the join carries comes from a document some read resolved, and the join
   records which space each of those lived in; where any of them lived
-  elsewhere, a computed target is measured like any other document. So the
-  residency half of the ceiling still holds for the direction it was written
-  for — a derivation cannot carry another space's labeled value into a local
-  document by materializing it — while a derivation over its own space's data
-  proceeds. Within one space the source and the computed cell share a replica
-  set, so the value reaches no reader it had not reached already, and what
-  follows it is the stamp.
+  elsewhere, the target is measured like any other document. So the residency
+  half of the ceiling still holds for the direction it was written for — a
+  derivation cannot carry another space's labeled value into a local document
+  by materializing it, and an emission cannot carry one into a local stream's
+  entries document — while work over the space's own data proceeds. A
+  computed cell shares a replica set with the source it derives from, and an
+  entries document shares one with the document holding the stream it belongs
+  to, so in both cases the value reaches no reader it had not reached
+  already, and what follows it is the stamp.
 
-  A declared entry can still reach a computed document, from a
+  A declared entry can still reach one of these documents, from a
   schema-carrying write to it, and the skip is unconditional over that route
   as it is over the meta seam's document-root route. Honoring it would make a
   derivation admit its own inputs' taint or refuse it according to whether
@@ -482,13 +540,17 @@ The strict-only delta is:
     both call `enqueuePostCommitEffect` themselves — has none, so its stores
     keep their own ceilings until the gate that should own them exists. Most
     builtins are in neither group: a list coordinator, `ifElse`, `when`,
-    `unless`, `compileAndRun`, `cellFromUrl` and `inspectConfLabel` stage
-    nothing at all, so there is no egress to govern and no refusal to move,
+    `unless`, `cellFromUrl` and `inspectConfLabel` stage nothing at all, so
+    there is no egress to govern and no refusal to move,
     and their stores take the route on the node-keyed test alone. That is
     the reading to apply to a new builtin: ask what it stages before asking
     what its stores may declare. `builtin-ownership-route.test.ts` pairs the
     two sets mechanically, so a builtin that stages an effect and takes the
-    route fails rather than passing on a reviewer noticing.
+    route fails rather than passing on a reviewer noticing. Served
+    `compileAndRun` stages its detached program through a `compileAndRun`
+    sink request before releasing the compiler, so its node-owned progress
+    and result stores use the route and the request has its own configurable
+    sink ceiling.
     Two further stores stay off the route for the reasons above rather than
     for this one. A store the runtime keys on something other than a node —
     `wish`'s interval clock, keyed on the interval, and its shared hashtag
@@ -582,8 +644,9 @@ The strict-only delta is:
   ordinary document measures against its own ceiling whichever transaction
   makes it: a bystander written by a later transaction of the same piece is
   refused exactly as one written by the setup transaction is. A `computed:`
-  document is outside the route for a different reason — the measurement
-  skips it altogether, per the computed-cell exemption above.
+  document and a stream's entries document are outside the route for a
+  different reason — the measurement skips them altogether, per the
+  exemption above.
 
   It DOES reach further than the setup-time route in two ways worth stating,
   because neither follows from "the same rule, later". The piece's result

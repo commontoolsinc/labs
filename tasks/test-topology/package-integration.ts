@@ -13,9 +13,11 @@
 
 import {
   SERVER_EXECUTION_ON_SKIPS,
+  type ServerExecutionOnSkip,
   type ServerExecutionSuite,
 } from "../server-execution-on-skips.ts";
 import { serverExecutionCiLane } from "../server-execution-ci.ts";
+import { taskEnvironment } from "./deno-task.ts";
 import {
   type FilePart,
   fileSuite,
@@ -59,6 +61,8 @@ async function integrationFiles(
 export async function loadPackageIntegrationSuites(
   root: string,
   defaultEnabled = serverExecutionCiLane("default").enabled,
+  skips: Record<ServerExecutionSuite, readonly ServerExecutionOnSkip[]> =
+    SERVER_EXECUTION_ON_SKIPS,
 ): Promise<Suite[]> {
   const defaults: FilePart[] = [];
   const opposites: FilePart[] = [];
@@ -68,11 +72,15 @@ export async function loadPackageIntegrationSuites(
     const packageDir = `packages/${scope}`;
     const files = await integrationFiles(root, packageDir);
     const junit = { kind: "integration", scope, filePrefix: packageDir };
-    const env: Record<string, string> = headless ? { HEADLESS: "1" } : {};
-    const on = unavailableFrom(
-      SERVER_EXECUTION_ON_SKIPS[scope],
-      packageDir,
-    );
+    // The environment the package's own `integration` task sets, so the
+    // suite a lane runs and the suite somebody runs by hand are the same
+    // run. `HEADLESS` is not part of it: the task leaves the browser
+    // visible and CI hides it.
+    const env: Record<string, string> = {
+      ...await taskEnvironment(`${root}/${packageDir}`, "integration"),
+      ...(headless ? { HEADLESS: "1" } : {}),
+    };
+    const on = unavailableFrom(skips[scope], packageDir);
     defaults.push({
       packageDir,
       flags: ["-A"],
@@ -135,7 +143,10 @@ export async function loadPackageIntegrationSuites(
   return [
     fileSuite({
       id: "package-integration",
-      needs: ["deno", "toolshed", "browser"],
+      // The baked server rather than one run from source: the shell's
+      // tests drive a browser at it, and the shell is a bundle inside
+      // the binary.
+      needs: ["deno", "toolshed-baked", "browser"],
       parts: defaults,
     }),
     fileSuite({

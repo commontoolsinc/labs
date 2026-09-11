@@ -608,7 +608,9 @@ $ cf piece call -s demo /of:fid1:SKf22px…N5UfM blockOn --on /of:fid1:d4ppvfP�
 ```
 
 The `on` address that came back is `d4ppvfP…Pqsls` — the same string that went
-in. What landed is an *edge to that item*, not a copy of its contents.
+in. What landed is an *edge to that item*, not a copy of its contents. It would
+go in again either way: as that bare string, or inside the `{"$link": …}`
+object the read printed it in, which the gate reads as the address it carries.
 
 Two payloads could only ever be mistakes at a position like this, and both are
 refused by name.

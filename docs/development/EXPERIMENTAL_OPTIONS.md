@@ -21,7 +21,7 @@ in the same change.
 flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-09-03. Each flag's section carries the date its status
+**Last reviewed:** 2026-09-10. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -35,7 +35,7 @@ was last checked against the code.
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
 | [`readerSchemaPrecedence`](#readerschemaprecedence)                         | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` env, or `RuntimeOptions.experimental`                                                                   | on                                                                                   | Robin McCollum (#6338)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
-| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **off** (`SERVER_EXECUTION_DEFAULT_ENABLED = false`; explicit `true` selects the other arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main at the ON default, then delete the flag and OFF path | Phases 1–7 landed; the section's dated entries carry each flip; stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
+| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **off** (`SERVER_EXECUTION_DEFAULT_ENABLED = false`; explicit `true` selects the other arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main at the ON default, then delete the flag and OFF path | Serving stack and OW28 scoped compilation have direct coverage; Phase-7 gate dispositions govern a renewed rollout; the section's dated entries carry each flip; stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-explicit`                                                                   | Bernhard Seefeld (#3263)                              | tighten default toward `enforce-strict`                                                                                                                                                                                           | active; ladder is permanent                                                     |
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4479)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
@@ -49,8 +49,8 @@ was last checked against the code.
 | [`syncSchemaTableV2`](#syncschematablev2)                                   | `setSyncSchemaTableConfig()` (negotiated per connection)                                                                                        | on                                                                                   | Ben Follington (#4292)                                | retire the negotiation once every peer speaks v2                                                                                                                                                                                  | implemented, on by default                                                      |
 | [`messageCompressionV1`](#messagecompressionv1)                             | `setMessageCompressionConfig()` (negotiated per connection)                                                                                     | on                                                                                   | PR #6474                                             | retire the rollback switch after the binary WebSocket envelope has field-soaked                                                                                                                                                   | implemented, on by default                                                      |
 | [`ownWriteEcho`](#ownwriteecho)                                             | `setOwnWriteEchoConfig()` (server-side only, not negotiated)                                                                                    | on                                                                                   | Robin McCollum (CT-1965)                              | remove the switch once the echo has field-soaked                                                                                                                                                                                  | implemented, on by default                                                      |
-| [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off                                                                                  | Ben Follington (#4937; shell toggle #4974)            | graduate to always-on after live measurement, or remove if superseded                                                                                                                                                             | implemented behind the flag, off by default, not yet measured over real latency |
-| [`cfcRenderCeiling`](#cfcrenderceiling)                                     | `commonfabric.cfcRenderCeiling()` in the browser (localStorage)                                                                                 | off                                                                                  | Bernhard Seefeld (#4550)                              | graduate once exchange resolution lands                                                                                                                                                                                           | implemented, off by default, dogfood only                                       |
+| [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off                                                                                  | Ben Follington (#4937; shell toggle #4974)            | graduate to always-on after live measurement, or remove if superseded                                                                                                                                                             | off by default; acquisition/removal ordering tested; real-latency measurement pending |
+| [`cfcRenderCeiling`](#cfcrenderceiling)                                     | `commonfabric.cfcRenderCeiling()` in the browser (localStorage)                                                                                 | off                                                                                  | Bernhard Seefeld (#4550)                              | graduate to an unconditional ceiling                                                                                                                                                                                           | implemented, off by default, dogfood only                                       |
 | [`INGEST_SELF_SERVE_ENABLED`](#ingest_self_serve_enabled) | `INGEST_SELF_SERVE_ENABLED` env on toolshed | off | Alex Komoroske (self-serve ingest channels) | graduate on once named-space keys stop deriving from a public passphrase | implemented, off by default |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning)                                 | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache`                                                             | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts                          | Ian Hickson                                           | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked                                                                                                                                      | implemented, on by default for FUSE-T, soak-validated                           |
 
@@ -368,9 +368,11 @@ server](#clients-that-are-not-built-alongside-their-server).
   [`packages/memory/v2/server-execution-default.ts`](../../packages/memory/v2/server-execution-default.ts)
   (a test pins the cell to the constant); the dated status entries below
   carry its history (landed flip-ready dark at `false` 2026-08-16; flipped
-  ON 2026-08-28 after the plan's Phase-7 ordered gates; each later flip has
-  its own entry). It is read by every deployed-topology entry
-  point — the `productionServer` / `remoteClient` construction presets
+  ON 2026-08-28; each later flip has its own entry). OW28's served
+  `compileAndRun` lifecycle has direct acceptance coverage. The Phase-7
+  ordered gates still apply; a flip record does not establish their
+  current verdicts. The default
+  is read by every deployed-topology entry point — the `productionServer` / `remoteClient` construction presets
   (toolshed's operator runtime, the background piece service, the CLI,
   every pieces controller and integration harness against a toolshed),
   toolshed's serving-host gate and its memory ACL principal lists (the
@@ -413,6 +415,12 @@ server](#clients-that-are-not-built-alongside-their-server).
   OFF code path is removed — a separate post-soak
   PR (the plan's Phase 7 task 2; it also removes the opposite guard lanes and
   `build-toolshed-opposite`).
+- **Status on 2026-09-10.** The first-party default remains OFF and
+  the ON soak is paused. OW28's served `compileAndRun` outbox/completion and
+  scoped child selection have direct lifecycle coverage. The Phase-7 gate
+  dispositions govern a renewed ON rollout. The
+  [coverage register](../specs/server-side-execution/verification-coverage.md#current-status)
+  carries the current scope and the audit's evidence boundaries.
 - **Status on 2026-09-03 (the ROLLBACK).** The rollback PR (#6840)
   returned the constant to `false` — the first data-only flip: this value
   and this registry's current-status prose, with no workflow, test, or role
@@ -1155,15 +1163,22 @@ the per-epic implementation notes).
   refreshes overlap up to a bounded window (`CONCURRENT_WATCH_REFRESH_WINDOW`,
   currently 8) in `storage/v2.ts`, and the memory client issues the whole
   watch-mutation family (`watch.set` + `watch.add`) in an ordered issue phase so
-  wire order is preserved and application stays ordered. Same-tick microtask
-  coalescing is unchanged.
+  wire order is preserved and application stays ordered. Watch removals derive
+  a full replacement set from session state, so they wait for preceding
+  responses to be applied before constructing that set. Later acquisitions
+  remain behind the removal in wire order. Each removal therefore drains the
+  in-flight window: acquisitions issued after it wait until every earlier
+  response has applied and the removal has been sent. Operation-watch
+  cancellations pay that drain. Independent acquisitions still overlap, and
+  same-tick microtask coalescing is unchanged.
 - **Current default and planned end state.** Off by default. It is a spike
   pending live measurement on a real (estuary-latency) load; the window size is
   a tuning value. End state is either graduation to always-on with a settled
   window, or removal if the render-side fix (initial-render descent) makes the
   waterfall shallow enough that concurrency no longer pays.
-- **Status on 2026-07-24.** Implemented behind the flag, off by default; not yet
-  measured end-to-end over real latency.
+- **Status on 2026-09-08.** Implemented behind the flag, off by default;
+  concurrent acquisitions and removal retries have deterministic ordering
+  coverage. Not yet measured end-to-end over real latency.
 - **Path to removal.** Graduate to always-on once measured safe and beneficial,
   or remove if superseded by reducing the round-trip count at the source.
 
@@ -1179,23 +1194,26 @@ the per-epic implementation notes).
   [`packages/shell/src/lib/render-ceiling.ts`](../../packages/shell/src/lib/render-ceiling.ts).
   Because the ceiling crosses the worker boundary in the fixed initialization
   data, flipping it takes effect on the next runtime (a reload or re-login), not
-  live.
+  live. A browser integration test states the side it needs through the
+  `renderCeiling` option of `ShellIntegration.goto`, which writes the same key
+  after the navigation and before the login.
 - **Added by.** Bernhard Seefeld, in "populate the render confidentiality
   ceiling behind a shell dogfood flag (Epic H3a)" (#4550, 2026-07-07).
 - **Purpose.** Populates the CFC render confidentiality ceiling in the shell's
-  runtime. When on, display sinks admit only the acting user's own identity atom
-  plus allow-listed influence-class caveat kinds; everything else fails closed
-  and renders as a blocked placeholder, and author-supplied render-boundary
-  declassification is denied.
-- **Current default and planned end state.** Off by default. It changes what the
-  shell renders and is expected to over-block until exchange resolution (a later
-  CFC stage, Epic H3b) lands, so it is enabled deliberately per browser profile
-  for dogfooding. The end state is to graduate the ceiling on once exchange
-  resolution makes the blocking precise.
-- **Status on 2026-07-08.** Implemented, off by default, dogfood only.
-- **Path to removal.** Land exchange resolution so the ceiling stops
-  over-blocking, turn it on by default, and then remove the localStorage toggle
-  and make the ceiling unconditional.
+  runtime. Display sinks admit the acting user's identity and personal-space
+  atoms plus allow-listed influence-class caveat kinds. Before the fit check,
+  the worker resolves shared `Space` labels through verified reader membership;
+  a delegate's access to the session workspace requires its own membership
+  evidence. Confidentiality the ceiling does not satisfy stays blocked, and
+  author-supplied render-boundary declassification is denied.
+- **Current default and planned end state.** Off by default and enabled per
+  browser profile for dogfooding. The end state is to enable the ceiling by
+  default and make it unconditional.
+- **Status on 2026-09-08.** Exchange resolution is implemented. Where reader
+  membership is required, missing or unsynced ACL evidence keeps the content
+  blocked; a reader grant admits it and a revocation blocks it again.
+- **Path to removal.** Finish dogfood validation, turn the ceiling on by default,
+  then remove the localStorage toggle and make the ceiling unconditional.
 
 ## Category 5: Fuse mount cache tuning
 
@@ -1318,9 +1336,30 @@ site has:
 
 The second is the weaker claim, but it does not fail quietly, and that is the
 point. Add a production use of one of these values and the throw fires — at the
-moment the use is added, in the change that added it — leaving exactly two
-honest ways forward: implement the handling the throw names, or back the use
-out. So the tripwire is its own enforcement, which is why an ungated site is
+moment the use is added, in the change that added it. Three honest ways lead out
+of that: implement the handling the throw names, back the use out, or establish
+that the site was never one a refusal belonged at and give it the answer it
+owes.
+
+That third one is rare and carries the heaviest burden of proof, because it
+closes nothing. A site taking it still cannot reach what the value holds; what
+changes is that it reports that in a form its caller can act on rather than
+throwing. So it is available only where the site has somewhere to put the
+report and records it there, and where refusing would cost more than the gap
+does — a walk under a subscription that has to keep delivering cannot throw at
+all, and a walk that only decides what a path finds is reporting an absence
+rather than handing back a wrong value. Reaching for a non-throwing predicate,
+on its own, is not this: without the record it is the quiet exemption the next
+obligation rules out, and the two are told apart by what the site does with the
+answer rather than by which identifier it calls.
+
+`reactive-dependencies.ts` is the worked example. Its `isKeyable()` descends a
+`FabricInstance` by property name, because refusing would cost the rest of a
+notification's changes and reporting one as having no keys would lose
+reachability the walk already reports. The marker above it records what the
+descent still misses, which is the record the paragraph above requires.
+
+So the tripwire is its own enforcement, which is why an ungated site is
 legitimate. What it is not is a flag, so do not cite this section as though one
 stood behind every throw.
 
@@ -1338,7 +1377,32 @@ than at any one of the sites:
 - **Meeting one.** A throw firing is the instrument working, not a defect in it.
   Implement the missing handling at the site it names — for a flag-gated site
   that work _is_ the flag's graduation work — or back out the use that reached
-  it. What is not on the list is exempting the value so the walk stays quiet.
+  it, or take the third way above and say in the change why the site owes an
+  answer rather than a refusal. What is not on the list is exempting the value
+  so the walk stays quiet, and swapping a throwing call for a non-throwing one
+  without recording what the site now under-reports is that.
+
+The container question `isWalkableObjectOrArray()` asks is the widest of these
+refusals, being reached from around twenty-five walks across `runner` and
+`piece`. Its strength at those sites is de facto rather than structural: a
+`FabricInstance` can be constructed and handed to any of them. What supports
+the claim is that `FabricError` is the one instance with live traffic today —
+the fetch builtins store one as a result. Writing one, appending one, reading
+one back, replacing one and deleting it were each driven through `Cell` within
+a single transaction, and replacing one was driven again across a commit
+boundary. Four walks refused something those operations reach, and each now
+answers instead: the two stored path reads in `storage/v2-path.ts`, three sites
+in `data-updating.ts`, and the shallow structure comparison in
+`storage/v2-transaction.ts` that the commit-time reactivity pass feeds. The
+last was found only by the cross-boundary replace, which is why the list is a
+record of what has been driven rather than a claim about what has not.
+
+Three walks were given the same treatment without a reachable operation to
+justify it, and are recorded here as untested rather than measured: `getAtPath`
+in `traverse.ts`, `mergeAnyOfMatches` in the same file, and
+`sendValueToBindingInner` in `pattern-binding.ts`. `getAtPath` follows the
+decision `traverseDAG` states a few hundred lines above it, that this file
+cannot fail loudly on an instance yet; the other two keep the refusal.
 
 Worked example: with [`modernCellRep`](#moderncellrep) on, a link is a
 `FabricLink` and therefore a `FabricInstance`, so ordinary links reach these

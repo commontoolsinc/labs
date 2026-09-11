@@ -1,91 +1,107 @@
 /**
  * Reports what the newest selection manifest would have a pull request
- * run: how much of the corpus fits five lanes, and how close the fullest
- * lane is to its budget. It goes amber when the manifest has gone stale,
- * because selection quality decays with it, and red when a lane's
- * projected work is past the bound the whole design rests on.
+ * run: what share of the corpus fits five lanes.
+ *
+ * It goes amber on either of two counts. The manifest has gone stale, and
+ * selection quality decays with it. Or the corpus holds a test that costs
+ * more on its own than a whole lane's budget, which no packing can place,
+ * so a pull request runs it only where its own diff makes it mandatory.
+ * It goes red when a lane's projected work is past the bound the whole
+ * design rests on.
+ *
+ * Two of those three want the sub line, and the red one takes it first.
+ * Staleness wants the header facet instead, so it competes for neither.
+ *
+ * The packing itself — every lane, what each holds, and what each is
+ * projected to spend — is a page away, along with every test no lane can
+ * hold and what each was measured at.
  *
  * Following the dashboard's values (README.md): it reports on the system.
  */
 
 import type { Status, Tile, TileView } from "../types.ts";
-import { newestManifest } from "../test-selection-manifest.ts";
+import { compactSpan, groupDigits } from "../lib.ts";
+import {
+  laneBudgetOf,
+  MANIFEST_SHARE_MS,
+  type ManifestReader,
+  selectedCount,
+  sharedManifest,
+} from "../test-selection-manifest.ts";
+import {
+  TEST_SELECTION_PATH,
+  testSelectionResponse,
+} from "../test-selection-page.ts";
 
 /** Hours before a manifest is stale enough to say so. */
 export const MANIFEST_STALE_HOURS = 8;
 
-/**
- * Seconds of planned work a lane may hold, when the manifest does not say.
- * Every manifest records the dials it was built with, so the tile reads
- * the budget from the manifest in front of it rather than from a number
- * here that would quietly start lying the day the dial moved.
- */
-export const LANE_BUDGET_FALLBACK_SECONDS = 230;
-
-/** The budget a manifest was built with, or the fallback. */
-export function laneBudgetOf(dials: Record<string, unknown>): number {
-  const budget = dials.LANE_BUDGET_SECONDS;
-  return typeof budget === "number" && Number.isFinite(budget) && budget > 0
-    ? budget
-    : LANE_BUDGET_FALLBACK_SECONDS;
-}
-
-/** Builds the tile against a store and a clock, so a test can supply both. */
+/** Builds the tile against a reader and a clock, so a test can supply both. */
 export function makeTestSelection(
-  options: { fetchImpl?: typeof fetch; now?: () => number } = {},
+  options: { read?: ManifestReader; now?: () => number } = {},
 ): Tile {
+  const read = options.read ?? sharedManifest;
   return {
     id: "test-selection",
-    intervalMs: 15 * 60_000,
-    collect: () => selectionView(options),
+    intervalMs: MANIFEST_SHARE_MS,
+    routes: [{
+      path: TEST_SELECTION_PATH,
+      handler: () => testSelectionResponse(read, options.now),
+    }],
+    collect: () => selectionView(read, options.now),
   };
 }
 
 async function selectionView(
-  options: { fetchImpl?: typeof fetch; now?: () => number },
+  read: ManifestReader,
+  clock?: () => number,
 ): Promise<TileView> {
-  {
-    const manifest = await newestManifest(
-      options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl },
-    );
-    if (manifest === undefined) {
-      return {
-        label: "test selection",
-        status: "unknown",
-        value: "—",
-        sub: "no selection manifest yet",
-      };
-    }
-    const selected = manifest.lanes.reduce(
-      (total, lane) =>
-        total +
-        lane.batches.reduce((sum, batch) => sum + batch.identities.length, 0),
-      0,
-    );
-    const known = manifest.entries.length;
-    const share = known === 0 ? 0 : (selected / known) * 100;
-    const now = options.now?.() ?? Date.now();
-    const ageHours = (now - Date.parse(manifest.generatedAt)) / 3_600_000;
-    const budget = laneBudgetOf(manifest.dials);
-    const fullest = manifest.lanes.length === 0
-      ? 0
-      : Math.max(...manifest.lanes.map((lane) => lane.projectedSeconds));
-    const status: Status = fullest > budget
-      ? "bad"
-      : ageHours > MANIFEST_STALE_HOURS
-      ? "warn"
-      : "good";
+  const manifest = await read();
+  if (manifest === undefined) {
     return {
       label: "test selection",
-      status,
-      value: `${share.toFixed(0)}%`,
-      sub: `${selected} of ${known} tests · fullest lane ` +
-        `${fullest.toFixed(0)}s of ${budget}s`,
-      aside: ageHours > MANIFEST_STALE_HOURS
-        ? `${ageHours.toFixed(0)}h old`
-        : undefined,
+      status: "unknown",
+      value: "—",
+      sub: "no selection manifest yet",
     };
   }
+  const selected = selectedCount(manifest);
+  const known = manifest.entries.length;
+  const share = known === 0 ? 0 : (selected / known) * 100;
+  const age = (clock?.() ?? Date.now()) - Date.parse(manifest.generatedAt);
+  const ageHours = age / 3_600_000;
+  const budget = laneBudgetOf(manifest.dials);
+  const fullest = manifest.lanes.length === 0
+    ? 0
+    : Math.max(...manifest.lanes.map((lane) => lane.projectedSeconds));
+  const over = fullest > budget;
+  const unplaceable = manifest.unschedulable.length;
+  const stale = ageHours > MANIFEST_STALE_HOURS;
+  const status: Status = over
+    ? "bad"
+    : unplaceable > 0 || stale
+    ? "warn"
+    : "good";
+  const badge = `${compactSpan(age)} old`;
+  return {
+    label: "test selection",
+    status,
+    value: `${share.toFixed(0)}%`,
+    // The condition the tile is colored for takes this line, worst
+    // first, and the corpus count holds it while neither has.
+    sub: over
+      ? `fullest lane ${fullest.toFixed(0)}s of ${budget}s`
+      : unplaceable > 0
+      ? `${groupDigits(unplaceable)} test${
+        unplaceable === 1 ? "" : "s"
+      } too long for any lane`
+      : `${groupDigits(selected)} of ${groupDigits(known)} tests`,
+    aside: stale
+      ? `<span class="hfacet" title="${badge}">${badge}</span>`
+      : undefined,
+    href: TEST_SELECTION_PATH,
+    hint: "lanes ↗",
+  };
 }
 
 export const testSelection = makeTestSelection();

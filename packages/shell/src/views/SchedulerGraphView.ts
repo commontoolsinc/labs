@@ -7,9 +7,9 @@ import { property, query, state } from "lit/decorators.js";
 
 import type { DebuggerController } from "../lib/debugger-controller.ts";
 
-import "./SchedulerSourceView.ts";
-
 import { entityUriFromActionId } from "../lib/scheduler-graph-identity.ts";
+// Loading this module defines the `x-scheduler-source` element that this
+// view renders.
 import {
   parseActionLocation,
   type SourceViewNode,
@@ -2544,23 +2544,6 @@ export class XSchedulerGraph extends LitElement {
                           null,
                           2,
                         )}</pre>
-                      </div>
-                    `
-                    : ""} ${flagMeta.queryResult !== undefined
-                    ? html`
-                      <div class="flag-meta-field">
-                        <div class="flag-meta-label">Query Result</div>
-                        <pre class="flag-meta-value">${(() => {
-                          try {
-                            return JSON.stringify(
-                              JSON.parse(flagMeta.queryResult as string),
-                              null,
-                              2,
-                            );
-                          } catch {
-                            return String(flagMeta.queryResult);
-                          }
-                        })()}</pre>
                       </div>
                     `
                     : ""}

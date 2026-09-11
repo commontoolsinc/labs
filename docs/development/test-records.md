@@ -310,12 +310,71 @@ leaves the map in the spool, and it applies `CF_TEST_SKIP_LIST`. Wrapping
 own, so a process with nothing to skip and no spool it may write leaves
 `Deno.test` alone and the report's own class names are read instead.
 
+Both of those need permissions. Reading `CF_TEST_RECORDS_DIR` and
+`CF_TEST_SKIP_LIST` needs `--allow-env`, and that one the test task
+grants: a task naming a restricted list of variables names those two
+among them — `readEnv` swallows the refusal, so a task that leaves them
+out records nothing and skips nothing, silently.
+
+Writing the map needs `--allow-write` covering the directory the run
+owner put the spool in, and that one the task cannot grant, because it
+cannot name the path: `deno task` expands `$VAR` but not
+`${VAR:-default}`, `--allow-write=` with an unset variable ends the run
+with `Empty values are not allowed`, and a `$` costs its member the file
+granularity `tasks/test-topology/deno-task.ts` reads its task for —
+every `$` but the one command substitution that file resolves, which is
+the `deno eval` naming the executable that several tasks already carry.
+So the caller that appends the preload appends the permission beside it.
+`spoolWriteArgument()` from
+`@commonfabric/test-support/records` builds that argument, and it builds
+none for an invocation already permitted to write everywhere. Deno merges
+two `--allow-write` path lists, so an invocation naming a list of its own
+takes the spool on top of it. A blanket grant is the one that cannot take
+a list beside it: `-A` and `--allow-all` refuse the combination outright,
+ending the run with `the argument '--allow-all...' cannot be used with
+'--allow-write[=<PATH>...]'`, and a bare `--allow-write` or `-W` is cut
+down to whatever list joins it. Short flags cluster, so `-RW` is a
+blanket grant of both, and `-A` is one of everything.
+
+It builds none for an invocation that cannot read the filesystem either,
+and that is the case to hold on to. A writable spool is what makes the
+preload wrap `Deno.test`, and wrapping is what costs the report the class
+names ingestion reads each case's file from; the files that replace them
+come from climbing to the directory holding `.git`, which needs read
+permission. So the write and the read go together, and an invocation
+granted one without the other records no file for any of its tests.
+`tasks/test-topology/package-integration.ts` holds a part in that shape,
+with `--allow-env` and no `--allow-read`.
+
+Four callers append the preload, and three of them append the write
+beside it. `tasks/workspace-tests.ts` appends both to each member's
+`deno task test`, taking the write from `spoolWriteArgument()` directly.
+The two topology suites append both to each invocation a batch runs —
+`fileSuite` in `tasks/test-topology/suite.ts` and `unitSuite` in
+`tasks/test-topology/unit.ts` — through `recordingArguments()`, which is
+where the helper is called for them. The fourth, `tasks/integration.ts`,
+appends the preload alone, because every invocation it builds runs under
+`-A` and the helper would build nothing for any of them. A task there
+that ever narrows its permissions needs the argument too.
+
 A test task naming its own `--import-map` does not take the preload. That
 map governs every module of the invocation, the preload included, so a
 specifier the preload needs and the map does not carry fails the whole
 run rather than the preload alone. Such a member keeps its JUnit path and
 loses nothing by the omission: with no wrapper installed, the report
 keeps its own class names and ingestion reads the file from those.
+
+What a class name reaches is the test file that registered the test
+itself. A module of ours that registers on a file's behalf — a fixture
+runner handed a directory of cases, a harness that replaces `Deno.test`
+to give each test a clock — is the nearest frame below the runner, so
+the class names it instead. Such a module goes in two places: it calls
+`registerFrameworkModule(import.meta.url)`, so the preload's map names
+the file that asked, and its path tail goes in
+`MACHINERY_MODULE_SUFFIXES`, so ingestion declines the class name rather
+than recording the module as every test's file. Missing from the first,
+it takes the map; missing from the second, it takes the report. A
+surface that registers this way and cannot write a map records no file.
 
 A harness with per-result callbacks
 appends records through `FragmentWriter` (see the hooks in
@@ -325,6 +384,15 @@ Anything else wraps its command:
 ```
 deno task run-recorded <kind> <scope> <name> -- <command...>
 ```
+
+A wrapped command in a workflow step also has its identity registered in
+the test topology. A lane runs what a suite enumerates, so the topology
+is what keeps the command running once a lane takes over the job. `deno
+task check-test-topology` reads every such step and fails on one no suite
+claims, which settles it on the pull request that adds the step. A
+command with no suite to register it under is one to leave unwrapped:
+["Recording" in the specification](../specs/test-records.md#recording)
+says that a check no lane can be asked to run is not recorded.
 
 A harness that is also a library — one this repository's own tests drive
 over fixture files — takes the decision to record from its caller, not

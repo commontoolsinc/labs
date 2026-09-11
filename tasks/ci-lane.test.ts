@@ -5,7 +5,8 @@ import {
   testIdentityKey,
   type TestRecord,
 } from "@commonfabric/test-support/records";
-import { loadTopology } from "./test-topology.ts";
+import type { CapabilityId } from "./ci-capabilities.ts";
+import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
 
 import {
   batchesOf,
@@ -22,7 +23,6 @@ import {
   runLane,
   spoolRecords,
 } from "./ci-lane.ts";
-import { capabilitiesBySuite } from "./test-topology.ts";
 import { census } from "./test-selection/census.ts";
 import type { Suite } from "./test-topology/suite.ts";
 import {
@@ -78,7 +78,7 @@ function manifestOf(entries: readonly Partial<ManifestEntry>[]): Manifest {
       unit: "packages/bakery/glaze.test.ts",
       cost: 1,
       score: 0.5,
-      inputs: { catches: 0, mainCatches: 0, sources: 0, churn: 0 },
+      inputs: { catches: 0, sources: 0, churn: 0 },
       flakeRate: 0,
       repeats: 1,
       ...entry,
@@ -888,7 +888,7 @@ describe("running a lane's work", () => {
       unit: "packages/bakery/glaze.test.ts",
       cost: 1.5,
       score: 0.5,
-      inputs: { catches: 0, mainCatches: 0, sources: 0, churn: 0 },
+      inputs: { catches: 0, sources: 0, churn: 0 },
       flakeRate: 0,
       repeats: 1,
     };
@@ -946,27 +946,26 @@ describe("running a lane's work", () => {
   });
 
   it("names what the manifest withheld, and what came back", () => {
-    const red = { k: "unit", s: "bakery", n: "glaze > sets" };
-    const flaky = { k: "unit", s: "bakery", n: "proof > rises" };
+    const touched = { k: "unit", s: "bakery", n: "glaze > sets" };
+    const untouched = { k: "unit", s: "bakery", n: "proof > rises" };
     const lines: string[] = [];
     const log = console.log;
     console.log = (line: string) => lines.push(line);
     try {
       describeWithheld(
         [
-          { test: red, suite: "workspace-unit", reason: "main-red" },
-          { test: flaky, suite: "workspace-unit", reason: "flaky" },
+          { test: touched, suite: "workspace-unit", reason: "flaky" },
+          { test: untouched, suite: "workspace-unit", reason: "flaky" },
         ],
-        new Map([[testIdentityKey(red), "changed"]]),
+        new Map([[testIdentityKey(touched), "changed"]]),
       );
     } finally {
       console.log = log;
     }
     const printed = lines.join("\n");
-    expect(printed).toContain("already failing in the latest run on `main`");
     expect(printed).toContain("too noisy to judge a change by");
-    // The change reaches the failing one, which is very likely a fix, so
-    // it runs in spite of being withheld.
+    // The change reaches one of them, which is very likely a fix, so it
+    // runs in spite of being withheld.
     expect(printed).toContain("yes, the change reaches it");
     expect(printed).toContain("| no |");
   });
@@ -1505,9 +1504,10 @@ describe("what a lane records about itself", () => {
         {
           manifest: () =>
             Promise.resolve({
-              // A gate the change did not touch, costing most of a lane:
-              // `always` outranks the budget, so the lane takes it and
-              // reports what that cost rather than dropping it.
+              // A manifest that knows one gate, which leaves every
+              // other unit in the tree unknown and therefore mandatory.
+              // The lane takes them all and says what that cost rather
+              // than dropping work.
               manifest: manifestOf([{
                 test: { k: "format", s: "repo", n: "deno-fmt" },
                 suite: "repo-gates",
@@ -1626,11 +1626,20 @@ describe("what a lane does with the batches it was given", () => {
       });
   }
 
-  async function run(command: readonly string[]): Promise<boolean> {
+  /**
+   * Runs a lane over that suite, and answers with its verdict beside the
+   * measurements it wrote. The spool is the lane's own, so what it
+   * records about itself stays here rather than reaching the spool of
+   * the run testing it.
+   */
+  async function run(
+    command: readonly string[],
+  ): Promise<{ ok: boolean; measured: TestRecord[] }> {
+    const spool = await Deno.makeTempDir({ prefix: "lane-spool-" });
     const log = console.log;
     console.log = () => {};
     try {
-      return await runLane(
+      const ok = await runLane(
         {
           lane: 1,
           of: 1,
@@ -1640,21 +1649,124 @@ describe("what a lane does with the batches it was given", () => {
           root: REPOSITORY,
           at: "2026-09-01T00:00:00Z",
         },
-        { manifest: selecting(), topology: topology(command) },
+        {
+          manifest: selecting(),
+          topology: topology(command),
+          spool: () => spool,
+        },
       );
+      const written = (await Promise.all(
+        (await Array.fromAsync(Deno.readDir(spool)))
+          .filter((entry) => entry.isFile)
+          .map((entry) => Deno.readTextFile(`${spool}/${entry.name}`)),
+      )).join("");
+      const measured = written.split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as TestRecord);
+      return { ok, measured };
     } finally {
       console.log = log;
+      await Deno.remove(spool, { recursive: true });
     }
   }
 
+  /** The outcome the lane recorded for its one batch. */
+  function batchOutcome(measured: readonly TestRecord[]): string | undefined {
+    return measured.find((record) =>
+      record.test.n === "ci-lane batch workspace-unit"
+    )?.outcome;
+  }
+
   it("passes when every batch passed", async () => {
-    expect(await run([Deno.execPath(), "eval", "0"])).toBe(true);
+    const { ok, measured } = await run([Deno.execPath(), "eval", "0"]);
+    expect(ok).toBe(true);
+    // The measurement says what the lane says. A batch recorded green
+    // while the lane reports red, or the other way about, is one commit
+    // carrying both outcomes for the identity.
+    expect(batchOutcome(measured)).toBe("pass");
+  });
+
+  it("gives each batch the environment its own suite asked for", async () => {
+    // `cf` exports the root it puts its command line under, and `deno`
+    // exports nothing. A lane opens the union of what its batches asked
+    // for, so both suites here run in a lane that opened `cf`, and only
+    // the one that asked for it may see what it exports.
+    const dir = await Deno.makeTempDir({ prefix: "lane-env-" });
+    const reporting = (id: string, needs: readonly CapabilityId[]) =>
+      suite({
+        id,
+        needs,
+        units: [`packages/bakery/${id}.test.ts`],
+        command: (_units, context) =>
+          Promise.resolve([{
+            command: [
+              Deno.execPath(),
+              "eval",
+              `Deno.writeTextFileSync(${
+                JSON.stringify(`${dir}/${id}`)
+              }, Deno.env.get("CF_LABS_ROOT") ?? "");`,
+            ],
+            cwd: context.root,
+          }]),
+      });
+    const log = console.log;
+    console.log = () => {};
+    try {
+      await runLane(
+        {
+          lane: 1,
+          of: 1,
+          full: false,
+          dryRun: false,
+          laneCount: false,
+          root: REPOSITORY,
+          at: "2026-09-01T00:00:00Z",
+        },
+        {
+          manifest: () =>
+            Promise.resolve({
+              manifest: manifestOf([
+                {
+                  test: { k: "unit", s: "bakery", n: "asked > runs" },
+                  suite: "asked",
+                  unit: "packages/bakery/asked.test.ts",
+                },
+                {
+                  test: { k: "unit", s: "bakery", n: "did-not > runs" },
+                  suite: "did-not",
+                  unit: "packages/bakery/did-not.test.ts",
+                },
+              ]),
+              objectName: "manifest-fixture.json.gz",
+            }),
+          topology: () =>
+            Promise.resolve([
+              reporting("asked", ["deno", "cf"]),
+              reporting("did-not", ["deno"]),
+            ]),
+          // What this case reads is the environment each batch ran in,
+          // so the lane records nothing about itself.
+          spool: () => undefined,
+        },
+      );
+      expect(await Deno.readTextFile(`${dir}/asked`)).toBe(REPOSITORY);
+      expect(await Deno.readTextFile(`${dir}/did-not`)).toBe("");
+    } finally {
+      console.log = log;
+      await Deno.remove(dir, { recursive: true }).catch(() => {});
+    }
   });
 
   it("fails when a batch failed, having run it", async () => {
     // A lane reports what it measured: the batch ran and went red, so
     // the lane is red, and nothing about that is a crash or a timeout.
-    expect(await run([Deno.execPath(), "eval", "Deno.exit(1)"])).toBe(false);
+    const { ok, measured } = await run([
+      Deno.execPath(),
+      "eval",
+      "Deno.exit(1)",
+    ]);
+    expect(ok).toBe(false);
+    expect(batchOutcome(measured)).toBe("fail");
   });
 
   it("says it could not date the tree it is testing", async () => {

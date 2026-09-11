@@ -644,6 +644,17 @@ run_piece_call() {
     '{"query":"tea","help":"","source":"bound-source","summary":"bound-source:tea:"}' \
     "Flag-based tool call should return the tool result"
 
+  # A verb that registers the piece it creates through the space root's
+  # `addPiece` stream, called from a process in which dispatch has started the
+  # addressed piece and nothing else: the send starts the root at delivery, and
+  # the registry carries the entry when the call returns.
+  ROOT_REGISTRAR_PATTERN_SRC="$SCRIPT_DIR/pattern/root-registrar.tsx"
+  ROOT_REGISTRAR_PIECE_ID=$(cf piece new $SPACE_ARGS $ROOT_REGISTRAR_PATTERN_SRC)
+  echo "Created root-registrar piece: $ROOT_REGISTRAR_PIECE_ID"
+  cf piece call $SPACE_ARGS --piece $ROOT_REGISTRAR_PIECE_ID register --label registered-by-verb
+  cf piece ls $SPACE_ARGS | grep -q "Entry registered-by-verb" ||
+    error "A verb sending into the root's addPiece stream should register its piece; registry: $(cf piece ls $SPACE_ARGS)"
+
   echo "Successfully ran CLI piece call integration tests for ${API_URL}/${SPACE}/${CALLABLE_PIECE_ID}."
 }
 

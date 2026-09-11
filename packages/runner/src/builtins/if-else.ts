@@ -3,12 +3,12 @@ import { internSchema } from "@commonfabric/data-model-schema";
 import { type Cell } from "../cell.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { parseLink } from "../link-utils.ts";
-import { type RawBuiltinResult } from "../module.ts";
+import { type RawBuiltinResult, type RawNodeCause } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { ownedCell } from "./runtime-owned-store.ts";
-import { resolvedCellScope } from "./scope-policy.ts";
+import { ownedResultCause, resolvedCellScope } from "./scope-policy.ts";
 
 /**
  * Argument schema for ifElse. The action value-reads ONLY `condition`; the
@@ -38,7 +38,7 @@ export function ifElse(
   inputsCell: Cell<[any, any, any]>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
-  cause: Cell<any>[],
+  cause: RawNodeCause,
   parentCell: Cell<any>,
   runtime: Runtime, // Runtime will be injected by the registration function
 ): RawBuiltinResult {
@@ -56,11 +56,14 @@ export function ifElse(
   const action: Action = (tx: IExtendedStorageTransaction) => {
     const { cell: conditionCell, value: condition } = readCondition(tx);
     const resultScope = resolvedCellScope(runtime, tx, conditionCell);
+    // Keyed on the output spot, never on the inputs document: every runtime
+    // sharing the piece must mint this one store, whatever its vintage
+    // serializes the inputs as (see `ownedResultCause`).
     const result = ownedCell<any>(
       runtime,
       tx,
       parentCell,
-      { ifElse: cause },
+      ownedResultCause("ifElse", cause, parentCell),
       undefined,
       resultScope,
     );

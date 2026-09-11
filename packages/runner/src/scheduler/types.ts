@@ -6,8 +6,8 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   MediaType,
+  ReplicaLoadFailure,
 } from "../storage/interface.ts";
-import type { ReplicaLoadFailure } from "../storage/interface.ts";
 import type {
   SchedulerEventPreflightActionSummary,
   SchedulerEventPreflightStats,
@@ -70,6 +70,16 @@ export type AnnotatedAction = Action & TelemetryAnnotations;
 export type EventHandler =
   & ((tx: IExtendedStorageTransaction, event: any) => any)
   & {
+    /**
+     * Alternative implementation at a shared stream address. Implementations
+     * coexist by key; `matches()` reads the selector through the event actor's
+     * transaction so dependency preflight and dispatch track the same inputs.
+     */
+    implementationSelection?: {
+      key: string;
+      matches(tx: IExtendedStorageTransaction): boolean;
+    };
+
     /**
      * Optional callback to populate a transaction with the handler's read dependencies.
      * Called by the scheduler to discover what cells the handler will read.
@@ -365,6 +375,9 @@ export type QueuedEvent = {
   handler: EventHandler;
   event: any;
 
+  /** Guarded implementation whose input dependencies passed preflight. */
+  preflightImplementation?: EventHandler;
+
   /**
    * Payload keys the RUNTIME itself injected into `event`'s value (send's
    * internal `runtimeInjectedEventKeys` option — the LLM tool-call path's
@@ -431,4 +444,11 @@ export type QueuedEvent = {
    * failure and carried across backoff retries.
    */
   retryDeadline?: number;
+
+  /**
+   * How many backoff re-runs this event has taken after its handler body did
+   * not run, counted against `HANDLER_NOT_RUN_BACKOFF_LIMIT`. A re-run parked
+   * on a load is not counted. Carried across requeues.
+   */
+  notRunBackoffs?: number;
 };

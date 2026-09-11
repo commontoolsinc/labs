@@ -26,7 +26,6 @@ import {
   coverageDebtView,
   makeCoverageDebt,
   dailyChangeLabel,
-  groupDigits,
   medianDailyChange,
   trendWindow,
 } from "./coverage-debt.ts";
@@ -94,17 +93,6 @@ const drift = (from: number, perDay: number, days: number) =>
   samplesOf(Array.from({ length: days }, (_, day) => from + day * perDay));
 
 describe("coverage-debt", () => {
-  describe("groupDigits()", () => {
-    it("returns the integer with its thousands separated", () => {
-      expect(groupDigits(78101)).toBe("78,101");
-      expect(groupDigits(999)).toBe("999");
-      expect(groupDigits(1000)).toBe("1,000");
-      expect(groupDigits(1234567)).toBe("1,234,567");
-      expect(groupDigits(0)).toBe("0");
-      expect(groupDigits(30.6)).toBe("31");
-    });
-  });
-
   describe("trendWindow()", () => {
     it("returns the samples inside the trend window", () => {
       const samples = samplesOf(Array(COVERAGE_TREND_DAYS + 10).fill(100));

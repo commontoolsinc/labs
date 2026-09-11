@@ -11,6 +11,7 @@
  */
 
 import type {
+  FlakeEvidence,
   ScoreInputs,
   TestIdentity,
 } from "@commonfabric/test-support/records";
@@ -26,6 +27,7 @@ import {
   COST_WINDOW_DAYS,
   ENVIRONMENTAL_MIN_SOURCES,
   FLAKE_COMMIT_REACH,
+  FLAKE_HALF_LIFE_RUNS,
   FLAKE_WINDOW_DAYS,
   FRESHNESS_FLOOR,
   FRESHNESS_HALF_LIFE_DAYS,
@@ -89,19 +91,20 @@ export interface IdentityState {
   /** Failures per day, the numerator of the churn term. */
   failuresByDay: Record<string, number>;
 
-  /** Runs per day, its denominator. */
+  /** Runs per day, the denominator of that term and of the flake rate. */
   runsByDay: Record<string, number>;
 
-  /** Flake observations per day, against the failures of the same day. */
+  /** Flake observations per day, the numerator of the flake rate. */
   flakesByDay: Record<string, number>;
 
   /**
-   * The ninetieth percentile of the day's measured durations, in
-   * milliseconds, and how many executions it was taken over. A day is
-   * the unit because keeping every duration would make the state object
-   * grow with the number of runs rather than with the number of tests.
+   * The day's slowest passing durations, in milliseconds, and how many
+   * passed. A day is the unit because keeping every duration would make
+   * the state object grow with the number of runs rather than with the
+   * number of tests, and the slowest of them are what a percentile
+   * inside the slowest tenth is read from.
    */
-  costByDay: Record<string, { p90: number; count: number }>;
+  costByDay: Record<string, DaySamples>;
 
   /** The outcome of the most recent `main` run this identity appeared in. */
   lastMainOutcome?: "pass" | "fail" | "skip";
@@ -144,19 +147,6 @@ export function daysBetween(earlier: string, later: string): number {
   return Math.round((to - from) / 86_400_000);
 }
 
-/**
- * The ninetieth percentile of a list of durations, by nearest rank. The
- * ninetieth rather than the maximum, because one unlucky runner should
- * not permanently inflate an estimate, and rather than the mean, because
- * a cost model that under-estimates blows the time budget.
- */
-export function percentile90(values: readonly number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const rank = Math.ceil(0.9 * sorted.length);
-  return sorted[Math.max(0, rank - 1)]!;
-}
-
 function addSource(state: IdentityState, source: string): void {
   if (!state.sources.includes(source)) state.sources.push(source);
 }
@@ -181,28 +171,17 @@ function bump(counts: Record<string, number>, day: string): void {
 }
 
 /**
- * Whether anything a test covers changed between two `main` commits. The
- * coverage attribution map is what answers this; without one the answer
- * is yes, which errs toward calling a failure a catch.
- */
-export type CoveredChange = (
-  identity: string,
-  fromCommit: string,
-  toCommit: string,
-) => boolean;
-
-/**
  * Judges the failures on `main` that were waiting for a later `main` run.
  * A failure the next run still shows is the same breakage continuing, so
  * it keeps waiting and nothing new is learned. A failure the next run
- * does not show either went away by itself, which is a flake, or was
- * fixed by the change between the two, which is a catch.
+ * does not show is a flake when that run is at the same commit, and a
+ * catch otherwise. Nothing separates a failure a change fixed from one
+ * that healed itself, so a failure that healed itself is credited as a
+ * catch as well.
  */
 function resolvePendingMain(
   state: IdentityState,
-  key: string,
   observation: Observation,
-  coveredChanged: CoveredChange,
 ): void {
   if (state.pendingMain.length === 0) return;
   if (observation.outcome === "fail") return;
@@ -225,19 +204,7 @@ function resolvePendingMain(
     bump(state.flakesByDay, first.day);
     return;
   }
-  if (coveredChanged(key, first.commit, observation.commit)) {
-    creditCatch(state, "main", first.day, first.source);
-  } else {
-    bump(state.flakesByDay, first.day);
-  }
-}
-
-/** How a batch of observations was judged. */
-export interface FoldResult {
-  states: Map<string, IdentityState>;
-
-  /** Identities failing in the most recent `main` run that named them. */
-  mainRed: Set<string>;
+  creditCatch(state, "main", first.day, first.source);
 }
 
 /**
@@ -450,9 +417,6 @@ export interface FoldOptions {
   /** The state each identity's history had reached before this batch. */
   prior?: Map<string, IdentityState>;
 
-  /** How to tell a fixed failure on `main` from one that healed itself. */
-  coveredChanged?: CoveredChange;
-
   /** What earlier batches of the same stream saw. */
   context?: FoldContext;
 }
@@ -471,11 +435,14 @@ export interface FoldOptions {
  * replay it each time. A one-shot iterator would leave every pass after
  * the first with nothing to read and score the batch as though most of it
  * had never run, so one is refused rather than folded.
+ *
+ * Returns the state each identity was folded into, which is the map
+ * `options.prior` names when a caller carries one across batches.
  */
 export function foldObservations(
   observations: Iterable<Observation>,
   options: FoldOptions = {},
-): FoldResult {
+): Map<string, IdentityState> {
   // An iterator is its own iterable, which is what tells the two apart.
   if (Object.is(observations[Symbol.iterator](), observations)) {
     throw new Error(
@@ -483,7 +450,6 @@ export function foldObservations(
     );
   }
   const states = options.prior ?? new Map<string, IdentityState>();
-  const coveredChanged = options.coveredChanged ?? (() => true);
   const context = options.context ?? emptyContext();
   const stateOf = (key: string): IdentityState => {
     let state = states.get(key);
@@ -589,15 +555,14 @@ export function foldObservations(
     // about the test and nothing about the change, so it does not reach
     // `lastMainOutcome` either: a test skipped on the default branch has
     // not been shown to be fixed, and the last run that did execute it is
-    // the last thing known about it. That keeps a still-broken test out of
-    // every pull request, which is the direction this design takes
-    // whenever the two errors are a lost signal and a change that cannot
-    // go green.
+    // the last thing known about it. A failure elsewhere therefore goes
+    // on being read as the default branch's, and is not credited to the
+    // change in front of it.
     if (observation.outcome === "skip") continue;
 
     bump(state.runsByDay, day);
     if (observation.place === "main") {
-      resolvePendingMain(state, key, observation, coveredChanged);
+      resolvePendingMain(state, observation);
       state.lastMainOutcome = observation.outcome;
     }
     if (observation.outcome === "pass") continue;
@@ -642,11 +607,7 @@ export function foldObservations(
     creditCatch(state, observation.place, day, observation.source);
   }
 
-  const mainRed = new Set<string>();
-  for (const [key, state] of states) {
-    if (state.lastMainOutcome === "fail") mainRed.add(key);
-  }
-  return { states, mainRed };
+  return states;
 }
 
 /**
@@ -701,43 +662,94 @@ export function sampledPercentile90(samples: DaySamples): number {
   return samples.slowest[Math.max(0, index)] ?? 0;
 }
 
+/** One list of a day's durations, as the day's bounded sample of them. */
+export function samplesOf(durationsMs: readonly number[]): DaySamples {
+  const samples = emptySamples();
+  for (const durationMs of durationsMs) sampleDuration(samples, durationMs);
+  return samples;
+}
+
 /**
- * Folds a batch of one day's durations into that day's cost.
+ * Two parts of one day read as a whole: the slowest of the union, and the
+ * count of both.
+ *
+ * This is the same sample one accumulation of the whole day would have
+ * kept. A duration either part dropped already had `COST_SAMPLE_CAP`
+ * larger durations above it in that part alone, so the union holds at
+ * least that many above it too and it falls outside the cap either way.
+ */
+export function mergeSamples(a: DaySamples, b: DaySamples): DaySamples {
+  return {
+    slowest: [...a.slowest, ...b.slowest]
+      .sort((x, y) => x - y)
+      .slice(-COST_SAMPLE_CAP),
+    count: a.count + b.count,
+  };
+}
+
+/**
+ * Folds a batch of one day's durations into that day's sample.
  *
  * A day is read across as many runs as it takes for its objects to
- * arrive, so this is given part of a day at a time and has to combine
- * rather than replace: a later batch of two fast executions would
- * otherwise overwrite a morning of slow ones and understate what the
- * identity costs, which is the direction that overruns a lane.
- *
- * What it keeps is the higher percentile and the summed count. Two
- * percentiles cannot be averaged into the percentile of their union
- * without the samples behind them, and of the two answers available the
- * larger is the one a time budget survives.
+ * arrive, so this is given part of a day at a time and combines rather
+ * than replaces. Combining the samples rather than a figure taken from
+ * them is what makes the day's cost a percentile of the day: a batch
+ * carrying one execution contributes one duration, where a percentile of
+ * that batch would be that one duration standing for every execution the
+ * day holds.
  */
 export function sealDay(
   state: IdentityState,
   day: string,
-  durationsMs: readonly number[] | DaySamples,
+  batch: DaySamples,
 ): void {
-  // The only writer of a day's cost, so what is already there is another
-  // sealing of the same day from an earlier run and can be combined with
-  // this one. Nothing writes a provisional value alongside it: a running
-  // maximum kept as the fold went would be merged here as though it were
-  // a percentile, and its count added to a count that already includes
+  // The only writer of a day's sample, so what is already there is
+  // another sealing of the same day from an earlier run and can be
+  // combined with this one. Nothing writes a provisional value alongside
+  // it, whose count would then be added to a count that already includes
   // it.
-  const batch = Array.isArray(durationsMs)
-    ? { p90: percentile90(durationsMs), count: durationsMs.length }
-    : {
-      p90: sampledPercentile90(durationsMs as DaySamples),
-      count: (durationsMs as DaySamples).count,
-    };
   if (batch.count === 0) return;
-  const known = state.costByDay[day];
-  state.costByDay[day] = known === undefined ? batch : {
-    p90: Math.max(known.p90, batch.p90),
-    count: known.count + batch.count,
-  };
+  state.costByDay[day] = mergeSamples(
+    state.costByDay[day] ?? emptySamples(),
+    batch,
+  );
+}
+
+/** A day as an older state wrote it: the percentile rather than the samples. */
+interface StoredPercentile {
+  p90: number;
+  count: number;
+}
+
+/**
+ * Reads a state's stored days forward. A day carrying a percentile and a
+ * count is read as a day of that many executions standing at that
+ * percentile, capped the way any day's sample is capped. It gives the
+ * same cost back, and a later part of the same day merges into it
+ * against the whole day's weight: one execution standing for the day
+ * would be outweighed by the first part to arrive after it, which is
+ * how a day of slow runs would come to report a fast one.
+ */
+export function readCostsForward(state: IdentityState): void {
+  const days = state.costByDay ?? {};
+  state.costByDay = days;
+  // A stored day is one shape or the other, which the state's own
+  // declared type cannot say.
+  const read: Record<string, DaySamples | StoredPercentile> = days;
+  for (const [day, held] of Object.entries(read)) {
+    if ("slowest" in held) continue;
+    // A day whose stored figures are not numbers is read as a day with
+    // nothing in it, which is what a day this cannot make sense of is
+    // worth. Ending the read of the whole state is not.
+    days[day] = Number.isInteger(held.count) && held.count > 0 &&
+        Number.isFinite(held.p90)
+      ? {
+        slowest: new Array(Math.min(held.count, COST_SAMPLE_CAP))
+          .fill(held.p90),
+        count: held.count,
+      }
+      : emptySamples();
+  }
 }
 
 /** Ages a state's per-day counters, dropping days past their windows. */
@@ -747,43 +759,140 @@ export function trimWindows(state: IdentityState, today: string): void {
       if (daysBetween(day, today) > windowDays) delete counts[day];
     }
   };
-  drop(state.runsByDay, CHURN_WINDOW_DAYS);
+  // The run counts answer three questions with two windows: the churn
+  // term's denominator, the flake rate's, and how recently `lastRun` saw
+  // the test. They are kept for the longer of the two windows, and each
+  // reader reads back only as far as its own.
+  drop(state.runsByDay, Math.max(CHURN_WINDOW_DAYS, FLAKE_WINDOW_DAYS));
   drop(state.failuresByDay, CHURN_WINDOW_DAYS);
   drop(state.flakesByDay, FLAKE_WINDOW_DAYS);
   drop(state.costByDay, COST_WINDOW_DAYS);
 }
 
 /**
- * The churn term: recent failures over recent runs, with each day's
- * counts halved every `CHURN_HALF_LIFE_DAYS` as they age. Decayed rather
- * than cut off at a window's edge, because a ratio over a long window
- * measures total historical brokenness rather than the current rate. A
- * week of failures eight months ago would otherwise outrank a test that
- * is failing right now.
+ * A share of a test's runs over the days inside `windowDays`, each day's
+ * counts weighed by `weigh` against how old the day is and how many runs
+ * have followed it.
+ *
+ * Decayed rather than summed flat, because a sum cannot tell two
+ * histories apart that a reader would never confuse. A test that
+ * disagreed twice and then passed two hundred times has settled; one
+ * that passed two hundred times and then disagreed twice has just
+ * started. The same counts, and not the same test.
+ *
+ * Read over a window as well, so what is measured stays bounded. Past
+ * four half-lives a day is worth under one part in sixteen, which makes
+ * the window a performance choice rather than a policy one.
  */
-export function churn(state: IdentityState, today: string): number {
-  let failures = 0;
+function decayedShare(
+  counted: Record<string, number>,
+  state: IdentityState,
+  today: string,
+  windowDays: number,
+  weigh: (ageDays: number, runsSince: number) => number,
+): number {
+  // Newest day first, so the runs a day has been followed by are known
+  // by the time that day is weighed. A day's own runs are weighed
+  // together, as though all of them happened at the end of it, which is
+  // as fine a grain as counters kept per day can answer at.
+  const days = Object.keys(state.runsByDay).sort().reverse();
+  let runsSince = 0;
+  let top = 0;
   let runs = 0;
-  for (const [day, count] of Object.entries(state.runsByDay)) {
+  for (const day of days) {
     const age = daysBetween(day, today);
-    if (age > CHURN_WINDOW_DAYS) continue;
-    const weight = 0.5 ** (age / CHURN_HALF_LIFE_DAYS);
+    if (age > windowDays) continue;
+    const count = state.runsByDay[day] ?? 0;
+    const weight = weigh(age, runsSince);
     runs += count * weight;
-    failures += (state.failuresByDay[day] ?? 0) * weight;
+    top += (counted[day] ?? 0) * weight;
+    runsSince += count;
   }
-  return runs === 0 ? 0 : failures / runs;
+  return runs === 0 ? 0 : top / runs;
 }
 
-/** The share of a test's failures that were flake observations. */
+/**
+ * The churn term: recent failures over recent runs. A ratio over a long
+ * undecayed window measures total historical brokenness rather than the
+ * current rate, and a week of failures eight months ago would otherwise
+ * outrank a test that is failing right now.
+ */
+export function churn(state: IdentityState, today: string): number {
+  return decayedShare(
+    state.failuresByDay,
+    state,
+    today,
+    CHURN_WINDOW_DAYS,
+    (age) => 0.5 ** (age / CHURN_HALF_LIFE_DAYS),
+  );
+}
+
+/**
+ * The share of a test's runs it was seen disagreeing with itself over.
+ *
+ * Runs rather than failures in the denominator, because what the rate
+ * decides is whether running this test once fails somebody's change for
+ * something its author cannot act on, and that is a chance per run. The
+ * two differ by everything a test's passes say: a test that failed once
+ * in ten thousand runs, and passed on the rerun, has every one of its
+ * failures a flake, and a share of failures would read it as wholly
+ * unreliable. Counting runs is also what lets an exclusion reverse, since
+ * a run that does not disagree lowers the share.
+ *
+ * A disagreement's weight halves every `FLAKE_HALF_LIFE_RUNS` runs that
+ * follow it, so a test that has settled since is not judged as though it
+ * had just started. Runs rather than days, because what shows a test has
+ * settled is running without disagreeing. A test that has not run has
+ * shown nothing, and time alone should not clear it.
+ *
+ * A lower bound on how often the test fails on its own, because the only
+ * spurious failure this can count is one with a pass beside it at the
+ * same commit. What raises the bound is repeats, which put several
+ * executions at one commit, and which a rising share is what buys.
+ *
+ * Nothing is charged against the count, and no belief about how tests
+ * usually behave survives into it. A disagreement is not a sample from
+ * an unknown rate the way a failure is; it is a proof, since a test that
+ * is deterministic cannot pass and fail at one commit. Shrinking the
+ * share toward zero would be shrinking it toward what the observation
+ * has already ruled out. So a test seen twice that disagreed once reads
+ * a half, and one that disagreed once in ten thousand runs reads a
+ * ten-thousandth: what separates them is how much each has been run, not
+ * how much either is believed.
+ */
 export function flakeRate(state: IdentityState, today: string): number {
-  let failures = 0;
+  return decayedShare(
+    state.flakesByDay,
+    state,
+    today,
+    FLAKE_WINDOW_DAYS,
+    (_age, runsSince) => 0.5 ** (runsSince / FLAKE_HALF_LIFE_RUNS),
+  );
+}
+
+/**
+ * What a person is shown beside the share: the disagreements inside the
+ * flake window and the runs they were seen among, counted flat. A share
+ * cannot be weighed without them, and they are not what the share
+ * divides — the share weights recent days more heavily, so a test with
+ * these counts reads higher when the disagreements are the recent part
+ * of them.
+ */
+export function flakeCounts(
+  state: IdentityState,
+  today: string,
+): FlakeEvidence {
   let flakes = 0;
-  for (const [day, count] of Object.entries(state.failuresByDay)) {
+  for (const [day, count] of Object.entries(state.flakesByDay)) {
     if (daysBetween(day, today) > FLAKE_WINDOW_DAYS) continue;
-    failures += count;
-    flakes += state.flakesByDay[day] ?? 0;
+    flakes += count;
   }
-  return failures === 0 ? 0 : flakes / failures;
+  let runs = 0;
+  for (const [day, count] of Object.entries(state.runsByDay)) {
+    if (daysBetween(day, today) > FLAKE_WINDOW_DAYS) continue;
+    runs += count;
+  }
+  return { flakes, runs };
 }
 
 /**
@@ -795,14 +904,15 @@ export function flakeRate(state: IdentityState, today: string): number {
  */
 export function costSeconds(state: IdentityState, today: string): number {
   let worst = 0;
-  for (const [day, sample] of Object.entries(state.costByDay)) {
+  for (const [day, samples] of Object.entries(state.costByDay)) {
     if (daysBetween(day, today) > COST_WINDOW_DAYS) continue;
-    if (sample.p90 > worst) worst = sample.p90;
+    const p90 = sampledPercentile90(samples);
+    if (p90 > worst) worst = p90;
   }
   return worst / 1000;
 }
 
-export type { ScoreInputs };
+export type { FlakeEvidence, ScoreInputs };
 
 /** The score's inputs for one identity, as of a given day. */
 export function scoreInputs(
@@ -813,7 +923,6 @@ export function scoreInputs(
     catches: CATCH_WEIGHT_LOCAL * state.localCatches +
       CATCH_WEIGHT_PR * state.prCatches +
       CATCH_WEIGHT_MAIN * state.mainCatches,
-    mainCatches: state.mainCatches,
     sources: state.sources.length,
     churn: churn(state, today),
   };

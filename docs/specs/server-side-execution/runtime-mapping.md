@@ -64,7 +64,7 @@ Status legend:
 | 21 | Per-(stream,handler) FIFO with W4 backlog cap 256, last-wins collapse, chained onCommit | `scheduler/events.ts` (the backlog cap in `queueSchedulerEvent`), `scheduler/constants.ts` (`MAX_EVENT_BACKLOG_PER_STREAM`) | README §3.8 (backpressure hook only) | GAP |
 | 22 | Event for a not-running piece: FIFO slot reserved, piece auto-started | `scheduler/events.ts` (the auto-start in `queueSchedulerEvent`), `ensure-piece-running.ts` (`ensurePieceRunning`) | serving-loop §1, §3 (demand-driven pull; the event is the demand) | RULED |
 | 23 | Preflight: `populateDependencies`, recompute dirty inputs on demand before dispatch, load-park (CT-1795) | `scheduler/events.ts` (`preflightQueuedEventDependencies`) | serving-loop §3, events §2 (cited as the freshness rule) | COVERED |
-| 24 | `presyncInputs` await before dispatch | `scheduler/types.ts` (`EventHandler.presyncInputs`), `scheduler/events.ts` (the `presyncInputs` await in `dispatchQueuedEvent`) | none (moot server-side) | CHANGED |
+| 24 | `presyncInputs` await before dispatch; guarded streams select the actor's implementation for preflight and recheck before execution | `scheduler/types.ts`, `scheduler/events.ts` | builtins §3 | COVERED |
 | 25 | Handler dispatch: immediate tx, `dispatchedEventId/Time`, commit not awaited | `scheduler/events.ts` (`dispatchQueuedEvent`) | events §2; serving-loop §3d | CHANGED |
 | 26 | Exactly-once handling: create-only receipt cell keyed by durable event id, `receipt-exists` / `origin-committed` preconditions (`commitPreconditions` flag), receipt-race loser drops | `runner.ts` (`Runner.#handleJavaScriptHandlerResult()`), cause (`$event` in `Runner.#instantiateJavaScriptHandlerNode()`), race `scheduler/events.ts` (the `receipt-exists` case in `dispatchQueuedEvent`) | events §4 (eventWatermark) | CHANGED |
 | 27 | Speculation lineage: events/pieces launched by an uncommitted tx are dropped/stopped on origin failure; cross-space descendants park until origin commit | `scheduler/lineage.ts` (`SpeculationLineage`), `scheduler/events.ts` (the `lineageStatus` check in `processPullQueuedEventDuringExecute`) | speculation §1-2 (client), serving-loop §3d (server) | CHANGED |
@@ -87,15 +87,15 @@ Status legend:
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
-| 37 | Lift/computed returning reactives: `patternFromFrame`, result-pattern cache keyed by result doc, changed pattern re-`run` into the same cell, unchanged is a no-op, stop on commit failure | `runner.ts` (`Runner.#writeJavaScriptActionResult()`: its `patternFromFrame` call and `#resultPatternCache` compare) | none by name | GAP |
+| 37 | Lift/computed returning reactives: `patternFromFrame`, content-hash memo per result document and instance, changed pattern run into the same cell, scoped program groups shared by selecting instances | `runner.ts` (`#writeJavaScriptActionResult`, `#startScopedPrograms`) | builtins §3 | COVERED |
 | 38 | Handler returning reactives: result pattern run under the handler tx with receipt ownership; navigateTo-bearing results deferred to post-commit start | `runner.ts` (`Runner.#handleJavaScriptHandlerResult()`, deferring through `#handlerResultPatternHasNavigateTo()`), one-shot pull (`Runner.#patternNeedsOneShotPull()`) | events §2 (consequences), builtins §3/§4 | GAP |
-| 39 | `compileAndRun`: async compile off the action, result piece via `runSynced`, `pieceCreatedCallback` | `builtins/compile-and-run.ts` (`compileAndRun`, its `compileOrGetPattern` continuation) | builtins §3 | CHANGED |
+| 39 | `compileAndRun`: accepted outbox compilation, stamped readiness completion, child setup in a derivation, client observation and creation callback | `builtins/compile-and-run.ts` | builtins §3 | COVERED; OW28 owns acceptance validation |
 
 ### 1f. Pattern-source updates
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
-| 40 | Following a piece's source origin: origin resolution, identity lookup, verified closure compile, schema-compat gate, pointer write | `source-reconciler.ts`, called from `packages/piece/src/ops/pieces-controller.ts` when a piece is opened | serving-loop.md §3e | N/A server-side (a serving tenure opens no piece, so it follows no origin; the SWAP half it does own is row 41) |
+| 40 | Following a piece's source origin: origin resolution, identity lookup, verified closure compile, schema-compat gate, pointer write | `source-reconciler.ts`, called by `packages/piece/src/ops/pieces-controller.ts` and `builtins/wish.ts` on explicit piece opens | serving-loop.md §3e | Opener-owned: ON clients open ordinary pieces; the serving wish builtin opens its runtime-supplied sidecars. Root ensuring does not follow source. The SWAP half is row 41. |
 | 41 | `patternIdentity` watcher: live hot-swap of running pieces on pointer change (setup, teardown, reinstantiate); unloadable-pointer roll-forward (CT-1923) | `runner.ts` (the `patternIdentity` meta sink `Runner.#startCore()` installs) | serving-loop.md §3e | COVERED (stage F: the swap runs in the SpaceServer — a pointer write is ordinary authored input; the swap's setup write stamps the `bookkeeping` kind; end-to-end test in `executor-serving-loop.test.ts`) |
 | 42 | Piece source lifecycle records (revisions, transitions, provenance) | `runner.ts` (`PieceSourceRevisionOperation` and the types beside it, `getPieceSourceRevisions`) | none (authored data; rides along) | COVERED |
 
@@ -341,13 +341,16 @@ store locality assumption broke — stop and check.
 **N37/N38 (result-as-pattern).** The runner instantiates pieces from
 *computation results*: any lift/handler returning reactives becomes a
 `patternFromFrame` pattern run into a deterministic result cell. For
-lifts, updates re-instantiate in place when the serialized pattern
-changes (the `#resultPatternCache` compare in
-`Runner.#writeJavaScriptActionResult()`) — unchanged results are
-no-ops, and a failed commit stops the child. For handlers, the child
-run is owned by the handler tx (receipt ownership, N26) and
-navigateTo-bearing results defer starting until the tx commits
-(`Runner.#handleJavaScriptHandlerResult()`) so the target is durable.
+lifts, a canonical content hash of the flattened builder artifacts identifies
+the result pattern. `resultPatternCache` memoizes that hash per result document
+and resolved instance. A changed pattern runs into the same result cell;
+unchanged results reuse it. Scoped serving instances share a node group when
+they select the same program. Failed setup releases its own work without
+stopping another instance's child.
+For handlers, the child run is owned by the handler tx (receipt
+ownership, N26) and navigateTo-bearing results defer starting until
+the tx commits (`Runner.#handleJavaScriptHandlerResult()`) so the
+target is durable.
 v2 placement: these run wherever the graph runs — server
 authoritatively (the child joins the space's graph, as builtins §3
 says for compileAndRun), client speculatively. Three consequences, one
@@ -357,27 +360,28 @@ no-children rule) — registrations are not writes
 (`Runner.#handleJavaScriptHandlerResult()`); ids derive from cause so
 the speculative child converges with the authoritative one by
 identity, and speculation §2 now carries the lifecycle + retirement
-line; (b) the lift-result re-instantiate happens inside a served wave
-— its writes are wave writes, fine, but the JSON-stringify compare is
-the *memo*; name it so nobody adds a second one; (c) the navigateTo
-deferral becomes moot under §3.7 (intent lands in the wave's derived
-commit; the client enacts) — delete the deferral in the ON arm rather
-than porting it.
+line; (b) the lift-result setup happens inside a served wave, and its
+content-hash memo remains specific to the selecting instance; (c) the
+navigateTo deferral becomes moot under §3.7 (intent lands in the
+wave's derived commit; the client enacts) — delete the deferral in the
+ON arm rather than porting it.
 
-**N39 (compileAndRun).** Matches builtins §3 (compile off the loop —
-today via a floating promise in `compileAndRun`; v2 moves the async to
-the outbox). Two client hooks need placement: `pieceCreatedCallback`
-(`compile-and-run.ts`, `Runtime.pieceCreatedCallback`) and the
-in-memory-only request dedupe (`previousCallHash`,
-`compile-and-run.ts` — unlike llm there is no durable requestHash
-today, so restart re-compiles; harmless but counter-visible).
-Recommended: derive "piece created" from data (the result cell), drop
-the callback server-side; adopt the §4 memo shape for the compile
-request.
+**N39 (compileAndRun).** The serving path follows builtins §3: the outbox
+compiles a detached program after the issuing contribution is accepted.
+Completion checks the instance's request marker and records readiness;
+a derivation stages child setup and the resolved marker together. Current
+source reads carry completion labels. Superseded completion releases its local
+issuance marker, allowing a withdrawn replacement to reissue. Pending requests
+recover through the target space's compile cache. Clients observe committed
+outcomes and invoke `pieceCreatedCallback` when the successful child appears.
+The OFF path uses its local compile promise and `runSynced`.
 
 **N40/N41 (pattern updates — who triggers under v2).** The two halves
 have different owners. FOLLOWING a source origin belongs to whoever
-OPENS a piece, which is a client; a serving tenure opens none. The live
+explicitly OPENS a piece. ON clients open ordinary pieces, while the serving
+wish builtin opens its runtime-supplied sidecars through `openSidecarSurface`;
+existing sidecars reconcile their origins on that open. Tenure activation
+ensures root existence without following its source. The live
 hot-swap via the `patternIdentity` meta sink, including teardown +
 reinstantiation and the unloadable-pointer roll-forward, belongs to
 whichever runtime is running the piece. Under v2 pieces run only in the
@@ -464,15 +468,19 @@ weighed (session-scoped derivations as client-speculation-only, scoped
 state reclassified authored-adjacent) are rejected — scoped derived
 state stays derived and server-committed, keeping today's reload
 persistence. The persisted-state context ladder (row 60) stays
-tripwired. The Phase 0 review continues (README §6 Q7, was ledger
-L10). The 2026-08-02 scout pass verified scopes.md's anchors and
-recorded in scopes.md §7 the five assumptions of main's scope
-machinery that a SpaceServer breaks (M1–M5: per-identity scope
-discovery; scope-NAME in-memory keying; no all-principals write path;
-scope-NAME wake keys; no session-data GC); scopes.md §8 lists what the
-review still owes (after the batch-4 closures: basis-index DDL
-authoring + session-data GC design); row 57's identity remainder is
-RESOLVED (N57, R-Q6b).
+tripwired. The Phase 0 review is complete apart from the session-data
+GC design (README §6, was ledger L10): the run-supply half — a
+narrowed node runs once per demanding principal, materialized on
+demand — was RULED 2026-08-16 and landed by fan-out stages A and B
+(scopes.md §2; verification-coverage.md OW17, CLOSED as a row with its
+flagged residuals owed there). The 2026-08-02 scout pass verified
+scopes.md's anchors and recorded in scopes.md §7 the five assumptions
+of main's scope machinery that a SpaceServer breaks (M1–M5:
+per-identity scope discovery; scope-NAME in-memory keying; no
+all-principals write path; scope-NAME wake keys; no session-data GC);
+scopes.md §8 lists what the review still owes — the session-data GC
+design, the basis-index DDL having been authored in serving-loop.md
+§3b; row 57's identity remainder is RESOLVED (N57, R-Q6b).
 
 **N57 (identity/authority) — RESOLVED 2026-08-02 (R-Q6b).** Today one
 runtime = one `userIdentityDID` (`Runtime.userIdentityDID`) and all

@@ -112,7 +112,7 @@ Deno.test("the warning names the failure and both installs", () => {
   const warning = missingCommandWarning("cf");
   assertStringIncludes(warning, "not on your PATH");
   assertStringIncludes(warning, "cf completion complete");
-  assertStringIncludes(warning, "mise");
+  assertStringIncludes(warning, "deno task install-cf");
   assertStringIncludes(warning, "ln -s");
 });
 

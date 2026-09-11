@@ -29,7 +29,7 @@ describe("cfc-verdict-reason", () => {
 
   it("recognizes a tagged reason and rejects an untagged one", () => {
     expect(isVerdictReason(verdictReason("exact-copy violated"))).toBe(true);
-    expect(isVerdictReason("missing link source metadata for of:x"))
+    expect(isVerdictReason("missing schema write-policy input for of:x"))
       .toBe(false);
   });
 
@@ -51,7 +51,7 @@ describe("cfc-verdict-reason", () => {
       verdictReason("writer-fit confidentiality misfit at /body"),
       "missing schema write-policy input for of:y",
     ])).toBe(false);
-    expect(isTerminalRefusal(["missing link source metadata for of:x"]))
+    expect(isTerminalRefusal(["missing schema write-policy input for of:x"]))
       .toBe(false);
     expect(isTerminalRefusal([])).toBe(false);
   });

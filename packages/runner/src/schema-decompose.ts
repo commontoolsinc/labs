@@ -64,7 +64,13 @@ const RESOURCE_SCOPE_KEYWORDS = [
   "$recursiveRef",
 ] as const;
 
-/** The URI scheme prefix of a content-addressed schema document reference. */
+/**
+ * The URI scheme prefix of a content-addressed schema document reference,
+ * `cid` being short for content identifier. RFC 2392 registers the same
+ * name for a body part of a MIME message, addressed by its `Content-ID`
+ * header. The two uses share the name and nothing else. `entity-kind.ts`
+ * records the other scheme names this tree uses.
+ */
 export const SCHEMA_DOCUMENT_REF_PREFIX = "cid:";
 
 /** A parsed external schema reference. */

@@ -21,6 +21,14 @@ CLEAR_ALL_SPACES=false
 FORCE=false
 WATCH=false
 BG_UPDATER=false
+# Flags this script has no opinion about, forwarded to start-local-dev.sh.
+# This script is a wrapper around that one, so its surface is the other's, and
+# refusing a flag it has not heard of makes every caller wait for this file to
+# learn about it. That reaches further than convenience: loom drives the
+# daemon's toolshed recovery through here at whatever labs commit it vendors,
+# so a refusal is an instance whose toolshed never comes back.
+PASSTHROUGH_ARGS=()
+CF_HARNESS=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --clear-cache)
@@ -37,6 +45,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --watch)
             WATCH=true
+            shift
+            ;;
+        --cf-harness)
+            CF_HARNESS=true
             shift
             ;;
         --bg-updater)
@@ -87,9 +99,9 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         *)
-            echo "Unknown option: $1"
-            echo "Usage: $0 [--clear-cache] [--dangerously-clear-all-spaces] [--force] [--watch] [--bg-updater] [--inspect] [--inspect-brk] [--inspect-port PORT] [--port-offset N] [--shell-port PORT] [--toolshed-port PORT]"
-            exit 1
+            echo "Forwarding to start-local-dev.sh: $1"
+            PASSTHROUGH_ARGS+=("$1")
+            shift
             ;;
     esac
 done
@@ -116,7 +128,14 @@ export TOOLSHED_PORT
 export PORT_OFFSET
 
 echo "Stopping local dev servers..."
-./scripts/stop-local-dev.sh --shell-port "$SHELL_PORT" --toolshed-port "$TOOLSHED_PORT"
+# The forwarded flags reach the stop as well as the start, so `--cf-harness`
+# cycles the console with the pair rather than leaving the old one holding its
+# port against the new one.
+STOP_ARGS=(--shell-port "$SHELL_PORT" --toolshed-port "$TOOLSHED_PORT")
+if [[ "$CF_HARNESS" == "true" ]]; then
+    STOP_ARGS+=(--cf-harness)
+fi
+./scripts/stop-local-dev.sh "${STOP_ARGS[@]}" "${PASSTHROUGH_ARGS[@]}"
 
 CACHE_DIR="packages/toolshed/cache"
 
@@ -150,6 +169,9 @@ fi
 if [[ "$BG_UPDATER" == "true" ]]; then
     START_ARGS="$START_ARGS --bg-updater"
 fi
+if [[ "$CF_HARNESS" == "true" ]]; then
+    START_ARGS="$START_ARGS --cf-harness"
+fi
 if [[ "$INSPECT" == "true" ]]; then
     if [[ "$INSPECT_BRK" == "true" ]]; then
         START_ARGS="$START_ARGS --inspect-brk"
@@ -160,4 +182,4 @@ if [[ "$INSPECT" == "true" ]]; then
         START_ARGS="$START_ARGS --inspect-port $INSPECT_PORT"
     fi
 fi
-./scripts/start-local-dev.sh $START_ARGS
+./scripts/start-local-dev.sh $START_ARGS "${PASSTHROUGH_ARGS[@]}"

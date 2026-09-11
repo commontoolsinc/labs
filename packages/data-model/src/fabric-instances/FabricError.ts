@@ -46,7 +46,7 @@ import {
   errorClassFromType,
   fabricFromNativeValue,
 } from "@/native-conversion.ts";
-import { isValidFabricValue } from "@/type-check.ts";
+import { isValidFabricValue } from "@/validity-check.ts";
 
 /**
  * Helper for `FabricError.fromNativeError()`, which converts a nested value

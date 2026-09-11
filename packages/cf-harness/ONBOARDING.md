@@ -45,10 +45,10 @@ first run does without.
    deno --version
    ```
 
-   Success is a version matching the pin. For `mise` users: a fresh checkout or
-   worktree is untrusted, so `mise where deno` fails until you run `mise trust`
-   in it. Either trust it, or skip the shims and put the install on `PATH`
-   directly:
+   Success is a version matching the pin. For `mise` users: the repo's
+   `mise.toml` pins Deno and nothing else, so a fresh checkout or worktree
+   resolves it with no `mise trust` step. To skip the shims, put the install on
+   `PATH` directly:
 
    ```sh
    export PATH="$HOME/.local/share/mise/installs/deno/<pinned-version>/bin:$PATH"
@@ -374,18 +374,16 @@ because render-by-slug currently crashes (CT-2185).
 ## 6. Drive it from the web API
 
 For the weaver, a script, or an agent that does not hold a browser. The
-[console routes](console/README.md#http-routes) require the per-process token
-cookie that `GET /` sets, because the server treats loopback as an address
-rather than an authorization; fetch `/` once and reuse the cookie jar.
+[console routes](console/README.md#http-routes) take one request each: they
+carry no credential, and ask only that the request names the server's own host.
+Reaching this socket is what the network already decided.
 
 ### Submit
 
 ```sh
 export CONSOLE_URL=http://127.0.0.1:<free-console-port>
-export COOKIE_JAR=$(mktemp /tmp/cf-harness-cookie.XXXXXX)
-curl -sS -c "$COOKIE_JAR" "$CONSOLE_URL/" >/dev/null
 
-TASK_RESPONSE=$(curl -sS -b "$COOKIE_JAR" \
+TASK_RESPONSE=$(curl -sS \
   -H 'Content-Type: application/json' \
   -d '{"text": "Build me a reading list of three books with a checkbox next to each. Name the piece reading-list."}' \
   "$CONSOLE_URL/api/task")
@@ -403,7 +401,7 @@ shows the shape.
 A script asks once and repeats only while it receives `409`:
 
 ```sh
-curl -i -sS -b "$COOKIE_JAR" "$CONSOLE_URL/api/turns/$TURN_ID/result"
+curl -i -sS "$CONSOLE_URL/api/turns/$TURN_ID/result"
 ```
 
 The whole rule is `409` keep asking, `200` read the result, `410` stop with the
@@ -411,7 +409,7 @@ terminal failure. A `404` is either an unknown turn or a completed turn whose
 artifacts are unavailable; inspect its `code`. Once it is `200`, keep the body:
 
 ```sh
-TURN_RESULT=$(curl -sS -b "$COOKIE_JAR" "$CONSOLE_URL/api/turns/$TURN_ID/result")
+TURN_RESULT=$(curl -sS "$CONSOLE_URL/api/turns/$TURN_ID/result")
 printf '%s\n' "$TURN_RESULT" | jq
 ```
 
@@ -441,7 +439,7 @@ long as the connection is held, so a caller must disconnect on the terminal
 event rather than wait for end of stream.
 
 ```sh
-curl -N -b "$COOKIE_JAR" "$CONSOLE_URL/api/events?sessionId=$SESSION_ID"
+curl -N "$CONSOLE_URL/api/events?sessionId=$SESSION_ID"
 ```
 
 Every chat event is one frame:
@@ -533,10 +531,8 @@ export INPUT_CELL_REF="/of:${INPUT_PIECE_ID}/account"
 
 ### Submit with the cell attached
 
-With the cookie jar from section 6:
-
 ```sh
-TASK_RESPONSE=$(curl -sS -b "$COOKIE_JAR" \
+TASK_RESPONSE=$(curl -sS \
   -H 'Content-Type: application/json' \
   -d "$(jq -n --arg ref "$INPUT_CELL_REF" '{
     text: "Make me a budget dashboard from my transaction data — totals by category that update when the data changes.",
@@ -661,8 +657,9 @@ The boundaries that affect this onboarding are:
   `policyRefusal` as structured data. Declassification by policy — releasing a
   value under one policy and refusing it under another — remains open.
 - CT-2187 and CT-2191: the audit's known findings in section 7.
-- CT-2155 clause 5: protected web routes use the `GET /` cookie exchange; there
-  is no shared bearer-token shortcut.
+- CT-2155 clause 5: the console's web routes carry no credential. The `Host`
+  allowlist is the whole of the request gate, and the network the console is
+  reachable on is the boundary.
 - CT-2185: `cf piece render --cell /<slug>` crashes; resolve with `cf cell get`
   and render by `fid1:` ID.
 - CT-2156: two consoles on one `CF_HARNESS_CONSOLE_DIR` interleave records.
