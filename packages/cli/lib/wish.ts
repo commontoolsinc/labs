@@ -124,61 +124,94 @@ export async function resolveWish(
       }),
   }));
 
+  // One result cell per invocation, as `cf piece call` mints for a tool run.
+  // A headless read is a throwaway instantiation, so the cell holds nothing
+  // but this invocation's answer: a refused or unfinished run can never read
+  // back as an earlier invocation's result, and the setup commit never claims
+  // a cell another session already wrote.
   const tx = runtime.edit();
   const resultCell = runtime.getCell<{
     out?: { result?: unknown; error?: unknown };
-  }>(space, { wish: { headlessRead: spec.query } }, undefined, tx);
+  }>(
+    space,
+    { wish: { headlessRead: spec.query, invocation: crypto.randomUUID() } },
+    undefined,
+    tx,
+  );
   const result = runtime.run(tx, wishPattern, {}, resultCell);
-  await tx.commit();
 
-  // Let the wish action run, then converge cross-space profile loads. The wish
-  // builtin pulls freshly-created profiles across space boundaries and re-runs
-  // when they materialize; pulling the result and syncing storage drains that.
-  await result.pull();
-  await runtime.idle();
-  await runtime.storageManager.synced();
-  // Surface a permanent authorization denial on the wish's own space with the
-  // real error. Scoped to `space`: a denied cross-space profile load stays a
-  // silent absent read, which is the wish's expected "no profile yet" outcome.
-  throwOnSpaceAuthorizationError(runtime.storageManager, space);
-  await result.pull();
-  await runtime.idle();
+  // The run is stopped on every way out, a refused setup included: a
+  // per-invocation cell means a per-invocation run, and a runtime that serves
+  // many reads (a host, a test) must not keep a finished or failed read live,
+  // re-running it on later source changes and retaining its cells.
+  try {
+    runtime.prepareTxForCommit(tx);
+    const setup = await tx.commit();
+    if (setup.error) {
+      throw new Error(
+        `Cannot set up the headless read of "${spec.query}": ${
+          String((setup.error as { message?: unknown }).message ?? setup.error)
+        }`,
+        { cause: setup.error },
+      );
+    }
 
-  const outCell = result.key("out");
-  const error: unknown = outCell.key("error").get();
-  const resolved = outCell.key("result");
-  // Whether the wish matched is read where the wish WROTE it, not inferred
-  // from what the target holds. A matched target whose value nothing has set
-  // dereferences to `undefined` exactly as an unmatched wish does, and only
-  // one of the two is an absent result: the matched one still has an address,
-  // which is the whole of what a marked position asks for.
-  const matched = resolved.getRaw() !== undefined;
-  const value: unknown = spec.schema === undefined
-    ? resolved.get()
-    : resolved.resolveAsCell().asSchema(undefined).asSchema(spec.schema).get();
+    // Drive the wish action's first run and load the result graph, then wait
+    // for the lookup to SETTLE. On a cold replica the action follows links
+    // into home records the runtime has not synced (the profile list, the MRU
+    // list, each profile's own space), reads each as absent until its load
+    // lands, and has its commit refused — a `seq: 0` claim over a document
+    // that exists — once per such layer, re-running after each catch-up.
+    // `settled()` spans those rounds. `idle()` does not: it returns before a
+    // commit's verdict and sees nothing of a retry parked on its catch-up
+    // gate, so a read after it can answer from a stale or empty result.
+    await result.pull();
+    await runtime.settled();
+    // Surface a permanent authorization denial on the wish's own space with
+    // the real error. Scoped to `space`: a denied cross-space profile load
+    // stays a silent absent read, which is the wish's expected "no profile
+    // yet" outcome.
+    throwOnSpaceAuthorizationError(runtime.storageManager, space);
 
-  if (isDataUnavailable(value)) {
-    const unavailableError = value.reason === "error"
-      ? value.error?.message
-      : undefined;
+    const outCell = result.key("out");
+    const error: unknown = outCell.key("error").get();
+    const resolved = outCell.key("result");
+    // Whether the wish matched is read where the wish WROTE it, not inferred
+    // from what the target holds. A matched target whose value nothing has
+    // set dereferences to `undefined` exactly as an unmatched wish does, and
+    // only one of the two is an absent result: the matched one still has an
+    // address, which is the whole of what a marked position asks for.
+    const matched = resolved.getRaw() !== undefined;
+    const value: unknown = spec.schema === undefined
+      ? resolved.get()
+      : resolved.resolveAsCell().asSchema(undefined).asSchema(spec.schema)
+        .get();
+
+    if (isDataUnavailable(value)) {
+      const unavailableError = value.reason === "error"
+        ? value.error?.message
+        : undefined;
+      return {
+        result: null,
+        error: typeof error === "string" && error.length > 0
+          ? error
+          : unavailableError,
+      };
+    }
+
     return {
-      result: null,
-      error: typeof error === "string" && error.length > 0
-        ? error
-        : unavailableError,
+      // `?? null` covers the matched-but-unset target a caller selected
+      // nothing over: there is an address to shape but no value to render,
+      // and a wish answers absence as JSON null. A selection never lands here
+      // undefined — `selectWishValue` refuses that rather than returning it.
+      result: matched
+        ? await selectWishValue(runtime, space, resolved, value, spec) ?? null
+        : null,
+      error: typeof error === "string" && error.length > 0 ? error : undefined,
     };
+  } finally {
+    runtime.runner.stop(resultCell);
   }
-
-  return {
-    // `?? null` covers the matched-but-unset target a caller selected nothing
-    // over: there is an address to shape but no value to render, and a wish
-    // answers absence as JSON null. A selection never lands here undefined —
-    // `selectWishValue` refuses that rather than returning it.
-    result: matched
-      ? await selectWishValue(runtime, space, resolved, value, spec) ?? null
-      : null,
-    error: typeof error === "string" && error.length > 0 ? error : undefined,
-  };
 }
 
 /**

@@ -172,7 +172,7 @@ export type DispatchingVisitorResult<
   | VisitSubtypeForm;
 
 //
-// Visitor interface and exported implementations thereof
+// Visitor interface
 //
 
 /**
@@ -190,6 +190,15 @@ export type DispatchingVisitorResult<
  * (possibly itself compound) as an additional option.
  */
 export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
+  /**
+   * Indicates whether or not the given value is compatible with the
+   * `DomainExtra` type defined by the visitor. This is a type predicate for
+   * `DomainExtra`. The visitor engine calls it before dispatching to
+   * `visitNonFabricValue()`, and will instead `throw` an error if this method
+   * returns anything falsy.
+   */
+  isDomainExtra(value: DomainFor<DomainExtra>): value is DomainExtra;
+
   /**
    * Visits a value which is already in the process of being visited. The
    * visitor engine calls this method _before_ calling `visitValue()` when the
@@ -237,11 +246,11 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   ): DispatchingVisitorResult<DomainExtra, ResultType>;
 
   /**
-   * Visits a value determined to _not_ be a valid `FabricValue`.
-   *
-   * **Note:** When this visitor is called using a function that allows for
-   * non-`FabricValue`s, the visitor engine will call this method on an
-   * ostensible `FabricValue` that did not pass its type check.
+   * Visits a value determined to _not_ be a valid `FabricValue`. Before calling
+   * this method, the visitor engine will call `isDomainExtra()`, and will only
+   * call this method if `isDomainExtra()` returned a truthy value (`throw`ing
+   * if not). So, as long as that method tells the truth, this method will only
+   * ever get called with a value which is truly compatible with `DomainExtra`.
    */
   visitNonFabricValue(
     value: DomainExtra,

@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import {
-  ContainerIteratingVisitor,
+  ContainerIteratingValueVisitor,
   type DispatchingVisitorResult,
   DO_RECURSE_KEYS_VALUES,
   DO_RECURSE_VALUES,
@@ -11,8 +11,11 @@ import {
   type LeafVisitorResult,
 } from "@/value-visit";
 
-describe("ContainerIteratingVisitor", () => {
-  class Iterating extends ContainerIteratingVisitor<never, never> {
+describe("ContainerIteratingValueVisitor", () => {
+  class Iterating extends ContainerIteratingValueVisitor<never, never> {
+    override isDomainExtra(_value: unknown): _value is never {
+      return false;
+    }
     override visitCycle(): LeafVisitorResult<never, never> {
       return undefined;
     }
