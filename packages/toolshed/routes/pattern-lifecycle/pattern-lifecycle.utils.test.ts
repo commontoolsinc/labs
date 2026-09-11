@@ -284,6 +284,26 @@ describe("pattern-lifecycle verbs (transport half)", () => {
       }),
     );
     expect(reader.status).toBe(403);
+
+    // A pattern the space already holds, by identity, moves the piece back.
+    const restored = ok(
+      await processSetSource(deps, alice.did(), {
+        space,
+        piece: created.pieceId,
+        pattern: created.pattern,
+        dangerouslyAllowIncompatibleSchema: true,
+      }),
+    );
+    expect(restored.pattern).toEqual(created.pattern);
+
+    const sourceless = refused(
+      await processSetSource(deps, alice.did(), {
+        space,
+        piece: created.pieceId,
+      }),
+    );
+    expect(sourceless.status).toBe(400);
+    expect(sourceless.code).toBe("invalid-source");
   });
 
   it("maps a compile failure to 422", async () => {

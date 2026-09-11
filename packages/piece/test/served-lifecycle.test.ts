@@ -432,11 +432,15 @@ describe("served lifecycle verbs", () => {
       ).toEqual(receipt.pattern);
     });
 
-    it("refuses a piece the space does not hold", async () => {
+    it("refuses a piece the space does not hold, and an address that names none", async () => {
       const refusal = await refusalOf(
         setSource("no-such-piece", { program: BASE_PROGRAM }),
       );
       expect(refusal.code).toBe("piece-not-found");
+      const malformed = await refusalOf(
+        setSource("", { program: BASE_PROGRAM }),
+      );
+      expect(malformed.code).toBe("piece-not-found");
     });
 
     it("refuses an update proved against a pattern the piece is no longer on", async () => {

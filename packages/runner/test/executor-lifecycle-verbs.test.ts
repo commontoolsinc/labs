@@ -349,6 +349,45 @@ describe("ExecutorHost.runLifecycleVerb", () => {
       expect(cell.get()).toBeUndefined();
     });
 
+    it("is refused at the stamp for a run that is not bookkeeping, and at the commit for a write to another space", async () => {
+      host = newHost();
+      const other =
+        (await Identity.fromPassphrase("lifecycle verbs other space"))
+          .did() as MemorySpace;
+      const seen = await host.runLifecycleVerb(space, {
+        name: "mark-elsewhere",
+        run: async (runtime) => {
+          const derivation = runtime.edit();
+          let stampRefusal: string | undefined;
+          try {
+            runtime.stampServerRun(derivation, {
+              actionId: "test-verb/derive-directly",
+              kind: "derivation",
+              directCommit: true,
+            });
+          } catch (error) {
+            stampRefusal = error instanceof Error ? error.message : "";
+          } finally {
+            derivation.abort();
+          }
+          const tx = runtime.edit();
+          runtime.stampServerRun(tx, {
+            actionId: "test-verb/mark-elsewhere",
+            kind: "bookkeeping",
+            directCommit: true,
+          });
+          runtime.getCell<{ marker: string }>(other, MARKER_CAUSE, undefined)
+            .withTx(tx).set({ marker: "elsewhere" });
+          runtime.prepareTxForCommit(tx);
+          return { stampRefusal, commit: await tx.commit() };
+        },
+      });
+      expect(seen.stampRefusal).toContain("only a bookkeeping run");
+      expect(seen.commit.error?.message).toContain(
+        "may write only the serving space",
+      );
+    });
+
     it("lets a piece it stages derive in the same cycle, the derivation written over the documents the commit moved", async () => {
       // No root ensure, so nothing but the verb's own work reaches the
       // cycle's wave: the piece's first derivation, which the demand pass
