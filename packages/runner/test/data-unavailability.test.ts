@@ -552,7 +552,7 @@ describe("JavaScript-node data unavailability", () => {
       isReadIgnoredForCommit(read.meta) &&
       isInternalVerifierRead(read.meta)
     );
-    expect(verifierReads).toHaveLength(1);
+    expect(verifierReads).toHaveLength(3);
   });
 
   it("does not traverse opaque guard operands below their root", async () => {
@@ -719,6 +719,36 @@ describe("JavaScript-node data unavailability", () => {
     expectUnavailable(output, "pending");
   });
 
+  it("preserves local definition scope while scanning nested inputs", async () => {
+    const marker = DataUnavailable.pending();
+    let calls = 0;
+    const output = await runValueNode({
+      argument: { value: { child: { status: marker } } },
+      argumentSchema: {
+        $defs: {
+          envelope: {
+            type: "object",
+            properties: { child: { $ref: "#/$defs/child" } },
+            required: ["child"],
+          },
+          child: {
+            type: "object",
+            properties: { status: { type: "number" } },
+            required: ["status"],
+          },
+        },
+        $ref: "#/$defs/envelope",
+      },
+      implementation: () => {
+        calls++;
+        return "should not run";
+      },
+    });
+
+    expect(calls).toBe(0);
+    expectUnavailable(output, "pending");
+  });
+
   it("terminates a linked-container cycle and still selects its sibling marker", async () => {
     const first = runtime.getCell(
       space,
@@ -818,43 +848,45 @@ describe("JavaScript-node data unavailability", () => {
   });
 
   it("selects syncing ahead of a concrete schema mismatch", async () => {
-    const writes: DataUnavailableReason[] = [];
-    const missingRemote = runtime.getCell(
-      remoteSpace,
-      `precedence missing remote ${nextResultId++}`,
-    );
-    let calls = 0;
+    for (const required of [["mismatch", "missing"], ["mismatch"]]) {
+      const writes: DataUnavailableReason[] = [];
+      const missingRemote = runtime.getCell(
+        remoteSpace,
+        `precedence missing remote ${nextResultId++}`,
+      );
+      let calls = 0;
 
-    const output = await runValueNode({
-      argument: {
-        mismatch: DataUnavailable.schemaMismatch(),
-        missing: missingRemote.getAsLink(),
-      },
-      nodeInputs: {
-        mismatch: { $alias: { cell: "argument", path: ["mismatch"] } },
-        missing: { $alias: { cell: "argument", path: ["missing"] } },
-      },
-      argumentSchema: {
-        type: "object",
-        properties: {
-          mismatch: { type: "number" },
-          missing: { type: "number" },
+      const output = await runValueNode({
+        argument: {
+          mismatch: DataUnavailable.schemaMismatch(),
+          missing: missingRemote.getAsLink(),
         },
-        required: ["mismatch", "missing"],
-      },
-      implementation: () => {
-        calls++;
-        return "should not run";
-      },
-      captureWrittenResult: (value) => {
-        if (value instanceof DataUnavailable) writes.push(value.reason);
-      },
-    });
+        nodeInputs: {
+          mismatch: { $alias: { cell: "argument", path: ["mismatch"] } },
+          missing: { $alias: { cell: "argument", path: ["missing"] } },
+        },
+        argumentSchema: {
+          type: "object",
+          properties: {
+            mismatch: { type: "number" },
+            missing: { type: "number" },
+          },
+          required,
+        },
+        implementation: () => {
+          calls++;
+          return "should not run";
+        },
+        captureWrittenResult: (value) => {
+          if (value instanceof DataUnavailable) writes.push(value.reason);
+        },
+      });
 
-    expect(calls).toBe(0);
-    expect(writes[0]).toBe("syncing");
-    expect(writes.at(-1)).toBe("schema-mismatch");
-    expectUnavailable(output, "schema-mismatch");
+      expect(calls).toBe(0);
+      expect(writes[0]).toBe("syncing");
+      expect(writes.at(-1)).toBe("schema-mismatch");
+      expectUnavailable(output, "schema-mismatch");
+    }
   });
 
   it("passes policy-accepted readiness syncing to the callback", async () => {

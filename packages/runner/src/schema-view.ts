@@ -78,6 +78,23 @@ import {
 
 const logger = getLogger("schema-view", { enabled: false, level: "warn" });
 
+const unavailableInputScans = new WeakMap<object, number>();
+
+/** Runs a schema-view walk which must observe unresolved optional children. */
+export function withUnavailableInputSchemaViewScan<T>(
+  tx: IExtendedStorageTransaction,
+  operation: () => T,
+): T {
+  unavailableInputScans.set(tx, (unavailableInputScans.get(tx) ?? 0) + 1);
+  try {
+    return operation();
+  } finally {
+    const remaining = (unavailableInputScans.get(tx) ?? 1) - 1;
+    if (remaining === 0) unavailableInputScans.delete(tx);
+    else unavailableInputScans.set(tx, remaining);
+  }
+}
+
 /**
  * Thrown when a reader touches data the schema does not describe.
  *
@@ -750,6 +767,11 @@ function createObjectView(
       return readChild(runtime, tx, link, key, narrowed, cfcLabelView, synced);
     } catch (error) {
       if (!isSchemaMismatchError(error)) throw error;
+      if (
+        isUnresolvedInputError(error) && unavailableInputScans.has(tx)
+      ) {
+        throw error;
+      }
       // The view asked for this read and the view is answering for it, so the
       // refusal never reaches the reader and must not survive on the
       // transaction. The read it registered does survive, which is what brings
