@@ -10,26 +10,26 @@ export default pattern(() => {
     [TESTS]: [
       {
         action: action(() =>
-          poll.seed.send({ voteCount: 74, voterCount: 8, optionCount: 14 })
+          poll.seed.send({ voteCount: 296, voterCount: 24, optionCount: 14 })
         ),
       },
       { action: action(() => poll.claim.send({ type: "click" })) },
       {
         assertion: assert(() =>
-          poll.voteCount === 74 && poll.userCount === 8 &&
+          poll.voteCount === 296 && poll.userCount === 24 &&
           poll.optionCount === 14 && poll.isJoined
         ),
       },
-      { render: poll[UI], readBudget: { total: 36000, perRun: 14000 } },
+      { render: poll[UI], readBudget: { total: 76000, perRun: 31000 } },
       {
         action: action(() =>
           poll.castVote.send({ optionId: "option-0", voteType: "yellow" })
         ),
       },
-      { render: poll[UI], readBudget: { total: 30000, perRun: 14000 } },
+      { render: poll[UI], readBudget: { total: 67000, perRun: 31000 } },
       {
         assertion: assert(() =>
-          poll.voteCount === 74 &&
+          poll.voteCount === 296 &&
           poll.votes.filter((vote) => vote.voteType === "yellow").length === 1
         ),
       },
