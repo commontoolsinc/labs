@@ -4,7 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
-- [2026-09-server-execution-topics-verification-baseline.md](development/performance/2026-09-server-execution-topics-verification-baseline.md) — initial six-recommendation campaign verification at e059494c45 and 83ee6cf73f: typed-index seed correctness in both arms, an admitted-event replica visibility gap, terminal sync and grace causality, linear watch maintenance, and repeated sidecar resolution; latency and implementation gates remain open.
+- [Index maintenance phase counts](development/performance/2026-09-11-index-maintenance-phases.md) — completed action-body counts for both index types across membership edits, key edits and lookup retargeting at three sizes.
+
 - [Demand-driven index enumeration](development/performance/2026-09-11-demanded-index-enumeration.md) — 2026-09-11: 512-row lookup and enumeration measurements, skewed-bucket costs, and the unresolved mixed-key representation boundary.
 - [Lazy scalar read width](development/performance/2026-09-11-lazy-scalar-read-width.md) — D2 eager/lazy one-scalar and all-row baseline at 74, 296, and 1,184 inline rows, with journal counts and timing limits.
 
@@ -41,6 +42,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [ow45-default-app-reload-post-6292-remeasure-2026-08-26.md](plans/server-execution-v2/optimize/ow45-default-app-reload-post-6292-remeasure-2026-08-26.md) — the default-app reload STEP's post-#6292 ON gate at head 37b45336a, August 2026: 9/10 and no lift, the earlier read-side residues likely closed with different evidence strengths, and the only red classified as a new store-incomplete `pattern-swap-setup-error` shape (raw run artifacts off-repo).
 - [memory-apply-op-2026-08-15.md](benchmarks/memory-apply-op-2026-08-15.md) — operation integration, query, checkpoint replay, and structured-document benchmark snapshot, August 2026.
 - [lunch-gate-evidence-2026-08-24.md](plans/server-execution-v2/optimize/lunch-gate-evidence-2026-08-24.md) — the lunch-poll ON-skip lift gate at merged head f14e44830, August 2026: 7/10 and no lift, the b04 client-start class closed on the file's own evidence, and the residue isolated as the guest profile piece's program-materialization commit never landing (raw run artifacts off-repo).
+- [2026-09-server-execution-topics-verification-baseline.md](development/performance/2026-09-server-execution-topics-verification-baseline.md) — initial six-recommendation campaign verification at e059494c45 and 83ee6cf73f: typed-index seed correctness in both arms, an admitted-event replica visibility gap, terminal sync and grace causality, linear watch maintenance, and repeated sidecar resolution; latency and implementation gates remain open.
 - [keyless-diagnosis-2026-08-27.md](plans/server-execution-v2/optimize/keyless-diagnosis-2026-08-27.md) — r06/r09 root-cause: wrong-branch optimistic navigation + keyless durability contradiction; a04 = mark-without-effects family
 - [topics-measure-report-2026-08-24.md](plans/server-execution-v2/optimize/topics-measure-report-2026-08-24.md) — topics tests and benchmarks ON vs OFF at tip 2ea87cea9, August 2026: the post-optimize regime on a growth-dominated workload, the settle/echo/arrival series, and the OW60 echo-drop guard at 0 fires in 20 journey runs (raw series off-repo).
 - [ow61-shipping-side-reexamination-2026-08-25.md](plans/server-execution-v2/optimize/ow61-shipping-side-reexamination-2026-08-25.md) — OW61's read-side cid: closure delivery guarantee re-examined at tip 9e9562177, August 2026: the prior localization falsified by measurement, the delivery-invariant probe clean across the memory and runner suites and two ensure-ON integration lanes, the memory-package coverage hole closed by a mutation-checked pin, and the ensure-ON board disagreeing between a local run (0 quarantines) and continuous integration (245 in shard 1 alone).
@@ -73,7 +75,6 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Executed plans and work orders
 
-- [Initial server-execution topics campaign ledger](plans/server-execution-topics-campaign-initial-ledger.md) — 2026-09-09 verification snapshot; the six-recommendation campaign remains active.
 - [server-pattern-verbs-seed.md](plans/server-pattern-verbs-seed.md) — the seed that recorded the ruled 2026-08-24 direction for the pattern lifecycle verbs as server calls, executed September 2026 for `upload` and `instantiate`, which run on the space's serving runtime under `EXPERIMENTAL_SERVER_EXECUTION` with `cf` requesting them, while `setsrc` stays client-side because a source update's module authority needs a transaction that commits to storage itself; the live contract is `docs/features/server-pattern-lifecycle.md`.
 - [read-cost-budgets.md](plans/read-cost-budgets.md) — completed A3 plan for opt-in pattern-test read budgets, transaction-attempt coverage, failure diagnostics, and executable pass/fail demonstrations; shipped in #7257, September 2026.
 
@@ -96,6 +97,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [module-loading-implementation-plan.md](specs/module-loading-implementation-plan.md) — the ESM module-record loader rollout.
 - [pattern-id-retirement.md](specs/pattern-id-retirement.md) — retiring pattern ids (work orders W0–W4).
 - [scheduler-v2/migration-plan.md](specs/scheduler-v2/migration-plan.md) — the v1→v2 scheduler migration phases, as executed (#4288).
+- [Initial server-execution topics campaign ledger](plans/server-execution-topics-campaign-initial-ledger.md) — 2026-09-09 verification snapshot; the six-recommendation campaign remains active.
 - [scheduler-v2/implementation/00-README.md](specs/scheduler-v2/implementation/00-README.md) — the scheduler-v2 work-order index and reading order.
 - [01-phase0-remove-push-mode.md](specs/scheduler-v2/implementation/01-phase0-remove-push-mode.md) — scheduler-v2 work order: remove push mode.
 - [02-phaseE0-event-identity.md](specs/scheduler-v2/implementation/02-phaseE0-event-identity.md) — scheduler-v2 work order: event identity and rejection taxonomy.
