@@ -176,15 +176,21 @@ function createCollectionIndexInstance(
       const keys = listSlotResolutions(runtime, tx, inputs);
       const source = listSlotResolutions(runtime, tx, inputs, "elements");
       if (!isConfirmed([keys.listCell, source.listCell])) return;
-      if (keys.rawList === undefined || source.rawList === undefined) return;
-      if (!Array.isArray(keys.rawList) || !Array.isArray(source.rawList)) {
+      if (
+        (keys.rawList !== undefined && !Array.isArray(keys.rawList)) ||
+        (source.rawList !== undefined && !Array.isArray(source.rawList))
+      ) {
         throw new TypeError("Collection indexing requires arrays");
       }
-      if (keys.slots.length !== source.slots.length) return;
-      const elements = source.slots.map((link) =>
+      const missingInput = keys.rawList === undefined ||
+        source.rawList === undefined;
+      if (!missingInput && keys.slots.length !== source.slots.length) return;
+      // A confirmed absent input has no members. Reconcile it through the
+      // same durable removal and child-release path as an empty array.
+      const elements = (missingInput ? [] : source.slots).map((link) =>
         runtime.getCellFromLink(link, undefined, tx)
       );
-      const extracted = keys.slots.map((link) =>
+      const extracted = (missingInput ? [] : keys.slots).map((link) =>
         runtime.getCellFromLink(link, undefined, tx)
       );
       const scope = narrowestCellScope(runtime, tx, [

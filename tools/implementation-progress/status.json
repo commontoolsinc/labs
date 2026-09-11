@@ -111,8 +111,8 @@
     {
       "id": "C3",
       "title": "Remote row invalidation",
-      "status": "review",
-      "detail": "Client acceptance landed in #7329. Serving-host acceptance is in review in #7331: correct values, stable full output links/producer identities, and untouched-row inactivity in both edit directions. Full runner validation and all 27 final serving-loop cases pass. Publication completes when #7331 lands."
+      "status": "done",
+      "detail": "Client acceptance landed in #7329 and serving-host acceptance landed in #7331 (cd525a0e5395a72d8e8910353a4e8a8a37bfca24). Both passed all 69 checks and clean Cubic/antagonistic reviews. Acceptance covers correct values, stable output links and producer identities, and untouched-row inactivity in both edit directions."
     },
     {
       "id": "C4",
