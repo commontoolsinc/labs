@@ -180,7 +180,10 @@ const GIT_SHOW = [
 // Line indices: 4 = subject, 5 = blank message line, 6 = body; 13 = a hunk
 // context line (editable); 16 = removed; 17,18 = additions.
 
-/** A fake git runner recording the replacement message, or null when preserved. */
+/**
+ * A fake git runner recording the replacement message, or null when
+ * preserved.
+ */
 function fakeGit(head: string | null): {
   git: GitRunner;
   amended: () => string | null;
@@ -619,7 +622,8 @@ export const shown = 2;
     const { root, ws, done } = tempWorkspace();
     try {
       const s = diffSession(ws);
-      toLine(s, 6); // the "     return n * 2;" context line — cursor at line start
+      // The "     return n * 2;" context line, with the cursor at line start.
+      toLine(s, 6);
       const contextLine = s.doc.text.split("\n")[6];
       s.handleKey({ name: "enter" });
       const lines = s.doc.text.split("\n");
@@ -655,12 +659,13 @@ export const shown = 2;
       const s = diffSession(ws);
       toLine(s, 6); // the "     return n * 2;" context line
       const orig = s.doc.text.split("\n")[6].slice(1); // content, past the marker
-      // Put the cursor in the middle of the content (a few chars before the end).
+      // Put the cursor in the middle of the content (a few chars before the
+      // end).
       press(s, "end", "left", "left", "left");
       s.handleKey({ name: "enter" });
       const lines = s.doc.text.split("\n");
-      // The pre-existing line changes, so it becomes a removed line plus the two
-      // halves as added lines — not a context line silently emptied.
+      // The pre-existing line changes, so it becomes a removed line plus the
+      // two halves as added lines — not a context line silently emptied.
       expect(lines[6], "the original becomes a removed line").toBe(`-${orig}`);
       const head = lines[7].slice(1);
       const tail = lines[8].slice(1);
@@ -1262,9 +1267,11 @@ index 0000000..1111111 100644
   it("expands context on Ctrl-L in pager mode, with no text cursor", () => {
     const { s, done } = expandSession();
     try {
-      // A twelve-row content area puts its quarter-screen target above the hunk.
+      // A twelve-row content area puts its quarter-screen target above the
+      // hunk.
       s.resize(80, 13);
-      // No arrow press, so the text cursor is never revealed: we are in the pager.
+      // No arrow press, so the text cursor is never revealed: we are in the
+      // pager.
       const view = s.view();
       expect(view.cursor, "no text cursor").toBeNull();
       assert(view.canExpand, "the status line advertises expand");
@@ -1290,7 +1297,8 @@ index 0000000..1111111 100644
       expect(rows[5].at(-1), "the marker points upward").toBe("◥");
       s.handleKey({ name: "ctrl-l" });
       const lines = s.doc.text.split("\n");
-      // The hunk on screen expanded; with nothing selected it grows upward first.
+      // The hunk on screen expanded; with nothing selected it grows upward
+      // first.
       expect(lines[4]).toBe("@@ -1,5 +1,5 @@");
       expect(lines[5]).toBe(" alpha");
       expect(lines[6]).toBe(" beta");
@@ -1307,7 +1315,8 @@ index 0000000..1111111 100644
   it("shows the expansion marker only in pager navigation", () => {
     const { s, done } = expandSession();
     try {
-      // A twelve-row content area puts its quarter-screen target above the hunk.
+      // A twelve-row content area puts its quarter-screen target above the
+      // hunk.
       s.resize(80, 13);
       expect(s.view().expandRow, "navigation marks the chosen edge").toBe(5);
       expect(s.view().diffMetadataRows).toEqual([4]);
@@ -1442,9 +1451,10 @@ index 0000000..1111111 100644
         diffSource(ws, edit),
       );
       // Select the second hunk via the structure tree (no text cursor), then
-      // expand: the choice of hunk must follow the selection, not a stale buffer.
-      // The quarter-screen target reaches up from the first hunk. Selecting the
-      // second hunk makes the selection govern the expansion instead.
+      // expand: the choice of hunk must follow the selection, not a stale
+      // buffer. The quarter-screen target reaches up from the first hunk.
+      // Selecting the second hunk makes the selection govern the expansion
+      // instead.
       let guard = 0;
       while ((s.view().selected?.startLine ?? -1) !== 9 && guard++ < 200) {
         s.handleKey({ name: "tab" });
@@ -1461,8 +1471,8 @@ index 0000000..1111111 100644
       expect(s.doc.text, "the first hunk is untouched").toContain(
         "@@ -4,3 +4,3 @@",
       );
-      // The hunk stays selected across the reparse even though its @@-count label
-      // grew, so a second Ctrl-L keeps expanding the same hunk.
+      // The hunk stays selected across the reparse even though its @@-count
+      // label grew, so a second Ctrl-L keeps expanding the same hunk.
       expect(s.view().selected?.kind, "still a hunk selected").toBe("hunk");
       expect(s.view().selected?.startLine, "still the second hunk").toBe(9);
       assert(
@@ -1477,7 +1487,8 @@ index 0000000..1111111 100644
   it("keeps the hunk header in view when a pager Ctrl-L expands up from the top", () => {
     const { s, done } = expandSession();
     try {
-      // A twelve-row content area puts its quarter-screen target above the hunk.
+      // A twelve-row content area puts its quarter-screen target above the
+      // hunk.
       s.resize(80, 13);
       expect(s.view().top, "starts at the top, pager mode").toBe(0);
       s.handleKey({ name: "ctrl-l" }); // expands up (reveals alpha/beta)
@@ -1527,7 +1538,8 @@ index 0000000..1111111 100644
         undefined,
         diffSource(ws, edit),
       );
-      // Scroll down so the hunk body is at the top and the header is off screen.
+      // Scroll down so the hunk body is at the top and the header is off
+      // screen.
       for (let i = 0; i < 6; i++) s.handleKey({ name: "j" });
       const view = s.view();
       expect(view.expandRow, "the last hunk body line is marked").toBe(7);
@@ -1540,10 +1552,10 @@ index 0000000..1111111 100644
         "the marker points down from the last body line",
       ).toBe("◢");
       s.handleKey({ name: "ctrl-l" });
-      // The quarter-screen target is in the hunk's lower half, so the lines come
-      // from below it and what follows the hunk is held still. Ten lines land on
-      // a five-row screen, so they fill it from that held edge: the last of them
-      // is on screen and the hunk has been pushed off the top.
+      // The quarter-screen target is in the hunk's lower half, so the lines
+      // come from below it and what follows the hunk is held still. Ten lines
+      // land on a five-row screen, so they fill it from that held edge: the
+      // last of them is on screen and the hunk has been pushed off the top.
       assert(s.view().message.startsWith("Showing line"), s.view().message);
       const rows = s.doc.text.split("\n").slice(s.view().top, s.view().top + 5);
       expect(rows, rows.join("|")).toContain(" line32");
@@ -1579,8 +1591,9 @@ index 0000000..1111111 100644
         undefined,
         diffSource(ws, edit),
       );
-      s.handleKey({ name: "tab" }); // selects the whole-file node, whose start line
-      // is the "diff --git" header — in no hunk.
+      // Selects the whole-file node, whose start line is the "diff --git"
+      // header — in no hunk.
+      s.handleKey({ name: "tab" });
       expect(s.view().selected?.label).toBe("▸ m.ts");
       expect(
         s.view().expandUp,
@@ -1645,12 +1658,13 @@ index 0000000..1111111 100644
         s.handleKey({ name: "tab" });
       }
       expect(s.view().selected?.label).toBe("## Section B");
-      s.handleKey({ name: "ctrl-l" }); // expands up — reveals # Title and ## Section A
+      // Expands up — reveals # Title and ## Section A.
+      s.handleKey({ name: "ctrl-l" });
       expect(s.doc.text, "context revealed above the hunk").toContain(
         " # Title",
       );
-      // The revealed headings become new nodes ahead of the selection in the tree;
-      // the selection must follow its node, not the now-stale flat index.
+      // The revealed headings become new nodes ahead of the selection in the
+      // tree; the selection must follow its node, not the now-stale flat index.
       expect(
         s.view().selected?.label,
         "the selection stayed on the same heading",
@@ -1664,7 +1678,8 @@ index 0000000..1111111 100644
     const { root, s, done } = expandSession();
     try {
       toLine(s, 8);
-      s.handleKey({ name: "ctrl-l" }); // expand downward (reveals zeta/eta/theta)
+      // Expand downward (reveals zeta/eta/theta).
+      s.handleKey({ name: "ctrl-l" });
       press(s, "escape");
       toLine(s, 7); // the "+delta" line
       press(s, "end");
@@ -1760,8 +1775,8 @@ index 0000000..1111111 100644
         parseDiff(s.doc.text)!.files.flatMap((f) => f.hunks).length,
         "one hunk where there were two",
       ).toBe(1);
-      // Now edit the SECOND hunk and save: the edit must survive and no line may
-      // be dropped or duplicated.
+      // Now edit the SECOND hunk and save: the edit must survive and no line
+      // may be dropped or duplicated.
       press(s, "escape");
       const target = s.doc.text.split("\n").indexOf("+line12");
       toLine(s, target);
@@ -2002,7 +2017,8 @@ trailing note line
       const s = diffSession(ws);
       press(s, "e"); // reveal at line 0
       s.handleKey({ name: "ctrl-s" });
-      type(s, "answer"); // first occurs on the removed line 8, then the added line 9
+      // "answer" first occurs on the removed line 8, then the added line 9.
+      type(s, "answer");
       press(s, "enter");
       const cl = s.view().cursor!.line;
       assert(
@@ -2138,9 +2154,9 @@ index 0000000..1111111 100644
       const root = Deno.makeTempDirSync();
       try {
         Deno.writeTextFileSync(join(root, "x.ts"), "realLine1\nrest2\nrest3\n");
-        // Two commits both touch x.ts at the same range. Only the newest (first)
-        // verifies against disk; the older one is stale, and commit metadata sits
-        // between the two file sections.
+        // Two commits both touch x.ts at the same range. Only the newest
+        // (first) verifies against disk; the older one is stale, and commit
+        // metadata sits between the two file sections.
         const log = [
           "commit bbbbbbbbbbbbbbbb",
           "Author: Dev <dev@example.com>",
@@ -2732,7 +2748,8 @@ diff --git a/b.ts b/b.ts
       const root = Deno.makeTempDirSync();
       try {
         Deno.writeTextFileSync(join(root, "m.ts"), "alpha\n\nbeta\n");
-        // The middle context line is emitted empty (a tool that trims the space).
+        // The middle context line is emitted empty (a tool that trims the
+        // space).
         const diff = [
           "diff --git a/m.ts b/m.ts",
           "--- a/m.ts",
@@ -2759,9 +2776,10 @@ diff --git a/b.ts b/b.ts
     it("saves a hunk with a blank context line without truncating the file", () => {
       const root = Deno.makeTempDirSync();
       try {
-        // The new side on disk has a blank line between alpha and BETA. The diff's
-        // body therefore carries an empty (unprefixed) context line; the parser
-        // counts it toward the hunk while save must carry its file line, not stop.
+        // The new side on disk has a blank line between alpha and BETA. The
+        // diff's body therefore carries an empty (unprefixed) context line; the
+        // parser counts it toward the hunk while save must carry its file line,
+        // not stop.
         Deno.writeTextFileSync(join(root, "m.ts"), "alpha\n\nBETA\ngamma\n");
         const diff = [
           "diff --git a/m.ts b/m.ts",
@@ -2781,8 +2799,9 @@ diff --git a/b.ts b/b.ts
         type(s, "!");
         press(s, "f3");
         assert(s.view().message.startsWith("Saved"), s.view().message);
-        // The whole new side round-trips: the blank line, the edit, and every line
-        // after it survive — no early stop that splices away the file's tail.
+        // The whole new side round-trips: the blank line, the edit, and every
+        // line after it survive — no early stop that splices away the file's
+        // tail.
         expect(
           Deno.readTextFileSync(join(root, "m.ts")),
           "the blank context line did not truncate the saved file",
@@ -2834,9 +2853,9 @@ diff --git a/b.ts b/b.ts
       try {
         const s = diffSessionFrom(ws, GIT_SHOW);
         press(s, "e"); // reveal the cursor
-        // Search for text that appears on an added line inside the hunk. An edit-
-        // mode search lands the cursor only on editable matches, so it skips the
-        // commit-message preamble entirely.
+        // Search for text that appears on an added line inside the hunk. An
+        // edit-mode search lands the cursor only on editable matches, so it
+        // skips the commit-message preamble entirely.
         s.handleKey({ name: "ctrl-s" });
         for (const ch of "double(21)") s.handleKey({ name: ch, char: ch });
         s.handleKey({ name: "enter" });
@@ -2866,7 +2885,8 @@ diff --git a/b.ts b/b.ts
         toLine(s, 4); // the subject line — an editable message line
         press(s, "end");
         type(s, " EDIT");
-        // A message line is edited as plain indented text (no removed/added pair).
+        // A message line is edited as plain indented text (no removed/added
+        // pair).
         expect(s.doc.lines[4].text).toBe("    Subject line of the commit EDIT");
         // Saving a changed message asks to confirm the amend first.
         press(s, "f3");
@@ -2992,7 +3012,8 @@ diff --git a/b.ts b/b.ts
         );
 
         // Only the message remains dirty. Saving again offers the same explicit
-        // choice, and amending now does not absorb the earlier workspace-only edit.
+        // choice, and amending now does not absorb the earlier workspace-only
+        // edit.
         press(s, "f3");
         assert(s.view().dialog, "the unsaved message prompts again");
         press(s, "a");
@@ -3212,7 +3233,8 @@ diff --git a/b.ts b/b.ts
         press(s, "end");
         press(s, "enter");
         type(s, "second subject line");
-        // The new line carries git's four-space indent and stays a message line.
+        // The new line carries git's four-space indent and stays a message
+        // line.
         expect(s.doc.lines[5].text).toBe("    second subject line");
         press(s, "f3");
         press(s, "a");
@@ -4280,7 +4302,8 @@ Subject: [PATCH] Embedded envelope`,
         press(s, "escape"); // hide the cursor, back to pager mode
         press(s, "q"); // quit → the dirty save prompt
         expect(promptText(s.view())).toContain("Save changes");
-        press(s, "s"); // → the amend prompt (the save-prompt handler stands aside)
+        // → the amend prompt (the save-prompt handler stands aside).
+        press(s, "s");
         expect(promptText(s.view())).toContain("Amend commit");
         assert(!s.quit, "not quit until the amend is confirmed");
         press(s, "a"); // confirm the amend → save, amend, and quit
@@ -4312,7 +4335,8 @@ Subject: [PATCH] Embedded envelope`,
       const fg = fakeGit(SHOW_SHA);
       try {
         const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
-        // Blank both content lines of the message (leaving the four-space indents).
+        // Blank both content lines of the message (leaving the four-space
+        // indents).
         for (const row of [4, 6]) {
           toLine(s, row);
           press(s, "ctrl-a"); // line start
@@ -4402,7 +4426,8 @@ Subject: [PATCH] Embedded envelope`,
         press(s, "a"); // the amend re-reads HEAD, sees it moved, and refuses
         expect(fg.amended(), "no amend when HEAD moved").toBeNull();
         expect(s.view().message).toContain("HEAD has moved");
-        // The amend runs before the file write, so a refusal leaves files untouched.
+        // The amend runs before the file write, so a refusal leaves files
+        // untouched.
         expect(Deno.readTextFileSync(join(root, "m.ts")), "no file written")
           .toBe(before);
       } finally {
@@ -4503,8 +4528,8 @@ Subject: [PATCH] Embedded envelope`,
         expect(s.view().dialog?.focus, "Tab focused the first scope").toBe(0);
         press(s, "escape"); // close it via Cancel
 
-        // Reopen and go the other way: Shift-Tab from no focus lands on the last,
-        // which is Cancel; Enter then activates it.
+        // Reopen and go the other way: Shift-Tab from no focus lands on the
+        // last, which is Cancel; Enter then activates it.
         press(s, "ctrl-r");
         press(s, "shift-tab");
         expect(s.view().dialog?.focus, "Shift-Tab focused the last button")
@@ -4524,7 +4549,8 @@ Subject: [PATCH] Embedded envelope`,
         toLine(s, 17);
         press(s, "end");
         type(s, " X"); // make the buffer dirty
-        moveCursorTo(s, 8); // the "diff --git" header line — in the file, in no hunk
+        // The "diff --git" header line — in the file, in no hunk.
+        moveCursorTo(s, 8);
         press(s, "ctrl-r");
         const p = promptText(s.view());
         expect(p).toContain("File");
@@ -4543,7 +4569,8 @@ Subject: [PATCH] Embedded envelope`,
         toLine(s, 17);
         press(s, "end");
         type(s, " X");
-        moveCursorTo(s, 0); // the "commit …" line — no file, no hunk, no message
+        // The "commit …" line — no file, no hunk, no message.
+        moveCursorTo(s, 0);
         press(s, "ctrl-r");
         const p = promptText(s.view());
         expect(p).toContain("All");

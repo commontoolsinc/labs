@@ -41,7 +41,10 @@ function alt(name: string, char?: string): Key {
   return char !== undefined ? { name, char, alt: true } : { name, alt: true };
 }
 
-/** Tab through the tree until a node whose label contains `label` is selected. */
+/**
+ * Tab through the tree until a node whose label contains `label` is
+ * selected.
+ */
 function selectByLabel(s: Session, label: string): void {
   for (let i = 0; i < 500; i++) {
     if (s.view().selected?.label?.includes(label)) return;
@@ -56,14 +59,15 @@ describe("Session", () => {
   //
 
   it("reports nothing to open on Enter for a reference whose line is in no node", () => {
-    // A "use" reference carries a destination line but no definition offset. When
-    // that line falls outside every structure node's range, both findTargetIndex
-    // (no offset) and nodeAtLine (no containing node) fail, so resolveTargetNode
-    // returns null and Enter reports there is nothing to open.
+    // A "use" reference carries a destination line but no definition offset.
+    // When that line falls outside every structure node's range, both
+    // findTargetIndex (no offset) and nodeAtLine (no containing node) fail, so
+    // resolveTargetNode returns null and Enter reports there is nothing to
+    // open.
 
-    // Real card with real targets, but the structure tree is trimmed to just the
-    // subject node — placed so the use site sits below its range, outside every
-    // node — so following the use reference resolves to no node.
+    // Real card with real targets, but the structure tree is trimmed to just
+    // the subject node — placed so the use site sits below its range, outside
+    // every node — so following the use reference resolves to no node.
     const text = `// transformed: /m.ts
 const base = 1;
 const useA = base;
@@ -186,10 +190,10 @@ index 0000000..1111111 100644
     const built = buildDiffDocument(REAL_DIFF, model, ws);
     const text = bufferLines.join("\n") + "\n";
     // Reparse the doctored text through the diff source so the document's lines
-    // and the edit buffer agree, then move the cursor to the target row. The real
-    // policy would refuse a body line that sits in no verified hunk; these tests
-    // exercise adjustHunkCounts, not editability, so swap in a permissive policy
-    // that treats any context/added line as editable.
+    // and the edit buffer agree, then move the cursor to the target row. The
+    // real policy would refuse a body line that sits in no verified hunk; these
+    // tests exercise adjustHunkCounts, not editability, so swap in a permissive
+    // policy that treats any context/added line as editable.
     const real = diffSource(ws, built.edit);
     const source: EditableSource = {
       ...real,
@@ -235,7 +239,8 @@ index 0000000..1111111 100644
       expect(s.view().cursor?.line, "cursor on the added line").toBe(2);
       press(s, "end");
       const before = s.doc.text;
-      press(s, "enter"); // splits the added line; adjustHunkCounts finds no hunk
+      // Splits the added line; adjustHunkCounts finds no hunk.
+      press(s, "enter");
       expect(s.doc.text, "the Enter inserted a new added line").not.toBe(
         before,
       );
@@ -337,9 +342,9 @@ index 0000000..1111111 100644
   it("keeps the picker scroll non-negative when paging up to the top", () => {
     const s = pickerSession();
     press(s, "ctrl-x", "ctrl-f");
-    // Drive the selection down so the scroll advances, then page up well past the
-    // top: the up branch sets the scroll to the selection (0) and the final guard
-    // keeps it from going negative.
+    // Drive the selection down so the scroll advances, then page up well past
+    // the top: the up branch sets the scroll to the selection (0) and the final
+    // guard keeps it from going negative.
     for (let i = 0; i < 20; i++) press(s, "down");
     expect(s.view().overlay!.scroll, "scrolled down").toBeGreaterThanOrEqual(0);
     for (let i = 0; i < 30; i++) press(s, "up");
@@ -350,10 +355,11 @@ index 0000000..1111111 100644
   });
 
   //
-  // structure-tree navigation from a real session
+  // card navigation and buffer editing from a real session
   //
   // These do not force the unreachable defensive returns, but assert the
-  // surrounding navigation and card behavior stays correct from a real session.
+  // surrounding card navigation and buffer editing stay correct from a real
+  // session.
   //
 
   it("deselects the card reference when moving back above the first target", () => {
