@@ -190,13 +190,13 @@ export interface CallableExecutionDeps {
    * linked contents are fetched. Other receipts are materialized before
    * selection to establish whether a result exists. The shared step waits
    * for its computed output with `Cell.pull()`, whose scheduler and
-   * linked-document convergence pool
-   * are runtime/manager-wide; a shaped call can therefore still share a wait
-   * with active work that the plain call's transaction-local acknowledgment
-   * does not. Declared object keys are ordered locally from the projection
-   * after that readiness boundary, with an open projection's retained extras
-   * following in value order. A verb that returns nothing keeps returning
-   * nothing — there is no value for a selection to be about. */
+   * linked-document convergence pool are runtime/manager-wide; a shaped call
+   * can therefore still share a wait with active work that the plain call's
+   * transaction-local acknowledgment does not. Declared object keys are ordered
+   * locally from the projection after that readiness boundary, with an open
+   * projection's retained extras following in value order. A verb that returns
+   * nothing keeps returning nothing — there is no value for a selection to be
+   * about. */
   selection?: CellSelection;
 
   /** @internal Seam for tests, mirroring `getCellValue`'s. */
@@ -1743,17 +1743,11 @@ export async function executeResolvedCallable(
           () => stored.pull(),
         );
         raw = stored.getRaw();
-        // A stored container establishes presence without loading its children.
-        // A root link needs materialization: its target can be absent.
-        if (isStoredContainer(raw)) {
-          value = raw;
-        } else {
-          value = await timeCliPhase(
-            "executeCallable.receipt.pull",
-            () => receipt.pull(),
-          );
-          raw = receipt.getRaw();
-        }
+      }
+      // A stored container establishes presence without loading its children.
+      // A root link needs materialization: its target can be absent.
+      if (isStoredContainer(raw)) {
+        value = raw;
       } else {
         value = await timeCliPhase(
           "executeCallable.receipt.pull",

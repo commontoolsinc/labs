@@ -1217,9 +1217,8 @@ no longer say which positions they came from, and an address names a position.
 A selection over a schemaless handler receipt starts by loading the receipt
 without following its children. If it holds an object or array, the CLI selects
 from that container directly. An address-only selection can therefore return a
-stored child link without loading the child. The receipt's declared result
-schema remains available for cycle bounding; it does not replace the selection's
-source schema.
+stored child link without loading the child. The verb's declared result remains
+available for cycle bounding; it does not replace the selection's source schema.
 
 Root links, instances, scalars, and receipts read through an explicit schema are
 materialized before selection. A root link can resolve to an absent value, so
@@ -1236,7 +1235,7 @@ order; that step starts no graph or storage work. When isolating the read
 matters, shape the collect instead. Call plain (or `--no-wait`), then collect
 from the receipt with `cf cell get --cell <receipt id> --select …`.
 
-Three cases follow from that:
+Selections also follow these rules:
 
 - **A value-less verb still reports nothing.** Its receipt is the empty witness,
   and the Invocation JSON omits `result` to say so. A selection is about a

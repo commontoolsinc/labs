@@ -51,6 +51,7 @@ async function withReceipt(
     received: (cell: Cell<unknown>) => boolean,
     fixture: Fixture,
   ) => Promise<void>,
+  declaredResult?: CallableResolution["declaredResult"],
 ): Promise<void> {
   const signer = await Identity.fromPassphrase("receipt-selection");
   const server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
@@ -95,6 +96,7 @@ async function withReceipt(
         },
       },
       callableKind: "handler",
+      declaredResult,
       cellKey: "create",
       pieces: { runtime: reader, getSpace: () => signer.did() },
       space: signer.did(),
@@ -190,18 +192,9 @@ describe("piece call receipt selection", () => {
     });
   });
 
-  it("keeps a declared result bound separate from the caller's selection", async () => {
+  it("returns a caller-selected field outside the verb's declared result", async () => {
     await withReceipt(
-      (runtime, space, tx) =>
-        seedRecord(runtime, space, tx, {
-          type: "object",
-          properties: {
-            topic: {
-              type: "object",
-              properties: { title: { type: "string" } },
-            },
-          },
-        }),
+      seedRecord,
       async (execute) => {
         const output = await execute({
           selection: { projection: parseSelectProjection("other.title") },
@@ -210,6 +203,17 @@ describe("piece call receipt selection", () => {
           other: { title: "Unselected sibling" },
         });
       },
+      () =>
+        Promise.resolve({
+          type: "object",
+          properties: {
+            topic: {
+              type: "object",
+              properties: { title: { type: "string" } },
+            },
+          },
+          additionalProperties: false,
+        }),
     );
   });
 
