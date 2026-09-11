@@ -35,7 +35,7 @@ path.
 
 ## Execution boundary
 
-Accounting starts immediately before invoking the scheduler action and ends when
+Body accounting starts immediately before invoking the scheduler action and ends when
 its body resolves or throws, at the same boundary as its execution-time sample.
 It covers argument materialization and result construction performed by that
 invocation. Failed and retried runs each contribute their work.
@@ -44,11 +44,16 @@ Accounting belongs to the underlying storage transaction. Read-only and
 nonreactive wrappers share its counters; unrelated transactions and other
 runtimes do not. Asynchronous code retains its transaction's ownership.
 
+`ActionStats.reads` and `scheduler.run.complete` describe this body boundary.
 Commit preparation, commit processing, event-handler dispatch, and diagnostic
-idempotency reruns are outside this boundary. These reports describe reactive
-action bodies, not the entire cost of an interaction. Whole-step budgets need
-the additional execution coverage tracked by
-[the implementation sequence](../plans/pattern-computation-cost-implementation.md).
+idempotency reruns are outside their samples.
+
+Pattern-test budgets also collect the separate `scheduler.read-attempt` stream.
+Its transaction samples extend through commit or abort and include event
+preflight, handler presync and dispatch, initialization, and asynchronous
+writeback attempts. Each retry contributes its own attempt. The
+[pattern-test budget contract](#pattern-test-budgets) defines the covered paths
+and settlement boundaries; diagnostic idempotency reruns remain excluded.
 
 Read sites check `readStatsActive` before looking up a transaction's collector.
 Disabled accounting allocates no collector or document set. Enabled runs retain
