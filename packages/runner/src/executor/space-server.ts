@@ -2877,10 +2877,15 @@ export class SpaceServer implements TransactionSealDestination {
       const record = this.#feed[index]!;
       if (!this.#refreshHeldDocuments(record)) {
         // The record's writes have not reached the replica: hold it and
-        // everything behind it for the next cycle, so the head this cycle
-        // covers stops short of it.
+        // everything behind it for the next cycle, and stop the head this
+        // cycle covers short of it. Clamped against the record's own seq,
+        // not only the coverage head as it stands: a LATE record (below)
+        // follows records above it in the feed, and their coverage must
+        // not carry W over the one that failed.
         this.#feed = this.#feed.slice(index);
-        return { batchHead: this.#coverageHead };
+        return {
+          batchHead: Math.min(this.#coverageHead, record.seq - 1),
+        };
       }
       // LATE records (stage P2-F, the sx2 unskip's flake diagnosis):
       // the feed has two in-process producers — the admission hook's
