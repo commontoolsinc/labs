@@ -1579,6 +1579,7 @@ jobs:
           fi
           # --no-check: the Check job type-checks packages/patterns/integration
           # (tasks/check.sh).
+          PIPE_CONSOLE=1 \
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
           PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \

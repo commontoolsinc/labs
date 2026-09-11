@@ -7196,6 +7196,9 @@ export class Runner {
       : { ...identity };
     const sync: DependencySync = async (resultCell, pattern, inputs) => {
       const syncStart = performance.now();
+      // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
+      const tempId = resultCell.getAsNormalizedFullLink().id.slice(0, 20);
+      logger.warn("temp-pre-sync", () => [`TEMP pre-sync start ${tempId}`]);
       try {
         return await this.#syncCellsForRunningPatternInner(
           resultCell,
@@ -7204,6 +7207,8 @@ export class Runner {
           capturedIdentity,
         );
       } finally {
+        // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
+        logger.warn("temp-pre-sync", () => [`TEMP pre-sync end ${tempId}`]);
         // Resume-boot decomposition: this is the dependency pre-sync a fresh
         // runtime pays before wiring a stored piece back up. Recorded under
         // the runner timing stats (they record even when the logger is
@@ -7487,7 +7492,9 @@ export class Runner {
       manager.loadsSettled === undefined
     ) return;
     const awaited = new Set<string>();
+    let round = 0;
     for (;;) {
+      round += 1;
       const readTx = this.#familyReadTx(identity);
       for (const plan of plans) {
         const schema = this.#planReadSchema(plan);
@@ -7506,6 +7513,11 @@ export class Runner {
       const keys = manager.pendingLoadAddresses()
         .map((address) => entityKey(address, this.#runtime.scopeKeyIdentity))
         .filter((key) => !awaited.has(key));
+      // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
+      logger.warn("temp-pre-sync", () => [
+        `TEMP cross-space round ${round}: ${keys.length} new pending`,
+        keys.slice(0, 6),
+      ]);
       if (keys.length === 0) return;
       for (const key of keys) awaited.add(key);
       const settleStart = performance.now();
@@ -7514,7 +7526,8 @@ export class Runner {
       } catch (error) {
         // A load that failed leaves its document absent; the next round
         // reads past it, and the run reads the same absence.
-        logger.debug("resume-pre-sync", () => [
+        // TEMP-INSTRUMENTATION (PR #7287): warn, not debug; remove before merge.
+        logger.warn("temp-pre-sync", () => [
           "a load a cross-space read kicked did not land",
           error,
         ]);
