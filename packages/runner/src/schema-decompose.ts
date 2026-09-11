@@ -33,7 +33,10 @@ import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import { isDeepFrozen } from "@commonfabric/data-model";
-import { internSchema } from "@commonfabric/data-model-schema";
+import {
+  internSchema,
+  internSchemaAsTaggedHashString,
+} from "@commonfabric/data-model-schema";
 import {
   anySchema,
   forEachSubschema,
@@ -211,6 +214,67 @@ export function collectExternalSchemaRefHashes(
   const result: ReadonlySet<string> = hashes.size === 0 ? EMPTY_HASHES : hashes;
   if (isDeepFrozen(schema)) externalRefHashCache.set(schema, result);
   return result;
+}
+
+/**
+ * The reserved root member of a stored document that carries the
+ * document's schema metadata — a result document's result schema, a
+ * receipt's shape (`EntityDocument.schema`,
+ * `docs/specs/memory-v2/01-data-model.md`). Like a link's `schema`
+ * position, it holds an inline schema or a `{ "$ref": "cid:…" }`
+ * reference, and every layer that collects a document's schema-document
+ * obligations — the commit boundary, result assembly, arrival
+ * validation, and the writer's own closure staging — reads it through
+ * {@link collectSchemaMetaRefHashes}.
+ */
+export const SCHEMA_META_MEMBER = "schema";
+
+/**
+ * The tagged hashes of every schema document a stored document's
+ * {@link SCHEMA_META_MEMBER} references. Only a non-array object at the
+ * root member is a schema position; anything else there is not a schema
+ * and references nothing. A `cid:` document's own `schema` member is not a
+ * metadata position, and callers exclude those documents before asking.
+ */
+export function collectSchemaMetaRefHashes(
+  document: unknown,
+): ReadonlySet<string> {
+  if (!isObjectNotArray(document)) return EMPTY_HASHES;
+  const schema = (document as { [SCHEMA_META_MEMBER]?: unknown })[
+    SCHEMA_META_MEMBER
+  ];
+  if (!isObjectNotArray(schema)) return EMPTY_HASHES;
+  return collectExternalSchemaRefHashes(schema as JSONSchema);
+}
+
+/**
+ * The inline form of a schema that carries external references: a root
+ * that is itself a bare `{ "$ref": "cid:…" }` recomposes from the
+ * document it names, and a root carrying references inside its body
+ * recomposes as though it were the closure's root document. A schema
+ * without external references is returned as it is. `lookup` supplies
+ * documents by tagged hash; a missing document throws, like
+ * {@link recomposeSchema} — callers that can tolerate a hole keep the
+ * reference form and let the read-time resolver fail closed.
+ */
+export function recomposeSchemaRefs(
+  schema: JSONSchema,
+  lookup: (taggedHash: string) => JSONSchema | undefined,
+): JSONSchema {
+  if (!containsExternalSchemaRef(schema)) return schema;
+  const obj = schema as JSONSchemaObj;
+  const keys = Object.keys(obj);
+  if (
+    keys.length === 1 && typeof obj.$ref === "string" &&
+    isExternalSchemaRef(obj.$ref)
+  ) {
+    return internSchema(recomposeSchema(obj.$ref, lookup));
+  }
+  const rootHash = internSchemaAsTaggedHashString(schema);
+  return internSchema(recomposeSchema(
+    formatExternalSchemaRef(rootHash),
+    (hash) => hash === rootHash ? schema : lookup(hash),
+  ));
 }
 
 /** The `<name>` of a `#/$defs/<name>` ref, or `undefined` for any other. */

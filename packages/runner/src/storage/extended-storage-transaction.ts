@@ -8,7 +8,11 @@ import {
   taggedHashStringOf,
 } from "@commonfabric/data-model";
 import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
-import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
+import {
+  collectExternalSchemaRefHashes,
+  collectSchemaMetaRefHashes,
+  SCHEMA_META_MEMBER,
+} from "../schema-decompose.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import { lookupSchemaDocument } from "../schema-registry.ts";
 import type { URI } from "../sigil-types.ts";
@@ -2226,9 +2230,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   /**
    * The write-side delivery guarantee of content-addressed schemas
    * (`docs/specs/content-addressed-schemas.md`): every schema document a
-   * written link references travels in the same transaction, into the same
-   * space, as the reference itself. Scans this transaction's writes for
-   * link schemas carrying external refs, expands each to its closure
+   * written link — or a written document's `schema` metadata member —
+   * references travels in the same transaction, into the same space, as
+   * the reference itself. Scans this transaction's writes for link schemas
+   * and `schema` members carrying external refs, expands each to its closure
    * through the realm registry (the link writer registered the documents
    * when it stamped the reference), and blind-writes the documents at the
    * canonical space scope. The staging happens eagerly, as each carrying
@@ -2256,7 +2261,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     );
     for (const space of spaces) {
       for (const detail of this.getWriteDetails(space)) {
-        this.#stageSchemaDocsForValue(space, detail.address.id, detail.value);
+        this.#stageSchemaDocsForValue(space, detail.address, detail.value);
       }
     }
   }
@@ -2271,18 +2276,20 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    */
   #stageSchemaDocsForValue(
     space: MemorySpace,
-    id: string,
+    address: Pick<IMemorySpaceAddress, "id" | "path">,
     value: FabricValue | undefined,
   ): void {
     if (!getContentAddressedSchemasConfig()) return;
-    if (id.startsWith("cid:")) return;
+    if (address.id.startsWith("cid:")) return;
     if (value === undefined) return;
     const hashes = new Set<string>();
-    // Link positions only: `$alias` records are binding vocabulary by
-    // CONTEXT — in a transaction's written values they are plain data,
-    // and scanning them here would treat data that merely looks like a
-    // binding as a schema carrier. Binding schemas externalized by the
-    // pattern serializer resolve through the realm registry.
+    // Link positions, and the document's `schema` metadata member — the
+    // two schema positions the commit boundary and result assembly read.
+    // `$alias` records are binding vocabulary by CONTEXT — in a
+    // transaction's written values they are plain data, and scanning them
+    // here would treat data that merely looks like a binding as a schema
+    // carrier. Binding schemas externalized by the pattern serializer
+    // resolve through the realm registry.
     mapLinkSchemas(value, (schema) => {
       for (
         const hash of collectExternalSchemaRefHashes(
@@ -2293,6 +2300,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
       return schema;
     });
+    // The member is reached by a whole-document write or by a write AT the
+    // member (`setMetaRaw`). A write below it edits inside a stored schema,
+    // which the runner never issues; the commit boundary's own scan leaves
+    // that shape to read-side assembly as well.
+    const metaSchema = address.path.length === 0
+      ? value
+      : address.path.length === 1 && address.path[0] === SCHEMA_META_MEMBER
+      ? { [SCHEMA_META_MEMBER]: value }
+      : undefined;
+    for (const hash of collectSchemaMetaRefHashes(metaSchema)) {
+      hashes.add(hash);
+    }
     for (const hash of hashes) {
       this.stageSchemaDocClosure(space, hash);
     }
@@ -2824,7 +2843,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#invalidateReadResultCache();
     const result = this.tx.write(address, value, options);
     if (result.ok) {
-      this.#stageSchemaDocsForValue(address.space, address.id, value);
+      this.#stageSchemaDocsForValue(address.space, address, value);
     }
     return result;
   }
@@ -2912,11 +2931,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     } else if (writeResult.error) {
       throw toThrowable(writeResult.error);
     }
-    // The staged value may carry link schemas with external refs; stage
-    // their closure with it (the write-side delivery guarantee, and what
-    // makes a same-transaction read through the link resolve). The `cid:`
+    // The staged value may carry link schemas — or be, or carry, a
+    // `schema` metadata member — with external refs; stage their closure
+    // with it (the write-side delivery guarantee, and what makes a
+    // same-transaction read through the reference resolve). The `cid:`
     // writes this issues recurse harmlessly: the stager skips them by id.
-    this.#stageSchemaDocsForValue(address.space, address.id, value);
+    this.#stageSchemaDocsForValue(address.space, address, value);
   }
 
   writeValueOrThrow(
@@ -3009,7 +3029,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       for (const write of staged) {
         this.#stageSchemaDocsForValue(
           write.address.space,
-          write.address.id,
+          write.address,
           write.value,
         );
       }

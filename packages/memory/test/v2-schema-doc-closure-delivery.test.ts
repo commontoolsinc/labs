@@ -38,7 +38,10 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import type { JSONSchema } from "@commonfabric/api";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { isObjectNotArray } from "@commonfabric/utils/types";
-import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
+import {
+  collectExternalSchemaRefHashes,
+  collectSchemaMetaRefHashes,
+} from "../../runner/src/schema-decompose.ts";
 import { isSubschema } from "../../runner/src/schema-walk.ts";
 import { mapLinkSchemas } from "../v2/schema-table-links.ts";
 import { Server } from "../v2/server.ts";
@@ -139,9 +142,10 @@ const openSession = async (
 /**
  * The `cid:` hashes a frame's documents OBLIGE, computed exactly as the
  * arriving replica computes them (`SpaceReplica`'s arrival validator in
- * runner/src/storage/v2.ts): the link-schema positions of an ordinary
- * document, and a schema document's own external refs. Keyed by hash,
- * valued by one document that named it — enough to say who quarantines.
+ * runner/src/storage/v2.ts): the link-schema positions and the `schema`
+ * metadata member of an ordinary document, and a schema document's own
+ * external refs. Keyed by hash, valued by one document that named it —
+ * enough to say who quarantines.
  */
 const obligedHashes = (upserts: readonly Upsert[]): Map<string, string> => {
   const obliged = new Map<string, string>();
@@ -167,6 +171,9 @@ const obligedHashes = (upserts: readonly Upsert[]): Map<string, string> => {
       }
       return schema;
     });
+    for (const dep of collectSchemaMetaRefHashes(doc)) {
+      obliged.set(dep, upsert.id);
+    }
   }
   return obliged;
 };
@@ -410,6 +417,86 @@ describe("schema document closure delivery", () => {
       reader: [],
       second: [],
     });
+  });
+});
+
+describe("schema document closure delivery for `schema` metadata", () => {
+  // A result document's `schema` metadata member is a schema position in
+  // the link spelling, and assembly ships its closure the same way: the
+  // reference-bearing document arrives with the documents it names, in
+  // the frame that delivers it, and a ref-only root schema whose closure
+  // runs through another document is followed to the end.
+  let server: Server;
+  let ledger: DeliveryLedger;
+  let upserts: readonly Upsert[];
+
+  beforeAll(async () => {
+    server = new Server({
+      store: new URL("memory://closure-delivery-schema-meta"),
+      subscriptionRefreshDelayMs: 0,
+      authorizeSessionOpen: (message) => {
+        const iss = message.invocation?.iss;
+        return typeof iss === "string" ? iss : undefined;
+      },
+      sessionOpenAuth: { audience: TEST_AUDIENCE },
+    });
+    const writer = await connect(server);
+    const writerSession = await openSession(writer, WRITER);
+    const response = await server.transact(
+      {
+        type: "transact",
+        requestId: nextRequestId("write"),
+        space: SPACE,
+        sessionId: writerSession,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [
+            { op: "set", id: `cid:${leafHash}`, value: { value: leafSchema } },
+            { op: "set", id: `cid:${rootHash}`, value: { value: rootSchema } },
+            {
+              op: "set",
+              id: "of:result-with-schema-meta",
+              value: {
+                value: { x: "described" },
+                schema: { $ref: `cid:${rootHash}` },
+              },
+            },
+          ],
+        },
+      } as Parameters<Server["transact"]>[0],
+    );
+    assert(response.ok !== undefined, JSON.stringify(response.error));
+
+    const reader = await connect(server);
+    const readerSession = await openSession(reader, READER);
+    const watchSet = await server.watchSet({
+      type: "session.watch.set",
+      requestId: nextRequestId("watch"),
+      space: SPACE,
+      sessionId: readerSession,
+      watches: [watchOn("of:result-with-schema-meta", "w-schema-meta")],
+    }) as ResponseMessage<WatchSetResult>;
+    assert(watchSet.ok !== undefined, JSON.stringify(watchSet.error));
+    ledger = new DeliveryLedger();
+    upserts = ledger.apply(watchSet.ok.sync.upserts as Upsert[]);
+
+    writer.connection.close();
+    reader.connection.close();
+  });
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  it("ships the closure a delivered document's `schema` metadata references, in the frame that delivers it", () => {
+    expect(carriedCids(upserts)).toEqual(
+      [`cid:${leafHash}`, `cid:${rootHash}`].toSorted(),
+    );
+  });
+
+  it("leaves the delivered document's `schema` reference resolvable in the receiving session", () => {
+    expect(ledger.unmet).toEqual([]);
   });
 });
 

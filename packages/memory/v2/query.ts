@@ -20,7 +20,10 @@ import {
 } from "@commonfabric/runner/graph-query";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
-import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
+import {
+  collectExternalSchemaRefHashes,
+  collectSchemaMetaRefHashes,
+} from "../../runner/src/schema-decompose.ts";
 import {
   lookupSchemaDocument,
   registerSchemaDocument,
@@ -984,7 +987,9 @@ const EMPTY_SCHEMA_REFS: ReadonlySet<string> = new Set();
  * hash is the single ref, and the closure walk verifies it and follows
  * its refs; its value is not link-scanned, because schema keywords such
  * as `default` may carry link-shaped DATA that is not a link position.
- * Every other document is scanned for link schemas anywhere in its value.
+ * Every other document is scanned for link schemas anywhere in its value,
+ * and for its reserved `schema` metadata member, a schema position in the
+ * same spelling.
  */
 const scanSnapshotSchemaRefs = (
   engine: Engine.Engine,
@@ -1042,6 +1047,7 @@ const scanSnapshotSchemaRefs = (
         }
         return schema;
       });
+      for (const hash of collectSchemaMetaRefHashes(doc)) refs.add(hash);
     }
   }
   const result = refs.size === 0 ? EMPTY_SCHEMA_REFS : refs;
@@ -1092,8 +1098,9 @@ export class SchemaClosureError extends Error {
 /**
  * The read-side delivery guarantee, enforced at the result-assembly
  * boundary: every schema reference embedded in the documents being
- * delivered — a link schema anywhere in a document's value, or a delivered
- * schema document's own refs — must resolve to a verified schema document
+ * delivered — a link schema anywhere in a document's value, the document's
+ * `schema` metadata member, or a delivered schema document's own refs —
+ * must resolve to a verified schema document
  * in this space, and the whole closure joins the delivered set and the
  * watch set. A missing or forged closure document fails the query loudly
  * ({@link SchemaClosureError}): the write-side guarantee installs closures

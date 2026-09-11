@@ -713,6 +713,157 @@ Deno.test("a replayed eliding commit reports its elision again", async () => {
   });
 });
 
+Deno.test("validates the schema document a result's `schema` metadata references", async () => {
+  await withEngine((engine) => {
+    const resultSchema = {
+      type: "object",
+      properties: { title: { type: "string" } },
+      required: ["title"],
+    } as const;
+    const resultHash = internSchemaAsTaggedHashString(resultSchema);
+    const docWithSchemaMeta = (id: string, hash: string) =>
+      ({
+        op: "set",
+        id,
+        value: { value: { title: "v" }, schema: { $ref: `cid:${hash}` } },
+      }) as never;
+
+    // The reserved root `schema` member is a schema position in the link
+    // spelling: a reference nothing backs is the same broken closure a
+    // dangling link `$ref` would create.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(1, {
+            operations: [docWithSchemaMeta("of:result-carrier", resultHash)],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // The document included in the SAME commit is accepted...
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        operations: [
+          docWithSchemaMeta("of:result-carrier", resultHash),
+          setOp(`cid:${resultHash}`, resultSchema),
+        ],
+      }),
+    });
+
+    // ...and once stored, it satisfies later metadata by itself.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(3, {
+        operations: [docWithSchemaMeta("of:result-carrier-2", resultHash)],
+      }),
+    });
+
+    // A patch landing a reference AT the member is validated through the
+    // post-patch document, like a patch landing a CFC envelope.
+    const missingSchema = {
+      type: "object",
+      properties: { later: { type: "number" } },
+    } as const;
+    const missingHash = internSchemaAsTaggedHashString(missingSchema);
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(4, {
+            operations: [
+              {
+                op: "patch",
+                id: "of:result-carrier",
+                patches: [{
+                  op: "replace",
+                  path: "/schema",
+                  value: { $ref: `cid:${missingHash}` },
+                }],
+              } as never,
+            ],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // Moving document content into the member is the same landing.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(5, {
+        operations: [{
+          op: "set",
+          id: "of:move-result-carrier",
+          value: { value: { hoard: { $ref: `cid:${missingHash}` } } },
+        } as never],
+      }),
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(6, {
+            operations: [
+              {
+                op: "patch",
+                id: "of:move-result-carrier",
+                patches: [{
+                  op: "move",
+                  from: "/value/hoard",
+                  path: "/schema",
+                }],
+              } as never,
+            ],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // The same move with the document backing it lands.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(7, {
+        operations: [
+          setOp(`cid:${missingHash}`, missingSchema),
+          {
+            op: "patch",
+            id: "of:move-result-carrier",
+            patches: [{ op: "move", from: "/value/hoard", path: "/schema" }],
+          } as never,
+        ],
+      }),
+    });
+    assertEquals(
+      (read(engine, { id: "of:move-result-carrier" } as never) as {
+        schema?: unknown;
+      })?.schema,
+      { $ref: `cid:${missingHash}` },
+    );
+
+    // A `cid:` document's own `schema` member is not a metadata position:
+    // a content-addressed install carrying one names no obligation.
+    const ownSchema = { type: "boolean", title: "own-schema-member" } as const;
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(8, {
+        operations: [{
+          op: "set",
+          id: `cid:${internSchemaAsTaggedHashString(ownSchema)}`,
+          value: {
+            value: ownSchema,
+            schema: { $ref: "cid:fid1:nothing-backs-this" },
+          },
+        } as never],
+      }),
+    });
+  });
+});
+
 Deno.test("validates the schema document a CFC envelope's schemaHash references", async () => {
   await withEngine((engine) => {
     const envelopeSchema = {

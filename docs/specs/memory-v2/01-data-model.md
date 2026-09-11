@@ -71,7 +71,7 @@ interface EntityDocument {
   argument?: SigilLink; // Well-known metadata link to an argument cell.
   internal?: InternalManifestEntry[]; // Manifest of derived internal cells.
   result?: SigilLink; // Well-known metadata link back to a result cell.
-  schema?: FabricValue; // Optional schema metadata.
+  schema?: FabricValue; // Optional schema metadata: an inline JSON Schema, or a `{ "$ref": "cid:…" }` reference (content-addressed-schemas.md).
   slug?: string; // Optional URL/address metadata.
   [key: string]: FabricValue;
 }

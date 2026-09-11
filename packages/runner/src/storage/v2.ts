@@ -70,7 +70,10 @@ import type { JSONSchema } from "../builder/types.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
-import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
+import {
+  collectExternalSchemaRefHashes,
+  collectSchemaMetaRefHashes,
+} from "../schema-decompose.ts";
 import {
   acquireSchemaRegistryLease,
   lookupSchemaDocument,
@@ -6828,8 +6831,10 @@ export class SpaceReplica
           continue;
         }
       }
-      // Link positions only — an `$alias`-shaped record in an arriving
-      // document is plain data, never a delivery obligation.
+      // Link positions and the reserved `schema` metadata member — the
+      // positions the server's assembly pass ships closures for. An
+      // `$alias`-shaped record in an arriving document is plain data,
+      // never a delivery obligation.
       mapLinkSchemas(doc as FabricValue, (schema) => {
         for (
           const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
@@ -6838,6 +6843,7 @@ export class SpaceReplica
         }
         return schema;
       });
+      for (const hash of collectSchemaMetaRefHashes(doc)) embed(hash, id);
     }
     for (const [id, document] of registered) {
       for (const dep of collectExternalSchemaRefHashes(document)) {

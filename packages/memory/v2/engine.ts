@@ -7,7 +7,11 @@ import {
 } from "@commonfabric/data-model";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
-import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
+import {
+  collectExternalSchemaRefHashes,
+  collectSchemaMetaRefHashes,
+  SCHEMA_META_MEMBER,
+} from "../../runner/src/schema-decompose.ts";
 import { isSubschema } from "../../runner/src/schema-walk.ts";
 import { mapLinkSchemas } from "./schema-table-links.ts";
 import {
@@ -5230,15 +5234,16 @@ const applyCommitTransaction = (
   //
   // The same pass collects every schema reference the commit's content
   // introduces — a link schema anywhere in a set's document, a patch's
-  // own values, and an installed schema document's own refs — for the
-  // closure validation below. Known gap: a patch that edits INSIDE an
-  // existing link's schema (replacing a `$ref` string at a sub-path, say)
-  // introduces a reference no patch value carries as a whole link, so
-  // only a scan of the post-patch document would see it — a cost this
-  // validation deliberately does not pay. The gap closes when links
-  // become opaque FabricPrimitive Link objects instead of patchable
-  // plain JSON; until then such a reference escapes commit-time
-  // validation and read-side assembly catches it. The scan is also
+  // own values, a document's reserved `schema` metadata member, and an
+  // installed schema document's own refs — for the closure validation
+  // below. Known gap: a patch that edits INSIDE an existing link's schema
+  // (replacing a `$ref` string at a sub-path, say) introduces a reference
+  // no patch value carries as a whole link, so only a scan of the
+  // post-patch document would see it — a cost this validation
+  // deliberately does not pay. The gap closes when links become opaque
+  // FabricPrimitive Link objects instead of patchable plain JSON; until
+  // then such a reference escapes commit-time validation and read-side
+  // assembly catches it. The scan is also
   // conservative the other way: a reference in an operand that does not
   // survive to the final document (a remove-by-value operand, an
   // add-then-remove within one commit) is still validated.
@@ -5288,25 +5293,37 @@ const applyCommitTransaction = (
     if (typeof schemaHash !== "string" || schemaHash.length === 0) return;
     requiredSchemaRefs.add(schemaHash);
   };
-  // The envelope position a patch sequence can land metadata at —
-  // directly (`/cfc`, `/cfc/schemaHash`), through a root-level value, or
-  // by MOVING document content into the reserved member. The forms
-  // compose in sequence AND across a commit's operations, so the only
-  // complete answer is the post-patch document at the operation's own
-  // address: replayed over what earlier operations in this commit left
-  // (a set can stage the base a later patch rewrites), else over the
+  // A document's reserved `schema` metadata member is a schema position
+  // in the link spelling — inline, or `{ "$ref": "cid:…" }` — and its
+  // refs are collected exactly as a link schema's are.
+  const collectSchemaMetaRefs = (document: unknown): void => {
+    for (const hash of collectSchemaMetaRefHashes(document)) {
+      requiredSchemaRefs.add(hash);
+    }
+  };
+  // The metadata positions a patch sequence can land a reference at —
+  // directly (`/cfc`, `/cfc/schemaHash`, `/schema`), through a root-level
+  // value, or by MOVING document content into a reserved member. The
+  // forms compose in sequence AND across a commit's operations, so the
+  // only complete answer is the post-patch document at the operation's
+  // own address: replayed over what earlier operations in this commit
+  // left (a set can stage the base a later patch rewrites), else over the
   // STORED document at the operation's own scope — a scoped patch never
   // lands on the space-scoped instance. Only documents some patch can
-  // reach `cfc` on carry staged state, so a commit without such patches
-  // pays nothing. A sequence that cannot apply is skipped here — the
-  // commit's own application refuses it.
-  const cfcPointer = (pointer: string | undefined): boolean =>
+  // reach a metadata member on carry staged state, so a commit without
+  // such patches pays nothing. A sequence that cannot apply is skipped
+  // here — the commit's own application refuses it. A pointer BELOW
+  // `/schema` edits inside a stored schema, the same shape as the
+  // inside-a-link gap above, and is left to read-side assembly the same
+  // way.
+  const metadataPointer = (pointer: string | undefined): boolean =>
     pointer !== undefined &&
-    (pointer === "" || pointer === "/cfc" || pointer.startsWith("/cfc/"));
-  const patchTouchesCfc = (patches: PatchOp[] | undefined): boolean =>
+    (pointer === "" || pointer === "/cfc" || pointer.startsWith("/cfc/") ||
+      pointer === `/${SCHEMA_META_MEMBER}`);
+  const patchTouchesMetadata = (patches: PatchOp[] | undefined): boolean =>
     (patches ?? []).some((patch) =>
-      cfcPointer(patch.path) ||
-      cfcPointer("from" in patch ? patch.from : undefined)
+      metadataPointer(patch.path) ||
+      metadataPointer("from" in patch ? patch.from : undefined)
     );
   // Scoped rows key exactly as the write loop below keys them: a
   // delegated commit's scoped writes carry the validated acting identity,
@@ -5327,14 +5344,14 @@ const applyCommitTransaction = (
           },
         )
     }`;
-  const cfcPatchDocKeys = new Set<string>();
+  const metadataPatchDocKeys = new Set<string>();
   for (const [opIndex, operation] of commit.operations.entries()) {
     if (operation.op !== "patch" || operation.id.startsWith("cid:")) continue;
-    if (patchTouchesCfc(operation.patches)) {
-      cfcPatchDocKeys.add(opDocKey(opIndex, operation));
+    if (patchTouchesMetadata(operation.patches)) {
+      metadataPatchDocKeys.add(opDocKey(opIndex, operation));
     }
   }
-  const stagedCfcDocs = new Map<string, unknown>();
+  const stagedMetadataDocs = new Map<string, unknown>();
   for (const [opIndex, operation] of commit.operations.entries()) {
     if (operation.op === "sqlite") continue;
     if (operation.op === "patch") {
@@ -5343,11 +5360,11 @@ const applyCommitTransaction = (
         if ("add" in patch) collectLinkSchemaRefs(patch.add);
         if ("values" in patch) collectLinkSchemaRefs(patch.values);
       }
-      if (cfcPatchDocKeys.size > 0) {
+      if (metadataPatchDocKeys.size > 0) {
         const docKey = opDocKey(opIndex, operation);
-        if (cfcPatchDocKeys.has(docKey)) {
-          const base = stagedCfcDocs.has(docKey)
-            ? stagedCfcDocs.get(docKey)
+        if (metadataPatchDocKeys.has(docKey)) {
+          const base = stagedMetadataDocs.has(docKey)
+            ? stagedMetadataDocs.get(docKey)
             : readState(engine, {
               id: operation.id,
               branch,
@@ -5363,9 +5380,10 @@ const applyCommitTransaction = (
               base as Parameters<typeof applyPatchToDocument>[0] | undefined,
               operation.patches ?? [],
             );
-            stagedCfcDocs.set(docKey, patched);
-            if (patchTouchesCfc(operation.patches)) {
+            stagedMetadataDocs.set(docKey, patched);
+            if (patchTouchesMetadata(operation.patches)) {
               collectCfcEnvelopeRef((patched as { cfc?: unknown }).cfc);
+              collectSchemaMetaRefs(patched);
             }
           } catch (error) {
             if (!(error instanceof PatchApplyError)) throw error;
@@ -5379,17 +5397,18 @@ const applyCommitTransaction = (
         collectCfcEnvelopeRef(
           (operation.value as { cfc?: unknown } | null)?.cfc,
         );
-        if (cfcPatchDocKeys.size > 0) {
+        collectSchemaMetaRefs(operation.value);
+        if (metadataPatchDocKeys.size > 0) {
           const docKey = opDocKey(opIndex, operation);
-          if (cfcPatchDocKeys.has(docKey)) {
-            stagedCfcDocs.set(docKey, operation.value);
+          if (metadataPatchDocKeys.has(docKey)) {
+            stagedMetadataDocs.set(docKey, operation.value);
           }
         }
       }
-      if (operation.op === "delete" && cfcPatchDocKeys.size > 0) {
+      if (operation.op === "delete" && metadataPatchDocKeys.size > 0) {
         const docKey = opDocKey(opIndex, operation);
-        if (cfcPatchDocKeys.has(docKey)) {
-          stagedCfcDocs.set(docKey, undefined);
+        if (metadataPatchDocKeys.has(docKey)) {
+          stagedMetadataDocs.set(docKey, undefined);
         }
       }
       continue;
