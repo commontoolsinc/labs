@@ -17,6 +17,16 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
+import {
+  acquireExecutionLease,
+  executionLeaseHolder,
+  liveExecutionLeaseHolder,
+  releaseExecutionLease,
+} from "@commonfabric/memory/v2/execution-lease";
 import type { FabricValue } from "@commonfabric/api";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
@@ -93,6 +103,9 @@ describe("engine-read-through", () => {
   /** The serving manager the factory built at the last activation. */
   let factoryManager: SharedServerStorageManager | undefined;
 
+  /** The serving runtime the factory built at the last activation. */
+  let factoryRuntime: Runtime | undefined;
+
   const newHost = (policy: SpaceServerPolicy): ExecutorHost =>
     new ExecutorHost({
       server,
@@ -120,6 +133,7 @@ describe("engine-read-through", () => {
           servingPosture: true,
           experimental: { serverExecution: true },
         });
+        factoryRuntime = runtime;
         return Promise.resolve({
           runtime,
           dispose: async () => {
@@ -242,6 +256,32 @@ describe("engine-read-through", () => {
     );
   };
 
+  /**
+   * Writes `{ draft }` into the client principal's own `user` instance of
+   * the named document and returns the document id: a foreign instance
+   * from the serving runtime's point of view, which the memory server
+   * delivers to a session only while the session's lease is live.
+   */
+  const writeUserInstance = async (
+    name: string,
+    draft: string,
+  ): Promise<URI> => {
+    const link = clientRuntime.getCell<unknown>(space, name, undefined)
+      .getAsNormalizedFullLink();
+    const cell = clientRuntime.getCellFromLink<{ draft: string }>({
+      ...link,
+      scope: "user",
+    });
+    const tx = clientRuntime.edit();
+    cell.withTx(tx).set({ draft });
+    expect((await tx.commit()).error).toBeUndefined();
+    await clientRuntime.storageManager.synced();
+    return link.id;
+  };
+
+  /** The identity a user-instance read of the client principal names. */
+  const clientIdentity: ScopeKeyIdentity = { principal: aliceSigner.did() };
+
   beforeEach(() => {
     server = new MemoryV2Server.Server({
       subscriptionRefreshDelayMs: 0,
@@ -255,6 +295,8 @@ describe("engine-read-through", () => {
     failRefreshes = undefined;
     refreshCalls = 0;
     factoryContext = undefined;
+    factoryManager = undefined;
+    factoryRuntime = undefined;
     clientManager = SharedServerStorageManager.connectTo(server, {
       as: aliceSigner,
     });
@@ -512,5 +554,136 @@ describe("engine-read-through", () => {
     } finally {
       replica.closeNow();
     }
+  });
+
+  it("reads another principal's instance under an expired lease only through the same-process reacquire, while a space-scoped read renews nothing", async () => {
+    await instantiatePiece();
+    host = newHost({
+      flushDeadlineMs: 5_000,
+      idleParkMs: 600_000,
+      renewIntervalMs: 600_000,
+      storeReadThrough: true,
+    });
+    await demandFromClient();
+    const engine = await server.engineForSpace(space);
+    const spaceServer = host.spaceServer(space)!;
+    const id = await writeUserInstance("read-through-lease-doc", "A");
+    expect(
+      Engine.readState(engine, {
+        id,
+        scopeKey: resolveScopeKey("user", clientIdentity),
+      })?.document,
+    ).toBeDefined();
+    const replica = factoryManager!.open(space).replica;
+
+    // The lease row expires under the tenure (an expired row matches
+    // nobody), as a stalled process would find it at its next renewal.
+    expect(
+      acquireExecutionLease(engine, {
+        space,
+        holder: spaceServer.holder,
+        now: Date.now() - 60_000,
+        ttlMs: 1,
+      }),
+    ).toBe(true);
+    expect(liveExecutionLeaseHolder(engine, space)).toBeUndefined();
+    // A space-scoped document is delivered to any session, lease or not,
+    // and is read here without consulting the row.
+    replica.get({ id: "of:read-through-space-probe", scope: "space" });
+    expect(host.stats().lease.lost).toBe(0);
+    expect(liveExecutionLeaseHolder(engine, space)).toBeUndefined();
+
+    // Another principal's instance is served only to a live holder: the
+    // read runs the renew arm first — the lease is lost and reacquired
+    // in-process, the same step the renew timer takes — and is served
+    // under the new tenure.
+    expect(
+      replica.getDocument(id, "user", clientIdentity)?.value,
+    ).toEqual({ draft: "A" });
+    expect(host.stats().lease.lost).toBe(1);
+    expect(liveExecutionLeaseHolder(engine, space)).toBe(spaceServer.holder);
+    expect(spaceServer.active).toBe(true);
+    // Held now: later reads of the instance never reach the row again.
+    releaseExecutionLease(engine, { space, holder: spaceServer.holder });
+    expect(
+      replica.getDocument(id, "user", clientIdentity)?.value,
+    ).toEqual({ draft: "A" });
+    expect(host.stats().lease.lost).toBe(1);
+  });
+
+  it("withholds another principal's instance while a rival holds the lease, and parks the space", async () => {
+    await instantiatePiece();
+    host = newHost({
+      flushDeadlineMs: 5_000,
+      idleParkMs: 600_000,
+      renewIntervalMs: 600_000,
+      storeReadThrough: true,
+    });
+    await demandFromClient();
+    const engine = await server.engineForSpace(space);
+    const spaceServer = host.spaceServer(space)!;
+    const id = await writeUserInstance("read-through-rival-doc", "A");
+    const replica = factoryManager!.open(space).replica;
+
+    releaseExecutionLease(engine, { space, holder: spaceServer.holder });
+    const rival = executionLeaseHolder("did:key:rival-process");
+    expect(
+      acquireExecutionLease(engine, { space, holder: rival, ttlMs: 600_000 }),
+    ).toBe(true);
+    // A former holder receives no foreign instance (protocol.md §3): the
+    // read is withheld, and the tenure that cannot reacquire parks.
+    expect(replica.getDocument(id, "user", clientIdentity)).toBeUndefined();
+    expect(host.stats().lease.lost).toBe(1);
+    await waitUntil(() => spaceServer.active === false, "the space to park");
+    expect(liveExecutionLeaseHolder(engine, space)).toBe(rival);
+  });
+
+  it("holds no record for an address the store has nothing at, reads it once, and picks it up from the feed once a commit creates it", async () => {
+    await instantiatePiece();
+    host = newHost({
+      flushDeadlineMs: 5_000,
+      idleParkMs: 600_000,
+      storeReadThrough: true,
+    });
+    await demandFromClient();
+    const engine = await server.engineForSpace(space);
+    const replica = factoryManager!.open(space).replica as SpaceReplica;
+    const id = "of:read-through-absent" as URI;
+    const readsBefore = host.stats().storeReads;
+    expect(replica.get({ id, path: [], scope: "space" })).toBeUndefined();
+    expect(host.stats().storeReads).toBe(readsBefore + 1);
+    // Examined once: the second read costs the engine nothing.
+    expect(replica.get({ id, path: [], scope: "space" })).toBeUndefined();
+    expect(host.stats().storeReads).toBe(readsBefore + 1);
+    // No record stands for it, as none would after a session's pull
+    // delivered nothing: a transaction that read it reports the absence
+    // as unexamined, for commit's reconcile to re-read.
+    const tx = factoryRuntime!.edit();
+    factoryRuntime!.getCellFromLink<unknown>({ id, space, path: [] })
+      .withTx(tx).get();
+    expect(replica.unexaminedAbsences(tx).map((absence) => absence.id))
+      .toEqual([id]);
+    await tx.commit();
+
+    // A commit creating the document reaches the replica through the feed.
+    const cell = clientRuntime.getCellFromLink<{ made: boolean }>({
+      id,
+      space,
+      path: [],
+    });
+    const creating = clientRuntime.edit();
+    cell.withTx(creating).set({ made: true });
+    expect((await creating.commit()).error).toBeUndefined();
+    const authoredSeq = Engine.serverSeq(engine);
+    const refreshesBefore = host.stats().storeRefreshes;
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= authoredSeq,
+      "the watermark to cover the creating commit",
+    );
+    expect(host.stats().storeRefreshes).toBeGreaterThan(refreshesBefore);
+    // Held by the refresh: this read costs the engine nothing.
+    const readsBeforeHeld = host.stats().storeReads;
+    expect(replica.getDocument(id)?.value).toEqual({ made: true });
+    expect(host.stats().storeReads).toBe(readsBeforeHeld);
   });
 });

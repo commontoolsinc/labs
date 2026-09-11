@@ -201,14 +201,21 @@ SpaceServer outbox ──(e)──► network; results re-enter via (a)
   documents a read document's link positions reference are read with
   it, to a fixpoint, exactly as a session's frame carries them. Reads
   run at the engine's head, as delivered frames do; writes and
-  foreign-space reads stay on the session. Two things a session frame
-  does and this posture does not: the lapsed-lease delivery filter
-  (protocol.md §3's withholding of scoped instances from a former
-  holder, re-delivered on the reacquire notice) is not consulted, so a
-  write inside a lapse is readable at once; and a read of an absent
-  address leaves a confirmed absence in the replica where a session
-  would have left nothing. Counted: `storeReads`, `storeRefreshes`
-  (§7).
+  foreign-space reads stay on the session. Two rules a session frame
+  follows hold here in the read-through's own form. Protocol.md §3's
+  lease-holder delivery rule — another principal's instance reaches
+  only the live holder of the space's lease — is applied per read: a
+  read of such an instance that finds the lease row lapsed runs the
+  renew arm first (the lost-then-reacquire step the renew timer takes,
+  taken at the moment the lapse is found) and is served under the
+  reacquired tenure, or withheld as the tenure parks; space-scoped
+  documents and the service's own instances are delivered to any
+  session, so they are read without consulting the row. And an address
+  the store holds nothing at leaves no record, as a pull that delivered
+  nothing leaves none: a transaction's read of it stays an unexamined
+  absence for commit to reconcile, and the store is asked again only
+  when the feed reports a write to it. Counted: `storeReads`,
+  `storeRefreshes` (§7).
 - **(b) memory server → ExecutorHost**, in-process: the
   admission-hook activation feed — an authored admission into a
   space with no live lease NOTIFIES the host, and activation then

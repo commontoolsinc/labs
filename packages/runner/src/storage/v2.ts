@@ -3346,6 +3346,16 @@ export class SpaceReplica
   #frameApplyDepth = 0;
 
   /**
+   * The instances (doc keys) the store read-through has read and found
+   * nothing at. No record stands for such an instance — a session's pull
+   * that delivered nothing leaves none either, and a transaction's read
+   * of it stays an unexamined absence for commit to reconcile — but the
+   * store is not asked again until the feed reports a write to it
+   * (`integrateStoreWrites()`), which reads it once more.
+   */
+  readonly #storeAbsences = new Set<string>();
+
+  /**
    * The last `SessionSync` snapshot _absorbed_ for each watched key — its
    * address as the frame named it and the seq and deletedness it carried — kept
    * so the replica can _declare_ its holdings on a reconnect (`holdings()`).
@@ -3774,7 +3784,8 @@ export class SpaceReplica
     const upserts: SessionSyncUpsert[] = [];
     for (const write of writes) {
       const id = write.id as URI;
-      if (!this.#docs.has(docKey(id, write.scopeKey))) continue;
+      const key = docKey(id, write.scopeKey);
+      if (!this.#docs.has(key) && !this.#storeAbsences.has(key)) continue;
       const upsert = read({ id, scopeKey: write.scopeKey });
       if (upsert !== undefined) upserts.push(upsert);
     }
@@ -8093,9 +8104,9 @@ export class SpaceReplica
   /**
    * Helper for the read entry points, which serves an instance this
    * replica holds no record for from the store read-through, when one is
-   * installed. A record already present — confirmed content, a pending
-   * own write, or a store absence read earlier — is left as it is:
-   * `integrateStoreWrites()` is what moves a held record. A scope the
+   * installed. A record already present — confirmed content or a pending
+   * own write — is left as it is, and so is an absence the store reported
+   * earlier: `integrateStoreWrites()` is what moves either. A scope the
    * identity cannot resolve keys by name, which no store address
    * matches, so it is not served here either.
    */
@@ -8109,9 +8120,9 @@ export class SpaceReplica
     const read = this.#storeReadThrough();
     if (read === undefined) return;
     const instance = this.instanceKey(scope, identity, explicit);
-    if (this.#docs.has(docKey(id, instance)) || !isScopeKey(instance)) {
-      return;
-    }
+    if (!isScopeKey(instance)) return;
+    const key = docKey(id, instance);
+    if (this.#docs.has(key) || this.#storeAbsences.has(key)) return;
     const upsert = read({ id, scopeKey: instance });
     if (upsert === undefined) return;
     this.#integrateReadThrough([upsert], "integrate");
@@ -8154,16 +8165,34 @@ export class SpaceReplica
    * inbound frame through the ordinary session-sync apply step, so the
    * confirmed records, the delivered set, the shadow bookkeeping, and the
    * change notifications all take exactly the shape a pushed frame gives
-   * them.
+   * them. An address the store holds nothing at — a `deleted` entry at
+   * seq 0, which no session frame ever carries — is kept out of the
+   * frame and remembered in `#storeAbsences` instead; a document read
+   * present clears that memory.
    */
   #integrateReadThrough(
     upserts: SessionSyncUpsert[],
     type: "pull" | "integrate",
   ): void {
     const read = this.#storeReadThrough();
-    const frame = read === undefined
-      ? upserts
-      : this.#withSchemaDependencies(read, upserts);
+    const frame: SessionSyncUpsert[] = [];
+    for (
+      const upsert of read === undefined
+        ? upserts
+        : this.#withSchemaDependencies(read, upserts)
+    ) {
+      const key = docKey(
+        upsert.id as URI,
+        this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
+      );
+      if (upsert.deleted === true && upsert.seq === 0) {
+        this.#storeAbsences.add(key);
+        continue;
+      }
+      this.#storeAbsences.delete(key);
+      frame.push(upsert);
+    }
+    if (frame.length === 0) return;
     const seqs = frame.map((upsert) => upsert.seq);
     this.#applySessionSync({
       type: "sync",

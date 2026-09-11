@@ -267,8 +267,9 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     names: { arg: string; result: string };
     pattern?: string;
     clients: Identity[];
+    policy?: ConstructorParameters<typeof ExecutorHost>[0]["policy"];
   }) => {
-    host = newHost();
+    host = newHost(options.policy);
     const alice = openClient(aliceSigner);
     const engine = await server.engineForSpace(space);
     const compiled = await alice.patternManager.compilePattern({
@@ -593,6 +594,75 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     // Bob's own user slot.)
     expect(
       aliceSessionRuns.map((e) => [e.actionId, e.instanceKey]),
+    ).toEqual([]);
+    setup.cancel();
+  });
+
+  it("(c) RAGGED under the store read-through posture: the run that discovers session depth for Bob serves his session instance at the moved ratchet, and his next session-scoped write re-runs it session-keyed; Alice never runs per session", async () => {
+    // The serving replica reads at the engine's head, so the run that
+    // discovers Bob's session depth already read his note: no input
+    // lands mid-run, and no re-run at the session key follows the
+    // discovery. Over a session the same shape re-runs session-keyed
+    // once frames arriving mid-run dirty it — a re-run, not a serving
+    // difference: the store truths below are identical, and a later
+    // session-scoped write of Bob's re-runs his session instance under
+    // its own key here as well.
+    const setup = await standUp({
+      names: { arg: "fo-c-rt-arg", result: "fo-c-rt-result" },
+      clients: [aliceSigner, bobSigner],
+      policy: { storeReadThrough: true },
+    });
+    const { engine, clients } = setup;
+    const alice = clients.get(aliceSigner.did())!;
+    const bob = clients.get(bobSigner.did())!;
+    const aliceKey = setup.userKey(aliceSigner);
+    const bobKey = setup.userKey(bobSigner);
+    const bobSessionPrefix = `session:${encodeURIComponent(bobSigner.did())}:`;
+    const bobSessionHolds = (value: string) =>
+      (engine.database.prepare(
+        `SELECT DISTINCT scope_key FROM head WHERE scope_key LIKE :prefix AND op != 'delete'`,
+      ).all({ prefix: `${bobSessionPrefix}%` }) as Array<
+        { scope_key: string }
+      >).some((row) => instanceHolds(engine, row.scope_key, value));
+    await setup.writeDraft(alice, "A");
+    await setup.writeNote(bob, "N");
+    await waitUntil(
+      () => instanceHolds(engine, aliceKey, '"echo:A"'),
+      "alice's user instance of echo",
+    );
+    await waitUntil(
+      () => bobSessionHolds('"note:N"'),
+      "bob's session instance of noteEcho",
+    );
+    expect(instanceHolds(engine, bobKey, '"echo:A"')).toBe(false);
+    await waitUntil(
+      () =>
+        [...basisKeys(engine)].some((key) => key.startsWith(bobSessionPrefix)),
+      "bob's session basis key",
+    );
+    const keys = basisKeys(engine);
+    expect(keys.has(aliceKey)).toBe(true);
+    expect(keys.has("space")).toBe(true);
+    expect(keys.has(setup.serviceUserKey)).toBe(false);
+    expect(host!.stats().storeReads).toBeGreaterThan(0);
+
+    // Bob's second note is a session-scoped input change: the feed
+    // refreshes his held session instance, and the node re-runs for
+    // him under his session key.
+    await setup.writeNote(bob, "N2");
+    await waitUntil(
+      () => bobSessionHolds('"note:N2"'),
+      "bob's session instance to re-derive from his second note",
+    );
+    const trace = servingRuntime!.scheduler.getActionRunTrace();
+    const sessionRuns = trace.filter((entry) =>
+      entry.instanceKey?.startsWith("session:")
+    );
+    expect(sessionRuns.length).toBeGreaterThan(0);
+    expect(
+      sessionRuns.filter((entry) =>
+        !entry.instanceKey!.startsWith(bobSessionPrefix)
+      ).map((e) => [e.actionId, e.instanceKey]),
     ).toEqual([]);
     setup.cancel();
   });

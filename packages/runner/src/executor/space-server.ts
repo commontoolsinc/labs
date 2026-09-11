@@ -49,6 +49,7 @@ import {
   eventAttentionIndexKey,
   identityOfScopeKey,
   resolveScopeKey,
+  scopeKeyApplicableTo,
   type ScopeKeyIdentity,
   scopeOfScopeKey,
   SERVER_EXECUTION_ATTENTION_DOC_ID,
@@ -84,6 +85,7 @@ import {
   EXECUTION_LEASE_TTL_MS,
   ExecutionLeaseCycle,
   executionLeaseHolder,
+  liveExecutionLeaseHolder,
 } from "@commonfabric/memory/v2/execution-lease";
 import {
   selectForeignBasisRows,
@@ -983,11 +985,14 @@ export class SpaceServer implements TransactionSealDestination {
     // read is a miss, and a miss served from the engine is the whole
     // point.
     const storeReadThrough = this.#options.policy?.storeReadThrough === true
-      ? engineReadThrough(engine, {
-        onRead: () => {
-          this.#options.stats.storeReads += 1;
-        },
-      })
+      ? this.#leaseHolderReadThrough(
+        engine,
+        engineReadThrough(engine, {
+          onRead: () => {
+            this.#options.stats.storeReads += 1;
+          },
+        }),
+      )
       : undefined;
     let runtime: Runtime;
     let dispose: () => Promise<void>;
@@ -2350,6 +2355,39 @@ export class SpaceServer implements TransactionSealDestination {
       });
     }
     return { ok: {} };
+  }
+
+  /**
+   * Helper for `activate()`, which holds the tenure's store read-through
+   * to protocol.md §3's lease-holder delivery rule: another principal's
+   * instance is served only to the live holder of the space's lease. A
+   * read of one that finds the lease row lapsed runs the renew arm first
+   * — the lost-then-reacquire step the renew timer takes, taken at the
+   * moment the lapse is found — and is served under the reacquired
+   * tenure, or withheld when the lease is not regained, as the tenure
+   * parks. Space-scoped documents and the service's own instances are
+   * delivered to any session, so they are read without consulting the
+   * row. A closed engine answers nothing, as the read-through itself
+   * does: the row must not be queried through a finalized statement.
+   */
+  #leaseHolderReadThrough(
+    engine: Engine.Engine,
+    read: StoreReadThrough,
+  ): StoreReadThrough {
+    const own: ScopeKeyIdentity = {
+      principal: this.#options.serviceIdentity,
+    };
+    return (address) => {
+      if (!engine.database.open) return undefined;
+      if (
+        !scopeKeyApplicableTo(address.scopeKey, own) &&
+        liveExecutionLeaseHolder(engine, this.#options.space) !== this.#holder
+      ) {
+        this.#renew();
+        if (this.#lease?.held !== true) return undefined;
+      }
+      return read(address);
+    };
   }
 
   /** The mid-wave renew (stage C tuning T3): called from the serving
