@@ -1,4 +1,4 @@
-import type { CollectionIndexData } from "@commonfabric/api";
+import type { CollectionIndexData, GroupIndex } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { expect } from "@std/expect";
@@ -8,6 +8,7 @@ import {
   collectionKeyBucket,
   resolveCollectionKey,
 } from "../src/builtins/collection-index-key.ts";
+import { CellImpl } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 
@@ -30,6 +31,66 @@ describe("collection index lookup", () => {
     await storage.synced();
     await runtime.dispose();
     await storage.close();
+  });
+
+  it("rejects uncompiled callbacks and enumeration on ordinary data", () => {
+    const tx = runtime.edit();
+    try {
+      const rows = runtime.getCell<string[]>(
+        space,
+        "direct-index-rows",
+        undefined,
+        tx,
+      );
+      rows.set(["a"]);
+      expect(() => rows.groupBy(() => "a")).toThrow("groupByWithPattern");
+      expect(() => rows.keyBy(() => "a")).toThrow("keyByWithPattern");
+      expect(() => CellImpl.prototype.keyEntries.call(rows)).toThrow(
+        "keyEntries requires a collection index",
+      );
+    } finally {
+      tx.abort();
+    }
+  });
+
+  it("forwards index proxy methods while preserving ordinary same-named fields", () => {
+    const tx = runtime.edit();
+    const index = runtime.getCell<CollectionIndexData<string, number[]>>(
+      space,
+      "proxy-index",
+      undefined,
+      tx,
+    );
+    index.set({
+      kind: "collection-index",
+      mode: "group",
+      keys: ["a"],
+      keyEntries: [{ kind: "value", value: "a" }],
+      buckets: {
+        [collectionKeyBucket({ kind: "string", value: "a" })]: [1],
+      },
+    });
+    const proxy = index.getAsReactiveProxy() as unknown as GroupIndex<
+      string,
+      number
+    >;
+    expect(proxy.lookup("a")).toEqual([1]);
+    expect(proxy.keys()).toEqual(["a"]);
+    expect(proxy.keyEntries()).toEqual([{ kind: "value", value: "a" }]);
+    const data = runtime.getCell<{ lookup: string; keys: string }>(
+      space,
+      "proxy-data",
+      undefined,
+      tx,
+    );
+    data.set({ lookup: "ordinary lookup", keys: "ordinary keys" });
+    expect(
+      (data.getAsReactiveProxy().lookup as unknown as { get(): string }).get(),
+    ).toBe("ordinary lookup");
+    expect(
+      (data.getAsReactiveProxy().keys as unknown as { get(): string }).get(),
+    ).toBe("ordinary keys");
+    tx.abort();
   });
 
   it("compiles keyed reads and observes bucket and enumeration updates", async () => {
@@ -58,6 +119,10 @@ describe("collection index lookup", () => {
       kind: "collection-index",
       mode: "group",
       keys: ["a", "b"],
+      keyEntries: [{ kind: "value", value: "a" }, {
+        kind: "value",
+        value: "b",
+      }],
       buckets: { [a]: [1], [b]: [2] },
     });
     const selected = runtime.getCell<string>(space, "selected", undefined, tx);
@@ -89,6 +154,7 @@ describe("collection index lookup", () => {
       tx = runtime.edit();
       selected.withTx(tx).set("missing");
       index.withTx(tx).key("keys").set(["b"]);
+      index.withTx(tx).key("keyEntries").set([{ kind: "value", value: "b" }]);
       await tx.commit();
       await runtime.idle();
       expect(await result.key("values").pull()).toEqual([]);
@@ -130,6 +196,7 @@ describe("collection index lookup", () => {
       kind: "collection-index",
       mode: "key",
       keys: ["b"],
+      keyEntries: [{ kind: "value", value: "b" }],
       buckets: { [b]: 2 },
     });
     const output = runtime.getCell<{ value: number | null | undefined }>(
@@ -156,6 +223,10 @@ describe("collection index lookup", () => {
       tx = runtime.edit();
       index.withTx(tx).key("buckets").key(b).set(20);
       index.withTx(tx).key("keys").set(["b", "c"]);
+      index.withTx(tx).key("keyEntries").set([
+        { kind: "value", value: "b" },
+        { kind: "value", value: "c" },
+      ]);
       await tx.commit();
       await runtime.idle();
       expect(runs).toBe(0);
@@ -213,6 +284,11 @@ describe("collection index lookup", () => {
       kind: "collection-index",
       mode: "key",
       keys: [first, second, "equal"],
+      keyEntries: [
+        { kind: "cell", cell: first },
+        { kind: "cell", cell: second },
+        { kind: "value", value: "equal" },
+      ],
       buckets: {
         [a]: 1,
         [b]: 2,
@@ -285,6 +361,7 @@ describe("collection index lookup", () => {
       kind: "collection-index",
       mode: "group",
       keys: ["a"],
+      keyEntries: [{ kind: "value", value: "a" }],
       buckets: { [collectionKeyBucket({ kind: "string", value: "a" })]: [row] },
     });
     const result = runtime.run(

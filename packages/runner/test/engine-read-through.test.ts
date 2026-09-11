@@ -541,6 +541,170 @@ describe("engine-read-through", () => {
     }
   });
 
+  it("reads the schema document a document's schema metadata member names along with it", async () => {
+    // The frame validator holds a document's `schema` metadata member to
+    // the same delivery guarantee as its link positions: the reference
+    // form names a schema document, and the document is quarantined unless
+    // that one arrives with it. The chase follows the member as a
+    // session's walk does.
+    const decomposed = decomposeSchema({
+      type: "object",
+      properties: { text: { type: "string" } },
+    });
+    const store = new Map<string, { value: FabricValue; schema?: JSONSchema }>(
+      [...decomposed.documents].map((
+        [hash, document],
+      ) => [`cid:${hash}`, { value: document as FabricValue }]),
+    );
+    const carrier = {
+      value: { text: "held" },
+      schema: { $ref: decomposed.rootRef },
+    };
+    store.set("of:meta-carrier", carrier);
+    const reads: string[] = [];
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    try {
+      manager.installStoreReadThrough(space, ({ id, scopeKey }) => {
+        reads.push(id);
+        const doc = store.get(id);
+        return {
+          branch: "",
+          id,
+          scope: "space",
+          scopeKey,
+          ...(doc === undefined
+            ? { seq: 0, deleted: true as const }
+            : { seq: 1, doc }),
+        };
+      });
+      const replica = manager.open(space).replica as SpaceReplica;
+      expect(replica.getDocument("of:meta-carrier" as URI)).toEqual(carrier);
+      expect(reads).toEqual([
+        "of:meta-carrier",
+        ...[...decomposed.documents.keys()].reverse().map((hash) =>
+          `cid:${hash}`
+        ),
+      ]);
+      // Held now: a second read reaches the store for nothing.
+      expect(replica.getDocument("of:meta-carrier" as URI)).toEqual(carrier);
+      expect(reads.length).toBe(1 + decomposed.documents.size);
+    } finally {
+      await manager.close();
+    }
+  });
+
+  it("reads the store for a pull of a held document no further, and serves the value the feed last refreshed", async () => {
+    // A held document is kept current by the feed's refresh at every
+    // cycle, the way a session's covered selector is by its watch; a
+    // later sync of it is answered from the replica. The refresh is what
+    // moves it: the store's newer version reaches a sync only through
+    // `integrateStoreWrites()`.
+    const store = new Map<
+      string,
+      { seq: number; doc: { value: FabricValue } }
+    >();
+    store.set("of:held", { seq: 1, doc: { value: { n: 1 } } });
+    const reads: string[] = [];
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    try {
+      manager.installStoreReadThrough(space, ({ id, scopeKey }) => {
+        reads.push(id);
+        const entry = store.get(id);
+        return {
+          branch: "",
+          id,
+          scope: "space",
+          scopeKey,
+          ...(entry === undefined
+            ? { seq: 0, deleted: true as const }
+            : { seq: entry.seq, doc: entry.doc }),
+        };
+      });
+      const replica = manager.open(space).replica as SpaceReplica;
+      expect((await replica.sync("of:held" as URI)).ok).toBeDefined();
+      expect(replica.getDocument("of:held" as URI)).toEqual({
+        value: { n: 1 },
+      });
+      store.set("of:held", { seq: 2, doc: { value: { n: 2 } } });
+      expect((await replica.sync("of:held" as URI)).ok).toBeDefined();
+      expect(reads).toEqual(["of:held"]);
+      expect(replica.getDocument("of:held" as URI)).toEqual({
+        value: { n: 1 },
+      });
+      expect(
+        manager.integrateStoreWrites(space, [
+          { id: "of:held", scopeKey: "space" },
+        ]),
+      ).toBe(1);
+      expect(replica.getDocument("of:held" as URI)).toEqual({
+        value: { n: 2 },
+      });
+      expect(reads).toEqual(["of:held", "of:held"]);
+    } finally {
+      await manager.close();
+    }
+  });
+
+  it("integrates a feed refresh at the seq a local commit already confirmed, since the store's document may carry what the commit merged", async () => {
+    // A commit of this replica's own write promotes its record to the
+    // commit's seq with the value it materialized locally; the store's
+    // document at that seq can hold more — content the engine merged in
+    // beside a mergeable write — and the refresh that carries it is the
+    // replica's first delivery of that seq, never a repeat.
+    const store = new Map<
+      string,
+      { seq: number; doc: { value: FabricValue } }
+    >();
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: manager,
+    });
+    try {
+      manager.installStoreReadThrough(space, ({ id, scopeKey }) => {
+        const entry = store.get(id);
+        return {
+          branch: "",
+          id,
+          scope: "space",
+          scopeKey,
+          ...(entry === undefined
+            ? { seq: 0, deleted: true as const }
+            : { seq: entry.seq, doc: entry.doc }),
+        };
+      });
+      const cell = runtime.getCell<{ n: number; merged?: boolean }>(
+        space,
+        "read-through-promoted",
+        undefined,
+      );
+      const id = cell.getAsNormalizedFullLink().id;
+      const tx = runtime.edit();
+      cell.withTx(tx).set({ n: 1 });
+      expect((await tx.commit()).error).toBeUndefined();
+      const replica = manager.open(space).replica as SpaceReplica;
+      const confirmed = replica.get({ id, path: [], scope: "space" })?.since;
+      expect(confirmed).toBeGreaterThan(0);
+      store.set(id, {
+        seq: confirmed!,
+        doc: { value: { n: 1, merged: true } },
+      });
+      expect(
+        manager.integrateStoreWrites(space, [{ id, scopeKey: "space" }]),
+      ).toBe(1);
+      expect(replica.getDocument(id)?.value).toEqual({ n: 1, merged: true });
+    } finally {
+      await runtime.dispose();
+      await manager.close();
+    }
+  });
+
   it("does not read the store for a pull whose scope the identity cannot resolve", async () => {
     // Such a scope keys by its name, which names no store row: the store
     // would read the name as the space scope and answer with the wrong
@@ -564,6 +728,8 @@ describe("engine-read-through", () => {
       },
     });
     try {
+      // A read on access under such a scope is not served either.
+      expect(replica.getDocument("of:by-name" as URI, "user")).toBeUndefined();
       expect((await replica.sync("of:by-name" as URI, undefined, "user")).ok)
         .toBeDefined();
       expect(reads).toEqual([]);
