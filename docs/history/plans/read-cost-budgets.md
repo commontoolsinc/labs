@@ -1,11 +1,19 @@
+---
+status: historical
+created: 2026-09-10
+archived: 2026-09-10
+reason: "Executed A3 plan; pattern-test read budgets shipped in #7257."
+superseded-by: docs/features/read-accounting.md
+---
+
 # Pattern-test read budgets
 
-Status: A3 implemented and validated in
-[PR #7257](https://github.com/commontoolsinc/labs/pull/7257); CI and review
-pending. The authoring surface and measurement boundaries are documented in the
-[read-accounting contract](../features/read-accounting.md#pattern-test-budgets).
+Status: completed. A3 landed in
+[PR #7257](https://github.com/commontoolsinc/labs/pull/7257) after all 69 CI gates
+and clean Cubic and antagonistic reviews. The authoring surface and measurement boundaries are documented in the
+[read-accounting contract](../../features/read-accounting.md#pattern-test-budgets).
 This plan tracks acceptance in the
-[computation-cost sequence](pattern-computation-cost-implementation.md).
+[computation-cost sequence](../../plans/pattern-computation-cost-implementation.md).
 
 ## Author contract
 
@@ -117,5 +125,5 @@ claim is needed to show the guard working.
       limits, with separate initialization and step intervals.
 - [x] Verify many cheap runs, removed actions, and failed attempts cannot evade
       the total. Verify unbudgeted execution is unchanged.
-- [ ] Publish the executable pass/fail demo, update author documentation, and
+- [x] Publish the executable pass/fail demo, update author documentation, and
       review both accounting completeness and failure diagnostics.
