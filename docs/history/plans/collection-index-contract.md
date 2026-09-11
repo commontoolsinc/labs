@@ -1,17 +1,19 @@
+---
+status: historical
+created: 2026-09-10
+archived: 2026-09-11
+reason: "Executed B1/B2 contract; index producers, tagged enumeration, joins, and phase measurements shipped."
+superseded-by: docs/features/collection-indexes.md
+---
+
 # Collection indexes and keyed lookup
 
-Status: B1/B2 implementation and acceptance contract for the
-[computation-cost implementation](pattern-computation-cost-implementation.md).
-The [feature documentation](../features/collection-indexes.md) describes index
-producers and lookup. Mixed primitive/Cell keys use tagged `keyEntries()`
-enumeration; homogeneous domains also support `keys()`. The implementation and
-focused authored-consumer acceptance are complete in #7323. Publication remains
-subject to current-head CI and review, tracked separately on the execution
-dashboard. Isolation, scale measurements, and joins have implementation evidence
-in that PR. The separate phase-count probe in
-[PR #7362](https://github.com/commontoolsinc/labs/pull/7362) validates membership
-edits and lookup retargeting across increasing sizes. Its publication gates
-remain pending too.
+The B1/B2 implementation and acceptance contract was executed through
+[PR #7323](https://github.com/commontoolsinc/labs/pull/7323), with the separate
+phase-count probe in [PR #7362](https://github.com/commontoolsinc/labs/pull/7362).
+The publication gates passed before those PRs merged. The
+[feature documentation](../../features/collection-indexes.md) describes the
+current index producers, lookup, and enumeration APIs.
 
 ## Key domain and equality
 
@@ -62,10 +64,10 @@ extracted key.
 Q7 is resolved: provide an explicit tagged enumeration API for mixed keys,
 with `{ kind: "value", value: primitiveKey }` and
 `{ kind: "cell", cell: cellKey }` entries. Preserve homogeneous `keys()` usage.
-The [decision record](../history/features/2026-09-11-index-key-enumeration-decision.md)
+The [decision record](../features/2026-09-11-index-key-enumeration-decision.md)
 records the context, consequences, and alternatives. Tagged enumeration and its
-focused acceptance tests are implemented. Publication gates remain separate
-from the checked implementation items below.
+focused acceptance tests are implemented. Publication gates are recorded separately
+from the implementation items below.
 
 - [x] Approve explicit tagged enumeration and record the decision.
 - [x] Add the public tagged type, enumeration method, and compiler/runtime wiring.
@@ -74,7 +76,7 @@ from the checked implementation items below.
 - [x] Verify cross-space references, removal/reinsertion, cold resume, and
       demand-only enumeration without broadening lookup dependencies.
 - [x] Update current API documentation and demonstrations.
-- [ ] Complete publication gates: final integration tests, current-head CI,
+- [x] Complete publication gates: final integration tests, current-head CI,
       antagonistic review, and Cubic review.
 
 General runtime union materialization changes are outside this implementation.
@@ -127,7 +129,7 @@ claiming an incremental many-to-many join.
 
 Index membership, per-element key extraction, bucket results, and lookup results
 use ordinary reactive child runs and transaction rollback. Follow
-[runner child ownership](../specs/runner-child-run-ownership.md) for removal,
+[runner child ownership](../../specs/runner-child-run-ownership.md) for removal,
 independent readers, teardown, and reload. Reusing a key after removal should
 address the same deterministic bucket; retired children must not leak merely
 because another key remains populated.
@@ -195,5 +197,5 @@ groups.
 - [x] Implement contracts, measured limits, and a synthetic roster/tally demo.
       The feature documentation and local dashboard expose the operator
       contracts, join behavior, and measurements; PRs #7323 and #7362 carry
-      repository publication through the separate gates above.
+      repository publication through the completed gates above.
       Live poll migration remains subject to coordination with Mike.
