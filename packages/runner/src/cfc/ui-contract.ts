@@ -159,52 +159,43 @@ const trustRequirementsFromContract = (
   };
 };
 
-/**
- * The refs a branch of the walk has followed, keyed by the document each was
- * read in. A local `#/…` pointer names a definition of the document it sits
- * in, so the same pointer read in another document is another ref; an
- * embedded or external ref names its document wherever it sits, so those
- * share one key. A ref met twice under one key is a cycle.
- */
-type FollowedRefs = Map<object, Set<string>>;
-
-const DOCUMENT_REFS: object = {};
-
-const followedRefsKey = (ref: string, root: JSONSchema | undefined): object =>
-  ref.startsWith("#") && isObjectOrArray(root) ? root : DOCUMENT_REFS;
-
-const copyFollowedRefs = (followed: FollowedRefs): FollowedRefs => {
-  const copy: FollowedRefs = new Map();
-  for (const [key, refs] of followed) copy.set(key, new Set(refs));
-  return copy;
-};
-
 // Follow a `$ref` of any form the runtime resolves — a local pointer, an
 // embedded schema, or an external `cid:` document — one chain at a time. The
-// schema comes back as it is where it carries no ref, where the ref closes a
-// cycle, or where it resolves to nothing.
+// resolver guards the chain; `seenRefs`, the refs this branch of the walk has
+// followed, guards the descent, where a recursive document reaches its own
+// ref again below the body it resolved to. The schema comes back as it is
+// where it carries no ref, where the ref closes a cycle, or where it resolves
+// to nothing.
 const followSchemaRef = (
   schema: JSONSchema | undefined,
   root: JSONSchema | undefined,
-  followed: FollowedRefs,
+  seenRefs: Set<string>,
 ): JSONSchema | undefined => {
   if (!isObjectOrArray(schema) || typeof schema.$ref !== "string") {
     return schema;
   }
   const ref = schema.$ref;
-  const key = followedRefsKey(ref, root);
-  let refs = followed.get(key);
-  if (refs?.has(ref)) return schema;
-  if (refs === undefined) {
-    refs = new Set();
-    followed.set(key, refs);
-  }
-  refs.add(ref);
+  if (seenRefs.has(ref)) return schema;
+  seenRefs.add(ref);
   return ContextualFlowControl.resolveSchemaRefs(
     schema,
     isObjectOrArray(root) ? root : schema,
   ) ?? schema;
 };
+
+// The seen refs to carry below a resolution. A resolution that enters another
+// document — its root is not the one the ref was read in — leaves the local
+// pointers followed so far behind: each named a definition of the document
+// being left, and the same pointer in the new document is another ref. An
+// embedded or external ref names its document wherever it sits, and stays.
+const seenRefsBelow = (
+  seenRefs: Set<string>,
+  root: JSONSchema | undefined,
+  resolvedRoot: JSONSchema,
+): Set<string> =>
+  resolvedRoot === root
+    ? seenRefs
+    : new Set([...seenRefs].filter((ref) => !ref.startsWith("#")));
 
 // The root a resolved ref's target resolves against: its own document where
 // the ref's chain ended in another one — a definition body that is an
@@ -222,14 +213,19 @@ const resolvedRootFor = (
 const uiContractFromSchemaInternal = (
   schema: JSONSchema | undefined,
   root: JSONSchema | undefined,
-  followed: FollowedRefs,
+  seenRefs: Set<string>,
 ): UiContract | undefined => {
-  const resolvedSchema = followSchemaRef(schema, root, followed);
+  const resolvedSchema = followSchemaRef(schema, root, seenRefs);
   if (resolvedSchema !== schema && schema !== undefined) {
+    const resolvedRoot = resolvedRootFor(
+      schema,
+      resolvedSchema ?? schema,
+      root,
+    );
     return uiContractFromSchemaInternal(
       resolvedSchema,
-      resolvedRootFor(schema, resolvedSchema ?? schema, root),
-      followed,
+      resolvedRoot,
+      seenRefsBelow(seenRefs, root, resolvedRoot),
     );
   }
   if (
@@ -266,22 +262,27 @@ const uiContractFromSchemaInternal = (
 export const uiContractFromSchema = (
   schema: JSONSchema | undefined,
 ): UiContract | undefined =>
-  uiContractFromSchemaInternal(schema, schema, new Map());
+  uiContractFromSchemaInternal(schema, schema, new Set());
 
 const uiContractsFromSchemaInternal = (
   schema: JSONSchema | undefined,
   root: JSONSchema | undefined,
   path: string[],
-  followed: FollowedRefs,
+  seenRefs: Set<string>,
 ): UiContractEntry[] => {
-  const branchRefs = copyFollowedRefs(followed);
+  const branchRefs = new Set(seenRefs);
   const resolvedSchema = followSchemaRef(schema, root, branchRefs);
   if (resolvedSchema !== schema && schema !== undefined) {
+    const resolvedRoot = resolvedRootFor(
+      schema,
+      resolvedSchema ?? schema,
+      root,
+    );
     return uiContractsFromSchemaInternal(
       resolvedSchema,
-      resolvedRootFor(schema, resolvedSchema ?? schema, root),
+      resolvedRoot,
       path,
-      branchRefs,
+      seenRefsBelow(branchRefs, root, resolvedRoot),
     );
   }
   if (!isObjectOrArray(resolvedSchema)) {
@@ -293,7 +294,7 @@ const uiContractsFromSchemaInternal = (
   const contract = uiContractFromSchemaInternal(
     resolvedSchema,
     childRoot,
-    new Map(),
+    new Set(),
   );
   if (contract !== undefined) {
     entries.push(
@@ -327,7 +328,7 @@ const uiContractsFromSchemaInternal = (
           definition as JSONSchema,
           definition as JSONSchema,
           [],
-          new Map(),
+          new Set(),
         )
       )
       .map((entry) => entry.contract);
@@ -343,7 +344,7 @@ const uiContractsFromSchemaInternal = (
           child as JSONSchema,
           childRoot,
           [...path, key],
-          followed,
+          seenRefs,
         ),
       );
     }
@@ -360,7 +361,7 @@ const uiContractsFromSchemaInternal = (
         child as JSONSchema,
         childRoot,
         path,
-        followed,
+        seenRefs,
       ),
     );
   }
@@ -380,7 +381,7 @@ const uiContractsFromSchemaInternal = (
         resolvedSchema.items as JSONSchema,
         childRoot,
         [...path, "*"],
-        followed,
+        seenRefs,
       ),
     );
   }
@@ -392,7 +393,7 @@ const uiContractsFromSchemaInternal = (
           resolvedSchema.prefixItems[index] as JSONSchema,
           childRoot,
           [...path, String(index)],
-          followed,
+          seenRefs,
         ),
       );
     }
@@ -404,7 +405,7 @@ const uiContractsFromSchemaInternal = (
 export const uiContractsFromSchema = (
   schema: JSONSchema | undefined,
 ): UiContractEntry[] =>
-  uiContractsFromSchemaInternal(schema, schema, [], new Map());
+  uiContractsFromSchemaInternal(schema, schema, [], new Set());
 
 export const trustedEventProvenanceMatchesUiContract = (
   provenance: unknown,

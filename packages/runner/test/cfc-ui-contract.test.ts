@@ -472,6 +472,53 @@ describe("CFC UI contract matching", () => {
       release();
     }
   });
+
+  it("resolves one definition name in two external documents to each document's own", () => {
+    // `Panel` is a submit action in one document and a disclosure in the
+    // other. Read as siblings, and read with the second nested inside the
+    // first, each document's `#/$defs/Panel` names its own definition.
+    const release = acquireSchemaRegistryLease();
+    try {
+      const submit = {
+        helper: "UiAction",
+        action: "SubmitDirectCommand",
+        trustedPattern: "TrustedDirectCommandSurface",
+        requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+      };
+      const disclosure = { helper: "UiDisclosure", kind: "Secret" };
+      const disclosing = {
+        type: "object",
+        properties: { action: { $ref: "#/$defs/Panel" } },
+        $defs: { Panel: { type: "string", ifc: { uiContract: disclosure } } },
+      } as unknown as JSONSchema;
+      const disclosingHash = internSchemaAsTaggedHashString(disclosing);
+      registerSchemaDocument(disclosingHash, disclosing);
+      const submitting = {
+        type: "object",
+        properties: {
+          action: { $ref: "#/$defs/Panel" },
+          next: { $ref: `cid:${disclosingHash}` },
+        },
+        $defs: { Panel: trustedPatternUiActionSchema },
+      } as unknown as JSONSchema;
+      const submittingHash = internSchemaAsTaggedHashString(submitting);
+      registerSchemaDocument(submittingHash, submitting);
+
+      expect(uiContractsFromSchema({
+        type: "object",
+        properties: {
+          a: { $ref: `cid:${submittingHash}` },
+          b: { $ref: `cid:${disclosingHash}` },
+        },
+      } as unknown as JSONSchema)).toEqual([
+        { path: ["a", "action"], contract: submit },
+        { path: ["a", "next", "action"], contract: disclosure },
+        { path: ["b", "action"], contract: disclosure },
+      ]);
+    } finally {
+      release();
+    }
+  });
 });
 
 describe("CFC trusted UI event enforcement", () => {
