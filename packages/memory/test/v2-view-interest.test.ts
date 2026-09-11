@@ -2,6 +2,8 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { spy } from "@std/testing/mock";
 
+import { ChangeSet } from "@codemirror/state";
+
 import {
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
@@ -12,11 +14,17 @@ import {
   type ServerMessage,
   type SessionOpenResult,
   setServerExecutionConfig,
+  toValuePath,
   type ViewInterest,
   type WatchSetResult,
   type WatchSpec,
 } from "../v2.ts";
 import { Server } from "../v2/server.ts";
+import {
+  CODEMIRROR_CHANGESET_CODEC,
+  operationBaselineHash,
+} from "../v2/operation-codec.ts";
+import { parseViewQuery } from "../v2/view-interest.ts";
 
 const space = "did:key:z6Mk-view-space";
 const principal = "did:key:z6Mk-view-reader";
@@ -542,5 +550,117 @@ describe("view interests", () => {
     ) as ResponseMessage<unknown>;
     expect(message.error).toBeDefined();
     expect(server.viewInterestsForSpace(space)).toHaveLength(0);
+  });
+  it("rearms a plan-only failed delivery", async () => {
+    await set([], [view()]);
+    const [{ handle }] = server.viewInterestsForSpace(space);
+    await server.setViewSelection(space, handle, {
+      generation: 1,
+      delivery: [query("of:support")],
+      eligibleActions: ["first"],
+    });
+    await server.flushSessions();
+    await server.setViewSelection(space, handle, {
+      generation: 2,
+      delivery: [query("of:support")],
+      eligibleActions: ["second"],
+    });
+    const frame = await server.syncSessionForConnection(
+      space,
+      sessionId,
+      new Set(),
+    );
+    expect(frame?.effect.upserts).toEqual([]);
+    expect(frame?.effect.viewPlans?.[0].generation).toBe(2);
+    server.rollbackUndeliveredSync(space, sessionId, frame!);
+    const retry = await server.syncSessionForConnection(
+      space,
+      sessionId,
+      new Set(),
+    );
+    expect(retry?.effect.viewPlans?.[0].generation).toBe(2);
+  });
+
+  it("retains operation cursors when adding an ordinary watch to a view", async () => {
+    expect(
+      (await server.transact({
+        type: "transact",
+        requestId: "seed-text",
+        space,
+        sessionId,
+        commit: {
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:text",
+            value: { value: { body: "a" } },
+          }],
+        },
+      })).error,
+    ).toBeUndefined();
+    expect(
+      (await server.transact({
+        type: "transact",
+        requestId: "edit-text",
+        space,
+        sessionId,
+        commit: {
+          localSeq: 3,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "apply-op",
+            id: "of:text",
+            path: toValuePath(["body"]),
+            codec: CODEMIRROR_CHANGESET_CODEC,
+            submissionId: "review:1",
+            base: null,
+            baselineHash: operationBaselineHash("a"),
+            payload: {
+              updates: [{
+                clientId: "writer",
+                changes: ChangeSet.of({ from: 1, insert: "b" }, 1).toJSON(),
+              }],
+            },
+          }],
+        },
+      })).error,
+    ).toBeUndefined();
+    const original = await set([{
+      id: "body-operations",
+      kind: "operation",
+      query: {
+        id: "of:text",
+        path: toValuePath(["body"]),
+        after: { epoch: 1, version: 0 },
+      },
+    }], [view()]);
+    expect(original.operationFields?.[0].field.operations).toHaveLength(1);
+    const added = await server.watchAdd({
+      type: "session.watch.add",
+      requestId: "add",
+      space,
+      sessionId,
+      watches: [watch("of:ordinary")],
+    });
+    expect(added.error).toBeUndefined();
+    expect(added.ok?.sync.operationFields?.[0].field.operations).toHaveLength(
+      0,
+    );
+  });
+
+  it("refuses string schemas at the view query boundary", () => {
+    expect(
+      parseViewQuery({
+        roots: [{ id: "of:render", selector: { path: [], schema: "invalid" } }],
+      }),
+    ).toBeNull();
+    for (const schema of [true, false, { type: "string" }]) {
+      expect(
+        parseViewQuery({
+          roots: [{ id: "of:render", selector: { path: [], schema } }],
+        }),
+      ).not.toBeNull();
+    }
   });
 });

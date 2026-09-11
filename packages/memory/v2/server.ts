@@ -4750,7 +4750,9 @@ export class Server {
     }
 
     try {
-      const nextOperationCursors = new Map<string, OpCursor>();
+      const nextOperationCursors = incremental
+        ? new Map(session.operationCursors)
+        : new Map<string, OpCursor>();
       const evaluated: Awaited<ReturnType<Server["evaluateWatchSet"]>> & {
         demandGraphs?: typeof session.graphs;
         demandEntities?: typeof session.entities;
@@ -5418,6 +5420,7 @@ export class Server {
       return;
     }
     const sync = undelivered.effect;
+    if (sync.viewPlans !== undefined) session.forceFullResync = true;
     const identity = this.#sessionScopeIdentity(session);
     const ids: string[] = [];
     // The frame's OWN delivery record carries the exact instance-keyed

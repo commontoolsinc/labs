@@ -4431,15 +4431,18 @@ export class SpaceReplica
     if (
       views.length > 0 && client.serverFlags?.viewScopedReplicationV1 !== true
     ) return false;
-    const { view, precedingSyncs, sync } = await session.viewSetSync(views);
-    if (this.#closed) return false;
-    this.#watchView = view;
-    for (const precedingSync of precedingSyncs) {
-      this.#applySessionSync(precedingSync, "integrate");
-    }
-    this.#applySessionSync(sync, "integrate");
-    this.#consumeWatchView(view);
-    return true;
+    await session.viewSetSync(views, ({ view, precedingSyncs, sync }) => {
+      if (this.#closed) return;
+      this.#watchView = view;
+      for (const frame of [...precedingSyncs, sync]) {
+        this.#applySessionSync(
+          isCurrent() ? frame : { ...frame, viewPlans: undefined },
+          "integrate",
+        );
+      }
+      this.#consumeWatchView(view);
+    });
+    return !this.#closed && isCurrent();
   }
 
   /** Observes complete eligibility snapshots after their input documents arrive. */

@@ -27,7 +27,6 @@ export function parseViewQuery(value: unknown): ViewQuery | null {
       !isObjectNotArray(root.selector) || !Array.isArray(root.selector.path) ||
       !root.selector.path.every((part) => typeof part === "string") ||
       !(root.selector.schema === undefined ||
-        typeof root.selector.schema === "string" ||
         typeof root.selector.schema === "boolean" ||
         isObjectNotArray(root.selector.schema))
     ) return null;

@@ -708,6 +708,9 @@ export class Client {
             // one.
             this.#noteStateChange();
             this.#rejectPending(err);
+            for (const session of this.#spaces) {
+              session.handleConnectionFailure(err);
+            }
             return;
           }
           this.#rejectPending(err);
@@ -1179,8 +1182,15 @@ export class SpaceSession {
     return () => this.#viewCapabilityLostObservers.delete(observer);
   }
 
-  /** Replaces renderer interests independently from ordinary explicit watches. */
-  async viewSetSync(views: ViewInterest[]): Promise<WatchMutationResult> {
+  /**
+   * Replaces renderer interests independently from ordinary explicit watches.
+   * `consume` integrates the result synchronously in watch-mutation order,
+   * before a later mutation can read holdings or apply its response.
+   */
+  async viewSetSync(
+    views: ViewInterest[],
+    consume?: (result: WatchMutationResult) => void,
+  ): Promise<WatchMutationResult> {
     this.#assertOpen();
     if (
       views.length > 0 &&
@@ -1218,11 +1228,13 @@ export class SpaceSession {
           this.#watchView = WatchView.fromSync(result.sync);
         } else this.#watchView.applySync(result.sync, false);
         this.#scheduleAck(result.serverSeq);
-        return {
+        const mutation = {
           view: this.#watchView,
           precedingSyncs: this.#takePrecedingWatchSyncs(),
           sync: result.sync,
         };
+        consume?.(mutation);
+        return mutation;
       },
       "apply",
     );
@@ -1361,6 +1373,7 @@ export class SpaceSession {
 
   /** Waits for session authentication and watch restoration on this connection. */
   async whenRestored(): Promise<void> {
+    this.#assertOpen();
     await this.#restoreComplete?.promise;
   }
 
@@ -1390,7 +1403,11 @@ export class SpaceSession {
       );
       return;
     }
-    this.#restoreComplete = Promise.withResolvers<void>();
+    if (this.#restoreComplete === undefined) {
+      this.#restoreComplete = Promise.withResolvers<void>();
+      // Session closure rejects this barrier even if no consumer is waiting.
+      this.#restoreComplete.promise.catch(() => {});
+    }
     if (
       this.#client.serverFlags?.viewScopedReplicationV1 !== true &&
       (this.#viewInterests.length > 0 || this.#viewsDirty)
@@ -1478,6 +1495,8 @@ export class SpaceSession {
         }
       }
       await Promise.all(replayTasks);
+      this.#restoreComplete?.resolve();
+      this.#restoreComplete = undefined;
     } catch (error) {
       // A permanent authorization denial ANYWHERE in the reopen — the initial
       // session.open OR the watch re-establishment (watchSetSync) that follows a
@@ -1493,8 +1512,6 @@ export class SpaceSession {
       throw error;
     } finally {
       this.#restoring = false;
-      this.#restoreComplete?.resolve();
-      this.#restoreComplete = undefined;
       if (!this.#closed && this.#outstandingCommits.size > 0) {
         this.#replayOutstandingCommits(replayedThroughLocalSeq);
       }
@@ -1507,6 +1524,8 @@ export class SpaceSession {
     }
     this.#closed = true;
     this.#closeError = new Error("memory session closed");
+    this.#restoreComplete?.reject(this.#closeError);
+    this.#restoreComplete = undefined;
     this.#readyOnConnection = false;
     this.#client.forgetSession(this);
     this.#rejectCaughtUpLocalSeqWaiters(this.#closeError);
@@ -1539,11 +1558,14 @@ export class SpaceSession {
    * The stored error is what `#assertOpen()` rethrows for any later call, so a
    * storage subscriber observes the real cause on its next watch or transact.
    * Shared by session revocation, a permanent reopen authorization denial,
-   * and a restore against a server that cannot take declared holdings.
+   * a restore against a server that cannot take declared holdings, and
+   * a permanent connection failure.
    */
   #terminateSession(error: Error): void {
     this.#closed = true;
     this.#closeError = error;
+    this.#restoreComplete?.reject(error);
+    this.#restoreComplete = undefined;
     this.#readyOnConnection = false;
     this.#client.forgetSession(this);
     for (const pending of this.#outstandingCommits.values()) {
@@ -1556,6 +1578,12 @@ export class SpaceSession {
     this.#viewCapabilityLostObservers.clear();
     this.#watchView?.close();
     this.#watchView = null;
+  }
+
+  /** Terminates the session when its client cannot restore the connection. */
+  handleConnectionFailure(error: Error): void {
+    if (this.#closed) return;
+    this.#terminateSession(error);
   }
 
   handleDisconnect(): void {
