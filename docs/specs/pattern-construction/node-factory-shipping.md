@@ -1966,8 +1966,9 @@ schema-declared Cell field is dereferenced to its current public value; the
 projection must never walk a Cell handle or its runner internals as authored
 data. That dereference replaces an already-present Cell handle as well as
 filling a sparse root; the handle must not become a directory merely because
-the outer read included the key. Consequently a cold factory cannot block
-unrelated sibling fields from refreshing in the mounted tree, and FUSE
+the outer read included the key. Following the handle to its current payload
+also keeps Factory materialization disabled. Consequently a cold factory cannot
+block unrelated sibling fields from refreshing in the mounted tree, and FUSE
 observation never turns a context-free shell into an executable callable.
 
 Authored code may neither supply a literal for such a field nor capture a

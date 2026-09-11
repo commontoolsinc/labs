@@ -14,7 +14,9 @@ import {
 } from "@commonfabric/piece/ops";
 import {
   type Cell,
+  getCellOrThrow,
   isCell,
+  isCellResultForDereferencing,
   lookupSchemaDocument,
   parseExternalSchemaRef,
   recomposeSchema,
@@ -3863,8 +3865,10 @@ export class CellBridge {
       const childCell = rootCell.key(key).asSchemaFromLinks();
       let resolvedCandidate = candidate;
       try {
-        resolvedCandidate = childCell.getRaw?.() ?? childCell.get?.() ??
-          candidate;
+        const rawCandidate = childCell.getRaw?.();
+        resolvedCandidate = rawCandidate !== undefined
+          ? rawCandidate
+          : childCell.getWithoutFactoryMaterialization?.() ?? candidate;
       } catch {
         resolvedCandidate = candidate;
       }
@@ -3933,16 +3937,38 @@ export class CellBridge {
       let childValue: unknown;
       let childReadSucceeded = false;
       try {
-        childValue = childCell.get?.();
+        const readWithoutFactoryMaterialization = (childCell as {
+          getWithoutFactoryMaterialization?: () => unknown;
+        }).getWithoutFactoryMaterialization;
+        childValue = typeof readWithoutFactoryMaterialization === "function"
+          ? readWithoutFactoryMaterialization.call(childCell)
+          : childCell.get?.();
         childReadSucceeded = true;
         // Override with the raw link reference only for sigil links, which
         // is what enables FUSE symlinks.
         const rawValue = childCell.getRaw?.();
         if (isSigilLink(rawValue)) {
           childValue = rawValue;
+        } else {
+          const visited = new Set<Cell<unknown>>();
+          while (
+            isCell(childValue) ||
+            isCellResultForDereferencing(childValue)
+          ) {
+            const projectedCell = isCell(childValue)
+              ? childValue
+              : getCellOrThrow(childValue);
+            if (visited.has(projectedCell)) {
+              childValue = undefined;
+              break;
+            }
+            visited.add(projectedCell);
+            childValue = projectedCell.getWithoutFactoryMaterialization();
+          }
         }
       } catch {
         childValue = undefined;
+        childReadSucceeded = false;
       }
 
       const callableKind =
@@ -3959,10 +3985,15 @@ export class CellBridge {
       if (
         childReadSucceeded &&
         (childValue !== undefined || !(key in materialized) ||
-          isCell(materialized[key]))
+          isCell(materialized[key]) ||
+          isCellResultForDereferencing(materialized[key]))
       ) {
         materialized[key] = childValue;
-      } else if (!childReadSucceeded && isCell(materialized[key])) {
+      } else if (
+        !childReadSucceeded &&
+        (isCell(materialized[key]) ||
+          isCellResultForDereferencing(materialized[key]))
+      ) {
         delete materialized[key];
       }
     }

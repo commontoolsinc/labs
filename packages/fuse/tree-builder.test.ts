@@ -1,6 +1,7 @@
 // tree-builder.test.ts — Unit tests for JSON-to-tree conversion and symlink parsing
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
+import { toCell } from "../runner/src/back-to-cell.ts";
 import { FsTree } from "./tree.ts";
 import {
   buildCallableScript,
@@ -1291,6 +1292,7 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
   interface FakeCell {
     schema: Record<string, unknown> | undefined;
     get(): unknown;
+    getWithoutFactoryMaterialization(): unknown;
     getRaw(): unknown;
     asSchemaFromLinks(): FakeCell;
     key(segment: string): FakeCell;
@@ -1306,6 +1308,7 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
     return {
       schema,
       get: () => value,
+      getWithoutFactoryMaterialization: () => value,
       getRaw: () => value,
       asSchemaFromLinks() {
         return this;
@@ -1397,6 +1400,7 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
   interface FakeCell {
     schema: Record<string, unknown> | undefined;
     get(): unknown;
+    getWithoutFactoryMaterialization(): unknown;
     getRaw(): unknown;
     asSchemaFromLinks(): FakeCell;
     key(segment: string): FakeCell;
@@ -1412,6 +1416,7 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     return {
       schema,
       get: () => value,
+      getWithoutFactoryMaterialization: () => value,
       getRaw: () => value,
       asSchemaFromLinks() {
         return this;
@@ -1423,7 +1428,9 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     };
   }
 
-  const titleCell = makeCell("hello", { type: "string" });
+  const titleValueCell = makeCell("hello", { type: "string" });
+  const titleProjection = { [toCell]: () => titleValueCell };
+  const titleCell = makeCell(titleProjection, { type: "string" });
   const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
   const toolCell = makeCell(
     patternFactoryValue({ source: "bound-source" }),
@@ -1459,7 +1466,7 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     },
     result: {
       getCell: () => Promise.resolve(resultCell),
-      get: () => Promise.resolve({ title: titleCell }),
+      get: () => Promise.resolve({ title: titleProjection }),
     },
   };
 
