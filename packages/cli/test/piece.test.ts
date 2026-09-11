@@ -1164,6 +1164,7 @@ describe("cli piece parsing", () => {
           pieceId: PIECE,
           pattern: { identity: "B".repeat(43), symbol: "default" },
           revisionId: "revision-2",
+          seq: 12,
           detachedOrigin: "system:origin.tsx",
         });
       },
@@ -1180,6 +1181,8 @@ describe("cli piece parsing", () => {
     expect(receipt).toEqual({
       status: "committed",
       ref: { identity: "B".repeat(43), symbol: "default" },
+      space: SPACE_DID,
+      seq: 12,
       revisionId: "revision-2",
       detachedOrigin: "system:origin.tsx",
       refresh: { status: "completed" },

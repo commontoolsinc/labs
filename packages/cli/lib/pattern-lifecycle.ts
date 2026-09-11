@@ -183,6 +183,7 @@ export async function setPieceSourceOnServer(
   pieceId: string;
   pattern: PatternRef;
   revisionId: string;
+  seq: number;
   detachedOrigin: string | null;
 }> {
   return await call(config, "setsrc", {

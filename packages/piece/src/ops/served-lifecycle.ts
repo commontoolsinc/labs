@@ -172,6 +172,13 @@ export interface ServedSetSourceReceipt {
   /** The source revision the transaction appended. */
   revisionId: string;
 
+  /**
+   * Position in the space's commit log at which the transaction was
+   * accepted: the seq `cf inspect value-at --seq` and `diff --from/--to`
+   * read.
+   */
+  seq: number;
+
   /** The origin the update detached, `null` when the piece had none. */
   detachedOrigin: string | null;
 }
@@ -417,6 +424,7 @@ export async function servedSetPieceSource(
     pieceId: request.pieceId,
     pattern: receipt.ref,
     revisionId: receipt.revisionId,
+    seq: receipt.seq,
     detachedOrigin: receipt.detachedOrigin,
   };
 }

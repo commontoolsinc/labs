@@ -195,6 +195,7 @@ describe("pattern-lifecycle client", () => {
             pieceId: "p1",
             pattern: { identity: "i", symbol: "s" },
             revisionId: "r1",
+            seq: 7,
             detachedOrigin: null,
           },
         },
@@ -206,6 +207,7 @@ describe("pattern-lifecycle client", () => {
             repository: "https://example.invalid/repo",
           });
           expect(receipt.revisionId).toBe("r1");
+          expect(receipt.seq).toBe(7);
           expect(calls).toHaveLength(1);
           const [call] = calls;
           expect(call.url.pathname).toBe(

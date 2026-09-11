@@ -40,7 +40,7 @@ naming both or neither fails validation.
 | ------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | `upload`      | `program`                                                                                         | `{ pattern }` — the pointer the space now holds the program under                  |
 | `instantiate` | `program` or `pattern`; optional `argument`, `repository`, `slug`, `force`, `register`, `start`   | `{ pieceId, pattern, slug? }`                                                      |
-| `setsrc`      | `piece`; `program` or `pattern`; optional `repository`, `dangerouslyAllowIncompatibleSchema`, `expectedPattern`, `start` | `{ pieceId, pattern, revisionId, detachedOrigin }` — the accepted setup transaction's receipt |
+| `setsrc`      | `piece`; `program` or `pattern`; optional `repository`, `dangerouslyAllowIncompatibleSchema`, `expectedPattern`, `start` | `{ pieceId, pattern, revisionId, seq, detachedOrigin }` — the accepted setup transaction's receipt, `seq` its position in the space's commit log |
 
 A refusal is a JSON body `{ error, code }`. `code` is stable and is what a
 client branches on; `error` is prose for a person.

@@ -240,6 +240,10 @@ export const setsrc = createRoute({
             revisionId: z.string().describe(
               "The source revision the update appended.",
             ),
+            seq: z.number().describe(
+              "Position in the space's commit log at which the update was " +
+                "accepted.",
+            ),
             detachedOrigin: z.string().nullable().describe(
               "The origin the update detached; null when the piece had none.",
             ),

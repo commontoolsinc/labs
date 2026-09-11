@@ -379,6 +379,7 @@ describe("served lifecycle verbs", () => {
       );
       expect(receipt.pieceId).toBe(created.pieceId);
       expect(receipt.pattern.identity).not.toBe(created.pattern.identity);
+      expect(receipt.seq).toBeGreaterThan(0);
       expect(receipt.detachedOrigin).toBeNull();
       expect(granted).toBe(true);
 

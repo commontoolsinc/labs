@@ -1970,6 +1970,8 @@ async function updateOnServer(
   return {
     status: "committed",
     ref: receipt.pattern,
+    space: pieces.getSpace(),
+    seq: receipt.seq,
     revisionId: receipt.revisionId,
     detachedOrigin: receipt.detachedOrigin,
     refresh,

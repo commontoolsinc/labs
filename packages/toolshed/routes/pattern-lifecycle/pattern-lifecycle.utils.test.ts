@@ -243,6 +243,7 @@ describe("pattern-lifecycle verbs (transport half)", () => {
     expect(updated.pieceId).toBe(created.pieceId);
     expect(updated.pattern.identity).not.toBe(created.pattern.identity);
     expect(updated.revisionId).toMatch(/\S/);
+    expect(updated.seq).toBeGreaterThan(0);
     expect(updated.detachedOrigin).toBeNull();
 
     const incompatible = refused(
