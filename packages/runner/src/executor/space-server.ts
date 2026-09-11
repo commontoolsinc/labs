@@ -98,6 +98,7 @@ import type { Runtime, ServerRunInfo } from "../runtime.ts";
 import type {
   CommitError,
   IExtendedStorageTransaction,
+  ISpaceReplica,
   IStorageTransaction,
   ITransactionSealSink,
   MemorySpace,
@@ -901,8 +902,8 @@ export class SpaceServer implements TransactionSealDestination {
   /**
    * Transactions stamped `directCommit` (runtime.ts `ServerRunInfo`),
    * recorded at the stamp: the store seq at that moment, which the commit
-   * holds a document it writes without reading to, and the run's action id
-   * for the log.
+   * holds every document it writes to, and the run's action id for the
+   * log.
    */
   readonly #directCommits = new WeakMap<
     IExtendedStorageTransaction,
@@ -2065,10 +2066,10 @@ export class SpaceServer implements TransactionSealDestination {
    * admission instead of being refused carriage-less. */
   #stampRun(tx: IExtendedStorageTransaction, info: ServerRunInfo): void {
     if (info.directCommit === true) {
-      // The basis for a document the transaction writes without reading,
-      // taken here, ahead of the run's first read, the way a wave takes
-      // its basis when it opens; a document it reads is held to the seq
-      // the read saw.
+      // The basis every document the transaction writes is held to, taken
+      // here, ahead of the run's first read, the way a wave takes its
+      // basis when it opens; a document it reads is held to the seq the
+      // read saw as well.
       if (info.kind !== "bookkeeping") {
         throw new Error(
           `run ${info.actionId} asked for a direct commit as a ` +
@@ -2564,10 +2565,10 @@ export class SpaceServer implements TransactionSealDestination {
    *
    * The store validates the transaction's own read set as it does a client
    * commit's — every read against this replica's records, a document that
-   * moved at a read path since refusing the whole transaction — and holds a
-   * document the transaction writes without reading to the store seq the
-   * transaction was stamped at. A commit the store took but this replica
-   * has not yet applied is therefore a conflict, not a blind overwrite. A
+   * moved at a read path since refusing the whole transaction — and holds
+   * every document the transaction writes to the store seq the transaction
+   * was stamped at. A commit the store took but this replica has not yet
+   * applied is therefore a conflict, not a blind overwrite. A
    * read of state sealed into the open wave names the durable basis beneath
    * it: a caller whose commit must not build on uncommitted state stages
    * that state in an earlier cycle. The replica takes the writes only once
@@ -2607,103 +2608,118 @@ export class SpaceServer implements TransactionSealDestination {
     }
     this.#recordLifecycleVerbWrites(tx);
     const identity = runtime.scopeKeyIdentity;
-    let committedSeq: number | undefined;
+    // Every space the transaction wrote is collected before anything
+    // commits, so a refusal leaves nothing behind. The store's shape of the
+    // serving space's commit is taken during the handoff, while the
+    // transaction's read log is still the transaction's to give.
+    const handed: Array<{
+      space: MemorySpace;
+      native: NativeStorageCommit;
+      source: IStorageTransaction;
+      store:
+        | ReturnType<NonNullable<ISpaceReplica["storeCommitOf"]>>
+        | undefined;
+    }> = [];
     const collector: ITransactionSealSink = {
-      sealSpaceCommit: async (
+      sealSpaceCommit: (
         space: MemorySpace,
         native: NativeStorageCommit,
         source: IStorageTransaction,
       ): Promise<Result<Unit, CommitError>> => {
-        if (space !== this.#options.space) {
-          return refuse(
-            `direct commit of ${direct.actionId} wrote ${space}; a direct ` +
-              "commit may write only the serving space",
-          );
-        }
-        if ((native.sqliteOps?.length ?? 0) > 0) {
-          return refuse(
-            `direct commit of ${direct.actionId} folds sqlite ops; those ` +
-              "ride scheduler runs' wave batches",
-          );
-        }
-        const { operations, preconditions, reads } = replica.storeCommitOf!(
-          native,
-          source,
-        );
-        // A pending read saw layers the store has not taken; what the
-        // store can check is the durable basis beneath them.
-        const confirmedReads: ConfirmedRead[] = [
-          ...reads.confirmed,
-          ...reads.pending.map((
-            { id, scope, path, basisSeq, nonRecursive },
-          ) => ({
-            id,
-            ...(scope === undefined ? {} : { scope }),
-            path,
-            seq: basisSeq ?? 0,
-            ...(nonRecursive === undefined ? {} : { nonRecursive }),
-          })),
-        ];
-        const annotations: WaveWriteAnnotation[] = [];
-        const written: Array<{ id: string; scopeKey: ScopeKey }> = [];
-        for (const [opIndex, operation] of operations.entries()) {
-          if (operation.op === "sqlite") continue;
-          const scopeKey = resolveScopeKey(operation.scope, identity);
-          written.push({ id: operation.id, scopeKey });
-          if (operation.scope !== undefined && operation.scope !== "space") {
-            annotations.push({ op: opIndex, scopeKey });
-          }
-        }
-        const outcome = await sink.commitWave({
+        handed.push({
           space,
-          home: true,
-          basisSeq: direct.basisSeq,
-          rebasedHeads: [],
-          operations,
-          preconditions: [...preconditions],
-          confirmedReads,
-          annotations,
-          consequenceOf: [],
-          basisInstances: [],
-          holder: this.#holder,
-          derivedThrough: this.#watermark,
-        });
-        if (outcome.error) {
-          return refuse(
-            `direct commit rejected: ${outcome.error.message}`,
-          );
-        }
-        committedSeq = outcome.ok.seq;
-        // Applied here only now, with the store's verdict already in hand.
-        const sealed = replica.sealNative!(
           native,
           source,
-          Promise.resolve({ committed: { seq: committedSeq } }),
-        );
-        const settled = await sealed.settled;
-        if (settled.error !== undefined) {
-          // The store holds the commit; the replica re-pulls what it
-          // rolled back, through the dirtiness fan-out below. Runs reading
-          // the rolled-back state meanwhile keep the ordinary conflict on
-          // the docs this commit moved.
-          logger.warn("direct-commit-local-rollback", () => [
-            `space ${space}: direct commit of ${direct.actionId} landed at ` +
-            `seq ${committedSeq} but its local apply was rejected`,
-            settled.error,
-          ]);
-        } else {
-          // A wave open now takes a contribution sealed from here on, whose
-          // reads of these docs saw this commit, as having observed it
-          // (wave.ts).
-          this.#currentWave?.noteOwnCommit(committedSeq, written);
-        }
-        return { ok: {} };
+          store: space === this.#options.space
+            ? replica.storeCommitOf!(native, source)
+            : undefined,
+        });
+        return Promise.resolve({ ok: {} });
       },
     };
     const result = await inner.sealInto(collector);
-    if (result.error !== undefined || committedSeq === undefined) {
-      // A refusal, or an all-no-op transaction that handed over nothing.
+    if (result.error !== undefined) return result;
+    if (handed.length === 0) {
+      // An all-no-op transaction handed over nothing.
       return result;
+    }
+    if (handed.length > 1 || handed[0].store === undefined) {
+      return refuse(
+        `direct commit of ${direct.actionId} wrote ${
+          handed.map((entry) => entry.space).join(", ")
+        }; a direct commit may write only the serving space`,
+      );
+    }
+    const { space, native, source, store } = handed[0];
+    if ((native.sqliteOps?.length ?? 0) > 0) {
+      return refuse(
+        `direct commit of ${direct.actionId} folds sqlite ops; those ride ` +
+          "scheduler runs' wave batches",
+      );
+    }
+    const { operations, preconditions, reads } = store;
+    // A pending read saw layers the store has not taken; what the store
+    // can check is the durable basis beneath them.
+    const confirmedReads: ConfirmedRead[] = [
+      ...reads.confirmed,
+      ...reads.pending.map(({ id, scope, path, basisSeq, nonRecursive }) => ({
+        id,
+        ...(scope === undefined ? {} : { scope }),
+        path,
+        seq: basisSeq ?? 0,
+        ...(nonRecursive === undefined ? {} : { nonRecursive }),
+      })),
+    ];
+    const annotations: WaveWriteAnnotation[] = [];
+    const written: Array<{ id: string; scopeKey: ScopeKey }> = [];
+    for (const [opIndex, operation] of operations.entries()) {
+      if (operation.op === "sqlite") continue;
+      const scopeKey = resolveScopeKey(operation.scope, identity);
+      written.push({ id: operation.id, scopeKey });
+      if (operation.scope !== undefined && operation.scope !== "space") {
+        annotations.push({ op: opIndex, scopeKey });
+      }
+    }
+    const outcome = await sink.commitWave({
+      space,
+      home: true,
+      basisSeq: direct.basisSeq,
+      rebasedHeads: [],
+      operations,
+      preconditions: [...preconditions],
+      confirmedReads,
+      annotations,
+      consequenceOf: [],
+      basisInstances: [],
+      holder: this.#holder,
+      derivedThrough: this.#watermark,
+    });
+    if (outcome.error) {
+      return refuse(`direct commit rejected: ${outcome.error.message}`);
+    }
+    const committedSeq = outcome.ok.seq;
+    // Applied here only now, with the store's verdict already in hand.
+    const sealed = replica.sealNative(
+      native,
+      source,
+      Promise.resolve({ committed: { seq: committedSeq } }),
+    );
+    const settled = await sealed.settled;
+    if (settled.error !== undefined) {
+      // The store holds the commit; the replica re-pulls what it rolled
+      // back, through the dirtiness fan-out below. Runs reading the
+      // rolled-back state meanwhile keep the ordinary conflict on the docs
+      // this commit moved.
+      logger.warn("direct-commit-local-rollback", () => [
+        `space ${space}: direct commit of ${direct.actionId} landed at ` +
+        `seq ${committedSeq} but its local apply was rejected`,
+        settled.error,
+      ]);
+    } else {
+      // A wave open now takes a contribution sealed from here on, whose
+      // reads of these docs saw this commit, as having observed it
+      // (wave.ts).
+      this.#currentWave?.noteOwnCommit(committedSeq, written);
     }
     this.#runningLifecycleVerb?.directCommitSeqs.push(committedSeq);
     bumpDerivedCommits(this.#options.stats, String(this.#options.space));

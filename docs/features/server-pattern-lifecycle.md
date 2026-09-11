@@ -144,9 +144,9 @@ and the receipt and authority the runner mints from that verdict claim
 nothing a withdrawal can undo. The store validates the transaction's own
 read set as it does a client commit's: every read is held to the seq this
 replica had for the document, so a commit the store took but the replica
-had not applied when the transaction read is a conflict, and a document the
-transaction writes without reading is held to the store seq the
-transaction was stamped at. A read of state sealed into the open wave names
+had not applied when the transaction read is a conflict, and every document
+the transaction writes is held to the store seq the transaction was stamped
+at. A read of state sealed into the open wave names
 the durable basis beneath it. The replica takes the writes only once the
 store has accepted them, so no run reads them as pending state a refusal
 could roll back.
@@ -154,13 +154,14 @@ could roll back.
 A wave open when the direct commit lands learns of it once the replica has
 applied it. Its commit step treats a document the direct commit wrote,
 sitting at exactly that commit's seq, as observed rather than conflicting
-for a contribution sealed after the commit whose reads of that document
-all saw the commit, and holds the store to that exact head when it commits.
-A contribution sealed before keeps the ordinary conflict, since its write
-rests on state the commit replaced; one that read the document as it stood
-before the commit is refused at its own commit by the replica's claim check
-and never seals, and the wave holds such a read to the same rule should one
-reach it. This is what lets a piece the update moved
+for a contribution sealed after the commit that read the document with the
+commit applied and read none of the commit's documents before it, and holds
+the store to that exact head when it commits. A contribution sealed before,
+or one with no such read to show it saw the commit, keeps the ordinary
+conflict, since its write may rest on state the commit replaced; one that
+read a document as it stood before the commit is refused at its own commit
+by the replica's claim check and never seals, and the wave holds such a read
+to the same rule should one reach it. This is what lets a piece the update moved
 re-derive in the same cycle, whether the loop's pointer watcher swaps a
 piece it runs or the demand pass loads one the verb staged.
 

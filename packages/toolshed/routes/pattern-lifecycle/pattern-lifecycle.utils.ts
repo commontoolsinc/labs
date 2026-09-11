@@ -279,7 +279,7 @@ export async function processSetSource(
       "Supply exactly one of `program` and `pattern`.",
     );
   }
-  let pattern = source.pattern;
+  let candidate: ServedPatternRef;
   if (source.program !== undefined) {
     const program = source.program;
     const uploaded = await runServedVerb(deps, callerDid, input.space, {
@@ -288,9 +288,10 @@ export async function processSetSource(
       confirm: undefined,
     });
     if (uploaded.status !== 200) return uploaded;
-    pattern = uploaded.body;
+    candidate = uploaded.body;
+  } else {
+    candidate = source.pattern;
   }
-  const candidate = pattern!;
   return await runServedVerb(deps, callerDid, input.space, {
     name: "setsrc",
     run: (pieces) =>

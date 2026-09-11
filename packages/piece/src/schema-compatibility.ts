@@ -593,6 +593,10 @@ const comparableIfc = (ifc: unknown): unknown => {
  * are compared. `comparableIfc` performs both reductions, and
  * {@link IfcKeyRole} states which keys take part in each.
  */
+/** How a refusal of {@link assertPatternSchemasBackwardCompatible} opens. */
+export const PATTERN_SCHEMAS_INCOMPATIBLE =
+  "Pattern schemas are not backward compatible";
+
 export function assertPatternSchemasBackwardCompatible(
   previous: Pattern,
   candidate: Pattern,
@@ -613,7 +617,7 @@ export function assertPatternSchemasBackwardCompatible(
   }
   if (issues.length > 0) {
     throw new Error(
-      `Pattern schemas are not backward compatible:\n${
+      `${PATTERN_SCHEMAS_INCOMPATIBLE}:\n${
         issues.map((issue) => `- ${issue}`).join("\n")
       }`,
     );
@@ -655,7 +659,7 @@ export function assertPatternSchemasBackwardCompatible(
 
   if (issues.length > 0) {
     throw new Error(
-      `Pattern schemas are not backward compatible:\n${
+      `${PATTERN_SCHEMAS_INCOMPATIBLE}:\n${
         issues.map((issue) => `- ${issue}`).join("\n")
       }`,
     );

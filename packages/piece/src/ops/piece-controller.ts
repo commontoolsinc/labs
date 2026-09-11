@@ -65,6 +65,7 @@ import { pieceId } from "../piece-id.ts";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
+  PATTERN_SCHEMAS_INCOMPATIBLE,
   schemasHaveSameContract,
 } from "../schema-compatibility.ts";
 import {
@@ -4722,9 +4723,13 @@ export class PieceController<T = unknown> {
         // identity without loading it.
         let previousPattern: Pattern | undefined;
         let previousRef: { identity: string; symbol: string };
+        // A served update repairs no cache: a write the load would seal
+        // into the serving wave is not one the update's own commit
+        // should rest on or answer for.
+        const repairCache = options?.served === undefined;
         try {
           ({ pattern: previousPattern, ref: previousRef } = await this
-            .#loadCurrentPattern());
+            .#loadCurrentPattern({ repairCache }));
         } catch (error) {
           if (!options?.dangerouslyAllowIncompatibleSchema) throw error;
           await this.#cell.sync();
@@ -5273,6 +5278,19 @@ function pieceSourceCompatibilityMessage(
   return [issues.schema, issues.argument, issues.retainedLinks, issues.cfc]
     .filter((message): message is string => message !== undefined)
     .join("\n");
+}
+
+/**
+ * Whether `error` is an update refused for the candidate's fit over the
+ * piece — its schemas against the current pattern's, the links its argument
+ * schema retains, or the stored argument — rather than for a reason of
+ * setup's own.
+ */
+export function isPieceSourceCompatibilityRefusal(error: unknown): boolean {
+  return error instanceof Error && (
+    error.message.startsWith(PATTERN_SCHEMAS_INCOMPATIBLE) ||
+    isOverridableArgumentCompatibilityError(error)
+  );
 }
 
 function isOverridableArgumentCompatibilityError(error: unknown): boolean {

@@ -237,6 +237,7 @@ describe("pattern-lifecycle verbs (transport half)", () => {
         piece: created.pieceId,
         program: NUMERIC_SEED_PROGRAM,
         dangerouslyAllowIncompatibleSchema: true,
+        start: false,
       }),
     );
     expect(updated.pieceId).toBe(created.pieceId);

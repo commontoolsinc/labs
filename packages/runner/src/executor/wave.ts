@@ -1022,11 +1022,12 @@ export class WaveAccumulator
    * and is applied to the replica, while this wave is open, writing `docs`
    * (docs/features/server-pattern-lifecycle.md). The commit step then
    * treats a doc in `docs` sitting at exactly `seq` as observed, not
-   * conflicting, for a contribution sealed from now on whose every read of
-   * that doc saw a seq no older than `seq`. A contribution sealed earlier,
-   * or one that read the doc before the commit reached the replica, keeps
-   * the ordinary conflict, since its write rests on state the commit
-   * replaced.
+   * conflicting, for a contribution sealed from now on that read the doc at
+   * `seq` or later and read no doc in `docs` earlier than `seq`. A
+   * contribution sealed earlier, one with no read of the doc to show it
+   * saw the commit, or one that read any of `docs` before the commit
+   * reached the replica keeps the ordinary conflict, since its write may
+   * rest on state the commit replaced.
    */
   noteOwnCommit(
     seq: number,
@@ -1806,8 +1807,9 @@ export class WaveAccumulator
 
     /** The head a contribution observed on a conflicted doc through one of
      * the loop's own direct commits, or `undefined` when the doc moved for
-     * some other reason, the contribution was sealed before the commit, or
-     * one of its reads of the doc predates it. */
+     * some other reason, the contribution was sealed before the commit,
+     * none of its reads of the doc shows it saw the commit, or a read of
+     * any doc the commit wrote predates it. */
     const observedOwnCommit = (
       key: string,
       contribution: WaveContribution,
@@ -1821,17 +1823,22 @@ export class WaveAccumulator
       const home = this.#homeSealed(contribution);
       if (home === undefined) return undefined;
       const { confirmed, pending } = home.sealed.commit.reads;
-      const readsBefore = [
-        ...confirmed.map((read) => ({ read, seq: read.seq })),
-        ...pending.map((read) => ({ read, seq: read.basisSeq ?? 0 })),
-      ].some(({ read, seq }) =>
-        seq < own.seq &&
-        docInstanceKey(
-            read.id,
-            this.#scopeKeyFor(read.scope, contribution.context),
-          ) === key
-      );
-      return readsBefore ? undefined : head;
+      let observed = false;
+      for (
+        const { read, seq } of [
+          ...confirmed.map((read) => ({ read, seq: read.seq })),
+          ...pending.map((read) => ({ read, seq: read.basisSeq ?? 0 })),
+        ]
+      ) {
+        const readKey = docInstanceKey(
+          read.id,
+          this.#scopeKeyFor(read.scope, contribution.context),
+        );
+        if (!own.keys.has(readKey)) continue;
+        if (seq < own.seq) return undefined;
+        if (readKey === key) observed = true;
+      }
+      return observed ? head : undefined;
     };
 
     const resolveConflicts = async (): Promise<void> => {

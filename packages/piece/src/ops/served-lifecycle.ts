@@ -34,6 +34,7 @@ import { pieceId as pieceIdOf } from "../piece-id.ts";
 import { claimSlugInTx, prepareSlugClaim } from "../slugs.ts";
 import { prepareSourceClosureVerification } from "../../../runner/src/compilation-cache/cell-cache.ts";
 import {
+  isPieceSourceCompatibilityRefusal,
   type PatternUpdateReceipt,
   type PieceController,
   PieceSourceChangedError,
@@ -367,8 +368,9 @@ export async function servedInstantiatePiece(
  * not started here. A piece the loop
  * runs is swapped by its pointer watcher, and one it does not run waits for
  * demand; the caller names the piece's root as the verb's demand for the
- * latter. The candidate loads without cache repair, so nothing this verb
- * seals into the cycle's wave is a document the transaction then extends.
+ * latter. Neither the candidate nor the current pattern loads with cache
+ * repair, so the verb seals nothing into the cycle's wave that the update
+ * would rest on or answer for.
  */
 export async function servedSetPieceSource(
   pieces: PiecesController,
@@ -435,11 +437,7 @@ function setSourceRefusal(error: unknown): ServedLifecycleRefusal {
       cause: error,
     });
   }
-  if (
-    message.includes("not backward compatible") ||
-    message.includes("updated arguments do not match the candidate schema") ||
-    message.includes("retained input")
-  ) {
+  if (isPieceSourceCompatibilityRefusal(error)) {
     return new ServedLifecycleRefusal("incompatible", message, {
       cause: error,
     });

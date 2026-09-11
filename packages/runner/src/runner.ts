@@ -7039,11 +7039,14 @@ export class Runner {
       let currentRef = getPatternIdentityRef(resultCell);
       while (currentRef !== undefined) {
         const loadedRef = currentRef;
+        // A direct commit's caller answers for what it seals into the
+        // serving wave, so the load repairs no cache on its behalf.
         const currentPattern = await this.#runtime.patternManager
           .loadPatternByIdentity(
             loadedRef.identity,
             loadedRef.symbol,
             resultCell.space,
+            { repairCache: options?.directCommit !== true },
           );
         currentRef = getPatternIdentityRef(resultCell);
         if (

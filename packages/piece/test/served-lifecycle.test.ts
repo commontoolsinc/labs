@@ -458,5 +458,23 @@ describe("served lifecycle verbs", () => {
       );
       expect(refusal.code).toBe("pattern-not-found");
     });
+
+    it("reports the refresh as deferred on the receipt the served update is built on", async () => {
+      // The served option on the client's own runtime: the commit is the
+      // store's as always there, and the piece is left to whoever runs it.
+      const created = await instantiate({ program: BASE_PROGRAM });
+      const candidate = await patternOf({ program: NUMERIC_SEED_PROGRAM });
+      const pieces = await clientPieces();
+      const pattern = await pieces.runtime.patternManager
+        .loadPatternByIdentity(candidate.identity, candidate.symbol, space);
+      const piece = await pieces.get(created.pieceId);
+      const receipt = await piece.setCompiledPattern(pattern!, {
+        dangerouslyAllowIncompatibleSchema: true,
+        served: { actingUser: aliceSigner.did() },
+      });
+      expect(receipt.status).toBe("committed");
+      expect(receipt.refresh).toEqual({ status: "deferred" });
+      expect(getPatternIdentityRef(piece.getCell())).toEqual(receipt.ref);
+    });
   });
 });
