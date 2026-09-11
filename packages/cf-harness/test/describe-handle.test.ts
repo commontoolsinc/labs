@@ -1203,6 +1203,32 @@ describe("describe_handle", () => {
         expect(output.database?.tables).toBeDefined();
       });
 
+      it("reports a table whose count query returned no count as unread", async () => {
+        // The provider answered, so nothing threw, and what came back holds no
+        // row count. Zero is the one thing that must not be reported for it.
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery(() => Promise.resolve({ rows: [] }));
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        expect(output.database?.fill).toEqual([{
+          table: "messages",
+          unread: "the count query returned no row count",
+        }]);
+      });
+
       it("reports no fill for a database whose storage provider runs no query", async () => {
         // Nothing is claimed about how full the tables are, rather than every
         // table reading as empty.
