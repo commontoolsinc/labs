@@ -304,6 +304,7 @@ describe("fetch-served-instances", () => {
     });
     const cancels: Array<() => void> = [];
     const dispatches: Array<() => void | Promise<void>> = [];
+    const publicationCallbacks: Array<() => void> = [];
     let resultCells: {
       pending: Cell<boolean>;
       result: Cell<string | undefined>;
@@ -335,6 +336,7 @@ describe("fetch-served-instances", () => {
       url = "https://example.test/publication",
       identity = runtime.scopeKeyIdentity,
       omitDispatch = false,
+      deferPublication = false,
     ) => {
       const tx = runtime.edit();
       transactions.push(tx);
@@ -356,6 +358,13 @@ describe("fetch-served-instances", () => {
         userUrl.withTx(tx).set(url);
         input.withTx(tx).key("url").set(userUrl as unknown as string);
       } else input.withTx(tx).setRaw({ url });
+      const register = tx.addCommitCallback.bind(tx);
+      using _publication = deferPublication
+        ? stub(tx, "addCommitCallback", (callback) =>
+          register((...args) => {
+            publicationCallbacks.push(() => callback(...args));
+          }))
+        : undefined;
       action(tx);
       return tx;
     };
@@ -372,11 +381,101 @@ describe("fetch-served-instances", () => {
       cancels,
       publications,
       dispatches,
+      publicationCallbacks,
       get resultCells() {
         return resultCells;
       },
     };
   }
+
+  it("retires a completed request when publication bookkeeping arrives afterward", async () => {
+    const fixture = publicationFixture();
+    using request = stub(
+      runtime,
+      "fetch",
+      () => Promise.resolve(new Response("completed before publication")),
+    );
+    const tx = fixture.stage(true, undefined, undefined, false, true);
+    await fixture.commit(tx);
+    expect(request.calls).toHaveLength(1);
+    expect(fixture.resultCells.result.withTx(runtime.readTx()).get()).toBe(
+      "completed before publication",
+    );
+    expect(fixture.publicationCallbacks).toHaveLength(1);
+    fixture.publicationCallbacks[0]();
+    using opened = spy(runtime, "edit");
+    fixture.cancels[0]();
+    expect(opened.calls).toHaveLength(0);
+  });
+
+  it("retires a delayed accepted attachment when another closure supplies its memo", async () => {
+    const original = publicationFixture("session", "session");
+    const attachment = publicationFixture("session", "session");
+    const response = Promise.withResolvers<Response>();
+    const issued = Promise.withResolvers<void>();
+    using request = stub(runtime, "fetch", () => {
+      issued.resolve();
+      return response.promise;
+    });
+    try {
+      const initial = original.stage(true);
+      runtime.prepareTxForCommit(initial);
+      expect((await initial.commit()).error).toBeUndefined();
+      await issued.promise;
+      const attached = attachment.stage(true, undefined, undefined, true, true);
+      runtime.prepareTxForCommit(attached);
+      expect((await attached.commit()).error).toBeUndefined();
+      expect(attachment.publicationCallbacks).toHaveLength(1);
+      response.resolve(new Response("shared memo"));
+      await runtime.settled();
+      expect(request.calls).toHaveLength(1);
+      expect(attachment.resultCells.result.withTx(runtime.readTx()).get()).toBe(
+        "shared memo",
+      );
+      attachment.publicationCallbacks[0]();
+      using opened = spy(runtime, "edit");
+      attachment.cancels[0]();
+      expect(opened.calls).toHaveLength(0);
+    } finally {
+      response.resolve(new Response("cleanup"));
+      await runtime.settled();
+    }
+  });
+
+  it("clears a settled error when the scoped URL is emptied", async () => {
+    const fixture = publicationFixture();
+    using request = stub(
+      runtime,
+      "fetch",
+      () => Promise.reject(new Error("request failed")),
+    );
+    await fixture.commit(fixture.stage(true));
+    expect(fixture.resultCells.error.withTx(runtime.readTx()).get())
+      .toBeDefined();
+    const empty = fixture.stage(true, "");
+    expect(empty.getCfcState().outbox).toHaveLength(0);
+    await fixture.commit(empty);
+    const read = runtime.readTx();
+    expect(fixture.resultCells.pending.withTx(read).get()).toBe(false);
+    expect(fixture.resultCells.result.withTx(read).get()).toBeUndefined();
+    expect(fixture.resultCells.error.withTx(read).get()).toBeUndefined();
+    expect(request.calls).toHaveLength(1);
+  });
+
+  it("aborts its teardown transaction when bookkeeping stamping throws", async () => {
+    const fixture = publicationFixture();
+    await fixture.commit(fixture.stage(true, undefined, undefined, true));
+    const teardown = runtime.edit();
+    transactions.push(teardown);
+    using _edit = stub(runtime, "edit", () => teardown);
+    using _stamp = stub(runtime, "stampServerRun", () => {
+      throw new Error("bookkeeping stamp failed");
+    });
+    using aborted = spy(teardown, "abort");
+    expect(() => fixture.cancels[0]()).not.toThrow();
+    expect(aborted.calls).toHaveLength(1);
+    expect(teardown.status().status).toBe("error");
+  });
 
   for (const mode of ["request", "memo", "empty"] as const) {
     it(`keeps an accepted user ${mode} published after an earlier space stage is refused`, async () => {
