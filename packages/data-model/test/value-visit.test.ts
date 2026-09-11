@@ -780,16 +780,32 @@ describe("value-visit", () => {
         expect(result).toEqual(mainResult(7));
       });
 
-      it("refuses, at compile time, a value outside the visitor's domain", () => {
+      it("refuses, at compile time, a value outside the visitor's domain, and routes it to `visitNonFabricValue()` at runtime", () => {
         // The refusal is the point of this test: were the call to type-check,
         // the directive would be reported as unused and the file would fail
-        // to compile. The line still runs, and at runtime the value reaches
-        // the non-fabric hook, which is the best-effort behavior for a value
-        // the types said could not arrive.
-        const vis = new EmptyValueVisitor<never, number>();
+        // to compile. The line still runs, and the assertions pin the
+        // best-effort runtime behavior for a value the types said could not
+        // arrive: it reaches the non-fabric hook, whose parameter type is
+        // `never`.
+        class Strict extends EmptyValueVisitor<never, number> {
+          seen: unknown[] = [];
+          override visitValue(): DispatchingVisitorResult<never, number> {
+            return DO_VISIT_SUBTYPE;
+          }
+          override visitNonFabricValue(
+            value: never,
+          ): LeafVisitorResult<never, number> {
+            this.seen.push(value);
+            return undefined;
+          }
+        }
+
+        const vis = new Strict();
+        const date = new Date(0);
 
         // @ts-expect-error A `Date` is not in a `never`-extra domain.
-        expect(visitValue(new Date(0), vis)).toBeUndefined();
+        expect(visitValue(date, vis)).toBeUndefined();
+        expect(vis.seen).toEqual([date]);
       });
     });
   });
