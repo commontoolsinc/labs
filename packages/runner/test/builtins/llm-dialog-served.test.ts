@@ -176,23 +176,31 @@ async function fixture(
         }
         try {
           await runtime.settled();
-          await runtime.dispose().catch(async (error) => {
-            await storage.close();
-            throw error;
-          });
         } finally {
-          LLMClient.prototype.sendRequest = originalSend;
-          runtime.scheduler.addEventHandler = originalHandler;
+          try {
+            await runtime.dispose({ closeStorage: false });
+          } finally {
+            try {
+              await storage.close();
+            } finally {
+              LLMClient.prototype.sendRequest = originalSend;
+              runtime.scheduler.addEventHandler = originalHandler;
+            }
+          }
         }
       },
     };
   } catch (error) {
-    LLMClient.prototype.sendRequest = originalSend;
-    runtime.scheduler.addEventHandler = originalHandler;
-    await runtime.dispose().catch(async (error) => {
-      await storage.close();
-      throw error;
-    });
+    try {
+      await runtime.dispose({ closeStorage: false });
+    } finally {
+      try {
+        await storage.close();
+      } finally {
+        LLMClient.prototype.sendRequest = originalSend;
+        runtime.scheduler.addEventHandler = originalHandler;
+      }
+    }
     throw error;
   }
 }
