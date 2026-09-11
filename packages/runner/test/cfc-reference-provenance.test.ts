@@ -2,7 +2,7 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { cfcAtom } from "@commonfabric/api/cfc";
-import type { FabricValue } from "@commonfabric/data-model";
+import { cloneIfNecessary, type FabricValue } from "@commonfabric/data-model";
 import {
   linkRefPayload,
   resetModernCellRepConfig,
@@ -122,6 +122,59 @@ describe("cfc-reference-provenance", () => {
     }]);
     return { target, selected };
   };
+
+  describe("external input acquisition", () => {
+    it("acquires an explicit address without importing the target's confidentiality", async () => {
+      const { target } = await selectedTarget();
+      const raw = cloneIfNecessary(target.getAsLink(), { frozen: false });
+      const acquired = runtime.acquireExternalInput(space, { item: raw }) as {
+        item: unknown;
+      };
+      expect(getCfcReferenceProvenance(raw)).toBeUndefined();
+      expect(getCfcReferenceProvenance(acquired.item)?.confidentiality).toEqual(
+        [],
+      );
+
+      const read = runtime.edit();
+      const input = runtime.getImmutableCell(space, acquired, undefined, read);
+      expect(input.key("item").key("secret").get()).toBe("hidden");
+      expect(deriveFlowJoin(read).confidentiality).toContainEqual(content);
+      read.abort();
+    });
+
+    it("retains an existing carrier's private selection history", async () => {
+      const { selected } = await selectedTarget();
+      const held = selected.resolveAsCell();
+      const acquired = runtime.acquireExternalInput(space, {
+        cell: held,
+        link: held.getAsLink(),
+      }) as { cell: unknown; link: unknown };
+      for (const value of [acquired.cell, acquired.link]) {
+        expect(getCfcReferenceProvenance(value)?.confidentiality)
+          .toContainEqual(selection);
+      }
+    });
+
+    it("acquires a missing target without probing its existence", () => {
+      const acquired = runtime.acquireExternalInput(space, {
+        item: { "/": { "link@1": { id: "of:missing-external-target" } } },
+      }) as { item: unknown };
+      expect(getCfcReferenceProvenance(acquired.item)?.binding).toEqual({
+        space,
+        id: "of:missing-external-target",
+        scope: "space",
+        path: [],
+      });
+    });
+
+    it("refuses a relative external reference with no authenticated source", () => {
+      expect(() =>
+        runtime.acquireExternalInput(space, {
+          item: { "/": { "link@1": { path: ["value"] } } },
+        })
+      ).toThrow("An external reference must name a document");
+    });
+  });
 
   for (const method of ["push", "addUnique"] as const) {
     it(`keeps an unchanged private prefix outside ${method} reference writes`, async () => {

@@ -177,13 +177,22 @@ apply, so decoded reference bytes cannot become public acquisitions. Primitive
 events need no context.
 
 Explicit host acquisition APIs, including `GetCell(cause)`,
-`RuntimeClient.acquireCell(address)`, and piece/home/slug loaders, remain
+`RuntimeClient.acquireCell(address)`, `Runtime.acquireExternalInput(space, data)`,
+and piece/home/slug loaders, remain
 trusted entry points. The shell inspector and string-link components acquire
 their independently selected addresses through that host operation. Ordinary
 CellRef operations require the issued token. Address-only wire strings cannot
 encode historical selection provenance. Metadata projections retain the
 requesting handle's restrictions, including references returned in internal
 manifests.
+
+CLI callable arguments use external-input acquisition after address normalization
+and handler input validation. An independently supplied address must name a
+document; its omitted space is the invocation's space. Existing private carriers
+retain their acquisition history. This operation observes no target contents and
+grants no target-content integrity. A relative raw reference without a source is
+refused, and an opaque immutable document still needs authenticated acquisition
+history for references inside it.
 
 Display views preserve held-reference confidentiality as covering restrictions
 under the existing view format. Inbound display fields are stripped. Render and

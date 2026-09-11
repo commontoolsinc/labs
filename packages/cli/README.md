@@ -729,6 +729,13 @@ reader. CLI writes therefore require a deployment whose readers support that
 envelope. A stored legacy reference with incomplete acquisition history remains
 unresolved; reading its address does not reconstruct its missing history.
 
+Callable link arguments are explicit host acquisitions. A normalized address
+must name a document; an omitted space uses the invocation's space. Acquiring
+the address reads no target contents and endorses none of them. Following the
+link observes the target's confidentiality. Existing private reference carriers
+retain their restrictions, while relative raw links with no authenticated source
+are refused.
+
 `cf cell get-label` returns the effective CFC label view for a result path. Pass
 `--input` to select the input cell — a `--cell` value ending in `#argument`
 selects it too. The paths in the returned view are relative to the selected

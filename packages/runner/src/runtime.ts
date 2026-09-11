@@ -1,5 +1,6 @@
 import {
   fabricFromNativeValue,
+  type FabricValue,
   isKeyableObjectOrArray,
 } from "@commonfabric/data-model";
 import {
@@ -71,6 +72,7 @@ import type {
 import { registerBuiltins } from "./builtins/index.ts";
 import {
   type Cell,
+  type CellLinkInput,
   convertCellsToLinks,
   createCell,
   internCellLinkSchema,
@@ -3523,6 +3525,29 @@ export class Runtime {
       undefined,
       carriedLabelView,
     );
+  }
+
+  /**
+   * Acquires explicit document references in independently chosen host input.
+   * Existing carriers retain their private selection history. New references
+   * name a document and inherit the supplied space when omitted; target
+   * contents and their labels are observed when the reference is followed.
+   * This is a trusted host entry point for external input.
+   */
+  acquireExternalInput(space: MemorySpace, data: CellLinkInput): FabricValue {
+    return convertCellsToLinks(data, {
+      transformLink: (_cell, link) => {
+        if (getCfcReferenceProvenance(link) !== undefined) return link;
+        const parsed = parseLink(link);
+        if (parsed?.id === undefined) {
+          throw new Error("An external reference must name a document");
+        }
+        return this.getCellFromLink({
+          ...parsed,
+          space: parsed.space ?? space,
+        }).getAsLink();
+      },
+    });
   }
 
   /**

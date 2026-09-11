@@ -316,6 +316,38 @@ describe("event-reference-context", () => {
     send.abort();
   });
 
+  it("carries an independently acquired external address through event encoding", async () => {
+    const held = await selectedReference();
+    const input = runtime.acquireExternalInput(space, {
+      item: roundtrip(held.getAsLink()),
+    });
+    const send = runtime.edit();
+    const event = serializeRuntimeEvent(input, send);
+    send.abort();
+    const restored = restoreRuntimeEventReferences(
+      roundtrip(event.payload),
+      event.runtimeReferenceContext,
+    ) as { item: unknown };
+    expect(getCfcReferenceProvenance(restored.item)?.confidentiality).toEqual(
+      [],
+    );
+    expect(getCfcReferenceProvenance(restored.item)?.binding)
+      .toEqual(getCfcReferenceProvenance(held)?.binding);
+  });
+
+  it("refuses external immutable addresses with unproven nested references", async () => {
+    const held = await selectedReference();
+    const box = runtime.getImmutableCell(space, { item: held });
+    const acquired = runtime.acquireExternalInput(space, {
+      box: roundtrip(box.getAsLink()),
+    });
+    const send = runtime.edit();
+    expect(() => serializeRuntimeEvent(acquired, send)).toThrow(
+      "Invalid Runtime event reference context",
+    );
+    send.abort();
+  });
+
   it("rejects altered payloads, binding substitutions and missing slot records", async () => {
     const held = await selectedReference();
     const send = runtime.edit();
