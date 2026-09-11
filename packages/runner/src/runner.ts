@@ -7469,9 +7469,10 @@ export class Runner {
    * walk delivers what a plan's selector reaches within its space and stops
    * at a link into another, so after the plan syncs land this reads each
    * plan's inputs under its read schema through a read transaction: a read
-   * that dead-ends on such a link kicks that document's load, and the
-   * kicked loads are awaited before the next read, which reaches one space
-   * further. A round whose reads kick nothing ends it.
+   * that dead-ends on such a link kicks that document's load, and every
+   * load then pending is awaited before the next read, which reaches one
+   * space further. A round after which nothing is pending ends it: the
+   * reads kicked nothing, and no earlier load is still in flight.
    */
   async #syncCrossSpaceReads(
     plans: readonly NodePlan[],
@@ -7484,7 +7485,6 @@ export class Runner {
     ) return;
     for (;;) {
       const readTx = this.#familyReadTx(identity);
-      const before = manager.pendingCrossSpacePromiseCount();
       for (const plan of plans) {
         const schema = this.#planReadSchema(plan);
         if (schema === undefined) continue;
@@ -7499,7 +7499,7 @@ export class Runner {
           ]);
         }
       }
-      if (manager.pendingCrossSpacePromiseCount() === before) return;
+      if (manager.pendingCrossSpacePromiseCount() === 0) return;
       const settleStart = performance.now();
       await manager.crossSpaceSettled();
       logger.time(settleStart, "start", "resumeCrossSpaceSettle");

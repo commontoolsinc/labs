@@ -81,8 +81,11 @@ returns:
 - `inputsCell`, the immutable cell built from the bound input bindings, which
   the node reads its argument from;
 - `module`, whose argument schema is the read schema the pre-sync syncs
-  `inputsCell` under, with a handler's `$event` slot excluded
-  (`schemaWithoutEventSlot`);
+  `inputsCell` under for a JavaScript node, with a handler's `$event` slot
+  excluded (`schemaWithoutEventSlot`), and for a raw node, where it is the
+  builtin's; a passthrough node's `inputsCell` is synced schema-less, since
+  its run copies the inputs whole, and a pattern node's is not synced at all,
+  since the child's own plans read it;
 - `outputs`, the bound output bindings, and `writes`, their write-redirect
   links, each carrying the output binding's schema;
 - for a pattern node, `childResultCell` under the child's result schema and
@@ -179,10 +182,10 @@ until setup writes one. The pre-sync mints an immutable cell holding the
 caller's argument and binds every node plan against its link. The plans then
 sync as on a resume: `inputsCell` links into the stand-in, the stand-in holds
 the caller's links, and the server walk crosses them under the module
-schema. This gives `runSynced` and `run()` the same per-node pre-sync a
-resume gets, with no separate mechanism and no derived read surface over the
-argument. The audit's recommendation to derive such a surface is superseded
-by this.
+schema. This gives `runSynced` the same per-node pre-sync a resume gets,
+with no separate mechanism and no derived read surface over the argument. A
+plain `run()` is synchronous and pre-syncs nothing. The audit's
+recommendation to derive such a surface is superseded by this.
 
 ### Each first run waits on what its plan named
 
