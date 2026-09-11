@@ -120,7 +120,11 @@ plan syncs. `LINK_HOPS`, `ArgumentLinkRoot`, `narrowChildSchema`, and
 `isReferenceOnlySchema` go with them. One walk stays, one hop wide: the
 stored argument's direct link targets and the result document owning each
 are named root-only (`#syncStoredArgumentLinkTargets`), because setup's
-supplied-link proof reads them and that read is no node's. The reference
+supplied-link proof reads them and that read is no node's. It runs last in
+the pre-sync, so a document a plan reads under a narrowed schema is asked
+for under that schema first and the root-only naming finds it local; the
+first selector a document receives is the narrowest a reader declared. The
+reference
 graphs that motivated the
 hop budget are declared `unknown` at their edges, where the traverser answers
 presence and stops, so no depth constant stands in for that.
@@ -336,7 +340,7 @@ in the pull request.
       which is what pulled a child's unread `friend` even after the plan
       syncs stopped asking for it.
 - [x] The stored argument's direct link targets, and the result document
-      owning each, are named root-only after the first wave
+      owning each, are named root-only last in the pre-sync
       (`#syncStoredArgumentLinkTargets`), for both a resume and a setup
       staged over a stored piece: setup's supplied-link proof reads a
       linked document's metadata and its owner's, and neither is a node

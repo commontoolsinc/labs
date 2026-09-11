@@ -7354,20 +7354,6 @@ export class Runner {
     }));
     logger.time(cellSyncWaveStart, "start", "resumeCellSyncWave");
 
-    // What setup reads of the stored argument beyond its own bytes: the
-    // documents it links to, and their owners. Readable only now that the
-    // argument document has arrived.
-    if (argumentMetaLink !== undefined) {
-      const argumentLinksStart = performance.now();
-      await this.#syncStoredArgumentLinkTargets(
-        this.#runtime.getCellFromLink({
-          ...argumentMetaLink,
-          schema: undefined,
-        }),
-        identity,
-      );
-      logger.time(argumentLinksStart, "start", "resumeArgumentLinksSync");
-    }
     await this.#syncCrossSpaceReads(plans, identity);
 
     // The list coordinators' children. The inputs their identities derive
@@ -7389,6 +7375,22 @@ export class Runner {
       identity,
     );
     logger.time(instanceNodesStart, "start", "resumeInstanceNodesSync");
+
+    // What setup reads of the stored argument beyond its own bytes: the
+    // documents it links to, and their owners, named root-only. Last, so a
+    // document a plan reads under a narrowed schema is asked for under that
+    // schema first and this naming finds it local.
+    if (argumentMetaLink !== undefined) {
+      const argumentLinksStart = performance.now();
+      await this.#syncStoredArgumentLinkTargets(
+        this.#runtime.getCellFromLink({
+          ...argumentMetaLink,
+          schema: undefined,
+        }),
+        identity,
+      );
+      logger.time(argumentLinksStart, "start", "resumeArgumentLinksSync");
+    }
 
     return true;
   }
@@ -10055,6 +10057,13 @@ export class Runner {
             scopeKeyIdentity: identity,
           });
         }
+        // Materialize the inputs once through the presync transaction: the
+        // link resolutions the body's first reads would otherwise pay are
+        // accounted to the presync, the scheduler's read budget keeps them
+        // apart from the body's own reads, and a read that dead-ends on a
+        // link into another space kicks that document's load here rather
+        // than in the body.
+        inputsCell.asSchema(module.argumentSchema).withTx(tx).get();
       }
       : undefined;
 
