@@ -133,7 +133,11 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   //
 
   /** Helper which implements most of a top-level visit. */
-  #mainVisit(value: DomainFor<DomainExtra>, assumeValid: boolean, deepTypeCheck: boolean): BaselineVisitResult<ResultType> {
+  #mainVisit(
+    value: DomainFor<DomainExtra>,
+    assumeValid: boolean,
+    deepTypeCheck: boolean,
+  ): BaselineVisitResult<ResultType> {
     if (this.#inProgress) {
       // This is a defense-in-depth protection against bugs in this file, and
       // also serves as documentation for the intended use of this class.

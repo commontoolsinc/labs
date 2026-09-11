@@ -639,6 +639,52 @@ describe("VisitInProgress", () => {
           expect(() => inProgress.visit([1], false)).toThrow(/non-container/);
           expect(inProgress.visit([2], false)).toBeUndefined();
         });
+
+        it("throws when a visitor re-enters from the root value, before anything is on the stack", () => {
+          const rec = new Recorder();
+          const inProgress = new VisitInProgress<unknown, unknown>(rec);
+          rec.onValue = (v) => {
+            if (v === "root") {
+              inProgress.visit(2, false);
+            }
+            return DO_VISIT_SUBTYPE;
+          };
+
+          expect(() => inProgress.visit("root", false)).toThrow(
+            /multiple concurrent top-level visits/,
+          );
+        });
+
+        it("keeps the outer visit's checking mode when a visitor swallows a re-entry error", () => {
+          // The array holding a function is the tell: the outer visit is
+          // shallow and iterates it, whereas the re-entry asked for a deep
+          // check, under which it would go whole to `visitNonFabricValue()`.
+          const rec = new Recorder();
+          const inProgress = new VisitInProgress<unknown, unknown>(rec);
+          const array = [() => 1];
+          rec.onValue = (v) => {
+            if (v === "root") {
+              try {
+                inProgress.visit(2, true);
+              } catch {
+                // Deliberately swallowed.
+              }
+              return replace(array);
+            }
+            return DO_VISIT_SUBTYPE;
+          };
+
+          inProgress.visit("root", false);
+          expect(rec.names).toEqual([
+            "value",
+            "value",
+            "container",
+            "array",
+            "value",
+            "nonFabric",
+            "visitedElement",
+          ]);
+        });
       });
     });
 
