@@ -1666,8 +1666,15 @@ export async function executeResolvedCallable(
               reject(new Error(`event append refused: ${delivery.refused}`));
             }
           };
+          // The commit callback settles both: a sender that never reports
+          // the append — one whose act IS the commit — is acknowledged
+          // here, and the appended report, when it comes, comes first.
+          const onCommit = (committedTx: IExtendedStorageTransaction) => {
+            resolve(committedTx);
+            handled.resolve(committedTx);
+          };
           try {
-            resolved.callableCell.send(dispatchInput, handled.resolve, {
+            resolved.callableCell.send(dispatchInput, onCommit, {
               ...(invocation === undefined ? {} : {
                 // The id and the session that chose it travel together:
                 // an id is the caller's own word, and only the pair

@@ -2107,25 +2107,17 @@ export class CellImpl<T extends FabricValue>
       // same actor explicitly, as the entry's `firedAt`; this carriage
       // covers the remaining in-process queueEvent shapes.)
       // Off server execution the handling's commit is the sender's own
-      // authored act, so `onAppended` fires with the commit callback; a
-      // failed handling reports as an undelivered append. Under it the
-      // wrapper above already fires the hook off the append itself.
+      // authored act, so `onAppended` fires with the commit callback and
+      // always as delivered: the act reached the store, and what the
+      // handling made of it — a failure, or a receipt-exists collision
+      // that settles on the original outcome — is the transaction's
+      // status, which the commit callback hands over. Under server
+      // execution the wrapper above fires the hook off the append itself.
       const appendedWithCommit = sendOptions?.onAppended;
       const settleCallback = firedEventId === undefined &&
           appendedWithCommit !== undefined
         ? (tx: IExtendedStorageTransaction) => {
-          const status = tx.status();
-          appendedWithCommit(
-            status.status === "error"
-              ? {
-                delivered: false,
-                refused: status.error instanceof Error
-                  ? status.error.message
-                  : String(status.error),
-              }
-              : { delivered: true },
-            tx,
-          );
+          appendedWithCommit({ delivered: true }, tx);
           onCommit?.(tx);
         }
         : onCommit;
