@@ -13,6 +13,9 @@ import {
 
 describe("ContainerIteratingVisitor", () => {
   class Iterating extends ContainerIteratingVisitor<never, never> {
+    override isDomainExtra(_value: unknown): _value is never {
+      return false;
+    }
     override visitCycle(): LeafVisitorResult<never, never> {
       return undefined;
     }

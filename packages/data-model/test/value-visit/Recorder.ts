@@ -38,6 +38,13 @@ export type Event = [name: string, ...args: unknown[]];
 export class Recorder extends ContainerIteratingVisitor<unknown, unknown> {
   readonly events: Event[] = [];
 
+  /**
+   * The values handed to `isDomainExtra()`, in order. Kept apart from
+   * `events` so that the recorded dispatch sequence is the visit alone.
+   */
+  readonly domainChecks: unknown[] = [];
+
+  onIsDomainExtra?: (value: unknown) => boolean;
   onValue?: (value: unknown) => DispatchingVisitorResult<unknown, unknown>;
   onCycle?: (
     value: unknown,
@@ -67,6 +74,12 @@ export class Recorder extends ContainerIteratingVisitor<unknown, unknown> {
   /** The names of the recorded calls, in order. */
   get names(): string[] {
     return this.events.map((e) => e[0]);
+  }
+
+  override isDomainExtra(value: unknown): value is unknown {
+    // The domain is `unknown`, so everything outside `FabricValue` is in it.
+    this.domainChecks.push(value);
+    return this.onIsDomainExtra ? this.onIsDomainExtra(value) : true;
   }
 
   override visitValue(

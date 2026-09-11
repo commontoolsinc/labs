@@ -69,23 +69,19 @@ describe("value-visit/impl", () => {
       expect(result).toEqual(mainResult(7));
     });
 
-    it("refuses, at compile time, a value outside the visitor's domain, and routes it to `visitNonFabricValue()` at runtime", () => {
-      // The refusal is the point of this test: were the call to type-check,
-      // the directive would be reported as unused and the file would fail
-      // to compile. The line still runs, and the assertions pin the
-      // best-effort runtime behavior for a value the types said could not
-      // arrive: it reaches the non-fabric hook, whose parameter type is
-      // `never`.
+    it("refuses, at compile time, a value outside the visitor's domain, and throws at runtime", () => {
+      // The compile-time refusal is half the point of this test: were the
+      // call to type-check, the directive would be reported as unused and
+      // the file would fail to compile. The line still runs, and the runtime
+      // half is that the engine, told by `isDomainExtra()` that the value is
+      // outside the domain, throws rather than handing it to the non-fabric
+      // hook, whose parameter type is `never`.
       class Strict extends EmptyValueVisitor<never, number> {
-        seen: unknown[] = [];
         override visitValue(): DispatchingVisitorResult<never, number> {
           return DO_VISIT_SUBTYPE;
         }
-        override visitNonFabricValue(
-          value: never,
-        ): LeafVisitorResult<never, number> {
-          this.seen.push(value);
-          return undefined;
+        override visitNonFabricValue(): LeafVisitorResult<never, number> {
+          throw new Error("should not be reached");
         }
       }
 
@@ -93,8 +89,9 @@ describe("value-visit/impl", () => {
       const date = new Date(0);
 
       // @ts-expect-error A `Date` is not in a `never`-extra domain.
-      expect(visitValue(date, vis)).toBeUndefined();
-      expect(vis.seen).toEqual([date]);
+      expect(() => visitValue(date, vis)).toThrow(
+        /Encountered a value outside of the visitor's domain: /,
+      );
     });
   });
 
