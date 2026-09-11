@@ -1632,6 +1632,67 @@ export class PatternManager {
     });
   }
 
+  /**
+   * Read the writer authority `identity` durably inherits in `space`, for a
+   * runtime about to run it over state that `predecessorIdentities` wrote. A
+   * source update registers its grants only in the runtime that performed
+   * it, and a runtime already holding `identity` resolves it from memory
+   * without the storage load that would register them, so its writes to
+   * fields bound to a predecessor would be refused. A grant registered
+   * earlier does not settle this: a later update onto the same successor
+   * extends its stored grants with that update's own predecessors.
+   *
+   * Returns `undefined` when no read is owed: `identity` is keyless and so
+   * has no stored closure, or the runtime already grants it every
+   * predecessor other than itself. Otherwise returns a promise that settles
+   * once the successor's verified source closure has been read in a
+   * transaction without writes, which registers every delegation that
+   * closure durably carries. A predecessor the successor inherits nothing
+   * from stays ungranted, and a failed read is logged rather than rejected,
+   * leaving the runtime's grants as they were.
+   */
+  readInheritedAuthority(
+    space: MemorySpace,
+    identity: string,
+    predecessorIdentities: Iterable<string>,
+  ): Promise<void> | undefined {
+    if (PatternManager.isKeylessPatternIdentity(identity)) return undefined;
+    let owed = false;
+    for (const predecessor of predecessorIdentities) {
+      if (
+        predecessor !== identity &&
+        !this.#runtime.grantsModuleDelegation(space, identity, predecessor)
+      ) {
+        owed = true;
+        break;
+      }
+    }
+    if (!owed) return undefined;
+    return this.#readSourceDelegations(space, identity);
+  }
+
+  /**
+   * Helper for `readInheritedAuthority()`, which loads `identity`'s verified
+   * source closure in a transaction without writes, so the load registers
+   * the delegations it carries.
+   */
+  async #readSourceDelegations(
+    space: MemorySpace,
+    identity: string,
+  ): Promise<void> {
+    const tx = this.#runtime.edit();
+    try {
+      await loadVerifiedSourceClosure(this.#runtime, space, identity, tx);
+    } catch (error) {
+      logger.warn("inherited-authority-read-failed", () => [
+        `reading the delegations of ${identity} in ${space} failed`,
+        error,
+      ]);
+    } finally {
+      tx.abort("inherited authority read complete");
+    }
+  }
+
   async compilePattern(
     input: string | RuntimeProgram,
     cacheCtx?: {
