@@ -1702,6 +1702,65 @@ describe("piece source reconciliation", () => {
       }
     });
 
+    it("starts no rescue after disposal during source-closure loading", async () => {
+      const identity = await identityFor(source("v1"));
+      let requests = 0;
+      createRuntime(servingFetch(() => identity, () => source("v1"), () => {
+        requests++;
+      }));
+      const elsewhere = (await Identity.fromPassphrase("rescue source space"))
+        .did();
+      const pattern = await runtime.patternManager.compilePattern(
+        parentProgram(source("v1")),
+        { space: elsewhere },
+      );
+      const piece = runtime.getCell(signer.did(), "disposed-rescue");
+      await runtime.setup(undefined, pattern, {}, piece);
+      await runtime.patternManager.flushCompileCacheWrites();
+      const originalRef = getPatternIdentityRef(piece);
+      const load = runtime.patternManager.getPatternSourceProgramByIdentity
+        .bind(
+          runtime.patternManager,
+        );
+      expect(await load(identity, piece.space)).toBeUndefined();
+      const entered = defer<void>();
+      const release = defer<void>();
+      let hold = true;
+      runtime.patternManager.getPatternSourceProgramByIdentity = async (
+        ...args
+      ) => {
+        const program = await load(...args);
+        if (hold) {
+          hold = false;
+          expect(program).toBeUndefined();
+          entered.resolve();
+          await release.promise;
+        }
+        return program;
+      };
+      const opening = open(piece);
+      try {
+        await Promise.race([
+          entered.promise,
+          opening.then(() => {
+            throw new Error("open did not reach source-closure loading");
+          }),
+        ]);
+        await runtime.sourceReconciler.dispose();
+        release.resolve();
+        await opening;
+        expect(requests).toBe(0);
+        expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+        expect(getPatternSource(piece)).toBeUndefined();
+        expect(getPieceSourceRevisions(piece)).toEqual([]);
+        expect(await load(identity, piece.space)).toBeUndefined();
+      } finally {
+        release.resolve();
+        await opening;
+        runtime.patternManager.getPatternSourceProgramByIdentity = load;
+      }
+    });
+
     it("tracks a pass before its fetch can initiate disposal", async () => {
       const identity = await identityFor(source("v1"));
       let disposing: Promise<void> | undefined;
