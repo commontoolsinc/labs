@@ -1409,11 +1409,16 @@ export class CfHarnessEngine {
    * token for each reference every run on this console is entitled to hold —
    * the space's piece registry, and the connector handles the run was
    * configured with — records the grants in run state, and returns them.
-   * Establishing
-   * the Fabric session is the cost of resolving the references, so this
-   * connects eagerly — callers invoke it only on runs configured for a
-   * session. Idempotent across resume: grants already recorded are returned
+   * Establishing the Fabric session is the cost of resolving the references,
+   * so this connects eagerly — callers invoke it only on runs configured for
+   * a session. Idempotent across resume: grants already recorded are returned
    * as they stand, without connecting again.
+   *
+   * Called for a session's own run and never for a delegated child, which
+   * receives only the handles its brief names (spec §5, `AH-CFC-12`): a child
+   * engine carries `connectorGrants` so its configuration matches its
+   * parent's, and calling this there would hand every child references no
+   * brief asked for.
    *
    * A run without a session factory has nothing to grant and answers `[]`.
    * A session that cannot be established propagates its failure — the caller

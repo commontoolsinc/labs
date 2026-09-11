@@ -109,7 +109,9 @@ describe("engine-connector-grants", () => {
     it("exposes the configured grants for a delegating parent to hand its child", () => {
       // A child's grants have to resolve from the configuration the parent's
       // resolved from; reading loom's records a second time in the child
-      // would be a second path to the same answer.
+      // would be a second path to the same answer. That the child is then
+      // granted nothing of its own is pinned where delegation happens, in
+      // `prompt-loop-subagent-handles.test.ts`.
 
       const engine = engineWith([MAIL_GRANT, BANK_GRANT]);
 
