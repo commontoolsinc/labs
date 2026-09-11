@@ -84,6 +84,14 @@ export abstract class ContainerIteratingValueVisitor<
   }
 
   /** @inheritDoc */
+  visitedFabricInstance(
+    _instance: FabricInstance,
+    _state: FabricValue,
+  ): BaselineVisitResult<ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
   visitedMapping(
     _container: FabricPlainObject | FabricInstance,
     _key: DomainFor<DomainExtra>,

@@ -110,6 +110,14 @@ export class NopValueVisitor<DomainExtra = never, ResultType = FabricValue>
   }
 
   /** @inheritDoc */
+  visitedFabricInstance(
+    _instance: FabricInstance,
+    _state: FabricValue,
+  ): BaselineVisitResult<ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
   visitedMapping(
     _container: FabricPlainObject | FabricInstance,
     _key: DomainFor<DomainExtra>,
