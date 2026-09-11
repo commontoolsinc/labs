@@ -8275,9 +8275,10 @@ export class SpaceReplica
     for (let index = 0; index < frame.length; index++) {
       const upsert = frame[index]!;
       if (upsert.deleted === true || !isObjectNotArray(upsert.doc)) continue;
-      const hashes = new Set(
-        schemaMetaRefHashes(classifySchemaMeta(upsert.doc)),
-      );
+      const metadata = classifySchemaMeta(upsert.doc);
+      // Leave malformed metadata in the frame for per-document quarantine.
+      if (metadata.kind === "malformed") continue;
+      const hashes = new Set(schemaMetaRefHashes(metadata));
       if (upsert.id.startsWith("cid:")) {
         const value = (upsert.doc as { value?: unknown }).value;
         if (isSubschema(value)) {
