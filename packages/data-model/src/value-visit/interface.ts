@@ -191,6 +191,15 @@ export type DispatchingVisitorResult<
  */
 export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   /**
+   * Indicates whether or not the given value is compatible with the the
+   * `DomainExtra` type defined by the visitor. This is a type predicate for
+   * `DomainExtra`. The visitor engine calls it before dispatching to
+   * `visitNonFabricValue()`, and will instead `throw` an error if this method
+   * returns anything falsy.
+   */
+  isDomainExtra(value: DomainFor<DomainExtra>): value is DomainExtra;
+
+  /**
    * Visits a value which is already in the process of being visited. The
    * visitor engine calls this method _before_ calling `visitValue()` when the
    * value to be visited is already in the middle of being visited as a

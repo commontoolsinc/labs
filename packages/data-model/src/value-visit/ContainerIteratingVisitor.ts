@@ -19,13 +19,15 @@ import {
 
 /**
  * Visitor which handles all containers by requesting that the engine iterate
- * over their contents. This class leaves all non-container `visit*()` methods
- * `abstract`, and implements no-op (empty) `visited*()` methods. Recursion is
- * as follows:
+ * over their contents. Recursion is as follows:
  *
  * * `FabricArray` -- all elements.
  * * `FabricInstance` -- keys and values.
- * * `FabricPlainObject`s -- values only.
+ * * `FabricPlainObject`s -- values only.Methods:
+ *
+ * The implementation includes a definition for all container-specific `visit()`
+ * methods per the above description, and also implements no-op (empty)
+ * `visited*()` methods. Every other method of the interface remains `abstract`.
  */
 export abstract class ContainerIteratingVisitor<
   DomainExtra = never,
