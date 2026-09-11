@@ -64,6 +64,12 @@ export default pattern(() => {
     createdByName: "Legacy creator",
     createdBy: { kind: "agent", name: "Current creator", avatar: "keep.png" },
   });
+  const unusableMigrated = new Writable(false);
+  const unusable = Topic({
+    createdByName: 42,
+    comments: [{ authorName: false, body: "No usable name", sentAt: 1 }],
+    authorFieldsMigratedV1: unusableMigrated,
+  });
   const completed = Topic({
     createdByName: "Must stay legacy",
     comments: [{
@@ -123,6 +129,11 @@ export default pattern(() => {
     completed.createdBy?.name === "" &&
     completed.comments[0].author === undefined
   );
+  const assert_nonstring_names_complete_without_authors = assert(() =>
+    unusable.createdBy?.name === "" &&
+    unusable.comments[0].author === undefined &&
+    unusableMigrated.get() === true
+  );
   const action_change_legacy_names = action(() => {
     legacyCreator.set("Changed legacy creator");
     comments.key(0).key("authorName").set("Changed legacy commenter");
@@ -156,6 +167,7 @@ export default pattern(() => {
       { assertion: assert_original_data_preserved },
       { assertion: assert_missing_flag_defaults_false },
       { assertion: assert_completed_flag_skips },
+      { assertion: assert_nonstring_names_complete_without_authors },
       { action: action_change_legacy_names },
       { assertion: assert_completed_migration_stays_inert },
       { action: action_replay_migration },

@@ -197,4 +197,89 @@ describe("topic-author-migration", () => {
       cancel();
     }
   });
+
+  it("preserves non-string legacy values without manufacturing authors", async () => {
+    const names = [42, false, null, ["not a name"], {
+      displayName: "not a name",
+    }];
+    const { argument, result, originalComments } = await start({
+      createdByName: { displayName: "not a creator name" },
+      comments: names.map((authorName, index) => ({
+        authorName,
+        body: "No usable name",
+        sentAt: index,
+      })),
+    });
+    expect(await result.key("createdBy").pull()).toEqual({
+      name: "",
+      kind: "person",
+    });
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    expect(argument.key("authorFieldsMigratedV1").getRaw()).toBe(true);
+    expect(argument.key("createdBy").getRaw()).toBeUndefined();
+    expect(argument.key("createdByName").getRaw()).toEqual({
+      displayName: "not a creator name",
+    });
+    expect(fabricAwareEqual(
+      argument.key("comments").getRaw({ lastNode: "value" }),
+      originalComments,
+    )).toBe(true);
+    for (const [index, name] of names.entries()) {
+      const comment = argument.key("comments").key(index);
+      expect(comment.key("author").getRaw()).toBeUndefined();
+      expect(comment.key("authorName").getRaw()).toEqual(name);
+    }
+    expect(errors).toEqual([]);
+  });
+
+  for (const field of ["creator", "comment"] as const) {
+    it(`waits for a linked ${field} name before completing any author writes`, async () => {
+      const pendingName = runtime.getCell<string>(space, "pending-name");
+      const { argument, result } = await start({
+        createdByName: field === "creator" ? pendingName : "Creator",
+        authorFieldsMigratedV1: false,
+        comments: [
+          { authorName: "First author", body: "First", sentAt: 1 },
+          {
+            authorName: field === "comment" ? pendingName : "Second author",
+            body: "Second",
+            sentAt: 2,
+          },
+        ],
+      });
+      const cancel = result.key("createdBy").sink(() => {});
+      try {
+        await runtime.idle();
+        await runtime.storageManager.synced();
+        expect(argument.key("authorFieldsMigratedV1").getRaw()).toBe(false);
+        expect(argument.key("createdBy").getRaw()).toBeUndefined();
+        expect(argument.key("comments").key(0).key("author").getRaw())
+          .toBeUndefined();
+
+        const arrival = runtime.edit();
+        pendingName.withTx(arrival).set("  Delayed name  ");
+        expect((await arrival.commit()).error).toBeUndefined();
+        expect(await result.key("createdBy").pull()).toEqual({
+          name: field === "creator" ? "  Delayed name  " : "Creator",
+          kind: "legacy",
+        });
+        await runtime.idle();
+        await runtime.storageManager.synced();
+        expect(argument.key("authorFieldsMigratedV1").getRaw()).toBe(true);
+        expect(
+          argument.key("comments").key(1).key("author").getRaw({
+            lastNode: "value",
+          }),
+        ).toEqual({
+          name: field === "comment" ? "  Delayed name  " : "Second author",
+          kind: "legacy",
+        });
+        expect(pendingName.getRaw()).toBe("  Delayed name  ");
+        expect(errors).toEqual([]);
+      } finally {
+        cancel();
+      }
+    });
+  }
 });

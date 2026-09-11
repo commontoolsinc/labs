@@ -63,10 +63,17 @@ export const first = pattern<{ setup: Setup }>(({ setup }) => {
     setup.migrated.get() === true
   );
   const assert_both_appends = assert(() =>
+    setup.topic.comments.length === 4 &&
     setup.topic.comments[2].author?.kind === "agent" &&
     setup.topic.comments[3].author?.kind === "agent" &&
-    setup.topic.comments[2].author?.name !==
-      setup.topic.comments[3].author?.name &&
+    ((setup.topic.comments[2].author?.name === "First writer" &&
+      setup.topic.comments[2].body === "First concurrent comment" &&
+      setup.topic.comments[3].author?.name === "Second writer" &&
+      setup.topic.comments[3].body === "Second concurrent comment") ||
+      (setup.topic.comments[2].author?.name === "Second writer" &&
+        setup.topic.comments[2].body === "Second concurrent comment" &&
+        setup.topic.comments[3].author?.name === "First writer" &&
+        setup.topic.comments[3].body === "First concurrent comment")) &&
     setup.topic.comments[0].author?.name === "Fable"
   );
   return {
@@ -104,6 +111,20 @@ export const second = pattern<{ setup: Setup }>(({ setup }) => {
     setup.topic.comments[1].author?.name === "Current author" &&
     setup.migrated.get() === true
   );
+  const assert_both_appends = assert(() =>
+    setup.topic.comments.length === 4 &&
+    setup.topic.comments[2].author?.kind === "agent" &&
+    setup.topic.comments[3].author?.kind === "agent" &&
+    ((setup.topic.comments[2].author?.name === "First writer" &&
+      setup.topic.comments[2].body === "First concurrent comment" &&
+      setup.topic.comments[3].author?.name === "Second writer" &&
+      setup.topic.comments[3].body === "Second concurrent comment") ||
+      (setup.topic.comments[2].author?.name === "Second writer" &&
+        setup.topic.comments[2].body === "Second concurrent comment" &&
+        setup.topic.comments[3].author?.name === "First writer" &&
+        setup.topic.comments[3].body === "First concurrent comment")) &&
+    setup.topic.comments[0].author?.name === "Fable"
+  );
   return {
     [TESTS]: [
       { assertion: assert_legacy_is_visible },
@@ -114,7 +135,7 @@ export const second = pattern<{ setup: Setup }>(({ setup }) => {
       { action: action_append },
       { label: "second-appended" },
       { await: "first-appended" },
-      { assertion: assert_migrated },
+      { assertion: assert_both_appends },
     ],
   };
 });

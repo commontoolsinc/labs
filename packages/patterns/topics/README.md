@@ -72,11 +72,15 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   known kind receives `kind: "legacy"`, which renders as the name without a
   person or agent classification. The stored input flag `authorFieldsMigratedV1`
   defaults to false and becomes true in the same transaction as the copies. All
-  source records are read before writing; an unresolved linked comment leaves
-  completion pending. The flag is shared per topic and survives reopening and
-  source updates. This migration covers the records present when it completes;
-  legacy writers must be retired before rollout, because later legacy-shaped
-  records are outside that completed pass.
+  relevant author fields are read through cell handles before writing; an
+  unresolved linked comment or name leaves completion pending. Legacy-name
+  inputs stay `unknown` to accept the full stored domain. The lift's explicit
+  schema reads strings while keeping other values opaque; only nonblank strings
+  are copied. Non-string values remain stored unchanged and do not prevent
+  completion. The flag is shared per topic and survives reopening and source
+  updates. This migration covers the records present when it completes; legacy
+  writers must be retired before rollout, because later legacy-shaped records
+  are outside that completed pass.
 - **The board names its members, and every reader reaches a name the same way.**
   `addTopic` allocates the next name in the same transaction as the append, so
   no reader observes a topic without its name and two concurrent creates

@@ -13,11 +13,13 @@ import {
   type ReadonlyCell,
   SELF,
   Stream,
+  toSchema,
   UI,
   type VNode,
   wish,
   Writable,
 } from "commonfabric";
+import type {} from "commonfabric/schema";
 
 import { type NamesTableRow, ownName } from "../collection-naming/naming.ts";
 
@@ -302,8 +304,8 @@ export interface TopicComment {
 
 /** Stored comment fields available to the author migration. */
 interface StoredTopicComment extends TopicComment {
-  /** Display name recorded without an author kind. */
-  authorName?: string;
+  /** Unrestricted legacy storage; only nonblank strings supply a name. */
+  authorName?: unknown;
 }
 
 export interface TopicLink {
@@ -376,7 +378,7 @@ export interface TopicInput {
   createdBy?: TopicAuthor;
 
   /** Creator display name recorded without an author kind. */
-  createdByName?: string;
+  createdByName?: unknown;
 
   /** Completion of the per-topic migration from display names to authors. */
   authorFieldsMigratedV1?: Writable<boolean | Default<false>>;
@@ -1355,55 +1357,88 @@ const createdByOf = lift((
  * topic. Existing author kinds and avatars remain authoritative; an unknown
  * kind is recorded as `legacy`.
  */
-const migrateAuthorFields = lift((
-  {
-    authorFieldsMigratedV1,
-    createdByName,
-    createdBy,
-    comments,
-  }: {
-    /** Durable completion flag shared by every reader of this topic. */
+const migrateAuthorFields = lift(
+  (input: {
+    /** Durable completion shared by every reader of this topic. */
     authorFieldsMigratedV1: Writable<boolean>;
-
-    /** Legacy creator name, retained after migration. */
-    createdByName?: string;
-
-    /** Destination for the creator's structured display snapshot. */
+    /** Source handle whose read distinguishes an absent name from a pending link. */
+    createdByName: ReadonlyCell<unknown>;
+    /** Structured creator destination under its existing declared shape. */
     createdBy: Writable<TopicAuthor | undefined>;
+    /** Author fields addressed through the original comment identities. */
+    comments: Writable<Pick<StoredTopicComment, "author" | "authorName">[]>;
+  }): void => {
+    if (input.authorFieldsMigratedV1.get()) return;
+    const { createdByName, createdBy, comments } = input;
 
-    /** Stored comments, addressed individually to preserve their identity. */
-    comments: Writable<StoredTopicComment[]>;
+    const legacyCreatorName = createdByName.get();
+    const creator = createdBy.get();
+    const creatorKind = creator?.kind;
+    const creatorName = !creator?.name.trim() &&
+        typeof legacyCreatorName === "string" && legacyCreatorName.trim()
+      ? legacyCreatorName
+      : undefined;
+    // Resolve every source and destination before making the first write. A
+    // missing linked record must leave completion pending. Read through handles:
+    // optional property reads can turn unresolved links into `undefined`.
+    const commentAuthors = comments.get().map((_, index) => {
+      const comment = comments.key(index);
+      const author = comment.key("author").get();
+      const legacyName = comment.key("authorName").get();
+      return {
+        index,
+        name: !author?.name.trim() &&
+            typeof legacyName === "string" && legacyName.trim()
+          ? legacyName
+          : undefined,
+        kind: author?.kind,
+      };
+    });
+
+    if (creatorName !== undefined) {
+      createdBy.key("name").set(creatorName);
+      if (!creatorKind) createdBy.key("kind").set("legacy");
+    }
+    commentAuthors.forEach(({ index, name, kind }) => {
+      if (name === undefined) return;
+      const author = comments.key(index).key("author");
+      author.key("name").set(name);
+      if (!kind) author.key("kind").set("legacy");
+    });
+    input.authorFieldsMigratedV1.set(true);
   },
-): void => {
-  if (authorFieldsMigratedV1.get()) return;
-
-  const creator = createdBy.get();
-  const creatorKind = creator?.kind;
-  const creatorName = !creator?.name.trim() && createdByName?.trim()
-    ? createdByName
-    : undefined;
-  // Resolve every source and destination before making the first write. A
-  // missing linked record must leave completion pending.
-  const commentAuthors = comments.get().map((comment, index) => ({
-    index,
-    name: !comment.author?.name.trim() && comment.authorName?.trim()
-      ? comment.authorName
-      : undefined,
-    kind: comment.author?.kind,
-  }));
-
-  if (creatorName !== undefined) {
-    createdBy.key("name").set(creatorName);
-    if (!creatorKind) createdBy.key("kind").set("legacy");
-  }
-  commentAuthors.forEach(({ index, name, kind }) => {
-    if (name === undefined) return;
-    const author = comments.key(index).key("author");
-    author.key("name").set(name);
-    if (!kind) author.key("kind").set("legacy");
-  });
-  authorFieldsMigratedV1.set(true);
-});
+  {
+    type: "object",
+    properties: {
+      authorFieldsMigratedV1: toSchema<Writable<boolean>>(),
+      createdBy: toSchema<Writable<TopicAuthor | undefined>>(),
+      // Concrete strings are read; every other legacy value stays opaque.
+      // A TypeScript `string | unknown` collapses to opaque-only `unknown`.
+      createdByName: {
+        type: ["string", "unknown"],
+        asCell: ["readonly"],
+      },
+      comments: {
+        type: "array",
+        asCell: ["cell"],
+        items: {
+          type: "object",
+          properties: {
+            author: toSchema<TopicAuthor>(),
+            authorName: { type: ["string", "unknown"] },
+          },
+        },
+      },
+    },
+    required: [
+      "authorFieldsMigratedV1",
+      "createdByName",
+      "createdBy",
+      "comments",
+    ],
+  } as const,
+  toSchema<void>(),
+);
 
 // ===== The pattern =====
 
