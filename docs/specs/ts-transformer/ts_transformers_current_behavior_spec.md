@@ -373,7 +373,9 @@ pin the shapes.
 The type-driven shrink preserves cell wrappers and resolves normalized value
 paths against their inner types. A stored field named `count`, `map`, or `get`
 therefore retains its value type and cell capability when captured by `computed`
-or `assert`, even when the wrapper has a method with the same name.
+or `assert`, even when the wrapper has a method with the same name. Inline
+object values in optional cell handles and optional stored values retain their
+requested fields and read-only capability while preserving nullish alternatives.
 
 The type-driven shrink also guards its descent on (type, requested-paths): a
 pair already on the path falls back to the named type reference — no

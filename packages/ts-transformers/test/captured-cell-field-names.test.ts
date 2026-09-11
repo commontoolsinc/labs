@@ -32,4 +32,52 @@ describe("captured cell value fields", () => {
       });
     }
   }
+  for (
+    const { declaration, read } of [
+      { declaration: "value?: Writable<Data>", read: "value!.get().count" },
+      { declaration: "value?: Writable<Data>", read: "value?.get().count" },
+      {
+        declaration: "value: Writable<Data> | null | undefined",
+        read: "value?.get().count",
+      },
+      {
+        declaration: "value: Writable<Data | undefined>",
+        read: "value.get()?.count",
+      },
+    ]
+  ) {
+    it(`narrows count while preserving nullishness in ${declaration} read as ${read}`, async () => {
+      const output = await transformSource(
+        `import { pattern, computed, Writable } from "commonfabric";
+        export default pattern<{ ${
+          declaration.replaceAll("Data", "{ count: number; unused: string }")
+        } }>(({value}) =>
+          computed(() => ${read})
+        );`,
+        { types: COMMONFABRIC_TYPES, typeCheck: true },
+      );
+      expect(emittedSchemas(parseModule(output))).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            properties: expect.objectContaining({
+              value: expect.objectContaining({
+                asCell: ["readonly"],
+                anyOf: expect.arrayContaining([
+                  expect.objectContaining({
+                    type: "object",
+                    properties: { count: { type: "number" } },
+                    required: ["count"],
+                  }),
+                  { type: "undefined" },
+                  ...(declaration.includes(" | null")
+                    ? [{ type: "null" }]
+                    : []),
+                ]),
+              }),
+            }),
+          }),
+        ]),
+      );
+    });
+  }
 });
