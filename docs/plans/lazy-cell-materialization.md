@@ -285,9 +285,13 @@ so read registration is not where the time goes. The permissive object schema
 costing four times the fully declared one is worth its own look: a schema that
 declares less should not traverse more.
 
-- [ ] Add the one-scalar arm once a lazy view exists to read through. Until then
-      it measures nothing new — eager materialization does the same work either
-      way, and the table above is already that number.
+- [x] The one-scalar and all-row comparison is available in
+      `test/cell-schema-read-width.bench.ts`. It uses fresh transactions and the
+      same declared schema in both eager and lazy modes, verifies every result,
+      and reports journal activity separately from timing. The
+      [baseline report](../history/development/performance/2026-09-11-lazy-scalar-read-width.md)
+      records the measured workload and its limits. Re-run it after per-access
+      implementation changes.
 
 ### Stage 1 — Split the standing handle from the pinned view
 

@@ -41,6 +41,9 @@ interface ReplayResult {
   /** Commit requests with no response when the projection settled. */
   unanswered: number;
 
+  /** Mutable shared writes from source setup before the projection. */
+  setupMutableSharedWrites: number;
+
   /** Shared write operations excluding immutable content-addressed documents. */
   mutableSharedWrites: number;
 }
@@ -96,7 +99,8 @@ describe("CLI projection replay", () => {
           commentCount: index,
         })),
       );
-      expect(seed.mutableSharedWrites).toBeGreaterThan(0);
+      expect(seed.setupMutableSharedWrites).toBeGreaterThan(0);
+      expect(seed.mutableSharedWrites).toBe(0);
       expect(seed.rejected).toEqual([]);
       expect(seed.unanswered).toBe(0);
       expect(seed.errors).toEqual([]);
@@ -114,6 +118,8 @@ describe("CLI projection replay", () => {
           index === 3 ? { ...row, title: "Updated row", commentCount: 99 } : row
         ),
       );
+      expect(changed.setupMutableSharedWrites).toBeGreaterThan(0);
+      expect(changed.mutableSharedWrites).toBe(0);
       expect(changed.rejected).toEqual([]);
       expect(changed.unanswered).toBe(0);
       expect(changed.errors).toEqual([]);

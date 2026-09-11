@@ -37,6 +37,7 @@ import type {
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { resolveLink } from "../src/link-resolution.ts";
+import { resultSchemaMetaSpelling } from "../src/result-schema-meta.ts";
 
 // One verb declared with `action<Event, Result>` whose body returns a value
 // derived from the event (provably from that dispatch), and one value-less
@@ -404,12 +405,14 @@ describe("compiled CTS action<E, R> results in receipts", () => {
     // The receipt carries the verb's declared `R` as its durable `schema`
     // meta — the description of a launched result, which the settled value
     // (a link to the child) cannot supply. `CreateNoteResult` reaches the
-    // runtime whole, named definitions included.
+    // runtime whole, named definitions included, and is stored in the
+    // spelling the meta takes (a content-addressed reference under the
+    // default flag), so the comparison is against that spelling.
     const receipt = runtime.getCellFromLink<Record<string, unknown>>(
       outcomes[0].receiptLink!,
     );
     await receipt.pull();
-    expect(receipt.getMetaRaw("schema")).toEqual({
+    expect(receipt.getMetaRaw("schema")).toEqual(resultSchemaMetaSpelling({
       type: "object",
       properties: { note: { $ref: "#/$defs/NoteView" } },
       required: ["note"],
@@ -420,7 +423,7 @@ describe("compiled CTS action<E, R> results in receipts", () => {
           required: ["title"],
         },
       },
-    });
+    }));
 
     // The schema describes what the receipt actually holds: the launched
     // child, reachable through the receipt address.

@@ -35,6 +35,7 @@ import { decodeMemoryBoundary, resolveScopeKey } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { NormalizedFullLink } from "../src/link-utils.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import {
@@ -183,6 +184,117 @@ describe("stage F serving loop", () => {
       storageManager: clientManager,
     });
   };
+
+  it("preserves serving row producers and skips untouched rows after client edits", async () => {
+    type Row = { key: string; value: number };
+    const ready = Promise.withResolvers<void>();
+    let cancel: (() => void) | undefined;
+    let readRows: (() => Row[]) | undefined;
+    let inspect:
+      | (() => { link: NormalizedFullLink; id: string; runs: number }[])
+      | undefined;
+    onServingRuntime = async (runtime) => {
+      try {
+        runtime.scheduler.enableSettleStats();
+        const compiled = await runtime.patternManager.compilePattern({
+          main: "/main.tsx",
+          files: [{
+            name: "/main.tsx",
+            contents: `
+            import { computed, pattern } from "commonfabric";
+            export default pattern<{rows:{key:string;value:number}[]}>(({rows})=>({
+              rows:rows.map(row=>({key:row.key,value:computed(()=>row.value*2)})),
+            }));
+          `,
+          }],
+        }, { space });
+        const argument = runtime.getCell<{ rows: unknown[] }>(space, "row-arg");
+        const result = runtime.getCell<{ rows: Row[] }>(
+          space,
+          "row-result",
+          compiled.resultSchema,
+        );
+        const inputs = [0, 1].map((index) =>
+          runtime.getCell<Row>(space, `row-input-${index}`)
+        );
+        const tx = runtime.edit();
+        inputs.forEach((cell, index) =>
+          cell.withTx(tx).set({ key: String(index), value: index + 1 })
+        );
+        argument.withTx(tx).set({ rows: inputs });
+        runtime.run(tx, compiled, argument, result);
+        expect((await tx.commit()).error).toBeUndefined();
+        cancel = result.sink(() => {});
+        await runtime.idle();
+        readRows = () => result.get().rows;
+        inspect = () => {
+          const graph = runtime.scheduler.getGraphSnapshot();
+          return [0, 1].map((index) => {
+            const link = result.key("rows").key(index).key("value")
+              .resolveAsCell().getAsNormalizedFullLink();
+            const producers = graph.nodes.filter((node) =>
+              node.type === "computation" &&
+              node.writes?.some((write) => write.includes(link.id))
+            );
+            expect(producers).toHaveLength(1);
+            expect(producers[0].stats?.runCount).toBeGreaterThan(0);
+            return {
+              link,
+              id: producers[0].id,
+              runs: producers[0].stats!.runCount,
+            };
+          });
+        };
+        ready.resolve();
+      } catch (error) {
+        ready.reject(error);
+        throw error;
+      }
+    };
+    host = newHost();
+    openClient();
+    try {
+      const clientResult = clientRuntime.getCell<{ rows: Row[] }>(
+        space,
+        "row-result",
+      );
+      await clientResult.sync();
+      await ready.promise;
+      expect(readRows!()).toEqual([{ key: "0", value: 2 }, {
+        key: "1",
+        value: 4,
+      }]);
+      let before = inspect!();
+      const engine = await server.engineForSpace(space);
+      for (const edited of [0, 1]) {
+        const input = clientRuntime.getCell<Row>(space, `row-input-${edited}`);
+        await input.sync();
+        const tx = clientRuntime.edit();
+        input.withTx(tx).key("value").set(10 + edited);
+        expect((await tx.commit()).error).toBeUndefined();
+        // The serving wave can advance the head beyond its authored input.
+        const authored = engine.database.prepare(
+          `SELECT MAX(seq) AS seq FROM "commit" WHERE class = 'authored'`,
+        ).get() as { seq: number };
+        expect(authored.seq).toBeGreaterThan(0);
+        await waitForSettled(clientRuntime, space, authored.seq);
+        await servingRuntime!.idle();
+        expect(readRows!()).toEqual([{ key: "0", value: 20 }, {
+          key: "1",
+          value: edited === 0 ? 4 : 22,
+        }]);
+        const after = inspect!();
+        expect(after.map(({ link, id }) => ({ link, id }))).toEqual(
+          before.map(({ link, id }) => ({ link, id })),
+        );
+        expect(after[edited].runs).toBeGreaterThan(before[edited].runs);
+        expect(after[1 - edited].runs).toBe(before[1 - edited].runs);
+        before = after;
+      }
+    } finally {
+      cancel?.();
+    }
+  });
 
   it("serves a demanded derivation: authored commit → wave → ONE derived commit with watermark; the client settles via waitForSettled", async () => {
     host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });

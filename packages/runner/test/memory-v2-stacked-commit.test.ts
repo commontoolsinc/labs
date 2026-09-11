@@ -1922,6 +1922,23 @@ describe("memory-v2-stacked-commit", () => {
         }))).toEqual([
           { id: DOCS.A, localSeq: [1, 2], path: ["value"] },
         ]);
+        const siblingReads = harness.replica.accessForTestingOnly.buildReads(
+          sourceFromReads(Array.from({ length: 100 }, (_, index) => ({
+            id: DOCS.A,
+            path: [`field-${index}`],
+          }))),
+          3,
+        );
+        expect(siblingReads.pending).toHaveLength(100);
+        expect(new Set(siblingReads.pending.map((read) => read.localSeq)).size)
+          .toBe(1);
+        expect(siblingReads.pending[0].localSeq).toEqual([1, 2]);
+        const earlierReads = harness.replica.accessForTestingOnly.buildReads(
+          sourceFromReads([{ id: DOCS.A, path: ["field-0"] }]),
+          2,
+        );
+        expect(earlierReads.pending[0].localSeq).toBe(1);
+        expect(siblingReads.pending[0].localSeq).toEqual([1, 2]);
         await expectResultOk(c1.promise);
         await expectResultOk(c2.promise);
       } finally {

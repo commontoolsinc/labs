@@ -44,6 +44,7 @@ import {
 } from "../src/pattern-index/client.ts";
 import { createHarnessFabricSessionFactory } from "../src/fabric-session.ts";
 import { patternIndexDependencies } from "../src/pattern-index/composition.ts";
+import { patternIndexDeclaredType } from "../src/tools/search-patterns.ts";
 
 /** The text of a thrown value, for a message that names what went wrong. */
 const errorMessage = (error: unknown): string =>
@@ -77,6 +78,14 @@ export interface SeedEntry {
   program: RuntimeProgram;
   argumentSchema?: unknown;
   resultSchema?: unknown;
+
+  /**
+   * The generation this one supersedes, absent for an atom the index holds
+   * under no other identity. Publication is create-only for the metadata of an
+   * identity the index already has, so an entry the seeder can still describe
+   * is a new identity, and this is what links it to the one it displaces.
+   */
+  priorPatternId?: string;
 }
 
 /** A doc comment's text with its leading `/**`, ` * ` and `*\/` removed. */
@@ -179,8 +188,103 @@ export const publishRequestFor = (
   ...(entry.resultSchema !== undefined
     ? { resultSchema: entry.resultSchema as never }
     : {}),
+  ...(entry.priorPatternId !== undefined
+    ? { priorPatternId: entry.priorPatternId }
+    : {}),
   dependencies: patternIndexDependencies(entry.program.files),
 });
+
+/** Where the published generations of each atom are recorded, from root. */
+export const GENERATIONS_FILE =
+  "packages/cf-harness/scripts/seeded-pattern-generations.json";
+
+/**
+ * The identities each atom has been published under, keyed by atom name and
+ * ordered oldest first.
+ *
+ * The last entry of a chain is what the index holds for that atom, and what a
+ * new generation names as its `priorPatternId`. `note` states that contract
+ * inside the file, for a reader who opened it without this module.
+ */
+export interface SeedGenerations {
+  note: string;
+  atoms: Readonly<Record<string, readonly string[]>>;
+}
+
+/**
+ * The record in `text`.
+ *
+ * @throws Error naming `path` when the file is not the shape above. A run that
+ * read a chain it could not understand would publish a new generation linked
+ * to nothing, which is the thing the record exists to prevent, so it stops
+ * instead.
+ */
+export const parseGenerations = (
+  path: string,
+  text: string,
+): SeedGenerations => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`${path} is not JSON: ${errorMessage(error)}`);
+  }
+  const record = parsed as Partial<SeedGenerations>;
+  // `atoms` is a map from an atom's name to its chain, and an array is an
+  // object with numeric keys — so one read here as a record would key every
+  // chain by its position, and a run reading it would name a prior generation
+  // for an atom called `0`.
+  if (
+    typeof parsed !== "object" || parsed === null || Array.isArray(parsed) ||
+    typeof record.note !== "string" ||
+    typeof record.atoms !== "object" || record.atoms === null ||
+    Array.isArray(record.atoms)
+  ) {
+    throw new Error(`${path} holds no {note, atoms} record`);
+  }
+  for (const [name, chain] of Object.entries(record.atoms)) {
+    if (
+      !Array.isArray(chain) || chain.length === 0 ||
+      chain.some((id) => typeof id !== "string" || id === "")
+    ) {
+      throw new Error(
+        `${path} records ${name} as something other than a non-empty list of identities`,
+      );
+    }
+  }
+  return { note: record.note, atoms: record.atoms };
+};
+
+/** The record as the file holds it: keys in name order, one identity per line. */
+export const serializeGenerations = (
+  generations: SeedGenerations,
+): string => {
+  const atoms = Object.fromEntries(
+    Object.entries(generations.atoms).sort(([a], [b]) => a < b ? -1 : 1),
+  );
+  return `${JSON.stringify({ note: generations.note, atoms }, null, 2)}\n`;
+};
+
+/**
+ * `generations` with `patternId` recorded as `name`'s newest generation, or
+ * unchanged when the chain already ends there.
+ *
+ * Appends rather than replaces, for both an atom the record knows and one it
+ * does not: a generation the index accepted is one that can be composed from
+ * then on, whether or not a later one displaces it in search.
+ */
+export const withGeneration = (
+  generations: SeedGenerations,
+  name: string,
+  patternId: string,
+): SeedGenerations => {
+  const chain = generations.atoms[name] ?? [];
+  if (chain.at(-1) === patternId) return generations;
+  return {
+    note: generations.note,
+    atoms: { ...generations.atoms, [name]: [...chain, patternId] },
+  };
+};
 
 /**
  * What the seed run needs from the world, so the run itself can be exercised
@@ -201,6 +305,9 @@ export interface SeedDeps {
 
   /** Answers which of `paths` are not formatted as the repository formats them. */
   checkFormatting: (paths: readonly string[]) => Promise<readonly string[]>;
+
+  readGenerations: () => Promise<SeedGenerations>;
+  writeGenerations: (generations: SeedGenerations) => Promise<void>;
 
   log: (line: string) => void;
   logError: (line: string) => void;
@@ -482,6 +589,7 @@ export const runSeed = async (
     const source = await Deno.readTextFile(path);
     return { name, path, metadata: seedMetadataFromSource(name, source) };
   }));
+  const generations = await deps.readGenerations();
 
   const entries: SeedEntry[] = [];
   for (const { name, path, metadata } of described) {
@@ -492,6 +600,10 @@ export const runSeed = async (
       );
       return 1;
     }
+    // The recorded generation is a prior one only where it names another
+    // identity: the same source compiles to the same identity, and an entry
+    // naming itself as what it supersedes would say the atom displaced itself.
+    const recorded = generations.atoms[name]?.at(-1);
     entries.push({
       name,
       path,
@@ -503,6 +615,9 @@ export const runSeed = async (
         : {}),
       ...(compiled.resultSchema !== undefined
         ? { resultSchema: compiled.resultSchema }
+        : {}),
+      ...(recorded !== undefined && recorded !== compiled.patternId
+        ? { priorPatternId: recorded }
         : {}),
     });
   }
@@ -520,6 +635,20 @@ export const runSeed = async (
         request.program.files.map((file) => file.name).join(", ")
       }`,
     );
+    deps.log(`  supersedes:  ${request.priorPatternId ?? "(nothing)"}`);
+    // Both the schema and the type a search renders from it: the type is what
+    // a session composing the atom reads, and it names the handle types a
+    // pattern author writes rather than the shapes their values have.
+    deps.log(
+      `  argumentType:   ${
+        patternIndexDeclaredType(request.argumentSchema) ?? "(none)"
+      }`,
+    );
+    deps.log(
+      `  resultType:     ${
+        patternIndexDeclaredType(request.resultSchema) ?? "(none)"
+      }`,
+    );
     deps.log(
       `  argumentSchema: ${JSON.stringify(request.argumentSchema) ?? "(none)"}`,
     );
@@ -527,15 +656,28 @@ export const runSeed = async (
 
   if (options.dryRun) {
     deps.log(
-      `\nDry run: ${entries.length} atom(s) compiled, nothing published.`,
+      `\nDry run: ${entries.length} atom(s) compiled, nothing published, ${GENERATIONS_FILE} unchanged.`,
     );
     return 0;
   }
 
   let created = 0;
   let held = 0;
+  let wrote = false;
+  let recorded = generations;
   for (const entry of entries) {
     const response = await deps.publish(publishRequestFor(entry));
+    const next = withGeneration(recorded, entry.name, response.patternId);
+    if (next !== recorded) {
+      // Written here rather than once the loop is through. From this point the
+      // index holds the entry whatever happens to the atoms after it, and this
+      // file is what a later run reads to say which generation a new one
+      // supersedes — so a publication that landed and went unrecorded is what
+      // makes that link name a generation the index has already displaced.
+      await deps.writeGenerations(next);
+      recorded = next;
+      wrote = true;
+    }
     if (response.created) {
       created += 1;
       // The index ranks on recorded events, and a publication is not one. The
@@ -549,6 +691,11 @@ export const runSeed = async (
       `${
         response.created ? "published" : "already held"
       }: ${entry.name} (${response.patternId})`,
+    );
+  }
+  if (wrote) {
+    deps.log(
+      `\n${GENERATIONS_FILE} records what this run published; commit it.`,
     );
   }
   deps.log(`\n${created} published, ${held} already held by the index.`);
@@ -567,30 +714,45 @@ export const seedDepsFrom = (
     getClient: () => Promise<
       Pick<PatternIndexClient, "publishPattern" | "recordEvent">
     >;
-    patternsRoot: string;
+    repoRoot: string;
     log: (line: string) => void;
     logError: (line: string) => void;
   },
-): SeedDeps => ({
-  compile: (path) =>
-    compileAtom(options.runtime, options.space, path, options.patternsRoot),
-  publish: async (request) =>
-    await (await options.getClient()).publishPattern(request),
-  recordCreated: async (patternId) => {
-    await (await options.getClient()).recordEvent({
-      patternId,
-      eventType: "created",
-    });
-  },
-  checkFormatting: denoFmtCheck,
-  log: options.log,
-  logError: options.logError,
-});
+): SeedDeps => {
+  const generationsPath = join(options.repoRoot, GENERATIONS_FILE);
+  return {
+    compile: (path) =>
+      compileAtom(
+        options.runtime,
+        options.space,
+        path,
+        join(options.repoRoot, "packages/patterns"),
+      ),
+    publish: async (request) =>
+      await (await options.getClient()).publishPattern(request),
+    recordCreated: async (patternId) => {
+      await (await options.getClient()).recordEvent({
+        patternId,
+        eventType: "created",
+      });
+    },
+    checkFormatting: denoFmtCheck,
+    readGenerations: async () =>
+      parseGenerations(
+        GENERATIONS_FILE,
+        await Deno.readTextFile(generationsPath),
+      ),
+    writeGenerations: (generations) =>
+      Deno.writeTextFile(generationsPath, serializeGenerations(generations)),
+    log: options.log,
+    logError: options.logError,
+  };
+};
 
 /** Builds the deps a real run uses: a fabric session and an index client. */
 export const fabricSeedDeps = async (
   settings: SeedSettings,
-  patternsRoot: string,
+  repoRoot: string,
   log: (line: string) => void,
   logError: (line: string) => void,
   // The two constructions this function exists to perform, injectable so the
@@ -613,7 +775,7 @@ export const fabricSeedDeps = async (
       { baseUrl: settings.indexBaseUrl },
       settings.identityKeyPath,
     ),
-    patternsRoot,
+    repoRoot,
     log,
     logError,
   });
@@ -627,7 +789,7 @@ export interface SeedIo {
   repoRoot: string;
   createDeps: (
     settings: SeedSettings,
-    patternsRoot: string,
+    repoRoot: string,
     log: (line: string) => void,
     logError: (line: string) => void,
   ) => Promise<SeedDeps>;
@@ -664,7 +826,7 @@ export const main = async (
   try {
     const deps = await io.createDeps(
       settings,
-      join(io.repoRoot, "packages/patterns"),
+      io.repoRoot,
       io.log,
       io.logError,
     );
