@@ -398,8 +398,9 @@ function localDefName(ref: string): string | undefined {
 /**
  * Collects the local definition names referenced anywhere in `fragment`,
  * refusing every construct the decomposition cannot represent. `fragment` is
- * a root body or a definition body — never a `$defs` holder itself, which is
- * why an inner `$defs` is a nested scope and refused.
+ * a root body or a definition body — never a `$defs` holder itself. The
+ * decomposed form carries one definition map, at the root, so a `$defs`
+ * inside a fragment has no place in it and is refused rather than dropped.
  */
 function scanFragment(
   fragment: JSONSchema,
@@ -409,7 +410,7 @@ function scanFragment(
   if (!isObjectNotArray(fragment)) return;
   if (fragment.$defs !== undefined) {
     throw new SchemaNotDecomposableError(
-      "a subschema declares its own `$defs` scope",
+      "a subschema declares its own `$defs`",
     );
   }
   if (fragment.definitions !== undefined) {

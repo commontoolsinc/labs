@@ -6974,6 +6974,14 @@ export class Runner {
     cell: Cell<any>;
     commit?: PatternSetupCommitReceipt;
   }> {
+    if (pattern === undefined) {
+      // TypeScript callers cannot omit this, but the runtime boundary is also
+      // used from JavaScript. A missing pattern is first read deep in the
+      // pre-sync, where it surfaces as a `TypeError` naming a property rather
+      // than the argument, so fail closed here, at the one point both public
+      // entry points pass through, before any work is done.
+      throw new Error("a synced run requires a pattern");
+    }
     await resultCell.sync();
 
     const synced = await this.#syncCellsForRunningPattern(
@@ -8846,7 +8854,7 @@ export class Runner {
 
     const eventDependencySchema = cfcSchemaWithInheritedDefs(
       { type: "object", properties: { $event: eventSchema as JSONSchema } },
-      argumentSchema.$defs,
+      resolveExternalRootRefForStructure(argumentSchema).$defs,
     );
     const inputsCell = this.#runtime.getImmutableCell(
       resultCell.space,
@@ -9018,9 +9026,12 @@ export class Runner {
   ): NormalizedFullLink[] {
     const links: NormalizedFullLink[] = [];
     const seen = new WeakMap<object, Set<unknown>>();
-    const rootDefinitions = isObjectOrArray(argumentSchema)
-      ? argumentSchema.$defs
+    // The argument schema at rest can be a `cid:` reference, whose
+    // definitions live on the document it names.
+    const argumentRoot = isObjectNotArray(argumentSchema)
+      ? resolveExternalRootRefForStructure(argumentSchema)
       : undefined;
+    const rootDefinitions = argumentRoot?.$defs;
 
     const visit = (schema: unknown, currentValue: unknown): void => {
       // Sigil-only: the value is post-unwrap, where the only `$alias`

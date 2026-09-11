@@ -58,6 +58,52 @@ describe("mergeCfcSchemaEnvelopes", () => {
     });
   });
 
+  describe("definitions through a merge", () => {
+    // The merged envelope is one document: both sides' `$defs` land on its
+    // root, and a name the two define differently is renamed apart on the
+    // candidate's side so each side's refs keep naming their own definition.
+
+    it("carries both sides' definitions onto the merged root", () => {
+      const merged = mergeCfcSchemaEnvelopes({
+        type: "object",
+        properties: { rows: { $ref: "#/$defs/Row" } },
+        $defs: { Row: { type: "string" } },
+      }, {
+        type: "object",
+        properties: { count: { $ref: "#/$defs/Count" } },
+        $defs: { Count: { type: "number" } },
+      }) as JSONSchemaObj;
+      expect(merged.$defs).toEqual({
+        Row: { type: "string" },
+        Count: { type: "number" },
+      });
+      expect(merged.properties).toEqual({
+        rows: { $ref: "#/$defs/Row" },
+        count: { $ref: "#/$defs/Count" },
+      });
+    });
+
+    it("renames a name the two sides define differently", () => {
+      const merged = mergeCfcSchemaEnvelopes({
+        type: "object",
+        properties: { rows: { $ref: "#/$defs/Entry" } },
+        $defs: { Entry: { type: "string" } },
+      }, {
+        type: "object",
+        properties: { count: { $ref: "#/$defs/Entry" } },
+        $defs: { Entry: { type: "number" } },
+      }) as JSONSchemaObj;
+      expect(merged.$defs).toEqual({
+        Entry: { type: "string" },
+        __cfc_hoisted_0_Entry: { type: "number" },
+      });
+      expect(merged.properties).toEqual({
+        rows: { $ref: "#/$defs/Entry" },
+        count: { $ref: "#/$defs/__cfc_hoisted_0_Entry" },
+      });
+    });
+  });
+
   it("allows additive required fields when a default preserves old documents", () => {
     const merged = mergeCfcSchemaEnvelopes({
       type: "object",

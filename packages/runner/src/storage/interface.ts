@@ -2107,6 +2107,29 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   ): boolean;
 
   /**
+   * Whether the store at `id` in `space` is one no schema declares a policy
+   * on — named by an authorized whole-document
+   * `CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE` marker on this transaction.
+   *
+   * The §8.12.4 writer-fit measurement quantifies over the paths a schema
+   * could have declared a policy at, and skips the ones it cannot ask about.
+   * Two of those it reads off the id alone; this is the answer for a document
+   * whose id says nothing, which the runtime names as it writes it.
+   *
+   * This transaction alone, with no enrollment beside it: the measurement runs
+   * over documents the asking transaction wrote, so a marker recorded beside
+   * the write always covers the question.
+   *
+   * Takes the runtime's mark for the same reason {@link isRuntimeOwnedStore}
+   * does: the gate acts on the claim rather than measuring it.
+   */
+  isUndeclarablePolicyStore(
+    space: string,
+    id: string,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): boolean;
+
+  /**
    * Records a grant document consulted by policyState-guarded boundary
    * evaluation (§8.12.7 route 2a) — address plus resolution-time content
    * digest — for the prepared-digest binding (`PreparedDigestInput.
