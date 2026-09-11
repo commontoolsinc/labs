@@ -27,12 +27,23 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 
 import { recordedForm, resolveHandle } from "../lib/shuttle/handles.ts";
 import type { ListingHandles, ListingRow } from "../lib/shuttle/listing.ts";
-import { type Place, placeAtSpaceRoot } from "../lib/shuttle/place.ts";
+import {
+  CurrentPlace,
+  type Place,
+  placeAtSpaceRoot,
+} from "../lib/shuttle/place.ts";
+import { moved } from "./shuttle-place-helpers.ts";
 
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
 
 /** The piece a listing inside one was read at. */
 const PIECE = "of:fid1:abcdefghijklmnop";
+
+/** A second piece, for the cases about recalling somewhere else. */
+const OTHER_PIECE = "of:fid1:ponmlkjihgfedcba";
+
+/** The reference naming the row `title` of the listing {@link IN_PIECE} made. */
+const TITLE_REFERENCE = `/${PIECE}@space/items/title`;
 
 /** Helper for the cases below, which is the place a listing was read at. */
 const AT = placeAtSpaceRoot(SPACE);
@@ -46,6 +57,11 @@ const IN_PIECE: Place = {
 /** Helper for the cases below, which is a listing numbering `rows`. */
 function listed(...rows: ListingRow[]): ListingHandles {
   return { place: AT, rows };
+}
+
+/** Helper for the cases below, which is a listing a piece numbered `rows` in. */
+function listedInPiece(...rows: ListingRow[]): ListingHandles {
+  return { place: IN_PIECE, rows };
 }
 
 /** Helper for the cases below, which is one row called `name`. */
@@ -211,6 +227,91 @@ describe("handles", () => {
       // either — one written there would name a segment with no name.
 
       expect(recordedForm("get %1/", listed(row("thermo")))).toBe("get thermo");
+    });
+
+    it("returns a row a piece listed as the reference naming that row", () => {
+      // A key is a name inside one piece, and two pieces hold a `title`
+      // apiece, so a line recorded with the key's own name would read
+      // whichever piece the prompt stands on when it comes back.
+
+      expect(recordedForm("get %1", listedInPiece(row("title"))))
+        .toBe(`get ${TITLE_REFERENCE}`);
+    });
+
+    it("returns a reference that reaches the row from another piece", () => {
+      // The claim the reference is for, read as what it names: the recorded
+      // token aimed from a piece that is not the listing's reaches the row the
+      // listing numbered, and a `title` standing in the piece it was aimed
+      // from is not what it reached.
+
+      const recorded = recordedForm("get %1", listedInPiece(row("title")));
+      const elsewhere = new CurrentPlace(SPACE);
+      moved(elsewhere, `/${OTHER_PIECE}`);
+      expect(elsewhere.aim(recorded.slice("get ".length), "get").move).toEqual({
+        kind: "moved",
+        place: {
+          position: {
+            kind: "piece",
+            space: SPACE,
+            piece: PIECE,
+            path: ["items", "title"],
+          },
+          scope: "space",
+        },
+      });
+    });
+
+    it("returns the walk written after such a handle as further segments", () => {
+      expect(recordedForm("set %1/target 25", listedInPiece(row("title"))))
+        .toBe(`set ${TITLE_REFERENCE}/target 25`);
+    });
+
+    it("returns a walk closed by a separator without a nameless segment", () => {
+      // The walk drops a trailing separator, so `%1/target/` and `%1/target`
+      // name one cell. Carried into the reference whole it would end in a
+      // segment with no name in it, which names another.
+
+      expect(recordedForm("set %1/target/ 25", listedInPiece(row("title"))))
+        .toBe(`set ${TITLE_REFERENCE}/target 25`);
+    });
+
+    it("returns the row's own name in the reference, not the operand", () => {
+      // The two differ exactly where no bare operand reaches the row: the
+      // operand is then the rendering the row prints as, and a rendering
+      // nested inside a second reference names nothing. The name is a segment,
+      // and the reference escapes the separator in it.
+
+      expect(recordedForm(
+        "get %1",
+        listedInPiece({
+          name: "a/b",
+          kind: "value",
+          operand: `/@${SPACE}/${PIECE}@space/items/a~1b`,
+        }),
+      )).toBe(`get /${PIECE}@space/items/a~1b`);
+    });
+
+    it("returns a handle whose walk backs out through `..` as it was typed", () => {
+      // A `..` is a level in a walk and a key's name in a reference, so the
+      // two would read one token as two cells. The handle stays, and goes on
+      // naming what it named.
+
+      expect(recordedForm("get %1/../other", listedInPiece(row("title"))))
+        .toBe("get %1/../other");
+    });
+
+    it("returns a row a facet listed as the operand the listing printed", () => {
+      // A piece's id names it from wherever the line comes back, so nothing is
+      // gained by writing it a second way — and the place a facet listing was
+      // read at is no piece for a reference to be built from.
+
+      expect(recordedForm("cd %1", {
+        place: {
+          position: { kind: "facet", space: SPACE, facet: "pieces" },
+          scope: "space",
+        },
+        rows: [row(OTHER_PIECE, "piece")],
+      })).toBe(`cd ${OTHER_PIECE}`);
     });
 
     it("returns a row whose operand needs quoting as a quoted token", () => {

@@ -141,28 +141,30 @@ function refuse(reason: string): HandleReading {
  * What the person sees is untouched: the line on the screen and the transcript
  * above it are what was typed, and this is what `up` puts back.
  *
- * A row is written out as the operand the listing minted for it, which is the
- * most stable spelling a row carries. A piece stands as the id that names it
- * in either facet; a row inside a piece stands as its own name, which is a
- * name inside the place the listing was read at rather than from anywhere.
- * That last is accepted rather than absolute — replayed somewhere else the
- * name reaches nothing, or reaches what it names there, and either way the
- * line's own text says what it will act on, where a handle's said nothing.
+ * A row is written out as a spelling that reaches it from anywhere the session
+ * stands. A row a facet listed stands as the id or the slug the listing
+ * printed, each of which names the piece from wherever the line comes back; a
+ * row a piece listed stands as the reference naming that piece and the path to
+ * the row, since a key is a name inside one piece and two pieces hold a `title`
+ * apiece. What the reference costs is length — a recalled line naming a cell
+ * inside a piece runs some sixty characters longer than the handle did, and is
+ * harder to edit for it.
  *
  * A callable row is written out otherwise, its handle carrying a receiver and
  * a verb name rather than a path (decision 27): what goes in its place is the
  * two tokens `call` reads those from ({@link callSpelling}).
  *
- * Everything else is left exactly as typed, and each case for one reason —
- * nothing bound, so there is nothing to write out. A handle that named no row
- * is one, and a row that is no callable and that the listing offered no
- * operand for is another. The third is every token the operand grammar does
- * not read: the verb, and everything from the first token that reads as an
- * option, since from there what a token is for is a verb's own table to say,
- * and a `%2` standing in an option's value or inside a callable's own section
- * is a character of that value rather than a handle. A line carrying no handle
- * at all therefore comes back as the string it was given, and so does a line
- * the split refuses, which has no tokens to write out.
+ * Everything else is left exactly as typed, because nothing came of writing it
+ * out. A handle that named no row is one, and a row that is no callable and
+ * that the listing offered no operand for is another. A third is a token whose
+ * walk a reference has no spelling for ({@link referenceWalk}). The last is
+ * every token the operand grammar does not read: the verb, and everything from
+ * the first token that reads as an option, since from there what a token is
+ * for is a verb's own table to say, and a `%2` standing in an option's value
+ * or inside a callable's own section is a character of that value rather than
+ * a handle. A line carrying no handle at all therefore comes back as the
+ * string it was given, and so does a line the split refuses, which has no
+ * tokens to write out.
  */
 export function recordedForm(
   line: string,
@@ -194,11 +196,26 @@ export function recordedForm(
  * `place.ts`), so the handle this looks up is the one a verb would have looked
  * up and the walk written after it is the walk a verb would have taken.
  *
- * The walk rides the operand as a further segment, which is the same two steps
- * the handle took: the row's operand from the listing's place, and the walk
- * from there. What comes back is one token, printed as one, so a row whose
- * operand holds a separator or a character the grammar reserves is quoted the
- * way a listing prints it.
+ * Where the listing stood decides which spelling names its rows from anywhere.
+ * A listing read inside a piece names its rows by a key, and a key is a name
+ * inside that piece — two pieces hold a `title` apiece — so the row is written
+ * as the reference that reaches it, the piece and the path to the row, and the
+ * walk written after the handle as further segments of the same reference.
+ * A listing read at a facet or at the space root names its rows by a piece's
+ * id, by a slug, or by a facet, each of which reaches the row from wherever
+ * the line is recalled, so those are written as the operand the listing
+ * minted.
+ *
+ * The row's own name goes into the reference rather than its operand, which
+ * differs where the name is one no bare operand reaches: the operand is then
+ * the rendering the row already prints as, and a rendering nested inside a
+ * second reference names nothing. The operand is still what says a spelling
+ * reaches the row at all, so a row the listing offered none for is left alone
+ * either way.
+ *
+ * What comes back is one token, printed as one, so a row whose spelling holds
+ * a separator or a character the grammar reserves is quoted the way a listing
+ * prints it.
  */
 function spellingFor(
   handles: ListingHandles | undefined,
@@ -208,14 +225,48 @@ function spellingFor(
   if (move === undefined) return undefined;
   const bound = resolveHandle(handles, move.handle);
   if (bound.kind === "refused") return undefined;
+  const at = bound.at;
   if (move.rest === "" && bound.row.kind === "callable") {
-    return callSpelling(bound.at, bound.row.name);
+    return callSpelling(at, bound.row.name);
   }
   const operand = bound.row.operand;
   if (operand === undefined) return undefined;
+  const position = at.position;
+  if (position.kind === "piece") {
+    const walk = referenceWalk(move.rest);
+    return walk === undefined ? undefined : quoteToken(referenceForPlace({
+      position: {
+        ...position,
+        path: [...position.path, bound.row.name, ...walk],
+      },
+      scope: at.scope,
+    }));
+  }
   return quoteToken(
     move.rest === "" ? operand : `${operand}/${move.rest}`,
   );
+}
+
+/**
+ * Helper for {@link spellingFor}, which is the walk written after a handle as
+ * the segments a reference carries it in, and nothing where a reference cannot
+ * carry it at all.
+ *
+ * A `..` is what it cannot carry. In a walk it backs out of the level the
+ * segment before it reached, and in a reference it is the name of a key, so
+ * the two read one token as two cells. Such a token is left as the handle it
+ * was typed as — which names what it named before — rather than written with
+ * the key's own name, that being the spelling the reference is here to avoid.
+ *
+ * The trailing separator is dropped as the walk itself drops it
+ * (`moveBySegments`, `place.ts`): `%1/` and `%1` name one row, and a segment
+ * with no name in it would make them two.
+ */
+function referenceWalk(rest: string): readonly string[] | undefined {
+  if (rest === "") return [];
+  const segments = rest.split("/");
+  if (segments.at(-1) === "") segments.pop();
+  return segments.includes("..") ? undefined : segments;
 }
 
 /**

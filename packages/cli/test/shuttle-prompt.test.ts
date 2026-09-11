@@ -37,6 +37,9 @@ import type { Key } from "../lib/view/keys.ts";
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
 const HANDLE = "of:fid1:abcdefghijklmnop";
 
+/** The piece a listing was read inside, which is not the one shuttle stands on. */
+const LISTED_PIECE = "of:fid1:ponmlkjihgfedcba";
+
 const CONFIG: SpaceConfig = {
   apiUrl: "https://toolshed.example/",
   space: SPACE,
@@ -861,6 +864,44 @@ describe("prompt", () => {
         text: "shuttle /slugs/ @space> cd slugs",
         column: 32,
       });
+    });
+
+    it("recalls an in-piece line onto the piece it read, not the one under it", async () => {
+      // The hazard the recorded reference ends. Two pieces hold a `title`
+      // apiece, and the listing was read inside one while shuttle stands on
+      // the other, so a line recorded with the key's own name would read the
+      // piece under the prompt the second time round. Both reads are asserted,
+      // since what the claim is about is that the second names what the first
+      // named.
+
+      const shuttle = atPiece();
+      shuttle.session.listed({
+        place: {
+          position: {
+            kind: "piece",
+            space: SPACE,
+            piece: LISTED_PIECE,
+            path: [],
+          },
+          scope: "space",
+        },
+        rows: [{ name: "title", kind: "value", operand: "title" }],
+      });
+      const read: string[] = [];
+      await running(
+        [...typed("get %1"), ENTER, UP, ENTER],
+        shuttle,
+        {
+          getCellValue: (config, path) => {
+            read.push(`${config.piece}/${path.join("/")}`);
+            return Promise.resolve("a title");
+          },
+        },
+      );
+      expect(read).toEqual([
+        `${LISTED_PIECE}/title`,
+        `${LISTED_PIECE}/title`,
+      ]);
     });
 
     it("draws the line as it was typed, the handle included", async () => {
