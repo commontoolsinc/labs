@@ -53,7 +53,7 @@
       "id": "C1",
       "title": "Multi-replica reproductions",
       "status": "active",
-      "detail": "Four synthetic browser cases pass: nested filters and mapped swatches, with same-space and cross-space profiles, remote colors, profile-only edits, membership additions, and ranking. Cold-materialization verification, removal, and reconnect cases remain."
+      "detail": "Four synthetic browser cases pass: nested filters and mapped swatches, with same-space and cross-space profiles, remote colors, profile-only edits, membership additions/removal/restoration, and ranking. Exact row text and swatch assertions cover empty rows. Cold-materialization verification and reconnects remain."
     },
     {
       "id": "B1",
