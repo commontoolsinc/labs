@@ -997,24 +997,23 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         // We always transform `recurse` to `recurseOf`. See comment on the
         // definition of `RecurseOfForm` for details.
 
-        const tag = this.#tagFromValueElseNull(finalValue);
-        if (
-          (tag !== VALUE_TAGS.Object) && (tag !== VALUE_TAGS.FabricInstance)
-        ) {
-          const desc = toCompactDebugString(finalValue, {
-            backtickQuote: true,
-          });
-          throw new Error(
-            `Cannot use \`recurse\` result with non-container: ${desc}`,
-          );
+        switch (this.#tagFromValueElseNull(finalValue)) {
+          case VALUE_TAGS.Array:
+          case VALUE_TAGS.FabricInstance:
+          case VALUE_TAGS.Object: {
+            return {
+              type: "recurseOf",
+              container: finalValue as FabricContainerValue,
+              doKeys: result.doKeys,
+              doValues: result.doValues,
+            };
+          }
         }
 
-        return {
-          type: "recurseOf",
-          container: finalValue as FabricContainerValue,
-          doKeys: result.doKeys,
-          doValues: result.doValues,
-        };
+        const desc = toCompactDebugString(finalValue, { backtickQuote: true });
+        throw new Error(
+          `Cannot use \`recurse\` result with non-container: ${desc}`,
+        );
       }
 
       case "visitSubtype": {
