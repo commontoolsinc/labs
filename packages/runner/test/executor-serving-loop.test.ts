@@ -32,7 +32,6 @@ import {
 import { stampWaveRunContext } from "../src/executor/wave.ts";
 import { markEffectCompletion } from "../src/executor/effect-completion.ts";
 import { decodeMemoryBoundary, resolveScopeKey } from "@commonfabric/memory/v2";
-import { SessionRegistry } from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -80,9 +79,11 @@ const newSharedServer = (
   options: { sessionTtlMs?: number; subscriptionRefreshDelayMs?: number } = {},
 ) =>
   new MemoryV2Server.Server({
-    ...(options.sessionTtlMs === undefined
-      ? {}
-      : { sessions: new SessionRegistry({ ttlMs: options.sessionTtlMs }) }),
+    ...(options.sessionTtlMs === undefined ? {} : {
+      sessions: new MemoryV2Server.SessionRegistry({
+        ttlMs: options.sessionTtlMs,
+      }),
+    }),
     subscriptionRefreshDelayMs: options.subscriptionRefreshDelayMs ?? 0,
     authorizeSessionOpen(message) {
       const principal = (message.authorization as { principal?: unknown })

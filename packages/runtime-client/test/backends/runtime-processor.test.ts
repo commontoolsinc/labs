@@ -35,7 +35,9 @@ import { siteTableCause, siteTableSchema } from "@commonfabric/home-schemas";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   type Cell,
+  CompilerStackLoadError,
   entityIdFrom,
+  parseLink,
   popFrame,
   pushFrame,
   Runtime,
@@ -53,9 +55,7 @@ import {
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { StorageManager as WorkerStorageManager } from "@commonfabric/runner/storage/cache";
 
-import { parseLink } from "@commonfabric/runner";
 import * as V2Storage from "@commonfabric/runner/storage/v2";
-import { CompilerStackLoadError } from "@commonfabric/runner";
 import {
   type CellRef,
   type CfcLabelView,

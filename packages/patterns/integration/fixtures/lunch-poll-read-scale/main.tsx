@@ -52,6 +52,7 @@ const seed = handler<
     profiles.addUnique(profile);
     return { name, profile, color: "#2f6f4e" };
   }));
+  const seededVotes: Writable<Vote>[] = [];
   for (let index = 0; index < voteCount; index++) {
     const optionId = `option-${index % optionCount}`;
     const voter = profiles.elementById(String(Math.floor(index / optionCount)));
@@ -59,8 +60,9 @@ const seed = handler<
     if (key === undefined) throw new Error("Fixture voter has no identity");
     const vote = votes.elementById(key);
     vote.set({ optionId, voter, voteType: "green", castAt: Date.now() });
-    votes.addUnique(vote);
+    seededVotes.push(vote);
   }
+  votes.set(seededVotes);
 });
 
 const claim = handler<Record<string, unknown>, {
