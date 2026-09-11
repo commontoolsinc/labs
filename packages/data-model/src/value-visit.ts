@@ -35,7 +35,6 @@ import {
   tagFromFabricValue,
   tagFromFabricValueElseNull,
   VALUE_TAGS,
-  type ValueTag,
 } from "./value-tags.ts";
 import { toCompactDebugString } from "./value-debug.ts";
 
@@ -1040,7 +1039,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    */
   #adjustRecurseForm(
     result: RecurseForm,
-    finalTag: ValueTag | null,
+    finalTag: FabricValueTag | null,
     finalValue: DomainFor<DomainExtra>,
   ): RecurseOfForm {
     switch (finalTag) {
