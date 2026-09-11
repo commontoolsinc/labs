@@ -79,7 +79,7 @@ import {
 import { EffectsChannel } from "./speculation/effects-channel.ts";
 import { waveRunContextOf } from "./executor/wave.ts";
 import { Action, Scheduler } from "./scheduler.ts";
-import { entityKey } from "./scheduler/keys.ts";
+import { entityKey, entityNameKey } from "./scheduler/keys.ts";
 import {
   type CommitBackpressurePolicy,
   resolveCommitBackpressure,
@@ -156,7 +156,6 @@ import {
 } from "./storage/reactivity-log.ts";
 import { isRetryableCommitRejection } from "./storage/rejection.ts";
 import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
-import { entityNameKey } from "./scheduler/keys.ts";
 import { toURI } from "./uri-utils.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
@@ -2704,6 +2703,7 @@ export class Runtime {
     });
     if (this.#tearingDownWrites) return Promise.resolve(teardownResult());
     const tx = this.edit(options);
+    this.scheduler.beginReadAttempt(tx, "editWithRetry");
     tx.tx.immediate = true;
     (tx.tx as { deferRunnerStartUntilCommit?: boolean })
       .deferRunnerStartUntilCommit = true;
@@ -2729,7 +2729,12 @@ export class Runtime {
         tx.abort("editWithRetry stopped because the runtime is disposing");
         return Promise.resolve(teardownResult());
       }
-      this.prepareTxForCommit(tx);
+      try {
+        this.prepareTxForCommit(tx);
+      } catch (error) {
+        if (tx.status().status === "ready") tx.abort(error);
+        throw error;
+      }
       return tx.commit().then(async ({ error }) => {
         if (error) {
           if (maxRetries > 0 && isRetryableCommitRejection(error)) {

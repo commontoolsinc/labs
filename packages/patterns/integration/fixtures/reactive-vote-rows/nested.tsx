@@ -1,7 +1,7 @@
 /** Demands remote linked votes and profiles inside reactive option-row filters. */
 
 import { NAME, pattern, UI } from "commonfabric";
-import { cast, type Input, rename } from "./model.ts";
+import { cast, type Input, rename, retract } from "./model.ts";
 
 export default pattern<Input>(({ options, votes, profiles }) => {
   const rows = options.map((option) => {
@@ -26,5 +26,6 @@ export default pattern<Input>(({ options, votes, profiles }) => {
     rows,
     cast: cast({ votes, profiles }),
     rename: rename({ profiles }),
+    retract: retract({ votes }),
   };
 });

@@ -1,5 +1,10 @@
 import type { JSONSchema } from "@commonfabric/api";
-import { columnDeclaresIfc, isSqliteDbRef } from "@commonfabric/memory/v2";
+import {
+  columnDeclaresIfc,
+  isSqliteDbRef,
+  type SqliteDbRef,
+  type SqliteQueryResult,
+} from "@commonfabric/memory/v2";
 import type { Cell } from "@commonfabric/runner";
 import { cfcLabelViewForCellFailClosed } from "@commonfabric/runner/cfc";
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
@@ -85,6 +90,56 @@ export interface DescribeHandleDatabase {
    * refused is absent from this list as well.
    */
   labels: DescribeHandleLabel[];
+
+  /**
+   * How much each disclosed table actually holds. Absent when the run has no
+   * way to count — a session that could not reach the database at all — which
+   * is a different answer from a table that reports itself uncountable.
+   */
+  fill?: DescribeHandleTableFill[];
+}
+
+/**
+ * How much one table holds: its rows, and per disclosed column how many of
+ * those rows carry a value rather than NULL.
+ *
+ * This is the one quantity this tool reports. No row, no cell value and no
+ * column's contents cross with it, and no predicate the caller chose is ever
+ * counted — a count is taken of a whole table and of whole columns, or not at
+ * all. What it buys is the difference between a column a query can filter on
+ * and one that is NULL on every row of this database, which is otherwise
+ * discoverable only by writing the query, reading nothing back, and having no
+ * way to tell that from a source that is genuinely empty.
+ */
+export interface DescribeHandleTableFill {
+  /** The table, named as {@link DescribeHandleDatabase.tables} names it. */
+  table: string;
+
+  /** Rows the table holds. Absent with {@link unread}. */
+  rows?: number;
+
+  /**
+   * One entry per disclosed column of the table, holding how many of those
+   * rows are non-NULL there. A column reading `0` beside a non-zero
+   * {@link rows} is filled on no row at all. Absent with {@link unread}.
+   */
+  nonNull?: Record<string, number>;
+
+  /**
+   * Why this table holds no counts, in the words of whatever refused. A table
+   * that could not be counted is reported as uncounted rather than as empty:
+   * zero rows and unknown rows are the two readings these counts exist to
+   * separate, and collapsing them would make an unreadable table look like an
+   * empty one.
+   *
+   * This is text from the database or the provider rather than from this tool,
+   * and it is the one such channel in the reply — the reason a count is worth
+   * having is the reason a refused count is, and a bare "uncounted" leaves a
+   * caller with nothing to correct. It crosses on the same terms property
+   * names do: the prompt loop scrubs bare fabric identifiers out of the whole
+   * reply, keys included, before any of it reaches model context.
+   */
+  unread?: string;
 }
 
 /** The label at one path inside a referent, as atom types and nothing else. */
@@ -105,10 +160,11 @@ export interface DescribeHandleLabel {
 }
 
 /**
- * Describes the SHAPE of a handle's referent and nothing else: property
- * names, types, nesting, and required-ness. No datum is ever reported, so a
- * reply here says what a reference is, never what it holds. This is what lets
- * an agent write code over a reference it was handed
+ * Describes the SHAPE of a handle's referent: property names, types, nesting,
+ * and required-ness — and, for a database, how full each of its tables is. No
+ * datum is ever reported, so a reply here says what a reference is and how much
+ * of it there is, never what it holds. This is what lets an agent write code
+ * over a reference it was handed
  * — you cannot compute over data whose shape you do not know — and what lets
  * an orchestrator verify a chain of transformations without reading the data
  * flowing through it.
@@ -176,7 +232,7 @@ export const describeHandleToolDescriptor: HarnessToolDescriptor = {
   toolId: "describe_handle",
   title: "Describe Handle",
   description:
-    "Report the shape of a general handle's referent and the CFC labels it carries: its recorded schema, path and label atom types, never its data. A referent that is a SQLite database reports its tables instead of a schema, under `database`: the columns of each table with their types, and the labels those columns carry. Read such a referent with `db.query` over the handle rather than as a value. A capability-restricted handle returns a named refusal. Use it to check that a reference is the kind of thing a step expects, and what handling it demands, before passing it on.",
+    "Report the shape of a general handle's referent and the CFC labels it carries: its recorded schema, path and label atom types, never its data. A referent that is a SQLite database reports its tables instead of a schema, under `database`: the columns of each table with their types, the labels those columns carry, and under `fill` how many rows each table holds and how many of them are non-NULL in each column. Read `fill` before writing a query: a column whose count is 0 is NULL on every row of this database, so filtering on it returns nothing, and a table reporting `unread` was not counted rather than empty. Read such a referent with `db.query` over the handle rather than as a value. A capability-restricted handle returns a named refusal. Use it to check that a reference is the kind of thing a step expects, and what handling it demands, before passing it on.",
   effectClass: "read",
   inputSchema: {
     type: "object",
@@ -231,6 +287,23 @@ export const describeHandleToolDescriptor: HarnessToolDescriptor = {
                 integrity: { type: "array", items: { type: "string" } },
               },
               required: ["confidentiality", "integrity"],
+              additionalProperties: false,
+            },
+          },
+          fill: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                table: { type: "string" },
+                rows: { type: "integer", minimum: 0 },
+                nonNull: {
+                  type: "object",
+                  additionalProperties: { type: "integer", minimum: 0 },
+                },
+                unread: { type: "string" },
+              },
+              required: ["table"],
               additionalProperties: false,
             },
           },
@@ -383,6 +456,106 @@ const describedDatabase = (
 };
 
 /**
+ * The read-only query a storage provider offers, as much of it as counting
+ * needs. A provider that offers none leaves a database uncounted.
+ */
+type SqliteQueryRunner = (
+  db: SqliteDbRef,
+  sql: string,
+) => Promise<SqliteQueryResult>;
+
+/** `name` as a SQLite identifier, quoted so no name can carry structure. */
+const quoteIdentifier = (name: string): string =>
+  `"${name.replaceAll('"', '""')}"`;
+
+/**
+ * Counts one table: its rows, and each of `columns` non-NULL over those rows.
+ *
+ * One statement per table, aliasing each count to a name this builds rather
+ * than to the column's own, so nothing a column is called can collide with
+ * the row count or with another alias.
+ */
+const countTableSql = (
+  table: string,
+  columns: readonly string[],
+): string => {
+  const counts = columns.map((column, index) =>
+    `COUNT(${quoteIdentifier(column)}) AS ${quoteIdentifier(`c${index}`)}`
+  );
+  return `SELECT COUNT(*) AS "n"${
+    counts.length === 0 ? "" : `, ${counts.join(", ")}`
+  } FROM ${quoteIdentifier(table)}`;
+};
+
+/** A count a query returned, or `undefined` for anything that is not one. */
+const countOf = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined;
+
+/**
+ * How full each disclosed table of `db` is, read through the session's
+ * storage provider.
+ *
+ * The tables walked are the reduced ones, so a table or column the disclosure
+ * refused is not counted either and cannot be learned of here. Each table is
+ * counted on its own, so one that cannot be read — a declared table the file
+ * does not hold, a statement the server refused — costs its own counts and
+ * none of the others, and says so in place of them.
+ *
+ * One statement per table, and a count over a column is a scan of it, so the
+ * work here grows with the database rather than with the reply. That is the
+ * price of the reading: what a count buys is the difference between a column a
+ * query can filter on and one that is NULL throughout, and nothing cheaper
+ * than reading the column establishes it.
+ */
+const readDatabaseFill = async (
+  provider: { sqliteQuery?: SqliteQueryRunner },
+  db: SqliteDbRef,
+  reduced: JSONSchema,
+): Promise<DescribeHandleTableFill[] | undefined> => {
+  if (provider.sqliteQuery === undefined) {
+    return undefined;
+  }
+  const fill: DescribeHandleTableFill[] = [];
+  for (const [table, spec] of Object.entries(schemaProperties(reduced))) {
+    const columns = Object.keys(schemaProperties(spec));
+    let row: Record<string, unknown> | undefined;
+    try {
+      // Called on the provider rather than through a name lifted off it: the
+      // storage provider is an object whose query reads its own state, and a
+      // detached call arrives with no receiver.
+      const result = await provider.sqliteQuery(
+        db,
+        countTableSql(table, columns),
+      );
+      const first = result.rows[0];
+      row = first === undefined || typeof first !== "object" || first === null
+        ? undefined
+        : first as Record<string, unknown>;
+    } catch (error) {
+      fill.push({
+        table,
+        unread: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
+    const rows = countOf(row?.n);
+    if (rows === undefined) {
+      fill.push({ table, unread: "the count query returned no row count" });
+      continue;
+    }
+    const nonNull: Record<string, number> = {};
+    for (const [index, column] of columns.entries()) {
+      const count = countOf(row?.[`c${index}`]);
+      if (count !== undefined) {
+        nonNull[column] = count;
+      }
+    }
+    fill.push({ table, rows, nonNull });
+  }
+  return fill;
+};
+
+/**
  * The schema declared for the referent at `path`, or nothing when none is.
  * A document's declared schema narrowed by a path is a walk over the schema
  * rather than a read of the data, so nothing here goes near a value; the
@@ -416,11 +589,16 @@ const declaredSchema = async (
  */
 const databaseOf = (
   referent: Cell<unknown>,
-): Pick<DescribedReferent, "database"> => {
-  const database = describedDatabase(
-    referent.asSchema({ type: "object", additionalProperties: true }).get(),
-  );
-  return database === undefined ? {} : { database };
+): { database?: DescribeHandleDatabase; ref?: SqliteDbRef } => {
+  const value = referent.asSchema({
+    type: "object",
+    additionalProperties: true,
+  })
+    .get();
+  const database = describedDatabase(value);
+  return database === undefined || !isSqliteDbRef(value)
+    ? {}
+    : { database, ref: value };
 };
 
 /** What the session can state about `ref`: its declared shape, and its labels. */
@@ -485,7 +663,22 @@ const describeInFabric = async (
     }
     // Nothing was declared, so the referent's own value is the only place a
     // contract can still be stated, and a database handle states one there.
-    return { labels, ...databaseOf(referent) };
+    const { database, ref: db } = databaseOf(referent);
+    if (database === undefined || db === undefined) {
+      return { labels };
+    }
+    // The counts are read after the contract rather than with it, so a
+    // database that discloses its tables still discloses them when nothing
+    // could be counted.
+    const fill = await readDatabaseFill(
+      pieces.runtime.storageManager.open(space),
+      db,
+      database.tables,
+    );
+    return {
+      labels,
+      database: fill === undefined ? database : { ...database, fill },
+    };
   } catch {
     return {};
   }

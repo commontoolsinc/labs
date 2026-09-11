@@ -66,12 +66,31 @@ The labels a sub-pattern's result document carries are the ones its own fields
 earned. A field aliasing an argument cell carries that cell's label through the
 link machinery. A field fed by a lift or a handler carries the join that
 module makes onto its own result (`applyArgumentIfcToResult`, called from
-`packages/runner/src/builder/module.ts`), except where a built-in sets
-`propagateInputIfc: false` because it resolves label views at run time
-instead — `llmDialog` is the one that does. And under
+`packages/runner/src/builder/module.ts`), and every module's output cells carry
+the join of its input cells' labels (`connectInputAndOutputs`, defined in
+`packages/runner/src/builder/node-utils.ts` and called from `module.ts` and
+`pattern.ts`), which covers a built-in whose result is written at run time
+rather than declared. And under
 `cfcFlowLabels: "persist"` the per-transaction join is written as a `derived`
 component on each value write target; at `observe` it only reaches a
 diagnostic, and at `off` nothing derives it.
+
+No module is excused that input join. A module labeling its outputs below the
+join of its inputs makes §8.9.1's flow-precision claim, which that section
+holds to trust in the executing implementation for `flow-taint-precision` under
+the acting user, and a graph is assembled before there is one. What the join
+states is not §8.9.2's measurement: the build transaction reads nothing, so
+§8.9.2 applied there yields the empty label, which is the argument the next
+paragraph makes for a pattern's own root. It is a static over-approximation of
+what any future attempt could consume, and it is the floor rather than a first
+guess — it mints a `declared` entry, and a path's effective label is the join of
+all its components, so the `derived` component above adds to it and never
+narrows it. A label narrower than the join is therefore available only through
+§8.9.1's trust gate, and nothing in the runtime evaluates that concept.
+
+The join reaches output cells, so a handler is covered by the result join above
+instead: a handler node is built with no outputs, and what its writes carry is
+the join its module makes onto its own result.
 
 The declared result schema adds none of its own: `factoryFromPattern` stores
 the schema the author declared, so a pattern that accepts a confidential
@@ -99,5 +118,7 @@ grant — the direction that refuses rather than admits.
 
 `packages/runner/test/cfc-argument-ifc-propagation.test.ts` holds each builder
 against its own schema, and `packages/runner/test/pattern.test.ts` measures
-where the label reaches the result instead. The `cfc-render-policy-demo`
+where the label reaches the result instead.
+`packages/runner/test/cfc-builtin-output-ifc.test.ts` holds each LLM built-in
+to the input join, at both dial settings. The `cfc-render-policy-demo`
 integration test drives the composed case under the ceiling.
