@@ -113,12 +113,22 @@ refresh finishes.
 
 ### Collection
 
-`collectSource(driver, signal?)` consumes `listSessions()` until `nextCursor` is
-absent. It records an inventory error for a repeated cursor. It also records an
-error before retaining a page that would raise the inventory above 100,000
-summaries. It then calls `readSession()` once for every retained summary. The
-optional signal is checked before and after every provider call. A host still
-stops the driver to interrupt a provider call that does not return on its own.
+`collectSource(driver, { signal, retain })` consumes `listSessions()` until
+`nextCursor` is absent. It records an inventory error for a repeated cursor. It
+also records an error before keeping a page that would raise the inventory above
+100,000 summaries. It then calls `readSession()` once for every listed summary.
+The optional signal is checked before and after every provider call. A host
+still stops the driver to interrupt a provider call that does not return on its
+own.
+
+The optional `retain` predicate sees each inventory summary before the session
+is read. A summary it accepts goes into the result's `retained` list and its
+session is not read; publication keeps that session's row and graph as they are.
+The predicate is the host's claim that the published copy is current, and the
+target checks the claim against the index: a retained session with no complete
+published copy is recorded as an error and makes the source's inventory
+incomplete. `AgentFabricTarget.publishedSessions()` supplies what a host needs
+to make the claim.
 
 The returned `CollectedSource` contains successful snapshots and structured
 errors. Its `complete` field is true only when enumeration completed, every
@@ -161,6 +171,7 @@ The target exposes these orchestration methods:
 
 | Method                                      | Behavior                                                                                                                                            |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `publishedSessions()`                       | Reads the complete index without transcripts and returns each session's driver, update time, lifecycle state, content hash, and status.             |
 | `beginSessionObservation()`                 | Allocates the ordering value that a caller records before it begins a full provider collection.                                                     |
 | `publish(collected, options?)`              | Publishes changed session graphs and replaces both indexes. Returns the number of non-deleted sessions.                                             |
 | `publishHealth(value)`                      | Publishes a host-defined health record under the connector-owned health schema.                                                                     |

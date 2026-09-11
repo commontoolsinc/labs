@@ -55,9 +55,11 @@ view for indexes and user interfaces.
 ### Collection and preparation
 
 `collectSource()` walks every inventory page from one driver. It then reads each
-listed session. A provider or session read error is returned in the collection
-result instead of discarding successfully read sessions. An optional owner
-signal stops work at provider call boundaries.
+listed session. A host can supply a predicate that judges, from an inventory
+summary alone, that a session's published copy is current; a session it accepts
+is retained rather than read. A provider or session read error is returned in
+the collection result instead of discarding successfully read sessions. An
+optional owner signal stops work at provider call boundaries.
 
 `prepareSession()` derives the stable session key, divides native events into
 chunks, computes content hashes, and computes a snapshot hash. The snapshot hash
@@ -79,7 +81,11 @@ committed.
 
 The target compares snapshot hashes with the previous index. It does not rewrite
 an unchanged session graph. It still refreshes source capabilities, recent
-message previews, and synchronization status in the indexes.
+message previews, and synchronization status in the indexes. A retained session
+keeps its row and graph without any of that. Retention rests on a complete
+published copy being there: a retention nothing complete backs makes the
+source's inventory incomplete, so a session absent from that inventory is not
+deleted on its word.
 
 A complete source inventory marks previously known missing sessions as deleted.
 An incomplete inventory preserves prior sessions and marks affected sessions

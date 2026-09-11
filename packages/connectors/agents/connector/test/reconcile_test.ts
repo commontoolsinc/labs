@@ -71,6 +71,33 @@ Deno.test("collectSource consumes every page and prepares stable session snapsho
   assertEquals(first.snapshotHash.startsWith("sha256:"), true);
 });
 
+Deno.test("collectSource lists a session the retain predicate accepts without reading it", async () => {
+  const reads: string[] = [];
+  const base = fakeDriver();
+  const driver: AgentDriver = {
+    ...base,
+    readSession: (id: string) => {
+      reads.push(id);
+      return base.readSession(id);
+    },
+  };
+
+  const collected = await collectSource(driver, {
+    retain: (summary) => summary.nativeSessionId === "one",
+  });
+
+  assertEquals(reads, ["two"]);
+  assertEquals(
+    collected.retained?.map((summary) => summary.nativeSessionId),
+    ["one"],
+  );
+  assertEquals(
+    collected.sessions.map((session) => session.summary.nativeSessionId),
+    ["two"],
+  );
+  assertEquals(collected.complete, true);
+});
+
 Deno.test("collectSource retains lifecycle state reported only by inventory", async () => {
   const inventorySummary = {
     nativeSessionId: "one",

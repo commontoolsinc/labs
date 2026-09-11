@@ -5,14 +5,29 @@ import { sessionKey } from "./session-contract.ts";
 import type {
   AgentDriver,
   NativeSessionSnapshot,
+  SessionSummary,
   SourceDescriptor,
 } from "./types.ts";
 
 export interface CollectedSource {
   source: SourceDescriptor;
   sessions: NativeSessionSnapshot[];
+  /**
+   * Inventory summaries whose published copies are current, listed without
+   * being read. Absent means every listed session was read.
+   */
+  retained?: readonly SessionSummary[];
   errors: Array<{ nativeSessionId?: string; message: string }>;
   complete: boolean;
+}
+
+export interface CollectSourceOptions {
+  signal?: AbortSignal;
+  /**
+   * Decides from an inventory summary alone whether the session's published
+   * copy is current. A session it accepts is retained rather than read.
+   */
+  retain?: (summary: SessionSummary) => boolean;
 }
 
 export interface PreparedSessionChunk {
@@ -39,7 +54,7 @@ const MAX_SESSION_SUMMARIES = 100_000;
 
 export async function collectSource(
   driver: AgentDriver,
-  signal?: AbortSignal,
+  { signal, retain }: CollectSourceOptions = {},
 ): Promise<CollectedSource> {
   signal?.throwIfAborted();
   const summaries = [];
@@ -72,7 +87,12 @@ export async function collectSource(
   }
 
   const sessions: NativeSessionSnapshot[] = [];
+  const retained: SessionSummary[] = [];
   for (const summary of summaries) {
+    if (retain?.(summary)) {
+      retained.push(summary);
+      continue;
+    }
     try {
       signal?.throwIfAborted();
       const snapshot = await driver.readSession(summary.nativeSessionId);
@@ -96,6 +116,7 @@ export async function collectSource(
   return {
     source: driver.source,
     sessions,
+    retained,
     errors,
     complete: enumerationComplete && errors.length === 0 &&
       sessions.every((session) => session.complete),
