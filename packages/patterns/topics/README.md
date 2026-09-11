@@ -65,6 +65,27 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   current authored-content verb writes structured attribution; the public result
   and mutation contracts contain no mutable "current author" state or
   display-name mirrors.
+- **Topic state upgrades run in order.** Running a Topic runs an upgrade lift,
+  even without a consumer reading its result. The input `topicStateVersion`
+  defaults to zero; pending steps run in order, and each records its new version
+  after its writes in the same transaction. Every durable mutation uses the same
+  upgrade function before writing. Both board creation paths stamp the current
+  version. A stored future or invalid version makes the lift inert and durable
+  mutations reject; session editor controls remain available.
+- **The first upgrade preserves legacy attribution.** It fills missing
+  structured names from `createdByName` and comment `authorName`, retaining
+  nonblank structured names, kinds, avatars, legacy fields, and comment
+  identity. Names without a known kind receive `kind: "legacy"`. Blank strings
+  and the trimmed placeholder `"someone"` supply no attribution. Legacy inputs
+  stay `unknown`; explicit reader schemas materialize strings and keep other
+  values opaque and unchanged. Every source and destination is read through
+  handles before the first write, so an unresolved linked comment or name leaves
+  this step pending. Once complete, later legacy writes are outside this pass.
+
+  [State upgrade design](state-upgrades.md) describes the sequence, mutation
+  boundary, schema bindings, tests, and rollback limits. Legacy writers must be
+  retired before rollout. Source rollback preserves stored data; only code that
+  implements the version guard can refuse writes to a newer state version.
 - **The board names its members, and every reader reaches a name the same way.**
   `addTopic` allocates the next name in the same transaction as the append, so
   no reader observes a topic without its name and two concurrent creates
