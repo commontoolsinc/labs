@@ -20,11 +20,18 @@ import {
 
 /**
  * No-op (empty implementation) of `ValueVisitor`: Every method is implemented
- * and just returns `undefined`. This is meant to be a reasonable base class for
- * more useful visitors, not to be particularly useful by itself.
+ * and just returns `undefined`, except for `isDomainExtra()` which returns
+ * `false` (the safe choice which also aligns with the default binding for
+ * `DomainExtra`). This is meant to be a reasonable base implementation for more
+ * useful visitors, not to be particularly useful by itself.
  */
-export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
+export class NopValueVisitor<DomainExtra = never, ResultType = FabricValue>
   extends BaseValueVisitor<DomainExtra, ResultType> {
+  /** @inheritDoc */
+  isDomainExtra(_value: DomainFor<DomainExtra>): _value is DomainExtra {
+    return false;
+  }
+
   /** @inheritDoc */
   visitCycle(
     _value: DomainFor<DomainExtra>,
