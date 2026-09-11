@@ -395,7 +395,9 @@ describe("schema-doc-writer", () => {
       new Promise(() => {}),
       { speculative: true },
     );
-    expect(writerStorage.isSchemaDocPersisted(space, rootHash)).toBe(false);
+    expect(writerStorage.isContentAddressedDocPersisted(space, rootHash)).toBe(
+      false,
+    );
 
     const tx = writer.edit();
     tx.writeValueOrThrow(
@@ -468,7 +470,9 @@ describe("schema-doc-writer", () => {
       new Promise(() => {}),
       { speculative: true },
     );
-    expect(writerStorage.isSchemaDocPersisted(space, rootHash)).toBe(false);
+    expect(writerStorage.isContentAddressedDocPersisted(space, rootHash)).toBe(
+      false,
+    );
 
     const tx = writer.edit();
     tx.writeValueOrThrow(

@@ -5,6 +5,7 @@ import {
   type FabricValue,
   type MutableFabricPlainObjectLayer,
   shallowMutableClone,
+  taggedHashStringOf,
 } from "@commonfabric/data-model";
 import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
@@ -2215,6 +2216,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #ensuredSchemaDocs = new Set<string>();
 
   /**
+   * `"<space>|<hash>"` pairs of content-addressed documents this
+   * transaction has already staged by value, kept apart from the
+   * schema-document set because the two never share a hash but do share
+   * the reason for the dedupe: a repeat write would invalidate a prepared
+   * CFC digest.
+   */
+  #stagedContentAddressedDocs = new Set<string>();
+
+  /**
    * The write-side delivery guarantee of content-addressed schemas
    * (`docs/specs/content-addressed-schemas.md`): every schema document a
    * written link references travels in the same transaction, into the same
@@ -2312,7 +2322,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       const key = `${space}|${hash}`;
       if (this.#ensuredSchemaDocs.has(key)) continue;
       this.#ensuredSchemaDocs.add(key);
-      if (this.tx.isSchemaDocPersisted?.(space, hash) === true) continue;
+      if (this.tx.isContentAddressedDocPersisted?.(space, hash) === true) {
+        continue;
+      }
       const document = lookupSchemaDocument(hash);
       if (document === undefined) {
         logger.warn(
@@ -2335,6 +2347,31 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       });
       pending.push(...collectExternalSchemaRefHashes(document));
     }
+  }
+
+  /**
+   * Like {@link stageSchemaDocClosure}, except the document is the value
+   * itself with no closure behind it and the caller supplies the content
+   * rather than a hash: the id is derived here, so a document can never
+   * be installed under a hash its content does not produce. Elision is
+   * server-confirmed only, for the reason the schema staging gives.
+   */
+  stageContentAddressedDocument(space: MemorySpace, value: FabricValue): URI {
+    const hash = taggedHashStringOf(value);
+    const id = `cid:${hash}` as URI;
+    const key = `${space}|${hash}`;
+    if (this.#stagedContentAddressedDocs.has(key)) return id;
+    this.#stagedContentAddressedDocs.add(key);
+    if (this.tx.isContentAddressedDocPersisted?.(space, hash) === true) {
+      return id;
+    }
+    this.#runPrivilegedSystemWrite(() => {
+      this.writeOrThrow(
+        { space, id, type: "application/json", path: [] },
+        { value },
+      );
+    });
+    return id;
   }
 
   /**
@@ -3522,6 +3559,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   stageSchemaDocClosure(space: MemorySpace, rootHash: string): void {
     this.#wrapped.stageSchemaDocClosure(space, rootHash);
+  }
+
+  stageContentAddressedDocument(space: MemorySpace, value: FabricValue): URI {
+    return this.#wrapped.stageContentAddressedDocument(space, value);
   }
 
   setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {
