@@ -8,8 +8,10 @@ antagonistic reviews. A4's browser benchmark shipped in #7261; count limits
 landed in #7282. C1's remote-row reproductions and C3's inline-element dependency
 repair landed in #7265; removal/restoration acceptance landed in #7285 and
 first-browser-materialization acceptance landed in #7302. Reconnect repair
-landed in #7308; rendered acceptance is validated in #7312, pending merge gates.
-Remaining row-invalidation acceptance stays open. B1/B2's contract landed in
+landed in #7308 and rendered reconnect acceptance in #7312. C4's repository-only
+reactive row migration is implemented and validated on the scoped-child and
+bounded-render repairs in #7313 and #7315. Remaining row-invalidation acceptance
+stays open. B1/B2's contract landed in
 #7294 and its typed lookup foundation landed in #7304. Producer lowering,
 bucket maintenance, and joins remain pending.
 
@@ -265,9 +267,13 @@ passed before merge, with clean Cubic and antagonistic reviews.
       reads, remote inserts/removals, and reconnect where relevant.
 - [ ] **C3 — Repair remote row invalidation.** Verify affected rows update,
       stable element identities survive, and untouched rows do not rerun.
-- [ ] **C4 — Restore reactive lunch-poll rows.** Remove the workaround and its
-      explanatory comment only after both regressions pass. Re-run A4 and
-      coordinate with B5 to keep one coherent pattern migration.
+- [x] **C4 — Restore reactive lunch-poll rows.** Direct reactive option and
+      voter maps use the scoped callback-child repair. Repository acceptance
+      includes 93 assertions, unchanged A4 budgets at all three sizes, and
+      concurrent two-browser voting. The
+      [acceptance record](../history/development/performance/2026-09-11-reactive-lunch-rows.md)
+      states measurement limits. B5's operator migration remains separate;
+      deployed poll updates require coordination with Mike.
 
 ## 6–9. Complete the collection algebra: B1–B4
 
@@ -386,9 +392,9 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Complete merge review for C1's rendered reconnect acceptance in #7312. Complete
-C3's remaining acceptance checks while retaining the
-production workaround. The first-materialization cases in
+Complete C3's remaining acceptance checks. C4's repository migration is
+implemented and validated; updating any deployed poll requires coordination
+with Mike. The first-materialization cases in
 [PR #7302](https://github.com/commontoolsinc/labs/pull/7302) pass all four
 nested/mapped and same/cross-space browser combinations.
 A4's browser benchmark and count limits are available. A5 still
