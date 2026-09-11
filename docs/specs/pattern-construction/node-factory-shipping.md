@@ -934,6 +934,11 @@ When a stored link carries a factory contract by content-addressed schema ref,
 link resolution registers that schema closure from the referring document
 before carrying the contract across the hop, even when the factory occupies the
 exact requested path.
+In the legacy decomposed-link representation, finding a `link@1` payload below
+a location is only a probe result. The complete value at that location must
+still satisfy canonical link admission before the resolver follows a hop. An
+aggregate that contains the link envelope alongside data fields remains an
+aggregate.
 
 Every canonical by-value write route uses this traversal, including direct Cell
 and stream writes, normal result/output binding, query-result-derived Cell
@@ -1953,7 +1958,10 @@ materialization disabled. The mounted JSON and callable-file views need only the
 inert `Factory@1` state; they must not load code merely to observe an input,
 result, or name change. Invocation through a mounted callable remains a separate
 runner-owned boundary that materializes the then-current factory with the stable
-call-site identity. Before generic tree traversal, a non-callable
+call-site identity. A directly branded factory shell is a JavaScript function;
+callable discovery suppresses that raw value from generic tree traversal while
+publishing its `.tool` file and JSON tool sigil. Before generic tree traversal,
+a non-callable
 schema-declared Cell field is dereferenced to its current public value; the
 projection must never walk a Cell handle or its runner internals as authored
 data. Consequently a cold factory cannot block unrelated sibling fields from

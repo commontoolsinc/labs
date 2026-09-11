@@ -51,6 +51,12 @@ export const PATTERN_BASELINE_RETIREMENTS: readonly BaselineRetirement[] = [
       "Pre-launch Factory@1 handler migration; owner-approved data wipe is recorded in the factory shipping spec.",
   },
   {
+    pattern: "google/core/experimental/gmail-agentic-search.tsx",
+    baseline: "20260910T175045Z-4ml1tI-8odPZPdmN",
+    reason:
+      "Pre-launch Factory@1 handler contract correction; owner-approved data wipe is recorded in the factory shipping spec.",
+  },
+  {
     pattern: "lobby/main.tsx",
     baseline: "20260729T022742Z-GhLFnf8OCmke_Jje",
     reason:

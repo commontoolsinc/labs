@@ -590,12 +590,14 @@ export function resolveLinkTracingDereferences(
       // (we need to be reactive to siblings that could invalidate the link)
       const whole = tx.readValueOrThrow({ ...link, path: link.path });
       const nextLink = parseLink(whole as CellLink, link);
-      nextHop = {
-        link: nextLink,
-        source: { ...link, path: [...link.path] },
-        kind: hopKindForLink(nextLink),
-        depth: link.path.length,
-      };
+      if (nextLink !== undefined) {
+        nextHop = {
+          link: nextLink,
+          source: { ...link, path: [...link.path] },
+          kind: hopKindForLink(nextLink),
+          depth: link.path.length,
+        };
+      }
     } else if (sigilProbe.error?.name === "NotFoundError") {
       const lastValid = (sigilProbe.error as INotFoundError).path.slice(); // [] => doc missing
       if (lastValid.length === 0) deadEndDocMissing = true;
@@ -630,12 +632,14 @@ export function resolveLinkTracingDereferences(
               ...link,
               path: lastValid,
             });
-            nextHop = {
-              link: nextLink,
-              source: { ...link, path: [...lastValid] },
-              kind: hopKindForLink(nextLink),
-              depth: lastValid.length,
-            };
+            if (nextLink !== undefined) {
+              nextHop = {
+                link: nextLink,
+                source: { ...link, path: [...lastValid] },
+                kind: hopKindForLink(nextLink),
+                depth: lastValid.length,
+              };
+            }
           }
         }
 

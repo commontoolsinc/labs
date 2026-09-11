@@ -1383,6 +1383,7 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
     true,
   );
   assertEquals(tree.lookup(resultIno!, "search.tool") !== undefined, true);
+  assertEquals(tree.lookup(resultIno!, "search"), undefined);
 
   const resultJson = JSON.parse(getFileContent(tree, pieceIno, "result.json"));
   assertEquals(resultJson.recordMessage, { "/handler": "recordMessage" });
@@ -1492,6 +1493,7 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     true,
   );
   assertEquals(tree.lookup(resultIno!, "search.tool") !== undefined, true);
+  assertEquals(tree.lookup(resultIno!, "search"), undefined);
 
   const resultJson = JSON.parse(getFileContent(tree, pieceIno, "result.json"));
   assertEquals(resultJson.title, "hello");

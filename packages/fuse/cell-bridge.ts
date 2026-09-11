@@ -3880,7 +3880,10 @@ export class CellBridge {
         schema: getInputSchema(childSchema),
       });
       callableKinds.set(key, callableKind);
-      if (typeof candidate === "object" && candidate !== null) {
+      if (
+        (typeof candidate === "object" && candidate !== null) ||
+        typeof candidate === "function"
+      ) {
         callableValues.add(candidate);
       }
     }
@@ -3888,7 +3891,8 @@ export class CellBridge {
     return {
       callables,
       skipEntry: (candidate: unknown) =>
-        (typeof candidate === "object" && candidate !== null &&
+        (((typeof candidate === "object" && candidate !== null) ||
+          typeof candidate === "function") &&
           callableValues.has(candidate)) ||
         isVNode(candidate),
       classifyEntry: (key: string) => callableKinds.get(key) ?? null,
