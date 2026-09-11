@@ -20,6 +20,7 @@ import {
   type HarnessPromptSlotBindingSource,
 } from "./contracts/cfc-policy-snapshot.ts";
 import {
+  ADDRESS_HANDLE_TOKEN_PREFIX,
   HANDLE_TOKEN_PATTERN,
   type HarnessHandleEntry,
   type HarnessHandleTable,
@@ -124,7 +125,6 @@ import {
   type CreateHarnessEngineOptions,
 } from "./engine.ts";
 import { OpenAICompatibleGatewayClient } from "./gateway/openai-client.ts";
-import { ADDRESS_HANDLE_TOKEN_PREFIX } from "./contracts/handle-table.ts";
 import {
   createHarnessHandleTable,
   defineOwnEntry,

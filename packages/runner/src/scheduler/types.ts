@@ -6,8 +6,8 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   MediaType,
+  ReplicaLoadFailure,
 } from "../storage/interface.ts";
-import type { ReplicaLoadFailure } from "../storage/interface.ts";
 import type {
   SchedulerEventPreflightActionSummary,
   SchedulerEventPreflightStats,

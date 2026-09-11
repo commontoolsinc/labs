@@ -41,7 +41,6 @@ import {
 import {
   Cell,
   type ConsoleHandler,
-  decodeJsonPointer,
   decomposeSchema,
   deepEqual,
   encodeJsonPointer,
@@ -78,6 +77,7 @@ import {
   getCarriedCfcLabelView,
   type IFCLabel,
   mergeCfcLabelViews,
+  pruneCfcSchemaDefinitions,
   redactCaveatSourcesForDisplay,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
@@ -2429,76 +2429,16 @@ const VERB_PROPERTY_KEYS: readonly string[] = [
 ];
 
 /**
- * The `$defs` key a reference into the document's own definitions names, or
- * `undefined` for anything else — a reference elsewhere, or deeper than one
- * definition. A reference is a JSON Pointer, so the key is its second
- * segment decoded: `Topic~1Author` names the definition `Topic/Author`.
- */
-function localDefinitionName(ref: unknown): string | undefined {
-  if (typeof ref !== "string" || !ref.startsWith("#/")) return undefined;
-  const [, root, name, ...rest] = decodeJsonPointer(ref.slice(1));
-  return root === "$defs" && name !== undefined && rest.length === 0
-    ? name
-    : undefined;
-}
-
-/**
- * The names of the local definitions `schema` references at any depth,
- * `$defs` bodies excepted: what a document's own `$defs` must carry for the
- * document to stand alone.
- */
-function localDefinitionRefs(
-  schema: JSONSchema,
-  into: Set<string> = new Set(),
-): Set<string> {
-  if (!isObjectOrArray(schema)) return into;
-  const name = localDefinitionName(schema.$ref);
-  if (name !== undefined) into.add(name);
-  mapSubschemas(
-    schema as Parameters<typeof mapSubschemas>[0],
-    (child) => {
-      localDefinitionRefs(child, into);
-      return child;
-    },
-    { includeUnused: true },
-  );
-  return into;
-}
-
-/**
- * `schema` carrying only the `$defs` entries its body reaches, transitively,
- * and no `$defs` key at all when it reaches none. A resolved reference
- * arrives with its whole document's definitions attached, most of which
- * describe other positions; a served schema carries what makes it stand
- * alone and nothing more.
- */
-function withReachableDefinitions(schema: JSONSchema & object): JSONSchema {
-  const { $defs, ...body } = schema as Record<string, unknown>;
-  if (!isObjectOrArray($defs)) return body as JSONSchema;
-  const kept: Record<string, unknown> = {};
-  const pending = [...localDefinitionRefs(body as JSONSchema)];
-  while (pending.length > 0) {
-    const name = pending.pop()!;
-    if (Object.hasOwn(kept, name) || !Object.hasOwn($defs, name)) continue;
-    const definition = ($defs as Record<string, unknown>)[name];
-    kept[name] = definition;
-    pending.push(...localDefinitionRefs(definition as JSONSchema));
-  }
-  return Object.keys(kept).length > 0
-    ? { ...body, $defs: kept } as JSONSchema
-    : body as JSONSchema;
-}
-
-/**
  * The input schema a declared verb serves: the property's event type, made
  * self-contained. A property written as a reference resolves to its
  * definition, with the property's own keys merged over it; the keys that
- * describe the verb rather than its event are then dropped, and the
- * definitions carried along are cut to the ones the event reaches. So a
- * `Stream<void>` verb serves an empty object schema rather than a stream
- * marker with the verb's prose hung on it, and a referenced event serves its
- * definition alone. A reference that does not resolve serves `true`: the
- * surface cannot invent structure.
+ * describe the verb rather than its event are then dropped. The event's active
+ * definition scope is attached and cut to the definitions the event reaches
+ * within it. Nested scopes retain `$defs: {}` when pruning removes all their
+ * definitions, preserving the scope boundary. A `Stream<void>` verb serves an
+ * empty object schema rather than a stream marker with the verb's prose hung
+ * on it, and a referenced event serves its definition alone. A reference that
+ * does not resolve serves `true`: the surface cannot invent structure.
  */
 function declaredVerbInput(
   property: Record<string, unknown>,
@@ -2513,7 +2453,18 @@ function declaredVerbInput(
       !VERB_PROPERTY_KEYS.includes(key)
     ),
   ) as JSONSchema & object;
-  return withReachableDefinitions(event);
+  // A referenced event serves the definitions of the document its reference
+  // chain ends in, which `resolveCfcSchemaRefs` carries on the resolved view;
+  // an inline event serves the root's.
+  const eventRoot = resolved !== property
+    ? cfcSchemaResolvedRoot(resolved as JSONSchema, root)
+    : root;
+  return pruneCfcSchemaDefinitions({
+    ...event,
+    ...(isObjectOrArray(eventRoot) && isObjectOrArray(eventRoot.$defs)
+      ? { $defs: eventRoot.$defs }
+      : {}),
+  });
 }
 
 /** The listing marks and prose a declared property carries. */

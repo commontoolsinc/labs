@@ -7,9 +7,9 @@ import { property, query, state } from "lit/decorators.js";
 
 import type { DebuggerController } from "../lib/debugger-controller.ts";
 
-import "./SchedulerSourceView.ts";
-
 import { entityUriFromActionId } from "../lib/scheduler-graph-identity.ts";
+// Loading this module defines the `x-scheduler-source` element that this
+// view renders.
 import {
   parseActionLocation,
   type SourceViewNode,

@@ -83,4 +83,47 @@ describe("selector-tracker-schema-docs", () => {
     registerAll(decomposed);
     expect(SelectorTracker.checkAnyOf(parent, warmHash)).toBe(true);
   });
+  it("does not resolve a union branch against its own `$defs` when the union declares none", () => {
+    const definitions = { Entry: { type: "string" } } as const;
+    const parent = internSchema({
+      anyOf: [{ $ref: "#/$defs/Entry", $defs: definitions }],
+    }) as JSONSchemaObj;
+    const resolvedHash = hashSchema(SelectorTracker.getStandardSchema({
+      type: "string",
+      $defs: definitions,
+    }));
+    expect(SelectorTracker.checkAnyOf(parent, resolvedHash)).toBe(false);
+  });
+
+  it("resolves a union branch against the union's definitions, not the branch's own", () => {
+    const childDefinitions = { Entry: { type: "string" } } as const;
+    const parentDefinitions = { Entry: { type: "integer" } } as const;
+    const parent = internSchema({
+      anyOf: [{ $ref: "#/$defs/Entry", $defs: childDefinitions }],
+      $defs: parentDefinitions,
+    }) as JSONSchemaObj;
+    const childHash = hashSchema(SelectorTracker.getStandardSchema({
+      type: "string",
+      $defs: childDefinitions,
+    }));
+    const parentHash = hashSchema(SelectorTracker.getStandardSchema({
+      type: "integer",
+      $defs: parentDefinitions,
+    }));
+    expect(SelectorTracker.checkAnyOf(parent, parentHash)).toBe(true);
+    expect(SelectorTracker.checkAnyOf(parent, childHash)).toBe(false);
+  });
+
+  it("inherits parent definitions when a union branch has no local scope", () => {
+    const definitions = { Entry: { type: "string" } } as const;
+    const parent = internSchema({
+      anyOf: [{ $ref: "#/$defs/Entry" }],
+      $defs: definitions,
+    }) as JSONSchemaObj;
+    const expected = hashSchema(SelectorTracker.getStandardSchema({
+      type: "string",
+      $defs: definitions,
+    }));
+    expect(SelectorTracker.checkAnyOf(parent, expected)).toBe(true);
+  });
 });

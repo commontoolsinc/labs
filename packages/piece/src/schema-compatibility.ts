@@ -23,7 +23,10 @@ import {
   UNUSED_SINGLE_SUBSCHEMA_KEYS,
 } from "@commonfabric/runner/schema-walk";
 import { internSchema } from "@commonfabric/data-model-schema";
-import { fabricAwareEqual } from "@commonfabric/data-model";
+import {
+  fabricAwareEqual,
+  isKeyableObjectOrArray,
+} from "@commonfabric/data-model";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
 type SchemaRole = "argument" | "result";
@@ -214,6 +217,39 @@ const SUBSCHEMA_MAP_KEYS: ReadonlySet<string> = new Set<string>([
 const holdsSubschemas = (key: string): boolean =>
   SUBSCHEMA_KEYS.has(key) || SUBSCHEMA_LIST_KEYS.has(key) ||
   SUBSCHEMA_MAP_KEYS.has(key);
+
+/**
+ * Every schema written directly inside `value`, reached by following each
+ * keyword of the vocabulary above that `skip` does not name.
+ *
+ * A keyword can hold something other than the array or the record its shape
+ * calls for. Such a value describes no nested schema, and nothing is returned
+ * for it. Otherwise the keyword's contents come back as they were written. A
+ * schema that arrived from a space can carry anything in a subschema position,
+ * so a caller that needs schemas narrows each child itself.
+ */
+function subschemaChildren(
+  value: object,
+  skip?: ReadonlySet<string>,
+): unknown[] {
+  const record = value as Record<string, unknown>;
+  const children: unknown[] = [];
+  for (const key of SUBSCHEMA_KEYS) {
+    const nested = record[key];
+    if (!skip?.has(key) && nested !== undefined) children.push(nested);
+  }
+  for (const key of SUBSCHEMA_LIST_KEYS) {
+    const nested = record[key];
+    if (!skip?.has(key) && Array.isArray(nested)) children.push(...nested);
+  }
+  for (const key of SUBSCHEMA_MAP_KEYS) {
+    const nested = record[key];
+    if (!skip?.has(key) && isKeyableObjectOrArray(nested)) {
+      children.push(...Object.values(nested));
+    }
+  }
+  return children;
+}
 
 /**
  * The keys inside a `writeAuthorizedBy` writer claim's `__ctWriterIdentityOf`
@@ -784,6 +820,25 @@ function schemaSubsetIssue(
   if (pairIsActive(source, target, context)) return undefined;
   markPairActive(source, target, context);
   try {
+    // Semantic extensions describe the whole node and are compared here
+    // before its alternatives expand. `schemaAlternatives` omits the parent
+    // node's extensions from the fragments so a branch carrying only a type
+    // is not mistaken for a node that removed an extension. Extensions
+    // declared on branch and descendant nodes remain part of their proofs.
+    //
+    // The `ifc` extension is compared for exact equality except for a
+    // `writeAuthorizedBy` writer claim's volatile identity — its content hash
+    // and its resolver-dependent file spelling, which the runtime does not
+    // hold fixed either — and the derived per-value label annotations, which
+    // describe the label a write produces rather than the policy the store
+    // declares. `keywordValuesEqual` applies that reduction, the same one it
+    // applies to an `ifc` nested below a composite keyword.
+    for (const key of SEMANTIC_EXTENSION_KEYS) {
+      if (!keywordValuesEqual(key, source[key], target[key])) {
+        return `${path}: ${key} changed`;
+      }
+    }
+
     if (
       source.anyOf || target.anyOf ||
       Array.isArray(source.type) || Array.isArray(target.type)
@@ -830,19 +885,6 @@ function schemaSubsetIssue(
 
     const constraintIssue = scalarConstraintSubsetIssue(source, target, path);
     if (constraintIssue) return constraintIssue;
-
-    for (const key of SEMANTIC_EXTENSION_KEYS) {
-      // The `ifc` extension is compared for exact equality except for a
-      // `writeAuthorizedBy` writer claim's volatile identity — its content hash
-      // and its resolver-dependent file spelling, which the runtime does not
-      // hold fixed either — and the derived per-value label annotations, which
-      // describe the label a write produces rather than the policy the store
-      // declares. `keywordValuesEqual` applies that reduction, the same one it
-      // applies to an `ifc` nested below a composite keyword.
-      if (!keywordValuesEqual(key, source[key], target[key])) {
-        return `${path}: ${key} changed`;
-      }
-    }
 
     for (const key of COMPLEX_CONSTRAINT_KEYS) {
       const applicableTypes = COMPLEX_CONSTRAINT_TYPES[key];
@@ -900,7 +942,7 @@ const DEFAULT_STABLE_SCHEMA_KEYS = new Set([
   // Four of the five `SEMANTIC_EXTENSION_KEYS` say how a value is delivered,
   // stored, or written, not what shape it has, so a default inserted beneath
   // one cannot falsify it. A change to the marker itself is still refused by
-  // the exact comparison in `objectSubsetIssue`. `ifc` is left out on
+  // the exact comparison in `schemaSubsetIssue`. `ifc` is left out on
   // purpose: a label is policy the write-authority comparison reasons about
   // (`comparableIfc`), and whether a materialized default satisfies a
   // labeled node's floor is that comparison's question, not this one's, so
@@ -1497,21 +1539,50 @@ function schemaMayProduceType(
 }
 
 /**
- * Conjunctions for each alternative after the caller checks whole-schema
- * defaults. The root default is omitted from both sides, including a schema
- * with a single type, so branch comparisons concern their value constraints.
- * Descendant schemas and their defaults remain intact.
+ * Returns a conjunction of fragments for each alternative after the caller
+ * checks the node's own keywords ({@link NODE_LEVEL_KEYWORDS}). Fragments omit
+ * the parent node's default and extensions, including for a single-type node.
+ * Branch and descendant schemas retain their own defaults and extensions.
  */
 function schemaAlternatives(schema: SchemaObject): JSONSchema[][] {
-  const { default: _default, ...withoutDefault } = schema;
-  if (withoutDefault.anyOf) {
-    const { anyOf, ...base } = withoutDefault;
+  const fragment = withoutNodeLevelKeywords(schema);
+  if (fragment.anyOf) {
+    const { anyOf, ...base } = fragment;
     return anyOf.map((alternative) => [base, alternative]);
   }
-  if (Array.isArray(withoutDefault.type)) {
-    return withoutDefault.type.map((type) => [{ ...withoutDefault, type }]);
+  if (Array.isArray(fragment.type)) {
+    return fragment.type.map((type) => [{ ...fragment, type }]);
   }
-  return [[withoutDefault]];
+  return [[fragment]];
+}
+
+/**
+ * The keywords a node states about itself as a whole, which
+ * {@link schemaSubsetIssue} judges once at the node before it expands the
+ * node's alternatives: the `default`, checked for validity or for change
+ * there, and the semantic extensions, compared for exact equality there. A
+ * fragment entering a branch proof omits the parent node's occurrences.
+ */
+const NODE_LEVEL_KEYWORDS: ReadonlySet<string> = new Set([
+  "default",
+  ...SEMANTIC_EXTENSION_KEYS,
+]);
+
+/**
+ * Returns the schema without its node-level keywords, or the same object when
+ * it has none. Copies with {@link keep}, so a `__proto__` key read off the wire
+ * remains an own property.
+ */
+function withoutNodeLevelKeywords(schema: SchemaObject): SchemaObject {
+  const keys = Object.keys(schema);
+  if (!keys.some((key) => NODE_LEVEL_KEYWORDS.has(key))) return schema;
+  const fragment: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (!NODE_LEVEL_KEYWORDS.has(key)) {
+      keep(fragment, key, (schema as Record<string, unknown>)[key]);
+    }
+  }
+  return fragment as SchemaObject;
 }
 
 /**
@@ -1687,6 +1758,64 @@ type ActiveSchemasByStability = WeakMap<
   { stable: WeakSet<object>; unstable: WeakSet<object> }
 >;
 
+/**
+ * The keywords {@link schemaHasUnsafeMaterializedDefault} does not follow. A
+ * `default` written under one of these is never merged into a value, so no
+ * constraint written above it can be broken by merging it.
+ *
+ * Every other keyword of the vocabulary above is followed. `allOf` is one of
+ * those. Reading a value through a schema that has an `allOf` reads it through
+ * each branch merged with the rest of the schema, so a `default` inside a
+ * branch is merged into the value the read returns.
+ *
+ * Five of the keywords below are left out because of what the keyword means,
+ * and the comment on each says which. The other seven do describe the value or
+ * part of it. They are left out for a narrower reason: no code that fills a
+ * value from a schema descends them. That is a fact about
+ * `SchemaObjectTraverser` (`packages/runner/src/traverse.ts`),
+ * `extractDefaultValues` (`packages/runner/src/runner-utils.ts`) and
+ * `processDefaultValue` (`packages/runner/src/schema.ts`) rather than about the
+ * keywords. Nothing here would fail if one of those changed, so a test carries
+ * the claim instead of this sentence.
+ * `schema-compatibility-default-reach.test.ts` reads a value through a schema
+ * carrying a default under each keyword named below, and fails naming the
+ * keyword if one of those defaults is merged in.
+ *
+ * A keyword this set does not name is followed whether or not a default under
+ * it can reach a value. `patternProperties` is such a keyword, and the same
+ * test measures it. Following a keyword a default cannot reach refuses an
+ * update that was safe. Stopping at a keyword a default can reach accepts one
+ * that was not. Refusing a safe update is the failure to prefer.
+ *
+ * @internal Exported for testing only.
+ */
+export const DEFAULT_INERT_SUBSCHEMA_KEYS: ReadonlySet<string> = new Set([
+  // Describes the values the schema rejects. A default written under it names
+  // a value the schema refuses, so nothing merges that value in.
+  "not",
+  // Constrains the names of an object's members. A default supplies a value,
+  // and a name is not a value.
+  "propertyNames",
+  // Describes what the string decodes to. That is not part of the value tree,
+  // so there is nowhere under it for a default to be merged.
+  "contentSchema",
+  // Hold definitions nothing reads directly. A definition a value takes is
+  // reached through the `$ref` that names it, and `resolveSchema` follows every
+  // `$ref` this walk passes.
+  ...DEFS_KEYS,
+  "definitions",
+  // Apply to the value once their condition holds.
+  "if",
+  "then",
+  "else",
+  "dependentSchemas",
+  // Applies to one element of an array, without saying which one.
+  "contains",
+  // Apply to the members and elements no other keyword accounted for.
+  "unevaluatedProperties",
+  "unevaluatedItems",
+]);
+
 /** Whether target default merging can violate an ancestor constraint. */
 function schemaHasUnsafeMaterializedDefault(
   input: JSONSchema,
@@ -1726,36 +1855,14 @@ function schemaHasUnsafeMaterializedDefault(
       return true;
     }
 
-    const children: JSONSchema[] = [];
-    for (
-      const collection of [
-        schema.properties,
-        schema.patternProperties,
-      ]
-    ) {
-      if (collection !== undefined) {
-        children.push(...Object.values(collection));
-      }
-    }
-    for (const child of [schema.additionalProperties, schema.items]) {
-      if (child !== undefined) children.push(child);
-    }
-    for (
-      const collection of [
-        schema.prefixItems,
-        schema.anyOf,
-        schema.oneOf,
-      ]
-    ) {
-      if (collection !== undefined) children.push(...collection);
-    }
-    return children.some((child) =>
-      schemaHasUnsafeMaterializedDefault(
-        child,
-        resolution.root,
-        unstable,
-        activeByRoot,
-      )
+    return subschemaChildren(schema, DEFAULT_INERT_SUBSCHEMA_KEYS).some(
+      (child) =>
+        schemaHasUnsafeMaterializedDefault(
+          child as JSONSchema,
+          resolution.root,
+          unstable,
+          activeByRoot,
+        ),
     );
   } finally {
     activeForPath.delete(schema);
@@ -1772,24 +1879,8 @@ function collectSchemaReferences(
   const record = value as Record<string, unknown>;
   if (typeof record.$ref === "string") refs.add(record.$ref);
 
-  for (const key of SUBSCHEMA_KEYS) {
-    collectSchemaReferences(record[key], refs, seen);
-  }
-  for (const key of SUBSCHEMA_LIST_KEYS) {
-    const children = record[key];
-    if (Array.isArray(children)) {
-      for (const child of children) {
-        collectSchemaReferences(child, refs, seen);
-      }
-    }
-  }
-  for (const key of SUBSCHEMA_MAP_KEYS) {
-    const children = record[key];
-    if (children !== null && typeof children === "object") {
-      for (const child of Object.values(children)) {
-        collectSchemaReferences(child, refs, seen);
-      }
-    }
+  for (const child of subschemaChildren(value)) {
+    collectSchemaReferences(child, refs, seen);
   }
 }
 

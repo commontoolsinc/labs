@@ -15,7 +15,7 @@ import {
   scopeOfScopeKey,
 } from "@commonfabric/memory/v2";
 import { LRUCache } from "@commonfabric/utils/cache";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -292,7 +292,8 @@ export class SelectorTracker<T = Result<Unit, Error>> {
 
   /**
    * The standardized hashes an anyOf item can match under: its plain form,
-   * its `$defs`-grafted form, and its `$ref`-resolved form. Computing these
+   * its inherited-`$defs` form, and its `$ref`-resolved form. Branch-local
+   * definitions keep their own scope. Computing these
    * builds fresh schema objects and re-hashes them, so cache the resulting
    * hash strings per (parent schema, item) identity when the parent is
    * deep-frozen (its items then are too).
@@ -328,7 +329,9 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     const missesBefore = externalResolutionMissCount();
     let current = SelectorTracker.getStandardSchema(item);
     hashes.push(hashSchema(current));
-    if (schema.$defs !== undefined) {
+    // An arm sits in the union's document, so it is also hashed carrying the
+    // union's `$defs`, in place of any the arm declares of its own.
+    if (isObjectNotArray(schema.$defs)) {
       current = SelectorTracker.getStandardSchema(
         schemaWithProperties(current, { $defs: schema.$defs }),
       );

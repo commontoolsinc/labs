@@ -3321,7 +3321,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         scope: "space",
         id: cell.getAsNormalizedFullLink().id,
         path: [],
-      }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
+      }) as { value?: unknown; cfc?: { labelMap?: { entries?: unknown[] } } };
+      // The stored value pins the document the label map is read from, so
+      // the empty map below is that document's own.
+      expect(stored.value).toEqual({ items: [] });
       expect(stored.cfc?.labelMap?.entries ?? []).not.toContainEqual({
         path: ["items", "*"],
         label: {},
