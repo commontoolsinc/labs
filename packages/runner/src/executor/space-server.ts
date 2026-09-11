@@ -42,11 +42,19 @@ import {
 } from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import {
+  type CellScope,
   type DeliveryAttention,
   type DeliveryDeferral,
   eventAttentionEntryKey,
   eventAttentionIndexKey,
+  identityOfScopeKey,
+  resolveScopeKey,
+  scopeKeyApplicableTo,
+  type ScopeKeyIdentity,
+  scopeOfScopeKey,
   SERVER_EXECUTION_ATTENTION_DOC_ID,
+  SERVER_EXECUTION_EFFECTS_DOC_ID,
+  SERVER_EXECUTION_WATERMARK_DOC_ID,
   type StreamEventEntry,
   type StreamEventsDocValue,
   toDirtyKey,
@@ -77,6 +85,7 @@ import {
   EXECUTION_LEASE_TTL_MS,
   ExecutionLeaseCycle,
   executionLeaseHolder,
+  liveExecutionLeaseHolder,
 } from "@commonfabric/memory/v2/execution-lease";
 import {
   selectForeignBasisRows,
@@ -85,6 +94,7 @@ import {
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Runtime, ServerRunInfo } from "../runtime.ts";
 import type {
+  CommitError,
   IExtendedStorageTransaction,
   IStorageTransaction,
   ITransactionSealSink,
@@ -93,10 +103,10 @@ import type {
   Result,
   SealedCommitVerdict,
   SealedNativeCommit,
+  StoreReadThrough,
   TransactionSealDestination,
   Unit,
 } from "../storage/interface.ts";
-import type { CommitError } from "../storage/interface.ts";
 import {
   ensurePieceRunningVerdict,
   type EnsurePieceVerdict,
@@ -109,6 +119,7 @@ import {
   waveRunContextOf,
   type WaveWriteAnnotation,
 } from "./wave.ts";
+import { engineReadThrough } from "./engine-read-through.ts";
 import { EngineWaveCommitSink } from "./engine-wave-sink.ts";
 import { readWatermarkSeq, watermarkDocLink } from "./watermark.ts";
 import {
@@ -122,15 +133,6 @@ import { effectCompletionKeyOf } from "./effect-completion.ts";
 import { markRendererTrustedEvent } from "../cfc/ui-contract.ts";
 import { EVENT_DEFERRAL_DROP_THRESHOLD } from "../scheduler/constants.ts";
 import { LT1_LATE_SEAL_REFUSED } from "../scheduler/types.ts";
-import {
-  type CellScope,
-  identityOfScopeKey,
-  resolveScopeKey,
-  type ScopeKeyIdentity,
-  scopeOfScopeKey,
-  SERVER_EXECUTION_EFFECTS_DOC_ID,
-  SERVER_EXECUTION_WATERMARK_DOC_ID,
-} from "@commonfabric/memory/v2";
 import type { PostCommitSideEffect } from "../cfc/types.ts";
 import {
   attentionForExpiredDeliveryFailure,
@@ -164,6 +166,13 @@ const timing = getLogger("executor", { enabled: false });
  * retry arm forever, invisible in the aggregate `structureLoadDeferred`
  * and logged only at debug level). */
 export const STRUCTURE_LOAD_STUCK_AFTER = 8;
+
+/** Consecutive cycles a feed record's store refresh may fail before the
+ * loop gives the space up to a `loop-failed` park (see
+ * `SpaceServer.#refreshHeldDocuments`). Bounded so a permanently failing
+ * engine read parks rather than spins, and above one so a single failed
+ * read costs a retry rather than a tenure. */
+export const STORE_REFRESH_ATTEMPTS = 3;
 
 /** Consecutive pre-queue drain deferrals (the arrival-order barrier's
  * view-lag, sidecar-sync-failure, and queue-time-throw arms) after
@@ -251,6 +260,28 @@ export type SpaceServerPolicy = {
   failureParkBackoffBaseMs?: number;
 
   failureParkBackoffMaxMs?: number;
+
+  /**
+   * Serve the serving runtime's HOME-space reads straight from the
+   * engine: a document the replica does not hold is read synchronously
+   * on first access, a `sync()` resolves from the engine without a
+   * session watch, and the feed's admitted commits refresh the
+   * documents the replica holds (`IStorageManager.installStoreReadThrough`
+   * and `integrateStoreWrites`). Off, every load rides the loopback
+   * session and the memory server's schema walk delivers the closure.
+   * Foreign-space reads stay on the session either way. The toolshed
+   * bootstrap reads SERVER_EXECUTION_STORE_READ_THROUGH.
+   */
+  storeReadThrough?: boolean;
+};
+
+/** What a SpaceServer hands its runtime factory (see
+ * SpaceServerOptions.createRuntime). */
+export type RuntimeFactoryContext = {
+  /** The tenure's store read-through, present under
+   * `SpaceServerPolicy.storeReadThrough`, for a factory to install on its
+   * storage manager before any home-space read it performs itself. */
+  storeReadThrough?: StoreReadThrough;
 };
 
 export type SpaceServerOptions = {
@@ -265,8 +296,11 @@ export type SpaceServerOptions = {
 
   /** Build the serving runtime over the LOOPBACK storage plane
    * (serving-loop.md §1 plane (a)). The factory owns auth and options;
-   * the SpaceServer asserts the posture (flag ON). */
-  createRuntime: () => Promise<{
+   * the SpaceServer asserts the posture (flag ON). A factory that reads
+   * the home space before returning installs `context.storeReadThrough`
+   * on its storage manager first, when the context carries one; the
+   * SpaceServer installs it on the returned runtime either way. */
+  createRuntime: (context: RuntimeFactoryContext) => Promise<{
     runtime: Runtime;
     dispose: () => Promise<void>;
   }>;
@@ -439,6 +473,11 @@ export class SpaceServer implements TransactionSealDestination {
   #sealChain: Promise<unknown> = Promise.resolve();
   #feed: AdmittedCommitNotice[] = [];
   #feedArrived: PromiseWithResolvers<void> | undefined;
+
+  /** The feed record whose store refresh is failing and how many cycles in
+   * a row it has: the drain holds that record and everything behind it for
+   * the next cycle, and gives up at `STORE_REFRESH_ATTEMPTS`. */
+  #storeRefreshFailure: { seq: number; attempts: number } | undefined;
 
   /**
    * Whether a shadow flip fired while no input waiter was installed; consumed
@@ -946,10 +985,27 @@ export class SpaceServer implements TransactionSealDestination {
     this.#lastRenewAt = Date.now();
     this.#options.stats.lease.held += 1;
 
+    // The tenure's store read-through, handed to the factory so a factory
+    // that reads the home space before returning installs it first, and
+    // installed again below for one that does not: the tenure's first
+    // read is a miss, and a miss served from the engine is the whole
+    // point.
+    const storeReadThrough = this.#options.policy?.storeReadThrough === true
+      ? this.#leaseHolderReadThrough(
+        engine,
+        engineReadThrough(engine, {
+          onRead: () => {
+            this.#options.stats.storeReads += 1;
+          },
+        }),
+      )
+      : undefined;
     let runtime: Runtime;
     let dispose: () => Promise<void>;
     try {
-      ({ runtime, dispose } = await this.#options.createRuntime());
+      ({ runtime, dispose } = await this.#options.createRuntime(
+        storeReadThrough === undefined ? {} : { storeReadThrough },
+      ));
     } catch (error) {
       // A failed activation must not strand the acquired lease row for
       // the TTL — a successor (or this host's retry) should be able to
@@ -981,6 +1037,9 @@ export class SpaceServer implements TransactionSealDestination {
     }
     this.#runtime = runtime;
     this.#disposeRuntime = dispose;
+    if (storeReadThrough !== undefined) {
+      runtime.storageManager.installStoreReadThrough?.(space, storeReadThrough);
+    }
     // MINOR-2: the fresh runtime's demand-root counters start at 0.
     this.#lastFoldedDemandEnters = 0;
     this.#lastFoldedDemandLeaves = 0;
@@ -2142,24 +2201,13 @@ export class SpaceServer implements TransactionSealDestination {
         const { promise, resolve } = Promise.withResolvers<
           SealedCommitVerdict
         >();
-        // Stage A (OW17): the completion's local pending layer lands on
-        // the CARRIAGE identity's instances — the same instances its
-        // engine rows are annotated with below — so the demanded run's
-        // instance sees the served result locally at verdict, not only
-        // through the wire. Residual, FLAGGED (not filled), now scoped
-        // to every non-sqlite effect kind — the fetch*/generate*
-        // families, llm, and llm-dialog (which additionally marks
-        // completions at 4 sites with bare `llmDialog:`-prefixed keys
-        // never widened by effectTargetKey, a separate pre-existing
-        // quirk): their writeback transactions
-        // are unstamped, so their hash-guard READS resolve against the
-        // service's instances and a per-instance node's effect
-        // completion is unpinned there. sqlite-query is CARVED OUT
-        // (OW53, 2026-08-22): its flush sets the requesting run's
-        // identity on every writeback transaction (the OW17 tx seam —
-        // sqlite-builtins.ts), so its guard reads and writes resolve
-        // the REQUESTING instance; pinned by the true-ON
-        // sqlite-read-clearance gate.
+        // The completion's local pending layer and engine rows use the same
+        // carriage identity. Guard reads happen before this seal, so a builtin
+        // must also attach its captured identity to the writeback transaction
+        // before reading. The shared fetch builtins and SQLite do that at their
+        // completion sites;
+        // verification-coverage.md OW28-instance-family records the remaining
+        // callers whose guard reads still use the serving identity.
         const sealed = replica.sealNative(
           native,
           source,
@@ -2302,6 +2350,39 @@ export class SpaceServer implements TransactionSealDestination {
       });
     }
     return { ok: {} };
+  }
+
+  /**
+   * Helper for `activate()`, which holds the tenure's store read-through
+   * to protocol.md §3's lease-holder delivery rule: another principal's
+   * instance is served only to the live holder of the space's lease. A
+   * read of one that finds the lease row lapsed runs the renew arm first
+   * — the lost-then-reacquire step the renew timer takes, taken at the
+   * moment the lapse is found — and is served under the reacquired
+   * tenure, or withheld when the lease is not regained, as the tenure
+   * parks. Space-scoped documents and the service's own instances are
+   * delivered to any session, so they are read without consulting the
+   * row. A closed engine answers nothing, as the read-through itself
+   * does: the row must not be queried through a finalized statement.
+   */
+  #leaseHolderReadThrough(
+    engine: Engine.Engine,
+    read: StoreReadThrough,
+  ): StoreReadThrough {
+    const own: ScopeKeyIdentity = {
+      principal: this.#options.serviceIdentity,
+    };
+    return (address) => {
+      if (!engine.database.open) return undefined;
+      if (
+        !scopeKeyApplicableTo(address.scopeKey, own) &&
+        liveExecutionLeaseHolder(engine, this.#options.space) !== this.#holder
+      ) {
+        this.#renew();
+        if (this.#lease?.held !== true) return undefined;
+      }
+      return read(address);
+    };
   }
 
   /** The mid-wave renew (stage C tuning T3): called from the serving
@@ -2821,9 +2902,25 @@ export class SpaceServer implements TransactionSealDestination {
    * (serving-loop.md §3). Authored records count toward §7's
    * authoredSeen. Dirtiness itself travels the scheduler's existing
    * path: the loopback session's subscriptions deliver the commits'
-   * doc changes, and storage notifications mark the graph dirty. */
-  #drainFeed(): { batchHead: number } {
-    for (const record of this.#feed) {
+   * doc changes, and storage notifications mark the graph dirty — or,
+   * under the store read-through posture, each record's writes are
+   * re-read into the replica here (`#refreshHeldDocuments()`) and the
+   * same notifications follow. */
+  #drainFeed(runtime: Runtime): { batchHead: number } {
+    for (let index = 0; index < this.#feed.length; index++) {
+      const record = this.#feed[index]!;
+      if (!this.#refreshHeldDocuments(record, runtime)) {
+        // The record's writes have not reached the replica: hold it and
+        // everything behind it for the next cycle, and stop the head this
+        // cycle covers short of it. Clamped against the record's own seq,
+        // not only the coverage head as it stands: a LATE record (below)
+        // follows records above it in the feed, and their coverage must
+        // not carry W over the one that failed.
+        this.#feed = this.#feed.slice(index);
+        return {
+          batchHead: Math.min(this.#coverageHead, record.seq - 1),
+        };
+      }
       // LATE records (stage P2-F, the sx2 unskip's flake diagnosis):
       // the feed has two in-process producers — the admission hook's
       // notify (async, after the transact's engine apply) and the
@@ -2951,6 +3048,54 @@ export class SpaceServer implements TransactionSealDestination {
     }
     this.#feed = [];
     return { batchHead: this.#coverageHead };
+  }
+
+  /**
+   * Helper for `#drainFeed()`, which under the store read-through
+   * posture re-reads the documents one admitted commit wrote, for those
+   * the serving replica holds, so its scheduler sees the change a session
+   * watch would otherwise have delivered. The loop's own derived commits
+   * are skipped: the replica confirmed those at its seal, and re-reading
+   * them would only cost the engine a read per written document. Returns
+   * whether the record's writes reached the replica. A read or
+   * integration that throws leaves the record to the next cycle, which
+   * retries it: the drain must not consume a record whose writes never
+   * reached the replica, since the watermark would then cover an input
+   * nothing derived over. After `STORE_REFRESH_ATTEMPTS` consecutive
+   * failures on one record the error propagates instead, the loop's own
+   * catch parks the space `loop-failed`, and the re-activation's fresh
+   * runtime reads the engine's head.
+   */
+  #refreshHeldDocuments(
+    record: AdmittedCommitNotice,
+    runtime: Runtime,
+  ): boolean {
+    if (this.#options.policy?.storeReadThrough !== true) return true;
+    if (record.class === "derived" && record.holder === this.#holder) {
+      return true;
+    }
+    try {
+      this.#options.stats.storeRefreshes +=
+        runtime.storageManager.integrateStoreWrites?.(
+          this.#options.space,
+          record.writes,
+        ) ?? 0;
+    } catch (error) {
+      const attempts = this.#storeRefreshFailure?.seq === record.seq
+        ? this.#storeRefreshFailure.attempts + 1
+        : 1;
+      this.#storeRefreshFailure = { seq: record.seq, attempts };
+      if (attempts >= STORE_REFRESH_ATTEMPTS) throw error;
+      logger.warn("store-refresh-failed", () => [
+        `space ${this.#options.space}: refreshing held documents for ` +
+        `commit ${record.seq} failed (attempt ${attempts} of ` +
+        `${STORE_REFRESH_ATTEMPTS}); the record waits for the next cycle`,
+        error,
+      ]);
+      return false;
+    }
+    this.#storeRefreshFailure = undefined;
+    return true;
   }
 
   /**
@@ -4543,7 +4688,7 @@ export class SpaceServer implements TransactionSealDestination {
       await this.#ensureSpaceRoot(runtime);
       timing.time(ensureStart, "executor", "wave", "root-ensure");
     }
-    const { batchHead } = this.#drainFeed();
+    const { batchHead } = this.#drainFeed(runtime);
     // The event drain stays a fully-awaited, single-flight step AHEAD
     // of the deadline race (Phase 3's shape): at most one drain runs
     // at a time, so a deadline-cut wave can never leave a detached

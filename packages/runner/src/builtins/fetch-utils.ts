@@ -1,5 +1,6 @@
 import { internSchema } from "@commonfabric/data-model-schema";
 import { hashStringOf } from "@commonfabric/data-model";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { stripUndefinedProps } from "@commonfabric/utils/strip-undefined-props";
 
 import type { Schema } from "../builder/types.ts";
@@ -137,6 +138,8 @@ export async function tryClaimMutex<T extends Record<string, any>>(
    * (server-execution v2 stage G, serving-loop.md §4); inert
    * everywhere else. */
   effectKey?: string,
+  /** Identity captured by the requesting served run. */
+  identity?: ScopeKeyIdentity,
 ): Promise<{
   claimed: boolean;
   inputs: T;
@@ -152,6 +155,7 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   await runtime.idle();
 
   await runtime.editWithRetry((tx) => {
+    if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
     const currentInternal = internal.withTx(tx).get();
     const isPending = pending.withTx(tx).get();
     const now = Date.now();
@@ -207,9 +211,12 @@ export async function tryClaimMutex<T extends Record<string, any>>(
       // markEffectCompletion contract.
       if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
       pending.withTx(tx).set(true);
+      // The served claim is authoritative. Its request hash must travel with
+      // the claim even when an optimistic derivation already shows that hash.
       internal.withTx(tx).update({
         requestId,
         lastActivity: now,
+        ...(identity !== undefined ? { inputHash } : {}),
       });
       claimed = true;
     } else {
@@ -242,9 +249,12 @@ export async function tryWriteResult<T extends Record<string, any>>(
   snapshotInputs?: (cell: Cell<T>) => T,
   /** See {@link tryClaimMutex}'s `effectKey`. */
   effectKey?: string,
+  /** Identity captured by the requesting served run. */
+  identity?: ScopeKeyIdentity,
 ): Promise<{ written: boolean; commitError?: CommitError }> {
   let success = false;
   const committed = await runtime.editWithRetry((tx) => {
+    if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
     if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
     const inputs = snapshotInputs
       ? snapshotInputs(inputsCell.withTx(tx))

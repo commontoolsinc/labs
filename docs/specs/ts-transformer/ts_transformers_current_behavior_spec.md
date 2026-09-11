@@ -214,7 +214,8 @@ list — is the authoritative source. As of this writing it recognizes:
   plain calls.)
 - conditional-helper calls: `ifElse`, `when`, `unless`
 - reactive array calls (`map`, `mapWithPattern`, `filter`, `filterWithPattern`,
-  `flatMap`, `flatMapWithPattern`)
+  `flatMap`, `flatMapWithPattern`, `count`, `countWithPattern`, `minBy`,
+  `minByWithPattern`, `maxBy`, `maxByWithPattern`)
 - cell factories (`cell`, `new Cell`, `new OpaqueCell`, `new Stream`, etc.),
   with legacy `.of(...)` still accepted
 - `Cell.for`-style calls
@@ -247,7 +248,8 @@ Remaining fallback behavior is intentionally narrow:
 - shadowed local helpers and object methods with Common Fabric-like names are not
   classified
 - a **synthetic** property call spelled `mapWithPattern` /
-  `filterWithPattern` / `flatMapWithPattern` whose method resolves to **no
+  `filterWithPattern` / `flatMapWithPattern` / `countWithPattern` /
+  `minByWithPattern` / `maxByWithPattern` whose method resolves to **no
   symbol** classifies as the array-method family by spelling alone. The
   closure stage emits these calls against receivers whose static type is
   still the plain array type (a site-lifted collection local, for example),
@@ -260,6 +262,11 @@ Remaining fallback behavior is intentionally narrow:
   not (an untyped receiver classifies as no call kind). Authored spellings
   of every family that fail symbol resolution still require a reactive
   receiver to classify
+
+The `*WithPattern` argument-hoisting path also requires a synthetic callee.
+Only closure-stage output guarantees that callback captures have been threaded
+through the params argument; an authored inline pattern stays in its enclosing
+scope.
 
 Builder-placement validation uses `detectDirectBuilderCall()`, so calls to
 functions returned by builders are not reclassified as direct `lift()` or
@@ -362,6 +369,17 @@ this implements is
 `handler-schema/contract-authored-event`,
 `contract-nested-unread-reference`, and `contract-authored-shapes` fixtures
 pin the shapes.
+
+The type-driven shrink preserves cell wrappers and resolves normalized value
+paths against their inner types. A stored field named `count`, `map`, or `get`
+therefore retains its value type and cell capability when captured by `computed`
+or `assert`, even when the wrapper has a method with the same name. Inline
+object values in optional cell handles and optional stored values retain their
+requested fields and read-only capability while preserving nullish alternatives.
+A `.get()` whose result is not resolved to a specific member path retains the
+receiver's complete stored shape, including when the result passes through a
+helper. Optional member reads retain the receiver without imposing a full-shape
+read.
 
 The type-driven shrink also guards its descent on (type, requested-paths): a
 pair already on the path falls back to the named type reference — no
@@ -812,6 +830,23 @@ followed by a push to the same collection, and reports:
   - the message text is produced per classification by `diagnosticMessage`;
     capability analysis feeds the findings via `mergeablePushMisuseSink`
 
+### 6.9a Nested collection scan validation
+
+`PatternContextValidationTransformer` reports **Warning**
+`collection:nested-scan` (`src/diagnostics/nested-collection-scan.ts`) for an
+inline reactive array-method callback scanning a captured reactive collection.
+It recognizes the array-method families classified by `classifyArrayMethodCallSite`
+and checks the receiver's array type and reactive provenance. Callback parameters
+and callback-local declarations as collection roots are excluded, so a row's
+own child array or a locally derived
+child list does not trigger this warning. The reported receiver must resolve to
+a captured root binding; complex receiver expressions are outside this check.
+Indexed receiver results, plain local arrays, sequential scans, lowered calls, and scans
+inside unrelated function boundaries are excluded. The warning does not change
+execution or claim that every update scans both collections; it asks the author
+to measure potentially multiplicative work and consider contract-compatible
+shared work, indexed lookups, or named aggregates.
+
 ### 6.10 Verb-return validation
 
 `VerbReturnValidationTransformer` (stage 6; verb contract WS-C/C2) inspects
@@ -904,6 +939,14 @@ Not every diagnostic comes from a validation transformer. The lowering stages
 report these through the same collector (deduplicated via §2.2's
 `markDiagnosticReported` channel):
 
+- **Warning** `schema-default:unresolved` (`schema-generator.ts`) — the
+  schema generator cannot recover a `Default<>` or `DeepDefault<>` value after
+  trying the node, type, and applicable brand-payload routes. That annotation
+  supplies no schema default; compilation continues. The warning points to the
+  default value type when it belongs to the current file, otherwise to the local
+  schema use.
+  Repeated reports for that source range collapse to one. See §7 of the
+  schema-generator mapping spec and `test/default-empty-record-schema.test.ts`.
 - **Error** `pattern-context:receiver-method-call`
   (`pattern-body-reactive-root-lowering.ts:162`) — the pattern-body
   reactive-root seam could not admit a receiver-method call on a tracked
@@ -1063,6 +1106,21 @@ that root as a capture of its own, and a whole-object capture subsumes the
 narrower paths beside it. The lift is then applied to the whole object and
 re-runs for any field of it, where it could have been applied to the one field
 the body reads.
+
+Callback-local declarations are excluded from captures using parameter lineage
+and the owning function's authored range. Rebuilt callbacks carry that range in
+their source maps. Matching requires the same function kind and exact range;
+ancestor traversal stops at intervening function boundaries, keeping nested
+parameters out of an enclosing callback's capture object.
+
+The set has one deliberately narrow reader on the way out. When the rewriter
+synthesizes an `ifElse`/`when`/`unless` call, `unwrapParentheses` tidies the
+operands placed in the call, and the probe recognizing a zero-arg inline IIFE
+callee reads through the same function: parentheses alone come off. Every
+other transparent wrapper can carry a type, and schema injection still reads
+operand types at those argument positions, so `as`, `<T>x`, `satisfies`, and
+`!` stay on the operands — a ternary branch reading `state.note!` keeps a
+non-nullable operand schema because the assertion stays in the tree.
 
 Key rewrite rules:
 
@@ -1229,7 +1287,11 @@ Result shape:
 
 - `receiver.<method>(fn[, thisArg])` ->
   `receiver.<method>WithPattern(pattern(callbackSchema, resultSchema, newCallback), paramsObj[, thisArg])`
-- currently supported methods are `map`, `filter`, and `flatMap`
+- supported callback methods are `map`, `filter`, `flatMap`, `count`, `minBy`,
+  and `maxBy`; the aggregate forms require explicit cell receivers in the
+  public type surface
+- argument-free `count`, `sum`, `min`, and `max` remain direct builtin-building
+  method calls
 - callback schema includes `{ element, index?, array? }` and adds `params` only
   when captures exist
 - computed destructuring keys are stabilized with generated key constants and
@@ -1364,6 +1426,9 @@ builder call it rebuilds carries the replaced call's source-map range (§11.5).
 - `_param` convention implies `never` schema for that parameter
 - failed inference falls back to `unknown`
 - `typeRegistry` is consulted first for synthetic nodes/types
+- Common Fabric generic aliases retain their authored type arguments when
+  qualified through `__cfHelpers`; argument pairing uses the alias arguments,
+  which can differ from the arguments of its underlying reference type.
 
 ### 10.2 `pattern(...)`
 
@@ -1941,8 +2006,10 @@ Special path:
 - empty-record defaults emit `default: {}` in pattern argument schemas,
   including inside `Writable`. Both `Record<string, unknown> | Default<V>`
   and `Default<Record<string, unknown>, V>` support `V` written as `{}`,
-  `Record<string, never>`, `Record<PropertyKey, never>`, or an alias of either
-  record (`test/default-empty-record-schema.test.ts`). The extraction rules
+  `Record<string, never>`, `Record<PropertyKey, never>`, or an alias of any of
+  these types, including alias chains and imports
+  (`test/default-empty-record-schema.test.ts`). Unresolved default values emit
+  `schema-default:unresolved` warnings (§6.12). The extraction rules
   live in §7 of the schema-generator mapping spec.
 - the node-based generator analyzes through a `readonly` type operator to
   its wrapped array type. A pattern-scope `.get()` on a `Cell<unknown[]>`

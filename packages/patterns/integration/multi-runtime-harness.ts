@@ -80,6 +80,9 @@ export interface MultiRuntimeSessionSpec {
    * near-zero in-process latency hides.
    */
   wsDelayMs?: number;
+
+  /** Routes this session through a test relay backed by the same storage server. */
+  apiUrl?: URL;
   /**
    * Write-side `requiredIntegrity` floor for this session's runtime,
    * overriding the harness-wide setting. Set it per session to model a fleet
@@ -513,7 +516,7 @@ export class MultiRuntimeHarness {
         await client.call("init", {
           identity: identity.keyPair,
           spaceName,
-          apiUrl,
+          apiUrl: normalized.apiUrl?.href ?? apiUrl,
           diagnostics: options.diagnostics === true,
           ...(normalized.wsDelayMs !== undefined
             ? { wsDelayMs: normalized.wsDelayMs }

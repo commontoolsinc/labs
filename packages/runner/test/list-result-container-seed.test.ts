@@ -269,6 +269,54 @@ describe("list-result-container-seed", () => {
       expect(logger.reportedError(0)).toBe(rejection);
     });
 
+    it("retains each deferred seed's identity when pulls settle in reverse order", async () => {
+      const firstIdentity = { ...runtime.scopeKeyIdentity };
+      const other = await Identity.fromPassphrase("other deferred seed owner");
+      const secondIdentity = { ...firstIdentity, principal: other.did() };
+      const identities = [firstIdentity, secondIdentity];
+      const pulls = identities.map(() => Promise.withResolvers<void>());
+      const containers = identities.map((_, index) =>
+        newContainer(`identity-seed-${index}`)
+      );
+      const stamped: ServerRunInfo[] = [];
+      const transactionIdentities: unknown[] = [];
+      const stamp = runtime.stampServerRun.bind(runtime);
+      (runtime as any).stampServerRun = (
+        tx: IExtendedStorageTransaction,
+        info: ServerRunInfo,
+      ) => {
+        transactionIdentities.push(tx.tx.scopeKeyIdentity);
+        stamped.push(info);
+        stamp(tx, info);
+      };
+      const pending = identities.map((identity, index) =>
+        seedResultContainerWhenPullSettles(
+          runtime,
+          containers[index],
+          () => true,
+          pulls[index].promise,
+          logger,
+          `identity-seed-${index}`,
+          identity,
+        )
+      );
+      expect(stamped).toEqual([]);
+      pulls[1].resolve();
+      await pending[1];
+      expect(valueOf(containers[0])).toBeUndefined();
+      expect(valueOf(containers[1])).toEqual([]);
+      pulls[0].resolve();
+      await pending[0];
+      expect(valueOf(containers[0])).toEqual([]);
+      expect(transactionIdentities).toEqual([secondIdentity, firstIdentity]);
+      expect(stamped).toEqual([1, 0].map((index) => ({
+        actionId: `identity-seed-${index}`,
+        kind: "bookkeeping",
+        scopeKeyIdentity: identities[index],
+      })));
+      expect(logger.warnings).toEqual([]);
+    });
+
     it("stamps every seed attempt's transaction as sanctioned bookkeeping", async () => {
       const container = newContainer("stamped-seed");
       // The seed transaction is minted outside any scheduler run, so nothing

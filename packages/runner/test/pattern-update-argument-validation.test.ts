@@ -15,6 +15,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { getMetaLink } from "../src/link-utils.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import { resultSchemaMetaSpelling } from "../src/result-schema-meta.ts";
 
 // A pattern update must not leave durable state the new version's argument
 // schema cannot read. `packages/piece/src/schema-compatibility.ts` waives one
@@ -489,7 +490,7 @@ describe("pattern update validates the stored argument", () => {
         .getMetaRaw("schema"),
       "the candidate's result schema was staged over a piece still running " +
         "the previous version's nodes",
-    ).toEqual(v1.resultSchema);
+    ).toEqual(resultSchemaMetaSpelling(v1.resultSchema!));
   });
 
   /**
@@ -770,7 +771,7 @@ describe("pattern update validates the stored argument", () => {
       "the candidate's result schema was written over a MARKERLESS running " +
         "piece — 'not staged by another version' was read as 'staged by this " +
         "one', and an absent marker proves neither",
-    ).toEqual(v1.resultSchema);
+    ).toEqual(resultSchemaMetaSpelling(v1.resultSchema!));
   });
 
   it("still repairs a missing result schema on a piece running THIS version", async () => {
@@ -827,7 +828,7 @@ describe("pattern update validates the stored argument", () => {
       "a piece running THIS version no longer has its missing result schema " +
         "repaired — the reuse path suppresses the write for the stale-marker " +
         "case and took the same-version case with it",
-    ).toEqual(pattern.resultSchema);
+    ).toEqual(resultSchemaMetaSpelling(pattern.resultSchema!));
 
     // The same repair on the OTHER reuse branch. A caller may re-run a running
     // piece WITH an argument (`PiecesController.runWithPattern` does), and that
@@ -853,7 +854,7 @@ describe("pattern update validates the stored argument", () => {
       meta(cell),
       "the supplied-argument reuse branch returns without repairing the " +
         "result schema, so a piece re-run with an argument stays untyped",
-    ).toEqual(pattern.resultSchema);
+    ).toEqual(resultSchemaMetaSpelling(pattern.resultSchema!));
   });
 
   it("does not classify a failure that merely mentions the refusal", () => {
