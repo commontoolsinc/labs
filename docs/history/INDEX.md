@@ -163,6 +163,9 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 - [2026-09-11-view-replication-server-currency.md](development/performance/2026-09-11-view-replication-server-currency.md) — initial server-currency adoption removes 121 authored startup executions in each of three enabled trials; records proof and revalidation cost, browser checks, and a preexisting feature-off CFC control failure.
 - [2026-09-11-view-replication-server-currency.results.json](development/performance/2026-09-11-view-replication-server-currency.results.json) — source hashes, exact commands, alternating startup counters and timings, profile hashes, validation failures and passes, and cleanup evidence.
+- [Browser process-group teardown follow-up, 2026-09-11](development/browser-process-group-teardown-2026-09-11.md) — Orphan renderers retaining browser pipes, explicit process-group ownership, and cleanup regression validation.
+
+- [Browser teardown investigation, 2026-09-11](development/browser-teardown-investigation-2026-09-11.md) — Current Chrome, detached Crashpad/updater pipe holders, controlled descriptor reproduction, and ON/OFF prototype validation.
 
 - [Scoped snapshot memo verification](development/performance/2026-09-10-scoped-snapshot-memo.md) — D3 metadata/epoch isolation regressions and exact label-view reuse counts at three sizes.
 
