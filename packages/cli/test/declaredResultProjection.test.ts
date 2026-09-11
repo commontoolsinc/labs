@@ -72,88 +72,43 @@ describe("declaredResultProjection", () => {
     });
   });
 
-  it("derives the cut through a nested `$defs` scope", () => {
-    // A subtree carrying its own `$defs` opens a new local-ref scope, and
-    // the canonical resolver reads the reference against it — the outer
-    // document also names `Item`, and that one does not recurse. A private
-    // pointer parser resolving every reference against the outer root read
-    // the wrong definition and silently derived nothing.
+  const wrapperWithOwnItem: JSONSchema = {
+    type: "object",
+    $defs: {
+      Item: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          parent: { $ref: "#/$defs/Item" },
+        },
+      },
+    },
+    properties: { item: { $ref: "#/$defs/Item" } },
+  };
+
+  it("derives nothing through a `$defs` below a root that declares none", () => {
+    // `#/$defs/Item` names a definition of the root, which declares none;
+    // the wrapper's own `$defs` is inert, so nothing re-enters anywhere.
 
     const declared: JSONSchema = {
       type: "object",
-      properties: {
-        wrapper: {
-          type: "object",
-          $defs: {
-            Item: {
-              type: "object",
-              properties: {
-                title: { type: "string" },
-                parent: { $ref: "#/$defs/Item" },
-              },
-            },
-          },
-          properties: { item: { $ref: "#/$defs/Item" } },
-        },
-      },
+      properties: { wrapper: wrapperWithOwnItem },
+    };
+    expect(declaredResultProjection(declared)).toBeUndefined();
+  });
+
+  it("derives nothing when the root's `$defs` names the definition and that one does not recurse", () => {
+    // `#/$defs/Item` names the root's `Item`; the wrapper's own `$defs` is
+    // inert below the root's map, and the root's `Item` re-enters nowhere.
+
+    const declared: JSONSchema = {
+      type: "object",
+      properties: { wrapper: wrapperWithOwnItem },
       $defs: {
         Item: { type: "object", properties: { title: { type: "string" } } },
       },
     };
-    expect(declaredResultProjection(declared)?.schema).toEqual({
-      type: "object",
-      properties: {
-        wrapper: {
-          type: "object",
-          properties: { item: CUT_ITEM },
-          additionalProperties: false,
-        },
-      },
-      additionalProperties: false,
-    });
-  });
-
-  it("does not read a repeated `$ref` spelling in a nested scope as the cycle", () => {
-    // The same "#/$defs/Item" spelling names a DIFFERENT definition inside a
-    // subtree carrying its own `$defs`. Only a reference repeated in its own
-    // scope closes the circle, so the nested leaf derives its contents while
-    // the outer `parent` still cuts — a spelling-keyed cycle set would render
-    // the finite leaf as an address.
-
-    const declared: JSONSchema = {
-      type: "object",
-      properties: { item: { $ref: "#/$defs/Item" } },
-      $defs: {
-        Item: {
-          type: "object",
-          properties: {
-            title: { type: "string" },
-            inner: {
-              type: "object",
-              $defs: {
-                Item: {
-                  type: "object",
-                  properties: { note: { type: "string" } },
-                },
-              },
-              properties: { leaf: { $ref: "#/$defs/Item" } },
-            },
-            parent: { $ref: "#/$defs/Item" },
-          },
-        },
-      },
-    };
-    expect(declaredResultProjection(declared)?.schema).toEqual({
-      type: "object",
-      properties: {
-        item: {
-          type: "object",
-          properties: { title: true, inner: true, parent: false },
-          additionalProperties: false,
-        },
-      },
-      additionalProperties: false,
-    });
+    expect(declaredResultProjection(declared)).toBeUndefined();
   });
 
   it("keeps the keys an index signature declares beside the position it cuts", () => {

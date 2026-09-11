@@ -8721,7 +8721,7 @@ export class Runner {
 
     const eventDependencySchema = cfcSchemaWithInheritedDefs(
       { type: "object", properties: { $event: eventSchema as JSONSchema } },
-      argumentSchema.$defs,
+      resolveExternalRootRefForStructure(argumentSchema).$defs,
     );
     const inputsCell = this.#runtime.getImmutableCell(
       resultCell.space,
@@ -8889,9 +8889,12 @@ export class Runner {
   ): NormalizedFullLink[] {
     const links: NormalizedFullLink[] = [];
     const seen = new WeakMap<object, Set<unknown>>();
-    const rootDefinitions = isObjectOrArray(argumentSchema)
-      ? argumentSchema.$defs
+    // The argument schema at rest can be a `cid:` reference, whose
+    // definitions live on the document it names.
+    const argumentRoot = isObjectNotArray(argumentSchema)
+      ? resolveExternalRootRefForStructure(argumentSchema)
       : undefined;
+    const rootDefinitions = argumentRoot?.$defs;
 
     const visit = (schema: unknown, currentValue: unknown): void => {
       // Sigil-only: the value is post-unwrap, where the only `$alias`

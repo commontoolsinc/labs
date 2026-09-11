@@ -78,7 +78,8 @@ import {
   type CfcLabelView,
   cfcLabelViewForResolvedCellWithStatus,
   cfcLabelViewFromSchema,
-  cfcSchemaChildRoot,
+  cfcSchemaResolvedRoot,
+  cfcSchemaWithInheritedDefs,
   getCarriedCfcLabelView,
   type IFCLabel,
   mergeCfcLabelViews,
@@ -2522,12 +2523,9 @@ export function partitionVerbListing(
  * named type its author declared, while a root piece's is written inline. The
  * `$defs` sit on the root, so the root is what the reference resolves against.
  *
- * The returned root is the scope a property's own references resolve in. A
- * `$defs` closure is local: the definition the root names may carry
- * definitions of its own, and a reference inside it names THOSE. Resolving at
- * the outer root finds nothing, or — worse — a same-named definition
- * belonging to someone else. `cfcSchemaChildRoot` opens the inner scope where
- * there is one and hands back the outer root where there is not.
+ * The returned root is the document a property's own references resolve in:
+ * the schema itself, or the document the resolved view is when resolution
+ * minted one of its own (`cfcSchemaResolvedRoot`).
  *
  * Returns `undefined` for a schema that declares no object at all.
  */
@@ -2543,7 +2541,9 @@ function declaredProperties(
   }
   return {
     properties: declared.properties as Record<string, unknown>,
-    root: cfcSchemaChildRoot(declared as JSONSchema, schema as JSONSchema),
+    root: typeof schema.$ref === "string"
+      ? cfcSchemaResolvedRoot(declared as JSONSchema, schema as JSONSchema)
+      : schema as JSONSchema,
   };
 }
 
@@ -2577,10 +2577,10 @@ const VERB_PROPERTY_KEYS: readonly string[] = [
  * The input schema a declared verb serves: the property's event type, made
  * self-contained. A property written as a reference resolves to its
  * definition, with the property's own keys merged over it; the keys that
- * describe the verb rather than its event are then dropped. The event's active
- * definition scope is attached and cut to the definitions the event reaches
- * within it. Nested scopes retain `$defs: {}` when pruning removes all their
- * definitions, preserving the scope boundary. A `Stream<void>` verb serves an
+ * describe the verb rather than its event are then dropped. The definitions of
+ * the event's document are attached in place of any `$defs` the property
+ * carries of its own, and cut to the ones the event reaches; under a document
+ * declaring none, the event serves none. A `Stream<void>` verb serves an
  * empty object schema rather than a stream marker with the verb's prose hung
  * on it, and a referenced event serves its definition alone. A reference that
  * does not resolve serves `true`: the surface cannot invent structure.
@@ -2593,14 +2593,17 @@ function declaredVerbInput(
     ? resolveCfcSchemaRefs(property, root)
     : property;
   if (!isObjectOrArray(resolved)) return true;
-  const event = Object.fromEntries(
+  const { $defs: _own, ...event } = Object.fromEntries(
     Object.entries(resolved).filter(([key]) =>
       !VERB_PROPERTY_KEYS.includes(key)
     ),
   ) as JSONSchema & object;
-  // `resolveCfcSchemaRefs` already carries the target's effective `$defs` onto
-  // the resolved view; `root` supplies the inherited scope for inline events.
-  const eventRoot = cfcSchemaChildRoot(event, root);
+  // A referenced event serves the definitions of the document its reference
+  // chain ends in, which `resolveCfcSchemaRefs` carries on the resolved view;
+  // an inline event serves the root's.
+  const eventRoot = resolved !== property
+    ? cfcSchemaResolvedRoot(resolved as JSONSchema, root)
+    : root;
   return pruneCfcSchemaDefinitions({
     ...event,
     ...(isObjectOrArray(eventRoot) && isObjectOrArray(eventRoot.$defs)
@@ -2728,11 +2731,17 @@ export function handlerVerbEvents(
         ? argumentSchema.properties.$event
         : undefined;
       if (!isObjectOrArray(event)) continue;
+      // An inline event is a fragment of the argument document: it carries
+      // that document's definitions — none, under a root declaring none — in
+      // place of any `$defs` of its own.
       eventSchema = typeof event.$ref === "string"
         ? resolveCfcSchemaRefs(event, argumentSchema as JSONSchema)
-        : isObjectOrArray(argumentSchema.$defs) && event.$defs === undefined
-        ? { ...event, $defs: argumentSchema.$defs } as JSONSchema
-        : event as JSONSchema;
+        : pruneCfcSchemaDefinitions(cfcSchemaWithInheritedDefs(
+          event as JSONSchema,
+          isObjectNotArray(argumentSchema.$defs)
+            ? argumentSchema.$defs as Record<string, JSONSchema>
+            : {},
+        ));
     }
     if (matched === 0) continue;
     verbs.set(name, matched === 1 ? eventSchema : undefined);
@@ -2801,9 +2810,17 @@ export function declaredVerbProse(
     const description = typeof property.description === "string"
       ? property.description
       : undefined;
+    // An inline property is a fragment of the result document: it carries
+    // that document's definitions — none, under a root declaring none — in
+    // place of any `$defs` of its own.
     const eventSchema = typeof property.$ref === "string"
       ? resolveCfcSchemaRefs(property, declaredRoot)
-      : property as JSONSchema;
+      : pruneCfcSchemaDefinitions(cfcSchemaWithInheritedDefs(
+        property as JSONSchema,
+        isObjectOrArray(declaredRoot) && isObjectNotArray(declaredRoot.$defs)
+          ? declaredRoot.$defs as Record<string, JSONSchema>
+          : {},
+      ));
     if (description === undefined && eventSchema === undefined) continue;
     prose.set(name, {
       ...(description !== undefined && { description }),
@@ -3010,14 +3027,14 @@ function withoutSchemaProse(schema: JSONSchema): JSONSchema {
 }
 
 /**
- * One declared node that may describe a position, with the scope its own
- * references resolve against.
+ * One declared node that may describe a position, with the document root
+ * its own references resolve against.
  *
- * The scope travels WITH the node because a `$defs` closure is local: a
- * definition may carry definitions of its own, and its nested references name
- * those rather than the ones at the event root. Carrying one root for the whole
- * walk resolves such a reference in the wrong document, which finds either
- * nothing or — worse — a same-named definition belonging to someone else.
+ * The root travels WITH the node because a reference chain can end in
+ * another document — an embedded or external target — whose definitions its
+ * nested references then name. Carrying one root for the whole walk resolves
+ * such a reference in the wrong document, which finds either nothing or —
+ * worse — a same-named definition belonging to someone else.
  *
  * `direct` separates an account OF the position from an account of one
  * ALTERNATIVE at it. Both are read when looking a child up; only a direct one
@@ -3099,9 +3116,8 @@ function servedDefinitionName(
  * declares it. Nothing here is written back: these are read to look a position
  * up, and the served document keeps its own shape.
  *
- * Scope is threaded rather than assumed. `cfcSchemaChildRoot` opens a new one
- * wherever a subtree carries its own `$defs`, and `resolveCfcSchemaRefRoot`
- * reports the scope a ref chain ends in, so a definition's nested references
+ * The document is threaded rather than assumed: `resolveCfcSchemaRefRoot`
+ * reports the one a ref chain ends in, so a definition's nested references
  * resolve in the document that declares them.
  *
  * Termination is by the open-reference stack, keyed on the pair of reference
@@ -3121,9 +3137,7 @@ function expandDeclared(
     direct: boolean,
   ): void => {
     if (!isObjectOrArray(node)) return;
-    // A node carrying its own definitions opens a scope before its own `$ref`
-    // is read, because that reference may name one of them.
-    const scope = cfcSchemaChildRoot(node, root);
+    const scope = root;
     const ref = node.$ref;
     let resolved: JSONSchema | undefined = node;
     let childRoot = scope;
@@ -3134,7 +3148,7 @@ function expandDeclared(
       openRefs.push({ ref, root: scope });
       resolved = resolveCfcSchemaRefs(node, scope);
       childRoot = isObjectOrArray(resolved)
-        ? cfcSchemaChildRoot(resolved, resolveCfcSchemaRefRoot(node, scope))
+        ? cfcSchemaResolvedRoot(resolved, resolveCfcSchemaRefRoot(node, scope))
         : scope;
     }
     try {

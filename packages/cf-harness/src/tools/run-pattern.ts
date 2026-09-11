@@ -1299,8 +1299,9 @@ export const runPatternTool: HarnessToolDefinition<
     // A property schema referring into the argument schema's `$defs` leaves
     // its root behind when it becomes a cell's whole schema, so the read
     // schema carries the referenced definitions along —
-    // `selectReferencedCfcSchemaDefs` computes that closure, honoring a
-    // property's own `$defs` scope over the root's.
+    // `selectReferencedCfcSchemaDefs` computes that closure from the argument
+    // schema's map. Under an argument schema that declares none, a property
+    // has no local definitions to carry.
     const argumentDefs = isObjectNotArray(argumentSchema) &&
         isObjectNotArray((argumentSchema as { $defs?: unknown }).$defs)
       ? (argumentSchema as { $defs: Record<string, JSONSchema> }).$defs

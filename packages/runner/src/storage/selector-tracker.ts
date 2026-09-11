@@ -15,11 +15,10 @@ import {
   scopeOfScopeKey,
 } from "@commonfabric/memory/v2";
 import { LRUCache } from "@commonfabric/utils/cache";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { cfcSchemaChildRoot } from "../cfc/schema-refs.ts";
 import {
   externalResolutionMissCount,
   onSchemaRegistryClear,
@@ -330,9 +329,9 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     const missesBefore = externalResolutionMissCount();
     let current = SelectorTracker.getStandardSchema(item);
     hashes.push(hashSchema(current));
-    if (
-      schema.$defs !== undefined && cfcSchemaChildRoot(item, schema) === schema
-    ) {
+    // An arm sits in the union's document, so it is also hashed carrying the
+    // union's `$defs`, in place of any the arm declares of its own.
+    if (isObjectNotArray(schema.$defs)) {
       current = SelectorTracker.getStandardSchema(
         schemaWithProperties(current, { $defs: schema.$defs }),
       );
@@ -345,7 +344,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       // miss counter.
       const resolved = ContextualFlowControl.resolveSchemaRefs(
         current,
-        cfcSchemaChildRoot(current, schema),
+        schema,
       );
       if (resolved !== undefined) {
         hashes.push(

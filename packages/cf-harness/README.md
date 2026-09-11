@@ -2312,6 +2312,12 @@ conforming states and the ordering rules of
 [`docs/specs/cfc-enforcement-matrix.md`](../../docs/specs/cfc-enforcement-matrix.md),
 each rule carrying the clause it turns on.
 
+AUD-15a's expected flow-label rung is a constant of the audit the same way,
+pinned at compile time to `MAX_ENFORCEMENT_CFC_OPTIONS` through a type-only
+import that reads no value out of the runner: a recorded run keeps one verdict,
+and a bundle that moves off that rung fails `deno task check` where the move is
+made rather than re-grading the corpus in silence.
+
 Every check carries the clauses it rests on and an exact quote from each, both
 printed with the finding and included in `--json`, **and how it rests on them**.
 A citation is `required-by` when the clause states the requirement the check

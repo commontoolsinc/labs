@@ -2,7 +2,10 @@ import type { JSONSchema } from "@commonfabric/api";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { ContextualFlowControl } from "../cfc.ts";
 import { forEachSubschema, isSubschema } from "../schema-walk.ts";
-import { cfcSchemaChildRoot, resolveCfcSchemaRefRoot } from "./schema-refs.ts";
+import {
+  cfcSchemaResolvedRoot,
+  resolveCfcSchemaRefRoot,
+} from "./schema-refs.ts";
 import { type CfcLabelView, mergeCfcLabelViews } from "./label-view-state.ts";
 import type { IFCLabel, LabelObservationClass } from "./types.ts";
 
@@ -41,7 +44,7 @@ export const cfcSchemaEntries = (
   if (!isSubschema(schema) || typeof schema === "boolean") {
     return entries;
   }
-  const schemaRoot = cfcSchemaChildRoot(schema, root);
+  const schemaRoot = root;
   const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
   for (let cursor = active; cursor !== undefined; cursor = cursor.parent) {
     if (cursor.root === rootKey && cursor.schema === schema) return entries;
@@ -55,12 +58,14 @@ export const cfcSchemaEntries = (
     return entries;
   }
 
-  const childRoot = cfcSchemaChildRoot(
-    resolved,
-    typeof schema.$ref === "string"
-      ? resolveCfcSchemaRefRoot(schema, schemaRoot)
-      : schemaRoot,
-  );
+  // A ref that did not resolve leaves `resolved` as the schema itself, whose
+  // own `$defs` is inert under the root it sits in.
+  const childRoot = resolved !== schema
+    ? cfcSchemaResolvedRoot(
+      resolved,
+      resolveCfcSchemaRefRoot(schema, schemaRoot),
+    )
+    : schemaRoot;
   if (isObjectOrArray(resolved.ifc)) {
     entries.push({
       path,
