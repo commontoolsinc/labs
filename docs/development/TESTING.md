@@ -138,9 +138,16 @@ profile, and removal writes. Its normal CI run covers connected readers. The
 reconnect mode requires a local relay and a shell compiled against that relay;
 the independent writer continues to use the toolshed directly.
 
-Start local toolshed and shell servers using
-[the local server procedure](LOCAL_DEV_SERVERS.md). For a toolshed on port 8089,
-run this relay in a separate terminal from the repository root:
+Start the local servers with offset 89, following
+[the local server procedure](LOCAL_DEV_SERVERS.md):
+
+```bash
+EXPERIMENTAL_SERVER_EXECUTION=false ./scripts/start-local-dev.sh --port-offset 89
+```
+
+This starts toolshed on port 8089 and the ordinary shell on port 5262. The test
+uses the separate relay-connected shell on port 5263 started below. Run this
+relay in another terminal from the repository root:
 
 ```bash
 deno run -A packages/patterns/integration/storage-network-gate-server.ts http://127.0.0.1:8089 58848 58849

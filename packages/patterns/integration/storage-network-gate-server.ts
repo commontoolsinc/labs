@@ -6,7 +6,7 @@ if (import.meta.main) {
   const [target, relayPort, controlPort] = Deno.args;
   const ports = [relayPort, controlPort].map(Number);
   if (
-    !target || Deno.args.length !== 3 ||
+    !target || Deno.args.length !== 3 || ports[0] === ports[1] ||
     ports.some((port) => !Number.isInteger(port) || port < 1 || port > 65535)
   ) {
     throw new Error(
