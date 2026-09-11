@@ -260,9 +260,9 @@ Deliberate extensions beyond the 2020-12 vocabulary:
   leaves. The authoritative name list is `FABRIC_PRIMITIVE_SCHEMA_TYPES` in
   `packages/api/index.ts`.
 
-Generated schemas also hoist named types into `$defs` and reference them via
-`#/$defs/...`. The full TypeScript→schema mapping is specified in the
-schema-generator mapping spec (`docs/specs/schema-generator/`).
+A generated schema places each named type in its root `$defs` and refers to
+it by `#/$defs/<name>`. The full TypeScript→schema mapping is specified in
+the schema-generator mapping spec (`docs/specs/schema-generator/`).
 
 A `#/$defs/<name>` ref names a definition of the document root, as JSON
 Schema resolves it: `#` is the root of the schema resource, and the runtime
