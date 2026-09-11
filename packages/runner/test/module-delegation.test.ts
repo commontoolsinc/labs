@@ -704,19 +704,40 @@ describe("module identity delegation", () => {
       expect((await sourceTx.commit()).error).toBeUndefined();
     };
 
-    it("returns `undefined` for one module, a keyless identity, or a predecessor already granted", () => {
+    it("returns `undefined` for a keyless identity, only itself as predecessor, or every predecessor already granted", () => {
       const pm = runtime.patternManager;
-      expect(pm.readInheritedAuthority(space, oldIdentity, oldIdentity))
+      expect(pm.readInheritedAuthority(space, "keyless:session", [oldIdentity]))
         .toBeUndefined();
-      expect(pm.readInheritedAuthority(space, "keyless:session", oldIdentity))
+      expect(pm.readInheritedAuthority(space, oldIdentity, [oldIdentity]))
         .toBeUndefined();
+      expect(pm.readInheritedAuthority(space, oldIdentity, [])).toBeUndefined();
 
       runtime.registerModuleDelegations(
         space,
         new Map([[successor.identity, new Set([oldIdentity])]]),
       );
-      expect(pm.readInheritedAuthority(space, successor.identity, oldIdentity))
-        .toBeUndefined();
+      expect(
+        pm.readInheritedAuthority(space, successor.identity, [
+          oldIdentity,
+          successor.identity,
+        ]),
+      ).toBeUndefined();
+    });
+
+    it("returns a read when any predecessor is ungranted, though another is granted", async () => {
+      runtime.registerModuleDelegations(
+        space,
+        new Map([[successor.identity, new Set([oldIdentity])]]),
+      );
+
+      const read = runtime.patternManager.readInheritedAuthority(
+        space,
+        successor.identity,
+        [oldIdentity, "ungranted-predecessor"],
+      );
+
+      expect(read).toBeInstanceOf(Promise);
+      await read;
     });
 
     it("registers the delegation the successor's stored source closure carries", async () => {
@@ -728,7 +749,7 @@ describe("module identity delegation", () => {
       const read = runtime.patternManager.readInheritedAuthority(
         space,
         successor.identity,
-        oldIdentity,
+        [oldIdentity],
       );
       expect(read).toBeInstanceOf(Promise);
       await read;
@@ -742,7 +763,7 @@ describe("module identity delegation", () => {
       await runtime.patternManager.readInheritedAuthority(
         space,
         successor.identity,
-        oldIdentity,
+        [oldIdentity],
       );
 
       expect(

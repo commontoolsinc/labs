@@ -652,12 +652,14 @@ grants it a predecessor's authority, and resolving a pattern from memory loads
 no closure. A source update records the pattern it moves a piece to as the
 latest revision of the piece's source history. So when the runner starts a
 piece, or swaps a running one after its pattern pointer moves, and the latest
-revision names the pattern it is about to run, it looks up the latest earlier
-revision naming a different pattern. If the runtime does not register the new
-pattern's module as inheriting from that one, the runner first reads the new
-pattern's verified source closure in a transaction without writes, which
-registers whatever delegation that closure durably carries. The start or swap
-proceeds once the read settles, whether or not it added a grant.
+revision names the pattern it is about to run, it checks that the runtime
+registers the new pattern's module as inheriting from every other pattern the
+history names. A grant registered for one of them settles nothing about the
+rest, since a later update onto the same successor extends its stored grants
+with that update's own predecessors. If any is missing, the runner first reads
+the new pattern's verified source closure in a transaction without writes,
+which registers whatever delegation that closure durably carries. The start or
+swap proceeds once the read settles, whether or not it added a grant.
 
 Registration and transitive closure are scoped by the space carrying that
 attestation. Each transaction snapshots the resulting per-space maps, and

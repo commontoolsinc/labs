@@ -317,6 +317,32 @@ export default pattern<{seed?: ${seedType}}>(() => {
 
       expect(await invokeSetName(observed, "after")).toBe("v2:after");
     });
+
+    it("authorizes the successor's writes for every earlier pattern in the piece's history, not just the latest", async () => {
+      // `observer` first registers v2's grant from v1 through one piece. A
+      // second piece then goes v0 → v1 → v2, which extends v2's stored
+      // grants to v0 as well; its field is still bound to v0.
+      const first = await pieces.create(authorizedWriterProgram("v1"), {
+        input: {},
+      });
+      await first.setPattern(authorizedWriterProgram("v2"));
+      await pieces.synced();
+      const firstObserved = await observerPieces.get(first.id, true);
+      expect(await invokeSetName(firstObserved, "first")).toBe("v2:first");
+
+      const second = await pieces.create(authorizedWriterProgram("v0"), {
+        input: {},
+      });
+      const updater = await pieces.get(second.id, true);
+      expect(await invokeSetName(updater, "before")).toBe("v0:before");
+      await second.setPattern(authorizedWriterProgram("v1"));
+      await second.setPattern(authorizedWriterProgram("v2"));
+      await pieces.synced();
+
+      const observed = await observerPieces.get(second.id, true);
+
+      expect(await invokeSetName(observed, "after")).toBe("v2:after");
+    });
   });
 
   it("merges predecessor chains into an already-stored successor closure", async () => {

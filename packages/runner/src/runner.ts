@@ -5133,15 +5133,16 @@ export class Runner {
 
   /**
    * The read that gives this runtime the writer authority a piece's pattern
-   * `identityRef` inherited from the pattern the piece ran before it, when
-   * the runtime does not already hold it (see
+   * `identityRef` inherited from the patterns the piece ran before it, when
+   * the runtime does not already hold all of it (see
    * `PatternManager.readInheritedAuthority()`).
    *
    * A source update, the only grantor, records the pattern it moves a piece
    * to as the latest revision of the piece's source history. So a read is
-   * owed only when that revision names `identityRef`, and the predecessor is
-   * the latest earlier revision naming another pattern. A pointer that moved
-   * without a revision, or a history naming no other pattern, owes none.
+   * owed only when that revision names `identityRef`, and the predecessors
+   * are the other patterns the history names, any of which may still own a
+   * field of the piece. A pointer that moved without a revision, or a
+   * history naming no other pattern, owes none.
    */
   #readInheritedAuthority(
     rootCell: Cell<unknown>,
@@ -5158,14 +5159,10 @@ export class Runner {
     if (revisions.at(-1)?.pattern.identity !== identityRef.identity) {
       return undefined;
     }
-    const predecessor = revisions.findLast((revision) =>
-      revision.pattern.identity !== identityRef.identity
-    );
-    if (predecessor === undefined) return undefined;
     return this.#runtime.patternManager.readInheritedAuthority(
       rootCell.space,
       identityRef.identity,
-      predecessor.pattern.identity,
+      revisions.map((revision) => revision.pattern.identity),
     );
   }
 
