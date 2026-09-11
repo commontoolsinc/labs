@@ -40,6 +40,7 @@ import {
   type PieceSourceTransition,
   type PieceSourceTransitionBaseline,
   preparePieceSourceTransitionBaseline,
+  readResultSchemaMeta,
   resolveCellPath,
   resolveLink,
   type RuntimeProgram,
@@ -528,6 +529,22 @@ export interface PatternUpdateReceipt extends PieceSourceSetResult {
     | { status: "failed"; warning: string };
 }
 
+/**
+ * The verdict {@link PieceController.changeSource} returns: `applied` when
+ * storage accepted the transaction carrying the source transition, and
+ * `incompatible` when the candidate cannot run over the piece's retained
+ * state, with the prepared change a caller may confirm to apply anyway. An
+ * update that finds its active origin already current makes no transition;
+ * it reports `applied` after recording that finding.
+ *
+ * A transition's `applied` is its transaction's own outcome, never a read of
+ * the piece beside the call — a read answers what the piece points at now,
+ * which a concurrent later change may have moved, and it resolves from local
+ * cache over a provider failure. `executionWarning` reports a failure in the work
+ * that refreshes the running piece after its transition committed; such a
+ * failure does not undo the accepted transition, the same split
+ * {@link PatternUpdateReceipt}'s `refresh` arm reports for a direct edit.
+ */
 export type PieceSourceActionResult =
   | { status: "applied"; executionWarning?: string }
   | {
@@ -1521,9 +1538,7 @@ export function durableSourceContract(
     linkedCell.tx,
   );
 
-  const resultSchema = sourceRoot.getMetaRaw("schema") as
-    | JSONSchema
-    | undefined;
+  const resultSchema = readResultSchemaMeta(sourceRoot);
   if (resultSchema !== undefined) {
     return {
       schemas: [{
@@ -1632,9 +1647,7 @@ export function durableSourceContract(
   // public result projections. Every current projection is an additional
   // producer-owned constraint: a write must preserve the argument/internal
   // contract and all public result contracts simultaneously.
-  const ownerSchema = ownerResult.getMetaRaw("schema") as
-    | JSONSchema
-    | undefined;
+  const ownerSchema = readResultSchemaMeta(ownerResult);
   const projected: DurableSchemaPath[] = [];
   if (ownerSchema !== undefined) {
     const rawResult = ownerResult.getRawUntyped({ lastNode: "top" });
@@ -3137,9 +3150,7 @@ class PiecePropIo implements PieceCellIo {
         assertPieceInputPath(targetCell, path ?? []);
       } else {
         const resultCell = pieces.getResult(piece);
-        const durableSchema = resultCell.getMetaRaw("schema") as
-          | JSONSchema
-          | undefined;
+        const durableSchema = readResultSchemaMeta(resultCell);
         targetCell = durableSchema === undefined
           ? resultCell
           : resultCell.asSchema(durableSchema);
@@ -4180,6 +4191,11 @@ export class PieceController<T = unknown> {
         baseline,
       );
       const mutationVersion = ++this.#mutationVersion;
+      // The transaction's own verdict: `editWithRetry` reports a rejected
+      // commit in its result, so past that check the transition is written.
+      // What can still fail is the schema refresh `#runMutation` runs after
+      // the operation, which does not undo the accepted detach.
+      let committed = false;
       try {
         await this.#runMutation(mutationVersion, async () => {
           const result = await this.#pieces.runtime.editWithRetry((tx) => {
@@ -4193,11 +4209,12 @@ export class PieceController<T = unknown> {
             return true;
           });
           if (result.error !== undefined) throw result.error;
+          committed = true;
           return this.#cell;
         });
         return { status: "applied" };
       } catch (error) {
-        if (await this.#sourceTransitionCommitted(transition.revisionId)) {
+        if (committed) {
           return {
             status: "applied",
             executionWarning: pieceSourceErrorMessage(error),
@@ -4420,48 +4437,61 @@ export class PieceController<T = unknown> {
       { selectedRevisionId: prepared.selectedRevisionId },
     );
     const mutationVersion = ++this.#mutationVersion;
+    // The accepted setup transaction's receipt, held exactly when storage
+    // accepted this change's transaction: from the resolved update, or from
+    // the post-commit error that carries it. It is what lets the catch below
+    // tell a transition that landed from one that did not.
+    let commit: PatternSetupCommitReceipt | undefined;
     try {
       await this.#runMutation(mutationVersion, async () => {
-        return await execute(
-          this.#pieces,
-          this.id,
-          candidate,
-          undefined,
-          {
-            start: true,
-            expectedPatternIdentity: previousRef,
-            validateCurrentArgument: acceptedReview === undefined
-              ? undefined
-              : (argumentCell) => {
-                const evidence = pieceSourceArgumentEvidence(
-                  argumentCell,
-                  this.#pieces,
-                );
-                if (evidence !== acceptedReview.argumentEvidence) {
-                  throw new Error(
-                    "the retained piece input changed after compatibility was checked",
+        try {
+          const result = await executePatternUpdate(
+            this.#pieces,
+            this.id,
+            candidate,
+            undefined,
+            {
+              expectedPatternIdentity: previousRef,
+              validateCurrentArgument: acceptedReview === undefined
+                ? undefined
+                : (argumentCell) => {
+                  const evidence = pieceSourceArgumentEvidence(
+                    argumentCell,
+                    this.#pieces,
                   );
+                  if (evidence !== acceptedReview.argumentEvidence) {
+                    throw new Error(
+                      "the retained piece input changed after compatibility was checked",
+                    );
+                  }
+                },
+              validateArgumentLinks: (argumentCell, argumentSchema) => {
+                try {
+                  assertPieceSourceRetainedLinksCompatible(
+                    argumentCell,
+                    argumentSchema,
+                    this.#pieces,
+                    previousPattern.argumentSchema,
+                  );
+                } catch (error) {
+                  const message = error instanceof Error
+                    ? error.message
+                    : String(error);
+                  if (acceptedReview?.issues.retainedLinks === message) return;
+                  throw error;
                 }
               },
-            validateArgumentLinks: (argumentCell, argumentSchema) => {
-              try {
-                assertPieceSourceRetainedLinksCompatible(
-                  argumentCell,
-                  argumentSchema,
-                  this.#pieces,
-                  previousPattern.argumentSchema,
-                );
-              } catch (error) {
-                const message = error instanceof Error
-                  ? error.message
-                  : String(error);
-                if (acceptedReview?.issues.retainedLinks === message) return;
-                throw error;
-              }
+              sourceTransition: transition,
             },
-            sourceTransition: transition,
-          },
-        ) as Cell<T>;
+          );
+          commit = result.commit;
+          return result.cell as Cell<T>;
+        } catch (error) {
+          if (error instanceof PatternSetupPostCommitError) {
+            commit = error.commit;
+          }
+          throw error;
+        }
       });
       // The transition cleared whatever the last reconciliation concluded,
       // and this is the fresh answer: the piece now runs what this origin
@@ -4487,15 +4517,20 @@ export class PieceController<T = unknown> {
       }
       return { status: "applied" };
     } catch (error) {
-      if (await this.#sourceTransitionCommitted(transition.revisionId)) {
+      if (commit !== undefined) {
         // The transition committed and running its source then failed, so
         // neither outcome is true: the piece did not decline this source, and
         // it is not demonstrably running it either. The warning below says
         // what happened, and the next reconciliation settles what the piece
-        // is doing rather than this guessing now.
+        // is doing rather than this guessing now. The wrapper's own message
+        // only restates that split, so the warning carries the cause — the
+        // failure itself — as `setPattern`'s refresh arm does.
+        const cause = error instanceof PatternSetupPostCommitError
+          ? error.cause
+          : error;
         return {
           status: "applied",
-          executionWarning: pieceSourceErrorMessage(error),
+          executionWarning: pieceSourceErrorMessage(cause),
         };
       }
       if (isOverridableArgumentCompatibilityError(error)) {
@@ -4839,24 +4874,6 @@ export class PieceController<T = unknown> {
         this.#cell = cell.asSchema(pattern.resultSchema);
       }
       return;
-    }
-  }
-
-  async #sourceTransitionCommitted(revisionId: string): Promise<boolean> {
-    try {
-      if (
-        getPieceSourceRevisions(this.#cell).some((revision) =>
-          revision.revisionId === revisionId
-        )
-      ) {
-        return true;
-      }
-      await this.#cell.sync();
-      return getPieceSourceRevisions(this.#cell).some((revision) =>
-        revision.revisionId === revisionId
-      );
-    } catch {
-      return false;
     }
   }
 
@@ -5228,6 +5245,12 @@ function pieceSourceTransition(
   };
 }
 
+/**
+ * Helper for `setInput()`, which re-runs the piece's current pattern over a
+ * caller-supplied argument. A source change goes through
+ * `executePatternUpdate` below instead, which carries the transition and
+ * returns the accepted transaction's receipt.
+ */
 async function execute(
   pieces: PiecesController,
   pieceId: string,
@@ -5236,15 +5259,6 @@ async function execute(
   options?: {
     start?: boolean;
     expectedPatternIdentity?: { identity: string; symbol: string };
-    validateCurrentArgument?: (
-      argumentCell: Cell<unknown>,
-    ) => void;
-    validateArgumentLinks?: (
-      argumentCell: Cell<unknown>,
-      argumentSchema: JSONSchema,
-    ) => void;
-    repository?: string;
-    sourceTransition?: PieceSourceTransition;
   },
 ): Promise<Cell<unknown>> {
   return await pieces.runWithPattern(pattern, pieceId, input, options);

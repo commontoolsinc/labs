@@ -6,7 +6,7 @@ import {
   type TestRecord,
 } from "@commonfabric/test-support/records";
 import type { CapabilityId } from "./ci-capabilities.ts";
-import { loadTopology } from "./test-topology.ts";
+import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
 
 import {
   batchesOf,
@@ -23,7 +23,6 @@ import {
   runLane,
   spoolRecords,
 } from "./ci-lane.ts";
-import { capabilitiesBySuite } from "./test-topology.ts";
 import { census } from "./test-selection/census.ts";
 import type { Suite } from "./test-topology/suite.ts";
 import {

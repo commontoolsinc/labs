@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { SchemaGenerator } from "../src/schema-generator.ts";
+import type { SchemaGenerationDiagnostic } from "../src/interface.ts";
 import { asObjectSchema, getTypeFromCode } from "./utils.ts";
 
 // The DEFAULT_MARKER brand payload carries V (the default VALUE's type) — see
@@ -58,13 +59,19 @@ describe("brand-payload default recovery (expanded Default<T, V>)", () => {
     const code = `${DEFAULT_PRELUDE}
       interface Tagged<V extends string> {
         note: Default<string, V>;
+        config: Default<{ tag: string }, { tag: V }>;
       }
       interface Holder {
         tagged: Tagged<"from-generic">;
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "Holder");
-    const schema = asObjectSchema(transformer.generateSchema(type, checker));
+    const diagnostics: SchemaGenerationDiagnostic[] = [];
+    const schema = asObjectSchema(
+      transformer.generateSchema(type, checker, undefined, {
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      }),
+    );
 
     const tagged = asObjectSchema(
       (schema.properties?.tagged ?? {}) as Record<string, unknown>,
@@ -73,6 +80,10 @@ describe("brand-payload default recovery (expanded Default<T, V>)", () => {
       type: "string",
       default: "from-generic",
     });
+    expect(tagged.properties?.config).toHaveProperty("default", {
+      tag: "from-generic",
+    });
+    expect(diagnostics).toEqual([]);
   });
 
   it("recovers tuple and object literal payloads", async () => {

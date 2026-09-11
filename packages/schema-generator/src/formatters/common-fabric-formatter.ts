@@ -11,6 +11,7 @@ import {
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import ts from "typescript";
 
+import { reportUnresolvedDefault } from "../default-diagnostics.ts";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
@@ -18,7 +19,7 @@ import {
   extractDefaultBrandPayloadValue,
   getArrayElementInfo,
   getPropertyNameText,
-  isEmptyRecordType,
+  isEmptyObjectDefaultType,
   resolveWrapperNode,
   type TypeWithInternals,
 } from "../type-utils.ts";
@@ -311,7 +312,11 @@ export class CommonFabricFormatter implements TypeFormatter {
               : { default: defaultValue }) as MutableJSONSchemaObj;
           }
           (valueSchema as Record<string, unknown>).default = defaultValue;
+        } else {
+          reportUnresolvedDefault(context);
         }
+      } else {
+        reportUnresolvedDefault(context);
       }
 
       return valueSchema;
@@ -895,10 +900,17 @@ export class CommonFabricFormatter implements TypeFormatter {
     targetKind: WrapperKind,
   ): ts.TypeReferenceNode | undefined {
     if (
-      originalNode &&
-      ts.isTypeReferenceNode(originalNode) &&
+      originalNode && ts.isTypeReferenceNode(originalNode) &&
       originalNode.typeArguments
     ) {
+      // A generic Cell alias can map its parameters into a larger payload.
+      // Only direct Cell syntax names that payload in its first argument.
+      if (
+        isCellCapabilityKind(targetKind) &&
+        resolvedWrapper?.node !== originalNode
+      ) {
+        return undefined;
+      }
       return originalNode;
     }
     if (resolvedWrapper?.kind === targetKind) {
@@ -990,6 +1002,8 @@ export class CommonFabricFormatter implements TypeFormatter {
           : { default: defaultValue }) as MutableJSONSchemaObj;
       }
       (valueSchema as any).default = defaultValue;
+    } else {
+      reportUnresolvedDefault(context, defaultTypeNode);
     }
 
     return valueSchema;
@@ -1849,28 +1863,35 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     // Handle array literals (tuples) like [1, 2] or ["item1", "item2"]
     if (ts.isTupleTypeNode(typeNode)) {
-      return typeNode.elements.map((element) =>
-        this.#extractDefaultValueFromNode(element, context)
-      );
+      const values: unknown[] = [];
+      for (const element of typeNode.elements) {
+        const value = this.#extractDefaultValueFromNode(element, context);
+        if (value === undefined) return undefined;
+        values.push(value);
+      }
+      return values;
     }
 
-    // Handle object literals like { theme: "dark", count: 10 }
     if (ts.isTypeLiteralNode(typeNode)) {
       const obj: Record<string, unknown> = {};
       for (const member of typeNode.members) {
-        if (ts.isPropertySignature(member) && member.name && member.type) {
-          const propName = getPropertyNameText(
-            member.name,
-            context.typeChecker,
-          );
-          if (!propName) {
-            continue;
-          }
-          obj[propName] = this.#extractDefaultValueFromNode(
-            member.type,
-            context,
-          );
+        if (!ts.isPropertySignature(member) || !member.name || !member.type) {
+          const type = context.typeRegistry?.get(typeNode) ??
+            context.typeChecker.getTypeFromTypeNode(typeNode);
+          return isEmptyObjectDefaultType(type, context.typeChecker)
+            ? {}
+            : undefined;
         }
+        const propName = getPropertyNameText(member.name, context.typeChecker);
+        if (propName === undefined) return undefined;
+        const value = this.#extractDefaultValueFromNode(member.type, context);
+        if (value === undefined) return undefined;
+        Object.defineProperty(obj, propName, {
+          value,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
       }
       return obj;
     }
@@ -1906,8 +1927,8 @@ export class CommonFabricFormatter implements TypeFormatter {
       return undefined;
     }
 
-    // Mapped records have type declarations but no `.valueDeclaration`.
-    if (isEmptyRecordType(type, context.typeChecker)) {
+    // Empty type literals and mapped records need no value declaration.
+    if (isEmptyObjectDefaultType(type, context.typeChecker)) {
       return {};
     }
 

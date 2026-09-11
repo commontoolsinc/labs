@@ -12,8 +12,9 @@ document's hash is well-founded.
 Design; the readers-first resolution infrastructure (Phase 0 of
 [the implementation plan](../history/plans/content-addressed-schemas-phase-0.md))
 has landed, and Phases 1 and 2 ship together behind the
-`contentAddressedSchemas` flag (on by default): links and `$alias`
-bindings stamp references with commits materializing each closure into
+`contentAddressedSchemas` flag (on by default): links, `$alias`
+bindings, and a result document's `schema` metadata stamp references
+with commits materializing each closure into
 the destination space, and a selector normalizes for the wire — the
 reference form only when its whole closure is confirmed persisted in
 the target space, the fully inline form (recomposed through the realm
@@ -22,11 +23,13 @@ loud server error for a selector reference nothing backs. The
 connection-scoped
 transport experiment (`syncSchemaCasV1`, unmerged) is not being pursued;
 this design is the storage-side successor for link positions, and a
-reference at rest never needs transport compression.
+reference at rest never needs transport compression. Code documents
+(§ Code documents) share the namespace and its rules: the compile cache
+stores each module's text as one, and its records link to them.
 
 ## Last Updated
 
-2026-08-15
+2026-09-10
 
 ## Motivation
 
@@ -105,6 +108,55 @@ A schema document is a `cid:` document whose value is a JSON Schema:
   store — delivery, traversal, and commit validation — resolve `cid:`
   documents at space scope. (Direct-registry reuse across spaces is
   hash-verified, so a divergent copy could never enter it.)
+
+### Code documents
+
+A code document is a `cid:` document whose value is a string: the authored
+source of one module, or its compiled output. It is the second kind of
+content the `cid:` namespace holds, and the larger.
+
+- **Id**: `cid:<taggedHash>` where the hash is `taggedHashStringOf(code)`,
+  the general `fid1` content hash of the string itself. Nothing but the
+  string enters the hash, so two modules with identical text share one
+  document however many records name it.
+- **Content**: `{ "value": "<code>" }` and nothing else. No filename,
+  identity, imports, or source map travels inside it; those stay on the
+  record that links to it, and the document says nothing about where its
+  text came from.
+- **Write**: the same idempotent blind write as a schema document, through
+  the transaction's `stageContentAddressedDocument`, which derives the id from the
+  content it is handed, so a code document can never be installed under a
+  hash its content does not produce. The record that links to it is written
+  in the same transaction.
+- **Verification**: the commit boundary re-hashes every `cid:` set's
+  content against its id and refuses a mismatch, so nothing lands in the
+  namespace that a reader cannot verify; a schema document's interned hash
+  is the same value, so one rule covers both kinds. A reader re-hashes the
+  string it resolves against the id the record's link names, so a document
+  that reached a replica by another route holding other content is refused
+  at load.
+- **Per space, by the writer**: the compile cache installs a code document
+  into the space of every record that links to it, in the same transaction
+  as the record, so a piece's code loads from the space the piece lives in
+  and no other space has to be reachable for it. That is a writer's
+  practice, not a reader's rule: a link that names a code document in
+  another space is a valid link, and a reader that follows one verifies
+  the resolved string against the linked id exactly as it does within a
+  space. No same-space guard applies on the read side.
+- **No envelope**: a code document carries no `cfc` metadata. It is a
+  runtime surface outside labeling, like a schema document: immutable,
+  named by its content, and excluded from schema write policy and the flow
+  join. A link written into a labeled record that names a `cid:` document
+  records no link-write policy input, since the document can carry nothing
+  a label would describe. Provenance stays on the record: the compile
+  cache's runtime-minted integrity atom labels the record, whose link and
+  map it covers, while the hash covers the bytes.
+- **Retention**: permanent, as for every `cid:` document. Every code
+  version ever compiled into a space stays there.
+
+A record written before code documents existed holds its code inline as a
+string, and readers accept both forms. Nothing rewrites an existing record;
+only new writes use a code document.
 
 ### Decomposition
 
@@ -248,6 +300,71 @@ schedule as the link flip, which retires the standing "`$alias` schemas
 travel inline indefinitely" carve-out in
 `packages/memory/v2/schema-table-links.ts`.
 
+### References in result-schema metadata
+
+A stored document's reserved root member `schema`
+(`EntityDocument.schema`, [the data model](memory-v2/01-data-model.md))
+carries the document's own description: the result schema a piece's setup
+writes for its result document, and the shape a receipt-only handling
+writes for what it stored. It is a schema position in the link spelling,
+with a grammar of exactly two forms:
+
+- **Inline**: a self-contained schema carrying no `cid:` reference.
+- **Reference**: a single-member `{ "$ref": "cid:<hash>" }` root, the
+  `#/$defs/<name>` fragment form included.
+
+```jsonc
+{
+  "value": { "items": [] },
+  "schema": { "$ref": "cid:fid1:xyz…" },
+}
+```
+
+There is no third form. A `cid:` reference nested inside an inline schema,
+or a root reference with sibling keywords, is refused wherever the member
+is written or read — at the writer (the transaction refuses the write
+before it stages), at the commit boundary (a `set`'s member, and the
+post-patch document of any patch sequence whose pointers reach
+`/schema`), and on the read side (result assembly fails the query, arrival
+validation quarantines the document) for malformed state that predates
+the enforcement or was written out of band. Keeping the grammar to two
+forms is what lets a reader recompose a reference without merging two
+schema-resource scopes.
+
+The writer (`writeResultSchemaMeta`, `packages/runner/src/result-schema-meta.ts`)
+decomposes the schema as a link writer does, registers the closure, and
+stamps the reference; the transaction's schema-document staging reads the
+`schema` member of a written document — or a write made at that member —
+the way it reads a link position, so the closure travels with the
+reference. A trivial schema (`{}`, `true`) stays inline, as on a link, and
+so does a schema decomposition refuses. Unlike a link schema, the metadata
+is not sanitized: it describes the document in full, `asCell` entries
+included, which is what lets a reader recover a typed handle from it.
+
+Readers take the metadata back in the inline form every consumer walks
+(`readResultSchemaMeta`), recomposed through the realm registry once the
+closure is complete there; a reference whose closure is not yet at hand is
+returned as stored, and the read-time resolver fails closed on it until
+the documents arrive. That is the one condition a reader tolerates: a
+malformed member, or a recomposition that fails over a complete closure,
+is a defect and throws. The CFC commit path, which reads the member
+through its own transaction, resolves each closure document space-first
+with content verification, the registry supplying only what the space
+does not hold — the same read policy as a stored envelope root.
+
+Every layer that collects a document's schema-document obligations reads
+this member alongside its link positions: the commit boundary, result
+assembly, and arrival validation. That includes every `cid:` document.
+Content addressing hashes `.value` alone, so a document's `schema` member
+is immutable and first-writer-wins under the `cid:` immutability rule
+without being cryptographically bound to the id, and nothing
+distinguishes a schema document from a blob whose value happens to be
+schema-shaped — so no layer treats one differently from the other. A
+document class that needs its schema bound to its identity puts the
+schema inside its hashed value. A patch BELOW `/schema` edits inside a
+stored schema, the same shape as the inside-a-link gap under Resolution,
+and is left to read-side assembly the same way.
+
 ### References in selectors
 
 `SchemaPathSelector.schema` accepts the same reference form. This is what
@@ -336,10 +453,11 @@ not deletions.
 
 The commit boundary also validates the closure a commit's content
 references: every schema ref introduced by a set's document, a patch's
-own values, an installed schema document's own refs, or the
-`cfc.schemaHash` a document's stored CFC envelope names (in a
-non-`cid:` set's value, or in the post-patch document of any patch
-sequence whose pointers can reach the reserved `cfc` member — a `cid:`
+own values, an installed schema document's own refs, any document's
+reserved `schema` metadata member (`cid:` documents included), or the
+`cfc.schemaHash` a document's stored CFC envelope names (in a non-`cid:`
+set's value, or in the post-patch document of any patch sequence whose
+pointers can reach the reserved `cfc` or `schema` member — a `cid:`
 document's own `cfc` member is deliberately not a metadata position and
 is never collected) must be backed —
 in the same commit or already stored in the space — by a document whose
@@ -397,8 +515,9 @@ exactly two guarantees, both about delivery rather than about values:
   schema reference embedded in delivered documents resolves within the
   delivered set. Enforcement sits at the result-assembly boundary: after
   traversal establishes the documents being delivered, the server scans
-  each complete document — a link schema anywhere in its value, or a
-  delivered schema document's own refs — verifies each referenced
+  each complete document — a link schema anywhere in its value, its
+  `schema` metadata member, or a delivered schema document's own refs —
+  verifies each referenced
   closure against the delivering space's own store, and joins the whole
   closure to the delivered set and watch set. A missing or forged
   closure document fails the query loudly: the write-side guarantee
@@ -438,8 +557,9 @@ exactly two guarantees, both about delivery rather than about values:
 
 Arrival mirrors the assembly pass rather than trusting it: BEFORE a frame
 applies, every schema ref its documents embed — a registered `cid:`
-schema document's own refs, or a link schema anywhere in an ordinary
-document's value — must reach a document the prospective frame or the
+schema document's own refs, a link schema anywhere in an ordinary
+document's value, or an ordinary document's `schema` metadata member —
+must reach a document the prospective frame or the
 stored replica holds whose content passes the identity check. Verified
 content, never mere presence: a forged local copy fails even when the
 realm registry holds a valid twin from another space, and content that
@@ -502,7 +622,8 @@ delivery and traversal split the work in two layers:
   the space does not hold selects nothing) lives on the same reads.
   Traversal does not recurse into `cid:` documents.
 - **Result assembly** owns delivery: it scans every complete document the
-  query delivers, verifies each referenced closure against the space's
+  query delivers — link positions and the `schema` metadata member —
+  verifies each referenced closure against the space's
   own store, and joins it to the delivered set and watch set — failing
   the query on a hole. A refresh revalidates the established delivery
   state too, so a corrupted dependency fails even under an unchanged
@@ -576,10 +697,12 @@ playbook:
   with the readers so no writer flag can ever produce a reference the
   boundary would not accept.
 - **Phase 1 — write references on links (flag-gated).** Decomposition +
-  same-transaction document installs; links carry references. Old inline
+  same-transaction document installs; links carry references, and so
+  does a result document's `schema` metadata. Old inline
   links keep reading forever — links rewrite on every re-instantiation, so
-  inline forms age out without a data migration. A canary pins the inline
-  vintage.
+  inline forms age out without a data migration, and an inline `schema`
+  member rewrites the next time its piece's setup runs. A canary pins the
+  inline vintage.
 - **Phase 2 — clients send references in selectors, and `$alias`
   bindings shed their embedded schemas.** Watch specs and one-shot
   queries carry references for persisted schemas. The server side
@@ -637,15 +760,14 @@ playbook:
    measure, and only then consider an inline-below-N-bytes rule — a
    threshold changes document identity, so it must be part of the
    decomposition's versioned contract, not a tuning knob.
-2. **Server-side integrity enforcement.** Partially resolved: the commit
-   boundary rejects mutations of `cid:` documents and validates the
-   referenced schema closure (presence and content identity, transitively)
-   for every commit, one documented patch shape excepted. What remains
-   open is generic first-install
-   verification for `cid:` documents nothing references — the boundary
-   cannot name an unreferenced document's class, so a forged blob-or-other
-   install is still confined to its space and fails closed when first
-   referenced.
+2. **Server-side integrity enforcement.** Resolved for content: the commit
+   boundary rejects mutations of `cid:` documents, refuses every `cid:` set
+   whose content does not hash to its id — a first installation nothing
+   references included — and validates the referenced schema closure
+   (presence, transitively) for every commit. What remains is the one
+   documented patch shape: a reference introduced by a patch that edits
+   inside an existing link's schema escapes commit-time collection, and
+   read-side assembly is what catches it.
 3. **Fetch-once for immutable documents.** Every pull is a watch add, so
    schema documents permanently grow the session watch set even though they
    can never change. Quiet but not free; a fetch-without-subscribe

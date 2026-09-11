@@ -79,7 +79,7 @@ import {
 import { EffectsChannel } from "./speculation/effects-channel.ts";
 import { waveRunContextOf } from "./executor/wave.ts";
 import { Action, Scheduler } from "./scheduler.ts";
-import { entityKey } from "./scheduler/keys.ts";
+import { entityKey, entityNameKey } from "./scheduler/keys.ts";
 import {
   type CommitBackpressurePolicy,
   resolveCommitBackpressure,
@@ -156,7 +156,6 @@ import {
 } from "./storage/reactivity-log.ts";
 import { isRetryableCommitRejection } from "./storage/rejection.ts";
 import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
-import { entityNameKey } from "./scheduler/keys.ts";
 import { toURI } from "./uri-utils.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
@@ -265,13 +264,14 @@ export interface ExperimentalOptions {
   modernCellRep?: boolean | undefined;
 
   /**
-   * Link writers replace inline schemas with references to
+   * Schema writers replace inline schemas with references to
    * content-addressed schema documents
    * (`docs/specs/content-addressed-schemas.md`, Phases 1 and 2): link
-   * writers stamp references, and selectors externalize opportunistically
-   * when their closure is already persisted in the target space. Gates
-   * emission only; readers and the server accept both forms
-   * unconditionally. Defaults to off.
+   * writers and `$alias` bindings stamp references, a result document's
+   * `schema` metadata takes the same reference form, and selectors
+   * externalize opportunistically when their closure is already persisted
+   * in the target space. Gates emission only; readers and the server
+   * accept both forms unconditionally. Defaults to on.
    */
   contentAddressedSchemas?: boolean | undefined;
 
@@ -2704,6 +2704,7 @@ export class Runtime {
     });
     if (this.#tearingDownWrites) return Promise.resolve(teardownResult());
     const tx = this.edit(options);
+    this.scheduler.beginReadAttempt(tx, "editWithRetry");
     tx.tx.immediate = true;
     (tx.tx as { deferRunnerStartUntilCommit?: boolean })
       .deferRunnerStartUntilCommit = true;
@@ -2729,7 +2730,12 @@ export class Runtime {
         tx.abort("editWithRetry stopped because the runtime is disposing");
         return Promise.resolve(teardownResult());
       }
-      this.prepareTxForCommit(tx);
+      try {
+        this.prepareTxForCommit(tx);
+      } catch (error) {
+        if (tx.status().status === "ready") tx.abort(error);
+        throw error;
+      }
       return tx.commit().then(async ({ error }) => {
         if (error) {
           if (maxRetries > 0 && isRetryableCommitRejection(error)) {

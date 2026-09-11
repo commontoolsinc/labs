@@ -301,6 +301,14 @@ export class PatternIndexClient {
   }
 
   /**
+   * The DID every call from this client is signed as, which is the principal
+   * the index attributes what this client did to.
+   */
+  get did(): string {
+    return this.#signer.did();
+  }
+
+  /**
    * Posts `payload` to one index function and returns its parsed answer.
    *
    * @throws PatternIndexError when the index answers non-2xx, or when a 2xx

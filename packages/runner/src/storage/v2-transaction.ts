@@ -1115,8 +1115,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     return new this(manager);
   }
 
-  isSchemaDocPersisted(space: MemorySpace, hash: string): boolean {
-    return this.#storage.isSchemaDocPersisted?.(space, hash) ?? false;
+  isContentAddressedDocPersisted(space: MemorySpace, hash: string): boolean {
+    return this.#storage.isContentAddressedDocPersisted?.(space, hash) ?? false;
   }
 
   status(): StorageTransactionStatus {
@@ -1983,7 +1983,7 @@ export class V2StorageTransaction implements IStorageTransaction {
    */
   #mustDeliverSchemaDoc(space: MemorySpace, id: string): boolean {
     return id.startsWith("cid:") &&
-      !this.isSchemaDocPersisted(space, id.slice("cid:".length));
+      !this.isContentAddressedDocPersisted(space, id.slice("cid:".length));
   }
 
   /**
@@ -2949,9 +2949,9 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     for (const read of this.#readActivities) {
       const meta = read.meta ?? EMPTY_META;
-      if (isReadIgnoredForScheduling(meta)) {
-        continue;
-      }
+      const ignored = isReadIgnoredForScheduling(meta);
+      const attempted = isReadMarkedAsAttemptedWrite(meta);
+      if (ignored && !attempted) continue;
 
       const instance = this.#instanceOf(read.scope);
       const address = {
@@ -2962,15 +2962,15 @@ export class V2StorageTransaction implements IStorageTransaction {
         path: read.path,
       };
 
+      if (attempted) {
+        attemptedWrites ??= [];
+        attemptedWrites.push(address);
+      }
+      if (ignored) continue;
       if (read.nonRecursive === true) {
         shallowReads.push(address);
       } else {
         reads.push(address);
-      }
-
-      if (isReadMarkedAsAttemptedWrite(meta)) {
-        attemptedWrites ??= [];
-        attemptedWrites.push(address);
       }
     }
 

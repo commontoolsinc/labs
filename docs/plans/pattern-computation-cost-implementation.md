@@ -1,10 +1,26 @@
 # Pattern computation cost: implementation sequence
 
-Status: A1/A2 instrumentation is shipped in
-[PR #7246](https://github.com/commontoolsinc/labs/pull/7246). The controlled A0
-fixture, accounting and reporting regressions, and dashboard are being reconciled
-in [PR #7241](https://github.com/commontoolsinc/labs/pull/7241). A3's local
-implementation requires adaptation to the shipped accounting API before review.
+Status: A1/A2 instrumentation shipped in #7246; worker control shipped in #7256.
+The controlled A0 fixture, accounting regressions, and dashboard shipped in
+#7241, with browser and remote-row demonstrations added in #7264. A3 budgets
+landed in #7257 after full validation, all 69 CI gates, and clean Cubic and
+antagonistic reviews. A4's browser benchmark shipped in #7261; count limits
+landed in #7282. C1's remote-row reproductions and C3's inline-element dependency
+repair landed in #7265; removal/restoration acceptance landed in #7285 and
+first-browser-materialization acceptance landed in #7302. Reconnect repair
+landed in #7308 and rendered reconnect acceptance in #7312. C4's repository-only
+reactive row migration is implemented and validated on the scoped-child and
+bounded-render repairs in #7313 and #7315. Row-invalidation implementation and validation are complete;
+serving-host acceptance is in review in #7331. B1/B2's contract landed in
+#7294 and its typed lookup foundation landed in #7304. Producer lowering,
+bucket maintenance, and joins remain pending.
+
+B3's named aggregates are implemented and validated in
+[PR #7259](https://github.com/commontoolsinc/labs/pull/7259), with
+[contracts](../features/collection-aggregates.md) and
+[measured update and initialization costs](../history/development/performance/2026-09-incremental-aggregates.md).
+The aggregate comparison precedes B1/B2; index contracts and keyed lookup are
+the next collection-operator priority.
 
 This tracker executes the design in
 [PR #7155](https://github.com/commontoolsinc/labs/pull/7155), reviewed at commit
@@ -44,7 +60,7 @@ deferred and does not block completion of the active work.
 | 6     | B1/B2 contracts      | 2; incorporate C1 findings                  | Written index, lookup, and join contracts              |
 | 7     | B1, B4               | 6                                           | Incremental grouping and unique-key indexing           |
 | 8     | B2, B4               | 7                                           | Keyed lookup and incremental join                      |
-| 9     | B3 contracts, B3, B4 | 8                                           | Deterministic named aggregates                         |
+| 9     | B3 contracts, B3, B4 | 2                                           | Deterministic named aggregates                         |
 | 10    | C2, C3, C4           | 5; use 2 for cost evidence                  | Remote updates work through reactive rows              |
 | 11    | B5, B6               | 3, 4, 8, 9; coordinate with 10              | Measured lunch-poll migration                          |
 | 12    | E1, E2, E3           | 2 for measurements; 7–9 for operator advice | Measured guidance and warning diagnostic               |
@@ -88,9 +104,9 @@ replacement advice requires a shipped replacement.
       are the initial boundary; event dispatch and commit work must be added
       before claiming whole-step budget coverage.
   - [x] Define proxy access events, actual link crossings, distinct documents
-        identified by replica document object, and registered dependencies. Specify
-        repeated reads, missing values, enumeration, shallow reads, and memo
-        hits. A read activity is not interchangeable with a proxy access.
+        identified by replica document object, and registered dependencies.
+        Specify repeated reads, missing values, enumeration, shallow reads, and
+        memo hits. A read activity is not interchangeable with a proxy access.
   - [x] Define per-run ownership, cumulative totals, and per-step aggregation.
         Distinguish a union of documents across a step from a sum of per-run
         cardinalities. Define failure, restart, idempotency verification, nested
@@ -137,23 +153,27 @@ durations are used as performance evidence.
 
 ## 3–4. Defend and calibrate measurements: A3–A5
 
-- [ ] **A3 — Add opt-in pattern-test budgets.** The
-      [budget contract](read-cost-budgets.md) defines the pending surface,
-      execution coverage, and pass/fail demo.
-  - [ ] Define the test declaration and diagnostics for per-action-run and
+- [x] **A3 — Add opt-in pattern-test budgets.** The
+      [budget contract](../features/read-accounting.md#pattern-test-budgets) defines the surface, execution
+      coverage, and pass/fail demo.
+  - [x] Define the test declaration and diagnostics for per-action-run and
         per-step-through-settle limits, with separate initialization limits.
-  - [ ] Include every execution in a step, including builtins, coordinators,
+  - [x] Include every execution in a step, including builtins, coordinators,
         failed attempts, and short-lived actions according to A1a's contract. Do
         not depend solely on retained graph snapshots for enforcement.
-  - [ ] Test exact-boundary pass, one-over failure, one expensive run, and many
+  - [x] Test exact-boundary pass, one-over failure, one expensive run, and many
         individually cheap runs exceeding the step budget. Verify unbudgeted
         tests preserve their behavior.
-- [ ] **A4 — Add the read-side benchmark.**
-  - [ ] Follow [BENCHMARKS.md](../development/BENCHMARKS.md); measure one vote
+- [x] **A4 — Add the read-side benchmark.**
+  - [x] Follow [BENCHMARKS.md](../development/BENCHMARKS.md); measure one vote
         settling with its tally on screen across declared collection sizes.
-  - [ ] Preserve the existing write-burst benchmark as a separate workload.
-        Record reads, runs, commits, and timing; assert counts in regression
-        tests and report timing as benchmark trends.
+  - [x] Preserve the existing write-burst benchmark as a separate workload.
+        Record reads, runs, commits, and timing in
+        [PR #7261](https://github.com/commontoolsinc/labs/pull/7261).
+  - [x] Add read-count regression limits in
+        [PR #7282](https://github.com/commontoolsinc/labs/pull/7282): all six
+        functional assertions and render limits pass at 74, 296, and 1,184 votes.
+        Benchmark timing remains a reported trend.
 - [ ] **A5 — Explain probe/product differences.**
   - [ ] Compare matched inputs in the headless probe and browser, varying worker
         boundary and single-space/cross-space voter links separately.
@@ -163,27 +183,119 @@ durations are used as performance evidence.
         access or environment requirements explicit if unavailable; do not
         substitute a synthetic result for deployed evidence.
 
+### Validation evidence for the A3 slice
+
+[PR #7257](https://github.com/commontoolsinc/labs/pull/7257) implements the
+checked A3 acceptance items.
+[Read-accounting tests](../../packages/runner/test/read-accounting.test.ts)
+cover transaction ownership, aborted attempts, queued preflight setup failures,
+fan-out, and asynchronous writebacks. The
+[budget collector tests](../../packages/cli/test/read-budgets.test.ts) cover
+exact boundaries, total/per-run separation, and action/attempt attribution.
+The [CLI budget fixtures](../../packages/cli/test/test-runner-read-budgets.test.ts)
+exercise declarations, functional-failure preservation, rejected initialization
+settlement without restarting it, render enforcement, many cheap runs, and one
+expensive run.
+
+Compiler acceptance also covers stored fields named after Cell methods,
+optional Cell handles, and whole-value reads passed to helpers. The generated
+call-center integration and pinned default-app vintage replay pass with complete
+stored shapes preserved. Full affected-package validation and all 69 CI gates
+passed before merge, with clean Cubic and antagonistic reviews.
+
 ## 5, 10. Repair incremental correctness: C1–C4
 
-- [ ] **C1 — Reproduce both documented failures.**
-  - [ ] Add a multi-replica nested-filter case whose reader has not locally
+- [x] **C1 — Reproduce both documented failures.**
+  - [x] Add a multi-replica nested-filter case whose reader has not locally
         materialized every vote.
-  - [ ] Add a remote element-update case asserting rendered per-row content.
+  - [x] Add a remote element-update case asserting rendered per-row content.
         Start beside the existing lunch-poll keyed-votes integration tests.
-  - [ ] Establish failure before repair, or demonstrate that the current system
+  - [x] Establish failure before repair, or demonstrate that the current system
         already passes the faithful reproduction. Record the cause or evidence
         before deciding what C2/C3 need to change.
-- [ ] **C2 — Repair partial materialization.** Verify complete inputs under cold
-      reads, remote inserts/removals, and reconnect where relevant.
-- [ ] **C3 — Repair remote row invalidation.** Verify affected rows update,
-      stable element identities survive, and untouched rows do not rerun.
-- [ ] **C4 — Restore reactive lunch-poll rows.** Remove the workaround and its
-      explanatory comment only after both regressions pass. Re-run A4 and
-      coordinate with B5 to keep one coherent pattern migration.
+  - [x] Exercise two reader transport outages with nested and mapped rows;
+        verify catch-up and subsequent updates through headless result reads.
+  - [x] Verify rendered rows after reconnect.
+
+  The
+  [independent-replica probes](../../packages/patterns/integration/reactive-vote-rows.test.ts)
+  assert nested-filter membership and derived tally updates. The
+  [browser tests](../../packages/patterns/integration/reactive-vote-rows-browser.test.ts)
+  cover same-space and cross-space profiles, remote colors, profile-only edits,
+  membership additions, removal/restoration, ranking changes, and nested mapped
+  swatches. Removal checks pin the empty row, absence of nested swatches,
+  reordering, and exactly one swatch after restoring the same keyed vote. A fresh
+  browser reader first materializes a vote and renamed profile after both were
+  changed remotely, then observes further edits while subscribed. Cross-space
+  profiles are created in a separate transaction and edited directly in their
+  own space. Headless result reads explicitly pull data, so browser rendering
+  owns the passive-update check. The optional browser reconnect mode closes
+  live reader sockets around color, profile, and removal writes; all four
+  nested/mapped and same/cross-space cases pass. The
+  [repeatable relay procedure](../development/TESTING.md#browser-row-reconnect-acceptance)
+  keeps the writer connected and asserts that each outage closes live sockets.
+  The [reconnect probe](../../packages/patterns/integration/reactive-vote-rows-reconnect.test.ts)
+  closes the reader's storage sockets while the writer changes membership and
+  profiles. Ordinary memory queries wait for session restoration before
+  constructing their requests. This guards the handshake-to-session interval;
+  a subsequent disconnect during request issue remains a separate boundary.
+  These synthetic probes cover repository behavior. Live poll changes require
+  coordination with Mike.
+
+  C3's landed fix records the mutable inline element used when resolving a
+  nested array to a content-addressed snapshot. The
+  [cell callback regression](../../packages/runner/test/cell-callbacks.test.ts)
+  fails without the fix after initial demand settles, then passes with the fix;
+  it also verifies that changing a neighboring inline element causes no rerun.
+  Four browser cases and the full runner suite (1,411 tests / 8,764 steps) pass
+  before the current-main merge. After integrating main `ce3602b18a`, all 46
+  type-check groups and 142 focused runtime checks pass. The fix landed in #7265
+  with all 69 CI gates and clean Cubic and antagonistic reviews. C3 remains open
+  for its remaining acceptance checks.
+
+  To record synthetic browser evidence with a local test server, set `API_URL`
+  and `FRONTEND_URL`, then run:
+
+  ```sh
+  CF_ROW_REPRO_ARTIFACT_DIR=/tmp/reactive-row-artifacts deno test -A packages/patterns/integration/reactive-vote-rows-browser.test.ts
+  ```
+
+  The artifact directory receives screenshots and assertion metadata for all
+  four cases. Live poll access requires coordination with Mike.
+
+- [x] **C2 — Repair partial materialization.** Complete inputs are covered by
+      C1's cold-browser, remote insertion/removal, and reconnect acceptance.
+      The session-restoration query repair is merged in #7308; rendered
+      reconnect acceptance is merged in #7312. The same-space and cross-space
+      fixtures verify complete vote and profile inputs on first demand, after
+      membership changes, and after two reader outages. No additional
+      materialization change is required for these reproductions. Disconnects
+      during request issue remain the separate boundary stated above; C3's
+      producer-identity and rerun checks are tracked independently.
+- [x] **C3 — Repair remote row invalidation.** Client and serving-host
+      acceptance verify correct derived values, stable normalized output links
+      and producer identities, and no execution of the untouched row producer
+      after edits to each of two linked rows. The
+      [client case](../../packages/patterns/integration/reactive-vote-rows.test.ts)
+      uses independent worker replicas and merged in #7329. The
+      [serving-loop case](../../packages/runner/test/executor-serving-loop.test.ts)
+      observes the actual serving runtime and waits for the authored input
+      watermark; a client diagnostic graph does not contain those actions.
+      The dashboard records serving acceptance as in review until #7331 lands.
+- [x] **C4 — Restore reactive lunch-poll rows.** Direct reactive option and
+      voter maps use the scoped callback-child repair. Repository acceptance
+      includes 93 assertions, unchanged A4 budgets at all three sizes, and
+      concurrent two-browser voting. The
+      [acceptance record](../history/development/performance/2026-09-11-reactive-lunch-rows.md)
+      states measurement limits. B5's operator migration remains separate;
+      deployed poll updates require coordination with Mike.
 
 ## 6–9. Complete the collection algebra: B1–B4
 
-- [ ] **B1 contract — Specify `groupBy` and `keyBy` separately.**
+- [ ] **B1 contract — Specify `groupBy` and `keyBy` separately.** The
+      [proposed index contract](collection-index-contract.md) records semantic
+      decisions and acceptance tests. The typed index handle and lowering
+      prototype remain prerequisites to completing this contract.
   - [ ] Key domain and equality, including resolved link identity and
         retargeting a key link without editing its containing element.
   - [ ] Duplicate-key handling that remains deterministic for unordered input;
@@ -205,21 +317,23 @@ durations are used as performance evidence.
         consumers do not rerun and measure maintenance work as size grows.
 - [ ] **B2 implementation — Build keyed lookup, then join.** Test lookup and
       join contracts, both-side updates, and affected-row-only invalidation.
-- [ ] **B3 contract — Specify deterministic aggregates.**
-  - [ ] Define combine order from the current collection, independent of edit
+- [x] **B3 contract — Specify deterministic aggregates.**
+  - [x] Define combine order from the current collection, independent of edit
         history; define floating-point behavior explicitly.
-  - [ ] Define ties, empty collections, NaN, infinities, and signed zero for
+  - [x] Define ties, empty collections, NaN, infinities, and signed zero for
         `sum`, `min`, `max`, `minBy`, and `maxBy`; define predicate counting.
-- [ ] **B3 implementation — Add `count`, `sum`, `min`/`max`, `minBy`/`maxBy`.**
-  - [ ] Maintain partial aggregates using existing element identities and
+- [x] **B3 implementation — Add `count`, `sum`, `min`/`max`, `minBy`/`maxBy`.**
+  - [x] Maintain partial aggregates using existing element identities and
         deterministic combination; avoid inverse subtraction.
-  - [ ] Reach identical results through different insertion, deletion, reorder,
+  - [x] Reach identical results through different insertion, deletion, reorder,
         and edit histories. Test count bounds on single-element updates and
         initialization separately.
-  - [ ] Keep ordinary `reduce` as the full-rerun order-dependent operation.
+  - [x] Keep ordinary `reduce` as the full-rerun order-dependent operation.
 - [ ] **B4 — Publish contracts and complexity with each operator.** Update
       public doc comments, pattern-author documentation, and executable examples
-      in the same slice that ships the API.
+      in the same slice that ships the API. The aggregate portion is documented
+      in [collection aggregates](../features/collection-aggregates.md); index
+      and join documentation remains pending.
 
 **Deferred B3a:** Reconsider restricted append folds only after B1–B3 ship and a
 remaining use case justifies them. Requires a separate contract excluding
@@ -238,25 +352,39 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## 12–13. Guidance and related runtime work: D, E
 
-- [ ] **E1 — Measure identical `computed` and `lift` collection loops** under
-      current defaults and compare declared read width and access counts.
-- [ ] **E2 — Publish the measured advice** where pattern authors encounter
+- [x] **E1 — Measure identical `computed` and `lift` collection loops** under
+      current defaults and compare declared read width and access counts. The
+      [reproducible comparison](../history/development/performance/2026-09-11-computed-lift-collection-loops.md)
+      validates three forms at 32, 128, and 512 linked rows, including unread-field
+      edits. The dashboard tracks publication and review status.
+- [x] **E2 — Publish the measured advice** where pattern authors encounter
       collections, `computed`, and `lift`. Explain nested-scan cost and use only
-      available operators in replacement examples.
-- [ ] **E3 — Add a transformer warning** through the existing diagnostic
+      available operators in replacement examples. The
+      [computed/lift guide](../common/concepts/computed/computed.md#collection-loop-cost)
+      and [collection guide](../features/collection-aggregates.md#choosing-a-collection-computation)
+      explain lazy read width, repeated scans, explicit cell receivers, numeric
+      contract differences, and measurement limits. The author index links both;
+      dashboard publication status remains separate.
+- [x] **E3 — Add a transformer warning** through the existing diagnostic
       collector. Test recognizable nested reactive scans and negative cases
       involving plain arrays and unrelated scopes; inspect warning volume across
       authored patterns before shipping. Escalation to error requires separate
       evidence about false positives.
+      The [diagnostic acceptance report](../history/development/performance/2026-09-11-nested-collection-scan-diagnostic.md)
+      records the focused cases, full transformer suite, and all five distinct
+      findings across 413 pattern entries. Publication and review remain visible
+      in the dashboard.
 - [ ] **D1 — Follow the remaining lazy-materialization work** in its
       [own plan](lazy-cell-materialization.md), including handlers and flag
       removal. Keep implementation ownership there.
 - [ ] **D2 — Re-run the A baseline when that dependency changes** and separate
       reduced access count from reduced per-access cost.
-- [ ] **D3 — Verify scoped snapshot memoization and measure its effect.**
-      Inspect existing snapshot-memo tests for metadata/epoch isolation,
-      invalidation, and journaling correctness; add missing coverage only where
-      needed. Measure label-view reuse before proposing further work.
+- [x] **D3 — Verify scoped snapshot memoization and measure its effect.**
+      The snapshot-memo suite passes 41 steps, including combined epoch/metadata
+      label-view isolation. The benchmark verifies one metadata read across
+      74, 296, and 1,184 requests in each scope. The
+      [verification report](../history/development/performance/2026-09-10-scoped-snapshot-memo.md)
+      records the control and measurement limits.
 
 ## 14. Validation and closeout
 
@@ -291,10 +419,19 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Define A3's budget declaration and extend measurement to event dispatch and
-commit work before enforcing whole-step budgets. Preserve separate
-initialization limits and include short-lived actions and failed attempts. The
-controlled A0 fixture is available for count comparisons; A4/A5 still need
-browser and cross-space measurements before product performance claims. Do not
-implement collection operators before the measurement and semantic gates above
-are satisfied.
+Continue the collection-operator implementation and its measured acceptance.
+C4's repository migration is
+implemented and validated; updating any deployed poll requires coordination
+with Mike. The first-materialization cases in
+[PR #7302](https://github.com/commontoolsinc/labs/pull/7302) pass all four
+nested/mapped and same/cross-space browser combinations.
+A4's browser benchmark and count limits are available. A5 still
+needs cross-space and deployed measurements before product performance claims.
+Live poll access requires coordination with Mike.
+
+For the pending collection operators, build on the typed lookup foundation in
+[PR #7304](https://github.com/commontoolsinc/labs/pull/7304), implement
+`groupBy`/`keyBy` and bucket maintenance against the
+[agreed index contract](collection-index-contract.md), then build the left join. Their
+measurements use the shipped counters and the aggregate comparison method; A4/A5
+gate deployed-product claims rather than operator implementation.

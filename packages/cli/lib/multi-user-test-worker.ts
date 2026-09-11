@@ -243,6 +243,7 @@ const stepPeekSchema = {
       },
     },
     skip: { type: "boolean" },
+    readBudget: true,
   },
 } as const;
 
@@ -255,7 +256,13 @@ function classifyStep(stepCell: Cell<unknown>, index: number): StepMeta {
     label?: string;
     await?: string;
     skip?: boolean;
+    readBudget?: unknown;
   };
+  if (peek?.readBudget !== undefined) {
+    throw new Error(
+      `Step ${index + 1}: read budgets are not supported in multi-user tests`,
+    );
+  }
   const skip = peek?.skip === true ? { skip: true } : {};
   if (typeof peek?.label === "string") {
     return { kind: "label", marker: peek.label, ...skip };
