@@ -126,7 +126,7 @@ describe("list deferred identity", () => {
       } finally {
         held.resolve();
         cancel();
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storage.close();
       }
     });
@@ -240,7 +240,7 @@ describe("list deferred identity", () => {
       }]);
     } finally {
       held.resolve();
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
       await storage.close();
     }
   });

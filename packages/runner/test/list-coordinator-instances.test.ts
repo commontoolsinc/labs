@@ -191,7 +191,7 @@ describe("list-coordinator-instances", () => {
                 identity,
               );
             } finally {
-              await actorRuntime.dispose();
+              await actorRuntime.dispose({ closeStorage: false });
               await actorStorage.close();
             }
           }
@@ -254,7 +254,7 @@ describe("list-coordinator-instances", () => {
         } finally {
           for (const cancel of cancellations) cancel();
           await storage.synced();
-          await runtime.dispose();
+          await runtime.dispose({ closeStorage: false });
           await storage.close();
           await server.close();
         }
