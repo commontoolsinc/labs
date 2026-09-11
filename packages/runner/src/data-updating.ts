@@ -588,14 +588,19 @@ export function initializeScopedArgumentSlots(
       path: [...container.path, key],
       schema: childSchema,
     };
-    if (Object.hasOwn(value, key)) {
-      if (!getServerExecutionConfig() || scope !== "session") continue;
+    const present = Object.hasOwn(value, key);
+    if (
+      getServerExecutionConfig() && scope === "session" &&
+      container.scope === "space"
+    ) {
       // The declaration is a link-value dependency, including changes that
       // preserve the containing object's key set and the reference address.
-      const target = sessionInitializationTarget(
-        tx.readValueOrThrow(childLink, { meta: linkResolutionProbe }),
-        childLink,
-      );
+      const target = present
+        ? sessionInitializationTarget(
+          tx.readValueOrThrow(childLink, { meta: linkResolutionProbe }),
+          childLink,
+        )
+        : { ...childLink, scope: "user" as const };
       if (!target) continue;
       let targetBlocked = false;
       const resolvedTarget = resolveLink(runtime, tx, target, "top", {
@@ -605,6 +610,18 @@ export function initializeScopedArgumentSlots(
         targetBlocked || resolvedTarget.pendingHopDoc ||
         !areNormalizedLinksSame(target, resolvedTarget)
       ) continue;
+      if (!present) {
+        changes.push(...normalizeAndDiff(
+          runtime,
+          tx,
+          childLink,
+          sessionInitializationLink(target, childLink),
+          argumentLink,
+          options,
+          { seen: new Map() },
+          undefined,
+        ));
+      }
       const parent = tx.readValueOrThrow({
         ...target,
         path: target.path.slice(0, -1),
@@ -649,6 +666,7 @@ export function initializeScopedArgumentSlots(
       ));
       continue;
     }
+    if (present) continue;
     changes.push(...scopedRedirectChanges(
       runtime,
       tx,

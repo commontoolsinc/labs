@@ -289,43 +289,69 @@ describe("scoped-session-initialization", () => {
     expect(user.key("count").getRaw({ lastNode: "top" })).toBeUndefined();
   });
 
-  for (const value of [7, undefined, "reference"] as const) {
-    it(`preserves a marked default's explicitly present ${String(value)} intermediate`, async () => {
+  for (const declared of [false, true]) {
+    for (const value of [7, undefined, "reference"] as const) {
+      it(`preserves an existing ${String(value)} user slot with a ${declared ? "marked" : "missing"} space declaration`, async () => {
+        const { raw, user } = await missingContinuation();
+        const reference = runtime.getCell(space, "explicit-target");
+        await reference.sync();
+        const seed = runtime.edit();
+        if (!declared) raw.withTx(seed).set({});
+        user.withTx(seed).set({
+          count: value === "reference" ? reference : value,
+        });
+        expect((await seed.commit()).error).toBeUndefined();
+        const before = user.key("count").getRaw({ lastNode: "top" });
+        const tx = runtime.edit();
+        initializeScopedArgumentSlots(
+          runtime,
+          tx,
+          raw.getAsNormalizedFullLink(),
+          schema,
+        );
+        expect((await tx.commit()).error).toBeUndefined();
+        expect(user.key("count").getRaw({ lastNode: "top" })).toEqual(before);
+        expect(Object.hasOwn(user.getRaw()!, "count")).toBe(true);
+        expect(
+          parseLink(raw.key("count").getRaw({ lastNode: "top" }), raw)?.scope,
+        ).toBe("user");
+        const write = runtime.edit();
+        if (value === "reference") {
+          reference.withTx(write).set(9);
+        } else {
+          raw.asSchema(schema).withTx(write).key("count").get()!.set(9);
+        }
+        expect((await write.commit()).error).toBeUndefined();
+        if (value === "reference") {
+          expect(raw.key("count").get()).toBe(9);
+          expect(user.key("count").getRaw({ lastNode: "top" })).toEqual(before);
+        } else {
+          expect(user.key("count").get()).toBe(9);
+        }
+        expect(
+          runtime.getCell(space, "inputs", undefined, undefined, "session")
+            .key("count").getRaw({ lastNode: "top" }),
+        ).toBeUndefined();
+      });
+    }
+
+    it(`preserves an explicitly undefined user container with a ${declared ? "marked" : "missing"} space declaration`, async () => {
       const { raw, user } = await missingContinuation();
-      const reference = runtime.getCell(space, "explicit-target");
-      await reference.sync();
+      const replace = runtime.edit();
+      if (!declared) raw.withTx(replace).set({});
+      user.asSchema<unknown>(undefined).withTx(replace).set(undefined);
+      expect((await replace.commit()).error).toBeUndefined();
       const tx = runtime.edit();
-      user.withTx(tx).set({ count: value === "reference" ? reference : value });
-      const before = user.withTx(tx).key("count").getRaw({ lastNode: "top" });
       initializeScopedArgumentSlots(
         runtime,
         tx,
         raw.getAsNormalizedFullLink(),
         schema,
       );
-      expect(user.withTx(tx).key("count").getRaw({ lastNode: "top" })).toEqual(
-        before,
-      );
       expect((await tx.commit()).error).toBeUndefined();
-      expect(Object.hasOwn(user.getRaw()!, "count")).toBe(true);
+      expect(user.getRaw()).toBeUndefined();
     });
   }
-
-  it("preserves an explicitly undefined user container", async () => {
-    const { raw, user } = await missingContinuation();
-    const replace = runtime.edit();
-    user.asSchema<unknown>(undefined).withTx(replace).set(undefined);
-    expect((await replace.commit()).error).toBeUndefined();
-    const tx = runtime.edit();
-    initializeScopedArgumentSlots(
-      runtime,
-      tx,
-      raw.getAsNormalizedFullLink(),
-      schema,
-    );
-    expect((await tx.commit()).error).toBeUndefined();
-    expect(user.getRaw()).toBeUndefined();
-  });
 
   for (const modern of [false, true]) {
     it(`preserves the declaration through the ${modern ? "modern" : "legacy"} wire representation without changing cause identity`, async () => {
