@@ -2047,6 +2047,16 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   ): void;
 
   /**
+   * Returns read-only schema inputs recorded for the document across scopes.
+   * Each query includes inputs appended since earlier queries, including a
+   * query that found none. Path and IFC relevance remain the caller's checks.
+   */
+  getCfcSchemaPolicyInputs(
+    space: MemorySpace,
+    id: string,
+  ): readonly Extract<WritePolicyInput, { kind: "schema" }>[];
+
+  /**
    * Whether `input` was recorded by the runtime, under
    * `runtimeWritePolicyAuthorization`.
    *

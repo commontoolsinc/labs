@@ -173,6 +173,9 @@ import {
  */
 const CURRENT_INSTANT = "now";
 
+/** The immutable result of a schema-input query for an unrecorded document. */
+const NO_SCHEMA_POLICY_INPUTS = Object.freeze([]);
+
 let nextReadMetaIdentity = 0;
 const readMetaIdentities = new WeakMap<Metadata, number>();
 
@@ -510,6 +513,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     referenceObservations: [],
     refusalDetails: [],
   };
+
+  #schemaPolicyInputs = new Map<
+    MemorySpace,
+    Map<string, Extract<WritePolicyInput, { kind: "schema" }>[]>
+  >();
 
   #reportedCfcRelevant = false;
   #reportedCfcPrepared = false;
@@ -1912,6 +1920,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // `compareWritePolicyInput` then re-hashes each element via the cache.
     const frozen = deepFreeze(input);
     this.#cfcState.writePolicyInputs.push(frozen);
+    if (frozen.kind === "schema") {
+      let documents = this.#schemaPolicyInputs.get(frozen.target.space);
+      if (!documents) {
+        documents = new Map();
+        this.#schemaPolicyInputs.set(frozen.target.space, documents);
+      }
+      let inputs = documents.get(frozen.target.id);
+      if (!inputs) {
+        inputs = [];
+        documents.set(frozen.target.id, inputs);
+      }
+      inputs.push(frozen);
+    }
     // Capture the identity active right now so writeAuthorizedBy is verified
     // against the trust context that authored this write, even if a later run
     // in the same transaction changes the identity.
@@ -1945,6 +1966,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-policy-input-added");
     }
+  }
+
+  /**
+   * Returns a read-only view of schema inputs for a document across scopes.
+   * Queries visit only that document's recorded schema inputs.
+   */
+  getCfcSchemaPolicyInputs(
+    space: MemorySpace,
+    id: string,
+  ): readonly Extract<WritePolicyInput, { kind: "schema" }>[] {
+    return readOnlyCfcView(
+      this.#schemaPolicyInputs.get(space)?.get(id) ?? NO_SCHEMA_POLICY_INPUTS,
+    );
   }
 
   isRuntimeWritePolicyInput(input: WritePolicyInput): boolean {
@@ -4044,6 +4078,14 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     authorization?: RuntimeWritePolicyAuthorization,
   ): void {
     this.#wrapped.recordCfcWritePolicyInput(input, authorization);
+  }
+
+  /** Delegates document schema-input queries to the wrapped transaction. */
+  getCfcSchemaPolicyInputs(
+    space: MemorySpace,
+    id: string,
+  ): readonly Extract<WritePolicyInput, { kind: "schema" }>[] {
+    return this.#wrapped.getCfcSchemaPolicyInputs(space, id);
   }
 
   isRuntimeWritePolicyInput(input: WritePolicyInput): boolean {
