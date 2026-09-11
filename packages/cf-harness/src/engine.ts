@@ -1025,6 +1025,16 @@ export class CfHarnessEngine {
   }
 
   /**
+   * The connector handles this run's console was launched against. A
+   * delegating parent hands them to the child engine, so a child's grants
+   * resolve from the configuration the parent's resolved from rather than
+   * from a second reading of the records behind it.
+   */
+  get connectorGrants(): readonly HarnessConnectorGrantSpec[] {
+    return this.#connectorGrants;
+  }
+
+  /**
    * Whether the run can reach the pattern index — either an injected factory
    * or `patternIndex` connection config. The prompt loop offers
    * `search_patterns` and `record_feedback` exactly when this holds.

@@ -19,6 +19,7 @@ import {
   resolveHandleToken,
 } from "../src/handle-table.ts";
 import type { HarnessFabricSession } from "../src/fabric-session.ts";
+import type { HarnessWellKnownGrant } from "../src/contracts/well-known-grants.ts";
 import {
   mintWellKnownGrants,
   resolveWellKnownGrantRefs,
@@ -147,6 +148,20 @@ describe("well-known-grants", () => {
       expect(resolveHandleToken(table, grants[0]!.token)).toBeDefined();
     });
 
+    it("records the handle table's canonical spelling of a reference, not the caller's", async () => {
+      // A connector grant's reference arrives from a loom record, which need
+      // not spell it the way the table stores it; two spellings of one address
+      // in run state and the table is the disagreement this closes.
+
+      const { table, grants } = await mintWellKnownGrants(undefined, "run-4", [
+        { name: "email", ref: `${MAIL_REF}  `, source: MAIL_GRANT.source },
+      ]);
+      const entry = table.entries.find((candidate) =>
+        candidate.token === grants[0]!.token
+      )!;
+      expect(grants[0]!.ref).toBe(entry.ref);
+    });
+
     it("carries a connector grant's source onto the record run state keeps", async () => {
       const { grants } = await mintWellKnownGrants(undefined, "run-3", [
         { name: "piece-registry", ref: REGISTRY_REF },
@@ -187,14 +202,23 @@ describe("well-known-grants", () => {
       expect(message).not.toContain(MAIL_ID);
     });
 
-    it("throws for a grant with neither a source nor a description of its own", () => {
-      expect(() =>
-        wellKnownGrantsContextMessage([{
+    it("throws for a resumed grant this build has no description for", () => {
+      // The union stops one being minted, so the only way this record arises
+      // is a run state written by another build and read back as JSON, where
+      // nothing checked it. Parsed rather than written as a literal, because
+      // a literal is the case the type already rules out.
+
+      const resumed = JSON.parse(
+        JSON.stringify({
           name: "profile",
           token: "cfh:a:qrstuvwx",
           ref: REGISTRY_REF,
-        }])
-      ).toThrow("no description");
+        }),
+      ) as HarnessWellKnownGrant;
+
+      expect(() => wellKnownGrantsContextMessage([resumed])).toThrow(
+        "no description",
+      );
     });
   });
 });

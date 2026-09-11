@@ -20,10 +20,22 @@
 
 import { HANDLE_NAME_PATTERN } from "../src/input-cells.ts";
 import { parseHandleRef } from "../src/handle-table.ts";
-import type { HarnessConnectorGrantSpec } from "../src/contracts/well-known-grants.ts";
+import type {
+  HarnessConnectorGrantSpec,
+  HarnessWellKnownGrantName,
+} from "../src/contracts/well-known-grants.ts";
 
 /** The CFC atom type whose `class` names what a column holds. */
 const RESOURCE_ATOM_TYPE = "https://commonfabric.org/cfc/atom/Resource";
+
+/**
+ * Names the harness grants on its own. A declared class landing on one of
+ * these is reported here rather than passed on, because the seeding refuses a
+ * name twice and would take every session on the console down with it.
+ */
+const RESERVED_GRANT_NAMES: ReadonlySet<string> = new Set<
+  HarnessWellKnownGrantName
+>(["piece-registry"]);
 
 /** The loom records a connector grant is resolved from. */
 export interface LoomConnectorRecords {
@@ -232,6 +244,12 @@ export const resolveConnectorGrants = (
       continue;
     }
     const name = classes[0]!;
+    if (RESERVED_GRANT_NAMES.has(name)) {
+      skip(
+        `its declared CFC class \`${name}\` is a name the harness already grants`,
+      );
+      continue;
+    }
     if (!HANDLE_NAME_PATTERN.test(name)) {
       skip(
         `its declared CFC class \`${name}\` is not a name a model may be handed`,
@@ -303,6 +321,20 @@ export const parseConnectorGrants = (
       throw new Error(
         `\`CF_HARNESS_CONNECTOR_GRANTS\` names a grant \`${name}\`, which ` +
           `must match ${HANDLE_NAME_PATTERN}`,
+      );
+    }
+    // Held to the same rule the mint holds it to, so a reference that would
+    // fail the first session fails the startup instead. An inherited variable
+    // is the case this catches: the launcher checked what it resolved, and a
+    // console started another way was handed whatever was in the environment.
+    try {
+      parseHandleRef(ref);
+    } catch (error) {
+      throw new Error(
+        `\`CF_HARNESS_CONNECTOR_GRANTS\` grant \`${name}\` names a reference ` +
+          `that does not parse: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
       );
     }
     return { name, ref, source: { connection, piece } };

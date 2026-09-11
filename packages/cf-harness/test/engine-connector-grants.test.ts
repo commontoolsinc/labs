@@ -106,6 +106,17 @@ describe("engine-connector-grants", () => {
       expect(grants.map((grant) => grant.name)).toEqual(["piece-registry"]);
     });
 
+    it("exposes the configured grants for a delegating parent to hand its child", () => {
+      // A child's grants have to resolve from the configuration the parent's
+      // resolved from; reading loom's records a second time in the child
+      // would be a second path to the same answer.
+
+      const engine = engineWith([MAIL_GRANT, BANK_GRANT]);
+
+      expect(engine.connectorGrants).toEqual([MAIL_GRANT, BANK_GRANT]);
+      expect(engineWith([]).connectorGrants).toEqual([]);
+    });
+
     it("announces a connector grant by name without disclosing its reference", async () => {
       const engine = engineWith([MAIL_GRANT]);
 

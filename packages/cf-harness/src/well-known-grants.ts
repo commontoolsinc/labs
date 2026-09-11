@@ -53,16 +53,6 @@ const GRANT_DESCRIPTIONS: Record<HarnessWellKnownGrantName, string> = {
 };
 
 /**
- * {@link GRANT_DESCRIPTIONS} keyed by a plain string, which is what a grant's
- * name is once a connector grant can carry one. The record above stays keyed
- * by the union, so the fixed names keep their exhaustiveness check; this is
- * the lookup, and having it means no call site casts a name it read.
- */
-const fixedGrantDescriptions = new Map<string, string>(
-  Object.entries(GRANT_DESCRIPTIONS),
-);
-
-/**
  * Model-facing description of one connector grant. Harness-authored except
  * for the grant's name, which the caller has already held to
  * {@link HANDLE_NAME_PATTERN}.
@@ -92,12 +82,14 @@ export const checkConnectorGrantSpec = (
   }
 };
 
-/** One grant's name and address, before any token exists for it. */
-export interface HarnessWellKnownGrantRef {
-  name: string;
-  ref: string;
-  source?: HarnessConnectorGrantSource;
-}
+/**
+ * One grant's name and address, before any token exists for it — the same
+ * two kinds {@link HarnessWellKnownGrant} has, so the mint cannot lose track
+ * of which it is holding.
+ */
+export type HarnessWellKnownGrantRef =
+  | { name: HarnessWellKnownGrantName; ref: string; source?: undefined }
+  | { name: string; ref: string; source: HarnessConnectorGrantSource };
 
 /**
  * Resolves the canonical references behind every well-known grant. The
@@ -157,15 +149,25 @@ export const mintWellKnownGrants = async (
 ): Promise<{ table: HarnessHandleTable; grants: HarnessWellKnownGrant[] }> => {
   let current = table ?? createHarnessHandleTable(runId);
   const grants: HarnessWellKnownGrant[] = [];
-  for (const { name, ref, source } of refs) {
-    const minted = await mintAddressHandle(current, ref);
+  for (const grant of refs) {
+    const minted = await mintAddressHandle(current, grant.ref);
     current = minted.table;
-    grants.push({
-      name,
-      token: minted.token,
-      ref,
-      ...(source !== undefined ? { source } : {}),
-    });
+    // The entry's canonical spelling rather than the one the caller passed,
+    // so the run-state record and the table entry name one reference. A
+    // connector grant's arrives from a loom record and need not be canonical.
+    const entry = current.entries.find(
+      (candidate) => candidate.token === minted.token,
+    )!;
+    grants.push(
+      grant.source === undefined
+        ? { name: grant.name, token: minted.token, ref: entry.ref }
+        : {
+          name: grant.name,
+          token: minted.token,
+          ref: entry.ref,
+          source: grant.source,
+        },
+    );
   }
   return { table: current, grants };
 };
@@ -183,11 +185,14 @@ const grantDescription = (grant: HarnessWellKnownGrant): string => {
   if (grant.source !== undefined) {
     return connectorGrantDescription(grant.name);
   }
-  const fixed = fixedGrantDescriptions.get(grant.name);
-  if (fixed === undefined) {
+  // Read through `Object.hasOwn` rather than indexed directly: run state is
+  // JSON this process may not have written, so a resumed record can carry a
+  // name no build of this module describes, and the type that rules that out
+  // for a grant we mint says nothing about one we read back.
+  if (!Object.hasOwn(GRANT_DESCRIPTIONS, grant.name)) {
     throw new Error(`no description for well-known grant \`${grant.name}\``);
   }
-  return fixed;
+  return GRANT_DESCRIPTIONS[grant.name];
 };
 
 /**

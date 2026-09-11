@@ -40,20 +40,37 @@ export interface HarnessConnectorGrantSpec {
   source: HarnessConnectorGrantSource;
 }
 
-/** One granted reference, as recorded in run state. */
-export interface HarnessWellKnownGrant {
-  /**
-   * Model-facing name: a {@link HarnessWellKnownGrantName} for a fixed
-   * grant, and the declared CFC class for a connector grant.
-   */
-  name: string;
+/**
+ * One granted reference, as recorded in run state. A grant is one of two
+ * kinds and `source` is what tells them apart, so the two are written as a
+ * union: a fixed grant's name is one this module's own table describes, and a
+ * connector grant carries the loom handle its name was read from. A record
+ * with a free-chosen name and no source is a grant nothing can describe, and
+ * the union is what stops one being constructed.
+ */
+export type HarnessWellKnownGrant =
+  | {
+    /** Which fixed reference this is. */
+    name: HarnessWellKnownGrantName;
 
-  /** The token the model holds. */
-  token: string;
+    /** The token the model holds. */
+    token: string;
 
-  /** The canonical reference behind it; never model-facing. */
-  ref: string;
+    /** The canonical reference behind it; never model-facing. */
+    ref: string;
 
-  /** Present when the grant is a connector handle rather than a fixed one. */
-  source?: HarnessConnectorGrantSource;
-}
+    source?: undefined;
+  }
+  | {
+    /** The declared CFC class loom named this handle's columns with. */
+    name: string;
+
+    /** The token the model holds. */
+    token: string;
+
+    /** The canonical reference behind it; never model-facing. */
+    ref: string;
+
+    /** The loom handle the name was read from. */
+    source: HarnessConnectorGrantSource;
+  };
