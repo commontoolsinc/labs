@@ -1,5 +1,5 @@
 import type { FabricValue } from "@/interface.ts";
-import { isValidFabricValue } from "@/type-check.ts";
+import { isValidFabricValue } from "@/validity-check.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 
 /** How much of a rendered state to keep. */

@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/pre-edit-reminders.ts\""
+            "command": "deno run --allow-read --allow-env \"$CLAUDE_PROJECT_DIR/.claude/scripts/pre-edit-reminders.ts\""
           }
         ]
       }
@@ -49,16 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "deno run --allow-read --allow-run \"$CLAUDE_PROJECT_DIR/.claude/scripts/post-edit-ts.ts\""
-          }
-        ]
-      },
-      {
-        "matcher": "ExitPlanMode",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/post-exit-plan.ts\""
+            "command": "deno run --allow-read --allow-env --allow-run \"$CLAUDE_PROJECT_DIR/.claude/scripts/post-edit-ts.ts\""
           }
         ]
       }
@@ -68,7 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "deno run --allow-read --allow-run \"$CLAUDE_PROJECT_DIR/.claude/scripts/stop-check.ts\""
+            "command": "deno run --allow-read --allow-env --allow-run \"$CLAUDE_PROJECT_DIR/.claude/scripts/stop-check.ts\""
           }
         ]
       }

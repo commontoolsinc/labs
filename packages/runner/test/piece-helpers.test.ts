@@ -148,6 +148,44 @@ describe("resolveCellPath through linked slots", () => {
     await storageManager?.close();
   });
 
+  it("reads a leaf through multiple sparse projections with repeated path segments", () => {
+    const raw = runtime.getCell(
+      space,
+      "nested sparse projection",
+      undefined,
+      tx,
+    );
+    raw.set({ value: { value: { value: 7 } } });
+    const cell = raw.asSchema({
+      type: "object",
+      properties: {
+        missing: { type: "string" },
+        value: {
+          type: "object",
+          properties: {
+            missing: { type: "string" },
+            value: {
+              type: "object",
+              properties: { value: { type: "number" } },
+            },
+          },
+          required: ["missing"],
+        },
+      },
+      required: ["missing"],
+    });
+    expect(cell.get()).toBeUndefined();
+    expect(cell.key("value").get()).toBeUndefined();
+    expect(resolveCellPath(cell, ["value", "value", "value"])).toBe(7);
+    expect(() => resolveCellPath(cell, ["value", "missing"]))
+      .toThrow('property "missing" not found');
+    expect(() =>
+      resolveCellPath(cell, ["value", "value", "value"], {
+        requireProjection: true,
+      })
+    ).toThrow('property "value" not found');
+  });
+
   it("reads through a cell link at an intermediate segment", () => {
     // The deploy shape that hit this: a piece whose `status` field is a
     // LINK to another cell (`cf piece link`), read back as

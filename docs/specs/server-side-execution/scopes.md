@@ -1,13 +1,14 @@
 # v2 detail: cell scopes — instances, never authority
 
 Normative spec for scope semantics wherever scoped state appears
-(plan Phases 1–5; the Phase 0 scopes review owns this doc and is in
-progress). Drafted from the owner rulings of 2026-08-02, batch 3
+(plan Phases 1–5; the Phase 0 scopes review owns this doc, and owes
+only §8 item 2). Drafted from the owner rulings of 2026-08-02, batch 3
 (S1–S5 below), with the batch-4 closures folded in (§2 fan-out
 composition; §7 M3 and floor); anchors verified by the
-scope-mechanics scout pass of 2026-08-02 (§Anchors, §7). Read
-[README.md](README.md) §3.8 and §6 Q7 first; assumes
-[serving-loop.md](serving-loop.md) vocabulary.
+scope-mechanics scout pass of 2026-08-02 (§Anchors, §7); the demand
+semantics of §2 ruled 2026-08-16 and built by fan-out stages A and B
+(verification-coverage.md OW17). Read [README.md](README.md) §3.8
+first; assumes [serving-loop.md](serving-loop.md) vocabulary.
 MUST/NEVER language is binding on implementers.
 
 ## Anchors (scout pass 2026-08-02; re-verified 2026-08-05)
@@ -480,7 +481,7 @@ snapshots across principals; the v2 basis index is per-instance and
 shares nothing across principals, so nothing is left to floor.
 Nothing of the floor survives as per-instance keying evidence.
 
-## 8. Open — scout + owner (what the Phase 0 review still owes)
+## 8. Open — the one design the Phase 0 review still owes
 
 Closed by the scout pass, 2026-08-02: widen-back (NO — §2
 Permanence) and the redirect's on-disk shape (§Anchors). Closed by

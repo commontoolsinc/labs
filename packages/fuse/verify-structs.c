@@ -18,6 +18,7 @@ int main(void) {
     printf("stat_st_dev=%zu\n", offsetof(struct stat, st_dev));
     printf("stat_st_ino=%zu\n", offsetof(struct stat, st_ino));
     printf("stat_st_nlink=%zu\n", offsetof(struct stat, st_nlink));
+    printf("stat_st_nlink_bytes=%zu\n", sizeof(((struct stat *)0)->st_nlink));
     printf("stat_st_mode=%zu\n", offsetof(struct stat, st_mode));
     printf("stat_st_uid=%zu\n", offsetof(struct stat, st_uid));
     printf("stat_st_gid=%zu\n", offsetof(struct stat, st_gid));

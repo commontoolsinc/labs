@@ -6,6 +6,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
+import { isStaleReadConflict } from "../src/storage/rejection.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("cfc-probe-mergeable-append");
@@ -329,7 +330,7 @@ describe("CFC metadata probes under mergeable appends", () => {
       cellB.push("B");
       const result = await txB.commit({ resolveAt: "verdict" });
 
-      expect(result.error).toBeDefined();
+      expect(isStaleReadConflict(result.error)).toBe(true);
       const durable = await readDurable(server, CAUSE, stringListSchema);
       expect(durable).toEqual(["seed", "A"]);
     } finally {

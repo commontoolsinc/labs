@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { setPatternEnvironment } from "../src/env.ts";
@@ -146,7 +147,7 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
     const result = await tx.commit();
 
     expect(released).toBe(false);
-    expect(result.error).toBeDefined();
+    expect(isCfcEnforcementRejection(result.error)).toBe(true);
     expect(String((result.error as Error).message)).toContain(
       "exceeds ceiling for fetchJson",
     );
@@ -250,15 +251,13 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
     const result = await tx.commit();
 
     expect(released).toBe(false);
-    expect(result.error).toBeDefined();
     // Assert it is specifically the CFC enforcement rejection, not some other
     // commit error — otherwise an unrelated failure would let this regression
     // guard pass vacuously (cubic review). The invalidated relevant tx is
-    // rejected for being not-prepared; the underlying reason names the late
-    // sink-request input that flipped it.
-    const message = String((result.error as Error).message);
-    expect(message).toContain("CFC enforcement rejected commit");
-    expect(message).toContain("not prepared");
+    // rejected for being not-prepared, and the reason names the post-prepare
+    // read that invalidated the digest.
+    expect(isCfcEnforcementRejection(result.error)).toBe(true);
+    expect(result.error?.message).toContain("read-after-prepare");
   });
 
   it("never fires a fetchJson pattern request carrying a labeled header (end-to-end)", async () => {

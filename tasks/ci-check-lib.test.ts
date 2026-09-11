@@ -18,6 +18,7 @@ import {
   COVERAGE_BASELINE_RESET_MARKER,
   COVERAGE_SUGGESTION_MARKER,
   coverageGroupsForChangedFiles,
+  coverageMetricForGroup,
   coverageMetricGroupName,
   downloadAndExtractArtifact,
   fetchArtifactsForRun,
@@ -29,7 +30,10 @@ import {
   githubGet,
   githubPatch,
   githubPost,
+  isNotFound,
   newestArtifactsByName,
+  ownTestsCoverageMember,
+  ownTestsCoverageMetric,
   parseAddedLinesFromPatch,
   parseBaselineOverrides,
   parseCacheStateFiles,
@@ -1171,6 +1175,42 @@ Deno.test("fetchPRFiles reads every changed-file page", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+Deno.test("isNotFound tells a thing that is not there from an interface that could not answer", () => {
+  assertEquals(
+    isNotFound(new Error("GitHub API GET 404 Not Found: /repos/o/r/pulls/1")),
+    true,
+  );
+  assertEquals(
+    isNotFound(
+      new Error("GitHub API GET 500 Server Error: /repos/o/r/pulls/1"),
+    ),
+    false,
+  );
+  // A path may hold the digits of a status, and a message about
+  // something else may hold the word.
+  assertEquals(
+    isNotFound(new Error("GitHub API GET 500 Error: /repos/o/r/runs/404")),
+    false,
+  );
+  assertEquals(isNotFound("404"), false);
+});
+
+Deno.test("a covered package's own-tests metric is not one of its source groups", () => {
+  const metric = ownTestsCoverageMetric("packages/memory");
+  assertEquals(ownTestsCoverageMember(metric), "packages/memory");
+  // The two carry the same package name, and reading one as the other
+  // would ratchet a figure the gate has no opinion about.
+  assertEquals(coverageMetricGroupName(metric), null);
+  assertEquals(
+    ownTestsCoverageMember(coverageMetricForGroup("packages/memory")),
+    null,
+  );
+  assertEquals(
+    coverageMetricGroupName(coverageMetricForGroup("packages/memory")),
+    "packages/memory",
+  );
 });
 
 Deno.test("downloadAndExtractArtifact retries transient artifact downloads", async () => {

@@ -4,6 +4,7 @@ import { createSession, Identity } from "@commonfabric/identity";
 import { defer } from "@commonfabric/utils/defer";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
+  type Cell,
   getPatternIdentityRef,
   getPatternSource,
   getPieceReconciliation,
@@ -19,6 +20,7 @@ import {
   readPieceSourceState,
   reconcilePieceSource,
 } from "../src/ops/piece-origin.ts";
+import type { PieceController } from "../src/ops/piece-controller.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
@@ -1249,13 +1251,29 @@ describe("piece source lifecycle", () => {
     expect(await piece.result.get(["version"])).toBe("reviewed");
   });
 
+  /** Seeds retained input authored by a client that bypassed piece projection. */
+  async function seedLegacyModeLink(
+    piece: PieceController,
+    source: Cell<unknown>,
+  ) {
+    const input = await piece.input.getCell();
+    const write = await runtime.editWithRetry((tx) => {
+      input.withTx(tx).key("mode").setRawUntyped(source.getAsLink({
+        base: input,
+        includeSchema: true,
+      }));
+    });
+    expect(write.error).toBeUndefined();
+    await pieces.synced();
+  }
+
   it("offers confirmation for a retained-link incompatibility", async () => {
     const source = await pieces.create(unionValueProgram(), { input: {} });
     const piece = await pieces.create(optionalModeProgram(1), {
       input: { value: 4 },
     });
     const sourceResult = await source.result.getCell();
-    await piece.input.set(sourceResult.key("value"), ["mode"]);
+    await seedLegacyModeLink(piece, sourceResult.key("value"));
 
     const origin = "system:linked.tsx";
     await stampOrigin(piece, origin);
@@ -1366,9 +1384,9 @@ describe("piece source lifecycle", () => {
     const piece = await pieces.create(optionalModeProgram(1), {
       input: { value: 4 },
     });
-    await piece.input.set(
+    await seedLegacyModeLink(
+      piece,
       (await source.result.getCell()).key("value"),
-      ["mode"],
     );
 
     const origin = "system:combined-warning.tsx";
@@ -1405,9 +1423,9 @@ describe("piece source lifecycle", () => {
     const piece = await pieces.create(optionalModeProgram(1), {
       input: { value: 4 },
     });
-    await piece.input.set(
+    await seedLegacyModeLink(
+      piece,
       (await firstSource.result.getCell()).key("value"),
-      ["mode"],
     );
 
     const origin = "system:changed-link.tsx";
@@ -1428,9 +1446,9 @@ describe("piece source lifecycle", () => {
     if (firstWarning.status !== "incompatible") {
       throw new Error("expected an incompatibility warning");
     }
-    await piece.input.set(
+    await seedLegacyModeLink(
+      piece,
       (await secondSource.result.getCell()).key("value"),
-      ["mode"],
     );
 
     const secondWarning = await piece.changeSource(action, {
@@ -1457,9 +1475,9 @@ describe("piece source lifecycle", () => {
     const piece = await pieces.create(optionalModeProgram(1), {
       input: { value: 4 },
     });
-    await piece.input.set(
+    await seedLegacyModeLink(
+      piece,
       (await source.result.getCell()).key("value"),
-      ["mode"],
     );
     const origin = "system:resolved-link.tsx";
     await stampOrigin(piece, origin);
@@ -1497,9 +1515,9 @@ describe("piece source lifecycle", () => {
     const piece = await pieces.create(optionalModeProgram(1), {
       input: { value: 4 },
     });
-    await piece.input.set(
+    await seedLegacyModeLink(
+      piece,
       (await firstSource.result.getCell()).key("value"),
-      ["mode"],
     );
     const origin = "system:execution-race.tsx";
     await stampOrigin(piece, origin);
@@ -1519,15 +1537,15 @@ describe("piece source lifecycle", () => {
     }
 
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      runPatternUpdate: typeof pieces.runPatternUpdate;
     };
-    const runWithPattern = pieces.runWithPattern.bind(pieces);
-    mutablePieces.runWithPattern = async (...args) => {
-      await piece.input.set(
+    const runPatternUpdate = pieces.runPatternUpdate.bind(pieces);
+    mutablePieces.runPatternUpdate = async (...args) => {
+      await seedLegacyModeLink(
+        piece,
         (await secondSource.result.getCell()).key("value"),
-        ["mode"],
       );
-      return await runWithPattern(...args);
+      return await runPatternUpdate(...args);
     };
     try {
       await expect(
@@ -1538,7 +1556,7 @@ describe("piece source lifecycle", () => {
         "retained piece input changed after compatibility was checked",
       );
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.runPatternUpdate = runPatternUpdate;
     }
   });
 
@@ -1547,9 +1565,9 @@ describe("piece source lifecycle", () => {
     const piece = await pieces.create(optionalModeProgram(1), {
       input: { value: 4 },
     });
-    await piece.input.set(
+    await seedLegacyModeLink(
+      piece,
       (await source.result.getCell()).key("value"),
-      ["mode"],
     );
     const origin = "system:missing-argument.tsx";
     await stampOrigin(piece, origin);
@@ -1569,10 +1587,10 @@ describe("piece source lifecycle", () => {
     }
 
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      runPatternUpdate: typeof pieces.runPatternUpdate;
     };
-    const runWithPattern = pieces.runWithPattern.bind(pieces);
-    mutablePieces.runWithPattern = async (...args) => {
+    const runPatternUpdate = pieces.runPatternUpdate.bind(pieces);
+    mutablePieces.runPatternUpdate = async (...args) => {
       const tx = runtime.edit();
       piece.getCell().withTx(tx).setMetaRaw(
         "argument",
@@ -1580,7 +1598,7 @@ describe("piece source lifecycle", () => {
         rawMetaWriteAuthorization,
       );
       await tx.commit();
-      return await runWithPattern(...args);
+      return await runPatternUpdate(...args);
     };
     try {
       await expect(
@@ -1589,7 +1607,7 @@ describe("piece source lifecycle", () => {
         }),
       ).rejects.toThrow("piece missing its current argument");
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.runPatternUpdate = runPatternUpdate;
     }
   });
 
@@ -1608,15 +1626,15 @@ describe("piece source lifecycle", () => {
     webSources["/api/patterns/new-link-race.tsx"] = optionalModeProgram(2);
 
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      runPatternUpdate: typeof pieces.runPatternUpdate;
     };
-    const runWithPattern = pieces.runWithPattern.bind(pieces);
-    mutablePieces.runWithPattern = async (...args) => {
-      await piece.input.set(
+    const runPatternUpdate = pieces.runPatternUpdate.bind(pieces);
+    mutablePieces.runPatternUpdate = async (...args) => {
+      await seedLegacyModeLink(
+        piece,
         (await source.result.getCell()).key("value"),
-        ["mode"],
       );
-      return await runWithPattern(...args);
+      return await runPatternUpdate(...args);
     };
     try {
       const result = await piece.changeSource({
@@ -1630,7 +1648,7 @@ describe("piece source lifecycle", () => {
         );
       }
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.runPatternUpdate = runPatternUpdate;
     }
   });
 
@@ -1648,10 +1666,10 @@ describe("piece source lifecycle", () => {
     );
 
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      runPatternUpdate: typeof pieces.runPatternUpdate;
     };
-    const runWithPattern = pieces.runWithPattern;
-    mutablePieces.runWithPattern = () => {
+    const runPatternUpdate = pieces.runPatternUpdate;
+    mutablePieces.runPatternUpdate = () => {
       throw new Error(
         "piece source is incompatible with retained input: synthetic",
       );
@@ -1664,7 +1682,7 @@ describe("piece source lifecycle", () => {
         }),
       ).rejects.toThrow("retained input: synthetic");
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.runPatternUpdate = runPatternUpdate;
     }
   });
 
@@ -1680,12 +1698,12 @@ describe("piece source lifecycle", () => {
     webSources["/api/patterns/non-error.tsx"] = versionProgram("candidate");
 
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      runPatternUpdate: typeof pieces.runPatternUpdate;
     };
-    const runWithPattern = pieces.runWithPattern;
-    mutablePieces.runWithPattern =
+    const runPatternUpdate = pieces.runPatternUpdate;
+    mutablePieces.runPatternUpdate =
       (() =>
-        Promise.reject("raw execution rejection")) as typeof runWithPattern;
+        Promise.reject("raw execution rejection")) as typeof runPatternUpdate;
     let reason: unknown;
     try {
       await piece.changeSource({
@@ -1695,12 +1713,18 @@ describe("piece source lifecycle", () => {
     } catch (error) {
       reason = error;
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.runPatternUpdate = runPatternUpdate;
     }
     expect(reason).toBe("raw execution rejection");
   });
 
   it("reports a saved transition separately from a later refresh failure", async () => {
+    // Injected at the post-commit work the update path actually performs:
+    // `runPatternUpdate` synchronizes the pattern AFTER its setup transaction
+    // is accepted, so a failure there is the refresh failing over a committed
+    // transition, and the verdict below has to say so from that transaction's
+    // receipt rather than report the transition unsaved.
+
     const piece = await pieces.create(versionProgram("v1"), { input: {} });
     const origin = "system:post-commit.tsx";
     await stampOrigin(piece, origin);
@@ -1710,11 +1734,11 @@ describe("piece source lifecycle", () => {
     await piece.setPattern(versionProgram("v2"));
 
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      syncPattern: typeof pieces.syncPattern;
     };
-    const runWithPattern = pieces.runWithPattern.bind(pieces);
-    mutablePieces.runWithPattern = async (...args) => {
-      await runWithPattern(...args);
+    const syncPattern = pieces.syncPattern.bind(pieces);
+    mutablePieces.syncPattern = async (...args) => {
+      await syncPattern(...args);
       throw new Error("post-commit refresh failed");
     };
     try {
@@ -1728,7 +1752,7 @@ describe("piece source lifecycle", () => {
         executionWarning: "post-commit refresh failed",
       });
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.syncPattern = syncPattern;
     }
 
     const state = await readPieceSourceState(runtime, piece.getCell());
@@ -1736,6 +1760,80 @@ describe("piece source lifecycle", () => {
     expect(
       state.history.filter((revision) => revision.operation === "revert"),
     ).toHaveLength(1);
+  });
+
+  it("reports a restore's refresh failure without rereading source history after its receipt", async () => {
+    // What the receipt replaces: confirming the transition by synchronizing
+    // the piece and re-reading its revision list. Such a read answers a
+    // different question — which revisions the piece holds now, after any
+    // concurrent change — and `syncCell` resolves normally over a provider
+    // error, so a cache hit reads as durable truth. The guard is armed the
+    // moment the setup transaction issues its receipt and fails every source
+    // history read from then on, so a read-back added beside the receipt
+    // fails this case rather than quietly agreeing with it.
+
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, "system:receipt-guard.tsx");
+    await piece.changeSource({ kind: "detach" });
+    const baseline = (await readPieceSourceState(runtime, piece.getCell()))
+      .history[0];
+    await piece.setPattern(versionProgram("v2"));
+
+    const mutablePieces = pieces as unknown as {
+      syncPattern: typeof pieces.syncPattern;
+    };
+    const syncPattern = pieces.syncPattern;
+    const runSyncedWithCommit = runtime.runSyncedWithCommit.bind(runtime);
+    const cellPrototype = Object.getPrototypeOf(piece.getCell()) as {
+      getMetaRaw: (field: string, options?: unknown) => unknown;
+    };
+    const getMetaRaw = cellPrototype.getMetaRaw;
+    let receiptIssued = false;
+    let sourceHistoryReadsAfterReceipt = 0;
+    mutablePieces.syncPattern = () => {
+      if (!receiptIssued) {
+        throw new Error("post-commit refresh started before the receipt");
+      }
+      throw new Error("injected post-commit refresh failure");
+    };
+    runtime.runSyncedWithCommit = (async (...args) => {
+      const result = await runSyncedWithCommit(...args);
+      receiptIssued = true;
+      return result;
+    }) as typeof runtime.runSyncedWithCommit;
+    cellPrototype.getMetaRaw = function (field, options) {
+      if (receiptIssued && field === "pieceSourceHistory") {
+        sourceHistoryReadsAfterReceipt++;
+        throw new Error(
+          "the commit receipt must not be verified by rereading source history",
+        );
+      }
+      return getMetaRaw.call(this, field, options);
+    };
+    try {
+      const result = await piece.changeSource({
+        kind: "restore",
+        revisionId: baseline.revisionId,
+      });
+
+      expect(receiptIssued).toBe(true);
+      expect(sourceHistoryReadsAfterReceipt).toBe(0);
+      expect(result).toEqual({
+        status: "applied",
+        executionWarning: "injected post-commit refresh failure",
+      });
+    } finally {
+      mutablePieces.syncPattern = syncPattern;
+      runtime.runSyncedWithCommit = runSyncedWithCommit;
+      cellPrototype.getMetaRaw = getMetaRaw;
+    }
+
+    // Read after the guard has proved the restore itself did not.
+    expect(getPatternIdentityRef(piece.getCell())).toEqual(baseline.pattern);
+    expect(
+      (await readPieceSourceState(runtime, piece.getCell())).history.at(-1)
+        ?.operation,
+    ).toBe("revert");
   });
 
   it("reports a committed detach after a concurrent refresh fails", async () => {
@@ -1751,6 +1849,23 @@ describe("piece source lifecycle", () => {
     // Only awaited, never read: this test is about what the newer edit does
     // to the detach beside it, not about what it returns.
     let newerEdit: Promise<unknown> | undefined;
+    const cellPrototype = Object.getPrototypeOf(cell) as {
+      getMetaRaw: (field: string, options?: unknown) => unknown;
+    };
+    const getMetaRaw = cellPrototype.getMetaRaw;
+    // Armed at the refresh failure: from there to the verdict is exactly
+    // where a read-back would run.
+    let refreshFailed = false;
+    let sourceHistoryReadsAfterFailure = 0;
+    cellPrototype.getMetaRaw = function (field, options) {
+      if (refreshFailed && field === "pieceSourceHistory") {
+        sourceHistoryReadsAfterFailure++;
+        throw new Error(
+          "a committed detach must not be verified by rereading source history",
+        );
+      }
+      return getMetaRaw.call(this, field, options);
+    };
 
     runtime.editWithRetry = (async (action, maxRetries) => {
       const result = await originalEditWithRetry(action, maxRetries);
@@ -1763,6 +1878,7 @@ describe("piece source lifecycle", () => {
           heldSyncEntered.resolve();
           return releaseHeldSync.promise.then(() => originalSync());
         }
+        refreshFailed = true;
         return Promise.reject(
           new Error("detach post-commit refresh failed"),
         );
@@ -1777,9 +1893,12 @@ describe("piece source lifecycle", () => {
         status: "applied",
         executionWarning: "detach post-commit refresh failed",
       });
+      expect(sourceHistoryReadsAfterFailure).toBe(0);
     } finally {
       mutableCell.sync = originalSync;
       runtime.editWithRetry = originalEditWithRetry;
+      refreshFailed = false;
+      cellPrototype.getMetaRaw = getMetaRaw;
       releaseHeldSync.resolve();
     }
     await newerEdit;
@@ -1827,6 +1946,11 @@ describe("piece source lifecycle", () => {
   });
 
   it("recognizes a saved transition even after a newer source change", async () => {
+    // The newer edit lands between this restore's accepted setup transaction
+    // and its failed refresh, so by the time the verdict is classified the
+    // piece is no longer on the restored revision. The transaction's own
+    // receipt is what keeps that verdict `applied`.
+
     const piece = await pieces.create(versionProgram("v1"), { input: {} });
     const origin = "system:concurrent-post-commit.tsx";
     await stampOrigin(piece, origin);
@@ -1836,15 +1960,15 @@ describe("piece source lifecycle", () => {
     await piece.setPattern(versionProgram("v2"));
 
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      syncPattern: typeof pieces.syncPattern;
     };
-    const runWithPattern = pieces.runWithPattern.bind(pieces);
+    const syncPattern = pieces.syncPattern.bind(pieces);
     let changedAgain = false;
-    mutablePieces.runWithPattern = async (...args) => {
-      await runWithPattern(...args);
+    mutablePieces.syncPattern = async (...args) => {
+      await syncPattern(...args);
       if (!changedAgain) {
         changedAgain = true;
-        mutablePieces.runWithPattern = runWithPattern;
+        mutablePieces.syncPattern = syncPattern;
         await piece.setPattern(versionProgram("v3"));
       }
       throw new Error("older post-commit refresh failed");
@@ -1860,7 +1984,7 @@ describe("piece source lifecycle", () => {
         executionWarning: "older post-commit refresh failed",
       });
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.syncPattern = syncPattern;
     }
 
     const state = await readPieceSourceState(runtime, piece.getCell());

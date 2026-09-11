@@ -30,8 +30,11 @@ Deno.test("builtin tool registry includes the agreed first-pass tool floor", () 
     "search_skills",
     "acquire_skill",
     "query_docs",
+    "loom_compose",
+    "loom_inspect",
+    "loom_authoring_context",
   ]);
-  assertEquals(BUILTIN_TOOL_REGISTRY.size, 18);
+  assertEquals(BUILTIN_TOOL_REGISTRY.size, 21);
   assertEquals(
     [...DEFAULT_PARENT_TOOL_IDS],
     [

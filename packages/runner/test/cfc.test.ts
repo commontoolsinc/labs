@@ -25,6 +25,7 @@ import { deepFreeze } from "@commonfabric/data-model";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
 import {
+  cfcSchemaWithInheritedDefs,
   findCfcSchemaRefs,
   pruneCfcSchemaDefinitions,
   resolveCfcSchemaRef,
@@ -1000,5 +1001,86 @@ describe("ContextualFlowControl.resolveSchemaRefsOrThrow", () => {
     };
     expect(() => ContextualFlowControl.resolveSchemaRefsOrThrow(schema))
       .toThrow(/Failed to resolve \$ref/);
+  });
+});
+
+describe("cfcSchemaWithInheritedDefs()", () => {
+  const definitions: Record<string, JSONSchema> = {
+    Name: { type: "string" },
+  };
+
+  it("attaches the inherited definitions to a fragment whose `$ref` names one, so the ref resolves", () => {
+    const scoped = cfcSchemaWithInheritedDefs(
+      { $ref: "#/$defs/Name" },
+      definitions,
+    );
+    expect(scoped).toEqual({ $ref: "#/$defs/Name", $defs: definitions });
+    expect(resolveCfcSchemaRefs(scoped as JSONSchemaObj)).toMatchObject({
+      type: "string",
+    });
+  });
+
+  it("attaches them when the local ref sits in a nested arm", () => {
+    const arm: JSONSchema = {
+      oneOf: [{ $ref: "#/$defs/Name" }, { type: "null" }],
+    };
+    expect(cfcSchemaWithInheritedDefs(arm, definitions)).toEqual({
+      ...arm,
+      $defs: definitions,
+    });
+  });
+
+  it("returns a deep-frozen fragment with no local ref as the same object", () => {
+    const plain = deepFreeze({
+      type: "object",
+      properties: { count: { type: "number" } },
+    }) as JSONSchema;
+    expect(cfcSchemaWithInheritedDefs(plain, definitions)).toBe(plain);
+  });
+
+  it("attaches the inherited definitions to a fragment that is not deep-frozen without scanning it for a local ref", () => {
+    // The scan memoizes only by identity of a deep-frozen object, so an
+    // unfrozen fragment is given the definitions whether or not it needs them.
+    const plain: JSONSchema = {
+      type: "object",
+      properties: { count: { type: "number" } },
+    };
+    expect(cfcSchemaWithInheritedDefs(plain, definitions)).toEqual({
+      ...plain,
+      $defs: definitions,
+    });
+  });
+
+  it("returns a fragment that declares its own `$defs` as the same object", () => {
+    const own: JSONSchema = {
+      $ref: "#/$defs/Name",
+      $defs: { Name: { type: "number" } },
+    };
+    expect(cfcSchemaWithInheritedDefs(own, definitions)).toBe(own);
+  });
+
+  it("returns a deep-frozen fragment as the same object when its only local ref sits under a child that declares its own `$defs`", () => {
+    const fragment = deepFreeze({
+      type: "object",
+      properties: {
+        inner: { $ref: "#/$defs/Name", $defs: { Name: { type: "number" } } },
+      },
+    }) as JSONSchema;
+    expect(cfcSchemaWithInheritedDefs(fragment, definitions)).toBe(fragment);
+  });
+
+  it("returns the fragment as the same object when there is nothing to inherit", () => {
+    const ref: JSONSchema = { $ref: "#/$defs/Name" };
+    expect(cfcSchemaWithInheritedDefs(ref, undefined)).toBe(ref);
+    expect(cfcSchemaWithInheritedDefs(true, definitions)).toBe(true);
+  });
+
+  it("returns the fragment as the same object when the inherited definitions are an array", () => {
+    const ref: JSONSchema = { $ref: "#/$defs/0" };
+    const arrayDefinitions = [{ type: "string" }] as unknown as Record<
+      string,
+      JSONSchema
+    >;
+    expect(cfcSchemaWithInheritedDefs(ref, arrayDefinitions)).toBe(ref);
   });
 });

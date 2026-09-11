@@ -23,11 +23,12 @@ import type { HarnessHandleTable } from "../contracts/handle-table.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
 import type { openProbeRuntime } from "../pattern-index/probe-runtime.ts";
 import type { PatternIndexClient } from "../pattern-index/client.ts";
-import type { PatternIndexPublicationLedger } from "../pattern-index/publish-ledger.ts";
+import type { PatternIndexLedger } from "../pattern-index/ledger.ts";
 import type { SkillsShAcquisitionClient } from "../skills-sh/acquisition.ts";
 import type { SkillsShSearchClient } from "../skills-sh/search-client.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
+import type { HarnessLoomAuthoringConfig } from "../loom-authoring.ts";
 import type { ProcessRunner } from "../sandbox/process-runner.ts";
 import type { SandboxRuntime } from "../sandbox/types.ts";
 
@@ -63,6 +64,15 @@ export interface HarnessToolContext {
    * keeps `run_pattern` and `acquire_skill` out of the tool surface.
    */
   getFabricSession?: () => Promise<HarnessFabricSession>;
+
+  /** Host-configured deployment target, without its identity key path. */
+  fabricSessionTarget?: {
+    /** Toolshed API base URL for the run. */
+    apiUrl: string;
+
+    /** Configured space name or DID for the run. */
+    space: string;
+  };
 
   /**
    * Opens the render gate's probe runtime; `openProbeRuntime` by default. A
@@ -133,13 +143,15 @@ export interface HarnessToolContext {
   patternIndexPublishDiscoverable?: boolean;
 
   /**
-   * Where a pattern this run authored is held until the session ends. The
-   * ledger publishes once per capability rather than once per successful run
-   * — see `pattern-index/publish-ledger.ts`. Absent when the run has no
-   * index, and absent for a tool invoked outside the engine, which publishes
-   * as it goes instead.
+   * Where this run's writes to the pattern index go: a pattern it authored is
+   * held there until the session ends, so search is offered one candidate per
+   * capability while the index still records every iteration, and a report
+   * about an indexed pattern it ran is sent from there — see
+   * `pattern-index/ledger.ts`. Absent when the run has no index, and absent
+   * for a tool invoked outside the engine, which neither publishes nor
+   * reports.
    */
-  patternIndexPublications?: PatternIndexPublicationLedger;
+  patternIndexLedger?: PatternIndexLedger;
 
   /**
    * What this run was asked to do, in the words it was asked in. A published
@@ -157,6 +169,9 @@ export interface HarnessToolContext {
 
   sandbox: SandboxRuntime;
   hostProcessRunner: ProcessRunner;
+
+  /** Host-owned Loom command routing, absent when the run has no grant. */
+  loomAuthoring?: HarnessLoomAuthoringConfig;
   currentDir: string;
   workspaceHostPath?: string;
   resolvePath(path: string): string;

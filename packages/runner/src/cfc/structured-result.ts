@@ -1,4 +1,8 @@
 import type { JSONSchema } from "@commonfabric/api";
+import {
+  FabricSpecialObject,
+  isWalkableObjectOrArray,
+} from "@commonfabric/data-model";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isSubschema } from "../schema-walk.ts";
 import { cfcOpaqueLinkForPath } from "./observation.ts";
@@ -397,10 +401,6 @@ const itemSchemaForIndex = (
   return combineAllOf(itemSchemas);
 };
 
-// TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this path
-// today, but will in the not-too-distant future; at that point this guard-less
-// `isObjectOrArray`-walk fails (a `FabricPrimitive` is decomposed, a `FabricInstance`
-// is walked by internal slots rather than codec contents). Mark ahead of that.
 const sanitizeValueWithOpaqueLinks = (
   value: unknown,
   schema: JSONSchema,
@@ -443,7 +443,20 @@ const sanitizeValueWithOpaqueLinks = (
     });
     return { value: items, linkedStringCount, sealedPaths };
   }
-  if (isObjectOrArray(value)) {
+  if (value instanceof FabricSpecialObject) {
+    // Sealed, not shown and not walked. A special object holds its state
+    // behind no property name, so the record arm below cannot measure it
+    // against the schema the way the unmodeled-key policy measures a record --
+    // and a value this cannot model is a value whose contents may themselves
+    // be data. Sealing is the same answer that policy gives, arrived at for
+    // the same reason.
+    return {
+      value: cfcOpaqueLinkForPath(opaqueHandleId, path),
+      linkedStringCount: 0,
+      sealedPaths: [[...path]],
+    };
+  }
+  if (isWalkableObjectOrArray(value)) {
     if (
       valueIsOpaqueLinkObject(value) &&
       schemaAcceptsOpaqueLinkObject(schema, value, fullSchema, reserved)

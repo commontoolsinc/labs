@@ -73,7 +73,7 @@ export const fabricAuthorityMatchesSpaceHost = (
 };
 
 /** Returns whether `hostname` names the local machine. */
-function isLoopbackHostname(hostname: string): boolean {
+export function isLoopbackHostname(hostname: string): boolean {
   return hostname === "localhost" || hostname === "localhost." ||
     hostname === "[::1]" ||
     /^127(?:\.\d{1,3}){3}$/.test(hostname);

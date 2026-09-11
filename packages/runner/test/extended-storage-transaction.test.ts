@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
@@ -15,6 +16,7 @@ import {
   createNonReactiveTransaction,
   type ExtendedStorageTransaction,
 } from "../src/storage/extended-storage-transaction.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { RuntimeOwnedStores } from "../src/cfc/runtime-owned-stores.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
@@ -51,6 +53,85 @@ describe("extended-storage-transaction", () => {
     tx.markLazyMaterialize(true);
     return { tx, cell: runtime.getCell(space, cause, SCHEMA, tx) };
   };
+
+  describe("content-addressed document staging", () => {
+    const code = "export const staged = 1;";
+    const codeId = `cid:${taggedHashStringOf(code)}`;
+    const stagedIds = (tx: IExtendedStorageTransaction): string[] =>
+      [...(tx.getWriteDetails?.(space) ?? [])].map((write) => write.address.id);
+
+    it("stages a document once however often a transaction asks", () => {
+      const tx = runtime.edit();
+      expect(tx.stageContentAddressedDocument(space, code)).toBe(codeId);
+      expect(tx.stageContentAddressedDocument(space, code)).toBe(codeId);
+      expect(stagedIds(tx).filter((id) => id === codeId)).toHaveLength(1);
+      tx.abort?.();
+    });
+
+    it("names a document by the general content hash of any value", () => {
+      const value = { kind: "blob", bytes: [1, 2, 3] };
+      const tx = runtime.edit();
+      expect(tx.stageContentAddressedDocument(space, value)).toBe(
+        `cid:${taggedHashStringOf(value)}`,
+      );
+      tx.abort?.();
+    });
+
+    it("elides a document the server already holds, whatever its value", async () => {
+      // A string, an array, and a number: the elision re-hashes the confirmed
+      // value, so it must recognize every kind of value the seam stages.
+      const values = [code, [1, "two", { three: 3 }], 42];
+      const ids = values.map((value) => `cid:${taggedHashStringOf(value)}`);
+      const install = runtime.edit();
+      for (const value of values) {
+        install.stageContentAddressedDocument(space, value);
+      }
+      expect((await install.commit()).error).toBeUndefined();
+      await storageManager.synced();
+
+      const tx = runtime.edit();
+      values.forEach((value, index) => {
+        expect(tx.stageContentAddressedDocument(space, value)).toBe(
+          ids[index],
+        );
+      });
+      for (const id of ids) expect(stagedIds(tx)).not.toContain(id);
+      tx.abort?.();
+    });
+
+    it("stages through a wrapping transaction into the one it wraps", () => {
+      const tx = runtime.edit();
+      const wrapped = createNonReactiveTransaction(tx);
+      expect(wrapped.stageContentAddressedDocument(space, code)).toBe(codeId);
+      expect(stagedIds(tx)).toContain(codeId);
+      tx.abort?.();
+    });
+  });
+
+  describe("the read-result cache across a batch write", () => {
+    it("keeps its entries across a batch holding no writes", () => {
+      const tx = runtime.edit();
+      tx.setCachedReadResult!("key", "variant", 1);
+
+      tx.writeValuesOrThrow!([]);
+
+      expect(tx.getCachedReadResult!("key", "variant")).toEqual({ value: 1 });
+      tx.abort("done");
+    });
+
+    it("drops its entries once a batch writes", async () => {
+      const { tx, cell } = await seeded("batch-write-drops-cache");
+      tx.setCachedReadResult!("key", "variant", 1);
+
+      tx.writeValuesOrThrow!([{
+        address: cell.getAsNormalizedFullLink(),
+        value: { value: 1 },
+      }]);
+
+      expect(tx.getCachedReadResult!("key", "variant")).toBeUndefined();
+      tx.abort("done");
+    });
+  });
 
   describe("the read-result cache under an epoch", () => {
     it("serves nothing while a read resolves against an earlier epoch", () => {

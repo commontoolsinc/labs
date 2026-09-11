@@ -9,6 +9,7 @@ import type {
   ClientCommit,
   CommitClass,
   CommitPrecondition,
+  DeliveryFailureClass,
   EntityDocument,
   EntityIdListOptions,
   EntityIdListResult,
@@ -25,7 +26,6 @@ import type {
   SqliteQueryResult,
   SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
-import type { DeliveryFailureClass } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import type { Cancel } from "../cancel.ts";
 import type { EntityId } from "../create-ref.ts";
@@ -230,13 +230,14 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
 
   /**
    * Whether SPACE's replica holds server-confirmed verified content for
-   * `cid:<hash>` — the write-side elision seam for schema-document
-   * staging. Confirmed only: a pending local write is not evidence the
+   * `cid:<hash>` — the write-side elision seam for content-addressed
+   * document staging, schema and code documents alike. Confirmed only: a
+   * pending local write is not evidence the
    * server holds the document. Consults an already-open replica and
    * answers false otherwise; false stages, which is always the safe
    * direction.
    */
-  isSchemaDocPersisted?(space: MemorySpace, hash: string): boolean;
+  isContentAddressedDocPersisted?(space: MemorySpace, hash: string): boolean;
 
   /**
    * Observer of FIRST opens per space (server-execution v2 Phase 4): the
@@ -593,6 +594,17 @@ export interface IRemoteStorageProviderSettings {
   experimentalConcurrentWatchRefresh?: boolean;
 }
 
+/**
+ * A document a transaction read as absent that its replica never examined,
+ * addressed the way a pending load for it is keyed: `scopeKey` names a
+ * foreign instance a served run read, and is absent for the replica's own.
+ * See {@link IStorageProvider.unexaminedAbsences}.
+ */
+export type UnexaminedAbsence = Pick<
+  IMemorySpaceAddress,
+  "space" | "id" | "scope" | "scopeKey"
+>;
+
 export interface IStorageProvider {
   /**
    * Sync a value from storage. Use transactions to retrieve the value.
@@ -623,25 +635,31 @@ export interface IStorageProvider {
   synced(): Promise<void>;
 
   /**
-   * Load the documents `source` read as absent without this replica ever
-   * having examined them (no local record; session-scoped instances
-   * excluded, since a fresh session instance cannot exist server-side), and
-   * resolve with how many turned out to exist.
+   * The documents `source` read as absent without this replica ever having
+   * examined them: no local record, session-scoped instances excluded since
+   * a fresh session instance cannot exist server-side. Each is keyed the
+   * way a pending load for it is keyed, so a caller can wait for the loads
+   * already in flight for them.
    *
    * An unexamined absence becomes a `seq: 0` confirmed read in the
    * transaction's commit — the claim that no such document exists — which
-   * the server rejects whenever one does. `Runtime.editWithRetry` consults
-   * this before committing: a non-zero count means the transaction's reads
-   * ran against documents it did not hold, so the attempt is re-run locally
-   * against the now-loaded documents instead of being rejected on the wire.
-   * Returns `0` synchronously when the transaction holds no unexamined
-   * absences, so commit paths that are synchronous stay synchronous.
-   * Optional: a provider without it simply leaves that convergence to the
-   * server's rejection and the retry gate, exactly as before.
+   * the server rejects whenever one does. `Runtime.editWithRetry` takes this
+   * list before committing, waits for the loads in flight for them, and
+   * re-runs the attempt locally when {@link presentCount} then reports any
+   * as existing, instead of shipping a commit the server would reject.
+   * Optional: a provider without it leaves that convergence to the server's
+   * rejection and the retry gate.
    */
-  loadUnexaminedAbsences?(
+  unexaminedAbsences?(
     source: IStorageTransaction | undefined,
-  ): number | Promise<number>;
+  ): readonly UnexaminedAbsence[];
+
+  /**
+   * How many of `absences`, addresses {@link unexaminedAbsences} returned,
+   * this replica now holds with a confirmed revision. Optional alongside
+   * {@link unexaminedAbsences}.
+   */
+  presentCount?(absences: readonly UnexaminedAbsence[]): number;
 
   /** INBOUND settlement only (server-execution v2 stage F): outstanding
    * watch refreshes/pulls, EXCLUDING commit settlement AND update
@@ -1338,11 +1356,11 @@ export interface IStorageTransaction {
   getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
 
   /**
-   * The manager's `isSchemaDocPersisted`, reachable from the transaction
-   * (the staging scan runs inside one). Optional the same way; absent
-   * means never elide.
+   * The manager's `isContentAddressedDocPersisted`, reachable from the
+   * transaction (the staging scan runs inside one). Optional the same
+   * way; absent means never elide.
    */
-  isSchemaDocPersisted?(space: MemorySpace, hash: string): boolean;
+  isContentAddressedDocPersisted?(space: MemorySpace, hash: string): boolean;
 
   /**
    * Optional read details for the given space: the values this transaction
@@ -1620,6 +1638,18 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    */
   stageSchemaDocClosure(space: MemorySpace, rootHash: string): void;
 
+  /**
+   * Stages the content-addressed document holding `value` into this
+   * transaction and returns its id: `cid:` plus the general content hash
+   * of the value. The document is the value and nothing else, so no
+   * closure follows it; the write is blind and idempotent, deduped per
+   * transaction, and elided when the space's server already holds the
+   * document. Required for the same reason as `stageSchemaDocClosure`:
+   * the dedupe and the elision cannot be bypassed by a caller writing
+   * the document itself.
+   */
+  stageContentAddressedDocument(space: MemorySpace, value: FabricValue): URI;
+
   tx: IStorageTransaction;
 
   /**
@@ -1664,13 +1694,20 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * The dispatched handler's BODY did not run (the runner's stream-path
    * argument-did-not-resolve skip: `isValidArgument === false`, runner.ts).
    * Set by the runner on the skip; consumed by the scheduler's event
-   * finalize for mark/effects atomicity (events.md §4, RULED 2026-08-27):
-   * a SERVED dispatch's transaction carries the entry's pre-stamped
-   * `consequenced` mark, so sealing a skipped run would commit the mark
-   * with ZERO effects and permanently consume the event (the a04 1-op
-   * shape). The finalize withdraws the whole transaction instead — the
-   * entry stays pending-unconsequenced and the drain re-delivers it.
-   * Client/OFF dispatches carry no mark and keep the silent skip.
+   * finalize, which withdraws the whole transaction rather than sealing
+   * it and re-runs the handler (events.md §5). A SERVED dispatch's
+   * transaction carries the entry's pre-stamped `consequenced` mark, so
+   * sealing a skipped run would commit the mark with ZERO effects and
+   * permanently consume the event (the a04 1-op shape); the entry stays
+   * pending-unconsequenced and the drain re-delivers it. A client
+   * dispatch is requeued by the scheduler within its retry window, parked
+   * on the loads the run registered when any are in flight, and fails
+   * loudly once the window is spent or once its re-runs with nothing to
+   * park on reach `HANDLER_NOT_RUN_BACKOFF_LIMIT`; one that opted out of retrying is
+   * not re-run, and its callback sees the aborted transaction. Under
+   * events-down a client dispatch without a served carriage is the
+   * speculative echo of an entry the server re-drains, and its skip seals
+   * as an empty speculative commit.
    */
   dispatchedHandlerNotRun?: { reason: string };
 
@@ -1909,6 +1946,20 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * `deepFreeze()`d on entry.
    */
   recordCfcStructureContainer(address: CfcAddress): void;
+
+  /**
+   * Settles whether this transaction is CFC-relevant — the flow-label
+   * relevance probe, then the sink-request ceiling probe — and runs
+   * `prepareCfc()` when it is.
+   *
+   * `commit()` runs this itself, so the enforcement ladder always decides on
+   * a settled verdict. `Runtime.prepareTxForCommit` runs it earlier for
+   * callers that read what prepare produces before they commit — the CFC
+   * outbox, and the label-map writes a reactivity log captured before the
+   * commit carries. A second pass finds the transaction prepared and does
+   * nothing. `docs/specs/cfc-commit-preparation.md` covers the arrangement.
+   */
+  prepareForCommit(): void;
 
   /**
    * Runs CFC boundary verification for this transaction and records the
@@ -2316,10 +2367,14 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * Link resolution and CFC label-view derivation both do exactly that, and
    * both are driven per element of a collection, so a scan recomputes them
    * once per element per pass. Each user owns its own key prefix and entry
-   * shape; the transaction owns when the map may be used and when it is
-   * dropped. It is replaced wholesale on any write — same rule as the
-   * `Cell.get()` cache above — so an entry is only ever served when nothing
-   * has been written since it was made.
+   * shape; the transaction owns which map is handed out and when it is
+   * dropped. The map for the current instant is replaced wholesale on any
+   * write — same rule as the `Cell.get()` cache above — so an entry is only
+   * ever served when nothing has been written since it was made. A read under
+   * an epoch, or inside a `runWithAmbientReadMeta()` scope, is handed a map of
+   * its own: an entry stands in only for reads journaled the way the caller's
+   * would be, and a map for an epoch outlives writes, since the instant it
+   * describes does.
    *
    * A user must be a derivation whose only observable effect is its result, or
    * must reproduce the rest itself: the reads a memoized derivation skips were
@@ -2329,9 +2384,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    *
    * `undefined` is returned where a derivation is not a pure function of the
    * snapshot: once CFC is prepared, where the read path's read-after-prepare
-   * invalidation is load-bearing, and inside a `runWithAmbientReadMeta()`
-   * scope, where the reads carry metadata that a call outside the scope would
-   * not.
+   * invalidation is load-bearing.
    *
    * Optional: transactions that must not memoize (the non-reactive `sample()`
    * wrapper, whose reads are excluded from scheduling) leave it undefined, and

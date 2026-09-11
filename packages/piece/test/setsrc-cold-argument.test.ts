@@ -1,3 +1,10 @@
+/**
+ * A nested piece's argument can live in its host's document, which may be
+ * unreadable in this replica. Setup preserves the stored bytes and defers
+ * validation of that document to reactive reads. The Piece API preserves the
+ * distinction between an unreadable document and a readable wrong value.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
@@ -9,39 +16,6 @@ import {
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
-
-// CT-1917 at the `cf piece setsrc` boundary: a slot the piece cannot READ right
-// now is not a slot holding the wrong value.
-//
-// A piece's argument document is not always resident. A nested piece's argument
-// lives in its HOST's document, so while the host has not synced the whole
-// argument reads as nothing. Runner deliberately DEFERS that state rather than
-// failing it: `applySetupState` preserves the stored bytes and lets the swap
-// proceed, because refusing would make every such piece un-updatable for
-// reasons that have nothing to do with its stored value.
-// `packages/runner/test/pattern-update-argument-validation.test.ts` pins the
-// same deferral one layer down ("defers an argument doc that reads NOTHING on
-// the in-place path").
-//
-// `setPattern` has to inherit that deferral, and there is one specific way to
-// lose it: running the aggregate compatibility review BEFORE the swap. That
-// review materializes the stored argument and validates it against the
-// candidate's schema, and it cannot tell a cold document from a wrong one — over
-// a cold document it validates `undefined` and refuses. An earlier revision of
-// PR #5311 did exactly that, to name every incompatibility at once, and a
-// reviewer found it by execution: two revisions with IDENTICAL schemas carrying
-// a required field, which `main` swaps happily, were refused with "updated
-// arguments do not match the candidate schema: value does not match type
-// object".
-//
-// So enforcement stays where it was: `assertPatternSchemasBackwardCompatible`
-// plus the execute-time validators, all of which defer a cold read. Whatever
-// else `setPattern` does with the aggregate review, it must not be allowed to
-// decide ACCEPTANCE — and this case is the guard on that, failing the moment it
-// is put back in front of the swap.
-//
-// Every other case in this package supplies a WARM argument, which is why the
-// regression got through — a warm argument validates fine either way.
 
 const signer = await Identity.fromPassphrase("setsrc cold argument");
 

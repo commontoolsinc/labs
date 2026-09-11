@@ -8,7 +8,10 @@ import {
 } from "@commonfabric/utils/bigint";
 
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
+import {
+  BaseFabricPrimitive,
+  VALUE_TAG,
+} from "@/fabric-bases/BaseFabricPrimitive.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
@@ -20,6 +23,10 @@ import {
 } from "@/codec-interface/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import {
+  FABRIC_PRIMITIVE_VALUE_TAGS,
+  type FabricPrimitiveValueTag,
+} from "@/value-tags.ts";
 
 /**
  * Temporal type representing a particular day, as a count of days from the
@@ -35,6 +42,15 @@ export class FabricEpochDay extends BaseFabricPrimitive
   constructor(value: bigint) {
     super();
     this.#value = value;
+  }
+
+  //
+  // Instance members
+  //
+
+  /** @inheritDoc */
+  get [VALUE_TAG](): FabricPrimitiveValueTag {
+    return FABRIC_PRIMITIVE_VALUE_TAGS.FabricEpochDay;
   }
 
   /** Days from POSIX Epoch. Negative values represent pre-epoch dates. */

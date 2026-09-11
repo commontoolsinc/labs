@@ -5,6 +5,7 @@ import {
   byDayThenName,
   dayPartitions,
   inputChoice,
+  namingSurfaces,
   parseArgs,
   partitionOf,
   publish,
@@ -21,6 +22,7 @@ import {
   type TestRecord,
 } from "@commonfabric/test-support/records";
 import {
+  type AggregateState,
   emptyAggregate,
   Fold,
   parseAggregate,
@@ -28,6 +30,7 @@ import {
 } from "./test-selection/build.ts";
 import type { Suite } from "./test-topology/suite.ts";
 import { join } from "@std/path";
+import { stateObjectName } from "./test-selection/store.ts";
 
 /**
  * A topology holding the one suite these cases record against. Supplied
@@ -49,6 +52,43 @@ const TOPOLOGY: Suite[] = [{
 }];
 
 const suites = () => Promise.resolve(TOPOLOGY);
+
+/** The one unit that topology holds. */
+const UNIT = "packages/memory/test/space.test.ts";
+
+/**
+ * A topology whose one suite places a record by the file it carries, the
+ * way a suite whose units are files does. A record with no file reaches
+ * no unit, which is what leaves an identity unplaced in practice.
+ */
+const needsFile = () =>
+  Promise.resolve<Suite[]>([{
+    ...TOPOLOGY[0]!,
+    locate: (record) =>
+      record.file === UNIT ? { level: "unit", unit: UNIT } : undefined,
+  }]);
+
+/** Everything a call said on the standard output, as one string. */
+async function saying(call: () => Promise<unknown>): Promise<string> {
+  const lines: string[] = [];
+  const log = console.log;
+  console.log = (line: string) => lines.push(line);
+  try {
+    await call();
+  } finally {
+    console.log = log;
+  }
+  return lines.join("\n");
+}
+
+/** The aggregate of the newest state object a run created. */
+async function newestState(
+  created: Map<string, Uint8Array>,
+): Promise<AggregateState> {
+  const newest = [...created.keys()].filter((name) => name.includes("/state/"))
+    .sort().at(-1)!;
+  return JSON.parse(await gunzipToText(created.get(newest)!));
+}
 
 const CI = (day: string, run: string) =>
   `labs/test-records/submissions/ci/v1/${day}/run-${run}-a.ndjson`;
@@ -92,6 +132,48 @@ describe("test-selection-publish", () => {
       expect(parseArgs(["--days"])).toBeUndefined();
       expect(parseArgs(["--concurrency", "x"])).toBeUndefined();
       expect(parseArgs(["--out"])).toBeUndefined();
+    });
+  });
+
+  describe("namingSurfaces()", () => {
+    const key = (kind: string, scope: string, name: string, variant?: string) =>
+      JSON.stringify(
+        variant === undefined
+          ? [kind, scope, name]
+          : [kind, scope, name, variant],
+      );
+
+    it("names the worst first, with its own count", () => {
+      expect(namingSurfaces([
+        key("unit", "utils", "a"),
+        key("unit", "llm", "b"),
+        key("unit", "utils", "c"),
+      ])).toBe("2 surface(s): unit:utils 2, unit:llm 1");
+    });
+
+    it("separates a variant from the surface it varies", () => {
+      // The two run in different configurations and are fixed in
+      // different places, so they are not one surface.
+      expect(namingSurfaces([
+        key("integration", "patterns", "a"),
+        key("integration", "patterns", "b", "server-execution"),
+      ])).toBe(
+        "2 surface(s): integration:patterns 1, " +
+          "integration:patterns:server-execution 1",
+      );
+    });
+
+    it("counts the surfaces it does not name", () => {
+      const keys = ["a", "b", "c", "d", "e", "f", "g"].map((scope) =>
+        key("unit", scope, "one")
+      );
+      expect(namingSurfaces(keys)).toContain("7 surface(s): ");
+      expect(namingSurfaces(keys)).toContain(", and 2 more");
+    });
+
+    it("passes over a key that names no identity", () => {
+      expect(namingSurfaces(["not an identity key", key("unit", "utils", "a")]))
+        .toBe("1 surface(s): unit:utils 1");
     });
   });
 
@@ -224,6 +306,7 @@ function object(
   outcome: TestRecord["outcome"],
   at: string,
   branch = "main",
+  file?: string,
 ): string {
   const context: RunContext = {
     schema: 1,
@@ -251,6 +334,7 @@ function object(
     test: { k: "unit", s: "memory", n: "space > writes" },
     outcome,
     durationMs: 40,
+    ...(file === undefined ? {} : { file }),
   };
   return buildObjectBody(context, [record]);
 }
@@ -321,8 +405,11 @@ describe("publish()", () => {
     expect(manifest!.entries[0]!.unit).toBe(
       "packages/memory/test/space.test.ts",
     );
-    // The failure at c1 that c2 went on to fix is a catch on main.
-    expect(manifest!.entries[0]!.inputs.mainCatches).toBe(1);
+    // The failure at c1 that c2 went on to fix is a catch on main, and
+    // a catch there is weighted by where it happened. The 1.5 is
+    // `CATCH_WEIGHT_MAIN` written out: comparing against the dial would
+    // hold just as well for a dial of zero and a catch never counted.
+    expect(manifest!.entries[0]!.inputs.catches).toBe(1.5);
   });
 
   it("leaves out an identity no suite claims, and says how many", async () => {
@@ -350,7 +437,139 @@ describe("publish()", () => {
       await gunzipToText(created.get(manifestName!)!),
     );
     expect(manifest!.entries).toEqual([]);
-    expect(lines.join("\n")).toContain("1 identities no suite claims");
+    expect(lines.join("\n")).toContain(
+      "the topology has no unit for 1 identities",
+    );
+  });
+
+  it("says which unplaced identities recorded again with no file", async () => {
+    // An identity still waiting for its next record leaves the count when
+    // that record arrives. One that is unplaced twice over has recorded
+    // more since and said too little both times, which is a surface the
+    // topology does not account for.
+    const objects = seed();
+    const { store } = fakeStore(objects);
+    await publish(["--bootstrap", "--days", "1"], store, NOW, needsFile);
+    objects[CI(DAY, "3")] = object("c3", "pass", "2026-08-20T03:00:00.000Z");
+    const lines = await saying(() =>
+      publish(["--days", "1"], store, NOW, needsFile)
+    );
+    expect(lines).toContain(
+      "1 of them were in this count at the last publish too",
+    );
+  });
+
+  it("holds an unplaced identity through a run that reads none of it", async () => {
+    // A surface records on its own schedule, and one recording less often
+    // than the publisher runs is in no fresh object most of the time. A
+    // list replaced each run would call it new every time it did record.
+    const objects = seed();
+    const { store } = fakeStore(objects);
+    await publish(["--bootstrap", "--days", "1"], store, NOW, needsFile);
+    await publish(["--days", "1"], store, NOW, needsFile);
+    objects[CI(DAY, "3")] = object("c3", "pass", "2026-08-20T03:00:00.000Z");
+    const lines = await saying(() =>
+      publish(["--days", "1"], store, NOW, needsFile)
+    );
+    expect(lines).toContain(
+      "1 of them were in this count at the last publish too",
+    );
+  });
+
+  it("drops what the count no longer holds from an older list", async () => {
+    // An aggregate written before the lane's own measurements left the
+    // count still names them, and nothing places one, so an entry that
+    // only left when placed would stay there for good.
+    const laneKey = JSON.stringify(["gate", "ci", "ci-lane batch memory"]);
+    const objects = seed();
+    const { store, created } = fakeStore(objects);
+    await publish(["--bootstrap", "--days", "1"], store, NOW, needsFile);
+    const older = await newestState(created);
+    objects[stateObjectName("2026-08-19", "01AAAA")] = JSON.stringify({
+      ...older,
+      unclaimed: [...older.unclaimed ?? [], laneKey],
+    });
+    created.clear();
+    objects[CI(DAY, "3")] = object("c3", "pass", "2026-08-20T03:00:00.000Z");
+    await publish(["--days", "1"], store, NOW, needsFile);
+    expect((await newestState(created)).unclaimed).not.toContain(laneKey);
+  });
+
+  it("drops an identity from the list once something places it", async () => {
+    // The list is what the tree does not account for, so a record naming
+    // a file a suite claims takes its identity out of it.
+    const objects = seed();
+    const { store, created } = fakeStore(objects);
+    await publish(["--bootstrap", "--days", "1"], store, NOW, needsFile);
+    objects[CI(DAY, "3")] = object(
+      "c3",
+      "pass",
+      "2026-08-20T03:00:00.000Z",
+      "main",
+      UNIT,
+    );
+    await publish(["--days", "1"], store, NOW, needsFile);
+    expect((await newestState(created)).unclaimed).toEqual([]);
+  });
+
+  it("says so when nothing unplaced was unplaced before", async () => {
+    // The same count means two different things, and which one it is
+    // rests on what no run had placed before this one.
+    const objects: Record<string, string> = {
+      [CI(DAY, "1")]: object(
+        "c1",
+        "fail",
+        "2026-08-20T01:00:00.000Z",
+        "main",
+        UNIT,
+      ),
+      [CI(DAY, "2")]: object(
+        "c2",
+        "pass",
+        "2026-08-20T02:00:00.000Z",
+        "main",
+        UNIT,
+      ),
+    };
+    const { store } = fakeStore(objects);
+    await publish(["--bootstrap", "--days", "1"], store, NOW, needsFile);
+    objects[CI(DAY, "3")] = object("c3", "pass", "2026-08-20T03:00:00.000Z");
+    const lines = await saying(() =>
+      publish(["--days", "1"], store, NOW, needsFile)
+    );
+    expect(lines).toContain(
+      "none of them were in this count at the last publish",
+    );
+  });
+
+  it("names the surfaces the stuck identities came from", async () => {
+    // A count says how much there is to fix, and the surface says which
+    // part of the tree it is in. Both the whole count and the part of it
+    // that did not move name the worst of theirs.
+    const objects = seed();
+    const { store } = fakeStore(objects);
+    await publish(["--bootstrap", "--days", "1"], store, NOW, needsFile);
+    objects[CI(DAY, "3")] = object("c3", "pass", "2026-08-20T03:00:00.000Z");
+    const lines = await saying(() =>
+      publish(["--days", "1"], store, NOW, needsFile)
+    );
+    expect(lines).toContain(
+      "those 1 were recorded by 1 surface(s): unit:memory 1",
+    );
+    expect(lines).toContain(
+      "those 1 were recorded by 1 surface(s): unit:memory 1",
+    );
+  });
+
+  it("compares against nothing when it folds into an empty aggregate", async () => {
+    // A bootstrap has no previous publish, so it counts what it could not
+    // place and says nothing about whether that is falling.
+    const { store } = fakeStore(seed());
+    const lines = await saying(() =>
+      publish(["--bootstrap", "--days", "1"], store, NOW, needsFile)
+    );
+    expect(lines).toContain("the topology has no unit for 1 identities");
+    expect(lines).not.toContain("at the last publish");
   });
 
   it("carries what each configuration declares unavailable", async () => {
@@ -411,7 +630,9 @@ describe("publish()", () => {
     } finally {
       console.log = log;
     }
-    expect(lines.join("\n")).toContain("1 identities measure a suite");
+    expect(lines.join("\n")).toContain(
+      "1 identities measure a whole invocation",
+    );
   });
 
   it("folds from the state it left rather than the objects again", async () => {

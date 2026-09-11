@@ -1,3 +1,8 @@
+import type {
+  LoomAuthoringToolOutput,
+  LoomComposeToolInput,
+  LoomReadToolInput,
+} from "./tools/loom-authoring.ts";
 import {
   dirname,
   join as joinHostPath,
@@ -7,6 +12,7 @@ import {
 import { normalize as normalizeSandboxPath } from "@std/path/posix";
 
 import {
+  type CfcConfClause,
   type CfcLabelView,
   type CfcPostureReport,
   inheritedCfcPostureReport,
@@ -18,6 +24,8 @@ import {
 } from "./artifacts.ts";
 import {
   fabricSessionCfcEnforcementMode,
+  fabricSessionCfcFlowLabels,
+  fabricSessionCfcFlowLabelsSource,
   type HarnessConfig,
   type ResolvedHarnessConfig,
   resolveHarnessConfig,
@@ -76,6 +84,7 @@ import {
   type ToolResultRef,
 } from "./contracts/tool-result.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
+import { harnessResumeRefusal } from "./control-errors.ts";
 import {
   classifyBuiltinToolFailure,
   classifyHarnessPolicyEventFailure,
@@ -101,9 +110,9 @@ import {
   type HarnessPatternIndexClientFactory,
 } from "./pattern-index/client.ts";
 import {
-  createPatternIndexPublicationLedger,
-  type PatternIndexPublicationLedger,
-} from "./pattern-index/publish-ledger.ts";
+  createPatternIndexLedger,
+  type PatternIndexLedger,
+} from "./pattern-index/ledger.ts";
 import {
   cacheHarnessSkillsShAcquisitionClientFactory,
   createHarnessSkillsShAcquisitionClientFactory,
@@ -243,6 +252,9 @@ export interface BuiltinToolInputMap {
   search_skills: SearchSkillsToolInput;
   acquire_skill: AcquireSkillToolInput;
   query_docs: QueryDocsToolInput;
+  loom_compose: LoomComposeToolInput;
+  loom_inspect: LoomReadToolInput;
+  loom_authoring_context: LoomReadToolInput;
 }
 
 export interface BuiltinToolOutputMap {
@@ -264,6 +276,9 @@ export interface BuiltinToolOutputMap {
   search_skills: SearchSkillsToolOutput;
   acquire_skill: AcquireSkillToolOutput;
   query_docs: QueryDocsToolOutput;
+  loom_compose: LoomAuthoringToolOutput;
+  loom_inspect: LoomAuthoringToolOutput;
+  loom_authoring_context: LoomAuthoringToolOutput;
 }
 
 interface ToolOutputWithId {
@@ -435,7 +450,7 @@ const resolveInitialCurrentDir = (
 ): string => {
   if (runState !== undefined) {
     if (runState.currentDir === undefined) {
-      throw new Error(
+      throw harnessResumeRefusal(
         "run state is missing currentDir; older cf-harness runs cannot be resumed",
       );
     }
@@ -497,7 +512,7 @@ export class CfHarnessEngine {
     HarnessSkillsShAcquisitionClientFactory;
   #docsCorpus?: Promise<HarnessDocsCorpus>;
   #exploreQueryRunner?: HarnessExploreQueryRunner;
-  #patternIndexPublications?: PatternIndexPublicationLedger;
+  #patternIndexLedger?: PatternIndexLedger;
   readonly #taskText?: string;
   readonly #inputCells: readonly HarnessInputCellSpec[];
   readonly #patternRefs: readonly HarnessPatternRefSpec[];
@@ -516,7 +531,7 @@ export class CfHarnessEngine {
     if (resumedLineage !== undefined) {
       const resumeContext = options.subagentResumeContext;
       if (resumeContext === undefined) {
-        throw new Error(
+        throw harnessResumeRefusal(
           `resumed subagent run ${
             options.runState!.runId
           } requires trusted parent resume context`,
@@ -529,7 +544,7 @@ export class CfHarnessEngine {
         resumeContext.parentRunId !== resumedLineage.parentRunId ||
         resumeContext.parentToolCallId !== resumedLineage.parentToolCallId
       ) {
-        throw new Error(
+        throw harnessResumeRefusal(
           `resumed subagent run ${
             options.runState!.runId
           } does not match trusted parent resume context`,
@@ -542,7 +557,7 @@ export class CfHarnessEngine {
       options.runState !== undefined && options.modelProvider !== undefined &&
       options.modelProvider !== recordedProvider
     ) {
-      throw new Error(
+      throw harnessResumeRefusal(
         `resumed run provider ${recordedProvider} does not match requested provider ${options.modelProvider}`,
       );
     }
@@ -551,7 +566,7 @@ export class CfHarnessEngine {
       options.model !== undefined && options.runState.model !== undefined &&
       options.model !== options.runState.model
     ) {
-      throw new Error(
+      throw harnessResumeRefusal(
         `resumed openai-codex run model ${options.runState.model} does not match requested model ${options.model}`,
       );
     }
@@ -564,7 +579,7 @@ export class CfHarnessEngine {
       requestedOwner !== undefined &&
       !harnessCredentialOwnersEqual(recordedOwner, requestedOwner)
     ) {
-      throw new Error(
+      throw harnessResumeRefusal(
         "resumed run credential owner does not match requested credential owner",
       );
     }
@@ -577,7 +592,7 @@ export class CfHarnessEngine {
       requestedHomeIdentity !== undefined &&
       recordedHomeIdentity !== requestedHomeIdentity
     ) {
-      throw new Error(
+      throw harnessResumeRefusal(
         "resumed run harness home does not match requested harness home",
       );
     }
@@ -590,7 +605,7 @@ export class CfHarnessEngine {
       requestedAuthSource !== undefined &&
       recordedAuthSource !== requestedAuthSource
     ) {
-      throw new Error(
+      throw harnessResumeRefusal(
         "resumed run model auth source does not match requested model auth source",
       );
     }
@@ -600,15 +615,15 @@ export class CfHarnessEngine {
       options.credentialOwnerKey !== undefined &&
       options.credentialOwnerKey !== options.runState.credentialOwnerKey
     ) {
-      throw new Error(
-        "resumed run credential owner does not match requested credential owner",
+      throw harnessResumeRefusal(
+        "resumed openai-codex run credential owner key does not match requested credential owner key",
       );
     }
     if (
       options.runState !== undefined &&
       options.runState.cfcEnforcementMode === undefined
     ) {
-      throw new Error(
+      throw harnessResumeRefusal(
         "run state is missing cfcEnforcementMode; older cf-harness runs cannot be resumed",
       );
     }
@@ -651,7 +666,7 @@ export class CfHarnessEngine {
       options.runState !== undefined &&
       this.config.cfcEnforcementMode !== options.runState.cfcEnforcementMode
     ) {
-      throw new Error(
+      throw harnessResumeRefusal(
         this.config.cfcEnforcementModeSource === "fabric-session"
           ? `resumed run CFC enforcement mode ${options.runState.cfcEnforcementMode} does not match the ${this.config.cfcEnforcementMode} its fabric session raises the harness dial to; lower --fabric-cfc-enforcement-mode to resume this run`
           : `resumed run CFC enforcement mode ${options.runState.cfcEnforcementMode} does not match requested CFC enforcement mode ${this.config.cfcEnforcementMode}`,
@@ -777,8 +792,8 @@ export class CfHarnessEngine {
       options.runState,
     );
     // The posture the fabric session's runtime will actually run at, resolved
-    // from the same config the session factory reads. The pin/default values
-    // restate what `runtimePresets.remoteClient` and the Runtime constructor
+    // from the same config the session factory reads. The enforcement pin
+    // restates what `runtimePresets.remoteClient` and the Runtime constructor
     // supply when the dial is unset (`coreOptions` in
     // `packages/runner/src/runtime-presets.ts`).
     // A host that supplies its own session factory overrides the config the
@@ -812,15 +827,10 @@ export class CfHarnessEngine {
           this.config.fabricSession.cfcEnforcementMode !== undefined
             ? "configured" as const
             : "preset-pin" as const,
-        flowLabels: this.config.fabricSession.cfcFlowLabels ??
-          (this.config.fabricSession.cfcPosture === "max-enforcement"
-            ? "persist" as const
-            : "off" as const),
-        flowLabelsSource: this.config.fabricSession.cfcFlowLabels !== undefined
-          ? "configured" as const
-          : this.config.fabricSession.cfcPosture === "max-enforcement"
-          ? "posture" as const
-          : "default" as const,
+        flowLabels: fabricSessionCfcFlowLabels(this.config.fabricSession),
+        flowLabelsSource: fabricSessionCfcFlowLabelsSource(
+          this.config.fabricSession,
+        ),
         ...(this.config.fabricSession.cfcPosture !== undefined
           ? { posture: this.config.fabricSession.cfcPosture }
           : {}),
@@ -858,23 +868,58 @@ export class CfHarnessEngine {
       const recorded = options.runState.fabricSessionCfc;
       if (recorded === undefined) {
         if (fabricSessionCfc.posture !== undefined) {
-          throw new Error(
+          throw harnessResumeRefusal(
             `fabric session CFC posture mismatch on resume: run state ` +
               `records no fabric-session posture, so it cannot attest the ` +
               `${fabricSessionCfc.posture} bundle the session ` +
               `configuration resolves`,
           );
         }
-      } else if (
-        recorded.enforcementMode !== fabricSessionCfc.enforcementMode ||
-        recorded.flowLabels !== fabricSessionCfc.flowLabels ||
-        recorded.posture !== fabricSessionCfc.posture ||
-        // The read ceiling too: a resume that would read wider (or under
-        // another ceiling) than the artifacts attest is the same
-        // contradiction as a moved dial.
-        JSON.stringify(recorded.readMaxConfidentiality) !==
-          JSON.stringify(fabricSessionCfc.readMaxConfidentiality) ||
-        recorded.readOnExceed !== fabricSessionCfc.readOnExceed ||
+      } else {
+        // A ceiling is compared by its clauses and stated by their count: a
+        // clause is a confidentiality label atom, which names spaces and
+        // carries field commitments, and this message leaves the harness.
+        const clauseCount = (clauses?: readonly CfcConfClause[]) =>
+          clauses === undefined
+            ? "none"
+            : `${clauses.length} clause${clauses.length === 1 ? "" : "s"}`;
+        const differences = [
+          ...([
+            [
+              "enforcement mode",
+              recorded.enforcementMode,
+              fabricSessionCfc.enforcementMode,
+            ],
+            ["flow labels", recorded.flowLabels, fabricSessionCfc.flowLabels],
+            [
+              "posture bundle",
+              recorded.posture ?? "none",
+              fabricSessionCfc.posture ?? "none",
+            ],
+            [
+              "read ceiling overflow",
+              recorded.readOnExceed ?? "none",
+              fabricSessionCfc.readOnExceed ?? "none",
+            ],
+          ] as const)
+            .filter(([, recordedDial, resolved]) => recordedDial !== resolved)
+            .map(([dial, recordedDial, resolved]) =>
+              `${dial} (${recordedDial} against ${resolved})`
+            ),
+          // The read ceiling too: a resume that would read wider (or under
+          // another ceiling) than the artifacts attest is the same
+          // contradiction as a moved dial.
+          ...(JSON.stringify(recorded.readMaxConfidentiality) !==
+              JSON.stringify(fabricSessionCfc.readMaxConfidentiality)
+            ? [
+              `read ceiling (${
+                clauseCount(recorded.readMaxConfidentiality)
+              } against ${
+                clauseCount(fabricSessionCfc.readMaxConfidentiality)
+              })`,
+            ]
+            : []),
+        ];
         // The whole record too, where the run recorded one. The two dials
         // above can agree while a dial neither of them names has moved under
         // the run — a changed runtime default, a changed posture bundle — and
@@ -884,16 +929,24 @@ export class CfHarnessEngine {
         // resume that drops the session the record came from: a run that
         // recorded an inherited record and is resumed without the parent
         // session behind it resolves a different record, or none, and either
-        // way the artifacts would stop describing what executes.
-        (recorded.record !== undefined &&
+        // way the artifacts would stop describing what executes. The record
+        // is named rather than printed: it lists every sink the runtime
+        // governs and every deviation it publishes, which is a security
+        // posture rather than a dial an operator moves, and this message
+        // leaves the harness.
+        if (
+          recorded.record !== undefined &&
           JSON.stringify(recorded.record) !==
-            JSON.stringify(fabricSessionCfc.record))
-      ) {
-        throw new Error(
-          `fabric session CFC posture mismatch on resume: run state records ` +
-            `${JSON.stringify(recorded)} but the session configuration ` +
-            `resolves ${JSON.stringify(fabricSessionCfc)}`,
-        );
+            JSON.stringify(fabricSessionCfc.record)
+        ) {
+          differences.push("the runtime posture record the dials resolve to");
+        }
+        if (differences.length > 0) {
+          throw harnessResumeRefusal(
+            `fabric session CFC posture mismatch on resume: the run and the ` +
+              `session configuration differ on ${differences.join(", ")}`,
+          );
+        }
       }
     }
     this.#runState = options.runState ??
@@ -993,22 +1046,25 @@ export class CfHarnessEngine {
    * duplicates were being produced at. Created on first use and only when the
    * run can reach an index at all.
    */
-  get patternIndexPublications(): PatternIndexPublicationLedger | undefined {
+  get patternIndexLedger(): PatternIndexLedger | undefined {
     const factory = this.#patternIndexClientFactory;
     if (factory === undefined) return undefined;
-    this.#patternIndexPublications ??= createPatternIndexPublicationLedger(
+    this.#patternIndexLedger ??= createPatternIndexLedger(
       factory,
     );
-    return this.#patternIndexPublications;
+    return this.#patternIndexLedger;
   }
 
   /**
-   * Sends everything this session's ledger still holds. Called once, when the
-   * session's prompt loop finishes; a session that never reaches it publishes
-   * nothing, which `publish-ledger.ts` states as the cost it is.
+   * Sends everything this session's ledger still holds and waits for every
+   * write it has made. Called once, when the session's prompt loop finishes.
+   * A session that never reaches it keeps whatever the ledger already sent —
+   * a displaced iteration, a dependency, a report — and loses the entries
+   * still held, which `ledger.ts` states as the cost it is, along with
+   * whichever writes were in flight.
    */
-  async flushPatternIndexPublications(): Promise<void> {
-    await this.#patternIndexPublications?.flush();
+  async flushPatternIndexLedger(): Promise<void> {
+    await this.#patternIndexLedger?.flush();
   }
 
   /**
@@ -2170,6 +2226,14 @@ export class CfHarnessEngine {
       ...(this.#fabricSessionFactory !== undefined
         ? { getFabricSession: this.#fabricSessionFactory }
         : {}),
+      ...(this.config.fabricSession !== undefined
+        ? {
+          fabricSessionTarget: {
+            apiUrl: this.config.fabricSession.apiUrl,
+            space: this.config.fabricSession.space,
+          },
+        }
+        : {}),
       ...(this.#openProbeRuntime !== undefined
         ? { openProbeRuntime: this.#openProbeRuntime }
         : {}),
@@ -2178,7 +2242,7 @@ export class CfHarnessEngine {
           getPatternIndexClient: this.#patternIndexClientFactory,
           patternIndexPublishEnabled: this.patternIndexPublishEnabled,
           patternIndexPublishDiscoverable: this.patternIndexPublishDiscoverable,
-          patternIndexPublications: this.patternIndexPublications,
+          patternIndexLedger: this.patternIndexLedger,
         }
         : {}),
       ...(this.docsCorpusAvailable
@@ -2202,6 +2266,7 @@ export class CfHarnessEngine {
       ...(this.#taskText !== undefined ? { taskText: this.#taskText } : {}),
       sandbox: this.sandbox,
       hostProcessRunner: this.hostProcessRunner,
+      loomAuthoring: this.config.loomAuthoring,
       resolvePath: (path: string) =>
         this.sandbox.resolvePath(path, this.#runState.currentDir),
       resolveHostPath: (path: string) => this.#resolveHostPath(path),

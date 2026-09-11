@@ -77,6 +77,18 @@ describe("entity-kind", () => {
     }
   });
 
+  it("keeps every entity URI scheme within RFC 3986 scheme syntax", () => {
+    // RFC 3986 section 3.1 admits a letter followed by any number of
+    // letters, digits, `+`, `-`, and `.`, and makes lowercase the canonical
+    // form. Iterating `ENTITY_URI_SCHEMES` settles the claim rather than
+    // sampling it, because that constant is the set `entityUriSchemePrefix`
+    // matches an id against.
+    expect(ENTITY_URI_SCHEMES.length).toBeGreaterThan(0);
+    for (const scheme of ENTITY_URI_SCHEMES) {
+      expect(scheme).toMatch(/^[a-z][a-z0-9+.-]*$/);
+    }
+  });
+
   it("detects canonical entity URI schemes", () => {
     expect(hasEntityUriScheme("of:fid1:abc")).toBe(true);
     expect(hasEntityUriScheme("computed:fid1:abc")).toBe(true);

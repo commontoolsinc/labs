@@ -64,13 +64,13 @@ describe("traverse-recorder", () => {
   });
 
   describe("recordInvocation", () => {
-    it("records an invocation with its address, selector and meta flag", () => {
+    it("records an invocation with its address, selector and `traverseCells` flag", () => {
       const recorder = new TraverseCaptureRecorder();
       recorder.recordInvocation(
         { address: address("of:doc", ["a"]) },
         selector(["a"]),
         undefined,
-        { includeMeta: true },
+        { traverseCells: true },
         undefined,
       );
 
@@ -80,7 +80,7 @@ describe("traverse-recorder", () => {
       expect(only.address.id).toBe("of:doc");
       expect(only.address.path).toEqual(["a"]);
       expect(only.address.type).toBe("application/json");
-      expect(only.includeMeta).toBe(true);
+      expect(only.traverseCells).toBe(true);
     });
 
     it("copies the address path rather than aliasing the caller's", () => {
@@ -90,7 +90,7 @@ describe("traverse-recorder", () => {
         { address: address("of:doc", path) },
         selector(["a"]),
         undefined,
-        { includeMeta: false },
+        { traverseCells: false },
         undefined,
       );
       path.push("mutated");
@@ -102,7 +102,7 @@ describe("traverse-recorder", () => {
 
     it("gives one context object one id across invocations", () => {
       const recorder = new TraverseCaptureRecorder();
-      const context = { includeMeta: false };
+      const context = { traverseCells: false };
       for (let i = 0; i < 3; i++) {
         recorder.recordInvocation(
           { address: address(`of:doc${i}`) },
@@ -125,14 +125,14 @@ describe("traverse-recorder", () => {
         { address: address("of:a") },
         selector(["a"]),
         undefined,
-        { includeMeta: false },
+        { traverseCells: false },
         undefined,
       );
       recorder.recordInvocation(
         { address: address("of:b") },
         selector(["a"]),
         undefined,
-        { includeMeta: false },
+        { traverseCells: false },
         undefined,
       );
 
@@ -148,14 +148,14 @@ describe("traverse-recorder", () => {
         { address: address("of:with") },
         selector(["a"]),
         undefined,
-        { includeMeta: false },
+        { traverseCells: false },
         {},
       );
       recorder.recordInvocation(
         { address: address("of:without") },
         selector(["a"]),
         undefined,
-        { includeMeta: false },
+        { traverseCells: false },
         undefined,
       );
 
@@ -175,14 +175,14 @@ describe("traverse-recorder", () => {
         { address: address("of:doc") },
         selector(["a"]),
         link,
-        { includeMeta: false },
+        { traverseCells: false },
         undefined,
       );
       recorder.recordInvocation(
         { address: address("of:doc2") },
         selector(["a"]),
         undefined,
-        { includeMeta: false },
+        { traverseCells: false },
         undefined,
       );
 
@@ -198,7 +198,7 @@ describe("traverse-recorder", () => {
           { address: address(`of:doc${i}`) },
           selector(["a"]),
           undefined,
-          { includeMeta: false },
+          { traverseCells: false },
           undefined,
         );
       }
@@ -218,7 +218,7 @@ describe("traverse-recorder", () => {
       expect(fixture.meta.name).toBe("fx");
       expect(fixture.meta.source).toBe("src.ts");
       expect(typeof fixture.meta.capturedAt).toBe("string");
-      expect(fixture.version).toBe(1);
+      expect(fixture.version).toBe(2);
     });
 
     it("describes a run that traversed nothing", () => {

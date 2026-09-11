@@ -52,9 +52,12 @@ rejected until the checked source-replication path exists.
 
 Following an origin is ONE mechanism, triggered by opening a piece — which a
 user does for most pieces and the runtime does for the surfaces it supplies. No
-kind of piece has a path of its own, nothing reconciles a piece nobody opened,
-and a serving tenure — which opens none — owes a space the existence of its
-root and nothing more. What that mechanism follows is a `system:` ref and a
+kind of piece has a path of its own, and nothing reconciles a piece nobody
+opened. Tenure activation owes a space the existence of its root without
+following the root's source. A served wish explicitly opens its runtime-supplied
+sidecars, so those pieces follow their origins on the serving runtime; the ON
+client only references the served sidecars. What that mechanism follows is a
+`system:` ref and a
 fabric URL, and those are the only two things it will follow. The candidate a
 `system:` origin resolves to is adopted as it stands, because the release that
 produced it was gated by golden replays; a candidate from any other origin has
@@ -592,19 +595,93 @@ another ordinary piece that passes the root-interface compatibility check.
 
 Uploading, compiling, or publishing content-addressed pattern source does not
 change an existing piece. These operations have no prior piece contract to
-compare, so piece compatibility does not gate them. Compatibility is evaluated
-when a candidate pattern is applied to an existing piece.
+compare, so piece compatibility does not gate them. Source-update compatibility
+is evaluated when a candidate pattern is applied to an existing piece.
+
+New input bindings made by `PiecesController.link` undergo contract validation
+in the transaction that commits the binding. A producer with durable schema
+metadata must satisfy the consumer's read contract and, for writable handles,
+accept the consumer's writes. Ordinary cells and externally injected handles
+without that metadata remain dynamic bindings: destination scope checks apply,
+but no static producer payload or capability proof is available. A known Piece
+whose producer contract cannot be recovered is refused. Raw writes that bypass
+this API, such as `setRawUntyped` and `cf cell set`, can store links without its
+admission check. The presence of a stored link alone therefore does not prove
+that its producer contract was checked when it was created.
 
 The runtime can compare the previous and candidate argument schemas, result
 schemas, and retained input links. Before a manual source replacement, the
 caller compiles and verifies the candidate and runs these structural
-comparisons. An incompatible pattern contract or retained link becomes an
+comparisons. Descriptions, titles, examples, and listing annotations do not
+change a contract, including inside defaulted unions. Defaults, reference
+targets, value constraints, and capability and CFC metadata remain part of the
+proof. Capability and CFC metadata are compared once, on the node that carries
+them, whatever spelling that node's alternatives take: one member type, a
+`type` list, or `anyOf` branches. Adding or removing a semantic extension on
+one of two `anyOf` nodes is incompatible in either the argument or result
+contract, subject to the same CFC metadata normalization as other nodes.
+
+The unconstrained schemas `true`, `{}`, and `{ type: "unknown" }` accept the
+same values; constraints beside `type: "unknown"` still apply. Adding an
+optional `unknown` read to an open producer contract is compatible,
+while adding an optional typed read requires the producer to guarantee that
+type whenever the property is present.
+
+Link materialization fills valid target defaults before validating the consumer
+view. Its subset proof can therefore accept an unconstrained producer (`true`)
+against `{ required: ["count"], properties: { count: { default: 1 } } }`:
+the member accepts any present value, and materialization fills an absent one.
+This allowance requires every ancestor constraint to remain valid under default
+insertion. Pattern evolution judges defaults as a migration; it does not use
+this link-materialization allowance. Its policy permitting new optional or
+defaulted fields on open argument objects is disabled inside the unconstrained
+schema proof and conjunction proofs.
+
+Union comparisons check defaults on the complete schemas before comparing
+alternatives, then omit the root default from both sides of each alternative
+comparison. Descendant defaults remain checked. This applies to both pattern
+evolution and link proofs, under their respective default policies.
+
+An incompatible pattern contract or retained link becomes an
 actionable warning. The UI requires explicit confirmation, and command-line
 tooling requires an explicit flag, before applying it. A materialized retained
 input that does not satisfy the candidate argument schema is not confirmable.
 The runtime rejects that source until the input is repaired. An accepted direct
 replacement detaches the piece and appends a revision. Refollowing an accepted
 historical origin retains that origin.
+
+Preflight and setup share stored-argument validation. Optional fields holding
+`undefined` count as absent. An argument document or linked value unreadable in
+the validating transaction defers to reactive reads; a readable wrong-typed
+value is refused. Preflight does not establish that every linked value is
+available.
+
+When validation needs to distinguish unreadable links from literal absence, its
+fallback walks stored links alongside the materialized argument. It reuses
+completed subgraphs within that validation, keyed by the full normalized link
+address and materialized view so distinct defaults stay distinct. Results that
+depend on a recursion cutoff or an unavailable raw-chain read are not reused;
+cyclic graphs retain their path-dependent cutoff behavior.
+
+A source update can preserve a committed direct handle under an unchanged
+consumer input contract. The serialized link values must compare equal under
+fabric-aware value comparison, and each prior and candidate path contract must
+have an equal resolved counterpart, including defaults and reference roots.
+A newly introduced link cannot use this rule.
+The continuity proof does not treat defaults as a new materialization step;
+bidirectional value-subset proofs alone cannot establish unchanged defaults.
+The strict default-insertion checks still govern new links and changed
+contracts. The linked producer retains its own store policy and enforces it on
+accesses, so its policy does not have to be repeated on the unchanged consumer
+contract. Capability-kind and scope checks still apply. Changed handle contracts
+require the full producer-contract proof.
+
+Retaining a handle proves continuity of the consumer contract, not a historical
+producer-contract check: writes that bypass `PiecesController.link`, such as
+`setRawUntyped` and `cf cell set`, can omit that check, and the producer schema
+can change after the link is stored. The retained-handle rule relies on
+producer enforcement at access and commit time for payload and flow-policy
+constraints rather than re-proving their subset relation during the update.
 
 Whether an automatic origin update runs these comparisons turns on one
 question: did anything gate the release that produced the candidate?
@@ -1135,8 +1212,9 @@ the owner of the piece. How that reaches a person is open design work.
 
 Reconciliation is triggered by opening the piece — which a user does for most
 pieces, and the runtime does for the surfaces it instantiates for itself.
-Nothing reconciles a piece nobody opened: a serving tenure owes a space the
-existence of its root, not the freshness of anyone's source. A root follows its
+Nothing reconciles a piece nobody opened. Tenure activation ensures root
+existence without following source; a served wish's explicit sidecar open
+invokes reconciliation just as another opener does. A root follows its
 origin on that same trigger and through that same sequence, and receives no
 narrower repair contract and skips no check when prior source is unavailable.
 Retained compatibility descriptors let this sequence replace an obsolete

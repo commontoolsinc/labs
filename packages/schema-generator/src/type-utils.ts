@@ -904,6 +904,34 @@ function followAliasToWrapperNode(
 }
 
 /**
+ * Recognizes `{}` literals and propertyless records with only `never`-valued
+ * indexes as empty defaults, including when reached through type aliases.
+ */
+export function isEmptyObjectDefaultType(
+  type: ts.Type,
+  typeChecker: ts.TypeChecker,
+): boolean {
+  if (
+    (type.flags & (ts.TypeFlags.Object | ts.TypeFlags.Intersection)) === 0 ||
+    type.isIntersection() &&
+      type.types.some((member) => (member.flags & ts.TypeFlags.Object) === 0) ||
+    typeChecker.getPropertiesOfType(type).length !== 0 ||
+    type.getCallSignatures().length !== 0 ||
+    type.getConstructSignatures().length !== 0
+  ) return false;
+
+  const indexes = typeChecker.getIndexInfosOfType(type);
+  if (indexes.length > 0) {
+    return indexes.every((index) =>
+      (index.type.flags & ts.TypeFlags.Never) !== 0
+    );
+  }
+  return type.getSymbol()?.declarations?.some((declaration) =>
+    ts.isTypeLiteralNode(declaration) && declaration.members.length === 0
+  ) ?? false;
+}
+
+/**
  * Convert a purely literal-shaped Type to its JSON value: string/number/
  * boolean literals, null, literal tuples, and object-literal types whose
  * members are themselves literal-shaped. Returns the value wrapped (so a
@@ -954,6 +982,11 @@ export function extractValueFromLiteralType(
     type.getCallSignatures().length === 0 &&
     type.getConstructSignatures().length === 0
   ) {
+    if (typeChecker.getIndexInfosOfType(type).length > 0) {
+      return isEmptyObjectDefaultType(type, typeChecker)
+        ? { value: {} }
+        : undefined;
+    }
     const props = typeChecker.getPropertiesOfType(type);
     const result: Record<string, unknown> = {};
     for (const prop of props) {
@@ -990,38 +1023,54 @@ export function isBrandOnlyMarkerType(
 }
 
 /**
- * Read `Default<T, V>`'s V back out of the DEFAULT_MARKER brand payload of an
- * expanded type: `T | (T & DefaultMarker<V>)`, a bare `T & DefaultMarker<V>`
- * intersection, or a standalone `DefaultMarker<V>` (the nullish arm). Returns
- * the extracted JSON value wrapped, or undefined when the type carries no
- * brand, more than one branded member, or a payload that is not
- * literal-shaped. The payload is the only place V survives once the checker
- * resolves the alias away — see Default<> in packages/api/index.ts.
+ * Recognizes an actual DEFAULT_MARKER property on an expanded Default member.
+ * Ordinary empty objects and unrelated symbol brands do not promise a default.
+ */
+export function hasDefaultMarker(
+  member: ts.Type,
+  typeChecker: ts.TypeChecker,
+): boolean {
+  return getDefaultMarkerProperty(member, typeChecker) !== undefined;
+}
+
+/**
+ * Selects candidate brand constituents for expanded-default extraction.
+ * Empty objects and other symbol brands remain candidates; the payload reader
+ * requires an actual DEFAULT_MARKER on every candidate before accepting a value.
  */
 export function isDefaultBrandedMember(
   member: ts.Type,
   typeChecker: ts.TypeChecker,
 ): boolean {
   if (isBrandOnlyMarkerType(member, typeChecker)) return true;
-  if ((member.flags & ts.TypeFlags.Intersection) === 0) return false;
-  const parts = (member as ts.IntersectionType).types ?? [];
-  return parts.some((part) => isBrandOnlyMarkerType(part, typeChecker));
+  if (!member.isIntersection()) return false;
+  return member.types.some((part) => isBrandOnlyMarkerType(part, typeChecker));
+}
+
+/** Finds the marker on a brand-only constituent of an expanded Default. */
+function getDefaultMarkerProperty(
+  member: ts.Type,
+  typeChecker: ts.TypeChecker,
+): ts.Symbol | undefined {
+  const brandParts = (member.flags & ts.TypeFlags.Intersection) !== 0
+    ? ((member as ts.IntersectionType).types ?? []).filter((part) =>
+      isBrandOnlyMarkerType(part, typeChecker)
+    )
+    : isBrandOnlyMarkerType(member, typeChecker)
+    ? [member]
+    : [];
+  return brandParts
+    .flatMap((part) => typeChecker.getPropertiesOfType(part))
+    .find((prop) =>
+      String(prop.escapedName as string).startsWith("__@DEFAULT_MARKER")
+    );
 }
 
 function extractPayloadFromBrandedMember(
   member: ts.Type,
   typeChecker: ts.TypeChecker,
 ): { value: unknown } | undefined {
-  const brandParts = (member.flags & ts.TypeFlags.Intersection) !== 0
-    ? ((member as ts.IntersectionType).types ?? []).filter((part) =>
-      isBrandOnlyMarkerType(part, typeChecker)
-    )
-    : [member];
-  const markerProp = brandParts
-    .flatMap((part) => typeChecker.getPropertiesOfType(part))
-    .find((prop) =>
-      String(prop.escapedName as string).startsWith("__@DEFAULT_MARKER")
-    );
+  const markerProp = getDefaultMarkerProperty(member, typeChecker);
   if (!markerProp) return undefined;
   const payload = typeChecker.getTypeOfSymbol(markerProp);
   const extracted = extractValueFromLiteralType(payload, typeChecker);

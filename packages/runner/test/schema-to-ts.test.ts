@@ -8,13 +8,12 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 // LiftFunction. The lift materialization test below is compile-time only and
 // declares a locally-typed `lift` (the facade `lift` is `declare const`, no
 // runtime value). (handler still materializes via its module.ts overloads.)
-import type { LiftFunction } from "@commonfabric/api";
+import type { AsCellType, LiftFunction, ReadonlyCell } from "@commonfabric/api";
 
 import { handler } from "../src/builder/module.ts";
 
 import "@commonfabric/api/schema";
 
-import type { AsCellType, ReadonlyCell } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { type Cell, Runtime, type Stream } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";

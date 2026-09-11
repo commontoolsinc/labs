@@ -2643,22 +2643,29 @@ describe("Phase 3 events-down (serving side)", () => {
       aliceSigner,
     ));
     const engine = await server.engineForSpace(space);
-    const { argument, result } = await standUp(clientRuntime, BUMP_PATTERN, {
-      arg: "ld1-arg",
-      result: "ld1-result",
-    });
+    const { compiled, argument, result } = await standUp(
+      clientRuntime,
+      BUMP_PATTERN,
+      {
+        arg: "ld1-arg",
+        result: "ld1-result",
+      },
+    );
     const cancelDemand = result.sink(() => {});
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
 
-    // Bob joins the same piece.
+    // Bob joins the same piece, reading it under its result schema, which
+    // is what reaches the handler stream he sends to: the store delivers
+    // the piece's document alone, and the stream behind `bump` is a
+    // document of its own.
     const bob = openClient(bobSigner);
     extraManagers.push(bob.manager);
     extraRuntimes.push(bob.runtime);
     const bobResult = bob.runtime.getCell<Record<string, unknown>>(
       space,
       "ld1-result",
-      undefined,
+      compiled.resultSchema,
     );
     await bobResult.sync();
 

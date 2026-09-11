@@ -258,7 +258,9 @@ Three nearby shapes are not this one:
 - A comment describing the **file** rather than any block in it is a file
   header. It goes at the top of the file as a doc comment, per
   [File headers](code-comment-style.md#file-headers), and not above the
-  top-level `describe()`.
+  top-level `describe()`. That section is also what says a test file is not
+  owed one: a header that would only name the file under test, or restate its
+  contract, is left out.
 - A [section marker](code-comment-style.md#section-markers) titles a region of
   the file holding several blocks. Reach is what tells the two apart, not
   length or subject matter.
@@ -423,6 +425,84 @@ says how a class shapes one, and what to do about the reaches it cannot
 cover. A stand-in the test hands the class declares itself as one where it is
 passed in, with an `as` on the argument or a small typed helper, never with a
 cast on the receiver.
+
+**`SpaceReplica.getDocument()` reads `undefined` for three different states.**
+The replica has never examined the document, the replica examined it and found
+it absent, and the replica holds a record whose value materializes as
+`undefined` all read the same. So
+`expect(replica.getDocument(id, scope)).toBeUndefined()` states only that the
+replica has no value for the document, whichever of the three put it in that
+position. Where the document is one no passing run holds a value for, the case
+cannot fail: a change that makes the replica examine that document leaves it
+green. Say which state is meant. Either name a document a run genuinely could
+hold a value for, so a value arriving where none belongs turns the case red, or
+read the record alongside the value:
+
+```ts
+// Shown at module scope.
+import { expect } from "@std/expect";
+import type { URI } from "@commonfabric/memory/interface";
+import type { SpaceReplica } from "@commonfabric/runner/storage/v2";
+
+declare const replica: SpaceReplica;
+declare const id: URI;
+
+expect(replica.accessForTestingOnly.hasDocumentRecord(id, "space")).toBe(true);
+expect(replica.getDocument(id, "space")).toBeUndefined();
+```
+
+`hasDocumentRecord()` reports whether the replica holds a record for the
+document, which is the predicate the absence-reconciliation path in
+`packages/runner/src/storage/v2.ts` decides by. A record appears once the
+replica has examined the document and also once a local write for it is
+pending, so a case turning on the first of those says in a comment that
+nothing has written the document yet.
+
+**A label-map absence assertion passes in four different states.** A test
+reaches the CFC label map through a chain like
+`replica.getDocument(id)?.cfc?.labelMap?.entries ?? []`. The `getDocument()`
+collapse above accounts for the first of the four. Two more come from the rest
+of the chain: the document carries no `cfc` metadata, and that metadata
+carries no `labelMap`. Each of the three yields the empty list the `??` hands
+back. The fourth is the one an absence assertion means — the label map is
+there and holds no matching entry — where `entries` may well be non-empty and
+it is the `find()` or `filter()` over it that comes back empty. All four look
+alike by the time the matcher runs, and where no passing run stamps that
+document, the case cannot fail at all.
+
+Say which state is meant. A positive companion the same helper reads back from
+that same document closes the first three: the entry is there, so the label
+map, the metadata and the document are there too, and the fourth is left as
+the claim. Where the run labels nothing on that document, no such companion
+exists, and naming the value the document stores is what there is. It rules
+out a missing document and nothing else, which leaves the two middle states
+standing — and those are what such a case asserts, since a document the run
+stamps nothing on is one carrying no metadata. A companion read from another
+document closes none of the three. It says the run stamped something
+somewhere, which is worth asserting where the case turns on a label that must
+not travel, and is not a substitute for pinning the document under assertion.
+
+```ts
+// Shown at module scope.
+import { expect } from "@std/expect";
+
+type StoredEntry = { label: { confidentiality?: string[] } };
+
+declare const entriesOf: (id: string) => StoredEntry[];
+declare const storedDocument: (id: string) => { value?: unknown } | undefined;
+declare const sourceId: string;
+declare const copyId: string;
+
+// The stored value pins the copy document, and the source carries the atom
+// the copy must not.
+expect(storedDocument(copyId)?.value).toEqual({ reading: "37.77,-122.41" });
+expect(
+  entriesOf(sourceId).flatMap((e) => e.label.confidentiality ?? []),
+).toContain("secret");
+expect(
+  entriesOf(copyId).flatMap((e) => e.label.confidentiality ?? []),
+).not.toContain("secret");
+```
 
 ## What a claim ranges over
 

@@ -19,6 +19,7 @@ import {
   readRunFlow,
   startTask,
 } from "./api.ts";
+import { consolePath, pageMount } from "./mount.ts";
 import "./index-view.ts";
 import "./flow-view.ts";
 import "./run-view.ts";
@@ -250,9 +251,12 @@ export class ConsoleApp extends LitElement {
   #subscribe(): void {
     this.#stream?.close();
     const stream = new EventSource(
-      `/api/events?sessionId=${
-        encodeURIComponent(this.sessionId ?? "")
-      }&afterSequence=${this.#lastSequence}`,
+      consolePath(
+        pageMount(),
+        `/api/events?sessionId=${
+          encodeURIComponent(this.sessionId ?? "")
+        }&afterSequence=${this.#lastSequence}`,
+      ),
     );
     this.#stream = stream;
     stream.addEventListener("chat", (message) => {
