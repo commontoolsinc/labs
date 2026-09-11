@@ -35,12 +35,20 @@ function cellTraversalKey(cell: Cell<any>): string {
   return JSON.stringify([space, id, path]);
 }
 
-function followResultCellChain(
+/**
+ * Follows `result` backlinks from `rootCell` to the result document that
+ * owns the chain, naming each document before its metadata is read: the
+ * store delivers a backlink as data on the document that carries it, never
+ * its target, so a replica reaches the next hop — and the pattern pointer
+ * at the end — only by syncing it. Returns `undefined` on a cycle or past
+ * `MAX_RESULT_LINK_DEPTH`.
+ */
+async function followResultCellChain(
   runtime: Runtime,
   rootCell: Cell<any>,
   tx: IExtendedStorageTransaction,
   observedDocIds: string[],
-): Cell<any> | undefined {
+): Promise<Cell<any> | undefined> {
   let currentCell = rootCell;
   const visited = new Set<string>();
   let depth = 0;
@@ -57,6 +65,7 @@ function followResultCellChain(
     const currentId = currentCell.getAsNormalizedFullLink().id;
     if (!observedDocIds.includes(currentId)) observedDocIds.push(currentId);
 
+    await currentCell.sync();
     const resultLink = getMetaLink(currentCell, "result");
     if (resultLink === undefined) return currentCell;
 
@@ -90,10 +99,11 @@ export type EnsurePieceVerdict = {
 
     /** Result-metadata cycle, or traversal depth exceeded. */
     | "chain-cycle"
-    /** The chain's owning doc carries no `patternIdentity` meta — as
-     * OBSERVED LOCALLY: an un-synced doc reads the same way, so a
-     * terminal decision must confirm durable state first (the caller
-     * syncs and re-asks). */
+    /** The chain's owning doc, named before it was read, carries no
+     * `patternIdentity` meta at the scope the chain was walked in. A
+     * scoped instance can read meta-less while the space instance holds
+     * the pointer, so a terminal decision re-asks at the space scope
+     * first (the caller's confirm step). */
     | "no-pattern-meta"
     /** Meta present but `loadPatternByIdentity` found nothing. */
     | "pattern-unloadable"
@@ -152,7 +162,7 @@ export async function ensurePieceRunningVerdict(
 
       // If this is an internal/argument/derived cell, find the result cell that
       // owns the chain.
-      const resultCell = followResultCellChain(
+      const resultCell = await followResultCellChain(
         runtime,
         rootCell,
         tx,

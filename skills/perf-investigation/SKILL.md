@@ -57,11 +57,12 @@ deltas print, and `--storage-stats` adds the storage rows. This is the fastest
 way to see a read count explode, and it needs no conversion work.
 
 Its counts are exact; its milliseconds are not the product's.
-`packages/cli/lib/test-runner.ts` calls `runtime.enableIdempotencyCheck()`
-unconditionally, which runs every computation a second time and changes what
-subscription registers. On a fifty-create topics run that was 16% of the wall
-clock and 58% of the action time, and it moved no count. Read this rung for
-shape, and gate that call off before quoting a duration from it.
+`packages/cli/lib/test-runner.ts` enables idempotency verification by default.
+Use `--no-idempotency-check` for timing experiments so verification replay does
+not distort the measurement. Keep verification enabled for correctness checks.
+The single-runtime runner also reports per-step read costs, including work
+triggered by assertions and render steps; `packages/cli/README.md` defines each
+counter and its measurement boundary.
 
 **Browser integration test.** What the pattern test cannot see: rendering, the
 main-thread/worker split, IPC, cold load, and anything about how cost scales
@@ -84,6 +85,21 @@ shows what the pattern actually compiles to, and the emitted schema's size is a
 usable proxy for read width — a board derivation that reads the whole space and
 one that reads a length differ by orders of magnitude in emitted characters.
 This catches a class the timers only see downstream of.
+
+**A `cf` invocation, in-process.** The CLI is a Deno process like the test
+runner, and `skills/perf-investigation/scripts/profile-cf.ts` runs one command
+inside a process that writes what it measured: the logger's timing statistics
+and counts, the spans under `CF_TIMING_MEASURES`, and, with `CF_PROF_CPU=1`, a
+V8 CPU profile. `profile-toolshed.ts` beside it profiles the serving toolshed
+over its inspector port for exactly the command's lifetime and differences
+`/api/health/stats` around it. What neither says is what crossed the wire:
+`CF_MEMORY_FRAME_LOG` records every frame the memory client sends and receives,
+and `summarize-frame-log.ts` reads a capture back as watches, documents
+delivered, and commits — `docs/development/debugging/profiling.md` says how to
+pair them. On the Topics board this rung is where a survey that printed 60 KB
+was found receiving 25 MB, and
+`docs/history/development/performance/2026-09-cf-cli-topics-board-cost.md` is
+the worked case.
 
 **The deployed thing.** Every rung above is a rig you built, and a rig can
 measure itself (see "What your harness holds live"). The board the team actually

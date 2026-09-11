@@ -415,6 +415,127 @@ describe("PatternManager.compileOrGetPattern", () => {
     expect(getPatternProgram(second)?.files[0].contents).toContain("tripled");
   });
 
+  it("caches query-result programs by content across cell updates and addresses", async () => {
+    const schema = {
+      type: "object",
+      properties: {
+        main: { type: "string" },
+        files: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              contents: { type: "string" },
+            },
+            required: ["name", "contents"],
+          },
+        },
+      },
+      required: ["main", "files"],
+    } as const;
+    const source = runtime.getCell<RuntimeProgram>(space, "compile-source");
+    const otherSource = runtime.getCell<RuntimeProgram>(space, "other-source");
+    await Promise.all([source.sync(), otherSource.sync()]);
+    await runtime.editWithRetry((writeTx) => {
+      source.withTx(writeTx).set(simpleProgram);
+      otherSource.withTx(writeTx).set(simpleProgram);
+    });
+
+    const [first, sameContent] = await Promise.all([
+      runtime.patternManager.compileOrGetPattern(source.asSchema(schema).get()),
+      runtime.patternManager.compileOrGetPattern(
+        otherSource.asSchema(schema).get(),
+      ),
+    ]);
+    expect(getPatternProgram(first)).toEqual(simpleProgram);
+
+    await runtime.editWithRetry((writeTx) => {
+      source.withTx(writeTx).set(differentProgram);
+    });
+    const changed = await runtime.patternManager.compileOrGetPattern(
+      source.asSchema(schema).get(),
+    );
+    expect(changed).not.toBe(first);
+    expect(sameContent).toBe(first);
+    expect(getPatternProgram(changed)).toEqual(differentProgram);
+    expect(getPatternProgram(first)).toEqual(simpleProgram);
+    expect(await runtime.patternManager.compileOrGetPattern(differentProgram))
+      .toBe(changed);
+  });
+
+  for (const inputKind of ["plain object", "query result"]) {
+    it(`compiles a detached ${inputKind} snapshot across an asynchronous wait`, async () => {
+      const program = {
+        main: "/main.ts",
+        mainExport: "chosen",
+        files: [
+          {
+            name: "/main.ts",
+            contents: [
+              "import { pattern } from 'commonfabric';",
+              "import { value } from './helper.ts';",
+              "export const chosen = pattern(() => ({ value }));",
+            ].join("\n"),
+          },
+          { name: "/helper.ts", contents: "export const value = 42;" },
+          { name: "/retained.ts", contents: "export const retained = true;" },
+          { name: "/data.txt", contents: "attached data" },
+        ],
+        dataFiles: ["/data.txt"],
+        sourceRoots: ["/retained.ts"],
+      };
+      const source = runtime.getCell<RuntimeProgram>(
+        space,
+        "delayed-source",
+        { type: "object", additionalProperties: true },
+      );
+      await source.sync();
+      await runtime.editWithRetry((writeTx) =>
+        source.withTx(writeTx).set(program)
+      );
+      const expected = {
+        ...program,
+        files: program.files.map((file) => ({ ...file })),
+        dataFiles: [...program.dataFiles],
+        sourceRoots: [...program.sourceRoots],
+      };
+      const compilePattern = runtime.patternManager.compilePattern.bind(
+        runtime.patternManager,
+      );
+      const release = Promise.withResolvers<void>();
+      runtime.patternManager.compilePattern = async (input, context) => {
+        await release.promise;
+        return await compilePattern(input, context);
+      };
+
+      const compilation = runtime.patternManager.compileOrGetPattern(
+        inputKind === "query result" ? source.get() : program,
+      );
+      const duplicate = runtime.patternManager.compileOrGetPattern(expected);
+      program.main = "/missing.ts";
+      program.mainExport = "missing";
+      program.files[0].contents = "invalid source";
+      program.dataFiles[0] = "/missing.txt";
+      program.sourceRoots[0] = "/missing-root.ts";
+      await runtime.editWithRetry((writeTx) =>
+        source.withTx(writeTx).set(program)
+      );
+      release.resolve();
+
+      const [compiled, duplicateCompiled] = await Promise.all([
+        compilation,
+        duplicate,
+      ]);
+      expect(duplicate).toBe(compilation);
+      expect(getPatternProgram(compiled)).toEqual(expected);
+      expect(duplicateCompiled).toBe(compiled);
+      expect(await runtime.patternManager.compileOrGetPattern(expected)).toBe(
+        compiled,
+      );
+    });
+  }
+
   it("single-flight: concurrent calls share one compilation", async () => {
     // Start multiple compilations concurrently
     const [first, second, third] = await Promise.all([

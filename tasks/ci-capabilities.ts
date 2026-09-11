@@ -3,12 +3,12 @@
  * implied.
  *
  * A lane works out the union of what its batches need, opens each one
- * once, and runs the batches inside it. Naming them is what lets two ways
- * of providing the same thing coexist: `toolshed` runs the default posture
- * from source, which is cheap enough for a pull request, while
- * `toolshed-baked-opposite` restores or builds a binary because the posture
- * opposite the first-party default is baked into the browser shell inside it
- * and a source run cannot reproduce that. A suite says which it needs and
+ * once, and runs the batches inside it. Naming them is what lets several
+ * ways of providing the same thing coexist: `toolshed` runs a server from
+ * source, which is cheap enough for a pull request and serves the API a
+ * suite reaches over HTTP, while `toolshed-baked` and
+ * `toolshed-baked-opposite` restore or build a binary, because the browser
+ * shell is a bundle compiled into one. A suite says which it needs and
  * neither the workflow nor the other suites know the difference.
  *
  * Every capability is idempotent: opening one that is already open is the
@@ -17,7 +17,11 @@
  */
 
 import * as path from "@std/path";
-import { serverExecutionCiLane } from "./server-execution-ci.ts";
+import {
+  serverExecutionCiLane,
+  type ServerExecutionCiRole,
+  verifyServerExecutionPosture,
+} from "./server-execution-ci.ts";
 
 /** Every piece of setup a suite may ask for. */
 export type CapabilityId =
@@ -27,6 +31,7 @@ export type CapabilityId =
   | "browser"
   | "git-history"
   | "toolshed"
+  | "toolshed-baked"
   | "toolshed-baked-opposite"
   | "bg-piece-service-binary"
   | "cf"
@@ -70,6 +75,13 @@ export interface CapabilityContext {
    * without a machine that has neither.
    */
   exec?: Exec;
+
+  /**
+   * How a capability asks a server it started what it is serving. A
+   * caller that supplies one is saying what the server would have
+   * answered, the way `exec` says what the machine would have answered.
+   */
+  fetch?: typeof fetch;
 }
 
 /** A capability that has been opened. */
@@ -146,25 +158,42 @@ function execOf(context: CapabilityContext): Exec {
   return context.exec ?? run;
 }
 
-/** Whether a command is already on the path. */
-async function onPath(exec: Exec, command: string): Promise<boolean> {
+/** A probe answering whether `command` is on the path. */
+function onPath(command: string): readonly string[] {
+  return ["sh", "-c", `command -v ${command}`];
+}
+
+/** Whether a command runs and reports success. */
+async function succeeds(
+  exec: Exec,
+  command: readonly string[],
+): Promise<boolean> {
+  const [name, ...args] = command;
   try {
-    await exec("sh", ["-c", `command -v ${command}`]);
+    await exec(name!, args);
     return true;
   } catch {
     return false;
   }
 }
 
-/** Installs Debian packages, and does nothing where they are all present. */
+/**
+ * Installs Debian packages, and does nothing where the probes say they
+ * are already there.
+ *
+ * A probe is a command whose success means what one of the packages
+ * provides is there. A package that puts a command on the path is
+ * probed with `onPath`; a package whose point is a file is probed with
+ * whatever answers about that file.
+ */
 async function apt(
   exec: Exec,
   packages: readonly string[],
-  probes: readonly string[],
+  probes: readonly (readonly string[])[],
 ): Promise<void> {
   let missing = false;
   for (const probe of probes) {
-    if (!await onPath(exec, probe)) missing = true;
+    if (!await succeeds(exec, probe)) missing = true;
   }
   if (!missing) return;
   await exec("sudo", ["apt-get", "update"]);
@@ -196,10 +225,21 @@ const fuse: Capability = {
   async open(context) {
     if (!context.dryRun) {
       const exec = execOf(context);
+      // The mount opens `libfuse3.so` through the foreign-function
+      // interface, and that unversioned name comes from the development
+      // package. `pkg-config --exists fuse3` is the question that names
+      // it: it fails where the development package is absent, and it
+      // fails where `pkg-config` itself is, which is the other thing this
+      // installs. `fusermount3` is what the unmount runs, and it is the
+      // remaining package.
       await apt(
         exec,
         ["pkg-config", "gcc", "libfuse3-dev", "fuse3"],
-        ["pkg-config", "gcc", "fusermount3"],
+        [
+          onPath("gcc"),
+          onPath("fusermount3"),
+          ["pkg-config", "--exists", "fuse3"],
+        ],
       );
       // The mount itself needs the device, and the runner image leaves it
       // owned by root.
@@ -213,7 +253,9 @@ const jq: Capability = {
   id: "jq",
   description: "jq, which the shell integration suites filter JSON with",
   async open(context) {
-    if (!context.dryRun) await apt(execOf(context), ["jq"], ["jq"]);
+    if (!context.dryRun) {
+      await apt(execOf(context), ["jq"], [onPath("jq")]);
+    }
     return exported({});
   },
 };
@@ -273,14 +315,37 @@ const gitHistory: Capability = {
   },
 };
 
+/**
+ * The environment a Toolshed at `role` builds and runs under: the ambient
+ * environment carrying the server-execution define the role names, and
+ * carrying none where the role names none.
+ *
+ * An unset define is a third state rather than a synonym for `false`. The
+ * shell bakes it in as `null`, which is what the default role's posture
+ * check asks for, so that role removes the name rather than setting it.
+ */
+function serverExecutionEnv(
+  role: ServerExecutionCiRole,
+): Record<string, string> {
+  const env = Deno.env.toObject();
+  const value = serverExecutionCiLane(role).experimentalValue;
+  if (value === undefined) delete env.EXPERIMENTAL_SERVER_EXECUTION;
+  else env.EXPERIMENTAL_SERVER_EXECUTION = value;
+  return env;
+}
+
 /** How a Toolshed server is started, whichever binary provides it. */
 interface ToolshedOptions {
   /** The command that starts it, and where it runs. */
   command: readonly string[];
   cwd: string;
 
-  /** Environment beyond the port, such as the server-execution define. */
-  env: Record<string, string>;
+  /**
+   * The server-execution arm this server is meant to be serving. A suite
+   * reaching a server on the other arm passes and reports that the arm
+   * it named works.
+   */
+  role: ServerExecutionCiRole;
 }
 
 /** The process identifier a background launch reports having detached. */
@@ -306,8 +371,11 @@ async function startToolshed(
   // port is chosen here and the server is told which one to bind.
   const port = context.dryRun ? 8000 : freePort();
   const url = `http://localhost:${port}`;
+  // Every name carries the origin with no trailing slash. The shell
+  // suites compose a path onto it as `${API_URL}/api/health/stats`, and
+  // a slash on both sides is a path the server does not serve.
   const env = {
-    API_URL: `${url}/`,
+    API_URL: url,
     MEMORY_URL: url,
     TOOLSHED_URL: url,
     TOOLSHED_PORT: `${port}`,
@@ -323,12 +391,11 @@ async function startToolshed(
   ], {
     cwd: options.cwd,
     env: {
-      ...Deno.env.toObject(),
+      ...serverExecutionEnv(options.role),
       // The server reaches for a gateway and a model key at startup. A
       // test server has neither.
       CFTS_AI_GATEWAY_URL: "",
       CFTS_AI_LLM_ANTHROPIC_API_KEY: "fake",
-      ...options.env,
       ...env,
     },
   });
@@ -336,14 +403,27 @@ async function startToolshed(
   if (pid === undefined) {
     throw new Error(`the toolshed launch named no process:\n${output}`);
   }
+  const stop = () => {
+    try {
+      Deno.kill(pid, "SIGTERM");
+    } catch {
+      // Already gone, which is the state this was after.
+    }
+  };
+  try {
+    await verifyServerExecutionPosture(
+      options.role,
+      url,
+      context.fetch ?? fetch,
+    );
+  } catch (error) {
+    stop();
+    throw error;
+  }
   return {
     env,
     close: () => {
-      try {
-        Deno.kill(pid, "SIGTERM");
-      } catch {
-        // Already gone, which is the state the close was after.
-      }
+      stop();
       return Promise.resolve();
     },
   };
@@ -375,67 +455,73 @@ const toolshed: Capability = {
     startToolshed(context, {
       command: [Deno.execPath(), "run", "--unstable-otel", "-A", "index.ts"],
       cwd: path.join(context.root, "packages", "toolshed"),
-      env: {},
+      role: "default",
     }),
 };
 
 /**
- * The same server with the posture opposite the first-party default, from a
- * compiled binary. The posture is a compile-time define baked into the browser
- * shell, so a source run cannot reproduce it. The lane's workflow restores the
- * binary from the Actions cache before the runner starts; building it here is
- * what happens when that cache missed.
+ * A Toolshed server from a compiled binary, at a stated server-execution
+ * role.
+ *
+ * The browser shell is a bundle baked into the binary, so this is what a
+ * suite that drives a browser needs; a server run from source answers the
+ * API and serves no shell. The opposite role needs a binary for a second
+ * reason — its posture is a compile-time define baked into that same
+ * shell.
+ *
+ * The lane's workflow restores these from the Actions cache before the
+ * runner starts; building one here is what happens when that cache
+ * missed. That is the slow path — about forty seconds against seventeen
+ * for a restore — and it is what the first run after a change to the
+ * sources pays.
  */
-const toolshedBakedOpposite: Capability = {
-  id: "toolshed-baked-opposite",
-  description: "a Toolshed server with the opposite posture in its baked shell",
-  needs: ["deno"],
-  async open(context) {
-    const opposite = serverExecutionCiLane("opposite");
-    const experimentalValue = String(opposite.enabled);
-    const binary = path.join(
-      context.root,
-      BINARY_CACHE_DIR,
-      `toolshed-baked-${experimentalValue}`,
-    );
-    if (!context.dryRun) {
-      let present = true;
-      try {
-        await Deno.stat(binary);
-      } catch {
-        // The workflow's cache step found nothing to restore, so the
-        // binary is built here instead. That is the slow path — about
-        // forty seconds against seventeen for a restore — and it is what
-        // the first run after a change to the sources pays.
-        present = false;
-      }
-      if (!present) {
-        await execOf(context)(
-          Deno.execPath(),
-          ["task", "build-binaries", "toolshed"],
-          {
-            cwd: context.root,
-            env: {
-              ...Deno.env.toObject(),
-              EXPERIMENTAL_SERVER_EXECUTION: experimentalValue,
+function bakedToolshed(role: ServerExecutionCiRole): Capability {
+  return {
+    id: role === "default" ? "toolshed-baked" : "toolshed-baked-opposite",
+    description:
+      `a Toolshed server with the ${role} posture in its baked shell`,
+    needs: ["deno"],
+    async open(context) {
+      const binary = path.join(
+        context.root,
+        BINARY_CACHE_DIR,
+        `toolshed-baked-${role}`,
+      );
+      if (!context.dryRun) {
+        let present = true;
+        try {
+          await Deno.stat(binary);
+        } catch {
+          present = false;
+        }
+        if (!present) {
+          await execOf(context)(
+            Deno.execPath(),
+            ["task", "build-binaries", "toolshed"],
+            {
+              cwd: context.root,
+              env: serverExecutionEnv(role),
             },
-          },
-        );
-        await Deno.mkdir(path.dirname(binary), { recursive: true });
-        await Deno.copyFile(
-          path.join(context.root, "dist", "toolshed"),
-          binary,
-        );
+          );
+          await Deno.mkdir(path.dirname(binary), { recursive: true });
+          await Deno.copyFile(
+            path.join(context.root, "dist", "toolshed"),
+            binary,
+          );
+        }
+        await Deno.chmod(binary, 0o755);
       }
-      await Deno.chmod(binary, 0o755);
-    }
-    return await startToolshed(context, {
-      command: [binary],
-      cwd: context.root,
-      env: { EXPERIMENTAL_SERVER_EXECUTION: experimentalValue },
-    });
-  },
-};
+      return await startToolshed(context, {
+        command: [binary],
+        cwd: context.root,
+        role,
+      });
+    },
+  };
+}
+
+const toolshedBaked = bakedToolshed("default");
+const toolshedBakedOpposite = bakedToolshed("opposite");
 
 /**
  * The compiled background-piece-service binary used by its deployed-topology
@@ -539,6 +625,7 @@ export const CAPABILITIES: ReadonlyMap<CapabilityId, Capability> = new Map(
     browser,
     gitHistory,
     toolshed,
+    toolshedBaked,
     toolshedBakedOpposite,
     bgPieceServiceBinary,
     cf,
@@ -582,8 +669,17 @@ export function resolveCapabilities(
 
 /** What opening a set of capabilities produced. */
 export interface OpenedCapabilities {
-  /** The environment every batch runs with, the requests merged in order. */
-  env: Record<string, string>;
+  /**
+   * The environment the capabilities a suite asked for export, merged in
+   * the order they opened.
+   *
+   * Two capabilities may export the same name and mean different things
+   * by it. The two Toolshed servers are the case: each exports the
+   * address its own server is listening on, and the default and opposite
+   * server-execution arms can share a lane. A batch reaching the other
+   * arm's server passes and reports that the arm it named works.
+   */
+  envFor(requested: Iterable<CapabilityId>): Record<string, string>;
 
   /** Seconds each capability's setup took, in the order they opened. */
   timings: Array<{ capability: CapabilityId; seconds: number }>;
@@ -603,7 +699,7 @@ export async function openCapabilities(
   context: CapabilityContext,
   registry: ReadonlyMap<CapabilityId, Capability> = CAPABILITIES,
 ): Promise<OpenedCapabilities> {
-  const env: Record<string, string> = {};
+  const exported = new Map<CapabilityId, Record<string, string>>();
   const timings: Array<{ capability: CapabilityId; seconds: number }> = [];
   const opened: OpenCapability[] = [];
   const close = async (): Promise<void> => {
@@ -622,7 +718,7 @@ export async function openCapabilities(
       const startedAt = performance.now();
       const open = await capability.open(context);
       opened.push(open);
-      Object.assign(env, open.env);
+      exported.set(id, open.env);
       timings.push({
         capability: id,
         seconds: (performance.now() - startedAt) / 1000,
@@ -632,5 +728,17 @@ export async function openCapabilities(
     await close();
     throw error;
   }
-  return { env, timings, close };
+  return {
+    envFor: (requested) => {
+      const env: Record<string, string> = {};
+      // Resolved rather than taken as given, so that a suite naming a
+      // capability gets what the capabilities under it export too.
+      for (const id of resolveCapabilities(requested, registry)) {
+        Object.assign(env, exported.get(id) ?? {});
+      }
+      return env;
+    },
+    timings,
+    close,
+  };
 }

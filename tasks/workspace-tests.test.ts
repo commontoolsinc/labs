@@ -11,14 +11,18 @@ import {
   assertTaskTestsIncluded,
   initializeDb,
   junitCapableMembers,
+  leafFlags,
+  memberRecordingArguments,
   memberTestTask,
   parseDisabledPackageList,
   readWorkspaceMembers,
+  recordingSpool,
   runTests,
   selectShardMembers,
   testConcurrency,
   testPackage,
 } from "./workspace-tests.ts";
+import { preloadArgument } from "@commonfabric/test-support/records";
 import { WORKSPACE_TEST_WEIGHTS } from "./test-timing-weights.ts";
 import {
   readUnlaunchedMembers,
@@ -763,6 +767,74 @@ Deno.test("the workspace's capable members are read from their manifests", async
   ) {
     assertEquals(capable.has(member), false, `${member} should not`);
   }
+});
+
+Deno.test("the spool a run records into is resolved once", () => {
+  // Each leaf runs with its own package as the working directory, so a
+  // relative spool would name a different place in each of them.
+  assertEquals(
+    recordingSpool("spool/records", "/work"),
+    "/work/spool/records",
+  );
+  assertEquals(recordingSpool("/var/records", "/work"), "/var/records");
+  assertEquals(recordingSpool(undefined, "/work"), undefined);
+});
+
+Deno.test("a spool Deno cannot be told about is not recorded into", () => {
+  // A comma separates one path from the next inside `--allow-write=`, so
+  // such a spool is granted as two paths that are not it. The run turns
+  // recording off rather than failing the members that would take it.
+  const said: string[] = [];
+  assertEquals(
+    recordingSpool("/var/a,b/records", "/work", (m) => said.push(m)),
+    undefined,
+  );
+  assertEquals(said.length, 1);
+  assertStringIncludes(said[0]!, "/var/a,b/records");
+});
+
+Deno.test("a forwarding runner is read by the flags it hands its leaf", () => {
+  // The runner process and the leaf `deno test` carry separate flag
+  // lists, and the leaf's is the one that loads the preload. Reading the
+  // whole line would answer from the runner's.
+  assertEquals(
+    leafFlags(
+      "./tasks",
+      "deno run --allow-read runner.ts x . -- --no-check -A",
+    ),
+    ["--no-check", "-A"],
+  );
+  // A member running its leaf directly has one list, and it is the whole
+  // of the line.
+  assertEquals(
+    leafFlags("./packages/html", "deno test --allow-read a.test.ts"),
+    ["deno", "test", "--allow-read", "a.test.ts"],
+  );
+});
+
+Deno.test("a recording leaf is given the preload and a write it needs", async () => {
+  const rootUrl = new URL("../", import.meta.url);
+  const members = await readWorkspaceMembers(new URL("deno.jsonc", rootUrl));
+  const recording = await memberRecordingArguments(members, "/spool", rootUrl);
+
+  const preload = preloadArgument();
+  // A member whose task names a write list of its own, and one naming no
+  // write at all, are each granted the spool on top of what they have,
+  // so the preload has somewhere to leave the name map its class names
+  // were traded for.
+  for (const member of ["./packages/runner", "./packages/html"]) {
+    assertEquals(recording.get(member), [preload, "--allow-write=/spool"]);
+  }
+  // A member already permitted to write anywhere is granted nothing.
+  // This one runs under `-A`, which Deno refuses to take beside an
+  // `--allow-write` path list at all, ending the run before it starts.
+  assertEquals(recording.get("./packages/toolshed"), [preload]);
+  // A member that cannot read the tree is granted nothing either: the
+  // write is what makes the preload take the class names, and the read
+  // is what finds the files that replace them.
+  assertEquals(recording.get("./packages/utils"), [preload]);
+  // A member whose task cannot take the preload takes nothing at all.
+  assertEquals(recording.get("./packages/cli"), []);
 });
 
 //

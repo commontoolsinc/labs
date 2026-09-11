@@ -30,7 +30,7 @@
  * `cf piece link` against the board recorded in the export.
  *
  * Those wiring links are `STRUCTURAL_LINK_SOURCES`, which maps each one to
- * the board path it points at: `mentionable` to the board's `topics`,
+ * the board path it points at: `mentionable` to the board's `mentionable` index,
  * `boardCrossrefs` to its `crossrefs`, and `boardNames` to its `namesTable`.
  * A link-valued field absent from that map stops the restore rather than
  * being guessed at, so a wiring input added to the topic pattern announces

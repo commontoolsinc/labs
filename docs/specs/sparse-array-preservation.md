@@ -114,7 +114,7 @@ because their sparse support was part of the original design:
 - **`packages/data-model/src/value-hash.ts`** — Feeds holes to the hash
   directly, coalescing each run into one hole entry.
 
-### Value validation (`packages/data-model/src/type-check.ts`)
+### Value validation (`packages/data-model/src/validity-check.ts`)
 
 `isValidFabricValueLayer()` and `isValidFabricValue()` accept sparse arrays —
 holes are valid fabric structure. `isValidFabricValue()` uses `for` + `i in`
@@ -240,7 +240,7 @@ the preferred entry point in runner code.
 
 Test coverage verifies sparse preservation at each layer:
 
-- **`packages/data-model/test/type-check.test.ts`** —
+- **`packages/data-model/test/validity-check.test.ts`** —
   `isValidFabricValueLayer()` accepts sparse arrays.
 - **`packages/data-model/test/native-conversion.test.ts`** — 
   `fabricFromNativeValue()` preserves holes.

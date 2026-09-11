@@ -745,7 +745,17 @@ run_mount() {
   rm -f "$MEMORY_PROXY_READY"
   MEMORY_PROXY_READY=""
 
-  MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$FUSE_API_URL" --identity="$IDENTITY" --space="$SPACE" --background --dangerously-allow-incompatible-schema)
+  # --cfc-mode names the FUSE guardrail mode this suite's write-through phases
+  # need rather than taking whatever the runner default resolves to. One of
+  # those phases writes a handler file, and an enforcing mount refuses a
+  # handler write with EACCES at `open`. That write is a shell redirect, so
+  # under this script's `set -e` the run ends at that line with the shell's own
+  # "Permission denied" and the path it was writing to, which names no mode.
+  #
+  # The runner default is `disabled` today (DEFAULT_CFC_ENFORCEMENT_MODE in
+  # packages/runner/src/cfc/types.ts, which `resolveCfcMode` falls back to), so
+  # the flag selects the mode this mount would have resolved to without it.
+  MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$FUSE_API_URL" --identity="$IDENTITY" --space="$SPACE" --cfc-mode=disabled --background --dangerously-allow-incompatible-schema)
   echo "$MOUNT_OUTPUT"
 
   MOUNT_PID="${MOUNT_OUTPUT#*PID }"
@@ -793,6 +803,16 @@ run_mount() {
   TOOL_FILE="$RESULT_DIR/search.tool"
 
   wait_for_path "$ENTITIES_DIR"
+
+  # `.status` carries the mode the daemon resolved, fixed before it mounted, so
+  # one read settles it. It is what names the mode at the mount when the flag
+  # above stops reaching the daemon, rather than several phases later as a
+  # permission error on a path.
+  path_exists "$STATUS_FILE" || error ".status was not mounted at the mount root."
+  STATUS_CFC_MODE=$(jq -r '.cfc.mode' "$STATUS_FILE")
+  if [ "$STATUS_CFC_MODE" != "disabled" ]; then
+    error ".status reports CFC mode $STATUS_CFC_MODE; the mount was given disabled."
+  fi
 }
 
 # Runs before any phase reads a piece: the assertion is that nothing but

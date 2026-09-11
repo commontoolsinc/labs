@@ -83,8 +83,9 @@ export function standIn(
     unit,
     cost: median(suiteCosts) ?? UNMEASURED_COST_SECONDS,
     score: VALUE_FLOOR,
-    inputs: { catches: 0, mainCatches: 0, sources: 0, churn: 0 },
+    inputs: { catches: 0, sources: 0, churn: 0 },
     flakeRate: 0,
+    flakeEvidence: { flakes: 0, runs: 0 },
     repeats: 1,
   };
 }
@@ -119,12 +120,11 @@ export interface Census {
 /**
  * Reads the working tree against a manifest.
  *
- * Three rules make a unit mandatory: its suite is marked `always`, the
- * change touched what it covers, or no manifest has ever seen it. The
- * last of those is the rule the test-record spec requires of any consumer
- * that selects which tests run. A selector that never runs the unselected
- * starves its own data, and a renamed test is an unknown identity until
- * an alias lands.
+ * Two rules make a unit mandatory: the change touched what it covers, or
+ * no manifest has ever seen it. The second is the rule the test-record
+ * spec requires of any consumer that selects which tests run. A selector
+ * that never runs the unselected starves its own data, and a renamed test
+ * is an unknown identity until an alias lands.
  */
 export function census(
   suites: readonly Suite[],
@@ -163,9 +163,9 @@ export function census(
   for (const suite of suites) {
     const unavailable = unavailableUnits(suite);
     // A unit that is a path is made mandatory by the diff naming it. A
-    // unit that is not — a type-check group, a binary — is one the suite
-    // has to map the diff onto itself, because only it knows what its
-    // unit covers.
+    // unit that is not — a type-check group, a repository gate, a
+    // binary — is one the suite has to map the diff onto itself,
+    // because only it knows what its unit covers.
     const touched = new Set<string>(
       suite.unitsForChange !== undefined
         ? suite.unitsForChange(changed)
@@ -173,9 +173,7 @@ export function census(
     );
     for (const unit of suite.units) {
       if (unavailable.has(unit)) continue;
-      const reason: SelectionReason | undefined = suite.mandatory === "always"
-        ? "always"
-        : touched.has(unit)
+      const reason: SelectionReason | undefined = touched.has(unit)
         ? "changed"
         : undefined;
       const recorded = inUnit.get(`${suite.id}\t${unit}`);

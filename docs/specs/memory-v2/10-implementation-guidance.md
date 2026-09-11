@@ -155,15 +155,19 @@ Path and document-boundary rules:
 
 ## 6. Stable Snapshot Rule
 
-A transaction must be authored against one stable local snapshot.
+A commit's read set must describe one stable local snapshot, so that
+`reads.confirmed` and `reads.pending` describe one coherent view
+(`03-commit-model.md` §3.3.4). Two ways to get there:
 
-- Do not apply incoming sync frames to confirmed state in the middle of building
-  a transaction.
-- Buffer incoming sync while a transaction is reading and writing.
-- Apply buffered sync after the transaction has been submitted.
+- Buffer incoming sync while a transaction is reading and writing, and apply
+  it after the transaction has been submitted.
+- Apply sync as it arrives; snapshot each document at the transaction's first
+  read of it; at commit, re-read every snapshotted document from the state the
+  read set is built from, and reject the transaction locally when any value
+  differs. The caller re-runs it against the changed state.
 
-This rule is required so `reads.confirmed` and `reads.pending` describe one
-coherent snapshot.
+The runner uses the second. A rejected transaction surfaces as
+`StorageTransactionInconsistent`, which its commit paths classify as retryable.
 
 ## 7. Commit Identity and Storage Identity
 

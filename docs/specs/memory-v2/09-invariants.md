@@ -40,9 +40,9 @@ Checkers referenced below:
   validator (`packages/memory/test/naive-admission.ts`);
 - the **TLA+ model**: `docs/specs/memory-v2/tla/PendingStacks.tla`, which
   model-checks INV-1/INV-3/INV-4/INV-5 over all small interleavings for each
-  dependency-recording and staleness-basis variant, and — in its
-  delayed-verdict-delivery mode (the `PendingStacks_Channel*.cfg` configs) —
-  INV-6 over the decided-but-not-yet-processed window.
+  dependency-recording, staleness-basis, and identity-acceptance variant,
+  and — in its delayed-verdict-delivery mode (the `PendingStacks_Channel*.cfg`
+  configs) — INV-6 over the decided-but-not-yet-processed window.
 - the **delivery model**: `docs/specs/memory-v2/tla/SessionDelivery.tla`,
   which model-checks INV-14 over one session's watch delivery across lost
   pushes, a wiped replica, and both reconnect paths (resumed and
@@ -96,6 +96,31 @@ regression witness, alongside the legacy-shape engine test in
 `PendingStacks_Repaired.cfg` certifies the repaired shape in the bounded
 model. The residual deviation retires when clients that omit `basisSeq`
 fall below the support floor.
+
+A second deviation is deliberate: an **identity commit**
+(`03-commit-model.md` §3.6.1), which leaves every document it writes as the
+space already holds it, is accepted without a staleness check. Its
+observation may be stale in this invariant's terms, but it produced no
+write, so the durable state at its resolution point is unchanged by it and
+the phantom and missed-write failures both have nothing to act on. What
+makes the acceptance sound is that the server proves the identity itself,
+inside the commit's transaction: per document, the commit's ordered `set`
+and `patch` operations replayed on the view the reader saw yield the stored
+document, and replayed on the stored document leave it unchanged, where a
+pending read's view is its declared confirmed basis with exactly the own
+layers it names replayed on it; a client claim would not do. The
+differential harness's reference model applies the idempotence half alone,
+so it admits a superset of what the engine admits. The TLA+ model's `IdentityMode = "elide"`
+(`PendingStacks_Identity.cfg`, `PendingStacks_ChannelIdentity.cfg`) certifies
+the rule in the bounded model under this invariant's content form,
+`ContentCoherence`: the writer-set form `ReadCoherence` is not the statement
+once a layer can be accepted without a revision, because the elided layer is
+observed by its own session as a contributor while durable history holds the
+foreign write that carried the same value, so the writer sets differ where
+the content does not (`PendingStacks_IdentityWriterForm.cfg` is the witness,
+on the writer-set form restricted to commits that wrote). `ElidedUnchanged`
+pins the exemption's premise: every path an elided commit would have written
+already held its value at its resolution point.
 
 ### INV-2 — Overlap over-approximation only
 
@@ -361,13 +386,20 @@ Checked by: the differential harness (engine `read` versus naive fold);
 > stack, never a mixture of states observed across an integration boundary
 > (`03-commit-model.md` §3.3.4).
 
-Layer: client (sync-frame buffering while a transaction builds).
+Layer: client, in either of the forms `03-commit-model.md` §3.3.4 admits:
+sync-frame buffering while a transaction builds, or the runner's commit-time
+claim check, which re-reads every document the transaction snapshotted from
+the state the read set is built from and rejects the transaction locally when
+a value differs.
 
-Soundness direction: MAY buffer integration longer than necessary; MUST NOT
-let a transaction observe two prefixes.
+Soundness direction: MAY reject a transaction whose reads are in fact coherent
+(a local rejection costs a re-run); MUST NOT export a read set that mixes two
+prefixes.
 
-Checked by: no dedicated checker (the durable-history oracle would surface a
-resulting incoherent acceptance as an INV-1 hit).
+Checked by: `packages/runner/test/commit-read-basis.test.ts` for the claim
+check (a document that lands under an open transaction rejects the commit
+locally); the durable-history oracle would surface a resulting incoherent
+acceptance as an INV-1 hit.
 
 ### INV-11 — Idempotent replay
 

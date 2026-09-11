@@ -6,13 +6,21 @@
  * mistaken for a completed contract.
  */
 
+import {
+  isLoomAuthoredObservation,
+  type LoomAuthoredObservation,
+} from "../src/loom-authoring.ts";
 import { join } from "@std/path";
 
 import type {
   HarnessChatEventEnvelope,
   HarnessChatStructuredEvent,
 } from "../src/contracts/interactive-chat.ts";
-import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
+import type {
+  HarnessToolCall,
+  HarnessToolTranscriptMessage,
+  HarnessTranscriptMessage,
+} from "../src/contracts/transcript.ts";
 
 /** A named piece a completed console turn made openable. */
 export interface ConsoleTurnResultPiece {
@@ -21,10 +29,22 @@ export interface ConsoleTurnResultPiece {
 
   /** Openable URL returned beside the slug. */
   url: string;
+
+  /** Verified composition membership for the same held token. No cell address. */
+  loomComponents?: readonly { loomId: string; componentId: string }[];
 }
 
 /** The stable result an external console caller reads for a completed turn. */
 export interface ConsoleTurnResult {
+  /** Verified compositions from this turn only, including explicit replays. */
+  looms: readonly Pick<
+    LoomAuthoredObservation,
+    "receipt" | "replayed" | "current_version"
+  >[];
+
+  /** Originating Loom captured at submission, independent of later UI focus. */
+  originLoomId?: string;
+
   /** Successful named-piece outputs, in transcript order. */
   pieces: readonly ConsoleTurnResultPiece[];
 
@@ -58,6 +78,9 @@ export type ConsoleChatEventEnvelope =
 
 /** Inputs which identify one turn's durable result. */
 export interface ReadConsoleTurnResultOptions {
+  /** Originating Loom from the durable turn input. */
+  originLoomId?: string;
+
   /** Root holding one artifact directory per turn. */
   artifactRoot: string;
 
@@ -97,6 +120,59 @@ interface TurnRunArtifacts {
   currentTranscriptIndexes: ReadonlySet<number>;
   finalText: string;
 }
+
+/** The first two occurrences suffice to establish uniqueness at any prefix. */
+interface IndexedCall {
+  index: number;
+  call: HarnessToolCall;
+  secondIndex?: number;
+}
+
+const indexCalls = (
+  artifacts: TurnRunArtifacts,
+): ReadonlyMap<string, IndexedCall> => {
+  const calls = new Map<string, IndexedCall>();
+  artifacts.transcript.forEach((message, index) => {
+    if (
+      !artifacts.currentTranscriptIndexes.has(index) ||
+      message.role !== "assistant" || !Array.isArray(message.toolCalls)
+    ) return;
+    for (const call of message.toolCalls) {
+      if (typeof call?.id !== "string") continue;
+      const prior = calls.get(call.id);
+      if (prior === undefined) calls.set(call.id, { index, call });
+      else if (prior.secondIndex === undefined) prior.secondIndex = index;
+    }
+  });
+  return calls;
+};
+
+/**
+ * Pairs only this turn's unique, preceding assistant call with its tool result.
+ * Historical calls and malformed/duplicate pairs cannot prove membership.
+ */
+const callArguments = (
+  calls: ReadonlyMap<string, IndexedCall>,
+  resultIndex: number,
+  result: HarnessToolTranscriptMessage,
+): Record<string, unknown> | undefined => {
+  const match = calls.get(result.toolCallId);
+  if (
+    match === undefined || match.index >= resultIndex ||
+    (match.secondIndex !== undefined && match.secondIndex < resultIndex) ||
+    match.call.function?.name !== result.toolName
+  ) {
+    return undefined;
+  }
+  try {
+    const value: unknown = JSON.parse(match.call.function.arguments);
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 /**
  * Returns a generated message's index, `malformed` for an invalid generated
@@ -223,13 +299,68 @@ export const readConsoleTurnResult = async (
   if (artifacts === undefined) {
     return undefined;
   }
+  const calls = indexCalls(artifacts);
+  const membership = new Map<
+    string,
+    { loomId: string; componentId: string }[]
+  >();
+  const looms = artifacts.transcript.flatMap((message, index) => {
+    if (
+      !artifacts.currentTranscriptIndexes.has(index) ||
+      message.role !== "tool" || message.toolName !== "loom_compose"
+    ) return [];
+    try {
+      const output: unknown = JSON.parse(message.content);
+      if (!isLoomAuthoredObservation(output)) return [];
+      const args = callArguments(calls, index, message);
+      const ids = output.receipt.component_ids as string[];
+      // compose preserves request order in component_ids. This correlation
+      // needs both the matching successful call and its exact receipt; it is
+      // not inferred from a human slug or copied out of model prose.
+      if (
+        args?.request_id === output.receipt.request_id &&
+        Array.isArray(args.components) && args.components.length === ids.length
+      ) {
+        args.components.forEach((component, position) => {
+          const token = component?.pattern_token;
+          if (typeof token !== "string" || token.length === 0) return;
+          membership.set(token, [...membership.get(token) ?? [], {
+            loomId: output.receipt.loom_id,
+            componentId: ids[position],
+          }]);
+        });
+      }
+      return [{
+        receipt: output.receipt,
+        replayed: output.replayed,
+        current_version: output.current_version,
+      }];
+    } catch {
+      return [];
+    }
+  });
   return {
+    ...(options.originLoomId !== undefined
+      ? { originLoomId: options.originLoomId }
+      : {}),
+    looms,
     pieces: artifacts.transcript.flatMap((message, index) => {
-      if (!artifacts.currentTranscriptIndexes.has(index)) {
+      if (
+        !artifacts.currentTranscriptIndexes.has(index) ||
+        message.role !== "tool"
+      ) {
         return [];
       }
       const piece = pieceFromAssignSlug(message);
-      return piece === undefined ? [] : [piece];
+      if (piece === undefined) return [];
+      const args = callArguments(calls, index, message);
+      const coverage = typeof args?.token === "string"
+        ? membership.get(args.token)
+        : undefined;
+      return [{
+        ...piece,
+        ...(coverage === undefined ? {} : { loomComponents: coverage }),
+      }];
     }),
     spaceName: options.spaceName,
     finalText: artifacts.finalText,

@@ -5,14 +5,24 @@
  *
  * The topology is only worth having if it stays complete: a test surface
  * nobody registered would vanish from the full run, which is a worse
- * failure than the workflow edit it replaced. Two halves catch the two
- * different ways a surface goes missing.
+ * failure than the workflow edit it replaced. A surface goes missing in
+ * three ways, and a check answers each.
  *
  * The tree half needs no store and runs on every pull request. It walks
  * the tree for things that look like tests and fails on any that no
  * suite accounts for, or that two suites claim under the same record
  * surface and variant. This is what catches a pull request adding a test
  * surface nobody registered, at the moment it is added.
+ *
+ * The workflow half runs beside it, over the step definitions under
+ * `.github`. A step can wrap a command in `run-recorded`. The three
+ * words after it are the command's identity, and every record the
+ * command writes carries that identity. The topology is the other place
+ * an identity is written down. A lane builds its commands from the
+ * topology, so a step whose identity no suite holds runs while that step
+ * stands and stops when a lane takes over the job holding it. Nothing in
+ * the tree carries such an identity, which is what puts it out of the
+ * tree half's reach.
  *
  * The store half runs on `main`. It reads a run's records and fails on
  * any identity no suite recognizes, or that more than one suite claims.
@@ -26,8 +36,8 @@
  * never runs or a mapping that is wrong, and both are worth knowing
  * about without blocking anybody.
  *
- *   deno task check-test-topology            # the tree half
- *   deno task check-test-topology --records <file>...   # both halves
+ *   deno task check-test-topology            # tree and workflows
+ *   deno task check-test-topology --records <file>...   # those and the store
  */
 
 import * as path from "@std/path";
@@ -37,7 +47,12 @@ import {
   type TestIdentity,
   testIdentityKey,
 } from "@commonfabric/test-support/records";
-import { isLaneMeasurement } from "./ci-lane.ts";
+import {
+  commandWords,
+  withoutComments,
+  withoutContinuations,
+} from "./ci-workflow.ts";
+import { isLaneMeasurement } from "./lane-measurement.ts";
 import { dayOf } from "./test-selection/build.ts";
 import { DENO_TEST_FILE } from "./test-topology/deno-task.ts";
 import { claimsFor, loadTopology } from "./test-topology.ts";
@@ -142,32 +157,72 @@ const NOT_A_TEST_SURFACE: ReadonlyArray<{ path: string; reason: string }> = [
   },
 ];
 
+/** Where the steps continuous integration runs are defined. */
+const CI_DEFINITIONS = ".github";
+
+/** The words that introduce a recording step, in the order they read. */
+const RUN_RECORDED = ["deno", "task", "run-recorded"];
+
+/** One recording step: the identity it writes, and the file holding it. */
+export interface WorkflowRecord {
+  test: TestIdentity;
+  where: string;
+}
+
 /**
- * Test files no suite runs, which is a defect rather than a decision.
- * Each is a test somebody wrote that nothing in this repository executes,
- * so it neither passes nor fails and nobody is told. They are reported
- * rather than failed on, because registering one means deciding where it
- * runs and finding out whether it still passes, and that is its own
- * change. A new unclaimed surface fails; these do not.
- *
- * An entry that stops applying fails as well, so a file that gets
- * registered or deleted takes its line with it.
+ * The identities the words of one file record. `deno task run-recorded`
+ * is followed by the three parts of an identity, so the three words
+ * after it are the identity. A step whose parts are quoted, or whose
+ * identity holds a workflow expression the run resolves, gives an
+ * identity no suite claims, and the check that reads it fails.
  */
-const UNREGISTERED_SURFACES: ReadonlyArray<{ path: string; reason: string }> = [
-  {
-    path: "packages/cf-harness/integration/engine.integration.test.ts",
-    reason:
-      "reached only by the package's own `test:integration` task, which " +
-      "nothing dispatches",
-  },
-  {
-    path:
-      "packages/cf-harness/integration/pattern-index-live.integration.test.ts",
-    reason:
-      "reached only by the package's own `test:integration` task, which " +
-      "nothing dispatches",
-  },
-];
+function recordedIdentities(text: string, where: string): WorkflowRecord[] {
+  const words = commandWords(withoutContinuations(withoutComments(text)));
+  const found: WorkflowRecord[] = [];
+  for (let at = 0; at + RUN_RECORDED.length < words.length; at++) {
+    if (RUN_RECORDED.some((word, index) => words[at + index] !== word)) {
+      continue;
+    }
+    const [k, s, n] = words.slice(at + RUN_RECORDED.length).slice(0, 3);
+    if (k === undefined || s === undefined || n === undefined) {
+      throw new Error(`${where} ends in the middle of a recording step`);
+    }
+    found.push({ test: { k, s, n }, where });
+  }
+  return found;
+}
+
+/** Every identity a step under `.github` records by hand. */
+export async function workflowRecords(
+  root: string,
+): Promise<WorkflowRecord[]> {
+  const found: WorkflowRecord[] = [];
+  const walk = async (relative: string): Promise<void> => {
+    // As in the tree walk, only the read of a directory's own entries
+    // answers "no such directory". A directory that vanishes deeper in
+    // the walk raises.
+    let entries: Deno.DirEntry[];
+    try {
+      entries = await Array.fromAsync(Deno.readDir(path.join(root, relative)));
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) return;
+      throw error;
+    }
+    entries.sort((left, right) => left.name < right.name ? -1 : 1);
+    for (const entry of entries) {
+      const at = `${relative}/${entry.name}`;
+      if (entry.isDirectory) {
+        await walk(at);
+        continue;
+      }
+      if (!entry.isFile || !/\.ya?ml$/.test(entry.name)) continue;
+      const text = await Deno.readTextFile(path.join(root, at));
+      found.push(...recordedIdentities(text, at));
+    }
+  };
+  await walk(CI_DEFINITIONS);
+  return found;
+}
 
 /** One thing the check found. */
 export interface Finding {
@@ -199,16 +254,12 @@ export function checkTree(
   candidates: readonly string[],
   declared: {
     fixtures?: ReadonlyArray<{ path: string; reason: string }>;
-    unregistered?: ReadonlyArray<{ path: string; reason: string }>;
   } = {},
 ): Finding[] {
   const findings: Finding[] = [];
   const claims = suites.map((suite) => ({ suite, ...claimsOf(suite) }));
   const fixtures = new Map(
     (declared.fixtures ?? []).map((entry) => [entry.path, entry.reason]),
-  );
-  const unregistered = new Map(
-    (declared.unregistered ?? []).map((entry) => [entry.path, entry.reason]),
   );
   const held = new Set<string>();
   for (const candidate of candidates) {
@@ -234,27 +285,18 @@ export function checkTree(
       }
     }
     if (exact.length > 0) {
-      const reason = fixtures.get(candidate) ?? unregistered.get(candidate);
+      const reason = fixtures.get(candidate);
       if (reason !== undefined) {
         findings.push({
           fails: true,
           message: `${candidate} is claimed by a suite and is still listed ` +
-            `as unclaimed: ${reason}`,
+            `as a fixture: ${reason}`,
         });
       }
       continue;
     }
     if (fixtures.has(candidate)) {
       held.add(candidate);
-      continue;
-    }
-    const unregisteredReason = unregistered.get(candidate);
-    if (unregisteredReason !== undefined) {
-      held.add(candidate);
-      findings.push({
-        fails: false,
-        message: `${candidate} runs nowhere: ${unregisteredReason}`,
-      });
       continue;
     }
     // A suite whose units are coarser than a file — a workspace member
@@ -273,12 +315,39 @@ export function checkTree(
       message: `${candidate} is claimed by no suite`,
     });
   }
-  for (const path of [...fixtures.keys(), ...unregistered.keys()]) {
+  for (const path of fixtures.keys()) {
     if (held.has(path)) continue;
     if (candidates.includes(path)) continue;
     findings.push({
       fails: true,
-      message: `${path} is listed as unclaimed and the tree no longer holds it`,
+      message: `${path} is listed as a fixture and the tree no longer holds it`,
+    });
+  }
+  return findings;
+}
+
+/**
+ * The workflow half: every identity a workflow step records by hand is
+ * claimed by exactly one suite.
+ */
+export function checkWorkflows(
+  suites: readonly Suite[],
+  records: readonly WorkflowRecord[],
+): Finding[] {
+  const findings: Finding[] = [];
+  const seen = new Set<string>();
+  for (const record of records) {
+    const key = testIdentityKey(record.test);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const claims = claimsFor(suites, record);
+    if (claims.length === 1) continue;
+    findings.push({
+      fails: true,
+      message: claims.length === 0
+        ? `no suite claims ${key}, which ${record.where} records`
+        : `${claims.map((claim) => claim.suite.id).join(" and ")} ` +
+          `both claim ${key}, which ${record.where} records`,
     });
   }
   return findings;
@@ -403,9 +472,9 @@ export function parseCheckArgs(
 }
 
 /**
- * Runs whichever halves the options ask for. The tree half always runs,
- * because it needs nothing but the checkout; the store half runs when a
- * run's records are named.
+ * Runs whichever halves the options ask for. The tree and workflow
+ * halves always run, because they need nothing but the checkout; the
+ * store half runs when a run's records are named.
  */
 export async function check(
   options: CheckOptions,
@@ -414,7 +483,10 @@ export async function check(
   const findings = checkTree(
     suites,
     await candidateSurfaces(options.root),
-    { fixtures: NOT_A_TEST_SURFACE, unregistered: UNREGISTERED_SURFACES },
+    { fixtures: NOT_A_TEST_SURFACE },
+  );
+  findings.push(
+    ...checkWorkflows(suites, await workflowRecords(options.root)),
   );
   if (options.records !== undefined) {
     findings.push(...checkStore(suites, await readRecords(options.records)));

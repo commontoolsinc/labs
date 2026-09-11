@@ -1,5 +1,10 @@
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
-import { cloneIfNecessary, hashStringOf } from "@commonfabric/data-model";
+import {
+  cloneIfNecessary,
+  hashStringOf,
+  isKeyableObjectOrArray,
+  taggedHashStringOf,
+} from "@commonfabric/data-model";
 import {
   hasDataUriScheme,
   valueFromDataUri,
@@ -80,7 +85,7 @@ import {
 } from "../link-types.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { entityKey } from "../scheduler/keys.ts";
-import { normalizeCellScope } from "../scope.ts";
+import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
@@ -111,6 +116,7 @@ import {
   StorageTransactionRejected,
   toReplicaLoadFailureError,
   TransactionCommitOptions,
+  UnexaminedAbsence,
   Unit,
 } from "./interface.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
@@ -298,7 +304,7 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
 
 /**
  * Identity of one data-URI pull: the URI, the schema it was read against, the
- * path into it, and where it lives.
+ * path into it, where it lives, and the identity resolving its linked cells.
  *
  * The result is a hash rather than those parts joined together. A data URI
  * carries its whole value in its id, so the id is the one part that varies
@@ -311,6 +317,7 @@ export function dataURISyncKey(identity: {
   path: readonly string[];
   space: MemorySpace;
   scope: CellScope | undefined;
+  scopeKeyIdentity?: ScopeKeyIdentity;
 }): string {
   return hashStringOf([
     identity.id,
@@ -318,6 +325,7 @@ export function dataURISyncKey(identity: {
     [...identity.path],
     identity.space,
     normalizeCellScope(identity.scope),
+    identity.scopeKeyIdentity,
   ]);
 }
 
@@ -1443,11 +1451,13 @@ export class StorageManager implements IStorageManager {
     this.#providers.get(space)?.noteAclChanged();
   }
 
-  isSchemaDocPersisted(space: MemorySpace, hash: string): boolean {
+  isContentAddressedDocPersisted(space: MemorySpace, hash: string): boolean {
     // Already-open replicas only: creating a provider is a session-level
     // side effect no elision probe should carry. A space this manager has
     // not opened answers false, and false stages.
-    return this.#providers.get(space)?.replica.isSchemaDocPersisted(hash) ??
+    return this.#providers.get(space)?.replica.isContentAddressedDocPersisted(
+      hash,
+    ) ??
       false;
   }
 
@@ -2222,7 +2232,14 @@ export class StorageManager implements IStorageManager {
     }
 
     if (hasDataUriScheme(id)) {
-      return this.#syncDataURICell(cell, space, id, schema, scope);
+      return this.#syncDataURICell(
+        cell,
+        space,
+        id,
+        schema,
+        scope,
+        { ...(options?.scopeKeyIdentity ?? this.scopeKeyIdentity()) },
+      );
     }
 
     const provider = this.open(space);
@@ -2351,7 +2368,12 @@ export class StorageManager implements IStorageManager {
    * resolved error counted as the load's failure and logged.
    */
   #trackPendingProviderSync(
-    address: { space: MemorySpace; scope: CellScope; id: URI },
+    address: {
+      space: MemorySpace;
+      scope: CellScope;
+      id: URI;
+      scopeKey?: ScopeKey;
+    },
     start: () => Promise<Result<Unit, Error>>,
   ): Promise<Result<Unit, Error>> {
     const releaseLoad = this.#registerPendingLoad(address);
@@ -2402,6 +2424,7 @@ export class StorageManager implements IStorageManager {
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
+    identity: ScopeKeyIdentity,
   ): Promise<Cell<T>> {
     const cacheKey = dataURISyncKey({
       id,
@@ -2409,10 +2432,18 @@ export class StorageManager implements IStorageManager {
       path: cell.path.map(String),
       space,
       scope,
+      scopeKeyIdentity: identity,
     });
     let work = this.#dataURISyncs.get(cacheKey);
     if (work === undefined) {
-      work = this.#syncDataURILinkTargets(cell, space, id, schema, scope);
+      work = this.#syncDataURILinkTargets(
+        cell,
+        space,
+        id,
+        schema,
+        scope,
+        identity,
+      );
       this.#dataURISyncs.set(cacheKey, work);
     }
     await work;
@@ -2425,6 +2456,7 @@ export class StorageManager implements IStorageManager {
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
+    identity: ScopeKeyIdentity,
   ): Promise<void> {
     let value: unknown = valueFromDataUri(id);
     for (const segment of [...cell.path.map(String)]) {
@@ -2447,6 +2479,7 @@ export class StorageManager implements IStorageManager {
       schema,
       promises,
       new Set(),
+      identity,
     );
     if (promises.length > 0) {
       await Promise.all(promises);
@@ -2464,6 +2497,7 @@ export class StorageManager implements IStorageManager {
     schema: JSONSchema | undefined,
     promises: Promise<unknown>[],
     seen: Set<unknown>,
+    identity?: ScopeKeyIdentity,
   ): void {
     if (value === null || value === undefined || seen.has(value)) {
       return;
@@ -2480,14 +2514,25 @@ export class StorageManager implements IStorageManager {
         const scope = normalizeCellScope(
           link.scope as CellScope | undefined,
         );
+        const instance = this.#foreignInstanceKey(scope, identity);
         promises.push(
           this.#trackPendingProviderSync(
-            { space, scope, id: link.id },
+            {
+              space,
+              scope,
+              id: link.id,
+              ...(instance !== undefined ? { scopeKey: instance } : {}),
+            },
             () =>
-              this.open(space).sync(link.id!, {
-                path: link.path.map((segment) => segment.toString()),
-                schema: link.schema ?? schema ?? false,
-              }, scope),
+              this.open(space).sync(
+                link.id!,
+                {
+                  path: link.path.map((segment) => segment.toString()),
+                  schema: link.schema ?? schema ?? false,
+                },
+                scope,
+                instance,
+              ),
           ),
         );
       }
@@ -2506,17 +2551,18 @@ export class StorageManager implements IStorageManager {
           itemSchema,
           promises,
           seen,
+          identity,
         );
       }
       return;
     }
 
-    // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, whose
-    // `Object.keys` are empty, so a cell link held inside a `FabricInstance`
-    // reconstructed from the data URI is never found here and its target
-    // document is never synced — the later read finds it absent. (A
-    // `FabricPrimitive` ends the walk harmlessly; it is a leaf.)
-    if (isObjectOrArray(value)) {
+    // TODO(danfuzz): the walk stops at a `FabricSpecialObject`, so a cell link
+    // held inside a `FabricInstance` reconstructed from the data URI is never
+    // found here and its target document is never synced — the later read
+    // finds it absent. (Stopping at a `FabricPrimitive` costs nothing; it is a
+    // leaf.)
+    if (isKeyableObjectOrArray(value)) {
       for (const key of Object.keys(value)) {
         const child = value[key];
         if (
@@ -2533,6 +2579,7 @@ export class StorageManager implements IStorageManager {
           childSchema,
           promises,
           seen,
+          identity,
         );
       }
     }
@@ -2697,7 +2744,7 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
     // ids, and session-resume replay all see one selector form.
     const normalizedSelector = externalizeSyncSelector(
       normalizeSyncSelector(selector),
-      (hash) => this.replica.isSchemaDocPersisted(hash),
+      (hash) => this.replica.isContentAddressedDocPersisted(hash),
     );
     // Replay requests are per (doc, instance): an instance-named load
     // (stage A) must replay as that instance on a replacement replica.
@@ -2723,11 +2770,16 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
     >;
   }
 
-  /** See {@link SpaceReplica.loadUnexaminedAbsences}. */
-  loadUnexaminedAbsences(
+  /** See {@link SpaceReplica.unexaminedAbsences}. */
+  unexaminedAbsences(
     source: IStorageTransaction | undefined,
-  ): number | Promise<number> {
-    return this.replica.loadUnexaminedAbsences(source);
+  ): readonly UnexaminedAbsence[] {
+    return this.replica.unexaminedAbsences(source);
+  }
+
+  /** See {@link SpaceReplica.presentCount}. */
+  presentCount(absences: readonly UnexaminedAbsence[]): number {
+    return this.replica.presentCount(absences);
   }
 
   async #replaySync(
@@ -3467,7 +3519,8 @@ export class SpaceReplica
   /**
    * The caught-up and stale-floor bookkeeping, the read builder, the
    * session-sync consumer, the watch-set refresh, the session-sync apply
-   * step, and the conflict read repair, which a test drives directly.
+   * step, and the conflict read repair, which a test drives directly. It
+   * also reports whether the replica holds a record for a document.
    */
   get accessForTestingOnly(): {
     noteCaughtUpLocalSeq(localSeq: number | undefined): void;
@@ -3483,12 +3536,16 @@ export class SpaceReplica
     refreshWatchSet(
       entries: Iterable<[WatchAddress, SchemaPathSelector]>,
       type?: "pull" | "integrate",
-      watchBranch?: string,
     ): Promise<Result<Unit, PullError>>;
     applySessionSync(sync: SessionSync, type: "pull" | "integrate"): void;
     waitForConflictReadRepair(
       rejection: StorageTransactionRejected,
     ): Promise<void>;
+    hasDocumentRecord(
+      id: URI,
+      scope?: CellScope,
+      identity?: ScopeKeyIdentity,
+    ): boolean;
   } {
     return {
       noteCaughtUpLocalSeq: (localSeq) => this.#noteCaughtUpLocalSeq(localSeq),
@@ -3500,11 +3557,12 @@ export class SpaceReplica
       buildReads: (source, localSeq, identity) =>
         this.#buildReads(source, localSeq, identity),
       consumeUpdates: (iterator) => this.#consumeUpdates(iterator),
-      refreshWatchSet: (entries, type, watchBranch) =>
-        this.#refreshWatchSet(entries, type, watchBranch),
+      refreshWatchSet: (entries, type) => this.#refreshWatchSet(entries, type),
       applySessionSync: (sync, type) => this.#applySessionSync(sync, type),
       waitForConflictReadRepair: (rejection) =>
         this.#waitForConflictReadRepair(rejection),
+      hasDocumentRecord: (id, scope, identity) =>
+        this.#hasDocumentRecord(id, scope, identity),
     };
   }
 
@@ -3579,6 +3637,27 @@ export class SpaceReplica
       address.id,
       this.instanceKey(address.scope, identity, address.scopeKey),
     );
+  }
+
+  /**
+   * Whether this replica holds a record for the document. A record appears
+   * once the replica has examined the document — an examination that found
+   * a value and one that found the document absent both leave one — and
+   * also once a local write for it is pending. This is the predicate
+   * {@link loadUnexaminedAbsences} decides by. It takes `scope` and
+   * `identity` as {@link getDocument} takes them, so a caller reading the
+   * two together names one document across both.
+   *
+   * `getDocument()` reads `undefined` for a record whose value materializes
+   * as `undefined` and for a document with no record at all, so a caller
+   * separating those two reads both.
+   */
+  #hasDocumentRecord(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    return this.#docs.has(this.#docKeyOf({ id, scope }, identity));
   }
 
   /**
@@ -5215,8 +5294,8 @@ export class SpaceReplica
   async #refreshWatchSet(
     entries: Iterable<[WatchAddress, SchemaPathSelector]>,
     type: "pull" | "integrate" = "pull",
-    watchBranch = "",
   ): Promise<Result<Unit, PullError>> {
+    const refreshStart = performance.now();
     try {
       const { session } = await this.#activeSessionHandle();
       // Per-session (no global): mirror the storage setting onto the session so
@@ -5270,7 +5349,7 @@ export class SpaceReplica
       }
 
       const watches = watchEntries.map(([address, selector]) => ({
-        id: watchIdForEntry(address, selector, watchBranch),
+        id: watchIdForEntry(address, selector, ""),
         kind: "graph" as const,
         query: {
           roots: [{
@@ -5291,9 +5370,18 @@ export class SpaceReplica
         },
       }));
 
-      const { view, precedingSyncs, sync } = await session.watchAddSync(
-        watches,
-      );
+      // Both sub-spans record in `finally` blocks, as `total` below does: a
+      // refresh that fails inside the request or inside application still
+      // paid for it, and a success-only span would leave that share in
+      // `total` alone, so the halves would not add up across outcomes.
+      const watchAddStart = performance.now();
+      let mutation: MemoryV2Client.WatchMutationResult;
+      try {
+        mutation = await session.watchAddSync(watches);
+      } finally {
+        logger.time(watchAddStart, "watchRefresh", "watchAddSync");
+      }
+      const { view, precedingSyncs, sync } = mutation;
 
       if (this.#closed) {
         view.close();
@@ -5301,6 +5389,7 @@ export class SpaceReplica
       }
 
       this.#watchView = view;
+      const applyStart = performance.now();
       try {
         for (const precedingSync of precedingSyncs) {
           this.#applySessionSync(precedingSync, "integrate");
@@ -5314,56 +5403,16 @@ export class SpaceReplica
         // overwrites `#watchView`.
         view.close();
         throw error;
+      } finally {
+        // deno-coverage-ignore-stop
+        logger.time(applyStart, "watchRefresh", "applySessionSync");
       }
-      // deno-coverage-ignore-stop
       this.#consumeWatchView(view);
       return { ok: {} };
     } catch (error) {
       return { error: toPullError(error) };
-    }
-  }
-
-  /** Remove graph watches whose caller needed only a one-shot absence probe. */
-  async #removeWatchIds(watchIds: readonly string[]): Promise<void> {
-    if (watchIds.length === 0) return;
-    let lastError: unknown;
-    // A failed watchRemoveSync has already removed these ids from the
-    // SpaceSession's reconnect intent. Reissuing it therefore sends the full
-    // corrected watch set; Client.request waits for an in-progress reconnect,
-    // so one retry also repairs the resumed-session ambiguity where the server
-    // may still hold the old watches.
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const { session } = await this.#activeSessionHandle();
-        const { view, precedingSyncs, sync } = await session.watchRemoveSync(
-          watchIds,
-        );
-        if (this.#closed) {
-          view.close();
-          return;
-        }
-        this.#watchView = view;
-        try {
-          for (const precedingSync of precedingSyncs) {
-            this.#applySessionSync(precedingSync, "integrate");
-          }
-          this.#applySessionSync(sync, "integrate");
-        } catch (error) {
-          view.close();
-          throw error;
-        }
-        this.#consumeWatchView(view);
-        return;
-      } catch (error) {
-        lastError = error;
-        if (this.#closed) return;
-      }
-    }
-    if (!this.#closed) {
-      console.warn(
-        "failed to remove temporary graph watches after retry",
-        lastError,
-      );
+    } finally {
+      logger.time(refreshStart, "watchRefresh", "total");
     }
   }
 
@@ -5492,6 +5541,7 @@ export class SpaceReplica
       if (next.done || this.#closed) {
         return;
       }
+      const applyStart = performance.now();
       try {
         this.#applySessionSync(next.value, "integrate");
       } catch (error) {
@@ -5508,6 +5558,13 @@ export class SpaceReplica
           "consumer continues:",
           error,
         ]);
+      } finally {
+        // The push-side counterpart of `watchRefresh/applySessionSync`:
+        // this key times application from the subscription iterator;
+        // the refresh key times application during graph-watch refreshes.
+        // Direct operation-watch and watch-removal application have no
+        // span under either key.
+        logger.time(applyStart, "watchPush", "applySessionSync");
       }
     }
   }
@@ -6367,19 +6424,22 @@ export class SpaceReplica
   }
 
   /**
-   * Load the documents a transaction read as absent without the replica ever
-   * having examined them, and report how many turned out to exist.
+   * The documents `source` read as absent that this replica has never
+   * examined, each keyed the way a pending load for it is keyed: an address
+   * naming a foreign instance carries that instance's key, and one naming
+   * the replica's own carries none.
    *
    * A read of a document the replica never synced resolves as absent, and
    * {@link buildReads} exports that as `seq: 0` — the claim that no such
    * document exists. The engine rejects the commit as `stale confirmed read`
    * whenever one does, and the rejection is right: the reading run followed
    * a link into a document it did not hold, so its traversal is sound only
-   * if that document really is absent. `Runtime.editWithRetry` calls this
-   * between running its action and committing, and a non-zero return is its
-   * signal to discard the attempt and re-run against the now-local
-   * documents — the same convergence the engine's rejection would force,
-   * without the round trip, the catch-up gate, or the wasted upload.
+   * if that document really is absent. `Runtime.editWithRetry` takes this
+   * list between running its action and committing, waits for the loads
+   * already in flight for these documents, and re-runs the action when
+   * {@link presentCount} then finds any of them present — the same
+   * convergence the engine's rejection would force, without the round trip,
+   * the catch-up gate, or the wasted upload.
    *
    * Session-scoped reads of this replica's own fresh session are excluded,
    * because no unseen server-side revision can exist under that instance.
@@ -6390,12 +6450,12 @@ export class SpaceReplica
    * transaction's scope identity, while ordinary client transactions use the
    * replica's own identity.
    */
-  loadUnexaminedAbsences(
+  unexaminedAbsences(
     source: IStorageTransaction | undefined,
-  ): number | Promise<number> {
-    if (source === undefined) return 0;
+  ): UnexaminedAbsence[] {
+    if (source === undefined) return [];
     const reads = getDirectTransactionReadActivities(source);
-    if (!reads) return 0;
+    if (!reads) return [];
     const identity = source.scopeKeyIdentity;
     // Documents this transaction writes are its own creations in flight:
     // reading one as absent and then writing it is what creating a document
@@ -6407,12 +6467,12 @@ export class SpaceReplica
       if (write.space !== this.#space) continue;
       ownWrites.add(docKey(write.id, this.instanceKey(write.scope, identity)));
     }
-    const unexamined = new Map<string, WatchAddress>();
+    const unexamined = new Map<string, UnexaminedAbsence>();
     for (const read of this.#commitReadActivities(source, reads)) {
       const scope = normalizeCellScope(read.scope);
       // A malformed/incomplete served identity cannot name the instance on
-      // the wire. Leave its claim for commit admission rather than pulling a
-      // different instance under the replica identity.
+      // the wire. Leave its claim for commit admission rather than waiting
+      // on a different instance under the replica identity.
       if (identity !== undefined && !canResolveScopeKey(scope, identity)) {
         continue;
       }
@@ -6423,96 +6483,34 @@ export class SpaceReplica
       if (ownWrites.has(key)) continue;
       if (this.#docs.has(key) || unexamined.has(key)) continue;
       unexamined.set(key, {
+        space: this.#space,
         id: read.id,
-        type: DOCUMENT_MIME as MIME,
         scope,
         ...(scope !== "space" && instance !== ownInstance
           ? { scopeKey: instance as ScopeKey }
           : {}),
       });
     }
-    // Synchronous zero: with nothing to examine there is nothing to await,
-    // and callers whose commit path is synchronous today stay synchronous —
-    // the commit-gated runner start among them.
-    if (unexamined.size === 0) return 0;
-    return (async () => {
-      // Like pull(), a one-shot probe must not reuse a session invalidated by
-      // an ACL change merely because the normal selector tracker is bypassed.
-      this.#consumeOwedSessionRemount();
-      const entries = normalizeSyncEntries(
-        [...unexamined.values()].map((
-          address,
-        ): [WatchAddress, SchemaPathSelector] => [
-          address,
-          // Fetch the document itself and follow no links. The basis needs
-          // this document's revision, not a schema-guided closure.
-          { path: [], schema: false },
-        ]),
-      );
-      // These probes own distinct watches so an absent result can be removed
-      // without disturbing a concurrent or pre-existing ordinary pull.
-      const watchBranch = `absence:${crypto.randomUUID()}`;
-      const watchIds = entries.map(([address, selector]) =>
-        watchIdForEntry(address, selector, watchBranch)
-      );
-      try {
-        const result = await this.#refreshWatchSet(
-          entries,
-          "pull",
-          watchBranch,
-        );
-        if (result.error) {
-          await this.#removeWatchIds(watchIds);
-          return 0;
-        }
+    return [...unexamined.values()];
+  }
 
-        const absentWatchIds: string[] = [];
-        const covered = Promise.resolve({ ok: {} } as Result<Unit, PullError>);
-        for (let index = 0; index < entries.length; index++) {
-          const [address, selector] = entries[index];
-          const key = docKey(
-            address.id,
-            this.instanceKey(address.scope, identity, address.scopeKey),
-          );
-          if ((this.#docs.get(key)?.confirmed.seq ?? 0) === 0) {
-            absentWatchIds.push(watchIds[index]);
-            continue;
-          }
-          // A discovered document is now a real dependency of the retry.
-          // Retain its watch and teach ordinary pulls that the selector is
-          // covered, even though this probe used a distinct watch id.
-          this.#watchSelectorTracker.add(
-            {
-              id: address.id,
-              type: DOCUMENT_MIME,
-              scope: normalizeCellScope(address.scope),
-              ...(address.scopeKey !== undefined
-                ? { scopeKey: address.scopeKey }
-                : {}),
-            },
-            selector,
-            covered,
-          );
-        }
-        // A never-created id must not become permanent live subscription
-        // state merely because one transaction asserted its absence.
-        await this.#removeWatchIds(absentWatchIds);
-        let present = 0;
-        for (const key of unexamined.keys()) {
-          if ((this.#docs.get(key)?.confirmed.seq ?? 0) > 0) present += 1;
-        }
-        return present;
-        // deno-coverage-ignore-start -- the refresh resolves to its error
-        // and the removal swallows its own, so only a bug lands here
-      } catch {
-        await this.#removeWatchIds(watchIds);
-        // Best-effort, like the retry gate it front-runs: an unexamined
-        // absence is what this path exported before, and the commit's own
-        // verdict still decides.
-        return 0;
-      }
-      // deno-coverage-ignore-stop
-    })();
+  /**
+   * How many of `absences` this replica now holds with a confirmed revision.
+   * `absences` is a list this replica's own {@link unexaminedAbsences}
+   * returned, not any address of that shape: a foreign instance is keyed by
+   * the `scopeKey` that call baked in, and an address from elsewhere would
+   * be counted against the replica's own instance.
+   */
+  presentCount(absences: readonly UnexaminedAbsence[]): number {
+    let present = 0;
+    for (const absence of absences) {
+      const key = docKey(
+        absence.id,
+        this.instanceKey(absence.scope, undefined, absence.scopeKey),
+      );
+      if ((this.#docs.get(key)?.confirmed.seq ?? 0) > 0) present += 1;
+    }
+    return present;
   }
 
   #buildReads(
@@ -6546,6 +6544,16 @@ export class SpaceReplica
     // the confirmed seq (or an explicit `confirmedSeq` override, e.g. a read that
     // carries its own `meta.seq`). Shared by the per-read loop below and the blind
     // write's structural precondition so the two emission sites stay in lockstep.
+    //
+    // Both the layers and the confirmed seq are read from the replica as the
+    // commit is built, not from the transaction's own snapshot of the doc,
+    // and a frame can land between the two. What the transaction owes this
+    // site (03-commit-model.md §3.3.4) is its commit-time claim check,
+    // passed before its reads are built: `claim()` in
+    // transaction/attestation.ts re-reads every doc the transaction
+    // snapshotted from this replica, and a differing value rejects the
+    // transaction locally as `StorageTransactionInconsistent`. So the
+    // content the transaction read is the content at the basis named here.
     //
     // `excludeSpeculativeLayers` (verification-coverage.md OW47, the client
     // own-write durability seam): the blind write's structural read passes
@@ -6878,7 +6886,8 @@ export class SpaceReplica
 
   /**
    * Whether this replica holds SERVER-CONFIRMED verified content for
-   * `cid:<hash>` — the emission gate for selector references: a confirmed
+   * `cid:<hash>` — the emission gate for selector references and the
+   * elision seam for staged content-addressed documents: a confirmed
    * document arrived by delivery or by an acknowledged commit, so the
    * space's server holds it, and content addressing means it can never
    * change. The confirmed layer specifically: a pending local write is
@@ -6888,13 +6897,13 @@ export class SpaceReplica
    * relies on the provisional route not changing after observable reads
    * (CT-2046 tracks enforcing that broadly).
    */
-  isSchemaDocPersisted(hash: string): boolean {
+  isContentAddressedDocPersisted(hash: string): boolean {
     const record = this.#docs.get(docKey(`cid:${hash}` as URI, "space"));
     const doc = record?.confirmed.value;
     if (!isObjectNotArray(doc)) return false;
-    const value = (doc as { value?: unknown }).value;
-    return isSubschema(value) &&
-      internSchemaAsTaggedHashString(value as JSONSchema) === hash;
+    const value = doc.value;
+    // A content-addressed document's value must hash to the id it sits under.
+    return taggedHashStringOf(value) === hash;
   }
 
   /**
@@ -8228,12 +8237,38 @@ const toRejectedError = (
   ) {
     const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
     const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
-    // The conflicted entity: structured field when the error is in-process;
-    // parsed from the message when it crossed the wire (Error fields do not
-    // survive serialization, the message does — its format is owned by
-    // memory/v2/engine.ts's ConflictError construction).
-    const staleReadOf = (error as { of?: unknown })?.of ??
-      message.match(/stale confirmed read: (\S+) at seq/)?.[1];
+    // Scoped descriptors cross current protocol boundaries structurally.
+    // Message-only errors retain default-scope recovery for every named read.
+    const toConflicts = (details: unknown): IConflictError["conflict"][] => {
+      const { of, scope } = (details ?? {}) as {
+        of?: unknown;
+        scope?: unknown;
+      };
+      return typeof of === "string"
+        ? [{
+          space,
+          the: DOCUMENT_MIME,
+          of: of as Entity,
+          ...(isCellScope(scope) ? { scope } : {}),
+        }]
+        : [];
+    };
+    const structuredConflicts = (error as { conflicts?: unknown })?.conflicts;
+    let conflicts = Array.isArray(structuredConflicts)
+      ? structuredConflicts.flatMap(toConflicts)
+      : [];
+    if (conflicts.length === 0) {
+      conflicts = toConflicts((error as { conflict?: unknown })?.conflict);
+    }
+    if (conflicts.length === 0) {
+      conflicts = toConflicts(error);
+    }
+    if (conflicts.length === 0) {
+      conflicts = Array.from(
+        message.matchAll(/stale confirmed read: (\S+) at seq/g),
+        (match) => toConflicts({ of: match[1] })[0],
+      );
+    }
     const firstOperation = commit.operations?.[0];
     const firstOperationId = firstOperation && "id" in firstOperation
       ? firstOperation.id
@@ -8242,16 +8277,14 @@ const toRejectedError = (
       name: "ConflictError",
       message,
       transaction: commit,
-      // Conflict descriptor: for stale-read conflicts `of` is authoritative
-      // (the memory engine names the conflicted entity structurally), so a
-      // retrier can pull exactly that doc before re-running. `the` remains a
-      // placeholder.
-      conflict: {
+      // The singular descriptor remains the first conflict for consumers of
+      // the legacy interface. `the` remains a placeholder.
+      conflict: conflicts[0] ?? {
         space,
         the: DOCUMENT_MIME,
-        of: ((typeof staleReadOf === "string" ? staleReadOf : undefined) ??
-          firstOperationId ?? "of:unknown") as Entity,
+        of: (firstOperationId ?? "of:unknown") as Entity,
       },
+      ...(conflicts.length > 0 ? { conflicts } : {}),
     };
     // retryAfterSeq is carried for diagnostics; retry gating is by caughtUpLocalSeq
     // (readyToRetry), and downstream only uses retryAfterSeq's presence to mark

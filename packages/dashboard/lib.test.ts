@@ -3,7 +3,7 @@
  */
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { budgetStatus, clampInt, concDot, daysLabel, durationTag, escapeHtml, friendlyError, humanDur, humanSpan, jsonFromZip, landingHref, lighten, median, multiSparkline, readBudget, sparkline, strip, thin, usd } from "./lib.ts";
+import { budgetStatus, clampInt, compactSpan, concDot, daysLabel, durationTag, escapeHtml, friendlyError, groupDigits, humanDur, humanSpan, jsonFromZip, landingHref, lighten, median, multiSparkline, readBudget, sparkline, strip, thin, usd } from "./lib.ts";
 import { artifactZip, bytes, makeZip } from "./test/artifact-zip.ts";
 
 Deno.test("landingHref: squash-merge trailing (#N) -> the PR", () => {
@@ -32,6 +32,25 @@ Deno.test("concDot: only genuine failures are red", () => {
   assertEquals(concDot("timed_out", 1), "red");
   assertEquals(concDot("cancelled", 1), "gray"); // non-verdict, not a failure
   assertEquals(concDot(null, 1), "gray");
+});
+
+Deno.test("compactSpan: minutes, then hours, then days", () => {
+  assertEquals(compactSpan(0), "0m");
+  assertEquals(compactSpan(12 * 60_000), "12m");
+  assertEquals(compactSpan(3_600_000), "1h");
+  assertEquals(compactSpan(28 * 3_600_000), "28h");
+  assertEquals(compactSpan(48 * 3_600_000), "2d");
+  assertEquals(compactSpan(7 * 86_400_000), "7d");
+  assertEquals(compactSpan(-5_000), "0m");
+});
+
+Deno.test("groupDigits: separates thousands, rounding first", () => {
+  assertEquals(groupDigits(78101), "78,101");
+  assertEquals(groupDigits(999), "999");
+  assertEquals(groupDigits(1000), "1,000");
+  assertEquals(groupDigits(1234567), "1,234,567");
+  assertEquals(groupDigits(0), "0");
+  assertEquals(groupDigits(30.6), "31");
 });
 
 Deno.test("daysLabel: consistent 'x days' text", () => {

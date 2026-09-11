@@ -66,7 +66,7 @@ import {
   shallowFabricFromNativeObjectElseUndefined,
   shallowFabricFromNativeValue,
 } from "@/native-conversion.ts";
-import { assertValidFabricValueLayer } from "@/type-check.ts";
+import { assertValidFabricValueLayer } from "@/validity-check.ts";
 import { LAYER_CORPUS, WeirdError } from "./fabric-value-corpus.ts";
 
 /** A concrete fabric class, `toBeInstanceOf()` wanting a constructor. */
