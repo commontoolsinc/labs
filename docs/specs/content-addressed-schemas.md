@@ -218,7 +218,9 @@ until then.
 
 Decomposition refuses input it cannot represent faithfully — a `$ref`
 outside the `#/$defs/<name>`, external, and embedded vocabularies, a
-dangling local ref, a nested `$defs` scope, the deprecated `definitions`
+dangling local ref, a `$defs` below the root (the decomposed form carries
+one definition map, at the root; the runtime's resolution rule for a
+nested one is in `json_schema.md`), the deprecated `definitions`
 keyword, the resource-scope keywords (`$id`, `$anchor`, `$dynamicAnchor`,
 `$dynamicRef`, and the 2019-09 pair `$recursiveAnchor` and
 `$recursiveRef`, whose scoping the rewrite cannot preserve), and an

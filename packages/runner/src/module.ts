@@ -26,6 +26,10 @@ export interface RawBuiltinResult {
   isEffect?: boolean;
   dependencies?: ReactivityLog;
   useDeclaredReadsAsDependencies?: boolean;
+
+  /** Defers a computation with declared outputs until a consumer demands them. */
+  deferUntilDemand?: boolean;
+
   debounce?: number;
   noDebounce?: boolean;
   throttle?: number;

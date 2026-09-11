@@ -1,4 +1,5 @@
 import type { NativeSessionSnapshot } from "./types.ts";
+import { terminateChildProcess } from "./child-process.ts";
 
 export interface GitContext {
   gitRepo: string | null;
@@ -38,13 +39,7 @@ const runGitCommand: GitCommandRunner = async (args, signal) => {
     stdout: "piped",
     stderr: "null",
   }).spawn();
-  const abort = () => {
-    try {
-      child.kill();
-    } catch {
-      // Killing an exited process can throw.
-    }
-  };
+  const abort = () => terminateChildProcess(child);
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) abort();
   try {

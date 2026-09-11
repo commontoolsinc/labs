@@ -749,6 +749,26 @@ cell's contents. The cache is designed around this:
   The compiled document therefore carries a **CFC integrity label**, written with
   the entry (`addIntegrity`) and **required on read** (`requiredIntegrity`). The
   label — not the SES verifier — is the security boundary for cache hits.
+- **A cache document declares no confidentiality policy, and says so.** Both
+  sets are addressed by causes built from the module's content-derived
+  identity, so no pattern names one of these records, and the schemas
+  describing their fields are the two write schemas in `cell-cache.ts`, which
+  declare integrity alone. So the ceiling the §8.12.4 writer-fit check
+  resolves at a cache write is the empty one, and at `enforce-strict` a write
+  carrying any confidentiality clause is a refused commit — which any
+  transaction that both reads labeled data and reaches a cache write takes, a
+  piece's source transition among them. Each cache write therefore records a
+  `runtime.undeclarable-store` marker naming its document
+  (`recordUndeclarablePolicyStore`), and the check skips the ceiling there.
+  The skip is scoped to a join the target's own space produced: where a clause
+  reached the join from another space, the cache write is measured like any
+  other, so a compile cannot carry a foreign space's labeled value into a
+  local record. The write stays a flow-stamp target, so the transaction's join
+  still lands on the record and a later read of a stamped path carries that
+  clause. The module's bytes are unaffected: they live in a `cid:` document,
+  which CFC leaves out of the flow join on both sides, so what a stamp can
+  reach is the compiler's bookkeeping beside them. `cfc-enforcement-matrix.md`
+  §4 carries the reasoning, including where this stops short of spec §18.6.2.
 - **Fail-closed, not fail-hard.** A compiled document with a missing or invalid
   integrity label is treated as a **cache miss** and recompiled from the
   (self-verifying) source set, which re-runs the SES verifier. So the verifier

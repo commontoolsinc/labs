@@ -25,6 +25,7 @@ import {
   isStream,
   type JSONSchema,
   KeepAsCell,
+  type MemorySpace,
   mergeSchemaDefaults,
   NAME,
   type NormalizedLink,
@@ -51,8 +52,8 @@ import {
 } from "@commonfabric/runner";
 import { storedArgumentRefusalDetail } from "@commonfabric/runner/shared";
 import {
-  cfcSchemaChildRoot,
   cfcSchemaMergeIssue,
+  cfcSchemaResolvedRoot,
   loadStoredCfcEnvelope,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
@@ -548,6 +549,13 @@ export interface PatternUpdateReceipt extends PieceSourceSetResult {
   status: "committed";
   /** Content-addressed pattern pointer written by the transaction. */
   ref: { identity: string; symbol: string };
+  /** The space whose commit log accepted the setup transaction. */
+  space: MemorySpace;
+  /**
+   * Position in `space`'s commit log at which the transaction was accepted:
+   * the seq `cf inspect value-at --seq` and `diff --from/--to` read.
+   */
+  seq: number;
   /** Source-history revision written atomically with `.ref`. */
   revisionId: string;
   /**
@@ -658,7 +666,7 @@ function resolvePathSchemaContract(
   contract: PathSchemaContract,
 ): PathSchemaContract {
   const schema = contract.schema;
-  const schemaRoot = cfcSchemaChildRoot(schema, contract.root);
+  const schemaRoot = contract.root;
   if (
     typeof schema !== "object" || schema === null ||
     typeof schema.$ref !== "string"
@@ -673,7 +681,7 @@ function resolvePathSchemaContract(
   return {
     ...contract,
     schema: resolved,
-    root: cfcSchemaChildRoot(resolved, owningRoot),
+    root: cfcSchemaResolvedRoot(resolved, owningRoot),
   };
 }
 
@@ -769,7 +777,7 @@ export function linkPathContracts(
         }
         next.push(...applicable.map((child) => ({
           schema: child,
-          root: cfcSchemaChildRoot(child, root),
+          root: root,
           mayBeMissing,
         })));
         continue;
@@ -790,7 +798,7 @@ export function linkPathContracts(
           : schema.items ?? true;
         next.push({
           schema: child,
-          root: cfcSchemaChildRoot(child, root),
+          root: root,
           mayBeMissing,
         });
         continue;
@@ -992,7 +1000,7 @@ export function currentValuePathContracts(
           {
             ...contract,
             schema: selectedContainer,
-            root: cfcSchemaChildRoot(selectedContainer, root),
+            root: root,
           },
           segment,
           currentValue,
@@ -1023,7 +1031,7 @@ export function currentValuePathContracts(
           {
             ...contract,
             schema: base,
-            root: cfcSchemaChildRoot(base, root),
+            root: root,
           },
           segment,
           currentValue,
@@ -1041,10 +1049,10 @@ export function currentValuePathContracts(
       const branchContract = (branch: JSONSchema): PathSchemaContract => ({
         ...contract,
         schema: branch,
-        root: cfcSchemaChildRoot(branch, root),
+        root: root,
       });
       const branchMatches = (branch: JSONSchema, value: unknown): boolean => {
-        const branchRoot = cfcSchemaChildRoot(branch, root);
+        const branchRoot = root;
         return validateSchemaValue(
           branch,
           value,
@@ -1201,7 +1209,7 @@ export function localizeOuterCellContract(
         localizeOuterCellContract(
           {
             schema: alternative,
-            root: cfcSchemaChildRoot(alternative, root),
+            root: root,
           },
           stored,
           active,
@@ -1274,7 +1282,7 @@ export function localizeOuterCellContract(
         localizeOuterCellContract(
           {
             schema: alternative,
-            root: cfcSchemaChildRoot(alternative, root),
+            root: root,
           },
           stored,
           active,
@@ -1383,7 +1391,7 @@ export function assertWritablePiecePath(
         ]);
         return {
           schema: child,
-          root: cfcSchemaChildRoot(child, contract.root),
+          root: contract.root,
         };
       });
     }
@@ -1441,7 +1449,7 @@ export function localizeStreamEventContract(
         localizeStreamEventContract(
           {
             schema: alternative,
-            root: cfcSchemaChildRoot(alternative, root),
+            root: root,
           },
           active,
         )
@@ -1476,7 +1484,7 @@ export function localizeStreamEventContract(
         localizeStreamEventContract(
           {
             schema: alternative,
-            root: cfcSchemaChildRoot(alternative, root),
+            root: root,
           },
           active,
         )
@@ -4701,7 +4709,7 @@ export class PieceController<T = unknown> {
   ): Promise<PatternUpdateReceipt> {
     const mutationVersion = ++this.#mutationVersion;
     let transition: PieceSourceTransition | undefined;
-    let committedRef: { identity: string; symbol: string } | undefined;
+    let commit: PatternSetupCommitReceipt | undefined;
     try {
       await this.#runMutation(mutationVersion, async () => {
         // A piece whose current pattern cannot load is exactly the piece a
@@ -4829,17 +4837,17 @@ export class PieceController<T = unknown> {
                 : { served: options.served }),
             },
           );
-          committedRef = result.commit.pattern;
+          commit = result.commit;
           return result.cell as Cell<T>;
         } catch (error) {
           if (error instanceof PatternSetupPostCommitError) {
-            committedRef = error.commit.pattern;
+            commit = error.commit;
           }
           throw error;
         }
       });
     } catch (error) {
-      if (transition !== undefined && committedRef !== undefined) {
+      if (transition !== undefined && commit !== undefined) {
         // The wrapper says only that post-commit work failed, which this line
         // already says; what a reader needs is which work and why. Log the
         // cause, the same failure `refresh.warning` reports, so the console
@@ -4856,7 +4864,9 @@ export class PieceController<T = unknown> {
         // named, whatever happened to the refresh afterwards.
         return {
           status: "committed",
-          ref: committedRef,
+          ref: commit.pattern,
+          space: commit.space,
+          seq: commit.seq,
           revisionId: transition.revisionId,
           detachedOrigin: transition.expected.origin,
           refresh: { status: "failed", warning },
@@ -4865,13 +4875,15 @@ export class PieceController<T = unknown> {
       throw pinnedSourceMoved(error, options?.expectedPattern);
     }
     // The mutation assigns `transition` before the write it belongs to, and
-    // sets `committedRef` from the accepted transaction's receipt; every
-    // earlier exit from it throws — so a mutation that resolved has both, and
-    // a mutation that did not took the catch above. Asserted rather than
-    // guarded because a guard here could never fire.
+    // holds the accepted transaction's receipt in `commit`; every earlier exit
+    // from it throws — so a mutation that resolved has both, and a mutation
+    // that did not took the catch above. Asserted rather than guarded because
+    // a guard here could never fire.
     return {
       status: "committed",
-      ref: committedRef!,
+      ref: commit!.pattern,
+      space: commit!.space,
+      seq: commit!.seq,
       revisionId: transition!.revisionId,
       detachedOrigin: transition!.expected.origin,
       refresh: {

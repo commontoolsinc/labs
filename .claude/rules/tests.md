@@ -35,9 +35,10 @@ A test that needs a real browser but not a running product goes in a
 package that splits its tests this way matches the pattern twice: once as an
 `--ignore` that keeps the file out of plain `deno test` discovery, and once as
 the argument list handed to `deno-web-test`. Both are globs, so there is no list
-to add the file to. `packages/dashboard` spreads the pair across a runner script
-and the task that runner calls, which changes where they are written and not
-what they match.
+to add the file to. `packages/ui` and `packages/iframe-sandbox` write the two
+halves as separate `deno-test` and `browser-test` tasks, and
+`packages/dashboard` spreads the pair across a runner script and the task that
+runner calls. Where the pair is written changes; what it matches does not.
 
 Two things break it, and the second is what makes the first hard to notice.
 

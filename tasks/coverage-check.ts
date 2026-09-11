@@ -66,8 +66,8 @@ import {
   REPO,
   shouldGateCoverageDebtMetric,
   unknownAcceptedMetrics,
-  WORKFLOW_FILE,
   type WorkflowRun,
+  workflowRunsPathForBaseline,
   workflowRunUrl,
   writeCoverageBaselineFile,
 } from "./ci-check-lib.ts";
@@ -185,18 +185,6 @@ export function parseMergedBaselineOverrides(
     );
     return null;
   }
-}
-
-export function workflowRunsPathForBaseline(
-  perPage: number,
-): string {
-  const params = new URLSearchParams({
-    branch: "main",
-    status: "success",
-    event: "push",
-    per_page: String(perPage),
-  });
-  return `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?${params}`;
 }
 
 export interface BaselineMainHeadValidation {
