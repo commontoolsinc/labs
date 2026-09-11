@@ -84,6 +84,7 @@ interface ProgramResolution {
   cache: Cell<Record<string, FetchCacheEntry>>;
   inputHash: string;
   requestId: string;
+  acceptedPublications: Set<ProgramPublication>;
   identity?: ScopeKeyIdentity;
   controller?: AbortController;
 }
@@ -247,7 +248,13 @@ export function fetchProgram(
   /** Retires deduplicated staging records with the work they share. */
   function finish(publication: ProgramPublication): void {
     publication.finished = true;
+    const resolution = inFlight.get(publication.effectKey!);
     inFlight.delete(publication.effectKey!);
+    for (const accepted of resolution?.acceptedPublications ?? []) {
+      accepted.finished = true;
+      publications.delete(accepted);
+    }
+    resolution?.acceptedPublications.clear();
     for (const other of publications) {
       if (other.effectKey !== publication.effectKey) continue;
       other.finished = true;
@@ -296,7 +303,9 @@ export function fetchProgram(
         publications.delete(publication);
         return;
       }
-      if (!inFlight.has(effectKey)) inFlight.set(effectKey, resolution);
+      const owner = inFlight.get(effectKey) ?? resolution;
+      owner.acceptedPublications.add(publication);
+      inFlight.set(effectKey, owner);
     };
     tx.addCommitCallback((committedTx, outcome) => {
       if (outcome.error) return;
@@ -404,6 +413,7 @@ export function fetchProgram(
         cache,
         inputHash,
         requestId,
+        acceptedPublications: new Set(),
         identity,
       };
       publication.effectKey = effectKey;
@@ -457,11 +467,13 @@ export function fetchProgram(
           onReleaseRejected: () => {
             // Another accepted attachment owns its claim even before dispatch.
             const owner = inFlight.get(effectKey);
+            owner?.acceptedPublications.delete(publication);
             if (
               owner === undefined ||
-              (owner === stagedResolution && owner.controller === undefined)
+              (owner.controller === undefined &&
+                owner.acceptedPublications.size === 0)
             ) {
-              releaseClaim(stagedResolution);
+              releaseClaim(owner ?? stagedResolution);
               finish(publication);
             } else {
               publication.finished = true;

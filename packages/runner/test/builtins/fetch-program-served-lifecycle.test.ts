@@ -397,22 +397,26 @@ describe("fetch-program-served-lifecycle", () => {
     expect(edits.calls).toHaveLength(0);
   });
 
-  it("keeps another accepted owner when a stale-claim attachment fails release before dispatch", async () => {
-    const f = fixture();
+  async function acceptedAttachments(f: ReturnType<typeof fixture>) {
     await f.seed(aliceOne, "user");
-    await commit(f.stage(aliceOne, true, true));
+    const first = f.stage(aliceOne, true, true);
+    await commit(first);
     expect(f.cacheState(aliceOne, "user")).toBe("fetching");
     const later = Date.now() + 10_001;
-    const takeover = (() => {
+    const second = (() => {
       using _clock = stub(Date, "now", () => later);
       return f.stage(aliceOne, true, true);
     })();
-    await commit(takeover);
+    await commit(second);
     expect(f.dispatches).toHaveLength(2);
     for (const callback of f.accepted) callback();
     await runtime.settled();
-    const state = takeover.getCfcState();
-    using _state = stub(takeover, "getCfcState", () =>
+    return [first, second];
+  }
+
+  function rejectRelease(tx: IExtendedStorageTransaction) {
+    const state = tx.getCfcState();
+    return stub(tx, "getCfcState", () =>
       ({
         ...state,
         prepare: {
@@ -428,25 +432,60 @@ describe("fetch-program-served-lifecycle", () => {
             writePolicyInputs: [],
           },
         },
-      }) satisfies ReturnType<typeof takeover.getCfcState>);
-    using network = stub(
-      globalThis,
-      "fetch",
-      () => Promise.reject(new Error("Unexpected HTTP dispatch")),
-    );
-    try {
-      await f.dispatches[1]();
+      }) satisfies ReturnType<typeof tx.getCfcState>);
+  }
+
+  for (const rejected of [0, 1]) {
+    it(`completes the surviving claim when accepted attachment ${rejected + 1} fails release`, async () => {
+      const f = fixture();
+      const attachments = await acceptedAttachments(f);
+      using _state = rejectRelease(attachments[rejected]);
+      using network = stub(globalThis, "fetch", () =>
+        Promise.resolve(
+          new Response('export default { result: "done" };', {
+            headers: { "content-type": "application/javascript" },
+          }),
+        ));
+      try {
+        await f.dispatches[rejected]();
+        await runtime.settled();
+        expect(network.calls).toHaveLength(0);
+        expect(f.cacheState(aliceOne, "user")).toBe("fetching");
+        await f.dispatches[1 - rejected]();
+        await runtime.settled();
+        expect(network.calls).toHaveLength(1);
+        expect(f.cacheState(aliceOne, "user")).toBe("success");
+        using edits = spy(runtime, "edit");
+        f.cancels[0]();
+        expect(edits.calls).toHaveLength(0);
+      } finally {
+        f.cancels[0]();
+        await runtime.settled();
+      }
+    });
+
+    it(`releases the claim when every accepted attachment fails release starting with ${rejected + 1}`, async () => {
+      const f = fixture();
+      const attachments = await acceptedAttachments(f);
+      using _first = rejectRelease(attachments[0]);
+      using _second = rejectRelease(attachments[1]);
+      using network = stub(
+        globalThis,
+        "fetch",
+        () => Promise.reject(new Error("Unexpected HTTP dispatch")),
+      );
+      await f.dispatches[rejected]();
+      await runtime.settled();
+      expect(f.cacheState(aliceOne, "user")).toBe("fetching");
+      await f.dispatches[1 - rejected]();
       await runtime.settled();
       expect(network.calls).toHaveLength(0);
-      expect(f.cacheState(aliceOne, "user")).toBe("fetching");
-      f.cancels[0]();
-      await runtime.settled();
       expect(f.cacheState(aliceOne, "user")).toBe("idle");
-    } finally {
+      using edits = spy(runtime, "edit");
       f.cancels[0]();
-      await runtime.settled();
-    }
-  });
+      expect(edits.calls).toHaveLength(0);
+    });
+  }
 
   it("preserves earlier refusal ownership when a newer scope publication is withdrawn", async () => {
     const f = fixture();
