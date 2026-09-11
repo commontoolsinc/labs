@@ -3,17 +3,16 @@
  * way the caller can wait out.
  *
  * Chrome recreates the directory `--user-data-dir` names, every missing parent
- * included, whenever it writes into it, and the crash handler and rendering
- * processes it starts outlive the browser process. Removing the profile
- * directory while one of those is alive puts the directory back, so the
- * removal has to follow the last process in the tree, and
- * `Deno.ChildProcess.status` covers one process.
+ * included, whenever it writes into it. Its rendering and utility processes
+ * can keep writing after the browser process exits, so removing the profile
+ * must wait for those writers too. `Deno.ChildProcess.status` covers one
+ * process.
  *
- * Every process in the tree inherits the two pipes the browser was spawned
- * with, and holds a pipe until it exits or closes that pipe. Both read ends
- * are waited for, so the wait ends once the last process holding either of
- * them has gone. Piping both also keeps the browser's output out of the
- * caller's own, which a spawn leaves inherited for any stream it asks no pipe
+ * Both output pipes are drained until their inherited write ends close.
+ * Chrome's installed updater is excluded from these launches: its detached
+ * services can retain the pipes independently of the browser's profile.
+ * Piping both also keeps the browser's output out of the caller's own,
+ * which a spawn leaves inherited for any stream it asks no pipe
  * for. The browser is spawned here and astral attached to the running browser,
  * which is what keeps those pipes in reach.
  */
@@ -41,7 +40,7 @@ import { isChildProcessGone } from "./astral-adapter.ts";
  */
 export const BOOT_FAILURE_MESSAGE = "Your binary refused to boot";
 
-/** A browser that has started, and how to reach and wait out its tree. */
+/** A browser that has started, its endpoint, and its output completion. */
 type SpawnedBrowser = {
   /** The browser process. */
   child: Deno.ChildProcess;
@@ -58,8 +57,8 @@ type SpawnedBrowser = {
  * read from it.
  *
  * A process that inherits a pipe holds its write end open until it exits or
- * closes the descriptor, and a browser closes neither, so for a browser and
- * everything it starts this is the point at which the last of them has gone.
+ * closes the descriptor. EOF establishes that no writer holds this pipe;
+ * it does not establish the exit of processes that redirected their output.
  * What is read is discarded rather than left unread because a full pipe blocks
  * the process writing into it.
  */
@@ -72,7 +71,7 @@ export async function readToEnd(
 }
 
 /**
- * Kills `child` and returns once every process in its tree has exited.
+ * Kills `child` and waits for its output to close and its exit status to settle.
  *
  * `closed` is what `readBrowserOutput()` reported for the same child. A
  * browser asked to close over the protocol is usually still shutting down when
@@ -98,9 +97,9 @@ export async function stopBrowserProcess(
  * Reads the browser's standard output and standard error to the end of both,
  * and reports the developer-tools endpoint named in the latter.
  *
- * The endpoint is reported while the reads carry on, because the pipes are
- * what say when the browser's processes have gone and a pipe nobody reads
- * fills up and stops the process writing into it. Output that ends without
+ * The endpoint is reported while the reads carry on, because a pipe nobody
+ * reads fills up and stops the process writing into it. The reads finish once
+ * all inherited write ends close. Output that ends without
  * naming an endpoint is a browser that never started: it is written out, and
  * the endpoint fails.
  */
@@ -161,7 +160,11 @@ async function spawnBrowser(options: LaunchOptions): Promise<SpawnedBrowser> {
     await getBinary(product, { cache: options.cache });
   const args = generateBinArgs(product, {
     launchPresets: options.launchPresets,
-    args: options.args,
+    // An ephemeral test browser must not start maintenance of the installed
+    // browser. Updater crash handlers can retain stderr after Chrome exits.
+    args: product === "chrome"
+      ? ["--disable-updater-scheduler", ...(options.args ?? [])]
+      : options.args,
     headless: options.headless,
   });
 
@@ -224,7 +227,7 @@ async function connectToBrowser(
   });
 }
 
-/** A running browser, and the process tree the run can wait out. */
+/** A running browser with an owned process, connection, and output streams. */
 export class BrowserProcess {
   #child: Deno.ChildProcess;
   #outputClosed: Promise<void>;
@@ -262,8 +265,8 @@ export class BrowserProcess {
   }
 
   /**
-   * Closes the browser and returns once every process holding the browser's
-   * output has closed it, which is once the last of them has exited.
+   * Closes the browser and waits for its process to exit and both output
+   * streams to reach EOF.
    *
    * The browser is stopped by the signal rather than by astral's `close()`,
    * which asks over the browser's connection and waits for an answer. A

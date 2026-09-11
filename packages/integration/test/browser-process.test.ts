@@ -175,7 +175,7 @@ describe("browser-process", () => {
       const started = await stdout.read();
       expect(new TextDecoder().decode(started.value)).toBe("started\n");
 
-      // Each of the three events reaches the list from the event loop, so a
+      // Each event reaches the list from the event loop, so a
       // stop that returned on the shell's exit alone would record itself
       // between the other two rather than after them.
       const events: string[] = [];
@@ -184,11 +184,19 @@ describe("browser-process", () => {
       });
       await child.status;
       events.push("shell exited");
+      expect((await stdout.read()).done).toBe(true);
+      events.push("stdout ended");
+      expect(events).toEqual(["shell exited", "stdout ended"]);
       await child.stdin.close();
       events.push("released");
       await stopping;
 
-      expect(events).toEqual(["shell exited", "released", "stopped"]);
+      expect(events).toEqual([
+        "shell exited",
+        "stdout ended",
+        "released",
+        "stopped",
+      ]);
     });
   });
 
@@ -220,6 +228,38 @@ describe("browser-process", () => {
 
     describe("static members", () => {
       describe("start()", () => {
+        it("keeps Chrome launches from scheduling the installed updater", async () => {
+          const options = await fakeBrowser(
+            "no endpoint",
+            1,
+            'printf \'%s\\n\' "$@" > "$0.args"',
+          );
+
+          await expect(BrowserProcess.start(options)).rejects.toThrow(
+            BOOT_FAILURE_MESSAGE,
+          );
+
+          const args = (await Deno.readTextFile(`${options.path}.args`))
+            .trim().split("\n");
+          expect(args).toContain("--disable-updater-scheduler");
+          expect(args).toContain(options.args[0]);
+        });
+
+        it("leaves Firefox launches free of Chrome updater switches", async () => {
+          const options = await fakeBrowser(
+            "no endpoint",
+            1,
+            'printf \'%s\\n\' "$@" > "$0.args"',
+          );
+
+          await expect(BrowserProcess.start({ ...options, product: "firefox" }))
+            .rejects.toThrow(BOOT_FAILURE_MESSAGE);
+
+          const args = (await Deno.readTextFile(`${options.path}.args`))
+            .trim().split("\n");
+          expect(args).not.toContain("--disable-updater-scheduler");
+        });
+
         it("throws when the browser exits without naming an endpoint", async () => {
           const options = await fakeBrowser("no endpoint", 1);
 

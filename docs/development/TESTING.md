@@ -88,6 +88,22 @@ If a browser command did run inside the agent sandbox, disregard its
 browser-startup failure and rerun it outside the sandbox before interpreting
 the test result.
 
+### Browser process cleanup
+
+The integration browser launcher uses the installed Chrome selected by
+`packages/integration/astral-adapter.ts`; `ASTRAL_BIN_PATH` overrides that
+selection. Chrome launches include `--disable-updater-scheduler` so an
+ephemeral test profile cannot start maintenance of the installed browser.
+Detached updater crash handlers can inherit Chrome's stderr and keep it open
+after the browser exits. Chrome's own crash reporting remains enabled.
+
+`BrowserProcess.close()` signals the browser and waits for its exit status
+and both output streams to reach EOF before profile removal. A browser's exit
+and its output reaching EOF are separate events: inherited descriptors can
+outlive the process that opened them. When investigating a teardown stall,
+capture every holder of the pipe, including detached updater processes, and
+record assertion completion separately from suite and process completion.
+
 ### Focused browser regressions
 
 A package can reserve a `*.browser.test.ts` file for DOM behavior that needs a
