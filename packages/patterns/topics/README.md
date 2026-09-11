@@ -65,6 +65,18 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   current authored-content verb writes structured attribution; the public result
   and mutation contracts contain no mutable "current author" state or
   display-name mirrors.
+- **Legacy display names migrate once per topic.** Reading a topic's author data
+  runs a lift that fills missing structured names from `createdByName` and
+  comment `authorName` fields. It preserves nonblank structured names, existing
+  kinds and avatars, the legacy fields, and comment identity. A name with no
+  known kind receives `kind: "legacy"`, which renders as the name without a
+  person or agent classification. The stored input flag `authorFieldsMigratedV1`
+  defaults to false and becomes true in the same transaction as the copies. All
+  source records are read before writing; an unresolved linked comment leaves
+  completion pending. The flag is shared per topic and survives reopening and
+  source updates. This migration covers the records present when it completes;
+  legacy writers must be retired before rollout, because later legacy-shaped
+  records are outside that completed pass.
 - **The board names its members, and every reader reaches a name the same way.**
   `addTopic` allocates the next name in the same transaction as the append, so
   no reader observes a topic without its name and two concurrent creates

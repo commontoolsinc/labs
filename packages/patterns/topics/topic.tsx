@@ -45,7 +45,8 @@ export interface TopicAuthor {
   /** Open for the same reason `TopicLinkKind` is: this is provided data, so a
    * closed set here could never gain `"service"` or whatever acts next.
    * Well-known values are `"person"` and `"agent"`, the latter marking an
-   * agent acting with its human user's key. */
+   * agent acting with its human user's key. `"legacy"` records a display name
+   * whose author kind is unknown. */
   kind: string;
   name: string;
   avatar?: string;
@@ -299,6 +300,12 @@ export interface TopicComment {
   removedBy?: TopicAuthor;
 }
 
+/** Stored comment fields available to the author migration. */
+interface StoredTopicComment extends TopicComment {
+  /** Display name recorded without an author kind. */
+  authorName?: string;
+}
+
 export interface TopicLink {
   kind: TopicLinkKind | Default<"web">;
   url: string | Default<"">;
@@ -363,10 +370,17 @@ export interface TopicInput {
   /** The topic's living document: durable conclusions get folded up into the
    * body; the comment thread below holds the deliberation. */
   body?: Writable<string | Default<"">>;
-  comments?: Writable<TopicComment[] | Default<[]>>;
+  comments?: Writable<StoredTopicComment[] | Default<[]>>;
   links?: Writable<TopicLink[] | Default<[]>>;
   createdAt?: number | Default<0>;
-  createdBy?: TopicAuthor;
+  createdBy?: Writable<TopicAuthor | undefined>;
+
+  /** Creator display name recorded without an author kind. */
+  createdByName?: string;
+
+  /** Completion of the per-topic migration from display names to authors. */
+  authorFieldsMigratedV1?: Writable<boolean | Default<false>>;
+
   bodyUpdatedBy?: Writable<
     TopicAuthor | Default<{ kind: "person"; name: "" }>
   >;
@@ -1336,6 +1350,61 @@ const createdByOf = lift((
   createdBy && createdBy.name.trim() ? createdBy : { kind: "person", name: "" }
 );
 
+/**
+ * Copies legacy display names into missing structured author names once per
+ * topic. Existing author kinds and avatars remain authoritative; an unknown
+ * kind is recorded as `legacy`.
+ */
+const migrateAuthorFields = lift((
+  {
+    authorFieldsMigratedV1,
+    createdByName,
+    createdBy,
+    comments,
+  }: {
+    /** Durable completion flag shared by every reader of this topic. */
+    authorFieldsMigratedV1: Writable<boolean>;
+
+    /** Legacy creator name, retained after migration. */
+    createdByName?: string;
+
+    /** Destination for the creator's structured display snapshot. */
+    createdBy: Writable<TopicAuthor | undefined>;
+
+    /** Stored comments, addressed individually to preserve their identity. */
+    comments: Writable<StoredTopicComment[]>;
+  },
+): void => {
+  if (authorFieldsMigratedV1.get()) return;
+
+  const creator = createdBy.get();
+  const creatorKind = creator?.kind;
+  const creatorName = !creator?.name.trim() && createdByName?.trim()
+    ? createdByName
+    : undefined;
+  // Resolve every source and destination before making the first write. A
+  // missing linked record must leave completion pending.
+  const commentAuthors = comments.get().map((comment, index) => ({
+    index,
+    name: !comment.author?.name.trim() && comment.authorName?.trim()
+      ? comment.authorName
+      : undefined,
+    kind: comment.author?.kind,
+  }));
+
+  if (creatorName !== undefined) {
+    createdBy.key("name").set(creatorName);
+    if (!creatorKind) createdBy.key("kind").set("legacy");
+  }
+  commentAuthors.forEach(({ index, name, kind }) => {
+    if (name === undefined) return;
+    const author = comments.key(index).key("author");
+    author.key("name").set(name);
+    if (!kind) author.key("kind").set("legacy");
+  });
+  authorFieldsMigratedV1.set(true);
+});
+
 // ===== The pattern =====
 
 export default pattern<TopicInput, TopicOutput>(
@@ -1347,6 +1416,8 @@ export default pattern<TopicInput, TopicOutput>(
       links,
       createdAt,
       createdBy,
+      createdByName,
+      authorFieldsMigratedV1,
       bodyUpdatedBy,
       bodyUpdatedAt,
       titleUpdatedBy,
@@ -1359,6 +1430,13 @@ export default pattern<TopicInput, TopicOutput>(
       [SELF]: self,
     },
   ) => {
+    migrateAuthorFields({
+      authorFieldsMigratedV1,
+      createdByName,
+      createdBy,
+      comments,
+    });
+
     // Session-local UI state (new-tab test: none of this should carry over).
     const commentDraft = new Writable.perSession("");
     const editingBody = new Writable.perSession(false);
