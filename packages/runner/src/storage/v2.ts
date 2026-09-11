@@ -68,7 +68,7 @@ import {
   applyPatchToDocument,
   PatchApplyError,
 } from "../../../memory/v2/patch.ts";
-import type { JSONSchema } from "../builder/types.ts";
+import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
@@ -94,7 +94,9 @@ import { entityKey } from "../scheduler/keys.ts";
 import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
+import { combineOptionalSchema } from "../traverse.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
+import { tempTrace } from "../temp-trace.ts";
 import * as Differential from "./differential.ts";
 import {
   IMemoryAddress,
@@ -925,6 +927,41 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
   };
 };
 
+/**
+ * The selector schema a link target is asked for. Where the reader's schema
+ * takes a handle at the link (`asCell` at its root, or at the root of an
+ * `anyOf`/`oneOf` branch), the outermost handle boundary comes off, so the
+ * selector describes the document's value the way the handle's reads do and
+ * the serving replica holds the document as a value it keeps current rather
+ * than as a reference it delivered once. Inner boundaries stay, as they do
+ * on the handle's own schema, and a schema that takes no handle is asked for
+ * as it is.
+ */
+function selectorSchemaForLink(
+  schema: JSONSchema | undefined,
+): JSONSchema | false {
+  if (!isObjectOrArray(schema)) return schema ?? false;
+  const unwrapped = unwrapOuterHandle(schema);
+  const branches = (key: "anyOf" | "oneOf"): Partial<JSONSchemaObj> => {
+    const list = unwrapped[key];
+    if (!Array.isArray(list)) return {};
+    return {
+      [key]: list.map((branch) =>
+        isObjectOrArray(branch) ? unwrapOuterHandle(branch) : branch
+      ),
+    };
+  };
+  return { ...unwrapped, ...branches("anyOf"), ...branches("oneOf") };
+}
+
+/** `schema` with its outermost `asCell` boundary removed, if it has one. */
+function unwrapOuterHandle(schema: JSONSchemaObj): JSONSchemaObj {
+  if (schema.asCell === undefined) return schema;
+  const { asCell: _asCell, ...inner } = schema;
+  const values = ContextualFlowControl.getAsCellValues(schema);
+  return values.length > 1 ? { ...inner, asCell: values.slice(1) } : inner;
+}
+
 export class StorageManager implements IStorageManager {
   readonly id: string;
   readonly as: Signer;
@@ -1193,7 +1230,14 @@ export class StorageManager implements IStorageManager {
       },
       registerPendingLoad: (address) => this.#registerPendingLoad(address),
       collectLinkedCellSyncs: (value, base, schema, promises, seen) =>
-        this.#collectLinkedCellSyncs(value, base, schema, promises, seen),
+        this.#collectLinkedCellSyncs(
+          value,
+          base,
+          schema,
+          promises,
+          seen,
+          undefined,
+        ),
     };
   }
 
@@ -1545,6 +1589,11 @@ export class StorageManager implements IStorageManager {
         eventAppendPacing: this.#eventAppendPacing,
       });
       this.#providers.set(space, provider);
+      // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
+      tempTrace(
+        `TEMP-OPEN space ${space}`,
+        new Error().stack?.split("\n").slice(1, 14).join("\n"),
+      );
     }
     if (firstOpen && this.spaceOpenObserver !== undefined) {
       // Deferred a microtask: the observer subscribes cells, which
@@ -2527,8 +2576,14 @@ export class StorageManager implements IStorageManager {
 
   /**
    * Walks `value` for cell links and pushes a pending provider sync of each
-   * linked document onto `promises`, under the schema that the link's place
-   * in `schema` selects. `seen` holds the objects already walked.
+   * linked document onto `promises`, under the schema a read at the link's
+   * place in `schema` would cross it with: the reader's sub-schema, which the
+   * link's own schema cannot widen (`combineSchemaForLink`). Each link goes
+   * through `#syncLinkTarget`, which crosses a link into a data-URI document
+   * locally rather than sending it. `seen` holds the objects already walked. A served per-instance run's
+   * `identity` names that principal's instance of each scoped target
+   * (server-execution v2 stage A), as `syncCell` does for a stored
+   * document.
    */
   #collectLinkedCellSyncs(
     value: unknown,
@@ -2548,33 +2603,15 @@ export class StorageManager implements IStorageManager {
 
     if (isPrimitiveCellLink(value)) {
       const link = parseLinkPrimitive(value, base);
-      if (link.id && !hasDataUriScheme(link.id)) {
-        const space = link.space ?? base.space!;
-        const scope = normalizeCellScope(
-          link.scope as CellScope | undefined,
-        );
-        const instance = this.#foreignInstanceKey(scope, identity);
-        promises.push(
-          this.#trackPendingProviderSync(
-            {
-              space,
-              scope,
-              id: link.id,
-              ...(instance !== undefined ? { scopeKey: instance } : {}),
-            },
-            () =>
-              this.open(space).sync(
-                link.id!,
-                {
-                  path: link.path.map((segment) => segment.toString()),
-                  schema: link.schema ?? schema ?? false,
-                },
-                scope,
-                instance,
-              ),
-          ),
-        );
-      }
+      if (link.id === undefined) return;
+      this.#syncLinkTarget(
+        { ...link, id: link.id },
+        base,
+        combineOptionalSchema(schema, link.schema),
+        promises,
+        seen,
+        identity,
+      );
       return;
     }
 
@@ -2622,6 +2659,98 @@ export class StorageManager implements IStorageManager {
         );
       }
     }
+  }
+
+  /**
+   * Syncs the document `link` names under `schema`, the schema a read
+   * crosses the link with. A link into a data-URI document is walked
+   * locally instead: the walk descends the link's path through the
+   * document's value, and a link it meets on the way is followed with the
+   * rest of the path appended, so a stand-in holding a caller's cell at
+   * `def` reaches the store for a binding of `def.next` as the read does.
+   * The reader's schema describes the value at the end of the path, so a
+   * link met earlier contributes its own schema narrowed to the rest of the
+   * path, the way `Cell.key()` narrows a schema it walks past.
+   */
+  #syncLinkTarget(
+    link: NormalizedLink & { id: URI },
+    base: NormalizedLink,
+    schema: JSONSchema | undefined,
+    promises: Promise<unknown>[],
+    seen: Set<unknown>,
+    identity: ScopeKeyIdentity | undefined,
+  ): void {
+    const space = link.space ?? base.space!;
+    const scope = normalizeCellScope(link.scope as CellScope | undefined);
+    if (hasDataUriScheme(link.id)) {
+      const dataBase: NormalizedLink = { space, id: link.id, scope, path: [] };
+      const segments = link.path.map((segment) => segment.toString());
+      let target: unknown = valueFromDataUri(link.id);
+      for (let i = 0; i < segments.length; i++) {
+        if (isPrimitiveCellLink(target)) {
+          const inner = parseLinkPrimitive(target, dataBase);
+          if (inner.id === undefined) return;
+          const remaining = segments.slice(i);
+          const innerSchema = inner.schema === undefined
+            ? undefined
+            : ContextualFlowControl.getSchemaAtPath(inner.schema, remaining);
+          this.#syncLinkTarget(
+            {
+              ...inner,
+              id: inner.id,
+              path: [...inner.path, ...remaining],
+            },
+            dataBase,
+            combineOptionalSchema(schema, innerSchema),
+            promises,
+            seen,
+            identity,
+          );
+          return;
+        }
+        // TODO(danfuzz): the descent stops at a `FabricSpecialObject`, so a
+        // path through a `FabricInstance` held in the document ends here and
+        // the link past it is never synced.
+        if (!isKeyableObjectOrArray(target)) return;
+        target = (target as Record<string, unknown>)[segments[i]];
+      }
+      this.#collectLinkedCellSyncs(
+        target,
+        dataBase,
+        schema,
+        promises,
+        seen,
+        identity,
+      );
+      return;
+    }
+    const instance = this.#foreignInstanceKey(scope, identity);
+    promises.push(
+      this.#trackPendingProviderSync(
+        {
+          space,
+          scope,
+          id: link.id,
+          ...(instance !== undefined ? { scopeKey: instance } : {}),
+        },
+        () =>
+          this.open(space).sync(
+            link.id,
+            {
+              path: link.path.map((segment) => segment.toString()),
+              // A reader that takes a handle at the link asks for the
+              // document under the handle's own schema, the wrapper removed:
+              // a selector carrying the wrapper, or none, describes a
+              // reference, which the serving replica delivers once and
+              // never keeps current, while the handle's reads want the
+              // value as it changes.
+              schema: selectorSchemaForLink(schema),
+            },
+            scope,
+            instance,
+          ),
+      ),
+    );
   }
 
   //

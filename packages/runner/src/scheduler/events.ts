@@ -39,6 +39,7 @@ import type {
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
 import { MAX_EVENT_BACKLOG_PER_STREAM } from "./constants.ts";
+import { tempTrace } from "../temp-trace.ts";
 import { createEventPreflightTraceContext } from "./diagnostics.ts";
 import { mintEventId } from "./event-identity.ts";
 import { planEventInvalidDependencyScheduling } from "./execution.ts";
@@ -1498,6 +1499,8 @@ export async function dispatchQueuedEvent(state: {
   // Ensure the handler's input docs are locally available before the body
   // runs (see EventHandler.presyncInputs). Fail open: a presync error should
   // surface as the handler's own read failure, not silently drop the event.
+  // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
+  tempTrace(`TEMP-DISPATCH ${queuedEvent.id} presync start`);
   if (typeof presyncedImplementation?.presyncInputs === "function") {
     const presyncTx = state.runtime.edit();
     try {
@@ -1527,6 +1530,11 @@ export async function dispatchQueuedEvent(state: {
   // slot until that await completes so the lineage callback can still find and
   // settle it. A failed origin removes the event through dropQueuedEvent; never
   // continue into the handler or notify its final callback a second time.
+  tempTrace(
+    `TEMP-DISPATCH ${queuedEvent.id} presync done; notified=${queuedEvent.finalOutcomeNotified} head=${
+      state.eventQueue[0] === queuedEvent
+    }`,
+  );
   if (
     queuedEvent.finalOutcomeNotified ||
     state.eventQueue[0] !== queuedEvent
@@ -2037,6 +2045,11 @@ export async function dispatchQueuedEvent(state: {
       const handleCommitResult = (
         error: EventCommitError | undefined,
       ): void => {
+        tempTrace(
+          `TEMP-DISPATCH ${queuedEvent.id} commit result: ${
+            error === undefined ? "ok" : String(error)
+          }`,
+        );
         if (
           served !== undefined && error !== undefined &&
           isLt1LateSealRefusal(error)
@@ -2335,6 +2348,11 @@ export async function dispatchQueuedEvent(state: {
         "event",
         "handlerAction",
       );
+      tempTrace(
+        `TEMP-DISPATCH ${queuedEvent.id} run start; notRun=${
+          tx.dispatchedHandlerNotRun !== undefined
+        } served=${served !== undefined}`,
+      );
       try {
         const runningPromise = Promise.resolve(
           state.runtime.harness.invoke(() =>
@@ -2355,6 +2373,11 @@ export async function dispatchQueuedEvent(state: {
             eventValue,
           );
           const duration = (performance.now() - actionStartTime) / 1000;
+          tempTrace(
+            `TEMP-DISPATCH ${queuedEvent.id} run done in ${
+              duration.toFixed(3)
+            }s`,
+          );
           if (duration > 10) {
             console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
           }

@@ -122,28 +122,39 @@ export type EnsurePieceVerdict = {
    * assuming. Present whenever a start ran. */
   graphIsInstalled?: () => boolean;
 
-  /** The owning result doc's id (the chain terminus) where the chain
-   * resolved — present for `started`, `no-pattern-meta`, and
-   * `pattern-unloadable`. */
-  rootId?: string;
-
   /** Every doc id the traversal read (the demanded root plus chain
    * links): the demand cycle's commit-triggered re-arm watches these. */
   observedDocIds: string[];
 };
 
+/** Options of {@link ensurePieceRunningVerdict}. */
+export type EnsurePieceOptions = {
+  /**
+   * Rethrow instead of collapsing every exception into a verdict. The
+   * serving loop's demand cycle must distinguish a deferral from an actual
+   * load or start failure; the default stays best-effort for the
+   * event-recovery caller.
+   */
+  propagateErrors?: boolean;
+
+  /**
+   * Called with the owning piece root's id once the chain from `cellLink`
+   * has resolved to it, before the piece is started. A caller that supplies
+   * a started piece's runs by what was demanded records the mapping here,
+   * so a run the start releases at once already finds it.
+   */
+  onOwningRoot?: (rootId: string) => void;
+};
+
 /**
  * Classified variant of {@link ensurePieceRunning} — same traversal and
- * start, richer outcome. `propagateErrors` RETHROWS instead of
- * collapsing every exception into a verdict (review thread
- * r3739139521): the serving loop's demand cycle must distinguish a
- * deferral from an actual load/start FAILURE; default stays
- * best-effort for the event-recovery caller.
+ * start, richer outcome. {@link EnsurePieceOptions} says what a caller may
+ * ask of it.
  */
 export async function ensurePieceRunningVerdict(
   runtime: Runtime,
   cellLink: NormalizedFullLink,
-  options?: { propagateErrors?: boolean },
+  options?: EnsurePieceOptions,
 ): Promise<EnsurePieceVerdict> {
   const observedDocIds: string[] = [];
   try {
@@ -183,7 +194,6 @@ export async function ensurePieceRunningVerdict(
         return {
           started: false,
           reason: "no-pattern-meta",
-          rootId,
           observedDocIds,
         };
       }
@@ -206,7 +216,6 @@ export async function ensurePieceRunningVerdict(
         return {
           started: false,
           reason: "pattern-unloadable",
-          rootId,
           observedDocIds,
         };
       }
@@ -214,6 +223,11 @@ export async function ensurePieceRunningVerdict(
       logger.debug("ensure-piece", () => [
         `Starting piece with pattern ${identityRef.identity} for result cell ${resultCell.getAsNormalizedFullLink().id}`,
       ]);
+
+      // The owning root is known before the piece runs: a caller keying
+      // per-instance run supply on it records the mapping here, so the
+      // first run the start releases already finds it.
+      options?.onOwningRoot?.(rootId);
 
       // Start the existing piece - this registers event handlers without
       // re-running setup and potentially allocating different metadata cells.
@@ -227,7 +241,6 @@ export async function ensurePieceRunningVerdict(
         started: true,
         graphIsInstalled: () =>
           runtime.runner.pieceGraphIsInstalled(resultCell),
-        rootId,
         observedDocIds,
       };
     } catch (error) {

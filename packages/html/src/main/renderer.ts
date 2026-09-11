@@ -112,6 +112,8 @@ export class VDomRenderer {
       return async () => {};
     }
     if (this.#mountId !== null) {
+      // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
+      console.log(`TEMP-MOUNT render refused: mount ${this.#mountId} active`);
       throw new Error(
         "VDomRenderer already has an active mount. Call cancel first.",
       );
@@ -119,6 +121,12 @@ export class VDomRenderer {
 
     this.#containerElement = container;
     this.#mountId = VDomRenderer.#nextMountId++;
+    // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
+    console.log(
+      `TEMP-MOUNT request mount ${this.#mountId} cell ${
+        JSON.stringify(cellRef).slice(0, 120)
+      }`,
+    );
 
     // Register container so the worker can insert children directly into it
     this.#applicator.setContainer(container);
@@ -128,6 +136,10 @@ export class VDomRenderer {
     try {
       const response = await this.#session.mount(this.#mountId, cellRef);
       this.#rootNodeId = response.rootId;
+      // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
+      console.log(
+        `TEMP-MOUNT mounted ${this.#mountId} rootId=${response.rootId}`,
+      );
 
       const elapsed = logger.timeEnd("mount", String(this.#mountId));
       logger.debug("render-mount", () => [
@@ -253,8 +265,16 @@ export class VDomRenderer {
       notification.mountId !== undefined &&
       notification.mountId !== this.#mountId
     ) {
+      // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
+      console.log(
+        `TEMP-BATCH dropped: for mount ${notification.mountId}, active ${this.#mountId}`,
+      );
       return;
     }
+    // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
+    console.log(
+      `TEMP-BATCH mount ${notification.mountId} batch ${notification.batchId} ops=${notification.ops.length} rootId=${notification.rootId}`,
+    );
 
     logger.timeStart("batch", String(notification.batchId));
     try {
@@ -288,6 +308,8 @@ export class VDomRenderer {
       ]);
     } catch (error) {
       logger.timeEnd("batch", String(notification.batchId));
+      // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
+      console.log(`TEMP-BATCH apply failed: ${String(error).slice(0, 200)}`);
       this.#onError?.(
         error instanceof Error ? error : new Error(String(error)),
       );

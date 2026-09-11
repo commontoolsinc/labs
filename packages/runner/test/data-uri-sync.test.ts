@@ -499,6 +499,51 @@ describe("data URI sync", () => {
       await otherStorageManager.close();
     }
   });
+
+  it("syncs a linked cell under the reader's schema, not the link's", async () => {
+    const linkedCell = runtime.getCell(
+      space,
+      "linked-target-under-reader-schema",
+      undefined,
+      tx,
+    );
+    linkedCell.set({ name: "Ada", extra: { big: true } });
+    const linkedId = linkedCell.getAsNormalizedFullLink().id;
+    const wide = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        extra: { type: "object", properties: { big: { type: "boolean" } } },
+      },
+    } as const;
+    const narrow = {
+      type: "object",
+      properties: { name: { type: "string" } },
+    } as const;
+
+    // The link carries the wide schema; the reader asks for the narrow one.
+    const dataCell = runtime.getImmutableCell(
+      space,
+      { ref: linkedCell.asSchema(wide).getAsLink({ includeSchema: true }) },
+      undefined,
+      tx,
+    );
+
+    const provider = storageManager.open(space);
+    const originalSync = provider.sync.bind(provider);
+    const schemasByTarget = new Map<string, unknown>();
+    provider.sync = (id: any, selector?: any, scope?: any) => {
+      schemasByTarget.set(id, selector?.schema);
+      return originalSync(id, selector, scope);
+    };
+
+    await dataCell.asSchema({
+      type: "object",
+      properties: { ref: narrow },
+    }).sync();
+
+    expect(schemasByTarget.get(linkedId)).toEqual(narrow);
+  });
 });
 
 describe("data URI sync memo key", () => {
