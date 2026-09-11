@@ -32,6 +32,7 @@ import {
   type ModuleDelegationMap,
   moduleDelegationsFromDocs,
   planCompileCacheWriteChunks,
+  recordUndeclarablePolicyStore,
   ROOT_LINK_SPECIFIER,
   type SourceDoc,
   sourceDocKey,
@@ -3574,6 +3575,7 @@ export class PatternManager {
         undefined,
         tx,
       );
+      recordUndeclarablePolicyStore(tx, cell);
       const current = cell.get();
       const annotations = {
         ...(isObjectOrArray(current?.annotations) ? current!.annotations : {}),

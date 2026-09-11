@@ -18,6 +18,7 @@ import { CFC_LABEL_READ_FAILED_ATOM } from "../src/cfc/observation.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
+  CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
   runtimeWritePolicyAuthorization,
 } from "../src/cfc/types.ts";
 import type { JSONSchema, Pattern } from "../src/builder/types.ts";
@@ -1325,6 +1326,361 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           "writer-fit confidentiality misfit",
         );
         expect(result.error?.message).toContain(`for ${entriesId} at /`);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+  });
+
+  describe("marked-undeclarable-store exemption", () => {
+    // The third arm of the same question the two id classes answer. A document
+    // whose id is a plain content hash looks like every other document, so the
+    // class it belongs to cannot be read off the id — the runtime names it as
+    // it writes it instead, under
+    // `CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE`. The compilation cache is
+    // what records it today: a cache document holds the compiler's record of a
+    // module at a content address of that module's bytes, so no pattern names
+    // it and no value schema describes a field on it.
+    //
+    // The marker is acted on rather than measured, so these cases pin what
+    // bounds it: who recorded it, and that it names a whole document.
+
+    /**
+     * Name `doc` as a store no schema declares a policy on, the way the
+     * compilation cache does for the documents it writes. `authorized` stands
+     * for who recorded it — the runtime passes its authorization, and code
+     * that merely holds a transaction cannot. `path` stands for how much of
+     * the document the marker names.
+     */
+    const markUndeclarable = (
+      tx: ReturnType<Runtime["edit"]>,
+      doc: { getAsNormalizedFullLink(): NormalizedFullLink },
+      { authorized = true, path = [] as readonly string[] } = {},
+    ): void => {
+      const link = doc.getAsNormalizedFullLink();
+      tx.recordCfcWritePolicyInput({
+        kind: "structural-provenance",
+        target: {
+          space: link.space,
+          scope: link.scope,
+          id: link.id,
+          path: [...path],
+        },
+        claim: CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
+        sources: [],
+      }, authorized ? runtimeWritePolicyAuthorization : undefined);
+    };
+
+    /**
+     * Read the seeded source and write what it carries onto `targetName`, at
+     * the path a delegation union lands on. `mark` decides whether the target
+     * is named, and how.
+     */
+    const writeTaintedRecord = async (
+      runtime: Runtime,
+      sourceName: string,
+      targetName: string,
+      mark?: (
+        tx: ReturnType<Runtime["edit"]>,
+        doc: { getAsNormalizedFullLink(): NormalizedFullLink },
+      ) => void,
+    ) => {
+      const tx = runtime.edit();
+      const source = runtime.getCell(signer.did(), sourceName, undefined, tx);
+      const raw = source.getRaw() as { secret?: string };
+      expect(raw.secret).toBe("s3cr3t");
+      const target = runtime.getCell<{ delegatedModuleIdentities?: string[] }>(
+        signer.did(),
+        targetName,
+        undefined,
+        tx,
+      );
+      mark?.(tx, target);
+      target.set({ delegatedModuleIdentities: [`predecessor/${raw.secret}`] });
+      const targetId = target.getAsNormalizedFullLink().id;
+      tx.prepareCfc();
+      return { targetId, result: await tx.commit() };
+    };
+
+    it("records no writer-fit reason for a write to a marked document", async () => {
+      // The defect this closes: a piece's source transition stages a module's
+      // delegation union on the same transaction that moves the piece's source
+      // pointer, and that transaction read the piece's argument. Measuring the
+      // cache write refuses the commit, so a pattern update is refused for
+      // exactly the pieces holding a confidential argument.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-cache-source");
+        const { targetId, result } = await writeTaintedRecord(
+          runtime,
+          "wf-cache-source",
+          "wf-cache-doc",
+          (tx, doc) => markUndeclarable(tx, doc),
+        );
+
+        expect(result.error).toBeUndefined();
+        // The exemption decides which store the value may land in, not
+        // whether the join follows it: the document holds the write and
+        // carries the clause.
+        expect(storedDocument(storageManager, targetId)?.value).toEqual({
+          delegatedModuleIdentities: ["predecessor/s3cr3t"],
+        });
+        expect(
+          replicaEntries(storageManager, targetId)
+            .filter((entry) => entry.origin === "derived")
+            .flatMap((entry) => entry.label.confidentiality ?? []),
+        ).toContain("secret");
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("measures the same write into a document nothing marked", async () => {
+      // The control: the exemption keys on the marker, not on the path the
+      // value lands at or the join this transaction carries.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-cache-plain-source");
+        const { targetId, result } = await writeTaintedRecord(
+          runtime,
+          "wf-cache-plain-source",
+          "wf-cache-plain-doc",
+        );
+
+        expect(result.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(result.error?.message).toContain(`for ${targetId} at /`);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("counts a marker recorded without the runtime's mark for nothing", async () => {
+      // The gate ACTS on this claim, and the recording method is on the public
+      // transaction interface, so pattern-authored code reaching `cell.tx` can
+      // name whatever document it likes. What separates the two is the
+      // authorization the runtime passes alongside.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-cache-forged-source");
+        const { targetId, result } = await writeTaintedRecord(
+          runtime,
+          "wf-cache-forged-source",
+          "wf-cache-forged-doc",
+          (tx, doc) => markUndeclarable(tx, doc, { authorized: false }),
+        );
+
+        expect(result.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(result.error?.message).toContain(`for ${targetId} at /`);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("counts a marker naming a path inside the document for nothing", async () => {
+      // Whether a schema could have declared a policy is a question about the
+      // document, so the marker answers for the whole of one. A marker
+      // carrying a path names a part, and a part is not what it can claim.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-cache-partial-source");
+        const { targetId, result } = await writeTaintedRecord(
+          runtime,
+          "wf-cache-partial-source",
+          "wf-cache-partial-doc",
+          (tx, doc) =>
+            markUndeclarable(tx, doc, {
+              path: ["delegatedModuleIdentities"],
+            }),
+        );
+
+        expect(result.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(result.error?.message).toContain(`for ${targetId} at /`);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("measures a document the marker did not name", async () => {
+      // The marker names a document, not the transaction. A transaction that
+      // marked one store and wrote another has said nothing about the second,
+      // and a gate keyed on the transaction rather than the document would let
+      // that second write through.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-cache-other-source");
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "wf-cache-other-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        expect(raw.secret).toBe("s3cr3t");
+        const marked = runtime.getCell(
+          signer.did(),
+          "wf-cache-marked-doc",
+          undefined,
+          tx,
+        );
+        markUndeclarable(tx, marked);
+        const bystander = runtime.getCell<{ copied?: string }>(
+          signer.did(),
+          "wf-cache-bystander-doc",
+          undefined,
+          tx,
+        );
+        bystander.set({ copied: `${raw.secret}!` });
+        const bystanderId = bystander.getAsNormalizedFullLink().id;
+        tx.prepareCfc();
+
+        const result = await tx.commit();
+        expect(result.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(result.error?.message).toContain(`for ${bystanderId} at /`);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("carries the claim to a document the marked value splits into", async () => {
+      // Anchoring puts part of a marked document's value in a document of its
+      // own — a cache document's `imports` array holds one per edge. The child
+      // is the same kind of store as its parent, and without the carry a
+      // transaction that rewrites a marked document while carrying a join is
+      // refused at the child rather than at the document it named.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "wf-cache-anchor-source");
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "wf-cache-anchor-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        expect(raw.secret).toBe("s3cr3t");
+        const parent = runtime.getCell<{ note: string }[]>(
+          signer.did(),
+          "wf-cache-anchor-parent",
+          anchoringList(),
+          tx,
+        );
+        markUndeclarable(tx, parent);
+        parent.set([{ note: `${raw.secret}!` }]);
+        const parentId = parent.getAsNormalizedFullLink().id;
+        tx.prepareCfc();
+
+        const result = await tx.commit();
+        expect(result.error).toBeUndefined();
+        expect(writerFitDiagnostics(tx)).toEqual([]);
+        // The parent's own write is all links after the anchor, so the
+        // content landed in the child, which is the document the claim had
+        // to reach. Its stored value pins it, and its stamp says the skip
+        // decided which store the value may land in rather than whether the
+        // join follows it.
+        const stored = storedDocument(storageManager, parentId)?.value;
+        const childId = parseLink((stored as unknown[])[0])!.id!;
+        expect(childId).not.toBe(parentId);
+        expect(storedDocument(storageManager, childId)?.value).toEqual({
+          note: "s3cr3t!",
+        });
+        expect(
+          replicaEntries(storageManager, childId)
+            .flatMap((entry) => entry.label.confidentiality ?? []),
+        ).toContain("secret");
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("keeps measuring a marked document whose join came from another space", async () => {
+      // Scoped to a join the target's own space produced, the same as the two
+      // id classes: a cache write cannot carry a foreign space's labeled value
+      // into a local document.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = strictRuntime(storageManager);
+      const foreign = (await Identity.fromPassphrase("wf-cache-foreign")).did();
+      try {
+        const seed = runtime.edit();
+        const foreignCell = runtime.getCell(
+          foreign,
+          "wf-cache-foreign-source",
+          { type: "object", properties: { secret: { type: "string" } } },
+          seed,
+        );
+        const foreignId = foreignCell.getAsNormalizedFullLink().id;
+        writeSeedEnvelopeDoc(seed, foreign);
+        seed.writeOrThrow({
+          space: foreign,
+          scope: "space",
+          id: foreignId,
+          path: [],
+        }, {
+          value: { secret: "s3cr3t" },
+          cfc: {
+            version: 1,
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: ["secret"],
+                label: { confidentiality: ["secret"] },
+              }],
+            },
+          },
+        });
+        expect((await seed.commit()).ok).toBeDefined();
+
+        const tx = runtime.edit();
+        const source = runtime.getCellFromLink(
+          { id: foreignId, path: [], space: foreign, scope: "space" },
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        expect(raw.secret).toBe("s3cr3t");
+        const target = runtime.getCell<
+          { delegatedModuleIdentities?: string[] }
+        >(
+          signer.did(),
+          "wf-cache-foreign-doc",
+          undefined,
+          tx,
+        );
+        markUndeclarable(tx, target);
+        target.set({
+          delegatedModuleIdentities: [`predecessor/${raw.secret}`],
+        });
+        const targetId = target.getAsNormalizedFullLink().id;
+        tx.prepareCfc();
+
+        const result = await tx.commit();
+        expect(result.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(result.error?.message).toContain(`for ${targetId} at /`);
       } finally {
         await runtime.dispose();
         await storageManager.close();

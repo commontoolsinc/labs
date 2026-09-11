@@ -48,6 +48,7 @@ import {
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
+  CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
   type CfcAddress,
   runtimeWritePolicyAuthorization,
 } from "./cfc/types.ts";
@@ -791,6 +792,38 @@ function anchorValueAsEntity(
         path: [],
       },
       claim: CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
+      sources: [{
+        space: link.space,
+        id: link.id,
+        scope: link.scope,
+        path: [...path],
+      }],
+    }, runtimeWritePolicyAuthorization);
+  }
+
+  // The same carry for the other class of parent, on the same reasoning. A
+  // document no schema declares a policy on splits its value the same way: a
+  // cache document's `imports` array holds one document per edge, and what
+  // each holds is a piece of the parent's own record at an id derived here.
+  // Without the carry the parent is exempt and its children are measured, so
+  // a transaction carrying a join that rewrites a cache document is refused
+  // at the child.
+  if (
+    tx.isUndeclarablePolicyStore(
+      link.space,
+      link.id,
+      runtimeWritePolicyAuthorization,
+    )
+  ) {
+    tx.recordCfcWritePolicyInput({
+      kind: "structural-provenance",
+      target: {
+        space: newEntryLink.space,
+        id: newEntryLink.id,
+        scope: newEntryLink.scope,
+        path: [],
+      },
+      claim: CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
       sources: [{
         space: link.space,
         id: link.id,
