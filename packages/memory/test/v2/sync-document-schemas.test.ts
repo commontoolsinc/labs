@@ -97,6 +97,22 @@ describe("sync-document-schemas", () => {
     expect(compressSessionSyncSchemas(sync)).toBe(sync);
   });
 
+  it("returns false for values outside a sync message envelope", () => {
+    for (
+      const message of [
+        undefined,
+        null,
+        false,
+        1,
+        "documentSchemaRef",
+        [{ documentSchemaRef: "outside an envelope" }],
+        { documentSchemaRef: "outside an envelope" },
+      ]
+    ) {
+      expect(hasDocumentSchemaReferences(message)).toBe(false);
+    }
+  });
+
   it("preserves nested application schemas and composes with link-schema tables", () => {
     const sync = resultSync(2);
     const application = {
