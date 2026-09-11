@@ -40,7 +40,11 @@ import {
   type LabelMapEntry,
   runtimeWritePolicyAuthorization,
 } from "../src/cfc/types.ts";
-import { getCellOrThrow } from "../src/query-result-proxy.ts";
+import {
+  createQueryResultProxy,
+  getCellOrThrow,
+} from "../src/query-result-proxy.ts";
+import { stub } from "@std/testing/mock";
 import { createLLMFriendlyLink } from "../src/link-types.ts";
 import { getMetaLink, parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -130,6 +134,71 @@ describe("cfc-reference-provenance", () => {
     }]);
     return { target, selected };
   };
+
+  it("retains every private clause when an existing view is extended or reused", () => {
+    const first = withCfcReferenceConfidentiality(undefined, [selection]);
+    const both = withCfcReferenceConfidentiality(first, [content]);
+    const subset = withCfcReferenceConfidentiality(both, [selection]);
+    expect(joinCfcReferenceConfidentiality([both])).toEqual([
+      selection,
+      content,
+    ]);
+    expect(joinCfcReferenceConfidentiality([subset])).toEqual([
+      selection,
+      content,
+    ]);
+  });
+
+  it("keeps passive proxy conversion and finished then probes out of the observation journal", async () => {
+    const { target } = await selectedTarget();
+    const tx = runtime.edit();
+    tx.markLazyMaterialize(true);
+    const view = createQueryResultProxy<Record<string, unknown>>(
+      runtime,
+      tx,
+      target.getAsNormalizedFullLink(),
+      0,
+      withCfcReferenceConfidentiality(undefined, [selection]),
+    );
+    const before = tx.getCfcState().referenceObservations.length;
+    const held = getCellOrThrow(view);
+    expect(getCfcReferenceProvenance(held)?.confidentiality).toEqual([
+      selection,
+    ]);
+    expect(tx.getCfcState().referenceObservations).toHaveLength(before);
+    tx.abort();
+    expect(view.then).toBeUndefined();
+    expect(tx.getCfcState().referenceObservations).toHaveLength(before);
+  });
+
+  it("keeps a cyclic content target unavailable to the verifier", async () => {
+    const cell = runtime.getCell(space, "cyclic-evidence");
+    await seed("cyclic-evidence", cell.getAsLink());
+    const tx = runtime.edit();
+    expect(tx.resolveCfcContentTarget(
+      cell.getAsNormalizedFullLink(),
+      space,
+      runtimeWritePolicyAuthorization,
+    )).toBeUndefined();
+    tx.abort();
+  });
+
+  it("propagates an unexpected failure while resolving trusted content evidence", async () => {
+    const { target } = await selectedTarget();
+    const tx = runtime.edit();
+    const failure = new Error("unexpected storage failure");
+    using _read = stub(tx, "read", () => {
+      throw failure;
+    });
+    expect(() =>
+      tx.resolveCfcContentTarget(
+        target.getAsNormalizedFullLink(),
+        space,
+        runtimeWritePolicyAuthorization,
+      )
+    ).toThrow("unexpected storage failure");
+    tx.abort();
+  });
 
   it("requires verifier authorization and retains its reads through a sampled transaction", async () => {
     const { target, selected } = await selectedTarget();
@@ -1665,6 +1734,42 @@ describe("cfc-reference-provenance", () => {
     const second = withCfcReferenceConfidentiality(undefined, equivalent);
     expect(joinCfcReferenceConfidentiality([first, second])).toHaveLength(2);
   });
+
+  for (const cap of ["any", "space"] as const) {
+    for (const scope of ["space", "session"] as const) {
+      it(`checks a derived alias in ${scope} against an inherited ${cap} cap`, () => {
+        const tx = runtime.edit();
+        try {
+          const result = runtime.getCellFromLink(
+            {
+              ...runtime.getCell(space, "capped-derived-alias")
+                .getAsNormalizedFullLink(),
+              scopeCaps: [{ depth: 0, scope: cap }],
+            },
+            undefined,
+            tx,
+          );
+          const bind = () =>
+            unwrapOneLevelAndBindToDoc(
+              { $alias: { partialCause: "derived", path: [] } },
+              undefined,
+              result,
+              { derivedInternalCells: [{ partialCause: "derived", scope }] },
+            );
+          if (cap === "space" && scope === "session") {
+            expect(bind).toThrow("exceeds its acquired scope cap");
+          } else {
+            const bound = bind();
+            const acquired = getCfcReferenceProvenance(bound);
+            expect(acquired?.binding.scope).toBe(scope);
+            expect(acquired?.scopeCaps).toEqual([{ depth: 0, scope: cap }]);
+          }
+        } finally {
+          tx.abort();
+        }
+      });
+    }
+  }
 
   it("keeps a derived alias separate from a same-path result projection", () => {
     const tx = runtime.edit();

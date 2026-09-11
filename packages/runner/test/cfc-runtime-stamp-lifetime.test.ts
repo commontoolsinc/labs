@@ -317,6 +317,29 @@ describe("CFC runtime stamp lifetime", () => {
     });
   }
 
+  it("ignores batch deletions of absent paths when recording authorship", () => {
+    const tx = runtime.edit();
+    const cell = runtime.getCell(space, "batch-absent-delete", undefined, tx);
+    cell.set({ present: "user" });
+    const address = cell.getAsNormalizedFullLink();
+    tx.setCfcImplementationIdentity(builtin);
+    tx.writeValuesOrThrow!([
+      {
+        address: { ...address, path: ["missing"] },
+        value: undefined,
+        delete: true,
+      },
+      { address: { ...address, path: ["other"] }, value: "model" },
+    ]);
+    expect(
+      tx.getCfcValueWriteAuthor({ ...address, path: ["missing"] })?.identity,
+    )
+      .toBeUndefined();
+    expect(tx.getCfcValueWriteAuthor({ ...address, path: ["other"] })?.identity)
+      .toEqual(builtin);
+    tx.abort();
+  });
+
   for (const order of [[undefined, builtin], [builtin, undefined]] as const) {
     it(`captures each batch write before its ${order[0] ? "builtin" : "unattributed"} author changes`, () => {
       const tx = runtime.edit();

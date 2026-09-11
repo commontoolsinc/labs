@@ -648,14 +648,9 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
       // A field's cap governs outgoing hops. Projecting within its existing
       // scoped document retains that cap without making another hop to it.
       if (
-        reference.scopeCaps?.length &&
-        (!underSource ||
-          ((link.id !== sourceLink.id || link.space !== sourceLink.space ||
-            link.scope !== sourceLink.scope) &&
-            reference.scopeCaps.some((cap) =>
-              cap.scope !== "any" &&
-              scopeRank(link.scope) > scopeRank(cap.scope)
-            )))
+        !underSource && reference.scopeCaps?.some((cap) =>
+          cap.scope !== "any" && scopeRank(link.scope) > scopeRank(cap.scope)
+        )
       ) {
         throw new Error("Reference alias exceeds its acquired scope cap");
       }

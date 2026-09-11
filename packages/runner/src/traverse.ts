@@ -4725,7 +4725,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
         if (isSigilLink(item)) {
           const context = this.objectCreator.enterReference?.(
             getNormalizedLink(curDoc.address, curSelector.schema),
-            "cell",
+            SchemaObjectTraverser.hasAsCell(curSelector.schema)
+              ? "cell"
+              : "value",
           );
           restoreReference = context?.restore;
           if (context?.blocked !== undefined) {
@@ -4903,13 +4905,26 @@ export class SchemaObjectTraverser<V extends FabricValue>
           // to the child cell and observe it when the target materializes.
           const isLink = isSigilLink(curDoc.value);
           if (isLink) this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
-          const cellLink = isLink
-            ? getNextCellLink(this.tx, curDoc, curSelector.schema!)
-            : getNormalizedLink(curDoc.address, curSelector.schema);
-          arrayObj[index] = this.objectCreator.createObject(
-            cellLink,
-            undefined,
-          );
+          // The array's first hop and the handle's final hop can be different
+          // references. Retain the final hop's selection before minting the Cell.
+          const handleContext = isLink
+            ? this.objectCreator.enterReference?.(
+              getNormalizedLink(curDoc.address, curSelector.schema),
+              "cell",
+            )
+            : undefined;
+          try {
+            const cellLink = handleContext?.blocked ??
+              (isLink
+                ? getNextCellLink(this.tx, curDoc, curSelector.schema!)
+                : getNormalizedLink(curDoc.address, curSelector.schema));
+            arrayObj[index] = this.objectCreator.createObject(
+              cellLink,
+              undefined,
+            );
+          } finally {
+            handleContext?.restore();
+          }
         } else {
           // We want those links to point directly at the linked cells, instead
           // of using our path (e.g. ["items", "0"]), so don't pass in a

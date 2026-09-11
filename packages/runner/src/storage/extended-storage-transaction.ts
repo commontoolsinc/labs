@@ -18,6 +18,7 @@ import {
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import { lookupSchemaDocument } from "../schema-registry.ts";
 import type { URI } from "../sigil-types.ts";
+import { LinkResolutionError } from "../link-resolution.ts";
 import { aclDocId } from "@commonfabric/memory/acl";
 import {
   type CommitError,
@@ -685,6 +686,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   set dispatchedEventId(value: string | undefined) {
+    if (
+      this.#dispatchedEventId !== undefined && value !== this.#dispatchedEventId
+    ) {
+      throw new Error(
+        "A dispatched event identity cannot be cleared or rebound",
+      );
+    }
     this.#dispatchedEventId = value;
     if (value !== undefined) requireCommitReadValidation(this);
   }
@@ -1574,10 +1582,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             projectionPath,
           ),
       );
-    } catch {
-      // Resolution failures share the unavailable-evidence result so the
-      // verifier cannot expose protected topology through its failure kind.
-      return undefined;
+    } catch (error) {
+      // Cyclic or excessively deep links share the unavailable-evidence result;
+      // their protected topology must not change the verifier's failure kind.
+      if (error instanceof LinkResolutionError) return undefined;
+      throw error;
     }
   }
 
@@ -3251,6 +3260,38 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     >,
   ): void {
     this.#assertWritable("writeValuesOrThrow()");
+    const iterator = writes[Symbol.iterator]();
+    let finished = false;
+    try {
+      let next = iterator.next();
+      while (!next.done) {
+        if (next.value.delete) {
+          // Flush preceding runs before testing deletion's slot presence. The
+          // single-write seam records authorship only when deletion applies.
+          this.writeValueOrThrow(next.value.address, next.value.value, {
+            delete: true,
+          });
+          next = iterator.next();
+        } else {
+          this.#writeValuesBatchOrThrow((function* () {
+            while (!next.done && !next.value.delete) {
+              yield next.value;
+              next = iterator.next();
+            }
+          })());
+        }
+      }
+      finished = true;
+    } finally {
+      if (!finished) iterator.return?.();
+    }
+  }
+
+  #writeValuesBatchOrThrow(
+    writes: Iterable<
+      { address: NormalizedFullLink; value: FabricValue; delete?: boolean }
+    >,
+  ): void {
     if (this.tx.writeBatch) {
       // Keep the batch path on the same noteSystemWrite chokepoint as single
       // writes (S18). This is not inert, and never was: `#noteSystemWrite`'s

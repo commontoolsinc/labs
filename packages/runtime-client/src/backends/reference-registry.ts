@@ -4,6 +4,7 @@
  */
 
 import { deepFreeze, taggedHashStringOf } from "@commonfabric/data-model";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   type Cell,
   KeepAsCell,
@@ -16,6 +17,7 @@ import {
   carryCfcReferenceProvenance,
   type CfcCellLinkRefPayload,
   cfcReferenceBindingMatches,
+  clausesEqual,
   getCarriedCfcLabelView,
   getCfcReferenceProvenance,
   immutableReferenceViewIdentity,
@@ -77,6 +79,22 @@ export class ReferenceRegistry {
       cfcLabelView?: unknown;
     };
     const sourceCell = cell ?? this.#runtime.getCellFromLink(clean);
+    const sourceLink = sourceCell.getAsNormalizedFullLink();
+    const sourceProvenance = getCfcReferenceProvenance(sourceCell);
+    if (
+      !cfcReferenceBindingMatches(provenance, {
+        ...sourceLink,
+        overwrite: normalized.overwrite,
+      }) ||
+      !deepEqual(sourceLink.scopeCaps ?? [], provenance.scopeCaps ?? []) ||
+      !provenance.confidentiality.every((clause) =>
+        sourceProvenance?.confidentiality.some((candidate) =>
+          clausesEqual(candidate, clause)
+        )
+      )
+    ) {
+      throw new Error("Retained cell does not match its reference acquisition");
+    }
     const key = taggedHashStringOf({
       authority,
       provenance,

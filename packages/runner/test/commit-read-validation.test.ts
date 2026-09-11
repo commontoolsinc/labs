@@ -26,6 +26,29 @@ const signer = await Identity.fromPassphrase("commit-read-validation");
 const space = signer.did();
 
 describe("commit-read-validation", () => {
+  it("keeps a dispatched event bound to its original durable identity", async () => {
+    const storage = EmulatedStorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage,
+    });
+    try {
+      const tx = runtime.edit();
+      tx.dispatchedEventId = "original";
+      tx.dispatchedEventId = "original";
+      for (const replacement of [undefined, "replacement"]) {
+        expect(() => {
+          tx.dispatchedEventId = replacement;
+        })
+          .toThrow("cannot be cleared or rebound");
+        expect(tx.dispatchedEventId).toBe("original");
+      }
+      tx.abort();
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   for (
     const kind of [
       "authorization",

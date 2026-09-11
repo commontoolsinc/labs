@@ -249,8 +249,14 @@ function createViewProxy<T>(
   // unpinned one resolves afresh, so it tracks current state once its original
   // has finished. A child of an unpinned tx-less view inherits that view's own
   // transaction rather than minting one per child.
-  const readTx = (): IExtendedStorageTransaction =>
-    pinned ? viewTx : runtime.readTx(tx);
+  const readTx = (): IExtendedStorageTransaction => {
+    const current = pinned ? viewTx : runtime.readTx(tx);
+    recordCfcReferenceObservation(current, {
+      binding: cfcReferenceBinding(link),
+      confidentiality: cfcReferenceConfidentialityForView(cfcLabelView),
+    }, "dereference");
+    return current;
+  };
   const childViewTx = (): IExtendedStorageTransaction =>
     pinned ? viewTx : runtime.readTx(tx ?? viewTx);
   // The instant a pinned view describes. A child built inside a parent's trap
@@ -268,10 +274,6 @@ function createViewProxy<T>(
   // written; this is the schema-LESS path, which a lift's argument does not
   // take, and the shape of these traps makes the by-hand form a worse trade.
   const atEpoch = <T>(body: () => T): T => {
-    recordCfcReferenceObservation(readTx(), {
-      binding: cfcReferenceBinding(link),
-      confidentiality: cfcReferenceConfidentialityForView(cfcLabelView),
-    }, "dereference");
     if (epoch === undefined || !viewTx.hasWrites()) return body();
     const previous = viewTx.enterReadEpoch(epoch);
     try {
@@ -452,14 +454,10 @@ function createViewProxy<T>(
   if (existingProxy) return remember(existingProxy);
 
   const proxy = new Proxy(proxyTarget as object, {
-    get: (target, prop, receiver) =>
-      atEpoch(() => {
-        // Promise adoption probes `then` on every value it receives, so a view
-        // that refuses the probe cannot cross a promise boundary at all — and a
-        // lift's result crosses one by construction. A finished view returns
-        // `undefined` for it, which is what a live one returns for a value
-        // with no `then`; every other property still refuses.
-        if (prop === "then" && pinned && !isReadable(viewTx)) return undefined;
+    get: (target, prop, receiver) => {
+      // Promise adoption of a finished view observes no stored value.
+      if (prop === "then" && pinned && !isReadable(viewTx)) return undefined;
+      return atEpoch(() => {
         if (Array.isArray(value) && prop === "length") {
           const accessTx = readTx();
           if (readStatsActive) recordProxyAccess(accessTx);
@@ -621,7 +619,8 @@ function createViewProxy<T>(
           childLabelView(cfcLabelView, String(prop)),
           pinned,
         );
-      }),
+      });
+    },
     set: (_, prop) => {
       if (typeof prop === "symbol") return false;
       throw new Error(

@@ -221,21 +221,13 @@ const resolvedMetadataForCell = (
 };
 
 /**
- * {@link cfcLabelViewForCellWithStatus}, plus the label stored on the doc the
- * selected path RESOLVES to.
+ * Joins the selected cell's label view, reference history from every crossed
+ * link, and the resolved document's stored labels. All entries are rebased to
+ * the selected path. Link traces contribute only when resolution crosses them;
+ * a direct cell retains its own carried and stored labels.
  *
- * For an inspection surface that answers "what is the label here" about a path
- * a person typed, the one-hop read is not enough: a path that crosses a link
- * part way through reports no label for a value that plainly carries one. This
- * merges the resolved doc's stored label into the same view, rebased so its
- * entries stay relative to the selected cell.
- *
- * Strictly additive. Every view the one-hop read produces is still in the
- * merge, and merging is keyed per (observation class, path) with a union of the
- * labels, so a leaf-link read — where the resolution lands on the same doc the
- * one hop already found — returns exactly what it returns today. `readFailed`
- * stays fail-closed across both: a resolution that throws is a failed read, not
- * an absent label.
+ * The merge unions labels per observation class and path. A failed metadata
+ * read or resolution sets `readFailed`, so inspection can fail closed.
  */
 export const cfcLabelViewForResolvedCellWithStatus = (
   cell: unknown,

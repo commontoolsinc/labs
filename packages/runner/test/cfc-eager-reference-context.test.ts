@@ -58,6 +58,48 @@ describe("cfc-eager-reference-context", () => {
     return cell.withTx(undefined);
   };
 
+  for (const asCell of [false, true]) {
+    it(`retains both link selections across array-item hops (asCell=${asCell})`, async () => {
+      const value = await seed("array-leaf", { value: "visible" });
+      const intermediate = await seed("array-middle", value.getAsLink(), [{
+        path: [],
+        origin: "link",
+        observes: "followRef",
+        label: { confidentiality: ["middle-selection"] },
+      }]);
+      const array = await seed("array-container", [intermediate.getAsLink()], [{
+        path: ["0"],
+        origin: "link",
+        observes: "followRef",
+        label: { confidentiality: [selection] },
+      }]);
+      const read = runtime.edit();
+      const projected = array.withTx(read).asSchema({
+        type: "array",
+        items: {
+          type: "object",
+          ...(asCell ? { asCell: ["readonly"] as const } : {}),
+          properties: { value: { type: "string", asCell: ["readonly"] } },
+        },
+      }).get();
+      const item = projected?.[0];
+      const object = isCell(item) ? item.get() : item;
+      const child: unknown = object?.value;
+      if (!isCell(child)) throw new Error("Expected a descendant Cell");
+      const held = child.withTx(undefined);
+      read.abort();
+      expect(getCfcReferenceProvenance(held)?.confidentiality)
+        .toEqual([selection, "middle-selection"]);
+      const next = runtime.edit();
+      expect(held.withTx(next).get()).toBe("visible");
+      expect(deriveFlowJoin(next).confidentiality).toEqual([
+        selection,
+        "middle-selection",
+      ]);
+      next.abort();
+    });
+  }
+
   for (const lazy of [false, true]) {
     for (const privateFirst of [false, true]) {
       it(`retains descendant reference history across sibling traversal (lazy=${lazy}, privateFirst=${privateFirst})`, async () => {

@@ -544,15 +544,10 @@ const effectiveReadLabel = (
     consumes: ReadClassSelection;
 
     /**
-     * Entries excluded from this read's consumption on top of class
-     * selection. Sole current user is `deriveFlowJoin`'s pair of template
-     * machinery boundaries: the §8.12.8 replace-from-criteria readback
-     * exclusion (a transaction re-deriving a container's membership stamps
-     * must not consume the very entries it replaces — see
-     * `ownRestampContainerPaths`) and the C0 §6.1 row-4 rule extended to
-     * plain reads (trace-covered resolution machinery skips `*`
-     * templates). Absent on every other call site (notably the
-     * `"all"`-selection write gate, which stays over-inclusive by design).
+     * Additional exclusions for resolution machinery in `deriveFlowJoin`.
+     * Those reads skip link-origin entries and runtime-minted templates;
+     * application observations consume their selected classes independently.
+     * Other callers, including the all-classes write gate, exclude nothing.
      */
     excludeEntry?: (entry: LabelMapEntry) => boolean;
   },

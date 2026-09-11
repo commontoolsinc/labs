@@ -138,7 +138,13 @@ export function withCfcReferenceConfidentiality(
     version: 1,
     entries: [...(view?.entries ?? []), referenceEntry],
   };
-  views.set(result, deepFreeze([...confidentiality]));
+  const retained = [...cfcReferenceConfidentialityForView(view)];
+  for (const clause of confidentiality) {
+    if (!retained.some((candidate) => clausesEqual(candidate, clause))) {
+      retained.push(clause);
+    }
+  }
+  views.set(result, deepFreeze(retained));
   return result;
 }
 

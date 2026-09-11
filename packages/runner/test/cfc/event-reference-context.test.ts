@@ -563,6 +563,16 @@ describe("event-reference-context", () => {
         ...record,
         reference: { ...reference, scopeCaps: [{ depth: -1, scope: "space" }] },
       },
+      {
+        ...record,
+        reference: {
+          ...reference,
+          scopeCaps: [
+            { depth: 0, scope: "any" },
+            { depth: 0, scope: "session" },
+          ],
+        },
+      },
       { ...record, viewConfidentiality: null },
       { ...record, immutableReferences: null },
       { ...record, view: { version: 2, entries: [] } },

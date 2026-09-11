@@ -57,6 +57,9 @@ export const schemaConstrainsNothing = (
 ): boolean =>
   schema === undefined || ContextualFlowControl.isTrueSchema(schema);
 
+/** A reference chain cannot terminate at a value. */
+export class LinkResolutionError extends Error {}
+
 export const MAX_PATH_RESOLUTION_LENGTH = 100;
 
 type LinkHop = {
@@ -569,7 +572,7 @@ export function resolveLinkTracingDereferences(
           `Link resolution iteration limit reached`,
         );
       }
-      throw new Error(`Link resolution iteration limit reached`);
+      throw new LinkResolutionError(`Link resolution iteration limit reached`);
     }
 
     // Detect cycles. `addressKey` always names the link this iteration starts
@@ -582,7 +585,7 @@ export function resolveLinkTracingDereferences(
           `Link cycle detected ${key} [${toCompactDebugString([...seen])}]`,
         );
       }
-      throw new Error(
+      throw new LinkResolutionError(
         `Link cycle detected at ${key} [${toCompactDebugString([...seen])}]`,
       );
     }
@@ -751,7 +754,9 @@ export function resolveLinkTracingDereferences(
         if (!options.silentFailures) {
           logger.error("link-res-error", `Link cycle detected: ${detail}`);
         }
-        throw new Error(`Link cycle detected at ${key}: ${detail}`);
+        throw new LinkResolutionError(
+          `Link cycle detected at ${key}: ${detail}`,
+        );
       }
       traces.push(recordDereferenceHop(tx, nextHop));
       if (readStatsActive) recordLinkResolution(tx);

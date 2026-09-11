@@ -92,9 +92,12 @@ function validReference(value: CfcReferenceProvenance): boolean {
     (value.scopeCaps === undefined ||
       Array.isArray(value.scopeCaps) &&
         value.scopeCaps.every((cap) =>
+          cap !== null && typeof cap === "object" &&
           Number.isSafeInteger(cap.depth) && cap.depth >= 0 &&
           isSchemaScope(cap.scope)
-        ));
+        ) &&
+        new Set(value.scopeCaps.map((cap) => cap.depth)).size ===
+          value.scopeCaps.length);
 }
 
 function restoreView(record: EventReference): CfcLabelView | undefined {

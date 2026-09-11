@@ -203,6 +203,28 @@ describe("reference-registry", () => {
     });
   }
 
+  it("rejects an unrelated or less restricted retained cell at export", async () => {
+    const acquired = await acquireSelected();
+    const unrelated = await seed("unrelated-cell", "other content");
+    expect(() => registry.exportLink(acquired.getAsLink(), unrelated))
+      .toThrow("Retained cell does not match its reference acquisition");
+    const unselected = runtime.getCellFromLink(
+      wireCopy(acquired.getAsNormalizedFullLink()),
+    );
+    expect(() => registry.exportLink(acquired.getAsLink(), unselected))
+      .toThrow("Retained cell does not match its reference acquisition");
+    const capped = runtime.getCellFromLink({
+      ...acquired.getAsNormalizedFullLink(),
+      scopeCaps: [{ depth: 0, scope: "space" }],
+    });
+    const uncapped = runtime.getCellFromLink({
+      ...acquired.getAsNormalizedFullLink(),
+      scopeCaps: undefined,
+    });
+    expect(() => registry.exportLink(capped.getAsLink(), uncapped))
+      .toThrow("Retained cell does not match its reference acquisition");
+  });
+
   it("rejects exporting a carrier after its binding is changed", async () => {
     const acquired = await acquireSelected();
     const original = acquired.getAsLink();
