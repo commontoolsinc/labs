@@ -25,4 +25,10 @@ its revision and reproduction command. The page lets the reader inspect each
 interval and the reported computation rows. Totals include unlisted rows; the
 recording is not a live benchmark. Preserve provenance when replacing it.
 
+The browser section shows recorded screenshots and diagnostic samples at three
+vote-list sizes. Its p75 timings include browser/protocol overhead and are
+labeled with machine, runtime, execution posture, and sample limitations. The
+read counts come from a separate untimed vote. Screenshot routes are explicitly
+allowlisted by the server.
+
 Check the server with `deno check tools/implementation-progress/server.ts`.

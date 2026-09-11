@@ -601,5 +601,55 @@
         "command": "cd /tmp/b13-read-budgets\nCF_TEST_CONTINUOUS_UI=1 deno task cf test packages/cli/test/fixtures/read-budgets/one-expensive.test.tsx --verbose --stats-threshold 0"
       }
     ]
+  },
+  "browser": {
+    "provenance": "Local client-execution run, Apple M5 / Deno 2.9.4, 2026-09-10. Base 360ade1ef0 with A4 benchmark changes. 14 options, same-space voter entities. Four timed samples per size; exploratory timings include browser/protocol and click-helper overhead. Other validation jobs overlapped this run. Counts are reactive-body samples from a separate untimed vote; event commits are separate markers.",
+    "runs": [
+      {
+        "voteCount": 74,
+        "spaceName": "ed004223-7d95-4752-9c6e-6a8e0deabbab-read-74",
+        "pieceId": "fid1:4GScMFBo1kKS3VOC3YfFl0Lnx7asDrxL6WSdmbigc48",
+        "sample": {
+          "runs": 59,
+          "accesses": 1545,
+          "maxAccesses": 649,
+          "linkHops": 724,
+          "eventCommits": 2,
+          "eventCommitErrors": 0
+        },
+        "p75Ms": 117.7,
+        "screenshot": "/74-votes.png"
+      },
+      {
+        "voteCount": 296,
+        "spaceName": "ed004223-7d95-4752-9c6e-6a8e0deabbab-read-296",
+        "pieceId": "fid1:DoV8qjd1dCL5hh1OAIRt1v9qD4OORVj3-sYXSxJgVQk",
+        "sample": {
+          "runs": 49,
+          "accesses": 4493,
+          "maxAccesses": 2425,
+          "linkHops": 1646,
+          "eventCommits": 2,
+          "eventCommitErrors": 0
+        },
+        "p75Ms": 200.3,
+        "screenshot": "/296-votes.png"
+      },
+      {
+        "voteCount": 1184,
+        "spaceName": "ed004223-7d95-4752-9c6e-6a8e0deabbab-read-1184",
+        "pieceId": "fid1:7VlMXpDQs2Yqpl6DWxPhzKA4yds32qE6vCHsB-kMfrM",
+        "sample": {
+          "runs": 79,
+          "accesses": 16295,
+          "maxAccesses": 9529,
+          "linkHops": 5429,
+          "eventCommits": 2,
+          "eventCommitErrors": 0
+        },
+        "p75Ms": 803.2,
+        "screenshot": "/1184-votes.png"
+      }
+    ]
   }
 }
