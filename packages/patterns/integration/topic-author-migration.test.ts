@@ -78,6 +78,71 @@ describe("topic-author-migration", () => {
     return { argument, result, originalComments };
   };
 
+  it("upgrades version zero to the current version without any result read", async () => {
+    const { argument } = await start({
+      createdByName: "Creator",
+      comments: [{ authorName: "Commenter", body: "First", sentAt: 1 }],
+    });
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    expect(argument.key("topicStateVersion").getRaw()).toBe(1);
+    expect(argument.key("createdBy").getRaw({ lastNode: "value" })).toEqual({
+      name: "Creator",
+      kind: "legacy",
+    });
+    expect(
+      argument.key("comments").key(0).key("author").getRaw({
+        lastNode: "value",
+      }),
+    ).toEqual({ name: "Commenter", kind: "legacy" });
+    expect(errors).toEqual([]);
+  });
+
+  for (
+    const comments of [[], [{
+      authorName: "Commenter",
+      body: "First",
+      sentAt: 1,
+    }]]
+  ) {
+    it(`upgrades without a stored creator name and with ${comments.length} comments`, async () => {
+      const { argument } = await start({ comments });
+      await runtime.idle();
+      await runtime.storageManager.synced();
+      expect(argument.key("topicStateVersion").getRaw()).toBe(1);
+      expect(argument.key("createdBy").getRaw()).toBeUndefined();
+      expect(argument.key("createdByName").getRaw()).toBeUndefined();
+      if (comments.length) {
+        expect(
+          argument.key("comments").key(0).key("author").getRaw({
+            lastNode: "value",
+          }),
+        ).toEqual({ name: "Commenter", kind: "legacy" });
+      }
+      expect(errors).toEqual([]);
+    });
+  }
+
+  for (const placeholder of ["someone", "  someone  "]) {
+    it(`keeps the legacy placeholder ${JSON.stringify(placeholder)} unattributed`, async () => {
+      const { argument } = await start({
+        createdByName: placeholder,
+        comments: [{ authorName: placeholder, body: "First", sentAt: 1 }],
+      });
+      await runtime.idle();
+      await runtime.storageManager.synced();
+      expect(argument.key("topicStateVersion").getRaw()).toBe(1);
+      expect(argument.key("createdBy").getRaw()).toBeUndefined();
+      expect(argument.key("comments").key(0).key("author").getRaw())
+        .toBeUndefined();
+      expect(argument.key("createdByName").getRaw()).toBe(placeholder);
+      expect(argument.key("comments").key(0).key("authorName").getRaw()).toBe(
+        placeholder,
+      );
+      expect(errors).toEqual([]);
+    });
+  }
+
   it("preserves comment links and completion after reopening from stored source", async () => {
     const { argument, result, originalComments } = await start({
       createdByName: "Fable",
@@ -92,7 +157,7 @@ describe("topic-author-migration", () => {
     });
     await runtime.idle();
     await runtime.storageManager.synced();
-    expect(argument.key("authorFieldsMigratedV1").getRaw()).toBe(true);
+    expect(argument.key("topicStateVersion").getRaw()).toBe(1);
     expect(fabricAwareEqual(
       argument.key("comments").getRaw({ lastNode: "value" }),
       originalComments,
@@ -148,7 +213,7 @@ describe("topic-author-migration", () => {
     expect(reopenedArgument.key("createdByName").getRaw()).toBe(
       "Changed legacy name",
     );
-    expect(reopenedArgument.key("authorFieldsMigratedV1").getRaw()).toBe(true);
+    expect(reopenedArgument.key("topicStateVersion").getRaw()).toBe(1);
     expect(errors).toEqual([]);
   });
 
@@ -159,7 +224,7 @@ describe("topic-author-migration", () => {
     );
     const { argument, result } = await start({
       createdByName: "Creator",
-      authorFieldsMigratedV1: false,
+      topicStateVersion: 0,
       comments: [
         { authorName: "First author", body: "First", sentAt: 1 },
         pending,
@@ -169,7 +234,7 @@ describe("topic-author-migration", () => {
     try {
       await runtime.idle();
       await runtime.storageManager.synced();
-      expect(argument.key("authorFieldsMigratedV1").getRaw()).toBe(false);
+      expect(argument.key("topicStateVersion").getRaw()).toBe(0);
       expect(argument.key("createdBy").getRaw()).toBeUndefined();
       expect(argument.key("comments").key(0).key("author").getRaw())
         .toBeUndefined();
@@ -187,7 +252,7 @@ describe("topic-author-migration", () => {
       });
       await runtime.idle();
       await runtime.storageManager.synced();
-      expect(argument.key("authorFieldsMigratedV1").getRaw()).toBe(true);
+      expect(argument.key("topicStateVersion").getRaw()).toBe(1);
       expect(pending.key("author").getRaw({ lastNode: "value" })).toEqual({
         name: "Delayed author",
         kind: "legacy",
@@ -216,7 +281,7 @@ describe("topic-author-migration", () => {
     });
     await runtime.idle();
     await runtime.storageManager.synced();
-    expect(argument.key("authorFieldsMigratedV1").getRaw()).toBe(true);
+    expect(argument.key("topicStateVersion").getRaw()).toBe(1);
     expect(argument.key("createdBy").getRaw()).toBeUndefined();
     expect(argument.key("createdByName").getRaw()).toEqual({
       displayName: "not a creator name",
@@ -238,7 +303,7 @@ describe("topic-author-migration", () => {
       const pendingName = runtime.getCell<string>(space, "pending-name");
       const { argument, result } = await start({
         createdByName: field === "creator" ? pendingName : "Creator",
-        authorFieldsMigratedV1: false,
+        topicStateVersion: 0,
         comments: [
           { authorName: "First author", body: "First", sentAt: 1 },
           {
@@ -252,7 +317,7 @@ describe("topic-author-migration", () => {
       try {
         await runtime.idle();
         await runtime.storageManager.synced();
-        expect(argument.key("authorFieldsMigratedV1").getRaw()).toBe(false);
+        expect(argument.key("topicStateVersion").getRaw()).toBe(0);
         expect(argument.key("createdBy").getRaw()).toBeUndefined();
         expect(argument.key("comments").key(0).key("author").getRaw())
           .toBeUndefined();
@@ -266,7 +331,7 @@ describe("topic-author-migration", () => {
         });
         await runtime.idle();
         await runtime.storageManager.synced();
-        expect(argument.key("authorFieldsMigratedV1").getRaw()).toBe(true);
+        expect(argument.key("topicStateVersion").getRaw()).toBe(1);
         expect(
           argument.key("comments").key(1).key("author").getRaw({
             lastNode: "value",

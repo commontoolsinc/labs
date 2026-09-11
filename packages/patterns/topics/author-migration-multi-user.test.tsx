@@ -1,6 +1,6 @@
 /**
  * Exercises one shared migration with two open runtimes and concurrent comment
- * appends. The initial completed flag lets both readers open the legacy data
+ * appends. The initial current version lets both readers open the legacy data
  * before an action enables migration.
  */
 
@@ -14,21 +14,21 @@ import {
 } from "commonfabric";
 import Topic, { type TopicOutput } from "./topic.tsx";
 
-/** Shared topic and its stored migration flag. */
+/** Shared topic and its stored state version. */
 interface Setup {
   /** Topic both participants keep open. */
   topic: TopicOutput;
 
   /** Test control for enabling migration after both readers are ready. */
-  migrated: Writable<boolean>;
+  migrated: Writable<number>;
 }
 
 /** Creates shared legacy records with migration initially disabled. */
 export const setup = pattern(() => {
-  const migrated = new Writable(true);
+  const migrated = new Writable(1);
   const topic = Topic({
     createdByName: "Legacy creator",
-    authorFieldsMigratedV1: migrated,
+    topicStateVersion: migrated,
     comments: [
       { authorName: "Fable", body: "Legacy comment", sentAt: 1 },
       {
@@ -44,7 +44,7 @@ export const setup = pattern(() => {
 
 /** Enables migration with both readers open, then appends a comment. */
 export const first = pattern<{ setup: Setup }>(({ setup }) => {
-  const action_enable_migration = action(() => setup.migrated.set(false));
+  const action_enable_migration = action(() => setup.migrated.set(0));
   const action_append = action(() =>
     setup.topic.addComment.send({
       agentName: "First writer",
@@ -60,7 +60,7 @@ export const first = pattern<{ setup: Setup }>(({ setup }) => {
     setup.topic.comments[0].author?.name === "Fable" &&
     setup.topic.comments[0].author?.kind === "legacy" &&
     setup.topic.comments[1].author?.name === "Current author" &&
-    setup.migrated.get() === true
+    setup.migrated.get() === 1
   );
   const assert_both_appends = assert(() =>
     setup.topic.comments.length === 4 &&
@@ -109,7 +109,7 @@ export const second = pattern<{ setup: Setup }>(({ setup }) => {
     setup.topic.comments[0].author?.name === "Fable" &&
     setup.topic.comments[0].author?.kind === "legacy" &&
     setup.topic.comments[1].author?.name === "Current author" &&
-    setup.migrated.get() === true
+    setup.migrated.get() === 1
   );
   const assert_both_appends = assert(() =>
     setup.topic.comments.length === 4 &&

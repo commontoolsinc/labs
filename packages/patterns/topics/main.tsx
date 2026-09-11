@@ -31,6 +31,7 @@ import {
 import Topic, {
   rejectMutation,
   snippet,
+  TOPIC_STATE_VERSION,
   type TopicAuthor,
   topicAuthorFromAgent,
   topicAuthorFromPerson,
@@ -510,6 +511,7 @@ export const submitProfileTopic = handler<void, {
   const author = topicAuthorFromPerson(profileName, profileAvatar);
   if (!trimmed || !author) return;
   const piece = Topic({
+    topicStateVersion: TOPIC_STATE_VERSION,
     title: trimmed,
     createdAt: Date.now(),
     createdBy: author,
@@ -575,6 +577,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, names }) => {
       rejectMutation("addTopic", "agentName must be non-blank");
     if (!trimmed) rejectMutation("addTopic", "title must be non-empty");
     const piece = Topic({
+      topicStateVersion: TOPIC_STATE_VERSION,
       title: trimmed,
       // Body at create is part of the create's atomic unit; created-with is
       // not an update, so bodyUpdatedBy/At stay unset (createdBy covers it).

@@ -65,22 +65,27 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   current authored-content verb writes structured attribution; the public result
   and mutation contracts contain no mutable "current author" state or
   display-name mirrors.
-- **Legacy display names migrate once per topic.** Reading a topic's author data
-  runs a lift that fills missing structured names from `createdByName` and
-  comment `authorName` fields. It preserves nonblank structured names, existing
-  kinds and avatars, the legacy fields, and comment identity. A name with no
-  known kind receives `kind: "legacy"`, which renders as the name without a
-  person or agent classification. The stored input flag `authorFieldsMigratedV1`
-  defaults to false and becomes true in the same transaction as the copies. All
-  relevant author fields are read through cell handles before writing; an
-  unresolved linked comment or name leaves completion pending. Legacy-name
-  inputs stay `unknown` to accept the full stored domain. The lift's explicit
-  schema reads strings while keeping other values opaque; only nonblank strings
-  are copied. Non-string values remain stored unchanged and do not prevent
-  completion. The flag is shared per topic and survives reopening and source
-  updates. This migration covers the records present when it completes; legacy
-  writers must be retired before rollout, because later legacy-shaped records
-  are outside that completed pass.
+- **Topic state upgrades run in order.** Running a Topic runs an upgrade lift,
+  even without a consumer reading its result. The input `topicStateVersion`
+  defaults to zero; pending steps run in order, and each records its new version
+  after its writes in the same transaction. Every durable mutation uses the same
+  upgrade function before writing. Both board creation paths stamp the current
+  version. A stored future or invalid version makes the lift inert and durable
+  mutations reject; session editor controls remain available.
+- **The first upgrade preserves legacy attribution.** It fills missing
+  structured names from `createdByName` and comment `authorName`, retaining
+  nonblank structured names, kinds, avatars, legacy fields, and comment
+  identity. Names without a known kind receive `kind: "legacy"`. Blank strings
+  and the trimmed placeholder `"someone"` supply no attribution. Legacy inputs
+  stay `unknown`; explicit reader schemas materialize strings and keep other
+  values opaque and unchanged. Every source and destination is read through
+  handles before the first write, so an unresolved linked comment or name leaves
+  this step pending. Once complete, later legacy writes are outside this pass.
+
+  [State upgrade design](state-upgrades.md) describes the sequence, mutation
+  boundary, schema bindings, tests, and rollback limits. Legacy writers must be
+  retired before rollout. Source rollback preserves stored data; only code that
+  implements the version guard can refuse writes to a newer state version.
 - **The board names its members, and every reader reaches a name the same way.**
   `addTopic` allocates the next name in the same transaction as the append, so
   no reader observes a topic without its name and two concurrent creates

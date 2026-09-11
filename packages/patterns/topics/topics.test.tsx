@@ -262,10 +262,17 @@ export default pattern(() => {
     kept: { destination: undefined, modifiedTitle: false },
     minted: { destination: undefined, modifiedTitle: true },
   });
+  const profileUpgrade = {
+    topicStateVersion: new Writable(1),
+    createdByName: new Writable<unknown>(),
+    createdBy: new Writable<TopicAuthor | undefined>(),
+    comments: profileComments,
+  };
   // Render the same cells the deterministic Profile handlers mutate. This
   // keeps their behavior and the detail UI in one end-to-end test path without
   // inventing a fallback identity for the pattern-test runtime.
   const profileTopic = Topic({
+    ...profileUpgrade,
     title: "Profile-authored topic",
     body: profileBody,
     comments: profileComments,
@@ -284,13 +291,16 @@ export default pattern(() => {
     profileName: " Ada ",
     profileAvatar: " 🦊 ",
   });
+
   const profileSubmitComment = submitProfileComment({
+    upgrade: profileUpgrade,
     comments: profileComments,
     commentDraft: profileCommentDraft,
     profileName: "Ada",
     profileAvatar: "🦊",
   });
   const profileSaveBody = saveProfileBody({
+    upgrade: profileUpgrade,
     body: profileBody,
     bodyDraft: profileBodyDraft,
     references: profileReferences,
@@ -302,6 +312,7 @@ export default pattern(() => {
     profileAvatar: "🦊",
   });
   const profileSubmitLink = submitProfileLink({
+    upgrade: profileUpgrade,
     links: profileLinks,
     linkUrlDraft: profileLinkUrlDraft,
     linkLabelDraft: profileLinkLabelDraft,
@@ -1012,6 +1023,7 @@ export default pattern(() => {
     uiMentioned.push(mentionTwo);
   });
   const uiDropMention = dropMention({
+    upgrade: profileUpgrade,
     mentioned: uiMentioned,
     topic: mentionOne,
   });
@@ -1099,6 +1111,7 @@ export default pattern(() => {
   >({ kind: "person", name: "" });
   const renameUpdatedAt = new Writable<number | Default<0>>(0);
   const profileSaveTitle = saveProfileTitle({
+    upgrade: profileUpgrade,
     title: renameTitle,
     titleDraft: renameTitleDraft,
     editingTitle: renameEditingTitle,
