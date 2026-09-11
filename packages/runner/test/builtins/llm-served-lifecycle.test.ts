@@ -248,12 +248,10 @@ async function fixture(
         }
         try {
           await runtime.settled();
-          try {
-            await runtime.dispose();
-          } catch (error) {
+          await runtime.dispose().catch(async (error) => {
             await storage.close();
             throw error;
-          }
+          });
         } finally {
           Map.prototype.set = mapSet;
           LLMClient.prototype.sendRequest = send;
@@ -265,12 +263,10 @@ async function fixture(
     Map.prototype.set = mapSet;
     LLMClient.prototype.sendRequest = send;
     LLMClient.prototype.generateObject = object;
-    try {
-      await runtime.dispose();
-    } catch (error) {
+    await runtime.dispose().catch(async (error) => {
       await storage.close();
       throw error;
-    }
+    });
     throw error;
   }
 }

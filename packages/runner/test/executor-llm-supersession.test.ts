@@ -180,12 +180,10 @@ describe("executor-llm-supersession", () => {
         return {
           runtime,
           dispose: async () => {
-            try {
-              await runtime.dispose();
-            } catch (error) {
+            await runtime.dispose().catch(async (error) => {
               await manager.close();
               throw error;
-            }
+            });
           },
         };
       },
@@ -206,12 +204,10 @@ describe("executor-llm-supersession", () => {
     await Promise.all(runtimes.map((runtime) => runtime.settled()));
     await Promise.all([...outboxes].map((outbox) => outbox.settle()));
     await host.close();
-    try {
-      await client.dispose();
-    } catch (error) {
+    await client.dispose().catch(async (error) => {
       await clientManager.close();
       throw error;
-    }
+    });
     await server.close();
     restore();
   });
@@ -440,12 +436,10 @@ export default pattern<{ prompt: ${scopeType}<Writable<string>> }, { output: any
           await Promise.all(runtimes.map((runtime) => runtime.settled()));
           cancelPeer?.();
           cancel();
-          try {
-            await peer.dispose();
-          } catch (error) {
+          await peer.dispose().catch(async (error) => {
             await manager.close();
             throw error;
-          }
+          });
         }
       });
     }
