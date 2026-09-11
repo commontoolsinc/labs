@@ -4,6 +4,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [2026-09-server-execution-topics-verification-baseline.md](development/performance/2026-09-server-execution-topics-verification-baseline.md) — initial six-recommendation campaign verification at e059494c45 and 83ee6cf73f: typed-index seed correctness in both arms, an admitted-event replica visibility gap, terminal sync and grace causality, linear watch maintenance, and repeated sidecar resolution; latency and implementation gates remain open.
 - [2026-09-10-lunch-poll-read-baseline.md](development/performance/2026-09-10-lunch-poll-read-baseline.md) — controlled A0 baseline with 14 options, eight same-space voters, 74 keyed votes, continuous headless UI demand, and per-action read counts.
 - [2026-09-10-read-accounting-probes.md](development/performance/2026-09-10-read-accounting-probes.md) — disabled-probe comparison for initial reactive action read accounting: five alternating control/candidate windows over 1,000 lazy-view elements, and the limits of the lunch-poll functional smoke check.
 - [coverage-status-audit-2026-09-09.md](plans/server-execution-v2/optimize/coverage-status-audit-2026-09-09.md) — OW28 landing-provenance and coverage-status audit at `16de7e0c87`: the preserved compile-and-run port and its end-to-end test were omitted from #6096 despite the completion claim; current writeback refusal and an OFF-path program-proxy cache collision reproduced, with OW18, OW30, OW31, OW55, OW56, OW58, OW60, and rollout statements reconciled against current source and focused suites.
@@ -62,6 +63,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [pattern-update-open-argument-investigation.md](plans/pattern-update-open-argument-investigation.md) — why the open-argument update class went unvalidated on the repair path, and the correction of an earlier measurement that named the wrong mechanism, July 2026.
 
 ## Executed plans and work orders
+
+- [Initial server-execution topics campaign ledger](plans/server-execution-topics-campaign-initial-ledger.md) — 2026-09-09 verification snapshot; the six-recommendation campaign remains active.
 
 - [cli-surface-implementation.md](plans/cli-surface-implementation.md) — the execution plan for steps 4 through 7 of the CLI surface shape, August 2026: positional addresses and the `#argument` suffix, the top-level data names, the dated deprecation window that retired the piece-mounted spellings, and Stage 4's five merges, which resolved as naming rather than merging once each command was put under the noun it acts on.
 - [cli-surface-shape-step-10-2026-08-31.md](plans/cli-surface-shape-step-10-2026-08-31.md) — executing step 10 of the CLI surface shape (the verb opens the callable's section and `--` closes it), August 2026: a documentation sweep of twenty-one files against an estimate of twelve, because the estimating pattern used `\b` for a word boundary and on that machine `git grep -E` matched nothing with it — indistinguishably from a true count of nothing, and one command away from a `grep -E` on which the same pattern works; carries the measurements, and the trade the step made, retiring the read options' pre-positional spelling on all six reading commands in exchange for a post-positional one that works on all six.
