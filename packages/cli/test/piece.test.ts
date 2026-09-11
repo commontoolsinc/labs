@@ -55,6 +55,7 @@ import {
   inspectPiece,
   listPieces,
   newPiece,
+  type PieceConfig,
   PieceResultProjectionError,
   PieceVerbReadError,
   recreateSpaceRootPattern,
@@ -1595,6 +1596,13 @@ describe("cli piece parsing", () => {
       { selection: { filter } },
       {
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
         resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
         deriveSelectedValue: (runtime, space, source, selection) => {
           expect(runtime).toBe(controller.runtime as any);
@@ -1628,6 +1636,13 @@ describe("cli piece parsing", () => {
       { selection: { filter: parseSelectionFilter(".active") } },
       {
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
         resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
         deriveSelectedValue: () => Promise.reject(selectionError),
       },
@@ -1668,6 +1683,13 @@ describe("cli piece parsing", () => {
       { selection: { filter: parseSelectionFilter(".active") } },
       {
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
         resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
         deriveSelectedValue: () =>
           Promise.reject(
@@ -1700,6 +1722,18 @@ describe("cli piece parsing", () => {
     };
     const deps = {
       loadPieces: () => Promise.resolve(controller as any),
+      loadPieceForRead: (
+        _pieces: unknown,
+        id: string,
+        step: boolean,
+        scope: PieceConfig["pieceScope"],
+      ) =>
+        (controller.get as (...args: unknown[]) => Promise<never>)(
+          id,
+          step,
+          undefined,
+          scope,
+        ),
       resolvePieceAddress: (_pieces: any, id: string) => Promise.resolve(id),
     };
     const options = {
@@ -1751,6 +1785,18 @@ describe("cli piece parsing", () => {
     };
     const deps = {
       loadPieces: () => Promise.resolve(controller as any),
+      loadPieceForRead: (
+        _pieces: unknown,
+        id: string,
+        step: boolean,
+        scope: PieceConfig["pieceScope"],
+      ) =>
+        (controller.get as (...args: unknown[]) => Promise<never>)(
+          id,
+          step,
+          undefined,
+          scope,
+        ),
       resolvePieceAddress: (_pieces: any, id: string) => Promise.resolve(id),
     };
 
@@ -1890,6 +1936,13 @@ describe("cli piece parsing", () => {
       { step: true },
       {
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
         resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
       },
     );
@@ -1969,6 +2022,13 @@ describe("cli piece parsing", () => {
       { step: true, input: true },
       {
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
         resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
       },
     );
@@ -2048,6 +2108,13 @@ describe("cli piece parsing", () => {
       { step: true },
       {
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
         resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
       },
     );
@@ -2091,6 +2158,13 @@ describe("cli piece parsing", () => {
       {
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
       },
     ).catch((error) => error);
     expect(error).toBeInstanceOf(PieceResultProjectionError);
@@ -2120,6 +2194,13 @@ describe("cli piece parsing", () => {
       {
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
       },
     )).resolves.toBeUndefined();
   });
@@ -2159,6 +2240,13 @@ describe("cli piece parsing", () => {
       {
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
       },
     )).rejects.toThrow(PieceResultProjectionError);
   });
@@ -2183,6 +2271,13 @@ describe("cli piece parsing", () => {
       {
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
       },
     )).rejects.toThrow("network unreachable");
   });
@@ -2212,6 +2307,13 @@ describe("cli piece parsing", () => {
       {
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
       },
     )).resolves.toBeUndefined();
   });
@@ -2275,6 +2377,7 @@ describe("cli piece parsing", () => {
     };
 
     const guardDeps = (piece: unknown) => ({
+      loadPieceForRead: () => Promise.resolve(piece as never),
       resolvePieceAddress: (_pieces: unknown, id: string) =>
         Promise.resolve(id),
       loadPieces: () =>

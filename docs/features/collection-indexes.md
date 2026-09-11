@@ -112,6 +112,12 @@ confirmations are ignored.
 
 ## Work and limitations
 
+Member setup watches retain Cell references to the selector result, source
+element, shared descriptor, and maintenance records. Each member resolves its
+selector and reads the concrete maintenance slots it needs; setting up one member
+does not materialize every bucket through its input schema. Selector reads remain
+reactive, including omitted keys.
+
 Membership reconciliation scans source occurrence identities. `groupBy` writes
 one member entry and uses a cached occurrence order to locate its published
 slot. Unchanged slots retain their original source links. Copying the order and

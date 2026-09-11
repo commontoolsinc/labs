@@ -81,11 +81,10 @@ describe("relaxDefaultedRequired", () => {
     });
   });
 
-  it("relaxes a default the subtree's own $defs scope provides", () => {
-    // A subtree that declares its own `$defs` opens a new local-ref scope
-    // (`cfcSchemaChildRoot`), so its refs must resolve against ITS definitions,
-    // not the document root's. The outer decoy definition carries no default:
-    // resolving in the wrong scope leaves `mode` required and refuses `{}`.
+  it("keeps a property required whose `$ref` names a document definition without a default, whatever the subtree's own `$defs` say", () => {
+    // `#/$defs/Mode` names the document root's definition; the `$defs` on the
+    // property is inert below it. The root's `Mode` carries no default, so
+    // `mode` stays required and `{}` is refused.
 
     expect(relaxedValidationError({}, {
       type: "object",
@@ -97,19 +96,15 @@ describe("relaxDefaultedRequired", () => {
       },
       required: ["mode"],
       $defs: { Mode: { type: "number" } },
-    })).toBeUndefined();
+    })).toBeDefined();
   });
 
-  describe("a nested object's own $defs scope", () => {
-    // The recursion threads each level's own scope (`cfcSchemaChildRoot`), so a
-    // property `$ref` beneath a NESTED object's own `$defs` resolves against
-    // that pool. Passing the outer root at every level — the previous behavior
-    // — missed the nested pool's default, left `mode` required, and the gate
-    // refused `{ opts: {} }` ("opts: missing required property mode") for a
-    // payload runtime materialization accepts and defaults (review repro on the
-    // D5/D6 PR).
+  describe("a nested object's own $defs", () => {
+    // The recursion threads the document root through every level, so a
+    // property `$ref` beneath a nested object resolves against the root's
+    // `$defs`; a `$defs` the nested object declares is inert.
 
-    it("relaxes a defaulted-required behind a nested object's own $defs", () => {
+    it("relaxes a defaulted-required behind a nested object's ref into the root's $defs", () => {
       expect(relaxedValidationError({ opts: {} }, {
         type: "object",
         properties: {
@@ -117,14 +112,14 @@ describe("relaxDefaultedRequired", () => {
             type: "object",
             properties: { mode: { $ref: "#/$defs/Mode" } },
             required: ["mode"],
-            $defs: { Mode: { type: "string", default: "fast" } },
           },
         },
         required: ["opts"],
+        $defs: { Mode: { type: "string", default: "fast" } },
       })).toBeUndefined();
     });
 
-    it("resolves a nested scope's ref in its own pool, not a decoy outer one", () => {
+    it("keeps a nested object's property required when only the nested object's own $defs define its ref", () => {
       expect(relaxedValidationError({ opts: {} }, {
         type: "object",
         properties: {
@@ -136,10 +131,25 @@ describe("relaxDefaultedRequired", () => {
           },
         },
         required: ["opts"],
-        // Same name in the document root, WITHOUT a default: resolving in the
-        // wrong scope would keep `mode` required and refuse the payload.
+      })).toBeDefined();
+    });
+
+    it("resolves a nested object's ref against the root's $defs when the root declares one", () => {
+      expect(relaxedValidationError({ opts: {} }, {
+        type: "object",
+        properties: {
+          opts: {
+            type: "object",
+            properties: { mode: { $ref: "#/$defs/Mode" } },
+            required: ["mode"],
+            $defs: { Mode: { type: "string", default: "fast" } },
+          },
+        },
+        required: ["opts"],
+        // Same name in the document root, WITHOUT a default: that is the
+        // definition the ref names, so `mode` stays required.
         $defs: { Mode: { type: "number" } },
-      })).toBeUndefined();
+      })).toBeDefined();
     });
   });
 
@@ -339,14 +349,23 @@ describe("localRefTarget", () => {
     )).toEqual(target);
   });
 
-  it("resolves inside the scope a subtree's own $defs opens", () => {
-    const inner = { type: "string", default: "fast" } as const;
+  it("resolves against the root's $defs rather than the subtree's own", () => {
+    const rootDefinition = { type: "number" } as const;
     expect(localRefTarget(
       {
         $ref: "#/$defs/Mode",
-        $defs: { Mode: inner },
+        $defs: { Mode: { type: "string", default: "fast" } },
       } as JSONSchema,
-      { $defs: { Mode: { type: "number" } } } as JSONSchema,
-    )).toEqual(inner);
+      { $defs: { Mode: rootDefinition } } as JSONSchema,
+    )).toEqual(rootDefinition);
+  });
+
+  it("returns the schema itself when its ref names no root definition, whatever $defs it declares", () => {
+    const unresolvable = {
+      $ref: "#/$defs/Mode",
+      $defs: { Mode: { type: "string", default: "fast" } },
+    } as JSONSchema;
+    expect(localRefTarget(unresolvable, { type: "object" } as JSONSchema))
+      .toBe(unresolvable);
   });
 });

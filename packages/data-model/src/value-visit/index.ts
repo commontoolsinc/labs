@@ -13,8 +13,8 @@
 
 export * from "./interface.ts";
 export { BaseValueVisitor } from "./BaseValueVisitor.ts";
-export { ContainerIteratingVisitor } from "./ContainerIteratingVisitor.ts";
-export { EmptyValueVisitor } from "./EmptyValueVisitor.ts";
+export { ContainerIteratingValueVisitor } from "./ContainerIteratingValueVisitor.ts";
+export { NopValueVisitor } from "./NopValueVisitor.ts";
 
 export {
   makeVisitFabricValueFunction,

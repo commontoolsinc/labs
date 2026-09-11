@@ -28,7 +28,7 @@
 import type { JSONSchema } from "@commonfabric/api";
 import type { PiecePatternRef } from "@commonfabric/piece/ops";
 import {
-  cfcSchemaChildRoot,
+  cfcSchemaResolvedRoot,
   resolveCfcSchemaRefs,
 } from "@commonfabric/runner/cfc";
 import { isObjectOrArray, isPlainObject } from "@commonfabric/utils/types";
@@ -95,7 +95,9 @@ function resolveDeclaredRoot(
   if (!isObjectOrArray(declared)) return undefined;
   return {
     declared,
-    root: cfcSchemaChildRoot(declared as JSONSchema, schema as JSONSchema),
+    root: typeof schema.$ref === "string"
+      ? cfcSchemaResolvedRoot(declared as JSONSchema, schema as JSONSchema)
+      : schema as JSONSchema,
   };
 }
 
