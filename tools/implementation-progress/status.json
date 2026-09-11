@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-11T12:26:09.201571+00:00",
+  "updated": "2026-09-11T12:29:32.690586+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7307",
@@ -24,8 +24,10 @@
     "#7304 merged as c0454ab24e after all 69 exact-head checks, zero issues in the full nine-file Cubic rereview, and clean antagonistic review.",
     "D3 local validation: 1,431 runner tests / 8,923 steps; 46 type groups; 599 documentation blocks; history index, formatting, lint, and six exact reuse/control benchmark counts pass. Antagonistic review is clean.",
     "#7282 merged as be92af0510 after all 69 exact-head checks, zero-issue Cubic review, and clean antagonistic review; all six scale assertions pass.",
+    "#7327 merged as b135f7f067ca8112ac7bf6f638b9511b26361944: all current-head CI gates succeeded or were skipped; Cubic run 103250197793 reported zero issues on dae8319a23; antagonistic review was clean. All nine measurement cases and the forced-disposal cleanup control passed.",
     "#7308 merged as e435590cf4c94c91a32260315efe1eedc5e66a7b: all 69 reviewed-head checks succeeded or were skipped, with clean Cubic and antagonistic review. C2 uses its session-restoration/reconnect acceptance evidence.",
-    "#7312 merged as c00a2581f13b3183986f4d30c6d4ad86e28a34ab: all 69 reviewed-head checks succeeded or were skipped, with clean Cubic and antagonistic review. C2 uses its session-restoration/reconnect acceptance evidence."
+    "#7312 merged as c00a2581f13b3183986f4d30c6d4ad86e28a34ab: all 69 reviewed-head checks succeeded or were skipped, with clean Cubic and antagonistic review. C2 uses its session-restoration/reconnect acceptance evidence.",
+    "#7329 merged as 593c341b27a8baff681374bd01b3125a70ffeca8: all 69 exact-head checks succeeded or were skipped; Cubic run 103258387302 reported zero issues on 9e28f27015; antagonistic review was clean. Client remote-row identity and narrow-invalidation acceptance is landed."
   ],
   "stages": [
     {
@@ -104,7 +106,7 @@
       "id": "C3",
       "title": "Remote row invalidation",
       "status": "active",
-      "detail": "Inline-element dependency fix landed in #7265 with four browser cases and narrow invalidation tests. Remaining acceptance checks and production workaround removal stay open."
+      "detail": "Client identity and narrow-invalidation acceptance is in PR #7329: edits to either row preserve both normalized output links and producer IDs, rerun the edited producer, and leave the untouched producer idle. Serving-host producer counts remain separate acceptance work."
     },
     {
       "id": "C4",
@@ -145,8 +147,8 @@
     {
       "id": "E1",
       "title": "Computed versus lift measurements",
-      "status": "review",
-      "detail": "PR #7327 implements and validates the computed/broad-lift/narrow-lift comparison at 32/128/512 linked rows. The report and reproduction command are linked from the implementation tracker. CI and Cubic review govern landing."
+      "status": "done",
+      "detail": "Merged #7327: validated computed/broad-lift/narrow-lift measurements at 32/128/512 linked rows, with unread-field edits and a reproducible command."
     },
     {
       "id": "E2",
