@@ -515,6 +515,31 @@ describe("JavaScript-node data unavailability", () => {
     expectUnavailable(output, "pending");
   });
 
+  it("does not preflight an object property excluded by the schema", async () => {
+    let calls = 0;
+    const output = await runValueNode({
+      argument: {
+        value: {
+          selected: 41,
+          excluded: DataUnavailable.pending(),
+        },
+      },
+      argumentSchema: {
+        type: "object",
+        properties: { selected: { type: "number" } },
+        required: ["selected"],
+        additionalProperties: false,
+      },
+      implementation: (value: { selected: number }) => {
+        calls++;
+        return value.selected + 1;
+      },
+    });
+
+    expect(calls).toBe(1);
+    expect(output).toBe(42);
+  });
+
   it("does not duplicate an ordinary linked target's effective read", async () => {
     const target = runtime.getCell<number>(
       space,
@@ -552,7 +577,7 @@ describe("JavaScript-node data unavailability", () => {
       isReadIgnoredForCommit(read.meta) &&
       isInternalVerifierRead(read.meta)
     );
-    expect(verifierReads).toHaveLength(3);
+    expect(verifierReads).toHaveLength(1);
   });
 
   it("does not traverse opaque guard operands below their root", async () => {

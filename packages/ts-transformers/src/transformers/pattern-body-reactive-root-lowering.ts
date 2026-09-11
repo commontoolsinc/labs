@@ -64,6 +64,10 @@ const KNOWN_PATH_TERMINAL_METHODS = new Set([
   "minByWithPattern",
   "maxBy",
   "maxByWithPattern",
+  "groupBy",
+  "groupByWithPattern",
+  "keyBy",
+  "keyByWithPattern",
 
   "filterWithPattern",
   "flatMapWithPattern",

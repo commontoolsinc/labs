@@ -128,7 +128,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-fab` | Morphing floating action button that expands into a panel | |
 | `cf-field` | Labeled field wrapper: muted label, optional required/error/help text (see [cf-field](#cf-field)) | |
 | `cf-file-download` | File download button (encapsulates blob/anchor download) | `$data`, `$filename` |
-| `cf-file-input` | Generic file upload | |
+| `cf-file-input` | Generic file upload to the space's blob store (see [files](../capabilities/files.md)) | |
 | `cf-form` | Transactional form wrapper buffering field writes until submit (see [cf-form](#cf-form)) | |
 | `cf-fragment` | Transparent wrapper element (`display: contents`) | |
 | `cf-google-oauth` | Google OAuth login (wrapper over `cf-oauth`) | `$auth` |

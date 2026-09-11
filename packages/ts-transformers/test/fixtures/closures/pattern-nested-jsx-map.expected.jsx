@@ -251,11 +251,11 @@ export default pattern((__cf_pattern_input) => {
                 }]
         } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
-                    type: "array",
-                    items: {}
-                }, {
                     type: "object",
                     properties: {}
+                }, {
+                    type: "array",
+                    items: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, hasItems, items.mapWithPattern(__cfPattern_2, {}), <p>No items</p>)}
       </div>),

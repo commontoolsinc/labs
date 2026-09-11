@@ -78,23 +78,6 @@ import {
 
 const logger = getLogger("schema-view", { enabled: false, level: "warn" });
 
-const unavailableInputScans = new WeakMap<object, number>();
-
-/** Runs a schema-view walk which must observe unresolved optional children. */
-export function withUnavailableInputSchemaViewScan<T>(
-  tx: IExtendedStorageTransaction,
-  operation: () => T,
-): T {
-  unavailableInputScans.set(tx, (unavailableInputScans.get(tx) ?? 0) + 1);
-  try {
-    return operation();
-  } finally {
-    const remaining = (unavailableInputScans.get(tx) ?? 1) - 1;
-    if (remaining === 0) unavailableInputScans.delete(tx);
-    else unavailableInputScans.set(tx, remaining);
-  }
-}
-
 /**
  * Thrown when a reader touches data the schema does not describe.
  *
@@ -183,7 +166,7 @@ const EXCLUDED_REJECTED: JSONSchema = Object.freeze({
   $comment: "rejectedProperty",
 });
 
-const isExcluded = (schema: JSONSchema): boolean =>
+export const isSchemaViewExcluded = (schema: JSONSchema): boolean =>
   isObjectOrArray(schema) &&
   (schema.$comment === "emptyProperties" ||
     schema.$comment === "missingProperty" ||
@@ -366,7 +349,8 @@ const requiredKeys = (schema: JSONSchema | undefined): readonly string[] =>
     ? schema.required as string[]
     : [];
 
-const childSchema = (
+/** Returns the child schema a lazy schema view applies at `key`. */
+export const schemaViewChildSchema = (
   schema: JSONSchema | undefined,
   key: string,
 ): JSONSchema => {
@@ -603,7 +587,7 @@ export function materializeSchemaView(
   }
 
   for (const key of requiredKeys(schema)) {
-    const narrowed = childSchema(schema, key);
+    const narrowed = schemaViewChildSchema(schema, key);
     if (!Object.hasOwn(value, key)) {
       // A declared default stands in for an absent required key, exactly as it
       // does for an eager read.
@@ -615,7 +599,7 @@ export function materializeSchemaView(
     // `required` says the result has to hold it. An eager read voids the whole
     // object here rather than dropping the property, which is what it does for
     // the same schema on an optional one.
-    if (isExcluded(narrowed)) {
+    if (isSchemaViewExcluded(narrowed)) {
       return mismatch(
         `required property ${JSON.stringify(key)} is not selected`,
       );
@@ -640,12 +624,14 @@ const visibleKeys = (
   value: Record<string, FabricValue>,
 ): string[] => {
   const keys = Object.keys(value).filter((key) =>
-    !isExcluded(childSchema(schema, key))
+    !isSchemaViewExcluded(schemaViewChildSchema(schema, key))
   );
   if (isObjectOrArray(schema) && isObjectOrArray(schema.properties)) {
     for (const key of Object.keys(schema.properties)) {
       if (Object.hasOwn(value, key)) continue;
-      if (declaredDefault(childSchema(schema, key)) === undefined) {
+      if (
+        declaredDefault(schemaViewChildSchema(schema, key)) === undefined
+      ) {
         continue;
       }
       keys.push(key);
@@ -733,8 +719,8 @@ function createObjectView(
   const schema = link.schema;
   const required = new Set(requiredKeys(schema));
   const resolveChild = (key: string): unknown => {
-    const narrowed = childSchema(schema, key);
-    if (isExcluded(narrowed)) return undefined;
+    const narrowed = schemaViewChildSchema(schema, key);
+    if (isSchemaViewExcluded(narrowed)) return undefined;
     if (!Object.hasOwn(value, key)) {
       // Register the read even though there is nothing there. An absent key is
       // usually a computed that has not produced yet, and the reader has to run
@@ -767,11 +753,6 @@ function createObjectView(
       return readChild(runtime, tx, link, key, narrowed, cfcLabelView, synced);
     } catch (error) {
       if (!isSchemaMismatchError(error)) throw error;
-      if (
-        isUnresolvedInputError(error) && unavailableInputScans.has(tx)
-      ) {
-        throw error;
-      }
       // The view asked for this read and the view is answering for it, so the
       // refusal never reaches the reader and must not survive on the
       // transaction. The read it registered does survive, which is what brings
@@ -861,7 +842,7 @@ function createArrayView(
   const resolveElement = (index: number): unknown => {
     const key = String(index);
     const item = value[index];
-    const itemSchema = childSchema(schema, key);
+    const itemSchema = schemaViewChildSchema(schema, key);
     const slotLink: NormalizedFullLink = {
       ...link,
       path: [...link.path, key],

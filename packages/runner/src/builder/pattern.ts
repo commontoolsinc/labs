@@ -44,7 +44,7 @@ import {
 } from "./builtin-replayability.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
 import { toJSONMethod } from "./json-member.ts";
-import { applyInputIfcToOutput, connectInputAndOutputs } from "./node-utils.ts";
+import { connectInputAndOutputs } from "./node-utils.ts";
 import { brandTrustedPattern, noteDerivedCopy } from "./pattern-metadata.ts";
 import { reactive } from "./reactive.ts";
 import {
@@ -181,8 +181,6 @@ export function pattern<T, R>(
       inputs as Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
     );
 
-    applyInputIfcToOutput(inputs, outputs);
-
     result = factoryFromPattern<T, R>(
       argumentSchema,
       resultSchema,
@@ -299,8 +297,6 @@ function factoryFromPattern<T, R>(
     });
   inputs = collectCellsAndNodes(inputs);
   outputs = collectCellsAndNodes(outputs);
-
-  applyInputIfcToOutput(inputs, outputs);
 
   // Fill in reasonable names for all cells, where possible:
 

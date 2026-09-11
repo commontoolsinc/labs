@@ -53,7 +53,9 @@ export function shouldRewriteCollectionMethod(
   if (
     methodName !== "map" && methodName !== "filter" &&
     methodName !== "flatMap" &&
-    methodName !== "count" && methodName !== "minBy" && methodName !== "maxBy"
+    methodName !== "count" && methodName !== "minBy" &&
+    methodName !== "maxBy" &&
+    methodName !== "groupBy" && methodName !== "keyBy"
   ) {
     return false;
   }

@@ -129,7 +129,9 @@ export type ArrayMethodFamilyName =
   | "flatMap"
   | "count"
   | "minBy"
-  | "maxBy";
+  | "maxBy"
+  | "groupBy"
+  | "keyBy";
 
 export interface ArrayMethodAccessKind {
   readonly family: ArrayMethodFamilyName;
@@ -149,6 +151,10 @@ const ARRAY_METHOD_ACCESS_BY_NAME = new Map<string, ArrayMethodAccessKind>([
   ["minByWithPattern", { family: "minBy", lowered: true }],
   ["maxBy", { family: "maxBy", lowered: false }],
   ["maxByWithPattern", { family: "maxBy", lowered: true }],
+  ["groupBy", { family: "groupBy", lowered: false }],
+  ["groupByWithPattern", { family: "groupBy", lowered: true }],
+  ["keyBy", { family: "keyBy", lowered: false }],
+  ["keyByWithPattern", { family: "keyBy", lowered: true }],
 ]);
 
 function getArrayMethodAccessKindByName(
