@@ -22,7 +22,7 @@ export const PROFILE_DIRECTORY_PREFIX = "integration-browser-";
 // Wrapper around `@astral/astral`'s `Browser`.
 //
 // Each browser keeps its profile in a temporary directory of its own, which
-// `close()` removes once the browser and everything it started has exited. A
+// `close()` removes after the browser exits and its output streams end. A
 // browser nothing closes leaves that directory behind, so a caller holds one
 // for as long as it holds the browser.
 export class Browser {
@@ -123,8 +123,8 @@ export class Browser {
       });
       return new Browser(process, profileDir, { timeout });
     } catch (error) {
-      // A launch that threw has stopped whatever it started, and hands back no
-      // browser for anyone to close the directory with. The launch failure is
+      // A failed launch completes its process and output cleanup, and hands
+      // back no browser for anyone to close the directory with. The failure is
       // the diagnosis, so a removal that fails as well is carried alongside it
       // rather than in its place.
       try {

@@ -71,6 +71,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Executed plans and work orders
 
+- [server-pattern-verbs-seed.md](plans/server-pattern-verbs-seed.md) — the seed that recorded the ruled 2026-08-24 direction for the pattern lifecycle verbs as server calls, executed September 2026 for `upload` and `instantiate`, which run on the space's serving runtime under `EXPERIMENTAL_SERVER_EXECUTION` with `cf` requesting them, while `setsrc` stays client-side because a source update's module authority needs a transaction that commits to storage itself; the live contract is `docs/features/server-pattern-lifecycle.md`.
 - [read-cost-budgets.md](plans/read-cost-budgets.md) — completed A3 plan for opt-in pattern-test read budgets, transaction-attempt coverage, failure diagnostics, and executable pass/fail demonstrations; shipped in #7257, September 2026.
 
 - [cli-surface-implementation.md](plans/cli-surface-implementation.md) — the execution plan for steps 4 through 7 of the CLI surface shape, August 2026: positional addresses and the `#argument` suffix, the top-level data names, the dated deprecation window that retired the piece-mounted spellings, and Stage 4's five merges, which resolved as naming rather than merging once each command was put under the noun it acts on.
@@ -155,6 +156,10 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [pr3154-review-guide.md](specs/ts-transformer/pr3154-review-guide.md) — reviewer entrypoint for the shipped PR-3154 transformer architecture.
 
 ## Investigations, journals, and working notes
+
+- [Browser process-group teardown follow-up, 2026-09-11](development/browser-process-group-teardown-2026-09-11.md) — Orphan renderers retaining browser pipes, explicit process-group ownership, and cleanup regression validation.
+
+- [Browser teardown investigation, 2026-09-11](development/browser-teardown-investigation-2026-09-11.md) — Current Chrome, detached Crashpad/updater pipe holders, controlled descriptor reproduction, and ON/OFF prototype validation.
 
 - [Scoped snapshot memo verification](development/performance/2026-09-10-scoped-snapshot-memo.md) — D3 metadata/epoch isolation regressions and exact label-view reuse counts at three sizes.
 
