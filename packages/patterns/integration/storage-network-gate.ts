@@ -81,7 +81,10 @@ export class StorageNetworkGate {
       peer.addEventListener("close", () => {
         this.#sockets.delete(peer);
         const other = peer === socket ? upstream : socket;
-        if (other.readyState === WebSocket.OPEN) other.close();
+        if (
+          other.readyState === WebSocket.CONNECTING ||
+          other.readyState === WebSocket.OPEN
+        ) other.close();
       }, { once: true });
     }
     socket.addEventListener("message", (event) => {
