@@ -2,8 +2,9 @@
  * Pattern test for the topic workbench: the topic header reads through the
  * narrow view, sessions come off the connector index newest first with
  * deleted rows dropped, a session naming the topic is offered as related,
- * attach is idempotent and joins the live row, detach removes it, and the
- * spawn command composes from the picked checkout and prompt.
+ * attach is idempotent and joins the live row, detach removes it, the
+ * spawn command composes from the picked checkout and prompt, and a start
+ * sends the connector a `start` command and attaches the session it named.
  */
 import {
   action,
@@ -17,9 +18,15 @@ import {
 } from "commonfabric";
 import Workbench, {
   type Attachment,
+  type CommandValue,
   type SessionIndexView,
   type TopicView,
 } from "./main.tsx";
+
+/** The first queued command, decoded; `null` when the queue is empty. */
+// deno-lint-ignore no-explicit-any
+const firstCommand = (queued: readonly CommandValue[]): any =>
+  JSON.parse(queued[0] ?? "null");
 
 export default pattern(() => {
   const topic = new Writable<TopicView>({
@@ -43,6 +50,11 @@ export default pattern(() => {
   // reads the same shallow fields either way.
   const index = new Writable<SessionIndexView>({
     schema: "commonfabric.agent-connector.session-index",
+    ownerDid: "did:key:owner",
+    sources: [
+      { id: "codex", driver: "codex-app-server" },
+      { id: "claude", driver: "claude-agent-sdk" },
+    ],
     sessions: [
       {
         sourceId: "claude",
@@ -87,7 +99,8 @@ export default pattern(() => {
     checkouts: [{ root: "/w/labs", branch: "main" }],
   });
   const attached = new Writable<Attachment[] | Default<[]>>([]);
-  const wb = Workbench({ topic, sessions: index, attached });
+  const commands = new Writable<CommandValue[] | Default<[]>>([]);
+  const wb = Workbench({ topic, sessions: index, attached, commands });
 
   const assert_header = assert(() =>
     wb[NAME] === "Workbench: Workbench topic" &&
@@ -161,6 +174,34 @@ export default pattern(() => {
     )
   );
 
+  // A start sends one `start` command for the Claude source, named after the
+  // topic and carrying the kickoff, and attaches the session it minted.
+  const action_start = action(() => {
+    wb.startSession.send();
+  });
+  const assert_start_command = assert(() =>
+    commands.get().length === 1 &&
+    firstCommand(commands.get())?.schema ===
+      "commonfabric.agent-connector.command" &&
+    firstCommand(commands.get())?.ownerDid === "did:key:owner" &&
+    firstCommand(commands.get())?.type === "start" &&
+    firstCommand(commands.get())?.sourceId === "claude" &&
+    /^[0-9a-f-]{36}$/.test(
+      firstCommand(commands.get())?.nativeSessionId ?? "",
+    ) &&
+    firstCommand(commands.get())?.payload?.cwd === "/w/labs" &&
+    firstCommand(commands.get())?.payload?.title ===
+      "topic #7: Workbench topic" &&
+    firstCommand(commands.get())?.payload?.text === wb.kickoff
+  );
+  const assert_start_attached = assert(() =>
+    wb.attachedSessions.length === 2 &&
+    wb.attachedSessions[1]?.nativeSessionId ===
+      firstCommand(commands.get())?.nativeSessionId &&
+    wb.attachedSessions[1]?.title === "topic #7: Workbench topic" &&
+    wb.attachedSessions[1]?.sourceId === "claude"
+  );
+
   return {
     [NAME]: "Topic workbench test",
     [UI]: wb[UI],
@@ -178,6 +219,9 @@ export default pattern(() => {
       { assertion: assert_detached },
       { action: action_compose_spawn },
       { assertion: assert_spawn_command },
+      { action: action_start },
+      { assertion: assert_start_command },
+      { assertion: assert_start_attached },
     ],
   };
 });
