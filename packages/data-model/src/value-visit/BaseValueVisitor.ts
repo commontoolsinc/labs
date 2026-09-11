@@ -99,7 +99,7 @@ export abstract class BaseValueVisitor<
 
   /** @inheritDoc */
   abstract visitedMapping(
-    container: FabricPlainObject | FabricInstance,
+    container: FabricPlainObject,
     key: DomainFor<DomainExtra>,
     value: DomainFor<DomainExtra>,
   ): BaselineVisitResult<ResultType>;

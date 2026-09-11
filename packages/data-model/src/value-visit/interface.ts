@@ -320,7 +320,7 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
    * container and is called _after_ the mapping itself was directly visited.
    */
   visitedMapping(
-    container: FabricPlainObject | FabricInstance,
+    container: FabricPlainObject,
     key: DomainFor<DomainExtra>,
     value: DomainFor<DomainExtra>,
   ): BaselineVisitResult<ResultType>;
