@@ -1138,6 +1138,50 @@ describe("console/server", () => {
       );
     });
 
+    it("answers 400 for an input cell whose name is already a connector grant", async () => {
+      // The caller cannot see the console's grants, so the refusal names the
+      // connection the colliding grant came from rather than only the word.
+
+      const granted = new ConsoleServer(
+        await resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+          ],
+          {
+            CF_HARNESS_CONNECTOR_GRANTS: JSON.stringify([{
+              name: "email",
+              ref: `/${CELL_ID}`,
+              source: {
+                connection: "gmail-work",
+                piece: "cf-gmail-messages--gmail-work",
+              },
+            }]),
+          },
+          "/console",
+        ),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: answeringLoop,
+            now: advancingClock(),
+            onEvent,
+          }),
+      );
+      const response = await granted.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [{ name: "email", ref: `/${CELL_ID}/days` }],
+      }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "inputCells names `email`, which is already this console's grant for the `gmail-work` connector handle",
+      );
+    });
+
     it("starts a task that names no input cells at all", async () => {
       const started = await startTask({
         text: "track my books",
@@ -1650,6 +1694,153 @@ describe("console/server", () => {
       expect(response.status).toBe(404);
       expect((await response.json()).error).toContain(
         "started without a pattern index",
+      );
+    });
+  });
+
+  describe("POST /api/index/feedback", () => {
+    /** Posts one verdict at a server that has an index. */
+    const vote = async (
+      indexed: { server: ConsoleServer },
+      body: unknown,
+    ): Promise<Response> =>
+      await indexed.server.handle(
+        jsonRequest("/api/index/feedback", body),
+      );
+
+    it("records an up verdict as a thumbs_up under the server's own identity", async () => {
+      const indexed = await indexServer([Response.json({ ok: true })]);
+
+      const response = await vote(indexed, {
+        patternId: "ss-2w4nQ8",
+        verdict: "up",
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        patternId: "ss-2w4nQ8",
+        eventType: "thumbs_up",
+        recordedBy: signer.did(),
+      });
+      expect(indexed.requests[0].url).toBe(
+        "https://index.test/api/recordEvent",
+      );
+      expect(JSON.parse(indexed.requests[0].body)).toEqual({
+        patternId: "ss-2w4nQ8",
+        eventType: "thumbs_up",
+      });
+    });
+
+    it("records a down verdict as a thumbs_down", async () => {
+      const indexed = await indexServer([Response.json({ ok: true })]);
+
+      const response = await vote(indexed, {
+        patternId: "ss-2w4nQ8",
+        verdict: "down",
+      });
+
+      expect(response.status).toBe(200);
+      expect((await response.json()).eventType).toBe("thumbs_down");
+      expect(JSON.parse(indexed.requests[0].body)).toEqual({
+        patternId: "ss-2w4nQ8",
+        eventType: "thumbs_down",
+      });
+    });
+
+    it("answers 400 for a verdict the index has no event for", async () => {
+      const indexed = await indexServer([]);
+
+      // `constructor` is the one that passes an unguarded lookup on the
+      // verdict map, so it stands beside the ordinary misspellings.
+      for (const verdict of ["sideways", "thumbs_up", "constructor", "", 1]) {
+        const response = await vote(indexed, {
+          patternId: "ss-2w4nQ8",
+          verdict,
+        });
+        expect(response.status).toBe(400);
+        expect((await response.json()).error).toBe(
+          'verdict must be "up" or "down"',
+        );
+      }
+      expect(indexed.requests).toEqual([]);
+    });
+
+    it("answers 400 for a body that names no pattern", async () => {
+      const indexed = await indexServer([]);
+
+      for (const patternId of [undefined, "", 7]) {
+        const response = await vote(indexed, { patternId, verdict: "up" });
+        expect(response.status).toBe(400);
+        expect((await response.json()).error).toBe("patternId is required");
+      }
+      expect(indexed.requests).toEqual([]);
+    });
+
+    it("answers 400 for a body that is not JSON", async () => {
+      const indexed = await indexServer([]);
+
+      const response = await indexed.server.handle(
+        new Request("http://127.0.0.1:8100/api/index/feedback", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "not json",
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe("request body is not JSON");
+      expect(indexed.requests).toEqual([]);
+    });
+
+    it("answers 400 for a JSON body that is not an object", async () => {
+      const indexed = await indexServer([]);
+
+      const response = await vote(indexed, "ss-2w4nQ8");
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe("patternId is required");
+      expect(indexed.requests).toEqual([]);
+    });
+
+    it("answers 503 when the server was started without an index", async () => {
+      const response = await server.handle(
+        jsonRequest("/api/index/feedback", {
+          patternId: "ss-2w4nQ8",
+          verdict: "up",
+        }),
+      );
+
+      expect(response.status).toBe(503);
+      expect((await response.json()).error).toContain(
+        "started without a pattern index",
+      );
+    });
+
+    it("answers 502 when the index took the request and did not record it", async () => {
+      const indexed = await indexServer([Response.json({ ok: false })]);
+
+      const response = await vote(indexed, {
+        patternId: "ss-2w4nQ8",
+        verdict: "up",
+      });
+
+      expect(response.status).toBe(502);
+      expect((await response.json()).error).toContain("thumbs_up");
+    });
+
+    it("passes through the status the index gave a request it faulted", async () => {
+      const indexed = await indexServer([
+        Response.json({ error: "unknown pattern" }, { status: 404 }),
+      ]);
+
+      const response = await vote(indexed, {
+        patternId: "missing",
+        verdict: "up",
+      });
+
+      expect(response.status).toBe(404);
+      expect((await response.json()).error).toBe(
+        "pattern index recordEvent failed (404)",
       );
     });
   });

@@ -370,6 +370,17 @@ this implements is
 `contract-nested-unread-reference`, and `contract-authored-shapes` fixtures
 pin the shapes.
 
+The type-driven shrink preserves cell wrappers and resolves normalized value
+paths against their inner types. A stored field named `count`, `map`, or `get`
+therefore retains its value type and cell capability when captured by `computed`
+or `assert`, even when the wrapper has a method with the same name. Inline
+object values in optional cell handles and optional stored values retain their
+requested fields and read-only capability while preserving nullish alternatives.
+A `.get()` whose result is not resolved to a specific member path retains the
+receiver's complete stored shape, including when the result passes through a
+helper. Optional member reads retain the receiver without imposing a full-shape
+read.
+
 The type-driven shrink also guards its descent on (type, requested-paths): a
 pair already on the path falls back to the named type reference — no
 structural fallback — which schema generation resolves through `$defs`
@@ -819,6 +830,23 @@ followed by a push to the same collection, and reports:
   - the message text is produced per classification by `diagnosticMessage`;
     capability analysis feeds the findings via `mergeablePushMisuseSink`
 
+### 6.9a Nested collection scan validation
+
+`PatternContextValidationTransformer` reports **Warning**
+`collection:nested-scan` (`src/diagnostics/nested-collection-scan.ts`) for an
+inline reactive array-method callback scanning a captured reactive collection.
+It recognizes the array-method families classified by `classifyArrayMethodCallSite`
+and checks the receiver's array type and reactive provenance. Callback parameters
+and callback-local declarations as collection roots are excluded, so a row's
+own child array or a locally derived
+child list does not trigger this warning. The reported receiver must resolve to
+a captured root binding; complex receiver expressions are outside this check.
+Indexed receiver results, plain local arrays, sequential scans, lowered calls, and scans
+inside unrelated function boundaries are excluded. The warning does not change
+execution or claim that every update scans both collections; it asks the author
+to measure potentially multiplicative work and consider contract-compatible
+shared work, indexed lookups, or named aggregates.
+
 ### 6.10 Verb-return validation
 
 `VerbReturnValidationTransformer` (stage 6; verb contract WS-C/C2) inspects
@@ -1078,6 +1106,12 @@ that root as a capture of its own, and a whole-object capture subsumes the
 narrower paths beside it. The lift is then applied to the whole object and
 re-runs for any field of it, where it could have been applied to the one field
 the body reads.
+
+Callback-local declarations are excluded from captures using parameter lineage
+and the owning function's authored range. Rebuilt callbacks carry that range in
+their source maps. Matching requires the same function kind and exact range;
+ancestor traversal stops at intervening function boundaries, keeping nested
+parameters out of an enclosing callback's capture object.
 
 The set has one deliberately narrow reader on the way out. When the rewriter
 synthesizes an `ifElse`/`when`/`unless` call, `unwrapParentheses` tidies the
@@ -1392,6 +1426,9 @@ builder call it rebuilds carries the replaced call's source-map range (§11.5).
 - `_param` convention implies `never` schema for that parameter
 - failed inference falls back to `unknown`
 - `typeRegistry` is consulted first for synthetic nodes/types
+- Common Fabric generic aliases retain their authored type arguments when
+  qualified through `__cfHelpers`; argument pairing uses the alias arguments,
+  which can differ from the arguments of its underlying reference type.
 
 ### 10.2 `pattern(...)`
 

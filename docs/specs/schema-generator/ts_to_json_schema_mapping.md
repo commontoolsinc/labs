@@ -385,6 +385,11 @@ pre-cleanup schemas.
 
 ### 6.3 Node/type interplay
 
+- A generic alias whose resolved type is a Cell uses that resolved wrapper's
+  payload. The alias's own first argument need not be the payload; source
+  type arguments supply an inner node only for direct Cell wrapper syntax.
+  Non-generic aliases retain their resolved declaration node so payload
+  defaults remain available to schema generation.
 - Capability re-wrap fidelity: when a **synthetic** node narrows a capability
   brand (the transformer re-wraps `Cell<T>` as `ReadonlyCell<T>`) and the
   node's own inner degrades to `any`, the resolved type's inner supplies the
@@ -398,7 +403,10 @@ pre-cleanup schemas.
   formats member-wise, preserving `{ type: "undefined" }` / `{ type: "null" }`,
   skipping conditional/type-parameter members, deduping identical member
   schemas (`isWrapperUnion` / `formatWrapperUnion` / `maybeWrapInAnyOf`).
-  Mixed unions fall to `UnionFormatter`.
+  Mixed unions fall to `UnionFormatter`. Primitive alternatives merge only
+  when both schemas contain exclusively `type` and `enum`; metadata-bearing
+  alternatives, including Cell wrappers, remain separate even when their
+  underlying primitive types match.
 - `Cell<Stream<T>>` **throws** with a boxing suggestion, from both the node
   path and the type path; tested (cell-type.test.ts).
 - `FactoryInput<T>` (alias-name detection) formats the inner type

@@ -12,6 +12,21 @@ import { initializePiecesController } from "./pieces-controller.ts";
 import { settleView, waitForSettledText } from "./cfc-browser-helpers.ts";
 import { waitForPieceView } from "./topics-navigation-helpers.ts";
 
+const networkControlUrl = Deno.env.get("CF_ROW_RECONNECT_CONTROL_URL");
+
+/** Controls the local relay used by the optional browser reconnect run. */
+async function controlNetwork(action: "pause" | "resume"): Promise<void> {
+  if (!networkControlUrl) return;
+  const response = await fetch(new URL(action, networkControlUrl), {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`Network relay ${action}: ${response.status}`);
+  }
+  const result = await response.json();
+  if (action === "pause") expect(result.closedSockets).toBeGreaterThan(0);
+}
+
 const root = join(import.meta.dirname!, "..");
 const fixtureRoot = join(import.meta.dirname!, "fixtures/reactive-vote-rows");
 
@@ -51,7 +66,7 @@ describe("rendered vote rows across replicas", () => {
   );
   for (const { variant, crossSpace } of cases) {
     const profileLocation = crossSpace ? "cross-space" : "same-space";
-    it(`updates ${variant} rows with ${profileLocation} profiles after remote writes`, async () => {
+    it(`materializes and updates ${variant} rows with ${profileLocation} profiles after remote writes`, async () => {
       const identity = await Identity.fromPassphrase(
         `reactive rows ${variant}`,
         { implementation: "noble" },
@@ -109,6 +124,30 @@ describe("rendered vote rows across replicas", () => {
           input,
         });
         const output = cc.getResult<FixtureOutput>(piece.getCell());
+        const coldName = "Alice Before Mount";
+        const seeded = await cc.runtime.editWithRetry((tx) =>
+          output.key("cast").withTx(tx).send({
+            key: "alice",
+            optionId: "one",
+            color: "red",
+          })
+        );
+        if (seeded.error) throw new Error(seeded.error.message);
+        await cc.runtime.settled(Infinity);
+        const coldRename = await cc.runtime.editWithRetry((tx) => {
+          if (externalProfiles) {
+            externalProfiles.withTx(tx).elementById("alice").key("name")
+              .set(coldName);
+          } else {
+            output.key("rename").withTx(tx).send({
+              key: "alice",
+              name: coldName,
+            });
+          }
+        });
+        if (coldRename.error) throw new Error(coldRename.error.message);
+        await cc.runtime.settled(Infinity);
+        await cc.synced();
         const page = await browser.newPage();
         const errors: string[] = [];
         page.addEventListener("pageerror", (event) => {
@@ -118,7 +157,27 @@ describe("rendered vote rows across replicas", () => {
         await waitForPieceView(page, spaceName, piece.id);
         await login(page, identity);
         await settleView(page);
+        await waitForSettledText(
+          page,
+          `[data-row="one"][title="${coldName}"]`,
+          "one: red",
+        );
+        expect(await renderedRows(page)).toEqual([
+          {
+            id: "one",
+            text: "one: red",
+            swatches: variant === "mapped" ? ["red"] : [],
+          },
+          { id: "two", text: "two:", swatches: [] },
+        ]);
+        const artifactDir = Deno.env.get("CF_ROW_REPRO_ARTIFACT_DIR");
+        if (artifactDir) {
+          const artifactName = crossSpace ? `${variant}-cross-space` : variant;
+          await Deno.mkdir(artifactDir, { recursive: true });
+          await page.screenshot(join(artifactDir, `${artifactName}-cold.png`));
+        }
         for (const color of ["green", "yellow"]) {
+          await controlNetwork("pause");
           const sent = await cc.runtime.editWithRetry((tx) =>
             output.key("cast").withTx(tx).send({
               key: "alice",
@@ -129,11 +188,12 @@ describe("rendered vote rows across replicas", () => {
           if (sent.error) throw new Error(sent.error.message);
           await cc.runtime.settled(Infinity);
           await cc.synced();
+          await controlNetwork("resume");
           await waitForSettledText(
             page,
             variant === "mapped"
-              ? `[data-row="one"][title="alice"][data-tally-colors="${color}"]`
-              : '[data-row="one"][title="alice"]',
+              ? `[data-row="one"][title="${coldName}"][data-tally-colors="${color}"]`
+              : `[data-row="one"][title="${coldName}"]`,
             variant === "mapped" ? "one:" : `one: ${color}`,
           );
           if (variant === "mapped") {
@@ -156,6 +216,7 @@ describe("rendered vote rows across replicas", () => {
             expect(swatches).toEqual([color]);
           }
         }
+        await controlNetwork("pause");
         const renamed = await cc.runtime.editWithRetry((tx) => {
           if (externalProfiles) {
             externalProfiles.withTx(tx).elementById("alice").key("name")
@@ -170,6 +231,7 @@ describe("rendered vote rows across replicas", () => {
         if (renamed.error) throw new Error(renamed.error.message);
         await cc.runtime.settled(Infinity);
         await cc.synced();
+        await controlNetwork("resume");
         await waitForSettledText(
           page,
           '[data-row="one"][title="Alice Updated"]',
@@ -208,7 +270,6 @@ describe("rendered vote rows across replicas", () => {
           expect(rowOrder).toEqual(["two", "one"]);
         }
         if (errors.length) throw new Error(errors.join("; "));
-        const artifactDir = Deno.env.get("CF_ROW_REPRO_ARTIFACT_DIR");
         if (artifactDir) {
           const artifactName = crossSpace ? `${variant}-cross-space` : variant;
           await Deno.mkdir(artifactDir, { recursive: true });
@@ -219,8 +280,10 @@ describe("rendered vote rows across replicas", () => {
               {
                 variant,
                 profileLocation,
+                reconnect: Boolean(networkControlUrl),
                 url: `${env.FRONTEND_URL}${spaceName}/${piece.id}`,
                 assertions: [
+                  "linked values and profiles before first browser materialization",
                   "remote colors",
                   "profile-only edit",
                   "remote membership",
@@ -235,12 +298,14 @@ describe("rendered vote rows across replicas", () => {
           );
         }
         for (const key of ["bob", "carol"]) {
+          await controlNetwork("pause");
           const removed = await cc.runtime.editWithRetry((tx) =>
             output.key("retract").withTx(tx).send({ key })
           );
           if (removed.error) throw new Error(removed.error.message);
           await cc.runtime.settled(Infinity);
           await cc.synced();
+          await controlNetwork("resume");
           await waitForSettledText(
             page,
             `[data-row="two"][title="${key === "bob" ? "carol" : ""}"]`,
@@ -292,9 +357,13 @@ describe("rendered vote rows across replicas", () => {
         expect(errors).toEqual([]);
       } finally {
         try {
-          await browser?.close();
+          await controlNetwork("resume");
         } finally {
-          await cc.dispose();
+          try {
+            await browser?.close();
+          } finally {
+            await cc.dispose();
+          }
         }
       }
     });
