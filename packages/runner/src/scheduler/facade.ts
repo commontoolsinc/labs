@@ -132,6 +132,7 @@ import { SpeculationLineage } from "./lineage.ts";
 import { SchedulerMaterializers } from "./materializers.ts";
 import { NodeRegistry, type SchedulerNode } from "./node-record.ts";
 import {
+  resolveRegistrationSurface,
   resubscribePullSchedulerAction,
   type SchedulerSubscribeActionState,
   type SchedulerSubscriptionState,
@@ -203,6 +204,9 @@ type SchedulerRegistrationInput = ReactivityLog;
 type SchedulerRegisterOptions = {
   /** Request initial currency from the server plan for this bound source. */
   adoptViewIdentity?: string;
+
+  /** Skips provisional parent demand; requires declared outputs and a computation. */
+  deferUntilDemand?: boolean;
 
   isEffect?: boolean;
   debounce?: number;
@@ -721,9 +725,12 @@ export class Scheduler {
   /**
    * Subscribes an action to run when its dependencies change.
    *
+   * Computations run when demanded. A live parent provisionally demands a new
+   * child unless `deferUntilDemand` is set with a declared write surface.
    * A matching settled view basis establishes initial currency and wake
-   * dependencies. Otherwise the action is scheduled immediately. After running,
-   * the scheduler re-subscribes using the run's reactivity log.
+   * dependencies without running the computation.
+   * Effects and idempotency diagnostics retain their execution policy. After
+   * running, the scheduler re-subscribes using the recorded reactivity log.
    *
    * @param action The action to subscribe
    * @param dependencies Optional callback or immediate ReactivityLog for
@@ -742,6 +749,14 @@ export class Scheduler {
       dependenciesOrOptions,
       maybeOptions,
     );
+    if (options.deferUntilDemand) {
+      if (options.isEffect || this.#nodes.isKnownEffect(action)) {
+        throw new Error("`deferUntilDemand` requires a computation");
+      }
+      if (resolveRegistrationSurface(action, dependencies).length === 0) {
+        throw new Error("`deferUntilDemand` requires a declared write surface");
+      }
+    }
     // Tag the action with its owning pattern instance so pattern readers
     // always carry a pieceId (used to group shaped cell-flip wakes by
     // instance and to distinguish pattern readers from internal machinery —
@@ -758,6 +773,7 @@ export class Scheduler {
         dependencies: initialDependencies,
         identity: options.adoptViewIdentity!,
       },
+      deferUntilDemand: options.deferUntilDemand,
       isEffect: options.isEffect,
       debounce: options.debounce,
       noDebounce: options.noDebounce,
@@ -1694,6 +1710,11 @@ export class Scheduler {
 
   onError(fn: ErrorHandler): void {
     this.#errorHandlers.add(fn);
+  }
+
+  /** Reports an action's asynchronous failure through the ordinary error handlers. */
+  reportError(error: Error, action: Action): void {
+    this.#handleError(error, action);
   }
 
   setEventPreflightTelemetryEnabled(enabled: boolean): void {

@@ -1192,6 +1192,30 @@ export class Runtime {
     }
   }
 
+  /**
+   * Whether the delegations registered for `space` let module `identity`
+   * exercise the writer authority of `predecessor`, directly or through a
+   * chain of predecessors — the relation a transaction's snapshot carries.
+   */
+  grantsModuleDelegation(
+    space: MemorySpace,
+    identity: string,
+    predecessor: string,
+  ): boolean {
+    const spaceDelegations = this.#moduleDelegations.get(space);
+    if (spaceDelegations === undefined) return false;
+    const visited = new Set<string>();
+    const pending = [...(spaceDelegations.get(identity) ?? [])];
+    while (pending.length > 0) {
+      const next = pending.pop()!;
+      if (next === predecessor) return true;
+      if (visited.has(next)) continue;
+      visited.add(next);
+      pending.push(...(spaceDelegations.get(next) ?? []));
+    }
+    return false;
+  }
+
   #moduleDelegationSnapshot(sourceUpdate?: PreparedSourceUpdate): Map<
     MemorySpace,
     ReadonlyMap<string, readonly string[]>

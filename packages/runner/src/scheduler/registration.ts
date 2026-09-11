@@ -62,6 +62,9 @@ export interface SchedulerSubscribeOptions {
   /** Validated synchronously with registration, before any action can run. */
   initialViewState?: { dependencies: ReactivityLog; identity: string };
 
+  /** Skips provisional parent demand for a computation with declared outputs. */
+  deferUntilDemand?: boolean;
+
   isEffect?: boolean;
   debounce?: number;
   noDebounce?: boolean;
@@ -161,6 +164,7 @@ export function subscribePullSchedulerAction(
   const parentRecord = state.subscriptionState.nodes.parentOf(action);
   if (
     !actionIsEffect &&
+    !options.deferUntilDemand &&
     record &&
     parentRecord &&
     isLive(state.subscriptionState.dependencyGraphState, parentRecord)

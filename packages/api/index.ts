@@ -864,6 +864,11 @@ export type CollectionIndexKey =
   | boolean
   | AnyBrandedCell<unknown>;
 
+/** Occupied key with an explicit distinction between value and Cell identity. */
+export type CollectionIndexKeyEntry<K extends CollectionIndexKey> = K extends
+  AnyBrandedCell<unknown> ? { kind: "cell"; cell: K }
+  : { kind: "value"; value: K };
+
 /** Stored descriptor whose buckets are addressed independently by keyed lookup. */
 export interface CollectionIndexData<K extends CollectionIndexKey, V> {
   /** Descriptor marker used to recognize an index receiver. */
@@ -874,6 +879,9 @@ export interface CollectionIndexData<K extends CollectionIndexKey, V> {
 
   /** Occupied keys in deterministic typed-key order. */
   readonly keys: K[];
+
+  /** Occupied keys with explicit primitive and Cell identity tags. */
+  readonly keyEntries: CollectionIndexKeyEntry<K>[];
 
   /** Per-key results addressed by the index's internal typed-key encoding. */
   readonly buckets: Record<string, V>;
@@ -891,8 +899,14 @@ export interface CollectionIndexHandle<
     key: T["keys"][number] | null | undefined,
   ): Reactive<T["buckets"][string]>;
 
-  /** Enumerates occupied keys in deterministic typed-key order. */
+  /**
+   * Enumerates occupied keys in deterministic typed-key order.
+   * Use `keyEntries()` for indexes mixing primitive values and Cell identities.
+   */
   keys(): Reactive<T["keys"]>;
+
+  /** Enumerates occupied primitive values and Cell identities with explicit tags. */
+  keyEntries(): Reactive<T["keyEntries"]>;
 }
 
 /** Index whose missing-key lookup yields an empty group. */
@@ -905,6 +919,11 @@ export type KeyIndex<K extends CollectionIndexKey, T> = CollectionIndexHandle<
   CollectionIndexData<K, T | undefined>
 >;
 
+/** @internal Preserves an index selector's key kind before result serialization. */
+export declare function tagCollectionKey<T>(
+  value: T,
+): { isCell: boolean; value: T };
+
 /**
  * Cells that allow deriving new cells from existing cells via array methods:
  * direct helpers mirror supported Array methods and return Reactive results.
@@ -912,6 +931,48 @@ export type KeyIndex<K extends CollectionIndexKey, T> = CollectionIndexHandle<
  * operations.
  */
 export interface IDerivable<T> {
+  /**
+   * Builds a reactive index while retaining original source occurrences.
+   * Mixed primitive/Cell keys use `keyEntries()` for tagged enumeration.
+   */
+  groupBy<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    selector: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+    ) => K | null | undefined,
+  ): GroupIndex<K, T extends Array<infer U> ? U : T>;
+
+  /** @internal Receives the compiler's tagged per-element selector pattern. */
+  groupByWithPattern<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<
+      T extends Array<infer U> ? U : T,
+      { isCell: boolean; value: K | null | undefined }
+    >,
+    params: Record<string, unknown>,
+  ): GroupIndex<K, T extends Array<infer U> ? U : T>;
+
+  /**
+   * Builds a reactive index while retaining original source occurrences.
+   * Mixed primitive/Cell keys use `keyEntries()` for tagged enumeration.
+   */
+  keyBy<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    selector: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+    ) => K | null | undefined,
+  ): KeyIndex<K, T extends Array<infer U> ? U : T>;
+
+  /** @internal Receives the compiler's tagged per-element selector pattern. */
+  keyByWithPattern<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<
+      T extends Array<infer U> ? U : T,
+      { isCell: boolean; value: K | null | undefined }
+    >,
+    params: Record<string, unknown>,
+  ): KeyIndex<K, T extends Array<infer U> ? U : T>;
+
   map<S>(
     this: IsThisObject,
     fn: (

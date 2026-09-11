@@ -8369,18 +8369,19 @@ export class SpaceReplica
   }
 
   /**
-   * Helper for `pull()`, which reads every entry's root from the store
-   * read-through and integrates the results as one frame. The frame is
-   * a `pull` when any root was not held before, the notification a first
-   * load owes its subscribers; otherwise an `integrate`, which notifies
-   * only what changed, as a covered selector's re-sync does.
+   * Helper for `pull()`, which reads every root this replica does not
+   * hold from the store read-through and integrates the results as one
+   * `pull` frame, the notification a first load owes its subscribers. A
+   * root already held, or read absent earlier, is not read again: the
+   * feed's refresh (`integrateStoreWrites()`) is what moves a held
+   * record, the way a session's watch moves a covered selector, and a
+   * re-sync of one is answered from the replica.
    */
   #pullFromStore(
     read: StoreReadThrough,
     entries: [WatchAddress, SchemaPathSelector | undefined][],
   ): void {
     const upserts: SessionSyncUpsert[] = [];
-    let firstLoad = false;
     for (const [address] of entries) {
       const id = address.id as URI;
       // A scope the identity cannot resolve keys by its name, which names
@@ -8392,12 +8393,13 @@ export class SpaceReplica
         address.scopeKey,
       );
       if (!isScopeKey(instance)) continue;
-      if (!this.#docs.has(docKey(id, instance))) firstLoad = true;
+      const key = docKey(id, instance);
+      if (this.#docs.has(key) || this.#storeAbsences.has(key)) continue;
       const upsert = read({ id, scopeKey: instance });
       if (upsert !== undefined) upserts.push(upsert);
     }
     if (upserts.length === 0) return;
-    this.#integrateReadThrough(upserts, firstLoad ? "pull" : "integrate");
+    this.#integrateReadThrough(upserts, "pull");
   }
 
   /**
@@ -8408,31 +8410,42 @@ export class SpaceReplica
    * them. An address the store holds nothing at — a `deleted` entry at
    * seq 0, which no session frame ever carries — is kept out of the
    * frame and remembered in `#storeAbsences` instead; a document read
-   * present clears that memory.
+   * present clears that memory. A read at the seq of the last delivery
+   * this replica absorbed for the instance is kept out of the frame too:
+   * the content under a delivered seq cannot differ, so integrating it
+   * again would only re-validate and re-notify what the replica holds.
+   * The confirmed seq is not that judge: a commit of the replica's own
+   * write promotes its record to the commit's seq with the value it
+   * materialized locally, and the store's document at that seq may hold
+   * more — content the engine merged in beside a mergeable write — so
+   * the first read at a seq no delivery has reached integrates.
    */
   #integrateReadThrough(
     upserts: SessionSyncUpsert[],
     type: "pull" | "integrate",
   ): void {
-    const read = this.#storeReadThrough();
-    const frame: SessionSyncUpsert[] = [];
-    for (
-      const upsert of read === undefined
-        ? upserts
-        : this.#withSchemaDependencies(read, upserts)
-    ) {
+    // Whether a read moves the replica at all; the absence memory is kept
+    // as a side effect.
+    const moves = (upsert: SessionSyncUpsert): boolean => {
       const key = docKey(
         upsert.id as URI,
         this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
       );
       if (upsert.deleted === true && upsert.seq === 0) {
         this.#storeAbsences.add(key);
-        continue;
+        return false;
       }
       this.#storeAbsences.delete(key);
-      frame.push(upsert);
-    }
-    if (frame.length === 0) return;
+      const delivered = this.#delivered.get(key);
+      return delivered === undefined || delivered.seq !== upsert.seq ||
+        delivered.deleted !== (upsert.deleted === true);
+    };
+    const roots = upserts.filter(moves);
+    if (roots.length === 0) return;
+    const read = this.#storeReadThrough();
+    const frame = read === undefined
+      ? roots
+      : this.#withSchemaDependencies(read, roots).filter(moves);
     const seqs = frame.map((upsert) => upsert.seq);
     this.#applySessionSync({
       type: "sync",
@@ -8446,12 +8459,14 @@ export class SpaceReplica
   /**
    * Helper for `#integrateReadThrough()`, which completes a frame of store
    * reads with the schema documents they reference: every `cid:` hash in a
-   * document's link positions, and in a schema document's own refs, that
-   * this replica does not already hold verified is read from the store
-   * and added to the frame, to a fixpoint. The delivery guarantee the
-   * frame validator enforces is that a document's refs resolve within
-   * the delivered set; a session's server walks those references for
-   * it, and this is the same chase for a frame read directly.
+   * document's link positions and in its `schema` metadata member, and in
+   * a schema document's own refs, that this replica does not already hold
+   * verified is read from the store and added to the frame, to a fixpoint.
+   * The delivery guarantee the frame validator enforces is that a
+   * document's refs resolve within the delivered set; a session's server
+   * walks those references for it, and this is the same chase for a frame
+   * read directly. A malformed metadata member names nothing here; the
+   * validator quarantines the document for it.
    */
   #withSchemaDependencies(
     read: StoreReadThrough,
@@ -8479,6 +8494,10 @@ export class SpaceReplica
           }
           return schema;
         });
+        const meta = classifySchemaMeta(upsert.doc);
+        if (meta.kind !== "malformed") {
+          for (const hash of schemaMetaRefHashes(meta)) hashes.add(hash);
+        }
       }
       for (const hash of hashes) {
         const id = `cid:${hash}` as URI;

@@ -1385,8 +1385,9 @@ the per-epic implementation notes).
 - **Added by.** Bernhard Seefeld, in the store read-through change.
 - **Purpose.** The serving runtime reads its HOME space straight from the
   space's engine instead of over its loopback session: a document its replica
-  does not hold is read synchronously on first access, a `sync()` resolves
-  from the engine with no session watch, and the feed's admitted commits
+  does not hold is read synchronously on first access and a `sync()` of that
+  document resolves from the engine with no session watch, while a `sync()` of
+  a held document is answered from the replica, and the feed's admitted commits
   re-read the documents the replica holds. The memory server then never walks
   a selector's schema closure for the serving session, and the loopback
   transport carries no frames for it. Writes and foreign-space reads stay on
