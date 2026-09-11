@@ -1,10 +1,10 @@
 {
-  "updated": "2026-09-11T01:17:24.432078+00:00",
+  "updated": "2026-09-11T02:02:17Z",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7257",
-  "activity": "Budget review repairs and integration with merged #7285/#7294 are validated. Full affected-package checks pass, including all 412 pattern type checks. Ready for fresh CI and Cubic in #7257; dependent scale limits remain in #7282.",
-  "review": "Antagonistic review is clean for the compiler, event failure, contributor attribution, and initialization settlement repairs. Fresh published-head CI and Cubic remain required for #7257.",
+  "activity": "Full review repairs validated: runner 1423 tests/8895 steps, full CLI suites, all type groups, three scale budgets, and four rendered remote-update/removal cases pass. Publishing the repairs to #7257 for fresh CI and Cubic review. The supporting generic Cell alias fix is published for review.",
+  "review": "Antagonistic review is clean for dispatch failure cleanup and presync accounting. Full local validation passes. Refreshed published-head Cubic and CI remain required before merging #7257.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
@@ -16,7 +16,8 @@
     "#7289: merged as b18d90b6aa with clean CI and Cubic/antagonistic reviews.",
     "#7285: merged as 1407825b0c after all current-head CI gates, zero-issue Cubic review, and clean antagonistic review.",
     "#7257: 1,423 runner tests / 8,892 steps; 1,167 transformer tests / 960 steps; full CLI passes all three runs; 146 generated patterns; eight vintages; all six scale assertions; 46 type groups and 599 docs blocks pass.",
-    "#7294: index/lookup contract merged as 039e8aecb0 after clean CI and Cubic/antagonistic reviews."
+    "#7294: index/lookup contract merged as 039e8aecb0 after clean CI and Cubic/antagonistic reviews.",
+    "Full-review follow-up: runner 1423 tests/8895 steps, CLI 1824 tests/2932 steps plus serial groups, all 46 type groups, 599 documentation blocks, all three scale budgets, and all four browser row cases pass. Skipped-step regression covers 27 previously uncovered CLI lines."
   ],
   "stages": [
     {
@@ -65,7 +66,7 @@
       "id": "B1",
       "title": "Grouping and unique-key indexing",
       "status": "active",
-      "detail": "Index/lookup contract landed in #7294. Compiler probe preserves key/value schemas with a single-payload typed handle. Public API and lowering prototype are next."
+      "detail": "Contract merged in #7294. Typed handle prototype compiles; supporting compiler repairs preserve Cell-key payloads and have passing regressions. Operator lowering and runtime implementation remain pending."
     },
     {
       "id": "B2",
@@ -183,9 +184,9 @@
     },
     {
       "id": "Q5",
-      "title": "Push coverage fix and dashboard checkpoint to GitHub?",
+      "title": "Push and merge implementation PRs after review?",
       "status": "Approved",
-      "proposal": "Mike authorized pushing the coverage fix and dashboard checkpoint to the existing PR #7241 branch in commontoolsinc/labs.",
+      "proposal": "Mike authorized continued implementation pushes and merges, including #7257, after antagonistic review, clean Cubic review, and passing CI.",
       "blocks": "None."
     },
     {
@@ -218,5 +219,9 @@
       "detail": "Compare the same interaction before and after migration, with read work and measured time."
     }
   ],
-  "validatedRevision": "21fc2fb6a9c0055a2d2e3055dcd7e1fba1bbeed3"
+  "validatedRevision": "21fc2fb6a9c0055a2d2e3055dcd7e1fba1bbeed3",
+  "validationProvenance": {
+    "revisionUrl": "https://github.com/commontoolsinc/labs/commit/21fc2fb6a9c0055a2d2e3055dcd7e1fba1bbeed3",
+    "scope": "Local package, type, pattern, browser, and vintage validation of the integrated implementation. This is the parent of published dashboard checkpoint d67c923566146faa6f7b2493b1828140295f7d47. It does not identify the separately recorded browser baseline capture."
+  }
 }

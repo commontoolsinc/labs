@@ -36,6 +36,70 @@ describe("test-runner read budgets", {
     ).toBe(true);
   });
 
+  it("accounts for compiled handler input materialization separately from its body", async () => {
+    const run = Runtime.prototype.run;
+    const presyncReads: { proxyAccesses: number; linkResolutions: number }[] =
+      [];
+    using _run = stub(Runtime.prototype, "run", function (...args) {
+      this.telemetry.addEventListener("telemetry", (event) => {
+        if (
+          event instanceof RuntimeTelemetryEvent &&
+          event.marker.type === "scheduler.read-attempt" &&
+          event.marker.kind === "presync"
+        ) presyncReads.push(event.marker.reads);
+      });
+      return run.apply(this, args);
+    });
+    const result = await runTests(resolve(root, "presync.test.tsx"), { root });
+    expect(result.failed).toBe(0);
+    expect(presyncReads).toHaveLength(1);
+    expect(presyncReads[0].linkResolutions).toBeGreaterThan(0);
+  });
+
+  it("preserves skipped results and action numbering with read budgets enabled", async () => {
+    const output: string[] = [];
+    using _log = stub(console, "log", (...args: unknown[]) => {
+      output.push(args.map(String).join(" "));
+    });
+    const result = await runTests(resolve(root, "skipped-steps.test.tsx"), {
+      root,
+      verbose: true,
+    });
+    expect(result.failed).toBe(0);
+    const steps = result.results.flatMap((r) => r.results);
+    expect(steps.map(({ name, passed, skipped, afterAction }) => ({
+      name,
+      passed,
+      skipped,
+      afterAction,
+    }))).toEqual([
+      { name: "assertion_1", passed: true, skipped: true, afterAction: null },
+      {
+        name: "assertion_2",
+        passed: true,
+        skipped: undefined,
+        afterAction: null,
+      },
+      {
+        name: "assertion_3",
+        passed: true,
+        skipped: true,
+        afterAction: "action_2",
+      },
+      {
+        name: "assertion_4",
+        passed: true,
+        skipped: undefined,
+        afterAction: "action_2",
+      },
+    ]);
+    expect(output.some((line) => line.includes("action_1 (skipped)"))).toBe(
+      true,
+    );
+    expect(output.some((line) => line.includes("Read budget (skipped step 2)")))
+      .toBe(true);
+  });
+
   it("fails a zero total budget even when the functional assertion passes", async () => {
     const output: string[] = [];
     using _log = stub(console, "log", (...args: unknown[]) => {

@@ -1867,7 +1867,12 @@ export class Scheduler {
   /** Starts opt-in accounting for a transaction outside a reactive body. */
   beginReadAttempt(
     tx: IExtendedStorageTransaction,
-    kind: "event" | "preflight" | "initialization" | "editWithRetry",
+    kind:
+      | "event"
+      | "presync"
+      | "preflight"
+      | "initialization"
+      | "editWithRetry",
     actionId?: string,
   ): void {
     if (!this.#readAttemptAccountingEnabled) return;
