@@ -166,6 +166,9 @@ const SPENDING_PATTERN_SOURCE = [
  * and values a reduction has to drop; the `ifc` annotations are what a reader
  * has to be told.
  */
+/** One `COUNT("<column>") AS "<alias>"` clause of a count statement. */
+const COUNT_CLAUSE = /COUNT\("([^"]+)"\) AS "([^"]+)"/g;
+
 const MAIL_DB_HANDLE = {
   id: "db-mail",
   rev: 3,
@@ -1087,6 +1090,128 @@ describe("describe_handle", () => {
 
         expect(output.hasSchema).toBe(true);
         expect(output.database).toBeUndefined();
+      });
+
+      /**
+       * Replaces the query the session's storage provider offers for this
+       * space, and returns what to restore. The emulated provider offers
+       * none, so a test that wants counts supplies the one the count read
+       * calls.
+       */
+      const withProviderQuery = (
+        query:
+          | ((db: unknown, sql: string) => Promise<{ rows: unknown[] }>)
+          | undefined,
+      ): () => void => {
+        const provider = runtime.storageManager.open(
+          session.pieces.getSpace(),
+        ) as { sqliteQuery?: unknown };
+        const previous = provider.sqliteQuery;
+        provider.sqliteQuery = query;
+        return () => {
+          provider.sqliteQuery = previous;
+        };
+      };
+
+      it("reports the rows a table holds and how many of them each column is non-NULL on", async () => {
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        // `received` NULL on every row is the finding the counts exist for: a
+        // query filtering on it matches nothing while the table is full. The
+        // fake reads the aliases out of the statement it is given, so what it
+        // returns is tied to the column each alias counts rather than to the
+        // order the disclosure happens to list them in.
+        const filled: Record<string, number> = {
+          sender: 1687,
+          body: 1600,
+          received: 0,
+        };
+        const statements: string[] = [];
+        const restore = withProviderQuery((_db, sql) => {
+          statements.push(sql);
+          const row: Record<string, number> = { n: 1687 };
+          for (const [, column, alias] of sql.matchAll(COUNT_CLAUSE)) {
+            row[alias] = filled[column] ?? -1;
+          }
+          return Promise.resolve({ rows: [row] });
+        });
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        expect(output.database?.fill).toEqual([{
+          table: "messages",
+          rows: 1687,
+          nonNull: { sender: 1687, body: 1600, received: 0 },
+        }]);
+        // One statement per table, over the table itself and no predicate.
+        expect(statements).toHaveLength(1);
+        expect(statements[0]).toContain('SELECT COUNT(*) AS "n"');
+        expect(statements[0]).toContain('FROM "messages"');
+        expect(statements[0]).not.toContain("WHERE");
+      });
+
+      it("reports a table it could not count as unread rather than as empty", async () => {
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery(() =>
+          Promise.reject(new Error("no such table: messages"))
+        );
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        expect(output.database?.fill).toEqual([{
+          table: "messages",
+          unread: "no such table: messages",
+        }]);
+        // The contract still discloses, so a database that cannot be counted
+        // is still one an agent can write a query against.
+        expect(output.database?.tables).toBeDefined();
+      });
+
+      it("reports no fill for a database whose storage provider runs no query", async () => {
+        // Nothing is claimed about how full the tables are, rather than every
+        // table reading as empty.
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery(undefined);
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        expect(output.database?.tables).toBeDefined();
+        expect(output.database?.fill).toBeUndefined();
       });
     });
   });

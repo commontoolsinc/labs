@@ -127,8 +127,8 @@ What works today:
   - `write_file`
   - `delegate_task`
   - `describe_handle` (shape and labels of a handle's referent, and the tables
-    of one that is a database, never its data; see
-    [Inspecting a handle's shape](#inspecting-a-handles-shape))
+    of one that is a database together with how full each of them is, never its
+    data; see [Inspecting a handle's shape](#inspecting-a-handles-shape))
   - `run_pattern` (present only when the run configures a fabric session; see
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
   - `search_patterns` (present only when the run configures a pattern index with
@@ -966,6 +966,22 @@ the table- and column-name channels are bounded exactly as a property-name
 channel is and the columns' annotations, prose and defaults do not ride out on
 the schema. The read is conditional on nothing being declared, so a referent
 that states its own shape is never opened.
+
+**How full each of those tables is answers beside the contract, under `fill`.**
+One entry per disclosed table: `rows`, every row the table holds, and `nonNull`,
+one count per disclosed column saying how many of those rows carry a value there
+rather than NULL. A column reading `0` beside a non-zero `rows` is filled on no
+row at all, so a query filtering on it matches nothing — and an empty result
+from such a query is indistinguishable, from inside the pattern, from a source
+that is genuinely empty. That is the difference these counts buy, and it is the
+reason they are worth the one quantity this tool reports: no row, no cell value
+and no column's contents cross with a count, and no predicate a caller chose is
+ever counted — a count is taken of a whole table and of whole columns, or not at
+all. A table that could not be counted reports `unread` with what refused it,
+never `0`, since zero rows and unknown rows are the two readings the counts
+exist to separate. `fill` is absent entirely where the run's storage provider
+offers no query, which claims nothing about any table rather than reporting them
+all as empty.
 
 Without it a database reads as an opaque value, and the code an agent writes
 over an opaque value is code that treats it as one — stringifying a handle and
