@@ -266,7 +266,11 @@ ambient-state one.
   client-written ones; a flag-ON client's diverted echo publishes that
   same address on its transaction, and the durable-ack coupling settles
   the sender's callback only after the handling consequenced — the
-  receipt is durable before the address is ever dereferenced.
+  receipt is durable before the address is ever dereferenced. A sender
+  that needs only its own act on the record takes the send's
+  `onAppended` hook, which settles when the append is durable and
+  carries the delivery outcome; the commit callback keeps the coupling
+  above, and a client that reads the receipt waits for it there.
   Exactly-once for the write is the single serving writer plus the
   store's CAS on the result cell ("all handlers write result cells
   (even if the value is undefined), and the CAS for that is the
