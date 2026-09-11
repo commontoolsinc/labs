@@ -1032,7 +1032,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   #adjustRecurseForm(
     result: RecurseForm,
     finalValue: DomainFor<DomainExtra>,
-    finalValueTagIfKnown?: FabricValueTag | null | undefined
+    finalValueTagIfKnown?: FabricValueTag | null | undefined,
   ): RecurseOfForm {
     const tag = (finalValueTagIfKnown === undefined)
       ? this.#tagFromValueElseNull(finalValue)
