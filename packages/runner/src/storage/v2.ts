@@ -68,7 +68,7 @@ import {
   applyPatchToDocument,
   PatchApplyError,
 } from "../../../memory/v2/patch.ts";
-import type { JSONSchema } from "../builder/types.ts";
+import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
@@ -928,20 +928,38 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
 };
 
 /**
- * The selector schema a link target is asked for when the reader's schema at
- * the link takes a handle (`asCell` at its root): the handle's own schema,
- * the wrapper removed, so the selector describes the document's value the
- * way the handle's reads do and the serving replica holds the document as a
- * value it keeps current, not as a reference it delivered once. A schema of
- * `unknown` at its root selects nothing to read through and stays as it is.
+ * The selector schema a link target is asked for. Where the reader's schema
+ * takes a handle at the link (`asCell` at its root, or at the root of an
+ * `anyOf`/`oneOf` branch), the outermost handle boundary comes off, so the
+ * selector describes the document's value the way the handle's reads do and
+ * the serving replica holds the document as a value it keeps current rather
+ * than as a reference it delivered once. Inner boundaries stay, as they do
+ * on the handle's own schema, and a schema that takes no handle is asked for
+ * as it is.
  */
 function selectorSchemaForLink(
   schema: JSONSchema | undefined,
 ): JSONSchema | false {
   if (!isObjectOrArray(schema)) return schema ?? false;
+  const unwrapped = unwrapOuterHandle(schema);
+  const branches = (key: "anyOf" | "oneOf"): Partial<JSONSchemaObj> => {
+    const list = unwrapped[key];
+    if (!Array.isArray(list)) return {};
+    return {
+      [key]: list.map((branch) =>
+        isObjectOrArray(branch) ? unwrapOuterHandle(branch) : branch
+      ),
+    };
+  };
+  return { ...unwrapped, ...branches("anyOf"), ...branches("oneOf") };
+}
+
+/** `schema` with its outermost `asCell` boundary removed, if it has one. */
+function unwrapOuterHandle(schema: JSONSchemaObj): JSONSchemaObj {
   if (schema.asCell === undefined) return schema;
   const { asCell: _asCell, ...inner } = schema;
-  return inner;
+  const values = ContextualFlowControl.getAsCellValues(schema);
+  return values.length > 1 ? { ...inner, asCell: values.slice(1) } : inner;
 }
 
 export class StorageManager implements IStorageManager {

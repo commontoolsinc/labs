@@ -476,11 +476,10 @@ describe("resume node plan pre-sync", () => {
     expect((await tx2.commit()).error).toBeUndefined();
     await rt1.storageManager.synced();
     await rt2.storageManager.synced();
-    const counter2 = rt2.getCellFromLink<{ n: number }>(
-      counter.getAsNormalizedFullLink(),
-    );
-    await counter2.pull();
-    expect(counter2.get()?.n).toBe(1);
+    // Read nothing here: a read of the document would kick its load and
+    // mask a subscription the pre-sync failed to leave. The handler's own
+    // read is the check.
+    expect(localOnB(counter)).toBe(true);
 
     resumed.key("bump").send({});
     await rt2.idle();

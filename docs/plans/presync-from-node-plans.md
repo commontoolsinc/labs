@@ -121,10 +121,14 @@ plan syncs. `LINK_HOPS`, `ArgumentLinkRoot`, `narrowChildSchema`, and
 stored argument's direct link targets and the result document owning each
 are named root-only (`#syncStoredArgumentLinkTargets`), because setup's
 supplied-link proof reads them and that read is no node's. It runs last in
-the pre-sync, so a document a plan reads under a narrowed schema is asked
-for under that schema first and the root-only naming finds it local; the
-first selector a document receives is the narrowest a reader declared. The
-reference
+the pre-sync, after every plan sync and coordinator sync has been issued, so
+a document a plan reads is asked for under that plan's schema before the
+root-only naming asks for it. Among plans the requests go out together, in
+pattern order, and no order among them is claimed; what the ordering
+guarantees is only that the root-only naming never precedes a reader's own
+request. On the setup path over a stored piece, the argument guard's
+root-only naming precedes the plan syncs, because the guard's snapshot must
+be taken before the family loads. The reference
 graphs that motivated the
 hop budget are declared `unknown` at their edges, where the traverser answers
 presence and stops, so no depth constant stands in for that.

@@ -1001,19 +1001,19 @@ export class SourceReconciler {
       origin: claim?.origin ?? state.storedSource ?? null,
       expected: state.snapshot,
     };
-    // The setup writes over the cells the stored piece owns — each one's
-    // backlink at least — and a write to a document this replica has not
-    // loaded replaces the document the store holds, so they are named first,
-    // with what the candidate's nodes read, each under the schema its reader
-    // declared.
-    await runtime.runner.syncStoredPieceCells(resultCell, candidate);
     // Setting up the candidate restages the piece's stored argument against
     // its schema, so that document has to be local before the transaction
     // opens, and still what it was when the transaction commits. A concurrent
     // argument change means the setup would stage a value nobody asked for.
-    // What the setup's proof reads of the argument's link targets was named
-    // above; this names it again root-only and finds it local.
+    // The guard's snapshot is taken first: an argument that changes while
+    // the family below loads is what the guard refuses at commit, so no
+    // candidate is set up over reads that were named for another argument.
     const argumentUnchanged = await runtime.syncStoredSetupArgument(resultCell);
+    // The setup also writes over the cells the stored piece owns — each one's
+    // backlink at least — and a write to a document this replica has not
+    // loaded replaces the document the store holds, so they are named too,
+    // with what the candidate's nodes read, each under its reader's schema.
+    await runtime.runner.syncStoredPieceCells(resultCell, candidate);
     const committed = await this.#commit(resultCell, state, signal, (tx) => {
       if (!argumentUnchanged(resultCell.withTx(tx))) return false;
       applyPieceSourceTransition(
