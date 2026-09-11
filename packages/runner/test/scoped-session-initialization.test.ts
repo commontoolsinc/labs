@@ -183,6 +183,165 @@ describe("scoped-session-initialization", () => {
       .toBe("user");
   });
 
+  it("discovers marked user continuations only when server execution is enabled", async () => {
+    const { raw, user } = await missingContinuation();
+    setServerExecutionConfig(false);
+    const local = runtime.edit();
+    expect(scopedArgumentInitializationTargets(
+      runtime,
+      local,
+      raw.getAsNormalizedFullLink(),
+      schema,
+    )).toEqual([]);
+    expect((await local.commit()).error).toBeUndefined();
+    expect(user.getRaw()).toEqual({});
+
+    setServerExecutionConfig(true);
+    const served = runtime.edit();
+    expect(scopedArgumentInitializationTargets(
+      runtime,
+      served,
+      raw.getAsNormalizedFullLink(),
+      schema,
+    )).toMatchObject([{
+      id: user.getAsNormalizedFullLink().id,
+      space,
+      path: ["count"],
+      scope: "user",
+    }]);
+    expect((await served.commit()).error).toBeUndefined();
+  });
+
+  for (const value of [7, undefined, []]) {
+    it(`preserves a non-record argument containing ${JSON.stringify(value)}`, async () => {
+      const raw = runtime.getCell<unknown>(space, "non-record-inputs");
+      await raw.sync();
+      const seed = runtime.edit();
+      raw.withTx(seed).set(value);
+      expect((await seed.commit()).error).toBeUndefined();
+      const tx = runtime.edit();
+      expect(scopedArgumentInitializationTargets(
+        runtime,
+        tx,
+        raw.getAsNormalizedFullLink(),
+        schema,
+      )).toEqual([]);
+      initializeScopedArgumentSlots(
+        runtime,
+        tx,
+        raw.getAsNormalizedFullLink(),
+        schema,
+      );
+      expect((await tx.commit()).error).toBeUndefined();
+      expect(raw.getRaw()).toEqual(value);
+    });
+  }
+
+  it("keeps an inline space value outside continuation discovery", async () => {
+    const raw = runtime.getCell<Record<string, unknown>>(
+      space,
+      "inline-inputs",
+    );
+    const user = runtime.getCell<Record<string, unknown>>(
+      space,
+      "inline-inputs",
+      undefined,
+      undefined,
+      "user",
+    );
+    await Promise.all([raw.sync(), user.sync()]);
+    const replace = runtime.edit();
+    raw.withTx(replace).set({ count: 7 });
+    user.withTx(replace).set({});
+    expect((await replace.commit()).error).toBeUndefined();
+    const tx = runtime.edit();
+    expect(scopedArgumentInitializationTargets(
+      runtime,
+      tx,
+      raw.getAsNormalizedFullLink(),
+      schema,
+    )).toEqual([]);
+    initializeScopedArgumentSlots(
+      runtime,
+      tx,
+      raw.getAsNormalizedFullLink(),
+      schema,
+    );
+    expect((await tx.commit()).error).toBeUndefined();
+    expect(raw.getRaw()).toEqual({ count: 7 });
+    expect(user.getRaw()).toEqual({});
+  });
+
+  it("does not discover continuations through a blocked whole-object reference", async () => {
+    const { raw, user } = await missingContinuation();
+    const replace = runtime.edit();
+    raw.withTx(replace).set(user);
+    expect((await replace.commit()).error).toBeUndefined();
+    const reference = raw.getRaw({ lastNode: "top" });
+    const tx = runtime.edit();
+    const cappedArgument = raw.asSchema({ type: "object", scope: "space" })
+      .getAsNormalizedFullLink();
+    expect(scopedArgumentInitializationTargets(
+      runtime,
+      tx,
+      cappedArgument,
+      schema,
+    )).toEqual([]);
+    initializeScopedArgumentSlots(runtime, tx, cappedArgument, schema);
+    expect((await tx.commit()).error).toBeUndefined();
+    expect(raw.getRaw({ lastNode: "top" })).toEqual(reference);
+    expect(user.getRaw()).toEqual({});
+
+    const allowed = runtime.edit();
+    initializeScopedArgumentSlots(
+      runtime,
+      allowed,
+      raw.getAsNormalizedFullLink(),
+      schema,
+    );
+    expect((await allowed.commit()).error).toBeUndefined();
+    expect(raw.getRaw({ lastNode: "top" })).toEqual(reference);
+    expect(parseLink(user.key("count").getRaw({ lastNode: "top" }), user))
+      .toMatchObject({
+        id: user.getAsNormalizedFullLink().id,
+        path: ["count"],
+        scope: "session",
+      });
+  });
+
+  it("preserves a user container rebound to an explicit reference", async () => {
+    const { raw, user } = await missingContinuation();
+    const target = runtime.getCell<Record<string, unknown>>(
+      space,
+      "rebound-inputs",
+      undefined,
+      undefined,
+      "user",
+    );
+    await target.sync();
+    const replace = runtime.edit();
+    target.withTx(replace).set({});
+    user.withTx(replace).set(target);
+    expect((await replace.commit()).error).toBeUndefined();
+    const reference = user.getRaw({ lastNode: "top" });
+    const tx = runtime.edit();
+    initializeScopedArgumentSlots(
+      runtime,
+      tx,
+      raw.getAsNormalizedFullLink(),
+      schema,
+    );
+    expect((await tx.commit()).error).toBeUndefined();
+    expect(user.getRaw({ lastNode: "top" })).toEqual(reference);
+    expect(target.getRaw()).toEqual({});
+    const handle = raw.asSchema(schema).key("count").get()!;
+    expect(handle.getAsNormalizedFullLink().scope).toBe("user");
+    const write = runtime.edit();
+    handle.withTx(write).set(9);
+    expect((await write.commit()).error).toBeUndefined();
+    expect(target.key("count").get()).toBe(9);
+  });
+
   it("reestablishes a declaration through an explicit write using the session schema", async () => {
     const { raw, user } = await missingContinuation();
     const replace = runtime.edit();
