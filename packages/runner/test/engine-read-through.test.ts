@@ -42,6 +42,7 @@ import {
   type SpaceServerPolicy,
   STORE_REFRESH_ATTEMPTS,
 } from "../src/executor/space-server.ts";
+import type { WaveCommitSink } from "../src/executor/wave.ts";
 import { readWatermarkSeq, waitForSettled } from "../src/executor/watermark.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { waitUntil } from "./support/wait-until.ts";
@@ -106,6 +107,12 @@ describe("engine-read-through", () => {
   /** The serving runtime the factory built at the last activation. */
   let factoryRuntime: Runtime | undefined;
 
+  /** The host's wave-commit sink decorator, for the test that holds a
+   * wave commit in flight. Undefined everywhere else. */
+  let decorateWaveCommitSink:
+    | ((sink: WaveCommitSink) => WaveCommitSink)
+    | undefined;
+
   const newHost = (policy: SpaceServerPolicy): ExecutorHost =>
     new ExecutorHost({
       server,
@@ -143,6 +150,9 @@ describe("engine-read-through", () => {
         });
       },
       policy,
+      ...(decorateWaveCommitSink === undefined
+        ? {}
+        : { decorateWaveCommitSink }),
     });
 
   /**
@@ -311,6 +321,7 @@ describe("engine-read-through", () => {
     factoryContext = undefined;
     factoryManager = undefined;
     factoryRuntime = undefined;
+    decorateWaveCommitSink = undefined;
     clientManager = SharedServerStorageManager.connectTo(server, {
       as: aliceSigner,
     });
@@ -650,6 +661,174 @@ describe("engine-read-through", () => {
     expect(host.stats().lease.lost).toBe(1);
     await waitUntil(() => spaceServer.active === false, "the space to park");
     expect(liveExecutionLeaseHolder(engine, space)).toBe(rival);
+  });
+
+  /** One wave commit the decorated sink saw: the wave's basis, and the
+   * seq the commit landed at once it has. */
+  type ObservedWaveCommit = { basisSeq: number; seq?: number };
+
+  /**
+   * Installs a sink decorator on the next host that records every wave
+   * commit and holds one in flight: the first one after `arm()`. `held`
+   * resolves once that commit is held, with it last in `commits`, and
+   * `release()` lets it land. Every seal opens a wave when none is open,
+   * at that moment's serverSeq, so a seal landing inside the hold opens
+   * one whose basis the held commit passes; what is authored inside the
+   * hold is the following cycle's batch, the one that would inherit that
+   * wave. Under this posture an input reaches the serving runtime only
+   * through a cycle's refresh, which keeps every seal but the test's own
+   * out of the window.
+   */
+  const holdableWaveCommit = (): {
+    arm: () => void;
+    held: Promise<void>;
+    release: () => void;
+    commits: ObservedWaveCommit[];
+  } => {
+    const held = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const commits: ObservedWaveCommit[] = [];
+    let armed = false;
+    decorateWaveCommitSink = (sink) => ({
+      currentHeads: (space, docs) => sink.currentHeads(space, docs),
+      concurrentWritePaths: (space, doc, sinceSeq) =>
+        sink.concurrentWritePaths(space, doc, sinceSeq),
+      commitWave: async (batch) => {
+        const observed: ObservedWaveCommit = { basisSeq: batch.basisSeq };
+        commits.push(observed);
+        if (armed) {
+          armed = false;
+          held.resolve();
+          await release.promise;
+        }
+        const result = await sink.commitWave(batch);
+        if (result.ok !== undefined) observed.seq = result.ok.seq;
+        return result;
+      },
+    });
+    return {
+      arm: () => {
+        armed = true;
+      },
+      held: held.promise,
+      release: () => release.resolve(),
+      commits,
+    };
+  };
+
+  /** The basis of every wave committed after `heldCommit` landed is at or
+   * past the seq it landed at: none was opened while it was in flight. */
+  const expectWavesOpenedAfter = (
+    commits: readonly ObservedWaveCommit[],
+    heldCommit: ObservedWaveCommit,
+  ): void => {
+    expect(heldCommit.seq).toBeDefined();
+    const later = commits.slice(commits.indexOf(heldCommit) + 1);
+    expect(later.length).toBeGreaterThan(0);
+    for (const commit of later) {
+      expect(commit.basisSeq).toBeGreaterThanOrEqual(heldCommit.seq!);
+    }
+  };
+
+  /** Seals a read probe against the serving runtime: a transaction that
+   * reads the argument document and writes nothing. */
+  const sealReadProbe = async (): Promise<void> => {
+    const probe = factoryRuntime!.edit();
+    factoryRuntime!.getCell<{ n: number }>(space, "read-through-arg", undefined)
+      .withTx(probe).get();
+    expect((await probe.commit()).error).toBeUndefined();
+  };
+
+  it("advances the watermark document over a commit authored while the wave creating that document was in flight, when nothing derives from it", async () => {
+    // The activation's first wave creates the watermark document. A cycle
+    // inheriting a wave opened during that commit carries only the next
+    // watermark advance, a write to a document its basis predates the
+    // creation of, which the per-doc CAS drops whole; the loop's own
+    // view of W would advance anyway, and nothing would re-advance the
+    // document until a later input.
+    const hold = holdableWaveCommit();
+    await instantiatePiece();
+    hold.arm();
+    host = newHost({
+      flushDeadlineMs: 5_000,
+      idleParkMs: 600_000,
+      storeReadThrough: true,
+    });
+    await demandFromClient();
+    const engine = await server.engineForSpace(space);
+    await hold.held;
+    const creation = hold.commits.at(-1)!;
+    await sealReadProbe();
+    const cell = clientRuntime.getCellFromLink<{ made: boolean }>({
+      id: "of:read-through-window-doc" as URI,
+      space,
+      path: [],
+    });
+    const creating = clientRuntime.edit();
+    cell.withTx(creating).set({ made: true });
+    expect((await creating.commit()).error).toBeUndefined();
+    const authoredSeq = latestAuthoredSeq(engine);
+    hold.release();
+
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= authoredSeq,
+      "the watermark document to cover the commit authored inside the window",
+    );
+    const settled = await waitForSettled(clientRuntime, space, authoredSeq, {
+      timeoutMs: 10_000,
+    });
+    expect(settled).toBeGreaterThanOrEqual(authoredSeq);
+    expectWavesOpenedAfter(hold.commits, creation);
+  });
+
+  it("derives from an input authored while its own previous wave commit was in flight, and serves the derived value", async () => {
+    // A cycle inheriting a wave opened during the commit of the wave
+    // deriving the previous input would seal the next derivation's write
+    // to the computed document under a basis that commit passed, and the
+    // per-doc CAS would drop it as superseded with nothing re-running it
+    // (serving-loop.md §3d).
+    const hold = holdableWaveCommit();
+    await instantiatePiece();
+    host = newHost({
+      flushDeadlineMs: 5_000,
+      idleParkMs: 600_000,
+      storeReadThrough: true,
+    });
+    const { clientResult, clientArg } = await demandFromClient();
+    const engine = await server.engineForSpace(space);
+    await deriveFromClient(clientArg, clientResult, 41);
+    // The content wave's trailing quiescence advance lands first, so the
+    // hold catches the wave deriving the next input and no other.
+    await waitUntil(
+      () => host!.stats().settleAdvances.count >= 1,
+      "the drain-settle quiescence advance to land",
+    );
+    hold.arm();
+    const input = clientRuntime.edit();
+    clientArg.withTx(input).set({ n: 50 });
+    expect((await input.commit()).error).toBeUndefined();
+    await hold.held;
+    const previous = hold.commits.at(-1)!;
+    await sealReadProbe();
+    const next = clientRuntime.edit();
+    clientArg.withTx(next).set({ n: 60 });
+    expect((await next.commit()).error).toBeUndefined();
+    const authoredSeq = latestAuthoredSeq(engine);
+    hold.release();
+
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= authoredSeq,
+      "the watermark document to cover the input authored inside the window",
+    );
+    await waitForSettled(clientRuntime, space, authoredSeq, {
+      timeoutMs: 10_000,
+    });
+    await waitUntil(
+      () => clientResult.key("total").get() === 61,
+      "the client to observe the derived value 61",
+    );
+    expect(host!.stats().supersededWrites).toBe(0);
+    expectWavesOpenedAfter(hold.commits, previous);
   });
 
   it("holds no record for an address the store has nothing at, reads it once, and picks it up from the feed once a commit creates it", async () => {

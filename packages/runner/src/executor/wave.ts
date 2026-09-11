@@ -867,6 +867,9 @@ export class WaveAccumulator
    * ride this wave's transaction. */
   readonly #pendingAppendsByTx = new WeakMap<object, OutboxAppendRow[]>();
 
+  /** How many staged appends no seal has taken yet (`hasUnsealedAppends`). */
+  #unsealedAppendCount = 0;
+
   readonly #sealedTxs = new WeakSet<object>();
   readonly #onUnstampedSeal: (() => void) | undefined;
   readonly #onEarlyEmitRefusal: (() => void) | undefined;
@@ -1022,6 +1025,13 @@ export class WaveAccumulator
     return this.#contributions.some((c) => c.outboundAppends.length > 0);
   }
 
+  /** Whether an append is staged by a transaction that has not sealed
+   * yet. Such an append rides the transaction's contribution once it
+   * seals, so a wave holding one is not empty even with no contribution. */
+  get hasUnsealedAppends(): boolean {
+    return this.#unsealedAppendCount > 0;
+  }
+
   /** The FOREIGN spaces sealed contributions target (protocol.md §2b's
    * provisioning commits). The serving loop resolves these spaces'
    * co-hosted engines BEFORE driving the commit step, so the sink's
@@ -1173,6 +1183,10 @@ export class WaveAccumulator
       // contribution), and dropping the entry here lost the appends
       // silently.
       const pendingAppends = this.#pendingAppendsByTx.get(tx) ?? [];
+      this.#unsealedAppendCount = Math.max(
+        0,
+        this.#unsealedAppendCount - pendingAppends.length,
+      );
       if (
         assembly.spaces.length === 0 && pendingAppends.length === 0 &&
         !localAcceptance
@@ -1370,6 +1384,7 @@ export class WaveAccumulator
       this.#pendingAppendsByTx.set(tx, pending);
     }
     pending.push(entry);
+    this.#unsealedAppendCount += 1;
   }
 
   /**
