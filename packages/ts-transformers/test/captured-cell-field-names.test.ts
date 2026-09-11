@@ -64,6 +64,40 @@ describe("captured cell value fields", () => {
     );
   });
 
+  it("preserves a nullable Stream capture and its event payload", async () => {
+    const output = await transformSource(
+      `import { pattern, action, Stream } from "commonfabric";
+      export default pattern<{
+        value: Stream<{ count: number }> | null | undefined;
+      }>(({ value }) => action(() => value?.send({ count: 1 })));`,
+      { types: COMMONFABRIC_TYPES, typeCheck: true },
+    );
+    const valueSchemas = emittedSchemas(parseModule(output)).flatMap(
+      (schema) => {
+        const properties = schema.properties;
+        return properties !== null && typeof properties === "object" &&
+            "value" in properties
+          ? [properties.value]
+          : [];
+      },
+    );
+    expect(valueSchemas).toHaveLength(2);
+    for (const schema of valueSchemas) {
+      expect(schema).toEqual({
+        anyOf: [
+          { type: "undefined" },
+          { type: "null" },
+          {
+            type: "object",
+            properties: { count: { type: "number" } },
+            required: ["count"],
+            asCell: ["stream"],
+          },
+        ],
+      });
+    }
+  });
+
   for (
     const { declaration, read } of [
       { declaration: "value?: Writable<Data>", read: "value!.get().count" },

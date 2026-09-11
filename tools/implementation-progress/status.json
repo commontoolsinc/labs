@@ -1,10 +1,10 @@
 {
-  "updated": "2026-09-11T02:02:17Z",
+  "updated": "2026-09-11T02:36:58.142869+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7257",
-  "activity": "Full review repairs validated: runner 1423 tests/8895 steps, full CLI suites, all type groups, three scale budgets, and four rendered remote-update/removal cases pass. Publishing the repairs to #7257 for fresh CI and Cubic review. The supporting generic Cell alias fix is published for review.",
-  "review": "Antagonistic review is clean for dispatch failure cleanup and presync accounting. Full local validation passes. Refreshed published-head Cubic and CI remain required before merging #7257.",
+  "activity": "Publishing the compiler coverage follow-up to #7257. Nullable Stream and parenthesized Cell capture regressions cover 13 lines absent from CI coverage. Full transformer tests, focused checked tests, and repository type checks pass. First-render demo is published in #7302; the Cell alias repair is in #7300.",
+  "review": "Antagonistic review is clean for the coverage regressions. The previous full Cubic review found no issues across 42 files. Refreshed CI and Cubic review remain required for this follow-up before merging #7257.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
@@ -15,7 +15,7 @@
     "#7279: merged as 6472ea93df after all 69 CI gates, zero-issue Cubic review, and clean antagonistic review.",
     "#7289: merged as b18d90b6aa with clean CI and Cubic/antagonistic reviews.",
     "#7285: merged as 1407825b0c after all current-head CI gates, zero-issue Cubic review, and clean antagonistic review.",
-    "#7257: 1,423 runner tests / 8,895 steps; 1,167 transformer tests / 960 steps; full CLI passes all three runs; 146 generated patterns; eight vintages; all six scale assertions; 46 type groups and 599 docs blocks pass.",
+    "#7257: 1,423 runner tests / 8,895 steps; 1,168 transformer tests / 961 steps; full CLI passes all three runs; 146 generated patterns; eight vintages; all six scale assertions; 46 type groups and 599 docs blocks pass.",
     "#7294: index/lookup contract merged as 039e8aecb0 after clean CI and Cubic/antagonistic reviews.",
     "Full-review follow-up: runner 1423 tests/8895 steps, CLI 1824 tests/2932 steps plus serial groups, all 46 type groups, 599 documentation blocks, all three scale budgets, and all four browser row cases pass. Skipped-step regression covers 27 previously uncovered CLI lines."
   ],

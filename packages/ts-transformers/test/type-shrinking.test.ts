@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
 import ts from "typescript";
 
 import type { CapabilityParamSummary } from "../src/core/mod.ts";
@@ -1129,4 +1130,26 @@ Deno.test("wrapTypeNodeWithCapability emits the expected cell wrappers", () => {
       "string",
     );
   }
+});
+
+Deno.test("applyShrinkAndWrap preserves a parenthesized capture while narrowing cell capability", () => {
+  const { sourceFile, checker } = createProgram(`
+    interface Cell<T> { get(): T; }
+    type Input = ({ value: Cell<{ count: number }>; other: string });
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const result = applyShrinkAndWrap(
+    createParamSummary({ wildcard: true, readPaths: [["value"]] }),
+    alias.type,
+    checker.getTypeAtLocation(alias.type),
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+  const { node, props: members } = shrunkProps(result, sourceFile);
+  expect(ts.isParenthesizedTypeNode(node)).toBe(true);
+  expect(hasQualifiedRef(node, "__cfHelpers", "ReadonlyCell")).toBe(true);
+  expect(members.get("count")?.type).toBe("number");
+  expect(members.get("other")?.type).toBe("string");
 });
