@@ -234,6 +234,19 @@ describe("baselines", () => {
       expect(baselines[0]?.uncoveredLines).toBe(5);
     });
 
+    it("passes over a measured-set metric that names no member", async () => {
+      const baselines = await collectCoverageBaselines(
+        source([{ id: 1, commit: "abc", createdAt: daysAgo(1) }], {
+          1: {
+            [measuredSetCoverageMetric("workspace-unit")]: 5,
+            [measuredSetCoverageMetric("workspace-unit/packages/a")]: 7,
+          },
+        }),
+        NOW,
+      );
+      expect(baselines.map((base) => base.member)).toEqual(["packages/a"]);
+    });
+
     it("stops at a run whose report names no measured set", async () => {
       // Such a run measured a tree where nothing publishes one, and
       // every older run is such a tree too, so reading further costs an

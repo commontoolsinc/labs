@@ -393,15 +393,16 @@ async function readAggregate(store: StoreAccess): Promise<AggregateRead> {
  */
 export async function liveBaselines(
   now: Date,
-  newest: (at: string) => Promise<ManifestFetch> = (at) =>
-    fetchManifest({ at }),
-  publishable: (
-    now: Date,
-    known: readonly CoverageBaseline[],
-  ) => Promise<CoverageBaseline[]> = publishableBaselines,
+  fetch?: typeof globalThis.fetch,
 ): Promise<CoverageBaseline[]> {
-  const previous = await newest(now.toISOString());
-  return await publishable(now, previous.manifest?.coverageBaselines ?? []);
+  const previous = await fetchManifest({
+    at: now.toISOString(),
+    ...(fetch === undefined ? {} : { fetch }),
+  });
+  return await publishableBaselines(
+    now,
+    previous.manifest?.coverageBaselines ?? [],
+  );
 }
 
 /**

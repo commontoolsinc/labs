@@ -9,6 +9,7 @@ import {
   nearestBaseline,
   nearestOnBranch,
   parseGateArgs,
+  publishedBaselines,
   runGate,
 } from "./coverage-gate.ts";
 import { coverageGateFor } from "./test-selection/coverage.ts";
@@ -178,6 +179,15 @@ describe("coverage-gate", () => {
         ["lane-1/coverage/lcov/sets/deeper/than/expected/coverage.lcov", "b"],
       ]);
       expect([...reports.keys()]).toEqual([]);
+    });
+
+    it("refuses a report directory it cannot walk", async () => {
+      // An absent directory is a lane that uploaded nothing, which the
+      // gate reports. Anything else is a failure worth ending on.
+      const dir = await Deno.makeTempDir({ prefix: "coverage-reports-" });
+      const file = path.join(dir, "not-a-directory");
+      await Deno.writeTextFile(file, "");
+      await expect(collectSetReports(file)).rejects.toThrow();
     });
 
     it("finds nothing where no lane uploaded anything", async () => {
@@ -925,6 +935,28 @@ describe("coverage-gate", () => {
       expect(lines.join("\n")).toContain("ACCEPT_COVERAGE_DEBT");
     });
 
+    it("writes what it says into the job's summary", async () => {
+      const { root, reports, suites } = await job(10, 6);
+      const summary = await Deno.makeTempFile({ prefix: "step-summary-" });
+      const before = Deno.env.get("GITHUB_STEP_SUMMARY");
+      Deno.env.set("GITHUB_STEP_SUMMARY", summary);
+      const log = console.log;
+      console.log = () => {};
+      try {
+        await main(["--base", "HEAD~1", "--reports", reports], root, {
+          topology: () => Promise.resolve(suites),
+          baselines: () => Promise.resolve([]),
+        });
+      } finally {
+        console.log = log;
+        if (before === undefined) Deno.env.delete("GITHUB_STEP_SUMMARY");
+        else Deno.env.set("GITHUB_STEP_SUMMARY", before);
+      }
+      expect(await Deno.readTextFile(summary))
+        .toContain("workspace-unit/packages/bakery");
+      await Deno.remove(summary);
+    });
+
     it("refuses a command line it cannot read", async () => {
       const { root } = await job(10, 6);
       const error = console.error;
@@ -934,6 +966,22 @@ describe("coverage-gate", () => {
       } finally {
         console.error = error;
       }
+    });
+  });
+
+  describe("the baselines a manifest carries", () => {
+    it("reads none where there is no manifest to read", async () => {
+      // A set with no baseline is reported rather than failed, so a
+      // store that cannot be reached costs the gate its opinion alone.
+      const empty: typeof globalThis.fetch = () =>
+        Promise.resolve(
+          new Response(
+            '<?xml version="1.0"?><ListBucketResult></ListBucketResult>',
+            { status: 200 },
+          ),
+        );
+      expect(await publishedBaselines("2026-09-10T00:00:00.000Z", empty))
+        .toEqual([]);
     });
   });
 

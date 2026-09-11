@@ -197,6 +197,17 @@ describe("coverage", () => {
       expect([...measuredUnitKeys(suites, gate)]).toHaveLength(2);
     });
 
+    it("requires nothing of a suite this tree does not hold", () => {
+      // A manifest can name a suite a later tree dropped, and a unit of
+      // one cannot be placed by anything.
+      const suites = [suite("workspace-unit", [bakery])];
+      const gate = coverageGateFor(
+        suites,
+        new Set(["packages/bakery/oven.ts"]),
+      );
+      expect(measuredUnitKeys([], gate).size).toBe(0);
+    });
+
     it("requires nothing when the cap turned the gate off", () => {
       const many = Array.from(
         { length: LOCAL_COVERAGE_MAX_SETS + 1 },

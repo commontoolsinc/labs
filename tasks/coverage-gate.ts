@@ -545,6 +545,23 @@ export interface GateDeps {
   baselines?: (at: string) => Promise<readonly CoverageBaseline[]>;
 }
 
+/**
+ * The baselines the manifest current at `at` carries, or none where
+ * there is no manifest to read. A set with no baseline is reported
+ * rather than failed, so a store that cannot be reached costs the gate
+ * its opinion and nothing else.
+ */
+export async function publishedBaselines(
+  at: string,
+  fetch?: typeof globalThis.fetch,
+): Promise<readonly CoverageBaseline[]> {
+  const found = await fetchManifest({
+    at,
+    ...(fetch === undefined ? {} : { fetch }),
+  });
+  return found.manifest?.coverageBaselines ?? [];
+}
+
 /** Runs the gate the way the job runs it, and answers with its status. */
 export async function main(
   args: readonly string[] = Deno.args,
@@ -570,11 +587,7 @@ export async function main(
     laneCount: false,
     root: options.root,
   });
-  const baselines = await (deps.baselines ??
-    (async (at: string) =>
-      (await fetchManifest({ at })).manifest?.coverageBaselines ?? []))(
-      moment.at,
-    );
+  const baselines = await (deps.baselines ?? publishedBaselines)(moment.at);
   let accepted: ReadonlyMap<string, number>;
   try {
     accepted = acceptedCoverageDebt(options.body);

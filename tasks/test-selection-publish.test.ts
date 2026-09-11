@@ -1300,44 +1300,21 @@ describe("publish() reporting what no lane can hold", () => {
 });
 
 describe("the baselines a publish carries", () => {
-  const carried: CoverageBaseline[] = [{
-    suite: "workspace-unit",
-    member: "packages/bakery",
-    commit: "abc",
-    createdAt: "2026-09-09T00:00:00.000Z",
-    uncoveredLines: 7,
-  }];
   const now = new Date("2026-09-10T00:00:00.000Z");
 
-  it("brings the newest manifest's baselines forward", async () => {
-    let given: readonly CoverageBaseline[] | undefined;
-    const published = await liveBaselines(
-      now,
-      () =>
-        Promise.resolve({
-          manifest: { ...emptyManifest(), coverageBaselines: carried },
-        }),
-      (_now, known) => {
-        given = known;
-        return Promise.resolve([...known]);
-      },
+  /** A fetch answering a listing with nothing under the prefix. */
+  const empty: typeof globalThis.fetch = () =>
+    Promise.resolve(
+      new Response(
+        '<?xml version="1.0"?><ListBucketResult></ListBucketResult>',
+        { status: 200 },
+      ),
     );
-    expect(given).toEqual(carried);
-    expect(published).toEqual(carried);
-  });
 
-  it("brings nothing forward where there is no manifest to read", async () => {
+  it("carries nothing where there is no manifest to read", async () => {
     // The walk over recent runs is then the only source, which is what
-    // rebuilds the window over the publishes that follow.
-    let given: readonly CoverageBaseline[] | undefined;
-    await liveBaselines(
-      now,
-      () => Promise.resolve({ absent: "listing failed" }),
-      (_now, known) => {
-        given = known;
-        return Promise.resolve([]);
-      },
-    );
-    expect(given).toEqual([]);
+    // rebuilds the window over the publishes that follow. A publisher
+    // without a credential reads no runs, so this carries nothing.
+    expect(await liveBaselines(now, empty)).toEqual([]);
   });
 });
