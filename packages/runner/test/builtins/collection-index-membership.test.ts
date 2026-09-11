@@ -145,6 +145,50 @@ describe("collection-index-membership", () => {
     expect(readBucket("A")).toEqual({ title: "First" });
   });
 
+  it("updates the winning occurrence's source without changing its key", async () => {
+    await update("a", "A", first, "key");
+    await update("a", "A", second, "key");
+    expect(readBucket("A")).toEqual({ title: "Second" });
+    expect(readKeys()).toEqual(["A"]);
+  });
+
+  it("orders unique winners by UTF-8 and rolls back a winning move", async () => {
+    await update("\u{10000}", "A", first, "key");
+    await update("\uE000", "A", second, "key");
+    expect(readBucket("A")).toEqual({ title: "Second" });
+    await update("\uE000", "B", second, "key", true);
+    expect(readBucket("A")).toEqual({ title: "Second" });
+    expect(readBucket("B")).toBeUndefined();
+    await update("\uE000", "B", second, "key");
+    expect(readBucket("A")).toEqual({ title: "First" });
+    expect(readBucket("B")).toEqual({ title: "Second" });
+  });
+
+  it("rebuilds an absent winner cache without changing the selected member", async () => {
+    await update("z", "A", first, "key");
+    await update("a", "A", second, "key");
+    const tx = runtime.edit();
+    state.withTx(tx).key("winners").set(undefined);
+    expect((await tx.commit()).error).toBeUndefined();
+    await update("z", "A", first, "key", true);
+    expect(state.key("winners").get()).toBeUndefined();
+    expect(readBucket("A")).toEqual({ title: "Second" });
+    await update("z", "A", first, "key");
+    expect(readBucket("A")).toEqual({ title: "Second" });
+    await update("a", undefined, second, "key");
+    expect(readBucket("A")).toEqual({ title: "First" });
+  });
+
+  it("restores an absent published bucket from retained membership", async () => {
+    await update("z", "A", first, "key");
+    await update("a", "A", second, "key");
+    const tx = runtime.edit();
+    index.withTx(tx).key("buckets").set({});
+    expect((await tx.commit()).error).toBeUndefined();
+    await update("z", "A", first, "key");
+    expect(readBucket("A")).toEqual({ title: "Second" });
+  });
+
   it("rolls back both buckets and key enumeration with an aborted move", async () => {
     await update("a", "A");
     await update("a", "B", first, "group", true);

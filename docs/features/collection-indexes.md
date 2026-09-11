@@ -50,10 +50,16 @@ leaves membership intact; a later input change can start confirmation again.
 
 ## Work and limitations
 
-Membership reconciliation scans source occurrence identities. Updating one key
-rebuilds and sorts each affected bucket; a bucket with M members can require
-O(M log M) work. Occupied-key metadata is maintained with membership. A separate
-child enumerates and sorts K occupied keys when `keys()` is demanded, which can
+Membership reconciliation scans source occurrence identities. `groupBy` rebuilds
+and sorts each affected bucket; a bucket with M members can require O(M log M)
+work. `keyBy` writes one member entry and compares an inserted occurrence with
+the cached winner. Non-winning updates avoid enumerating the bucket. Removing
+the winner scans the remaining members in O(M) work to choose its replacement.
+A missing winner cache is reconstructed from durable membership, and a missing
+published bucket is restored from its selected member.
+
+Occupied-key metadata is maintained with membership. A separate child enumerates
+and sorts K occupied keys when `keys()` is demanded, which can
 require O(K log K) work. Lookup-only demand does not rebuild this enumeration
 for membership updates. Retained live membership records are proportional
 to source occurrences and occupied keys; storage history follows the ordinary

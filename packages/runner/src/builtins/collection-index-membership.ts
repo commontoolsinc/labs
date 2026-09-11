@@ -56,6 +56,9 @@ export interface CollectionIndexMembership {
 
   /** Occupied key metadata used by demanded enumeration. */
   occupied: Record<string, OccupiedKey | undefined>;
+
+  /** Winning occurrence hashes for unique-key buckets; populated on demand. */
+  winners?: Record<string, string | undefined>;
 }
 
 /** Public index descriptor whose groups preserve original source links. */
@@ -87,6 +90,76 @@ function deleteIndexSlot(
   tx.poisonMergeableOp?.(link);
 }
 
+/** Finds the first occurrence when a unique bucket needs a replacement winner. */
+function firstMember(members: Record<string, IndexMember>): string | undefined {
+  let winner: string | undefined;
+  for (const id of Object.keys(members)) {
+    if (
+      winner === undefined ||
+      utf8Compare(members[id].occurrence, members[winner].occurrence) < 0
+    ) winner = id;
+  }
+  return winner;
+}
+
+/** Updates one unique-key member without rebuilding an unchanged winning value. */
+function updateUniqueBucket(
+  tx: IExtendedStorageTransaction,
+  stored: Cell<CollectionIndexMembership>,
+  output: Cell<MaintainedCollectionIndex>,
+  bucket: string,
+  memberId: string,
+  member: IndexMember | undefined,
+  wasOccupied: boolean,
+): boolean {
+  const members = stored.key("members").key(bucket);
+  const winners = stored.key("winners");
+  if (winners.get() === undefined) winners.set({});
+  const winnerSlot = winners.key(bucket);
+  const winnerCell = winnerSlot.asSchema<string | undefined>(winnerSlot.schema);
+  function readMember(id: string) {
+    const slot = members.key(id);
+    return slot.asSchema<IndexMember | undefined>(slot.schema).get();
+  }
+  let winnerId = winnerCell.get();
+  // Durable membership can exist before its optional winner cache is populated.
+  if (winnerId === undefined && wasOccupied) {
+    winnerId = firstMember(snapshotQueryResult(members.get() ?? {}));
+  }
+  const previousWinner = winnerId;
+  if (member) {
+    members.key(memberId).set(member);
+    if (
+      winnerId === undefined || winnerId === memberId ||
+      utf8Compare(member.occurrence, readMember(winnerId)!.occurrence) < 0
+    ) winnerId = memberId;
+  } else {
+    deleteIndexSlot(tx, members.key(memberId));
+    if (winnerId === memberId) {
+      winnerId = firstMember(snapshotQueryResult(members.get() ?? {}));
+    }
+  }
+  if (winnerId === undefined) {
+    deleteIndexSlot(tx, winnerCell);
+    deleteIndexSlot(tx, members);
+    deleteIndexSlot(tx, output.key("buckets").key(bucket));
+    return false;
+  }
+  if (winnerCell.get() !== winnerId) winnerCell.set(winnerId);
+  if (
+    winnerId !== previousWinner || (member && winnerId === memberId) ||
+    output.key("buckets").key(bucket).getRaw() === undefined
+  ) {
+    const selected = member && winnerId === memberId
+      ? member
+      : snapshotQueryResult(readMember(winnerId)!);
+    output.key("buckets").key(bucket).set(
+      output.runtime.getCellFromLink(selected.element, undefined, tx),
+    );
+  }
+  return true;
+}
+
 /**
  * Moves or removes one source occurrence and publishes its affected buckets.
  * The owning coordinator supplies runtime-owned cells in the index's scope.
@@ -114,34 +187,49 @@ export function maintainCollectionIndexMembership(
       const affected = new Set([previous, next]);
       for (const bucket of affected) {
         if (bucket === undefined) continue;
-        const membersCell = stored.key("members").key(bucket);
-        const members = { ...snapshotQueryResult(membersCell.get() ?? {}) };
-        const wasOccupied = Object.keys(members).length > 0;
-        if (bucket === next) {
-          members[memberId] = {
+        const member = bucket === next
+          ? {
             occurrence,
             element: element.getAsNormalizedFullLink(),
-          };
-        } else {
-          delete members[memberId];
-        }
-        const ordered = Object.values(members).sort((a, b) =>
-          utf8Compare(a.occurrence, b.occurrence)
-        );
-        if (ordered.length) membersCell.set(members);
-        else deleteIndexSlot(tx, membersCell);
-        const values = ordered.map((member) =>
-          runtime.getCellFromLink(member.element, undefined, tx)
-        );
-        if (ordered.length) {
-          output.key("buckets").key(bucket).set(
-            mode === "group" ? values : values[0],
+          }
+          : undefined;
+        let wasOccupied: boolean;
+        let isOccupied: boolean;
+        if (mode === "key") {
+          wasOccupied = stored.key("occupied").key(bucket).get() !== undefined;
+          isOccupied = updateUniqueBucket(
+            tx,
+            stored,
+            output,
+            bucket,
+            memberId,
+            member,
+            wasOccupied,
           );
         } else {
-          deleteIndexSlot(tx, output.key("buckets").key(bucket));
+          const membersCell = stored.key("members").key(bucket);
+          const members = { ...snapshotQueryResult(membersCell.get() ?? {}) };
+          wasOccupied = Object.keys(members).length > 0;
+          if (member) members[memberId] = member;
+          else delete members[memberId];
+          const ordered = Object.values(members).sort((a, b) =>
+            utf8Compare(a.occurrence, b.occurrence)
+          );
+          isOccupied = ordered.length > 0;
+          if (isOccupied) {
+            membersCell.set(members);
+            output.key("buckets").key(bucket).set(
+              ordered.map((entry) =>
+                runtime.getCellFromLink(entry.element, undefined, tx)
+              ),
+            );
+          } else {
+            deleteIndexSlot(tx, membersCell);
+            deleteIndexSlot(tx, output.key("buckets").key(bucket));
+          }
         }
-        if (wasOccupied !== (ordered.length > 0)) {
-          if (ordered.length) {
+        if (wasOccupied !== isOccupied) {
+          if (isOccupied) {
             stored.key("occupied").key(bucket).set({
               identity: key!.identity,
               ...(key!.identity.kind === "cell"
