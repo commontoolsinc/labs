@@ -137,9 +137,16 @@ into another space kicks a load there (`ensureLinkedDocLoaded`), and that
 load is the subscription: the storage manager opens the space and tracks the
 load. The pre-sync uses exactly that: after a wave's plan syncs land, it
 reads each plan's inputs under its read schema through a read transaction,
-awaits the loads those reads kicked (`crossSpaceSettled`), and reads again
-until a round kicks nothing (`#syncCrossSpaceReads`). The read's own
-traversal decides what is missing, so no second walk exists. The pass is
+awaits the loads pending after those reads by document (`loadsSettled` over
+`pendingLoadAddresses`), and reads again until a round leaves no load
+pending that an earlier round did not await (`#syncCrossSpaceReads`). The
+read's own traversal decides what is missing, so no second walk exists. The
+pass awaits loads, never the storage manager's settled pool: on a client that
+pool holds the runtime's other work, and a resume that waited for it would
+wait behind sinks and coordinators that never go quiet. Awaiting each
+document once is also what ends the pass for a link whose target never
+arrives or whose space denies the read, since every read kicks such a load
+again. The pass is
 owed rather than optional: a space the transaction only read enters no
 commit's basis, so a cold cross-space read costs no conflict, but an action
 that destructures the cold value throws instead of re-running, and the home

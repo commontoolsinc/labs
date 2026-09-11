@@ -137,6 +137,7 @@ import {
   type EventHandler,
   ignoreReadForScheduling,
 } from "./scheduler.ts";
+import { entityKey } from "./scheduler/keys.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import { isSchemaMismatchError } from "./schema-view.ts";
 import { forEachSubschema } from "./schema-walk.ts";
@@ -7469,10 +7470,15 @@ export class Runner {
    * walk delivers what a plan's selector reaches within its space and stops
    * at a link into another, so after the plan syncs land this reads each
    * plan's inputs under its read schema through a read transaction: a read
-   * that dead-ends on such a link kicks that document's load, and every
-   * load then pending is awaited before the next read, which reaches one
-   * space further. A round after which nothing is pending ends it: the
-   * reads kicked nothing, and no earlier load is still in flight.
+   * that dead-ends on such a link kicks that document's load, and the loads
+   * pending after the reads are awaited before the next read, which reaches
+   * one space further. Each round awaits only loads no earlier round
+   * awaited, by document, so a link whose target never arrives, kicked
+   * again by every read, ends the pass rather than extending it, and a round
+   * whose reads leave no new load pending ends it. The manager's settled
+   * pool is not what is awaited: on a client it holds the runtime's other
+   * work, sinks' first loads and coordinators' republishes among it, which
+   * a resume must not wait behind.
    */
   async #syncCrossSpaceReads(
     plans: readonly NodePlan[],
@@ -7480,9 +7486,10 @@ export class Runner {
   ): Promise<void> {
     const manager = this.#runtime.storageManager;
     if (
-      manager.pendingCrossSpacePromiseCount === undefined ||
-      manager.crossSpaceSettled === undefined
+      manager.pendingLoadAddresses === undefined ||
+      manager.loadsSettled === undefined
     ) return;
+    const awaited = new Set<string>();
     for (;;) {
       const readTx = this.#familyReadTx(identity);
       for (const plan of plans) {
@@ -7499,9 +7506,22 @@ export class Runner {
           ]);
         }
       }
-      if (manager.pendingCrossSpacePromiseCount() === 0) return;
+      const keys = manager.pendingLoadAddresses()
+        .map((address) => entityKey(address, this.#runtime.scopeKeyIdentity))
+        .filter((key) => !awaited.has(key));
+      if (keys.length === 0) return;
+      for (const key of keys) awaited.add(key);
       const settleStart = performance.now();
-      await manager.crossSpaceSettled();
+      try {
+        await manager.loadsSettled(keys);
+      } catch (error) {
+        // A load that failed leaves its document absent; the next round
+        // reads past it, and the run reads the same absence.
+        logger.debug("resume-pre-sync", () => [
+          "a load a cross-space read kicked did not land",
+          error,
+        ]);
+      }
       logger.time(settleStart, "start", "resumeCrossSpaceSettle");
     }
   }

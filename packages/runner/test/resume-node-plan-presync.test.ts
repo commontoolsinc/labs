@@ -703,6 +703,58 @@ describe("resume node plan pre-sync", () => {
     }
   });
 
+  it("ends the cross-space pass while unrelated tracked work is still in flight", async () => {
+    // A client runtime keeps other work in the storage manager's settled
+    // pool: sinks' first loads, coordinators' republishes, retries. The pass
+    // awaits the loads its own reads kicked, not the pool, so a resume on a
+    // busy client starts the piece while that work is still running.
+    const txP = rt1.edit();
+    const leafDoc = rt1.getCell<{ name?: string }>(
+      spaceP,
+      "cross-space leaf under load",
+      undefined,
+      txP,
+    );
+    leafDoc.withTx(txP).set({ name: "Ada" });
+    rt1.prepareTxForCommit(txP);
+    expect((await txP.commit()).error).toBeUndefined();
+    const tx1 = rt1.edit();
+    const midDoc = rt1.getCell<{ next?: unknown }>(
+      space,
+      "cross-space mid under load",
+      undefined,
+      tx1,
+    );
+    midDoc.withTx(tx1).set({ next: leafDoc });
+    const top = rt1.getCell<{ next?: unknown }>(
+      space,
+      "cross-space top under load",
+      undefined,
+      tx1,
+    );
+    top.withTx(tx1).set({ next: midDoc });
+    rt1.prepareTxForCommit(tx1);
+    expect((await tx1.commit()).error).toBeUndefined();
+
+    const unrelated = Promise.withResolvers<void>();
+    managerB.trackUntilSettled(unrelated.promise);
+    try {
+      const resumed = await createAndResume(
+        DEEP_READ_PROGRAM,
+        { def: top },
+        "cross-space parent under load",
+      );
+      expect(localOnB(leafDoc, spaceP)).toBe(true);
+      unrelated.resolve();
+      await rt2.idle();
+      const label = resumed.key("label");
+      await label.pull();
+      expect(label.get()).toBe("n:Ada");
+    } finally {
+      unrelated.resolve();
+    }
+  });
+
   it("names a document a body reads three links deep", async () => {
     const tx = rt1.edit();
     const leaf = rt1.getCell<{ name?: string }>(
