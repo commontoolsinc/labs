@@ -306,8 +306,8 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   /**
    * Indicates that the instance state of a `FabricInstance` was just visited.
    * This method is called as a result of the visitor returning a `recurse`
-   * result for a visited `FabricInstance` and is called _after_ the element
-   * itself was directly visited.
+   * result for a visited `FabricInstance` and is called _after_ the instance's
+   * state was directly visited.
    */
   visitedFabricInstance(
     instance: FabricInstance,
