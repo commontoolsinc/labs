@@ -50,8 +50,9 @@ type VisitSubtypeOfForm<DomainExtra> = {
 /**
  * Similar to `VisitSubtypeOfForm`, but for `recurse`. Unlike that one, though,
  * this one is _always_ propagated in the engine after getting a plain `recurse`
- * result, on the theory that if we're going to iterate the one extra allocation
- * is small potatoes, and it keeps the code a wee bit simpler.
+ * result, on the theory that if we're going to recurse -- a relatively
+ * heavyweight operation -- the one extra allocation is small potatoes, and it
+ * keeps the code a wee bit simpler.
  */
 type RecurseOfForm = {
   readonly type: "recurseOf";
@@ -362,8 +363,8 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   }
 
   /**
-   * Iterates over all the elements in an array, in response to a `recurse`
-   * result.
+   * Recurses into a `FabricArray`, iterating over all its elements, in response
+   * to a `recurse` result.
    */
   #iterateArray(result: RecurseOfForm): BaselineVisitResult<ResultType> {
     const { container, doValues } = result;
@@ -438,7 +439,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   }
 
   /**
-   * Recurses on a `FabricInstance`, in response to a `recurse` result. The
+   * Recurses into a `FabricInstance`, in response to a `recurse` result. The
    * recursion consists of a single sub-value visit, of the instance's state,
    * per its normal codec.
    */
@@ -480,8 +481,8 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   }
 
   /**
-   * Iterates over all the entries in a `FabricPlainObject`, in response to a
-   * `recurse` result.
+   * Recurses into a `FabricPlainObject`, iterating over all its entries, in
+   * response to a `recurse` result.
    */
   #iterateFabricPlainObject(
     result: RecurseOfForm,
