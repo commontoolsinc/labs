@@ -8259,12 +8259,14 @@ export class SpaceReplica
   /**
    * Helper for `#integrateReadThrough()`, which completes a frame of store
    * reads with the schema documents they reference: every `cid:` hash in a
-   * document's link positions, and in a schema document's own refs, that
-   * this replica does not already hold verified is read from the store
-   * and added to the frame, to a fixpoint. The delivery guarantee the
-   * frame validator enforces is that a document's refs resolve within
-   * the delivered set; a session's server walks those references for
-   * it, and this is the same chase for a frame read directly.
+   * document's link positions and in its `schema` metadata member, and in
+   * a schema document's own refs, that this replica does not already hold
+   * verified is read from the store and added to the frame, to a fixpoint.
+   * The delivery guarantee the frame validator enforces is that a
+   * document's refs resolve within the delivered set; a session's server
+   * walks those references for it, and this is the same chase for a frame
+   * read directly. A malformed metadata member names nothing here; the
+   * validator quarantines the document for it.
    */
   #withSchemaDependencies(
     read: StoreReadThrough,
@@ -8292,6 +8294,10 @@ export class SpaceReplica
           }
           return schema;
         });
+        const meta = classifySchemaMeta(upsert.doc);
+        if (meta.kind !== "malformed") {
+          for (const hash of schemaMetaRefHashes(meta)) hashes.add(hash);
+        }
       }
       for (const hash of hashes) {
         const id = `cid:${hash}` as URI;

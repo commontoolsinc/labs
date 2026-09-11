@@ -523,6 +523,60 @@ describe("engine-read-through", () => {
     }
   });
 
+  it("reads the schema document a document's schema metadata member names along with it", async () => {
+    // The frame validator holds a document's `schema` metadata member to
+    // the same delivery guarantee as its link positions: the reference
+    // form names a schema document, and the document is quarantined unless
+    // that one arrives with it. The chase follows the member as a
+    // session's walk does.
+    const decomposed = decomposeSchema({
+      type: "object",
+      properties: { text: { type: "string" } },
+    });
+    const store = new Map<string, FabricValue>(
+      [...decomposed.documents].map((
+        [hash, document],
+      ) => [`cid:${hash}`, { value: document } as FabricValue]),
+    );
+    const carrier = {
+      value: { text: "held" },
+      schema: { $ref: decomposed.rootRef },
+    } as FabricValue;
+    store.set("of:meta-carrier", carrier);
+    const reads: string[] = [];
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    try {
+      manager.installStoreReadThrough(space, ({ id, scopeKey }) => {
+        reads.push(id);
+        const doc = store.get(id);
+        return {
+          branch: "",
+          id,
+          scope: "space",
+          scopeKey,
+          ...(doc === undefined
+            ? { seq: 0, deleted: true as const }
+            : { seq: 1, doc }),
+        };
+      });
+      const replica = manager.open(space).replica as SpaceReplica;
+      expect(replica.getDocument("of:meta-carrier" as URI)).toEqual(carrier);
+      expect(reads).toEqual([
+        "of:meta-carrier",
+        ...[...decomposed.documents.keys()].reverse().map((hash) =>
+          `cid:${hash}`
+        ),
+      ]);
+      // Held now: a second read reaches the store for nothing.
+      expect(replica.getDocument("of:meta-carrier" as URI)).toEqual(carrier);
+      expect(reads.length).toBe(1 + decomposed.documents.size);
+    } finally {
+      await manager.close();
+    }
+  });
+
   it("does not read the store for a pull whose scope the identity cannot resolve", async () => {
     // Such a scope keys by its name, which names no store row: the store
     // would read the name as the space scope and answer with the wrong
