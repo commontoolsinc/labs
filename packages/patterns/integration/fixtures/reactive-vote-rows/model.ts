@@ -53,3 +53,11 @@ export const rename = handler<
 >(({ key, name }, { profiles }) => {
   profiles.elementById(key).key("name").set(name);
 });
+
+/** Removes a vote's membership link while preserving its keyed entity. */
+export const retract = handler<
+  { key: string },
+  { votes: Writable<Vote[]> }
+>(({ key }, { votes }) => {
+  votes.removeByValue(votes.elementById(key));
+});

@@ -1,10 +1,10 @@
 {
-  "updated": "2026-09-11T00:26:49.955314+00:00",
+  "updated": "2026-09-11T01:14:37.570886+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7257",
-  "activity": "Read budgets integrated with main and nullable Cell capture correction validated. Publishing for fresh Cubic and CI. Selector fix #7279 merged; A4 read limits are in draft #7282.",
-  "review": "Antagonistic review is clean for the nullable Cell correction. All focused and full transformer checks pass; current-head Cubic and CI remain required before landing.",
+  "activity": "Budget review repairs pass full compiler, runner, CLI, generated-pattern, vintage, type and docs validation. All three dependent scale fixtures retain their exact counts and pass limits. Integrating merged removal acceptance #7285 and index contract #7294 before fresh CI/Cubic.",
+  "review": "Antagonistic review is clean for the compiler, event failure, contributor attribution, and initialization settlement repairs. Fresh published-head CI and Cubic remain required for #7257.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
@@ -12,8 +12,11 @@
     "#7265: merged as 3aee034aff after all 69 CI gates, zero-issue latest Cubic review, and clean antagonistic review.",
     "#7264: merged as 5d23bc5ba9 after all 69 CI gates and clean latest Cubic/antagonistic reviews.",
     "#7259: named incremental aggregates merged as d9b45371ef; contracts and measurements are linked from the implementation tracker.",
-    "#7257: main integration passed 1,423 runner tests / 8,888 steps. Nullable Cell correction passed 1,167 transformer tests / 959 steps, 20 focused compiler/aggregate steps, all 13 CLI budget steps, 46 type-check groups, 599 docs blocks, fmt and lint.",
-    "#7279: merged as 6472ea93df after all 69 CI gates, zero-issue Cubic review, and clean antagonistic review."
+    "#7279: merged as 6472ea93df after all 69 CI gates, zero-issue Cubic review, and clean antagonistic review.",
+    "#7289: merged as b18d90b6aa with clean CI and Cubic/antagonistic reviews.",
+    "#7285: merged as 1407825b0c after all current-head CI gates, zero-issue Cubic review, and clean antagonistic review.",
+    "#7257: 1,423 runner tests / 8,892 steps; 1,167 transformer tests / 960 steps; full CLI passes all three runs; 146 generated patterns; eight vintages; all six scale assertions; 46 type groups and 599 docs blocks pass.",
+    "#7294: index/lookup contract merged as 039e8aecb0 after clean CI and Cubic/antagonistic reviews."
   ],
   "stages": [
     {
@@ -38,13 +41,13 @@
       "id": "A3",
       "title": "Read budgets and whole-step coverage",
       "status": "review",
-      "detail": "Implementation, main integration, and nullable Cell capture correction validated. PR #7257 requires fresh Cubic review and current-head CI before landing."
+      "detail": "Complete Cell reads and all reviewed failure paths are repaired. Full validation passes; publishing for fresh CI and Cubic in #7257."
     },
     {
       "id": "A4",
       "title": "Read-side benchmark",
       "status": "active",
-      "detail": "Browser benchmark landed in #7261. Draft #7282 adds passing render limits at all three sizes and a verified one-over failure. Its prerequisite is #7257."
+      "detail": "Browser benchmark landed in #7261. Read limits and optimized fixture published in draft #7282; all three sizes and one-over-limit probe pass. Awaiting prerequisite #7257."
     },
     {
       "id": "A5",
@@ -56,13 +59,13 @@
       "id": "C1",
       "title": "Multi-replica reproductions",
       "status": "active",
-      "detail": "Four synthetic browser cases pass: nested filters and mapped swatches, with same-space and cross-space profiles, remote colors, profile-only edits, membership additions, and ranking. Cold-materialization verification, removal, and reconnect cases remain."
+      "detail": "Remote insertion, rename, removal, and restoration acceptance now lands through #7285 for nested/mapped rows with same-space/cross-space profiles. Before/after demo available. Cold materialization and reconnect acceptance remain."
     },
     {
       "id": "B1",
       "title": "Grouping and unique-key indexing",
-      "status": "todo",
-      "detail": "Settle key, duplicate, ordering, identity, and complexity contracts."
+      "status": "active",
+      "detail": "Index/lookup contract landed in #7294. Compiler probe preserves key/value schemas with a single-payload typed handle. Public API and lowering prototype are next."
     },
     {
       "id": "B2",
@@ -215,5 +218,5 @@
       "detail": "Compare the same interaction before and after migration, with read work and measured time."
     }
   ],
-  "validatedRevision": "6be9f46a291e957bb31fe01e81f26b0015539e1b"
+  "validatedRevision": "42e7c680ed36a375e84148fdb992d43b08afb60d"
 }

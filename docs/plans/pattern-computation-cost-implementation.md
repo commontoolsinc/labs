@@ -3,12 +3,13 @@
 Status: A1/A2 instrumentation shipped in #7246; worker control shipped in #7256.
 The controlled A0 fixture, accounting regressions, and dashboard shipped in
 #7241, with browser and remote-row demonstrations added in #7264. A3 budget
-enforcement is under review in #7257. Its captured-cell compiler regression
-repair passes the full transformer suite and targeted CLI tests; current-head
-CI and Cubic review remain. A4's browser benchmark shipped in #7261; count
-limits remain. C1's remote-row reproductions and the C3 inline-element
-dependency repair landed in #7265. Cold-materialization, removal, reconnect,
-and remaining row-invalidation acceptance checks stay open.
+repairs are under review in #7257. Full compiler, runner, CLI, generated-pattern,
+and vintage validation pass; current-head CI and Cubic review remain. A4's
+browser benchmark shipped in #7261; count limits remain in #7282. C1's remote-row
+reproductions and C3's inline-element dependency repair landed in #7265;
+removal/restoration acceptance and its demo landed in #7285. Cold materialization
+and reconnect acceptance remain. B1/B2's proposed contract landed in #7294;
+its typed handle and lowering prototype remain pending.
 
 B3's named aggregates are implemented and validated in
 [PR #7259](https://github.com/commontoolsinc/labs/pull/7259), with
@@ -212,12 +213,13 @@ reviews remain landing gates.
   assert nested-filter membership and derived tally updates. The
   [browser tests](../../packages/patterns/integration/reactive-vote-rows-browser.test.ts)
   cover same-space and cross-space profiles, remote colors, profile-only edits,
-  membership additions, ranking changes, and nested mapped swatches. The browser
+  membership additions, removal/restoration, ranking changes, and nested mapped
+  swatches. Removal checks pin the empty row, absence of nested swatches,
+  reordering, and exactly one swatch after restoring the same keyed vote. The browser
   subscribes before votes are created. Cross-space profiles are created in a
   separate transaction and edited directly in their own space. Headless result
   reads explicitly pull data, so browser rendering owns the passive-update
-  check. C1 remains open for cold-materialization verification, removals, and
-  reconnects. These synthetic probes do not authorize removing the lunch-poll
+  check. C1 remains open for cold-materialization verification and reconnects. These synthetic probes do not authorize removing the lunch-poll
   workaround or accessing the live poll.
 
   C3's landed fix records the mutable inline element used when resolving a
@@ -251,7 +253,10 @@ reviews remain landing gates.
 
 ## 6–9. Complete the collection algebra: B1–B4
 
-- [ ] **B1 contract — Specify `groupBy` and `keyBy` separately.**
+- [ ] **B1 contract — Specify `groupBy` and `keyBy` separately.** The
+      [proposed index contract](collection-index-contract.md) records semantic
+      decisions and acceptance tests. The typed index handle and lowering
+      prototype remain prerequisites to completing this contract.
   - [ ] Key domain and equality, including resolved link identity and
         retargeting a key link without editing its containing element.
   - [ ] Duplicate-key handling that remains deterministic for unordered input;
