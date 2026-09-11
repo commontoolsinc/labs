@@ -966,7 +966,15 @@ the 2026-08-24 ruling; the owner may re-rule it).
 - The accumulator is a layered view: store snapshot at the wave's input
   seq + previously sealed writes. Actions run serially per space, so a
   later action reads earlier ones' sealed writes; intra-wave ordering is
-  the scheduler's ordering.
+  the scheduler's ordering. The input seq is the serverSeq the wave was
+  opened at, and any seal opens one when none is open. A wave nothing
+  sealed into is discarded at the next cycle's start and again ahead of
+  the cycle's own watermark write, so the wave a cycle commits was opened
+  at or after its predecessor's commit landed: a seal arriving while that
+  commit is in flight (a read probe against the serving runtime) would
+  otherwise leave a wave whose basis the loop's own commit has already
+  passed, and the next cycle's writes to the documents it touched — the
+  watermark advance among them — would be dropped against it.
 - Failure isolation is per action: an aborted tx discards only its own
   writes; the wave keeps the rest.
 - On a client (OFF arm, and speculation in the ON arm) seal == commit /
