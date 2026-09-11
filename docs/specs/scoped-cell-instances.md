@@ -348,6 +348,20 @@ the target cell's declared/effective scope controls which scoped storage
 instance is written. A write does not widen or narrow the target cell just
 because the value being written was read from another scope.
 
+A writable handle created for an absent defaulted property uses the scope on
+its `asCell` entry, whether the property is read through the containing object
+or projected with `key()`. A stored value or reference retains its own scope;
+a reference to a missing target is still an existing reference. An unresolved
+or scope-blocked ancestor cannot authorize creation of a scoped default.
+
+Pattern argument setup materializes missing declared scoped properties even
+when the caller supplies the argument object through a Cell reference. The
+redirect stays at the input slot so existing child bindings follow subsequent
+explicit rebinding. Existing values and references remain authoritative,
+including a reference to the same input field at a narrower scope. The reads
+that authorize initialization remain commit dependencies, so a concurrent
+explicit write cannot be overwritten silently.
+
 ## TypeScript Authoring
 
 Scope wrappers are type-level annotations:
