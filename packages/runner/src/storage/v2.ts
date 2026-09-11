@@ -5099,7 +5099,11 @@ export class SpaceReplica
     transaction: NativeStorageCommit,
     source: IStorageTransaction | undefined,
     verdict: Promise<SealedCommitVerdict>,
-    options?: { readonly speculative?: boolean },
+    options?: {
+      readonly speculative?: boolean;
+      readonly identity?: ScopeKeyIdentity;
+      readonly reads?: ClientCommit["reads"];
+    },
   ): SealedNativeCommit {
     return this.#sealOperations(
       documentOperationsOf(transaction),
@@ -5117,12 +5121,16 @@ export class SpaceReplica
    * applying anything here: for a committer that commits to the store
    * ahead of sealing the same transaction into this replica, which needs
    * the store's shape before the replica has seen the writes. The reads
-   * are `source`'s, against this replica's records as they stand, so a
-   * pending read names the durable basis beneath the layers it saw.
+   * are `source`'s, against this replica's records for `identity`'s
+   * instances as they stand, so a pending read names the durable basis
+   * beneath the layers it saw; handed back to {@link sealNative} as its
+   * `reads`, they are the one snapshot both the store and the seal rest
+   * on.
    */
   storeCommitOf(
     transaction: NativeStorageCommit,
     source: IStorageTransaction | undefined,
+    identity?: ScopeKeyIdentity,
   ): {
     operations: ClientCommit["operations"];
     preconditions: readonly CommitPrecondition[];
@@ -5134,7 +5142,7 @@ export class SpaceReplica
         transaction.sqliteOps ?? [],
       ),
       preconditions: activeCommitPreconditions(transaction.preconditions),
-      reads: this.#buildReads(source, this.#nextLocalSeq),
+      reads: this.#buildReads(source, this.#nextLocalSeq, identity),
     };
   }
 
@@ -5147,6 +5155,7 @@ export class SpaceReplica
     options?: {
       readonly speculative?: boolean;
       readonly identity?: ScopeKeyIdentity;
+      readonly reads?: ClientCommit["reads"];
     },
   ): SealedNativeCommit {
     // The tx→replica identity seam (server-execution v2 stage A, OW17): a
@@ -5162,7 +5171,7 @@ export class SpaceReplica
     }
     const commit: ClientCommit = {
       localSeq,
-      reads: this.#buildReads(source, localSeq, identity),
+      reads: options?.reads ?? this.#buildReads(source, localSeq, identity),
       // Cell ops first, folded SQLite ops last — the same commit shape
       // commitOperations builds, so the wave batch is made of ordinary
       // client commits.

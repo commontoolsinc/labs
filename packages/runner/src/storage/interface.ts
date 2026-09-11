@@ -2822,6 +2822,12 @@ export interface ISpaceReplica extends ISpace {
        * read set is built against those instances' pending stacks.
        * Absent = the replica's own identity, exactly as before. */
       readonly identity?: ScopeKeyIdentity;
+
+      /** The read set to seal under instead of building one here: the set
+       * {@link storeCommitOf} took for the same transaction and identity,
+       * which the store has validated, so the store's verdict and the local
+       * seal rest on one snapshot. Absent, the seal builds its own. */
+      readonly reads?: ClientCommit["reads"];
     },
   ): SealedNativeCommit;
 
@@ -2831,12 +2837,15 @@ export interface ISpaceReplica extends ISpace {
    * without applying anything to this replica. A committer that commits to
    * the store ahead of sealing the transaction here (the serving loop's
    * direct commit) reads the store's shape from this; the reads are
-   * `source`'s against this replica's records, a pending read naming the
-   * durable basis beneath its layers. Optional, as {@link sealNative} is.
+   * `source`'s against this replica's records for `identity`'s instances
+   * (the replica's own when absent, as {@link sealNative}'s), a pending
+   * read naming the durable basis beneath its layers. Optional, as
+   * {@link sealNative} is.
    */
   storeCommitOf?(
     transaction: NativeStorageCommit,
     source: IStorageTransaction | undefined,
+    identity?: ScopeKeyIdentity,
   ): {
     operations: ClientCommit["operations"];
     preconditions: readonly CommitPrecondition[];

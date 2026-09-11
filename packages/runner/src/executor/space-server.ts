@@ -2611,7 +2611,9 @@ export class SpaceServer implements TransactionSealDestination {
     // Every space the transaction wrote is collected before anything
     // commits, so a refusal leaves nothing behind. The store's shape of the
     // serving space's commit is taken during the handoff, while the
-    // transaction's read log is still the transaction's to give.
+    // transaction's read log is still the transaction's to give, under the
+    // replica's own identity: a direct commit is a bookkeeping run's, which
+    // carries no other.
     const handed: Array<{
       space: MemorySpace;
       native: NativeStorageCommit;
@@ -2698,11 +2700,13 @@ export class SpaceServer implements TransactionSealDestination {
       return refuse(`direct commit rejected: ${outcome.error.message}`);
     }
     const committedSeq = outcome.ok.seq;
-    // Applied here only now, with the store's verdict already in hand.
+    // Applied here only now, with the store's verdict already in hand,
+    // under the read set the store validated.
     const sealed = replica.sealNative(
       native,
       source,
       Promise.resolve({ committed: { seq: committedSeq } }),
+      { reads },
     );
     const settled = await sealed.settled;
     if (settled.error !== undefined) {
