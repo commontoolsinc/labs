@@ -82,8 +82,9 @@ describe("memory-v2-wave-promotion", () => {
       const verdicts = [
         Promise.withResolvers<SealedCommitVerdict>(),
         Promise.withResolvers<SealedCommitVerdict>(),
+        Promise.withResolvers<SealedCommitVerdict>(),
       ];
-      const sealed = ["a", "b"].map((item, index) =>
+      const sealed = ["a", "b", "c"].map((item, index) =>
         replica.sealNative(
           {
             operations: [{
@@ -92,7 +93,7 @@ describe("memory-v2-wave-promotion", () => {
               scope: "space",
               type: "application/json",
               patches: [{ op: "add", path: "/value/items/-", value: item }],
-              value: { value: { items: ["a", "b"].slice(0, index + 1) } },
+              value: { value: { items: ["a", "b", "c"].slice(0, index + 1) } },
             }],
           },
           undefined,
@@ -100,12 +101,14 @@ describe("memory-v2-wave-promotion", () => {
         )
       );
       try {
-        const indices = order === "forward" ? [0, 1] : [1, 0];
+        const indices = order === "forward" ? [0, 1, 2] : [2, 1, 0];
         for (const index of indices) {
           verdicts[index].resolve({ committed: { seq: 10 } });
           expect(await sealed[index].settled).toEqual({ ok: {} });
+          expect(replica.getDocument(id)?.value).toEqual({
+            items: ["a", "b", "c"],
+          });
         }
-        expect(replica.getDocument(id)?.value).toEqual({ items: ["a", "b"] });
       } finally {
         for (const verdict of verdicts) {
           verdict.resolve({ withdrawn: { message: "test cleanup" } });
@@ -114,6 +117,81 @@ describe("memory-v2-wave-promotion", () => {
       }
     });
   }
+
+  it("keeps durable append order beneath speculation and a newly sealed append", async () => {
+    const manager = StorageManager.emulate({ as: signer });
+    const replica = manager.open(signer.did()).replica as SpaceReplica;
+    replica.accessForTestingOnly.applySessionSync({
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 1,
+      removes: [],
+      upserts: [{ id, branch: "", seq: 1, doc: { value: { items: [] } } }],
+    }, "pull");
+    const verdicts: ReturnType<
+      typeof Promise.withResolvers<SealedCommitVerdict>
+    >[] = [];
+    const items: string[] = [];
+    const append = (item: string, speculative = false) => {
+      const verdict = Promise.withResolvers<SealedCommitVerdict>();
+      verdicts.push(verdict);
+      items.push(item);
+      const sealed = replica.sealNative(
+        {
+          operations: [{
+            op: "patch",
+            id,
+            type: "application/json",
+            patches: [{ op: "add", path: "/value/items/-", value: item }],
+            value: { value: { items: [...items] } },
+          }],
+        },
+        undefined,
+        verdict.promise,
+        { speculative },
+      );
+      return { verdict, sealed };
+    };
+    try {
+      const first = append("a");
+      const speculative = append("speculative", true);
+      const second = append("b");
+      expect(replica.getDocument(id)?.value).toEqual({
+        items: ["a", "speculative", "b"],
+      });
+      second.verdict.resolve({ committed: { seq: 10 } });
+      expect(await second.sealed.settled).toEqual({ ok: {} });
+      expect(replica.getNonSpeculativeDocument(id)?.value).toEqual({
+        items: ["a", "b"],
+      });
+      expect(replica.getDocument(id)?.value).toEqual({
+        items: ["a", "speculative", "b"],
+      });
+      const third = append("c");
+      expect(replica.getDocument(id)?.value).toEqual({
+        items: ["a", "speculative", "b", "c"],
+      });
+      expect(replica.getNonSpeculativeDocument(id)?.value).toEqual({
+        items: ["a", "b", "c"],
+      });
+      speculative.verdict.resolve({
+        withdrawn: { message: "overlay retired" },
+      });
+      expect((await speculative.sealed.settled).error).toBeDefined();
+      for (const contribution of [first, third]) {
+        contribution.verdict.resolve({ committed: { seq: 10 } });
+        expect(await contribution.sealed.settled).toEqual({ ok: {} });
+        expect(replica.getDocument(id)?.value).toEqual({
+          items: ["a", "b", "c"],
+        });
+      }
+    } finally {
+      for (const verdict of verdicts) {
+        verdict.resolve({ withdrawn: { message: "test cleanup" } });
+      }
+      await manager.close();
+    }
+  });
 
   for (const arrival of ["before", "between", "newer"] as const) {
     it(`keeps an authoritative snapshot arriving ${arrival} the local promotions`, async () => {
@@ -209,6 +287,9 @@ describe("memory-v2-wave-promotion", () => {
     try {
       secondVerdict.resolve({ committed: { seq: 10 } });
       expect(await second.settled).toEqual({ ok: {} });
+      expect(replica.getDocument(id)?.value).toEqual({
+        items: ["withdrawn", "a", "b"],
+      });
       firstVerdict.resolve({
         withdrawn: { message: "earlier contribution dropped" },
       });

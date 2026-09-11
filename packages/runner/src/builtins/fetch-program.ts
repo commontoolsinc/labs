@@ -262,6 +262,7 @@ export function fetchProgram(
   ): void {
     requireWaveAcceptance(tx);
     const accept = () => {
+      // Replacing an output binding does not relinquish its accepted request.
       publication.accepted = true;
       for (const other of publications) {
         if (
@@ -454,9 +455,12 @@ export function fetchProgram(
         {
           idempotencyKey: effectKey,
           onReleaseRejected: () => {
-            // A rejected attachment cannot retire another callback's running
-            // resolution. A claim with no dispatched owner can be released.
-            if (inFlight.get(effectKey)?.controller === undefined) {
+            // Another accepted attachment owns its claim even before dispatch.
+            const owner = inFlight.get(effectKey);
+            if (
+              owner === undefined ||
+              (owner === stagedResolution && owner.controller === undefined)
+            ) {
               releaseClaim(stagedResolution);
               finish(publication);
             } else {

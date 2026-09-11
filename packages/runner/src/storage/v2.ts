@@ -573,6 +573,26 @@ const applyPendingVersion = (
   }
 };
 
+/** Folds pending and locally accepted wave contributions in sealing order. */
+const materializePendingVersions = (
+  confirmed: ConfirmedVersion,
+  pending: readonly PendingVersion[],
+  logContext: PendingPatchLogContext,
+): EntityDocument | undefined => {
+  const promotion = confirmed.localWavePromotion;
+  const interleaved = promotion !== undefined && promotion.entries.length > 0;
+  const entries = interleaved
+    ? [...promotion.entries, ...pending].sort((left, right) =>
+      left.localSeq - right.localSeq
+    )
+    : pending;
+  let value = interleaved ? promotion.base : confirmed.value;
+  for (const entry of entries) {
+    value = applyPendingVersion(value, entry, logContext);
+  }
+  return value;
+};
+
 const ensurePendingMaterializationCache = (
   record: DocumentRecord,
 ): PendingMaterializationCache => {
@@ -595,6 +615,19 @@ const materializedVersionThroughPending = (
 ): MaterializedVersion => {
   if (pendingCount <= 0) {
     return record.confirmed;
+  }
+  if (record.confirmed.localWavePromotion?.entries.length) {
+    // A later verdict can settle before an earlier pending contribution.
+    // Reconstruct their sealing order until that unresolved prefix retires;
+    // the ordinary prefix cache assumes all confirmed operations precede it.
+    return {
+      value: materializePendingVersions(
+        record.confirmed,
+        record.pending.slice(0, pendingCount),
+        logContext,
+      ),
+      transactionValue: UNCACHED_TRANSACTION_VALUE,
+    };
   }
 
   const cache = ensurePendingMaterializationCache(record);
@@ -4396,18 +4429,17 @@ export class SpaceReplica
     // array, not a prefix, so the prefix materialization cache does not
     // apply; a doc carrying speculation is a bounded transient (the
     // overlay destination retires it), so this stays a cold path.
-    let value = record.confirmed.value;
-    for (const entry of record.pending) {
-      if (this.#speculativeLocalSeqs.has(entry.localSeq)) {
-        continue;
-      }
-      value = applyPendingVersion(value, entry, {
+    return materializePendingVersions(
+      record.confirmed,
+      record.pending.filter((entry) =>
+        !this.#speculativeLocalSeqs.has(entry.localSeq)
+      ),
+      {
         space: this.#space,
         id: uri,
         scope,
-      });
-    }
-    return value;
+      },
+    );
   }
 
   /** Whether an optimistic local write for this doc is still pending — not

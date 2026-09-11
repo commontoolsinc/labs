@@ -1266,8 +1266,11 @@ the durable rows of §5 carry APPENDS, never effect state).
   retirement barrier stays as the belt over that structural
   guarantee). When several accepted contributions to one document share a
   wave sequence, their settled local value includes every contribution in
-  local sealing order. An authoritative frame at the same sequence already
-  contains the wave's value and prevents replay; a newer frame also takes
+  local sealing order. Local promotion also preserves that order between
+  verdicts, including in the view that excludes speculative pending layers.
+  An authoritative frame at the same sequence already
+  contains the wave's value and prevents replay of accepted contributions;
+  a newer frame also takes
   precedence. `memory-v2-wave-promotion.test.ts` covers this boundary across
   space, user, and session instances, including reordered verdict delivery,
   withdrawal, and noncommutative appends.

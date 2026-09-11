@@ -324,6 +324,25 @@ describe("fetch-program-served-lifecycle", () => {
     await runtime.settled();
   });
 
+  it("owns an older accepted request without restoring its replaced binding", async () => {
+    const f = fixture();
+    await f.seed(aliceOne, "user");
+    await f.seed(bobOne, "session");
+    await commit(f.stage(aliceOne, true, true));
+    await commit(f.stage(bobOne));
+    expect(f.read(f.binding, bobOne)?.selected).toBe("session");
+    for (const callback of f.accepted) callback();
+    await runtime.settled();
+    expect(f.read(f.binding, bobOne)?.selected).toBe("session");
+    expect(f.cacheState(aliceOne, "user")).toBe("fetching");
+    expect(f.cacheState(bobOne, "session")).toBe("fetching");
+    f.cancels[0]();
+    await runtime.settled();
+    expect(f.cacheState(aliceOne, "user")).toBe("idle");
+    expect(f.cacheState(bobOne, "session")).toBe("idle");
+    expect(f.read(f.binding, bobOne)?.selected).toBe("session");
+  });
+
   it("announces a shared pending result to an independently refused binding", async () => {
     const f = fixture("session");
     await f.seed(aliceOne, "user");
@@ -376,6 +395,57 @@ describe("fetch-program-served-lifecycle", () => {
     using edits = spy(runtime, "edit");
     f.cancels[0]();
     expect(edits.calls).toHaveLength(0);
+  });
+
+  it("keeps another accepted owner when a stale-claim attachment fails release before dispatch", async () => {
+    const f = fixture();
+    await f.seed(aliceOne, "user");
+    await commit(f.stage(aliceOne, true, true));
+    expect(f.cacheState(aliceOne, "user")).toBe("fetching");
+    const later = Date.now() + 10_001;
+    const takeover = (() => {
+      using _clock = stub(Date, "now", () => later);
+      return f.stage(aliceOne, true, true);
+    })();
+    await commit(takeover);
+    expect(f.dispatches).toHaveLength(2);
+    for (const callback of f.accepted) callback();
+    await runtime.settled();
+    const state = takeover.getCfcState();
+    using _state = stub(takeover, "getCfcState", () =>
+      ({
+        ...state,
+        prepare: {
+          status: "prepared",
+          digest: "program-release-refusal",
+          input: {
+            consumedReads: [],
+            attemptedWrites: [],
+            writes: [],
+            writeAttemptLog: [],
+            dereferenceTraces: [],
+            triggerReads: [],
+            writePolicyInputs: [],
+          },
+        },
+      }) satisfies ReturnType<typeof takeover.getCfcState>);
+    using network = stub(
+      globalThis,
+      "fetch",
+      () => Promise.reject(new Error("Unexpected HTTP dispatch")),
+    );
+    try {
+      await f.dispatches[1]();
+      await runtime.settled();
+      expect(network.calls).toHaveLength(0);
+      expect(f.cacheState(aliceOne, "user")).toBe("fetching");
+      f.cancels[0]();
+      await runtime.settled();
+      expect(f.cacheState(aliceOne, "user")).toBe("idle");
+    } finally {
+      f.cancels[0]();
+      await runtime.settled();
+    }
   });
 
   it("preserves earlier refusal ownership when a newer scope publication is withdrawn", async () => {

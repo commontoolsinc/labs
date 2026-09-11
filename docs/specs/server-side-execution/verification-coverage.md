@@ -2684,9 +2684,10 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   `memory-v2-wave-promotion.test.ts` covers the storage boundary those completion
   guards depend on: all accepted contributions to one document at the same wave
   sequence remain visible after settlement, across space, user, and session
-  instances. Noncommutative appends retain sealing order; authoritative frames
-  prevent replay, and withdrawing an earlier pending layer preserves already
-  accepted sibling operations.
+  instances. Noncommutative appends retain sealing order between local verdicts,
+  including when the reader excludes speculative pending layers. Authoritative
+  frames prevent replay of accepted contributions, and withdrawing an earlier
+  pending layer preserves already accepted sibling operations.
 
   Remaining investigation obligations: tool-loop LLM requests, `llmDialog`,
   non-clearance SQLite instance keys, and the provider READ partition.
