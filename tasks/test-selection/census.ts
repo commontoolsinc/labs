@@ -18,6 +18,11 @@ import {
   type Unit,
 } from "../test-topology/suite.ts";
 import {
+  coverageGateFor,
+  type CoverageGateSelection,
+  measuredUnitKeys,
+} from "./coverage.ts";
+import {
   emptyManifest,
   type Manifest,
   type ManifestEntry,
@@ -115,6 +120,15 @@ export interface Census {
    * arrives and still knows almost none of it.
    */
   unmeasured: number;
+
+  /**
+   * What the coverage gate decided about this change: the measured sets
+   * it runs whole and scores, everything the change reached, and the
+   * reason the gate is off where it is. Every consumer reads this rather
+   * than working the question out again, so the lane that measures and
+   * the job that scores cannot disagree about which sets are gated.
+   */
+  coverage: CoverageGateSelection;
 }
 
 /**
@@ -125,6 +139,11 @@ export interface Census {
  * spec requires of any consumer that selects which tests run. A selector
  * that never runs the unselected starves its own data, and a renamed test
  * is an unknown identity until an alias lands.
+ *
+ * The first rule is what the coverage gate rides on. A measured set the
+ * change reaches is a declaration saying the change touched what every
+ * one of its units covers, so its units are mandatory under the same rule
+ * and through the same declaration vocabulary rather than a second one.
  */
 export function census(
   suites: readonly Suite[],
@@ -154,6 +173,8 @@ export function census(
     const suite = key.slice(0, key.indexOf("\t"));
     costs.set(suite, [...costs.get(suite) ?? [], total]);
   }
+  const coverage = coverageGateFor(suites, changed);
+  const measured = measuredUnitKeys(suites, coverage);
   const entries: ManifestEntry[] = [];
   const mandatory = new Map<string, SelectionReason>();
   const taken = new Set<string>(
@@ -173,8 +194,12 @@ export function census(
     );
     for (const unit of suite.units) {
       if (unavailable.has(unit)) continue;
+      // The diff naming the unit outright is the more exact answer, so
+      // it is the reason reported where both hold.
       const reason: SelectionReason | undefined = touched.has(unit)
         ? "changed"
+        : measured.has(`${suite.id}\t${unit}`)
+        ? "coverage-gate"
         : undefined;
       const recorded = inUnit.get(`${suite.id}\t${unit}`);
       if (recorded === undefined) {
@@ -240,5 +265,6 @@ export function census(
     },
     mandatory,
     unmeasured,
+    coverage,
   };
 }
