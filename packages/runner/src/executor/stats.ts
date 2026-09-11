@@ -561,6 +561,19 @@ export type ServingLoopStats = {
      * cannot spin the wave loop. */
     failures: number;
   };
+
+  /**
+   * Pattern-lifecycle verbs the serving loop ran on a requester's behalf
+   * (docs/features/server-pattern-lifecycle.md): an `upload` or
+   * `instantiate` request routed to the space's serving runtime. `runs`
+   * counts verbs whose run step completed, any outcome; `failures` those
+   * whose run threw, or whose durable confirmation after the wave commit
+   * failed.
+   */
+  lifecycleVerbs: {
+    runs: number;
+    failures: number;
+  };
 };
 
 export const emptyServingLoopStats = (): ServingLoopStats => ({
@@ -654,6 +667,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     skippedNoOwner: 0,
     failures: 0,
   },
+  lifecycleVerbs: { runs: 0, failures: 0 },
 });
 
 type ActiveDeliveryCheckpointStat = {
