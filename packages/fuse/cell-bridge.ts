@@ -3827,7 +3827,9 @@ export class CellBridge {
     skipEntry: (value: unknown) => boolean;
     classifyEntry: (key: string, value: unknown) => CallableKind | null;
   } {
-    const schema = rootCell.asSchemaFromLinks().schema as
+    const schema = expandSchemaReference(
+      rootCell.asSchemaFromLinks().schema,
+    ) as
       | Record<string, unknown>
       | undefined;
     const schemaProperties = schema?.properties as
@@ -3915,7 +3917,9 @@ export class CellBridge {
       return value;
     }
 
-    const schema = rootCell.asSchemaFromLinks().schema as
+    const schema = expandSchemaReference(
+      rootCell.asSchemaFromLinks().schema,
+    ) as
       | Record<
         string,
         unknown

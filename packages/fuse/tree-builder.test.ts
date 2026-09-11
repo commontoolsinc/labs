@@ -1,7 +1,9 @@
 // tree-builder.test.ts — Unit tests for JSON-to-tree conversion and symlink parsing
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
+import { decomposeSchema } from "@commonfabric/runner";
 import { toCell } from "../runner/src/back-to-cell.ts";
+import { registerSchemaDocument } from "../runner/src/schema-registry.ts";
 import { FsTree } from "./tree.ts";
 import {
   buildCallableScript,
@@ -1436,16 +1438,21 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     patternFactoryValue({ source: "bound-source" }),
     undefined,
   );
+  const resultSchema = {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      recordMessage: { type: "object" },
+      search: { type: "object" },
+    },
+  } as const;
+  const { rootRef, documents } = decomposeSchema(resultSchema);
+  for (const [hash, document] of documents) {
+    registerSchemaDocument(hash, document);
+  }
   const resultCell = makeCell(
     { title: "hello" },
-    {
-      type: "object",
-      properties: {
-        title: { type: "string" },
-        recordMessage: { type: "object" },
-        search: { type: "object" },
-      },
-    },
+    { $ref: rootRef },
     {
       title: titleCell,
       recordMessage: handlerCell,
