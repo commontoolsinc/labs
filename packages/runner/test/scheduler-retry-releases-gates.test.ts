@@ -49,9 +49,11 @@ describe("scheduler-owed retries run past the node's freshness gates", () => {
       apiUrl: new URL(import.meta.url),
       storageManager: smB,
     });
+    // The harness owns the managers: dispose leaves them open, and each is
+    // closed exactly once here.
     const close = async () => {
-      await runtimeB.dispose();
-      await runtimeA.dispose();
+      await runtimeB.dispose({ closeStorage: false });
+      await runtimeA.dispose({ closeStorage: false });
       await smB.close();
       await smA.close();
       await server.close();

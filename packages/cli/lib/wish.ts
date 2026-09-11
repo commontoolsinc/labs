@@ -159,34 +159,43 @@ export async function resolveWish(
   // `settled()` spans those rounds. `idle()` does not: it returns before a
   // commit's verdict and sees nothing of a retry parked on its catch-up
   // gate, so a read there answered from a stale or empty result.
-  await result.pull();
-  await runtime.settled();
-  // Surface a permanent authorization denial on the wish's own space with the
-  // real error. Scoped to `space`: a denied cross-space profile load stays a
-  // silent absent read, which is the wish's expected "no profile yet" outcome.
-  throwOnSpaceAuthorizationError(runtime.storageManager, space);
+  // The run is stopped once the answer is extracted: a per-invocation cell
+  // means a per-invocation run, and a runtime that serves many reads (a
+  // host, a test) must not keep every finished read live, re-running each on
+  // later source changes and retaining its cells.
+  try {
+    await result.pull();
+    await runtime.settled();
+    // Surface a permanent authorization denial on the wish's own space with
+    // the real error. Scoped to `space`: a denied cross-space profile load
+    // stays a silent absent read, which is the wish's expected "no profile
+    // yet" outcome.
+    throwOnSpaceAuthorizationError(runtime.storageManager, space);
 
-  const outCell = result.key("out");
-  const error: unknown = outCell.key("error").get();
-  const resolved = outCell.key("result");
-  // Whether the wish matched is read where the wish WROTE it, not inferred
-  // from what the target holds. A matched target whose value nothing has set
-  // dereferences to `undefined` exactly as an unmatched wish does, and only
-  // one of the two is an absent result: the matched one still has an address,
-  // which is the whole of what a marked position asks for.
-  const matched = resolved.getRaw() !== undefined;
-  const value: unknown = resolved.get();
+    const outCell = result.key("out");
+    const error: unknown = outCell.key("error").get();
+    const resolved = outCell.key("result");
+    // Whether the wish matched is read where the wish WROTE it, not inferred
+    // from what the target holds. A matched target whose value nothing has
+    // set dereferences to `undefined` exactly as an unmatched wish does, and
+    // only one of the two is an absent result: the matched one still has an
+    // address, which is the whole of what a marked position asks for.
+    const matched = resolved.getRaw() !== undefined;
+    const value: unknown = resolved.get();
 
-  return {
-    // `?? null` covers the matched-but-unset target a caller selected nothing
-    // over: there is an address to shape but no value to render, and a wish
-    // answers absence as JSON null. A selection never lands here undefined —
-    // `selectWishValue` refuses that rather than returning it.
-    result: matched
-      ? await selectWishValue(runtime, space, resolved, value, spec) ?? null
-      : null,
-    error: typeof error === "string" && error.length > 0 ? error : undefined,
-  };
+    return {
+      // `?? null` covers the matched-but-unset target a caller selected
+      // nothing over: there is an address to shape but no value to render,
+      // and a wish answers absence as JSON null. A selection never lands here
+      // undefined — `selectWishValue` refuses that rather than returning it.
+      result: matched
+        ? await selectWishValue(runtime, space, resolved, value, spec) ?? null
+        : null,
+      error: typeof error === "string" && error.length > 0 ? error : undefined,
+    };
+  } finally {
+    runtime.runner.stop(resultCell);
+  }
 }
 
 /**

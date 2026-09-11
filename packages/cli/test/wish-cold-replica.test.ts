@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
@@ -19,11 +19,19 @@ const profileSpaceDid =
   (await Identity.fromPassphrase("cf-wish-cold-test-profile-space")).did();
 
 describe("cf wish headless read on a cold replica", () => {
-  let server: ReturnType<typeof newLoopbackServer>;
+  let server: ReturnType<typeof newLoopbackServer> | undefined;
   const managers: EmulatedStorageManager[] = [];
   const runtimes: Runtime[] = [];
 
+  // Each test starts its own server and picks the fan-out cadence: 0 spreads
+  // frames at once, a delay makes every catch-up a wait, which is what a
+  // deployed server is.
+  function startServer(refreshDelayMs = 0): void {
+    server = newLoopbackServer({ subscriptionRefreshDelayMs: refreshDelayMs });
+  }
+
   function connect(): Runtime {
+    if (server === undefined) throw new Error("startServer() first");
     const storageManager = EmulatedStorageManager.connectTo(server, {
       as: userIdentity,
     });
@@ -36,19 +44,11 @@ describe("cf wish headless read on a cold replica", () => {
     return runtime;
   }
 
-  // Each test picks the server's fan-out cadence: 0 spreads frames at once,
-  // a delay makes every catch-up a wait, which is what a deployed server is.
-  let refreshDelayMs = 0;
-
-  beforeEach(() => {
-    server = newLoopbackServer({ subscriptionRefreshDelayMs: refreshDelayMs });
-    refreshDelayMs = 0;
-  });
-
   afterEach(async () => {
     for (const runtime of runtimes.splice(0)) await runtime.dispose();
     for (const manager of managers.splice(0)) await manager.close();
-    await server.close();
+    await server?.close();
+    server = undefined;
   });
 
   // The live home shape: `defaultPattern.profiles` lists the profile (a link
@@ -111,6 +111,7 @@ describe("cf wish headless read on a cold replica", () => {
   }
 
   it("resolves #profileName from a replica that never synced the home records", async () => {
+    startServer();
     const writer = connect();
     await seedProfile(writer);
 
@@ -129,8 +130,7 @@ describe("cf wish headless read on a cold replica", () => {
     // and a re-run. With frames spread on a delay the catch-ups take real
     // time, and a fixed sequence of idle/sync steps ends before the rounds
     // do; the read must wait for the lookup to settle instead.
-    refreshDelayMs = 150;
-    server = newLoopbackServer({ subscriptionRefreshDelayMs: refreshDelayMs });
+    startServer(150);
     const writer = connect();
     await seedProfile(writer);
 
@@ -143,6 +143,7 @@ describe("cf wish headless read on a cold replica", () => {
   });
 
   it("does not present an earlier invocation's answer as this one's", async () => {
+    startServer();
     // Invocation 1, before any profile exists: the honest answer is the
     // no-profile error, and it is committed as wish state.
     const first = connect();

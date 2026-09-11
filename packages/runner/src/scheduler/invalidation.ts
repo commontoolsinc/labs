@@ -259,7 +259,11 @@ export interface MarkInvalidOptions {
    * it resolves, and a cold `cf wish` lookup sat on its refused first run
    * for good (2026-09-11). A re-queue that waited on nothing — a local
    * inconsistency, a transport error — keeps its gates: there the debounce
-   * is the spacing between the re-run and the local writer it raced. */
+   * is the spacing between the re-run and the local writer it raced.
+   *
+   * Consumed by the scheduler facade's invalid-setter (`#markActionInvalid`),
+   * which owns the gates; {@link markInvalid} below records status and
+   * causes only and does not read it. */
   retry?: boolean;
 }
 
