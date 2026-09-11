@@ -203,7 +203,7 @@ passed before merge, with clean Cubic and antagonistic reviews.
 
 ## 5, 10. Repair incremental correctness: C1–C4
 
-- [ ] **C1 — Reproduce both documented failures.**
+- [x] **C1 — Reproduce both documented failures.**
   - [x] Add a multi-replica nested-filter case whose reader has not locally
         materialized every vote.
   - [x] Add a remote element-update case asserting rendered per-row content.
@@ -213,7 +213,7 @@ passed before merge, with clean Cubic and antagonistic reviews.
         before deciding what C2/C3 need to change.
   - [x] Exercise two reader transport outages with nested and mapped rows;
         verify catch-up and subsequent updates through headless result reads.
-  - [ ] Verify rendered rows after reconnect.
+  - [x] Verify rendered rows after reconnect.
 
   The
   [independent-replica probes](../../packages/patterns/integration/reactive-vote-rows.test.ts)
@@ -227,7 +227,11 @@ passed before merge, with clean Cubic and antagonistic reviews.
   changed remotely, then observes further edits while subscribed. Cross-space
   profiles are created in a separate transaction and edited directly in their
   own space. Headless result reads explicitly pull data, so browser rendering
-  owns the passive-update check. C1 remains open for reconnect verification.
+  owns the passive-update check. The optional browser reconnect mode closes
+  live reader sockets around color, profile, and removal writes; all four
+  nested/mapped and same/cross-space cases pass. The
+  [repeatable relay procedure](../development/TESTING.md#browser-row-reconnect-acceptance)
+  keeps the writer connected and asserts that each outage closes live sockets.
   The [reconnect probe](../../packages/patterns/integration/reactive-vote-rows-reconnect.test.ts)
   closes the reader's storage sockets while the writer changes membership and
   profiles. Ordinary memory queries wait for session restoration before
