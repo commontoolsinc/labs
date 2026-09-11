@@ -266,7 +266,13 @@ passed before merge, with clean Cubic and antagonistic reviews.
 - [ ] **C2 — Repair partial materialization.** Verify complete inputs under cold
       reads, remote inserts/removals, and reconnect where relevant.
 - [ ] **C3 — Repair remote row invalidation.** Verify affected rows update,
-      stable element identities survive, and untouched rows do not rerun.
+      stable element identities survive, and untouched rows do not rerun. The
+      client-execution acceptance in
+      [reactive vote rows](../../packages/patterns/integration/reactive-vote-rows.test.ts)
+      edits each of two rows from another replica, checks stable normalized
+      output links and producer identities, and verifies that only the edited
+      row producer runs. Serving-host producer counts remain separate acceptance
+      work because a client diagnostic graph does not contain those actions.
 - [x] **C4 — Restore reactive lunch-poll rows.** Direct reactive option and
       voter maps use the scoped callback-child repair. Repository acceptance
       includes 93 assertions, unchanged A4 budgets at all three sizes, and
