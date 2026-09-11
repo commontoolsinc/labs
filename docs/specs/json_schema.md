@@ -265,20 +265,13 @@ it by `#/$defs/<name>`. The full TypeScript→schema mapping is specified in
 the schema-generator mapping spec (`docs/specs/schema-generator/`).
 
 A `#/$defs/<name>` ref names a definition of the document root, as JSON
-Schema resolves it: `#` is the root of the schema resource, and the runtime
-supports no keyword that starts another resource below it (`$id`, `$anchor`,
-and the dynamic-ref keywords are refused). A `$defs` on a subschema below the
-root is therefore inert: a union arm that declares `$defs` of its own still
-resolves its `$ref` against the union's document, and `#/$defs/<name>` is the
-only local pointer form the runtime resolves, so nothing reaches a nested map
-by path either. Following an embedded or `cid:` external ref enters another
-document, whose own map governs everything below it. A fragment the runtime
-evaluates apart from its document — a union arm, an element schema, a resolved
-definition body — carries a copy of the document's map so that it resolves
-standalone; the copy opens no new scope. A member of a content-addressed
-cyclic group is read as a view whose refs into the group take the external
-`cid:<hash>#/$defs/<name>` form, so it resolves wherever a derived schema
-later embeds it.
+Schema resolves it. The runtime supports no keyword that starts another
+resource below the root (`$id`, `$anchor`, and the dynamic-ref keywords are
+refused), so a `$defs` on a subschema is inert. Only an embedded or `cid:`
+external ref enters another document, whose own map governs everything below
+it; `docs/specs/content-addressed-schemas.md` gives the `cid:` form. A
+fragment evaluated apart from its document carries a copy of the document's
+map, which opens no scope of its own.
 
 ### Handling of `never`
 
