@@ -26,7 +26,6 @@
  * logs by eye.
  */
 
-import type { JSONSchema } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { env } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
@@ -44,6 +43,7 @@ import {
   PieceController,
   PiecesController,
 } from "./pieces-controller.ts";
+import { demandTopicBoard } from "./topic-board-fixture.ts";
 import { waitForPieceView } from "./topics-navigation-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
@@ -133,7 +133,7 @@ describe("Topics create, on screen against off screen", () => {
     // an up-to-date list rather than waking a cold one — through the narrowest
     // surface that does that. See DEMAND.
     for (const board of [rendered, unrendered]) {
-      const cancel = demandBoard(cc, board);
+      const cancel = demandBoard(board);
       if (cancel) sinkCancels.push(cancel);
     }
 
@@ -215,29 +215,13 @@ describe("Topics create, on screen against off screen", () => {
   });
 });
 
-/**
- * Hold `board` live through the surface {@link DEMAND} names, and hand back the
- * cancel. The durable result schema has to be applied before keying in: the
- * piece cell carries no schema of its own, so a sink taken straight off it is a
- * schemaless read of everything the result reaches.
- */
-function demandBoard(
-  cc: PiecesController,
-  board: PieceController,
-): (() => void) | undefined {
-  const resultCell = cc.getResult(board.getCell());
+/** Hold the authoring demand selected for the on-screen comparison. */
+function demandBoard(board: PieceController): (() => void) | undefined {
   if (DEMAND === "none") return undefined;
-  if (DEMAND === "full") return resultCell.sink(() => {});
-  if (DEMAND !== "index") {
+  if (DEMAND !== "index" && DEMAND !== "full") {
     throw new Error(
       `CF_TOPICS_ONSCREEN_DEMAND must be one of index, full, none: ${DEMAND}`,
     );
   }
-  const durableSchema = resultCell.getMetaRaw("schema") as
-    | JSONSchema
-    | undefined;
-  const typed = durableSchema === undefined
-    ? resultCell
-    : resultCell.asSchema(durableSchema);
-  return typed.key("index").sink(() => {});
+  return demandTopicBoard(board, DEMAND);
 }

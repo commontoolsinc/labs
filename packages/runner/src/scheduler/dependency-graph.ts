@@ -346,39 +346,33 @@ export function groupReadsByEntity(
   return readsByEntity;
 }
 
+/** Returns whether `to` is reachable from `from`, including itself. */
 export function hasDependentPath(
   dependentsByAction: WeakMap<Action, Set<Action>>,
   from: Action,
   to: Action,
 ): boolean {
-  return hasDependentPathFromSeeds(dependentsByAction, [from], to);
+  return reachesDependent(dependentsByAction, [from], to);
 }
 
-/** Shares visited nodes across seeds, including overlapping downstream paths. */
-function hasDependentPathFromSeeds(
+/** Traverses the union of the seed nodes' downstream edges once per query. */
+function reachesDependent(
   dependentsByAction: WeakMap<Action, Set<Action>>,
-  seeds: readonly Action[],
+  pending: Action[],
   to: Action,
 ): boolean {
-  const visited = new Set<Action>();
-  const pending: Action[] = [];
+  const visited = new Set(pending);
 
-  for (const seed of seeds) {
-    if (visited.has(seed)) continue;
-    visited.add(seed);
-    pending.push(seed);
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (current === to) return true;
 
-    while (pending.length > 0) {
-      const current = pending.pop()!;
-      if (current === to) return true;
-
-      const dependents = dependentsByAction.get(current);
-      if (!dependents) continue;
-      for (const dependent of dependents) {
-        if (visited.has(dependent)) continue;
-        visited.add(dependent);
-        pending.push(dependent);
-      }
+    const dependents = dependentsByAction.get(current);
+    if (!dependents) continue;
+    for (const dependent of dependents) {
+      if (visited.has(dependent)) continue;
+      visited.add(dependent);
+      pending.push(dependent);
     }
   }
 
@@ -389,9 +383,8 @@ function hasDependentPathFromSeeds(
  * True when an invalid/never-ran node is transitively upstream of `action`.
  *
  * Seed from the maintained invalid-node set rather than walking `action`'s
- * whole upstream cone. One cycle-safe walk follows the canonical
- * writer-to-reader edges from every candidate, sharing visits when their
- * downstream paths overlap.
+ * whole upstream cone. Shared downstream paths are visited once per query,
+ * including when several invalid nodes feed the same reader.
  * `action` itself is excluded: a resubscribe records a run that just completed,
  * so callers use this to decide whether newly-live upstream work needs a wake.
  */
@@ -399,13 +392,11 @@ export function hasInvalidUpstream(
   state: Pick<DependencyGraphState, "dependents" | "nodes">,
   action: Action,
 ): boolean {
-  const candidates = state.nodes.getInvalidNodes();
-  if (candidates.size === 0) return false;
-  return hasDependentPathFromSeeds(
-    state.dependents,
-    [...candidates].filter((candidate) => candidate !== action),
-    action,
-  );
+  const pending: Action[] = [];
+  for (const candidate of state.nodes.getInvalidNodes()) {
+    if (candidate !== action) pending.push(candidate);
+  }
+  return reachesDependent(state.dependents, pending, action);
 }
 
 export function collectDirectWritersForLog(state: {

@@ -780,6 +780,7 @@ export class SpaceSession {
     pending: PromiseWithResolvers<AppliedCommit>;
   }>();
   #watchSpecs: WatchSpec[] = [];
+  #watchSpecPositions = new Map<string, number[]>();
   #watchView: WatchView | null = null;
   #precedingWatchSyncs: SessionSync[] = [];
   #sessionId: string;
@@ -1137,7 +1138,7 @@ export class SpaceSession {
         }),
       (result) => {
         this.#noteResult(result.serverSeq);
-        this.#watchSpecs = watches;
+        this.#replaceWatchSpecs(watches);
         this.#noteOperationWatchCursors(result.sync);
         if (this.#watchView === null) {
           this.#watchView = WatchView.fromSync(result.sync);
@@ -1182,11 +1183,20 @@ export class SpaceSession {
       (result) => {
         const applyStart = performance.now();
         this.#noteResult(result.serverSeq);
-        this.#watchSpecs = [
-          ...new Map(
-            [...this.#watchSpecs, ...watches].map((watch) => [watch.id, watch]),
-          ).values(),
-        ];
+        if (this.#watchSpecPositions.size !== this.#watchSpecs.length) {
+          this.#replaceWatchSpecs([
+            ...new Map(this.#watchSpecs.map((watch) => [watch.id, watch]))
+              .values(),
+          ]);
+        }
+        for (const watch of watches) {
+          const positions = this.#watchSpecPositions.get(watch.id);
+          if (positions !== undefined) this.#watchSpecs[positions[0]] = watch;
+          else {
+            this.#watchSpecPositions.set(watch.id, [this.#watchSpecs.length]);
+            this.#watchSpecs.push(watch);
+          }
+        }
         this.#noteOperationWatchCursors(result.sync);
         if (this.#watchView === null) {
           this.#watchView = WatchView.fromSync(result.sync);
@@ -1215,12 +1225,12 @@ export class SpaceSession {
     const removed = new Set(watchIds);
     return await this.#runWatchMutation(
       () => {
+        // Cancellation is local intent even when the request fails: a later
+        // reconnect must not restore a watch its last subscriber removed.
         const watches = this.#watchSpecs.filter((watch) =>
           !removed.has(watch.id)
         );
-        // Cancellation is local intent even when the request fails: a later
-        // reconnect must not restore a watch its last subscriber removed.
-        this.#watchSpecs = watches;
+        this.#replaceWatchSpecs(watches);
         return this.#client.request<WatchSetResult>({
           type: "session.watch.set",
           requestId: crypto.randomUUID(),
@@ -1419,7 +1429,7 @@ export class SpaceSession {
       pending.pending.reject(new Error("memory session closed"));
     }
     this.#outstandingCommits.clear();
-    this.#watchSpecs = [];
+    this.#replaceWatchSpecs([]);
     this.#watchView?.close();
     this.#watchView = null;
   }
@@ -1451,7 +1461,7 @@ export class SpaceSession {
     }
     this.#rejectCaughtUpLocalSeqWaiters(error);
     this.#outstandingCommits.clear();
-    this.#watchSpecs = [];
+    this.#replaceWatchSpecs([]);
     this.#watchView?.close();
     this.#watchView = null;
   }
@@ -1623,19 +1633,28 @@ export class SpaceSession {
         ] as const
       ),
     );
-    this.#watchSpecs = this.#watchSpecs.map((watch) => {
-      if (watch.kind !== "operation" || !delivered.has(watch.id)) {
-        return watch;
+    for (const [id, cursor] of delivered) {
+      for (const position of this.#watchSpecPositions.get(id) ?? []) {
+        const watch = this.#watchSpecs[position];
+        if (watch.kind !== "operation") continue;
+        const query = { ...watch.query };
+        if (cursor === null) delete query.after;
+        else if (cursor !== undefined) query.after = cursor;
+        this.#watchSpecs[position] = { ...watch, query };
       }
-      const query = { ...watch.query };
-      const cursor = delivered.get(watch.id);
-      if (cursor === null) {
-        delete query.after;
-      } else if (cursor !== undefined) {
-        query.after = cursor;
-      }
-      return { ...watch, query };
-    });
+    }
+  }
+
+  /** Replaces reconnect intent and indexes every accepted list position. */
+  #replaceWatchSpecs(watches: readonly WatchSpec[]): void {
+    this.#watchSpecs = [...watches];
+    this.#watchSpecPositions = new Map();
+    for (let position = 0; position < watches.length; position++) {
+      const id = watches[position].id;
+      const positions = this.#watchSpecPositions.get(id);
+      if (positions === undefined) this.#watchSpecPositions.set(id, [position]);
+      else positions.push(position);
+    }
   }
 
   #noteCaughtUpLocalSeq(localSeq: number | undefined): void {

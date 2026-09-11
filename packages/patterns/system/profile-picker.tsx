@@ -8,6 +8,7 @@ import {
   Writable,
 } from "commonfabric";
 import ProfileCreate, {
+  profileLinkListSchema,
   profileLinkSchema,
   type ProfileReferenceValue,
   type ProfileRoster,
@@ -57,6 +58,12 @@ type ProfilePickerInput = {
 // `homeSpace` guards the degenerate case: the `profiles` / `defaultProfile` /
 // `mru` container links live in the home space, so an unmaterialized / invalid
 // entry that still resolves into the home space must never match.
+//
+// Both sides must be link CELLS: the default read as a cell ref, and the row's
+// profile re-read from the `profiles` list by index. The map callback's element
+// parameter is not usable for this — inside a `computed` it is the opaque
+// reference, not a cell, so it carries no link and every row compared as "not
+// the default" (the badge never lit; 2026-09-11, the estuary profile preflight).
 //
 // Uses `getAsNormalizedFullLink().space` via the `as any` escape hatch — the
 // pattern-facing surface has no typed space accessor (precedent:
@@ -111,7 +118,7 @@ export default pattern<
         style={{ padding: "8px" }}
       >
         <h3 style={{ margin: 0, fontSize: "14px" }}>Your profiles</h3>
-        {profiles.map((p) => (
+        {profiles.map((p, i) => (
           <cf-hstack gap="2" align="center">
             <div style={{ flex: "1" }}>
               {
@@ -123,14 +130,22 @@ export default pattern<
             </div>
             {ifElse(
               computed(() => {
-                // Read the default link as a cell REF (asCell) so a cross-space
-                // profile not yet loaded here doesn't collapse to `undefined`,
-                // then match by the profile's own SPACE (CT-1843) — `equals`
-                // returns false cross-space (different entity id + scope).
+                // Read the default link and this row's list entry as cell REFS
+                // (asCell) so a cross-space profile not yet loaded here doesn't
+                // collapse to `undefined`, then match by the profile's own
+                // SPACE (CT-1843) — `equals` returns false cross-space
+                // (different entity id + scope). The entry comes from the list
+                // by index, not from `p`: see sameProfileCell.
+                const entries = ((profiles as any).asSchema(
+                  profileLinkListSchema(),
+                ).get() ?? []) as unknown[];
+                const entry = entries[i as any];
                 const def = (defaultProfile as any).asSchema(
                   profileLinkSchema(),
                 ).get();
-                return def ? sameProfileCell(def, p, homeSpace) : false;
+                return def && entry
+                  ? sameProfileCell(def, entry, homeSpace)
+                  : false;
               }),
               <span style={{ color: "#0a7", fontSize: "12px" }}>default</span>,
               <cf-button

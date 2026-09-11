@@ -7,13 +7,14 @@
  * Every topic's title and body are derived from its index, so two runs of the
  * same size produce the same board and their timings are comparable.
  *
- * Seeding holds the whole board live while it writes, and the board recomputes
+ * Seeding holds the board's index live while it writes, and the board recomputes
  * its crossref join on each write, so peak memory rises with the topic count.
  * {@link seedTopicBoardOutOfProcess} runs the seed in a child Deno with a heap
  * of its own, which is how a benchmark gets a large board without carrying that
  * peak for the rest of its run.
  */
 
+import type { JSONSchema } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
@@ -31,6 +32,9 @@ export interface SeededTopic {
 }
 
 export interface TopicBoardFixture {
+  /** The authoring subscription used while creating the board. */
+  seedDemand: TopicBoardDemand;
+
   /** The space the board lives in. */
   spaceName: string;
 
@@ -48,6 +52,9 @@ export interface SeedTopicBoardOptions {
 
   /** How many topics the board carries. */
   topicCount: number;
+
+  /** Index subscription by default; full-result demand is an explicit stress case. */
+  demand?: TopicBoardDemand;
 
   /**
    * How many earlier topics a citing body cites. Every citation is an edge the
@@ -70,6 +77,34 @@ export interface SeedTopicBoardOptions {
 
 export const DEFAULT_CROSSREFS_PER_TOPIC = 2;
 export const DEFAULT_BODY_WORDS = 120;
+
+export type TopicBoardDemand = "index" | "full";
+
+/** Validate a benchmark's demand setting before it creates a space. */
+export function parseTopicBoardDemand(value = "index"): TopicBoardDemand {
+  if (value !== "index" && value !== "full") {
+    throw new Error(`Topic board demand must be index or full: ${value}`);
+  }
+  return value;
+}
+
+/** Hold the board's current list through the selected authoring subscription. */
+export function demandTopicBoard(
+  board: PieceController,
+  demand: TopicBoardDemand = "index",
+): () => void {
+  const result = board.pieces().getResult(board.getCell());
+  if (demand === "full") return result.sink(() => {});
+  const schema = result.getMetaRaw("schema") as JSONSchema | undefined;
+  if (schema === undefined) {
+    throw new Error(
+      "Topic board result has no durable schema for index demand.",
+    );
+  }
+  // The durable schema describes the result root. key() needs it on that root
+  // to select the index row schema for the subscription.
+  return result.asSchema(schema).key("index").sink(() => {});
+}
 
 /**
  * How many topics carry citations, counted back from the newest.
@@ -246,9 +281,8 @@ export async function seedTopicBoard(
     );
     const board = await cc.create(program, { start: true });
 
-    // Hold the board's result live for the duration of the seed, so each
-    // `addTopic` lands against an up-to-date list.
-    releaseBoard = cc.getResult(board.getCell()).sink(() => {});
+    const demand = options.demand ?? "index";
+    releaseBoard = demandTopicBoard(board, demand);
 
     const topics: SeededTopic[] = [];
     // The created pieces themselves, because a mention is a reference: the
@@ -277,7 +311,12 @@ export async function seedTopicBoard(
       options.onTopic?.(index);
     }
 
-    return { spaceName: options.spaceName, boardId: board.id, topics };
+    return {
+      spaceName: options.spaceName,
+      boardId: board.id,
+      seedDemand: demand,
+      topics,
+    };
   } finally {
     releaseBoard?.();
     await cc.dispose();
@@ -291,6 +330,7 @@ export interface SeedTopicBoardOutOfProcessOptions {
   /** Passphrase the child derives the seeding identity from. */
   passphrase: string;
   topicCount: number;
+  demand?: TopicBoardDemand;
   crossrefsPerTopic?: number;
   citingTopics?: number;
   bodyWords?: number;
@@ -337,6 +377,7 @@ export async function seedTopicBoardOutOfProcess(
         `--space=${options.spaceName}`,
         `--passphrase=${options.passphrase}`,
         `--topics=${options.topicCount}`,
+        `--demand=${options.demand ?? "index"}`,
         `--crossrefs=${
           options.crossrefsPerTopic ?? DEFAULT_CROSSREFS_PER_TOPIC
         }`,

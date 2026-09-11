@@ -76,8 +76,8 @@ a value-only view materializes stored contents.
 
 The [decision record](../history/features/2026-09-11-index-key-enumeration-decision.md)
 records the selected representation and alternatives. The
-[acceptance checklist](../plans/collection-index-contract.md#tagged-enumeration-acceptance)
-tracks validation.
+[executed acceptance contract](../history/plans/collection-index-contract.md#tagged-enumeration-acceptance)
+records the implementation checks.
 
 A Cell key denotes its resolved space, document, path, and scope. Its schema and
 stored contents do not participate in equality. Selecting a Cell preserves that
@@ -112,6 +112,12 @@ confirmations are ignored.
 
 ## Work and limitations
 
+Member setup watches retain Cell references to the selector result, source
+element, shared descriptor, and maintenance records. Each member resolves its
+selector and reads the concrete maintenance slots it needs; setting up one member
+does not materialize every bucket through its input schema. Selector reads remain
+reactive, including omitted keys.
+
 Membership reconciliation scans source occurrence identities. `groupBy` writes
 one member entry and uses a cached occurrence order to locate its published
 slot. Unchanged slots retain their original source links. Copying the order and
@@ -136,9 +142,10 @@ storage retention policy.
 Materializer envelopes can introduce scheduler ordering edges proportional to
 source size even when an unrelated lookup does not rerun. These operators make
 no constant-time update guarantee. Group consumers also pay for the members they
-read. Scale measurements and join operators are tracked by the
-[implementation plan](../plans/pattern-computation-cost-implementation.md) and
-[index contract](../plans/collection-index-contract.md).
+read. The [benchmark guide](../development/BENCHMARKS.md) describes the
+reproducible maintenance-phase probe, which separates initialization, linked-row
+changes, membership edits, and lookup retargeting across sizes and key
+distributions.
 
 ## Left lookup joins
 

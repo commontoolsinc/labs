@@ -3,7 +3,7 @@
  * call it receives, and builders for the result forms a test hands back.
  *
  * The recorder dispatches every value to its subtype method and recurses into
- * containers the way `ContainerIteratingVisitor` does by default, so a test
+ * containers the way `ContainerIteratingValueVisitor` does by default, so a test
  * that wants the default walk sets nothing, and one that wants a different
  * decision at one hook assigns the matching `on*` property.
  */
@@ -20,7 +20,7 @@ import {
 import { type PrimitiveValueTag } from "@/value-tags.ts";
 import {
   type BaselineVisitResult,
-  ContainerIteratingVisitor,
+  ContainerIteratingValueVisitor,
   type DispatchingVisitorResult,
   DO_VISIT_SUBTYPE,
   type LeafVisitorResult,
@@ -31,13 +31,20 @@ export type Event = [name: string, ...args: unknown[]];
 
 /**
  * Visitor that dispatches every value to its subtype method, recurses into
- * containers the way `ContainerIteratingVisitor` does by default, and records
+ * containers the way `ContainerIteratingValueVisitor` does by default, and records
  * each call it receives. Each hook can be overridden per test by assigning the
  * matching `on*` property.
  */
-export class Recorder extends ContainerIteratingVisitor<unknown, unknown> {
+export class Recorder extends ContainerIteratingValueVisitor<unknown, unknown> {
   readonly events: Event[] = [];
 
+  /**
+   * The values handed to `isDomainExtra()`, in order. Kept apart from
+   * `events` so that the recorded dispatch sequence is the visit alone.
+   */
+  readonly domainChecks: unknown[] = [];
+
+  onIsDomainExtra?: (value: unknown) => boolean;
   onValue?: (value: unknown) => DispatchingVisitorResult<unknown, unknown>;
   onCycle?: (
     value: unknown,
@@ -67,6 +74,12 @@ export class Recorder extends ContainerIteratingVisitor<unknown, unknown> {
   /** The names of the recorded calls, in order. */
   get names(): string[] {
     return this.events.map((e) => e[0]);
+  }
+
+  override isDomainExtra(value: unknown): value is unknown {
+    // The domain is `unknown`, so everything outside `FabricValue` is in it.
+    this.domainChecks.push(value);
+    return this.onIsDomainExtra ? this.onIsDomainExtra(value) : true;
   }
 
   override visitValue(

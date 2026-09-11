@@ -591,6 +591,57 @@ describe("VisitInProgress", () => {
         });
       });
 
+      describe("`isDomainExtra()`", () => {
+        it("passes a non-fabric value to `isDomainExtra()` and, on `true`, to `visitNonFabricValue()`", () => {
+          const rec = new Recorder();
+          const date = new Date(0);
+
+          visit(date, rec);
+          expect(rec.domainChecks).toEqual([date]);
+          expect(rec.names).toEqual(["value", "nonFabric"]);
+        });
+
+        it("throws for a non-fabric value, without calling `visitNonFabricValue()`, on `false`", () => {
+          const rec = new Recorder();
+          rec.onIsDomainExtra = () => false;
+
+          expect(() => visit(new Date(0), rec)).toThrow(
+            /Encountered a value outside of the visitor's domain: /,
+          );
+          expect(rec.names).not.toContain("nonFabric");
+        });
+
+        it("throws for a non-fabric replacement under a valid root, on `false`", () => {
+          const rec = new Recorder();
+          rec.onIsDomainExtra = () => false;
+          rec.onValue = (v) =>
+            (v === "x") ? replace(new Date(0)) : DO_VISIT_SUBTYPE;
+
+          expect(() => visit(["x"], rec)).toThrow(
+            /Encountered a value outside of the visitor's domain: /,
+          );
+        });
+
+        it("does not call `isDomainExtra()` for a valid `FabricValue`", () => {
+          const rec = new Recorder();
+
+          visit({ a: [1, "two", null] }, rec);
+          expect(rec.domainChecks).toEqual([]);
+        });
+
+        it("passes the value that failed the check: the function under the shallow check, the whole array under the deep check", () => {
+          const shallow = new Recorder();
+          const deep = new Recorder();
+          const fn = () => 1;
+          const array = [fn];
+
+          visit(array, shallow);
+          visit(array, deep, true);
+          expect(shallow.domainChecks).toEqual([fn]);
+          expect(deep.domainChecks).toEqual([array]);
+        });
+      });
+
       describe("results", () => {
         it("returns `undefined` when no visitor produces a `mainResult`", () => {
           expect(visit({ a: [1] }, new Recorder())).toBeUndefined();
@@ -703,12 +754,13 @@ describe("VisitInProgress", () => {
         expect(visitAssumingValid(5, rec)).toEqual(mainResult("5"));
       });
 
-      it("throws on reaching a value that is not a `FabricValue`", () => {
+      it("throws on reaching a value that is not a `FabricValue`, without consulting `isDomainExtra()`", () => {
         const rec = new Recorder();
 
         expect(() => visitAssumingValid([1, new Date(0)], rec)).toThrow(
           /assume valid/,
         );
+        expect(rec.domainChecks).toEqual([]);
       });
 
       it("throws for a `recurse` on a value that is not a `FabricValue`", () => {

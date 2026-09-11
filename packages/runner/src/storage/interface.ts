@@ -739,6 +739,13 @@ export interface IStorageProvider {
   /** Establish the authenticated space session without reading entity values. */
   ensureSession?(): Promise<void>;
 
+  /**
+   * Wait for an ordered response after this space's published input frames.
+   * Frame application completes before the response; pending local writes may
+   * still shadow those inputs. This does not wait for commit durability.
+   */
+  pullToServerHead?(): Promise<void>;
+
   /** List live space-scoped entity identifiers without loading their values. */
   listEntityIds?(): Promise<string[] | undefined>;
 
