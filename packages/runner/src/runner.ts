@@ -62,7 +62,6 @@ import {
   type Cell,
   createCell,
   isCell,
-  markCellDocumentSynced,
   syncCellForIdentity,
 } from "./cell.ts";
 import {
