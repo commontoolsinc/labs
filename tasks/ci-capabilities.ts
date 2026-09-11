@@ -30,6 +30,7 @@ export type CapabilityId =
   | "jq"
   | "browser"
   | "git-history"
+  | "github-api"
   | "toolshed"
   | "toolshed-baked"
   | "toolshed-baked-opposite"
@@ -312,6 +313,38 @@ const gitHistory: Capability = {
       }
     }
     return exported({});
+  },
+};
+
+/** The environment variable a lane is handed the token in. */
+export const GITHUB_TOKEN_VARIABLE = "GITHUB_TOKEN";
+
+/**
+ * A token for the GitHub API, handed to the suites that ask the service a
+ * question and to no others.
+ *
+ * A lane runs the repository's own gates beside pattern and integration
+ * tests, and one gate asks GitHub what each action pin resolves to.
+ * Sixty requests an hour is what the service allows a caller with no
+ * token, shared across everything else reaching it from that address, so
+ * the gate needs one.
+ *
+ * The workflow puts the token in the lane's own environment, and this
+ * takes it out of there before any batch runs. A child process inherits
+ * what the lane holds, so a token left in place would reach every test in
+ * the lane whether or not its suite asked for one; removing it is what
+ * makes the declaration mean something.
+ */
+const githubApi: Capability = {
+  id: "github-api",
+  description: "a token for the GitHub API",
+  open(context) {
+    const token = Deno.env.get(GITHUB_TOKEN_VARIABLE);
+    if (token === undefined || token.length === 0) {
+      return Promise.resolve(exported({}));
+    }
+    if (!context.dryRun) Deno.env.delete(GITHUB_TOKEN_VARIABLE);
+    return Promise.resolve(exported({ [GITHUB_TOKEN_VARIABLE]: token }));
   },
 };
 
@@ -624,6 +657,7 @@ export const CAPABILITIES: ReadonlyMap<CapabilityId, Capability> = new Map(
     jq,
     browser,
     gitHistory,
+    githubApi,
     toolshed,
     toolshedBaked,
     toolshedBakedOpposite,

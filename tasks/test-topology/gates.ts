@@ -612,7 +612,10 @@ function patternVintageSuite(): Suite {
 /** Every gate suite, read from the working tree. */
 export async function loadGateSuites(root: string): Promise<Suite[]> {
   return [
-    gateSuite("repo-gates", WORKING_TREE_GATES, ["deno"]),
+    // The action-pin gate asks GitHub what each pin resolves to, and
+    // sixty requests an hour is what the service allows a caller with no
+    // token.
+    gateSuite("repo-gates", WORKING_TREE_GATES, ["deno", "github-api"]),
     gateSuite("repo-history-gates", HISTORY_GATES, ["deno", "git-history"]),
     await typecheckSuite(root),
     cfcheckSuite(),

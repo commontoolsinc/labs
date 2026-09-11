@@ -385,7 +385,7 @@ table is the migration's checklist.
 
 | Suite | Today's jobs | Record variant | Capabilities |
 | --- | --- | --- | --- |
-| `repo-gates` | `Check` (all but the type check) | — | `deno` |
+| `repo-gates` | `Check` (all but the type check) | — | `deno`, `github-api` |
 | `repo-history-gates` | the two append-only gates in `Pattern Update State and Baseline Integrity` | — | `deno`, `git-history` |
 | `typecheck` | `Check` (the type check) | — | `deno` |
 | `workspace-unit` | `Test (1..8)` | — | `deno`, `fuse`, `browser` |
@@ -1208,6 +1208,7 @@ batches.
 | `jq` | `jq` | about 2 seconds |
 | `browser` | Relaxes the AppArmor user-namespace restriction | under a second |
 | `git-history` | Unshallows the checkout | 3–10 seconds |
+| `github-api` | Takes the GitHub API token out of the lane's own environment and hands it to the suites that declared it | under a second |
 | `toolshed` | A Toolshed server listening on an allocated port | see below |
 | `local-dev-servers` | The whole local dev stack, brought up by `deno task integration` on a chosen port offset | 15–20 seconds |
 | `toolshed-baked` | The same, from a compiled binary, whose baked shell a browser can drive | 42 seconds to build, or 17 to restore |

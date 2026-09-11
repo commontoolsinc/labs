@@ -77,12 +77,45 @@ describe("ci capabilities", () => {
       "deno",
       "fuse",
       "git-history",
+      "github-api",
       "jq",
       "local-dev-servers",
       "toolshed",
       "toolshed-baked",
       "toolshed-baked-opposite",
     ]);
+  });
+
+  it("hands the API token to the suites that asked and to no others", async () => {
+    // A child process inherits what the lane holds, so a token left in
+    // the lane's own environment would reach every test in the lane.
+    Deno.env.set("GITHUB_TOKEN", "a-token");
+    try {
+      const opened = await openCapabilities(["github-api", "jq"], {
+        root: Deno.cwd(),
+        dryRun: false,
+        workDir: "/nonexistent",
+        exec: () => Promise.resolve(""),
+      });
+      expect(opened.envFor(["github-api"]).GITHUB_TOKEN).toBe("a-token");
+      expect(opened.envFor(["jq"]).GITHUB_TOKEN).toBeUndefined();
+      expect(Deno.env.get("GITHUB_TOKEN")).toBeUndefined();
+      await opened.close();
+    } finally {
+      Deno.env.delete("GITHUB_TOKEN");
+    }
+  });
+
+  it("exports nothing where the lane was handed no token", async () => {
+    Deno.env.delete("GITHUB_TOKEN");
+    const opened = await openCapabilities(["github-api"], {
+      root: Deno.cwd(),
+      dryRun: false,
+      workDir: "/nonexistent",
+      exec: () => Promise.resolve(""),
+    });
+    expect(opened.envFor(["github-api"])).toEqual({});
+    await opened.close();
   });
 
   it("exports the environment a dry run's batches would see", async () => {
