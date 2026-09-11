@@ -396,10 +396,13 @@ describe("CFC cross-space integrity", () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime(storageManager);
     try {
-      await seedLabeledDoc(runtime, spaceA, "s1e-src", "37.77,-122.41", [{
-        path: [],
-        label: { integrity: ["gps-reading"] },
-      }]);
+      const srcId = await seedLabeledDoc(
+        runtime,
+        spaceA,
+        "s1e-src",
+        "37.77,-122.41",
+        [{ path: [], label: { integrity: ["gps-reading"] } }],
+      );
 
       // Actually READ the labeled source and write its MATERIALIZED value (not a
       // link) into space B — the "a handler read it and copied the bytes" path.
@@ -433,6 +436,12 @@ describe("CFC cross-space integrity", () => {
       expect((doc?.value as { reading?: string })?.reading).toBe(
         "37.77,-122.41",
       );
+      // The source carries the atom the copy must not, and the value read
+      // above pins the copy document the entries below are read from.
+      expect(
+        entriesFor(readDoc(storageManager, spaceA, srcId), [])
+          .flatMap((e) => e.label.integrity ?? []),
+      ).toContain("gps-reading");
       const integrity = entriesFor(doc, ["reading"])
         .flatMap((e) => e.label.integrity ?? []);
       expect(integrity).not.toContain("gps-reading");

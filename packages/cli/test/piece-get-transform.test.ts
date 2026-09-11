@@ -1,5 +1,7 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { spy, stub } from "@std/testing/mock";
+
 import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
@@ -2077,6 +2079,75 @@ describe("cf cell get transforms", () => {
       (runtime as any).edit = originalEdit;
     }
   });
+
+  it("sets up the projection once and returns its result without runtime-owned setup", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "accepted-projection-setup",
+      { type: "object", properties: { id: { type: "number" } } },
+      tx,
+    );
+    source.set({ id: 1 });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    // Count caller-provided setup and refuse runtime-owned setup so neither
+    // path can silently introduce a second setup transaction.
+    using setups = spy(runtime, "setup");
+    using ownedSetups = stub(runtime, "editWithRetry", () =>
+      Promise.resolve({
+        error: {
+          name: "StorageTransactionAborted",
+          message: "forced setup rejection",
+          reason: "forced setup rejection",
+        },
+      }));
+    expect(
+      await deriveSelectedValue(runtime, space, source, {
+        projection: parseSelectProjection("id"),
+      }),
+    ).toEqual({ id: 1 });
+    expect(setups.calls).toHaveLength(1);
+    expect(ownedSetups.calls).toHaveLength(0);
+  });
+
+  for (const failure of ["sync", "start", "missing"] as const) {
+    it(`reports projection startup failure: ${failure}`, async () => {
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        space,
+        "projection-startup-failure",
+        { type: "object", properties: { id: { type: "number" } } },
+        tx,
+      );
+      source.set({ id: 1 });
+      expect((await tx.commit()).ok).toBeDefined();
+
+      using injected = failure === "sync"
+        ? stub(
+          runtime.runner,
+          "syncStoredPieceCells",
+          () => Promise.reject(new Error("dependency sync failed")),
+        )
+        : stub(
+          runtime,
+          "start",
+          () =>
+            failure === "start"
+              ? Promise.reject("pattern start failed")
+              : Promise.resolve(false),
+        );
+      const message = failure === "sync"
+        ? "dependency sync failed"
+        : failure === "start"
+        ? "pattern start failed"
+        : "projection did not start";
+      await expect(deriveSelectedValue(runtime, space, source, {
+        projection: parseSelectProjection("id"),
+      })).rejects.toThrow(`Could not apply get transform: ${message}`);
+      expect(injected.calls).toHaveLength(1);
+    });
+  }
 
   it("returns projection-ordered output without a storage-wide sync", async () => {
     const setup = runtime.edit();

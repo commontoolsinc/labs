@@ -1320,39 +1320,46 @@ describe("closure replication: the in-flight sibling supplier race", () => {
         // PHASE 1 — build the PARTIAL ORIGIN through the real production
         // mechanism, a replication-tail persist failure: replicate the
         // importer B -> E with the lib's doc writes failing store-level
-        // (own-property shadow on the tx write — the marker only ever
-        // appears in lib source docs, and a replication's ENTRY persist
-        // writes none of them). The entry closure lands in E; the
-        // dependency root does not. And the failure classification pin:
-        // a PERSIST failure does NOT park — the park is for supply
+        // (own-property shadow on the tx writes — the marker only ever
+        // appears in lib source text, and a replication's ENTRY persist
+        // writes none of it). The source text reaches storage as the
+        // lib's code document, staged through the single-value write,
+        // while the record itself goes through the batched write, so
+        // both entry points carry the shadow. The entry closure lands in
+        // E; the dependency root does not. And the failure classification
+        // pin: a PERSIST failure does NOT park — the park is for supply
         // failures only, where a future record event is the remedy.
         const realEdit = rt2.edit.bind(rt2);
         let armed = true;
+        const mentionsMarker = (args: unknown[]): boolean => {
+          try {
+            return JSON.stringify(args)?.includes("LIB-SOURCE-MARKER-7C") ??
+              false;
+          } catch {
+            // Unstringifiable args cannot carry the marker.
+            return false;
+          }
+        };
         editSpy.edit = () => {
           const tx = realEdit();
           if (!armed) return tx;
-          const spied = tx as unknown as {
-            writeValuesOrThrow?: (...args: unknown[]) => unknown;
-          };
-          const realWrite = (tx as unknown as {
-            writeValuesOrThrow: (...args: unknown[]) => unknown;
-          }).writeValuesOrThrow.bind(tx);
-          spied.writeValuesOrThrow = (...args: unknown[]) => {
-            let mentionsMarker = false;
-            try {
-              mentionsMarker =
-                JSON.stringify(args)?.includes("LIB-SOURCE-MARKER-7C") ??
-                  false;
-            } catch {
-              // Unstringifiable args cannot carry the marker.
-            }
-            if (armed && mentionsMarker) {
-              throw new Error(
-                "injected store failure for the dependency root's writes",
-              );
-            }
-            return realWrite(...args);
-          };
+          const spied = tx as unknown as Record<
+            "writeValuesOrThrow" | "writeOrThrow",
+            (...args: unknown[]) => unknown
+          >;
+          for (
+            const method of ["writeValuesOrThrow", "writeOrThrow"] as const
+          ) {
+            const realWrite = spied[method].bind(tx);
+            spied[method] = (...args: unknown[]) => {
+              if (armed && mentionsMarker(args)) {
+                throw new Error(
+                  "injected store failure for the dependency root's writes",
+                );
+              }
+              return realWrite(...args);
+            };
+          }
           return tx;
         };
         const phase1 = await captureManagerLines(async () => {

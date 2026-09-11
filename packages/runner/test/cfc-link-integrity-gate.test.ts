@@ -97,6 +97,11 @@ describe("CFC link-write integrity gate", () => {
         replica.getDocument(persistedId)?.cfc?.labelMap?.entries ??
           [];
       const allIntegrity = entries.flatMap((e) => e.label.integrity ?? []);
+      // The rest of the carried view persisted, so the integrity check below
+      // runs over a label map that was written.
+      expect(entries.map((e) => e.label.confidentiality)).toContainEqual([
+        "leak",
+      ]);
       // The forged InjectionSafe must not have been persisted anywhere.
       expect(
         allIntegrity.some((a) => a?.type?.endsWith("/InjectionSafe")),
