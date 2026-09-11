@@ -69,10 +69,14 @@ class SharedServerStorageManager extends EmulatedStorageManager {
    * resolves — holding an open (sealed, uncommitted) wave across a
    * lease tenure bump, deterministically. Undefined everywhere else. */
   settleGate: Promise<void> | undefined;
+  settleGateReached: (() => void) | undefined;
 
   override async inputSynced(): Promise<void> {
     await super.inputSynced();
-    if (this.settleGate !== undefined) await this.settleGate;
+    if (this.settleGate !== undefined) {
+      this.settleGateReached?.();
+      await this.settleGate;
+    }
   }
 }
 
@@ -1292,7 +1296,14 @@ describe("stage F serving loop", () => {
       idleParkMs: 600_000,
       renewIntervalMs: 25,
     });
-    onServingRuntime = () => Promise.resolve();
+    const gate = Promise.withResolvers<void>();
+    const gateReached = Promise.withResolvers<void>();
+    onServingRuntime = (runtime) => {
+      const manager = runtime.storageManager as SharedServerStorageManager;
+      manager.settleGate = gate.promise;
+      manager.settleGateReached = gateReached.resolve;
+      return Promise.resolve();
+    };
     openClient();
 
     const input = clientRuntime.getCell<{ value: number }>(
@@ -1310,23 +1321,14 @@ describe("stage F serving loop", () => {
     );
     const spaceServer = host.spaceServer(space)!;
     const engine = await server.engineForSpace(space);
-    // Let the activation-triggered cycle finish (its watermark-only
-    // advance claims the authored input) so the loop sits in
-    // wait-for-input — not mid-settle — before the gate closes.
-    const authoredSeq = Engine.serverSeq(engine);
-    await waitUntil(
-      () => readWatermarkSeq(engine) >= authoredSeq,
-      "the activation cycle to settle",
-    );
 
-    // Close the gate, then open a wave: a stamped tx on the SERVING
-    // runtime seals into the wave (capturing the current tenure); its
-    // commit step cannot run until the settle passes the gated
-    // inputSynced barrier.
+    // The gate was installed before activation started. Wait until the loop
+    // reaches it, then open a wave: a stamped tx on the SERVING runtime seals
+    // into the wave (capturing the current tenure), and its commit step cannot
+    // run until the gated inputSynced barrier is released.
     const manager = servingRuntime!
       .storageManager as SharedServerStorageManager;
-    const gate = Promise.withResolvers<void>();
-    manager.settleGate = gate.promise;
+    await gateReached.promise;
     const probeCell = servingRuntime!.getCell<{ n: number }>(
       space,
       "renew-blip-probe",
@@ -1366,6 +1368,7 @@ describe("stage F serving loop", () => {
       "space to park on the lease-lost wave abort",
     );
     manager.settleGate = undefined;
+    manager.settleGateReached = undefined;
     // Soundness: no watermark movement rode the aborted wave, and no
     // continued loop minted a watermark-only advance after it.
     expect(readWatermarkSeq(engine)).toBe(watermarkBefore);
