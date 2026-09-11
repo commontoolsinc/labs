@@ -31,8 +31,6 @@ import {
   websocketReady,
 } from "@astral/astral";
 
-import { isChildProcessGone } from "./astral-adapter.ts";
-
 /**
  * The message a launch throws when the browser exited without naming an
  * endpoint. Exported so that whoever decides what to do about such a launch
@@ -71,21 +69,23 @@ export async function readToEnd(
 }
 
 /**
- * Kills `child` with `SIGKILL` and waits for its output and exit status.
+ * Kills the process group led by `child` and waits for output and root status.
  *
- * `closed` is what `readBrowserOutput()` reported for the same child. Process
- * termination must complete without cooperation from the browser's event
- * loop. Output remains drained while the browser's children shut down, and an
- * output failure is reported only after the root process has been reaped.
+ * `closed` is what `readBrowserOutput()` reported for the same child.
+ * The child must have been spawned with `detached: true`, which creates its
+ * own process group on the supported Unix platforms. Killing that group also
+ * stops renderers that outlive the root, without signaling the test runner.
+ * Output remains drained until detached helpers release their descriptors.
+ * An output failure is reported only after the root has been reaped.
  */
 export async function stopBrowserProcess(
-  child: Pick<Deno.ChildProcess, "kill" | "status">,
+  child: Pick<Deno.ChildProcess, "pid" | "status">,
   closed: Promise<void>,
 ): Promise<void> {
   try {
-    child.kill("SIGKILL");
+    Deno.kill(-child.pid, "SIGKILL");
   } catch (error) {
-    if (!isChildProcessGone(error)) {
+    if (!(error instanceof Deno.errors.NotFound)) {
       throw error;
     }
   }
@@ -181,6 +181,7 @@ async function spawnBrowser(options: LaunchOptions): Promise<SpawnedBrowser> {
 
   const child = new Deno.Command(binary, {
     args,
+    detached: true,
     stdout: "piped",
     stderr: "piped",
   }).spawn();

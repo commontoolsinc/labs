@@ -100,14 +100,16 @@ disables Chrome's updater scheduler so detached maintenance services cannot
 inherit the test browser's output pipes. Chrome's own crash reporting remains
 enabled.
 
-Closing the browser sends `SIGKILL` to its root process and waits for its exit
-status and both output pipes to reach end of file. A child that inherits a pipe
-holds its write end until it exits or closes that descriptor; EOF establishes
-that those descriptors are closed, not that every descendant has exited. Both
-pipes are drained continuously because an unread pipe can fill and block its
-writer. Profile removal follows the process and output waits. The spawning and
-the waits belong to [`BrowserProcess`](../integration/browser-process.ts), which
-the browser integration tests also use.
+Each browser launches in its own Unix process group. Closing it sends `SIGKILL`
+to that group and waits for the root's exit status and both output pipes to
+reach end of file. This also stops renderers that outlive the root. A child that
+inherits a pipe holds its write end until it exits or closes that descriptor;
+EOF establishes that those descriptors are closed, not that every descendant has
+exited. Both pipes are drained continuously because an unread pipe can fill and
+block its writer. Profile removal follows the process and output waits. The
+spawning and the waits belong to
+[`BrowserProcess`](../integration/browser-process.ts), which the browser
+integration tests also use.
 
 ## Support
 

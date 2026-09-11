@@ -12,6 +12,7 @@
 import type { Browser as AstralBrowser } from "@astral/astral";
 import { expect } from "@std/expect";
 import { afterEach, describe, it } from "@std/testing/bdd";
+import { stub } from "@std/testing/mock";
 
 import {
   BOOT_FAILURE_MESSAGE,
@@ -26,31 +27,30 @@ import {
 // listening socket, or a process from outliving a failure.
 const madeByTest: (() => Promise<void>)[] = [];
 
-// A shell that starts `cat` in the background, says so on its standard output,
-// and then waits. `cat` inherits the standard error the shell was spawned with
-// and holds it until its own standard input reaches end of file, which the
-// test brings about by closing the shell's standard input. The redirection
+// A shell that starts `cat` in the background, announces it, and exits. `cat`
+// retains stderr until it is killed or its stdin reaches EOF. The redirection
 // through file descriptor 3 is what gets that pipe to `cat`: a background
 // job's standard input is /dev/null unless it is redirected explicitly.
-const HOLDS_STANDARD_ERROR =
-  "exec 3<&0; cat <&3 >/dev/null & echo started; wait";
+const HOLDS_STANDARD_ERROR = "exec 3<&0; cat <&3 >/dev/null & echo started";
 
-// Spawns `script` under `sh` with its standard error piped, and registers the
-// kill and the closing of its standard input.
-function shell(
-  script: string,
+// Spawns a command in its own process group with stderr piped, and registers
+// group termination and the closing of its standard input.
+function spawn(
+  binary: string,
+  args: string[],
   streams: { stdin?: "piped" | "null"; stdout?: "piped" | "null" } = {},
 ): Deno.ChildProcess {
   const stdin = streams.stdin ?? "null";
-  const child = new Deno.Command("sh", {
-    args: ["-c", script],
+  const child = new Deno.Command(binary, {
+    args,
+    detached: true,
     stdin,
     stdout: streams.stdout ?? "null",
     stderr: "piped",
   }).spawn();
   madeByTest.push(async () => {
     try {
-      child.kill();
+      Deno.kill(-child.pid, "SIGKILL");
     } catch {
       // Already gone, which is where most of these tests leave it.
     }
@@ -60,6 +60,13 @@ function shell(
     await child.status;
   });
   return child;
+}
+
+function shell(
+  script: string,
+  streams: { stdin?: "piped" | "null"; stdout?: "piped" | "null" } = {},
+): Deno.ChildProcess {
+  return spawn("sh", ["-c", script], streams);
 }
 
 // More than a pipe holds, so a stand-in that writes this much to its standard
@@ -167,7 +174,7 @@ describe("browser-process", () => {
 
       try {
         await expect(stopBrowserProcess({
-          kill: (signal) => child.kill(signal),
+          pid: child.pid,
           status,
         }, Promise.reject(readFailure))).rejects.toBe(readFailure);
 
@@ -189,50 +196,85 @@ describe("browser-process", () => {
     });
 
     it("rethrows a kill failure that is not the process having gone", async () => {
+      const child = shell("read line", { stdin: "piped" });
       const refused = new Error("Operation not permitted (os error 1)");
-      const child = {
-        kill: () => {
-          throw refused;
-        },
-        status: Promise.resolve({ success: false, code: 1, signal: null }),
-      };
-
+      using _kill = stub(Deno, "kill", () => {
+        throw refused;
+      });
       await expect(stopBrowserProcess(child, Promise.resolve())).rejects
         .toThrow("Operation not permitted");
     });
 
-    it("returns after a process that outlived the one it was given has exited", async () => {
+    it("stops descendants in the owned group after the root has exited", async () => {
       const child = shell(HOLDS_STANDARD_ERROR, {
         stdin: "piped",
         stdout: "piped",
       });
+      const stdout = child.stdout.getReader();
+      madeByTest.push(() => stdout.cancel());
+      expect(new TextDecoder().decode((await stdout.read()).value)).toBe(
+        "started\n",
+      );
+      expect((await child.status).code).toBe(0);
+
+      await stopBrowserProcess(child, readToEnd(child.stderr));
+
+      expect((await stdout.read()).done).toBe(true);
+      expect((await child.status).code).toBe(0);
+    });
+
+    it("waits for inherited output held outside the owned process group", async () => {
+      // This helper has no imports or workspace dependencies. Its separate
+      // group models Crashpad's detached launch, and stdin EOF releases it.
+      const child = spawn(Deno.execPath(), [
+        "eval",
+        "--no-config",
+        "--no-lock",
+        `const child = new Deno.Command(Deno.execPath(), {
+          args: ["eval", "--no-config", "--no-lock",
+            "await Deno.stdin.readable.pipeTo(new WritableStream());"],
+          detached: true,
+          stdin: "inherit",
+          stdout: "null",
+          stderr: "inherit",
+        }).spawn();
+        console.log(child.pid);
+        await child.status;`,
+      ], { stdin: "piped", stdout: "piped" });
       const closed = readToEnd(child.stderr);
 
-      // `cat` is running by the time the shell has said so, so the kill below
-      // takes the shell without taking the holder of the pipe with it.
       const stdout = child.stdout.getReader();
       madeByTest.push(() => stdout.cancel());
       const started = await stdout.read();
-      expect(new TextDecoder().decode(started.value)).toBe("started\n");
+      const helperPid = Number(new TextDecoder().decode(started.value).trim());
+      expect(Number.isSafeInteger(helperPid) && helperPid > 0).toBe(true);
+      madeByTest.push(() => {
+        try {
+          Deno.kill(helperPid, "SIGKILL");
+        } catch {
+          // EOF has already released the detached helper on success.
+        }
+        return Promise.resolve();
+      });
 
       // Each event reaches the list from the event loop, so a
-      // stop that returned on the shell's exit alone would record itself
+      // stop that returned on the root's exit alone would record itself
       // between the other two rather than after them.
       const events: string[] = [];
       const stopping = stopBrowserProcess(child, closed).then(() => {
         events.push("stopped");
       });
       await child.status;
-      events.push("shell exited");
+      events.push("root exited");
       expect((await stdout.read()).done).toBe(true);
       events.push("stdout ended");
-      expect(events).toEqual(["shell exited", "stdout ended"]);
+      expect(events).toEqual(["root exited", "stdout ended"]);
       await child.stdin.close();
       events.push("released");
       await stopping;
 
       expect(events).toEqual([
-        "shell exited",
+        "root exited",
         "stdout ended",
         "released",
         "stopped",
@@ -268,6 +310,25 @@ describe("browser-process", () => {
 
     describe("static members", () => {
       describe("start()", () => {
+        it("gives each browser its own process group", async () => {
+          const options = await fakeBrowser(
+            "no endpoint",
+            1,
+            'printf \'%s\\n\' "$$" > "$0.pid"; ps -p "$$" -o pgid= > "$0.group"',
+          );
+
+          await expect(BrowserProcess.start(options)).rejects.toThrow(
+            BOOT_FAILURE_MESSAGE,
+          );
+
+          const pid = Number(await Deno.readTextFile(`${options.path}.pid`));
+          const group = Number(
+            await Deno.readTextFile(`${options.path}.group`),
+          );
+          expect(pid).toBeGreaterThan(0);
+          expect(group).toBe(pid);
+        });
+
         it("keeps Chrome launches from scheduling the installed updater", async () => {
           const options = await fakeBrowser(
             "no endpoint",
