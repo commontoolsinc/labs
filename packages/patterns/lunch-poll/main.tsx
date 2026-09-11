@@ -1090,29 +1090,24 @@ const tallyOption = (
   let green = 0;
   let yellow = 0;
   let red = 0;
-  for (const v of votes) {
-    if (v.voteType === "green") green++;
-    else if (v.voteType === "yellow") yellow++;
-    else if (v.voteType === "red") red++;
-  }
-  return {
-    option,
-    green,
-    yellow,
-    red,
-    voters: votes.map((v) => {
-      const entry = rosterOf(v.voter);
-      const name = entry?.name ?? "";
-      return {
-        name,
-        voteType: v.voteType,
-        color: entry?.color ?? "#888",
-        initials: initialsByName.get(name) ??
-          getInitials(name, participantNames),
-        isSelf: isSelf(v.voter),
-      };
-    }),
-  };
+  const voters = votes.map((v) => {
+    const voteType = v.voteType;
+    const voter = v.voter;
+    if (voteType === "green") green++;
+    else if (voteType === "yellow") yellow++;
+    else if (voteType === "red") red++;
+    const entry = rosterOf(voter);
+    const name = entry?.name ?? "";
+    return {
+      name,
+      voteType,
+      color: entry?.color ?? "#888",
+      initials: initialsByName.get(name) ??
+        getInitials(name, participantNames),
+      isSelf: isSelf(voter),
+    };
+  });
+  return { option, green, yellow, red, voters };
 };
 
 // 📊 Lunch stats: per-place visit count + green/yellow/red tallies, derived from
