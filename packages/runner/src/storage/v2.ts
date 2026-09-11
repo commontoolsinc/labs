@@ -756,6 +756,15 @@ const compactCommitReads = <
   space: MemorySpace,
   reads: Read[],
 ): Read[] => {
+  const dependencyKeys = new Map<number | number[], string>();
+  const dependencyKeyFor = (localSeq: number | number[]): string => {
+    let key = dependencyKeys.get(localSeq);
+    if (key === undefined) {
+      key = localSeqKey(localSeq);
+      dependencyKeys.set(localSeq, key);
+    }
+    return key;
+  };
   const sorted = [...reads].sort((left, right) => {
     const leftScope = normalizeCellScope(left.scope);
     const rightScope = normalizeCellScope(right.scope);
@@ -772,8 +781,8 @@ const compactCommitReads = <
     }
 
     if ("localSeq" in left && "localSeq" in right) {
-      const leftKey = localSeqKey(left.localSeq);
-      const rightKey = localSeqKey(right.localSeq);
+      const leftKey = dependencyKeyFor(left.localSeq);
+      const rightKey = dependencyKeyFor(right.localSeq);
       if (leftKey !== rightKey) {
         return leftKey < rightKey ? -1 : 1;
       }
@@ -801,7 +810,7 @@ const compactCommitReads = <
         normalizeCellScope(candidate.scope)
       }:${candidate.id}:${candidate.seq}`
       : `pending:${normalizeCellScope(candidate.scope)}:${candidate.id}:${
-        localSeqKey(candidate.localSeq)
+        dependencyKeyFor(candidate.localSeq)
       }:${candidate.basisSeq}`;
     let group = grouped.get(dependencyKey);
     if (!group) {
@@ -859,8 +868,8 @@ const compactCommitReads = <
     }
 
     if ("localSeq" in left && "localSeq" in right) {
-      const leftKey = localSeqKey(left.localSeq);
-      const rightKey = localSeqKey(right.localSeq);
+      const leftKey = dependencyKeyFor(left.localSeq);
+      const rightKey = dependencyKeyFor(right.localSeq);
       if (leftKey !== rightKey) {
         return leftKey < rightKey ? -1 : 1;
       }
