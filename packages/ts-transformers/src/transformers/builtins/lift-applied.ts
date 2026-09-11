@@ -75,6 +75,9 @@ interface FallbackEntry {
 }
 
 export interface LiftAppliedCallOptions {
+  /** Known output type of a synthetic expression. */
+  readonly resultTypeNode?: ts.TypeNode;
+
   readonly factory: ts.NodeFactory;
   readonly tsContext: ts.TransformationContext;
   readonly cfHelpers: CFHelpers;
@@ -263,8 +266,9 @@ export function createLiftAppliedCall(
     context,
   );
 
-  // Build result type node from expression type
-  const resultTypeNode = buildResultTypeNode(expression, context);
+  // Infer the expression result when the caller supplies no output type.
+  const resultTypeNode = options.resultTypeNode ??
+    buildResultTypeNode(expression, context);
 
   // Inner lift call: __cfHelpers.lift<inputTypeNode, resultTypeNode>(callback)
   const innerLiftCall = cfHelpers.createHelperCall(

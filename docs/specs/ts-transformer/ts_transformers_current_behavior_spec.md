@@ -1128,6 +1128,11 @@ Key rewrite rules:
 - `a || b`: lowers to `unless(condition, fallback)` only in pattern context
 - ternary `cond ? x : y`:
   - becomes `ifElse(cond, x, y)` with branch/predicate processing
+  - when rewriting a collection receiver establishes callback ownership, the
+    callback is registered before its body is visited, so discriminator
+    comparisons are evaluated reactively
+  - whole-branch wrappers exclude bindings declared inside nested callbacks
+    while retaining outer captures, including outer bindings with the same name
 - array-method family calls are never wrapped as a unit: the analysis marks
   them `skip-call-rewrite`, so only the receiver chain before the method is
   processed. Via §5's spelling fallback this equally covers an
@@ -1139,6 +1144,17 @@ Key rewrite rules:
     lowered to the lift-applied form)
 - compute contexts:
   - no computed wrappers; only child rewrites and logical conversions
+
+Collection index selectors (`groupBy` / `keyBy` on explicit array-valued cells)
+use the array callback pipeline and its `WithPattern` form. Each selector return
+is evaluated inside a computation that tags whether its result is a Cell before
+serialization. Primitive fields are read as values; Cell fields retain their
+identity without reading their contents. A nullish selected value omits that
+source occurrence. The pattern-owned expression pass skips synthetic computation
+callbacks, preserving ordinary JavaScript conditionals inside the key tagger.
+The computation carries the tagged selector output type into its lift schema.
+Bare terminal returns and fallthrough emit `void 0`, preserving omitted keys
+when a selector binds a local variable named `undefined`.
 
 Helper-owned compute branches introduced by ternary / conditional-helper
 rewriting are re-analyzed with synthetic compute ownership. This preserves

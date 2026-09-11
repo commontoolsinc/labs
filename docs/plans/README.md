@@ -11,7 +11,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
 ## Current plans
 
 - [Collection indexes and keyed lookup](collection-index-contract.md) defines
-  proposed B1/B2 semantics and acceptance tests before implementation.
+  B1/B2 semantics and acceptance tests for index producers, keyed lookup,
+  left joins, and tagged mixed-key `keyEntries()` enumeration. Homogeneous
+  key domains also support `keys()`. The contract tracks publication gates.
 
 - [Pattern computation cost: implementation sequence](pattern-computation-cost-implementation.md)
   executes the design in PR #7155 with checkable measurement, collection

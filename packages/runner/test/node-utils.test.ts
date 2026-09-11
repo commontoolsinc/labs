@@ -1,9 +1,17 @@
 /**
- * What the CFC output-labeling walk does with a `FabricSpecialObject`. Such a
- * value has zero enumerable own properties, so the walk's `Object.entries()`
- * descent ends at it. That costs a `FabricPrimitive` nothing -- a leaf holds no
- * cell to label -- but for a `FabricInstance` it means a cell in its codec
- * contents goes _unlabelled_, so the walk refuses one instead.
+ * What the CFC output-labeling walk does with values it cannot label.
+ *
+ * A `FabricSpecialObject` has zero enumerable own properties, so the walk's
+ * `Object.entries()` descent ends at it. That costs a `FabricPrimitive`
+ * nothing -- a leaf holds no cell to label -- but for a `FabricInstance` it
+ * means a cell in its codec contents goes _unlabeled_, so the walk refuses
+ * one instead.
+ *
+ * A cell carrying a cause or a link refuses the schema the walk writes, and
+ * the walk lets that throw. The cause case below holds that contract. Every
+ * production caller hands the walk a cell minted for the node being wired, so
+ * the case reaches the throw through the helper directly, and what it pins is
+ * that a label the walk cannot attach stops its caller.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -119,6 +127,30 @@ describe("node-utils", () => {
           "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
             "attaching CFC labels to outputs.",
         );
+      });
+    });
+
+    it("throws for an output cell that already carries a cause", () => {
+      withinHandler(() => {
+        // The control is the same one the `FabricError` case uses: a causeless
+        // cell in the same position takes the label, so what changes the
+        // outcome is the cause.
+        const input = new Cell("classified", {
+          type: "string",
+          ifc: { confidentiality: ["secret"] },
+        });
+        const causeless = new Cell("out", { type: "string" });
+
+        applyInputIfcToOutput({ input }, { target: causeless });
+        // deno-lint-ignore no-explicit-any
+        expect((causeless as any).schema?.ifc?.confidentiality).toContain(
+          "secret",
+        );
+
+        const named = Cell.for<string>("named");
+
+        expect(() => applyInputIfcToOutput({ input }, { target: named }))
+          .toThrow("Cannot setSchema: cell already has a cause or link.");
       });
     });
 

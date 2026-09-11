@@ -78,7 +78,6 @@ without constructing a value snapshot. It retains the handle's acquisition
 history but does not acquire unrelated history from other cells inspected in
 the same render transaction. Unavailable label evidence blocks rendering.
 
-
 `factoryFromPattern` stores the author's declared result schema without adding
 a blanket join of the pattern's argument schemas. Explicit result `ifc`
 declarations still classify their own paths. In particular,
@@ -87,15 +86,34 @@ ceiling may hide the entire card rather than just a confidential value inside
 it. A public card that displays confidential contents keeps the classification
 on those contents and lets the render boundary govern their observation.
 
-Lifts and handlers apply argument-schema policy to their result schemas through
-`applyArgumentIfcToResult` in `packages/runner/src/builder/node-utils.ts`. Every
-module's output cells also carry the join of its input cells' schema labels
-through `connectInputAndOutputs` in `packages/runner/src/builder/node-utils.ts`,
-including LLM builtins whose results are written at runtime. This static join
-creates a `declared` floor at every flow-label setting. A later measured
-`derived` component can add restrictions but cannot narrow that floor. A label
-below the conservative join requires the flow-precision authority of §8.9.1;
-the graph construction step has no acting user under whom to evaluate it.
+Lifts and sub-patterns apply their declared argument-schema policy to their
+result schemas through `applyArgumentIfcToResult`, called from
+`packages/runner/src/builder/module.ts`. The per-node `applyInputIfcToOutput`
+walk, reached through `connectInputAndOutputs` in
+`packages/runner/src/builder/node-utils.ts`, labels each module's output cells
+from that node's input edges, including LLM builtins whose results are written
+at runtime. Neither mechanism joins the whole enclosing pattern's argument
+schema onto every reachable result. These static declarations establish a floor
+at every flow-label setting; measured dependencies can add restrictions but
+cannot narrow that floor without the authority required by §8.9.1.
+
+A handler node has `outputs: {}`; its context cells and event stream are inputs.
+Its write targets therefore receive no label from the build-time output walk.
+The handler's actual observations, including the selected stream reference and
+sending flow carried into dispatch, contribute to its transaction's derived
+labels under `cfcFlowLabels: "persist"`. Under §8.12.8 these measured dependencies
+belong to the replaceable derived component, while authored declarations retain
+their own monotone discipline.
+
+A built-in replacing its output link's schema preserves that link's `ifc` through
+`schemaCarryingLinkIfc` in `packages/runner/src/cell.ts`. The three list operations
+use it for their container schemas, and named scalar aggregates use it for their
+result schemas. The list join is conservative: `joinSchema` flattens source
+member and container atoms onto the result's container root. §8.5.4.3 requires
+the coordinator to retain its structural dependencies; §8.17.1 requires a scalar
+aggregate without per-value attribution to retain its contributors' join.
+`packages/runner/test/list-result-schema.test.ts` and
+`packages/runner/test/cfc-argument-ifc-propagation.test.ts` cover those carriers.
 
 Persistent flow labels separately record the transaction's measured dependencies
 as `derived` components; flow-observe mode diagnoses that join without
