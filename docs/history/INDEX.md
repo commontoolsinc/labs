@@ -120,6 +120,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Shipped or superseded designs and decision records
 
+- [Collection indexes and keyed lookup](plans/collection-index-contract.md) — 2026-09-10: executed B1/B2 semantics and acceptance contract for grouping, unique-key lookup, tagged enumeration, left joins, and maintenance measurements.
+
 - [Mixed index key enumeration decision](features/2026-09-11-index-key-enumeration-decision.md) — 2026-09-11: approved Q7 tagged enumeration contract, caller consequences, alternatives, and pending acceptance requirements.
 
 - [APRIME-LINEAGE-HANDOFF.md](packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md) — the authored-source lineage investigation, per-channel hazards, probes, and execution record for the CT-1868/1869/1870 arc, completed August 2026.

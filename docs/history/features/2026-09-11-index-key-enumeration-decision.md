@@ -10,7 +10,7 @@ reason: "Accepted Q7 API decision; records context, consequences, and alternativ
 Mike approved explicit tagged enumeration on September 11, 2026, resolving Q7
 of the [computation-cost implementation plan](../../plans/pattern-computation-cost-implementation.md).
 This records an accepted design decision, not completed implementation or test
-acceptance. The [live contract](../../plans/collection-index-contract.md) tracks
+acceptance. The [live contract](../plans/collection-index-contract.md) tracks
 implementation requirements.
 
 ## Context
