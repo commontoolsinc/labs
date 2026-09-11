@@ -75,27 +75,27 @@ describe("piece address forms", () => {
       clientClass: "web",
       experimental: { serverExecution: true, viewScopedReplication: true },
     });
-    const session = await createSession({
-      identity: signer,
-      spaceName: "view-addressed-controller",
-    });
-    const controller = new PiecesController(session, viewer);
-    const remote = viewer.getCell(
-      pieces.getSpace(),
-      "other-space-piece",
-      undefined,
-    );
-    const local = viewer.getCell(
-      controller.getSpace(),
-      "local-piece",
-      undefined,
-    );
-    const calls: string[] = [];
-    const enabling = stub(viewer.viewReplication, "enable", (space) => {
-      calls.push(space);
-      return Promise.resolve(false);
-    });
     try {
+      const session = await createSession({
+        identity: signer,
+        spaceName: "view-addressed-controller",
+      });
+      const controller = new PiecesController(session, viewer);
+      const remote = viewer.getCell(
+        pieces.getSpace(),
+        "other-space-piece",
+        undefined,
+      );
+      const local = viewer.getCell(
+        controller.getSpace(),
+        "local-piece",
+        undefined,
+      );
+      const calls: string[] = [];
+      using _enabling = stub(viewer.viewReplication, "enable", (space) => {
+        calls.push(space);
+        return Promise.resolve(false);
+      });
       await viewer.editWithRetry((tx) => {
         remote.withTx(tx).set({ $NAME: "Remote" });
         local.withTx(tx).set({ $NAME: "Local" });
@@ -109,7 +109,6 @@ describe("piece address forms", () => {
       });
       expect(calls).toEqual([controller.getSpace()]);
     } finally {
-      enabling.restore();
       await viewer.dispose({ closeStorage: false });
     }
   });
