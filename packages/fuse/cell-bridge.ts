@@ -14,6 +14,7 @@ import {
 } from "@commonfabric/piece/ops";
 import {
   type Cell,
+  ContextualFlowControl,
   getCellOrThrow,
   isCell,
   isCellResultForDereferencing,
@@ -3938,6 +3939,7 @@ export class CellBridge {
         : {};
     for (const key of Object.keys(properties)) {
       const childCell = rootCell.key(key).asSchemaFromLinks();
+      const childSchema = expandSchemaReference(childCell.schema);
       let childValue: unknown;
       let childReadSucceeded = false;
       try {
@@ -3953,7 +3955,9 @@ export class CellBridge {
         const rawValue = childCell.getRaw?.();
         if (isSigilLink(rawValue)) {
           childValue = rawValue;
-        } else {
+        } else if (
+          ContextualFlowControl.getAsCellValues(childSchema).length > 0
+        ) {
           const visited = new Set<Cell<unknown>>();
           while (
             isCell(childValue) ||
@@ -3975,9 +3979,8 @@ export class CellBridge {
         childReadSucceeded = false;
       }
 
-      const callableKind =
-        classifyCallableEntry(childValue, childCell.schema) ??
-          classifyCallableEntry(childCell, childCell.schema);
+      const callableKind = classifyCallableEntry(childValue, childSchema) ??
+        classifyCallableEntry(childCell, childSchema);
 
       if (callableKind) {
         if (!(key in materialized)) {

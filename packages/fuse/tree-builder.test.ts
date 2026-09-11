@@ -1432,7 +1432,18 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
 
   const titleValueCell = makeCell("hello", { type: "string" });
   const titleProjection = { [toCell]: () => titleValueCell };
-  const titleCell = makeCell(titleProjection, { type: "string" });
+  const titleCell = makeCell(titleProjection, {
+    type: "string",
+    asCell: ["cell"],
+  });
+  const metadataProjection = {
+    note: "kept",
+    [toCell]: () => metadataCell,
+  };
+  const metadataCell = makeCell(metadataProjection, {
+    type: "object",
+    properties: { note: { type: "string" } },
+  });
   const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
   const toolCell = makeCell(
     patternFactoryValue({ source: "bound-source" }),
@@ -1441,7 +1452,11 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
   const resultSchema = {
     type: "object",
     properties: {
-      title: { type: "string" },
+      title: { type: "string", asCell: ["cell"] },
+      metadata: {
+        type: "object",
+        properties: { note: { type: "string" } },
+      },
       recordMessage: { type: "object" },
       search: { type: "object" },
     },
@@ -1455,6 +1470,7 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     { $ref: rootRef },
     {
       title: titleCell,
+      metadata: metadataCell,
       recordMessage: handlerCell,
       search: toolCell,
     },
@@ -1473,7 +1489,11 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     },
     result: {
       getCell: () => Promise.resolve(resultCell),
-      get: () => Promise.resolve({ title: titleProjection }),
+      get: () =>
+        Promise.resolve({
+          title: titleProjection,
+          metadata: metadataProjection,
+        }),
     },
   };
 
@@ -1502,6 +1522,9 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
   const resultIno = tree.lookup(pieceIno, "result");
   assertEquals(resultIno !== undefined, true);
   assertEquals(getFileContent(tree, resultIno!, "title"), "hello");
+  const metadataIno = tree.lookup(resultIno!, "metadata");
+  assertEquals(metadataIno !== undefined, true);
+  assertEquals(getFileContent(tree, metadataIno!, "note"), "kept");
   assertEquals(
     tree.lookup(resultIno!, "recordMessage.handler") !== undefined,
     true,

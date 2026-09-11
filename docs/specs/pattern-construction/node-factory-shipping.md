@@ -1968,7 +1968,9 @@ data. That dereference replaces an already-present Cell handle as well as
 filling a sparse root; the handle must not become a directory merely because
 the outer read included the key. This projection applies equally when the root
 schema is carried by its content-addressed reference. Following the handle to
-its current payload also keeps Factory materialization disabled. Consequently a
+its current payload also keeps Factory materialization disabled. An ordinary
+object query-result view retains its object projection; the presence of an
+internal back-pointer alone does not make it an `asCell` field. Consequently a
 cold factory cannot block unrelated sibling fields from refreshing in the
 mounted tree, and FUSE observation never turns a context-free shell into an
 executable callable.
