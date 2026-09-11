@@ -386,12 +386,14 @@ function sqliteParamForRuntime(
 function cellValueForClient(
   value: unknown,
   registry: ReferenceRegistry,
+  cycleRoot: Cell<unknown>,
 ): FabricValue {
   return convertCellsToLinks(
     value as Parameters<typeof convertCellsToLinks>[0],
     {
       includeSchema: true,
       keepAsCell: KeepAsCell.All,
+      cycleRoot,
       doNotConvertCellResults: true,
       includeCfcLabelView: true,
       transformLink: (cell, link) => registry.exportLink(link, cell),
@@ -1345,7 +1347,7 @@ export class RuntimeProcessor {
     // `convertCellsToLinks()` preserves a `FabricPrimitive` by identity, and
     // the envelope's encoding carries one to the main thread with its class,
     // so what the response holds is what the cell held.
-    const converted = cellValueForClient(value, this.#referenceRegistry);
+    const converted = cellValueForClient(value, this.#referenceRegistry, cell);
     // The resolved cell's own schema-bearing ref, when asked for — for a meta
     // link read this addresses the linked cell itself, so the caller can
     // subscribe to it or consult its schema's declarations.
@@ -1416,10 +1418,10 @@ export class RuntimeProcessor {
             "Cell backing value is incompatible with its schema.",
           );
         }
-        return cellValueForClient(projected, this.#referenceRegistry);
+        return cellValueForClient(projected, this.#referenceRegistry, cell);
       }
       cell.set(initial);
-      return cellValueForClient(initial, this.#referenceRegistry);
+      return cellValueForClient(initial, this.#referenceRegistry, cell);
     });
     if (result.error) throw new Error(result.error.message);
     return { value: result.ok };
@@ -1805,7 +1807,11 @@ export class RuntimeProcessor {
             `  schema: ${JSON.stringify(request.cell.schema)}`,
         );
       }
-      const converted = cellValueForClient(value, this.#referenceRegistry);
+      const converted = cellValueForClient(
+        value,
+        this.#referenceRegistry,
+        cell,
+      );
       // The sink read the raw label on its tracked tx (so cfc writes re-fire
       // it); redact Caveat.source here before it crosses to the main thread.
       const redactedLabel = request.includeCfcLabel

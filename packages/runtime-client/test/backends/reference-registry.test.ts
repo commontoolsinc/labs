@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { stub } from "@std/testing/mock";
 
 import { cfcAtom } from "@commonfabric/api/cfc";
 import type { FabricValue } from "@commonfabric/data-model";
@@ -37,7 +38,7 @@ import {
   RequestType,
 } from "@/protocol/mod.ts";
 import type { WorkerClient } from "@/backends/worker-client.ts";
-import { $conn, CellHandle, RuntimeClient } from "@/mod.ts";
+import { $conn, $onCellUpdate, CellHandle, RuntimeClient } from "@/mod.ts";
 import { createSigilLinkFromParsedLink } from "../../../runner/src/link-utils.ts";
 import { decomposeSchema } from "../../../runner/src/schema-decompose.ts";
 import type { URI } from "@commonfabric/memory/interface";
@@ -48,6 +49,7 @@ import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
 } from "../../../runner/test/cfc-seed-envelope.ts";
+import { cellRefToKey } from "@/shared/utils.ts";
 import { buildProcessor } from "./build-processor.ts";
 
 const signer = await Identity.fromPassphrase("worker-reference-registry");
@@ -141,6 +143,65 @@ describe("reference-registry", () => {
       "Reference acquisition registry is missing",
     );
   });
+
+  for (const path of [[], ["branch"]]) {
+    it(`retains an acquisition on a cycle read at /${path.join("/")}`, async () => {
+      const target = runtime.getCell(space, "cycle");
+      const link = target.getAsNormalizedFullLink();
+      const value = {
+        name: "cycle target",
+        self: linkRefFrom({ ...link, path }),
+      };
+      await seed("cycle", path.length === 0 ? value : { branch: value });
+      const processor = buildProcessor({ runtime, identity: signer, space });
+      const ref = processor.handleAcquireCell({
+        type: RequestType.AcquireCell,
+        address: {
+          ...link,
+          path,
+          schema: {
+            type: "object",
+            properties: { name: { type: "string" }, self: { $ref: "#" } },
+          },
+        },
+      }).cell;
+      const client = {
+        [$conn]: () => ({
+          request: (request: IPCClientRequest) =>
+            processor.handleRequest(wireCopy(request)),
+        }),
+      } as unknown as RuntimeClient;
+      const handle = new CellHandle<{ self: CellHandle<{ name: string }> }>(
+        client,
+        wireCopy(ref),
+      );
+      const cyclic: Record<string, unknown> = { name: "cycle target" };
+      cyclic.self = cyclic;
+      const read = stub(Object.getPrototypeOf(target), "get", () => cyclic);
+      let response;
+      try {
+        response = processor.handleCellGet({
+          type: RequestType.CellGet,
+          cell: ref,
+        });
+      } finally {
+        read.restore();
+      }
+      handle[$onCellUpdate](wireCopy(response.value));
+      const self = handle.get()!.self;
+      expect(self.ref().cfcReferenceToken).toBeDefined();
+      expect(self.ref().path).toEqual(path);
+      expect(await self.key("name").sync()).toBe("cycle target");
+      if (path.length > 0) {
+        expect(() =>
+          processor.handleCellGet({
+            type: RequestType.CellGet,
+            cell: { ...self.ref(), path: [] },
+          })
+        ).toThrow("Reference acquisition token does not match its binding");
+      }
+    });
+  }
 
   it("rejects exporting a carrier after its binding is changed", async () => {
     const acquired = await acquireSelected();
@@ -249,6 +310,7 @@ describe("reference-registry", () => {
     );
     expect(getCfcReferenceProvenance(opaque)?.confidentiality).toEqual([]);
     expect(publicRef.cfcReferenceToken).not.toBe(opaqueRef.cfcReferenceToken);
+    expect(cellRefToKey(publicRef)).not.toBe(cellRefToKey(opaqueRef));
     expect(trustedRef.id).toBe(opaqueRef.id);
     expect(trustedRef.cfcReferenceToken).toBe(identicalRef.cfcReferenceToken);
     expect(trustedRef.cfcReferenceToken).not.toBe(opaqueRef.cfcReferenceToken);

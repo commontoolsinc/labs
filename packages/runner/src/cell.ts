@@ -4801,6 +4801,9 @@ type CellLinkOptions = {
     path: readonly string[],
   ) => SigilLink;
 
+  /** The source of a read, used to acquire absolute links for value cycles. */
+  cycleRoot?: Cell<unknown>;
+
   /** Which `asCell` entries survive in a carried schema; see `KeepAsCell`. */
   keepAsCell?: KeepAsCell;
 };
@@ -4918,6 +4921,12 @@ function convertOneToLinks(
     refuseImmutableInstanceReference();
   }
   if (depth >= 0) {
+    if (options.cycleRoot !== undefined) {
+      const target = isCellResultForDereferencing(value)
+        ? getCellOrThrow(value)
+        : options.cycleRoot.key(...stack.slice(0, depth));
+      return linkToCell(target, options, [...stack]);
+    }
     return deepFreeze(linkRefFrom({ path: stack.slice(0, depth) }));
   }
 

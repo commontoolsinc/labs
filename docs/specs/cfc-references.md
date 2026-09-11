@@ -166,6 +166,12 @@ projection that cannot encode the acquisition's retained scope caps. Stripped,
 stale, or foreign tokens cannot recreate trusted acquisition through arbitrary
 CellRef operations.
 
+Subscriptions and cached values are keyed by acquisition token as well as
+address and projection, so identical reference bytes with different private
+histories remain separate. Cycle backlinks exported from a read carry an
+absolute acquired reference to their ancestor. A backlink issued for an acquired
+subtree retains that subtree's path boundary.
+
 Resolving a slug for `piece:get` retains the stored reference's acquisition
 history. When the slug names a path inside a piece, the returned handle keeps
 the redirect's scope restrictions while adopting the schema along that path.
