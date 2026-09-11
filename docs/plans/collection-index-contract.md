@@ -65,11 +65,20 @@ whole-array callback arguments in the first API: they would make source
 reordering a dependency of every key extractor.
 
 The result is a typed index handle. Its `lookup(key)` returns an ordinary
-reactive Cell containing a group or an optional original element. A separate
+reactive value containing a group or an optional original element. A Cell passed
+as the key always denotes its identity; callers use an explicit value read when
+its stored primitive should be the key. This keeps Cell identity unambiguous
+when an index accepts both primitive and Cell keys. A separate
 `keys()` operation observes occupied-key membership. Each lookup subscribes to
 one key's bucket and the lookup key's resolution path; it must not subscribe to
-index enumeration. The exact type declarations and branded-handle lowering must
-be prototyped before the implementation contract is marked complete.
+index enumeration.
+
+The typed-handle prototype uses a read-only Cell descriptor with separately
+addressed buckets and occupied keys. Compiled lookup delegates to the descriptor
+Cell and returns an ordinary reactive value. Its acceptance tests cover
+primitive/Cell key separation, link retargeting, unrelated-bucket isolation,
+missing-key insertion, linked row contents, and durable lookup resume. Index
+construction, per-element extraction, and bucket ownership remain pending.
 
 The first join is a left lookup join against a `keyBy` index: one output per
 left occurrence, with its original left element and an optional right element.
@@ -113,7 +122,7 @@ groups.
 
 ## Implementation sequence and acceptance
 
-- [ ] Prototype the typed index handle and its transformer/schema boundary. Keep
+- [x] Prototype the typed index handle and its transformer/schema boundary. Keep
       key lookup separate from ordinary object-property `Cell.key`.
 - [ ] Implement shared key resolution and per-element extraction, reusing
       runtime identity and ownership machinery.
