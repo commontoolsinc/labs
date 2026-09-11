@@ -928,17 +928,20 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
 };
 
 /**
- * Whether `schema` selects a reference rather than the value it names: an
- * `asCell` wrapper, or `unknown`, at its root. A read under such a schema
- * hands back a handle or an opaque value rather than reading through, so the
- * document behind the link is what the reader holds, and it is asked for
- * root-only.
+ * The selector schema a link target is asked for when the reader's schema at
+ * the link takes a handle (`asCell` at its root): the handle's own schema,
+ * the wrapper removed, so the selector describes the document's value the
+ * way the handle's reads do and the serving replica holds the document as a
+ * value it keeps current, not as a reference it delivered once. A schema of
+ * `unknown` at its root selects nothing to read through and stays as it is.
  */
-function selectsReferenceOnly(schema: JSONSchema | undefined): boolean {
-  if (!isObjectOrArray(schema)) return false;
-  if (schema.asCell !== undefined) return true;
-  return schema.type === "unknown" ||
-    (Array.isArray(schema.type) && schema.type.includes("unknown"));
+function selectorSchemaForLink(
+  schema: JSONSchema | undefined,
+): JSONSchema | false {
+  if (!isObjectOrArray(schema)) return schema ?? false;
+  if (schema.asCell === undefined) return schema;
+  const { asCell: _asCell, ...inner } = schema;
+  return inner;
 }
 
 export class StorageManager implements IStorageManager {
@@ -2718,10 +2721,12 @@ export class StorageManager implements IStorageManager {
             {
               path: link.path.map((segment) => segment.toString()),
               // A reader that takes a handle at the link asks for the
-              // document itself, root-only: a selector carrying the handle
-              // wrapper would describe a reference, and the serving replica
-              // holds a document only through a selector that describes it.
-              schema: selectsReferenceOnly(schema) ? false : (schema ?? false),
+              // document under the handle's own schema, the wrapper removed:
+              // a selector carrying the wrapper, or none, describes a
+              // reference, which the serving replica delivers once and
+              // never keeps current, while the handle's reads want the
+              // value as it changes.
+              schema: selectorSchemaForLink(schema),
             },
             scope,
             instance,
