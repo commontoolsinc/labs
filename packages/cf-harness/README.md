@@ -1133,11 +1133,17 @@ and the regular files directly under `scripts/`. A skill is a directory, and the
 scripts its prose tells a model to run are part of it — prose referring to a
 missing script would be a different and misleading skill. Every other path — a
 reference, an asset, a package file, a directory nested below `scripts/`, a
-symlink or a submodule anywhere — refuses the whole acquisition and is returned
-as sanitized, inert refusal metadata. Nothing is silently stripped. A skill
-shipping more than sixteen scripts refuses on the inventory, before a single one
-is fetched: the size cap bounds a file and that bound is what keeps the number
-of requests one acquisition makes ours rather than the publisher's.
+symlink or a submodule anywhere, a filename carrying a control codepoint or
+opening with a dot — refuses the whole acquisition and is returned as sanitized,
+inert refusal metadata. Nothing is silently stripped, and an admitted path is
+held to the filename rule rather than sanitized on the way out: `loadedPaths`
+and the tool output report it as it was.
+
+Two bounds sit beside each other and bound different things. The 256 KiB cap
+bounds each admitted file's bytes. A separate count cap refuses a skill shipping
+more than sixteen scripts, on the inventory and before a single one is fetched,
+which is what keeps the number of requests one acquisition makes ours rather
+than the publisher's.
 
 Only after this check does the host require root `SKILL.md` to be a regular Git
 tree file, stream at most 256 KiB of pinned raw bytes per admitted file, require

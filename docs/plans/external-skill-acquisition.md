@@ -244,10 +244,16 @@ on names**:
   arrived in part. A directory nested below `scripts/`, a symlink and a
   submodule are refusals of this kind: the first is a tree the whitelist never
   judged, and the other two name bytes the inventory does not vouch for.
+- A script's filename is held to printable ASCII without a path separator, a
+  control codepoint or a leading dot. An admitted path is reported — it reaches
+  the acquisition's own record and the tool output, neither of which sanitizes
+  on the way out — so a name the publisher chose is refused here rather than
+  carried and cleaned later.
 - A skill shipping more scripts than one acquisition admits refuses on the
-  inventory, before a single one is fetched. The size cap bounds a file; this
-  bounds the number of requests, which would otherwise be the publisher's
-  number rather than ours.
+  inventory, before a single one is fetched. That count cap and the per-file
+  size cap bound different things: the size cap bounds a file's bytes, and the
+  count cap is what keeps the number of requests ours rather than the
+  publisher's.
 
 Admitting the scripts is not admitting them to the registry. The acquired tree
 is host-side, nothing is written into the skills root, and whether a script may
@@ -395,8 +401,10 @@ there.
    registry's unverified hash.
 3. **Isolated verified acquisition.** The parent-facing `acquire_skill` effect
    resolves and fetches host-side, with commit-SHA acquisition fail-closed, the
-   recursive single-file payload whitelist, and first-class refusal. It writes
-   into a cell, returns a handle, and proves with an adversarial canary that the
+   recursive payload whitelist above — the root `SKILL.md` and the regular
+   files directly under `scripts/`, everything else refusing — and first-class
+   refusal. It writes the instructions into a cell, holds the scripts
+   host-side, returns a handle, and proves with an adversarial canary that the
    parent never received the skill text. A `.well-known` digest route can join
    the same boundary when a source publishes one.
 4. **The provenance mark**, minted split-mint style on the acquiring write.

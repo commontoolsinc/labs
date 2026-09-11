@@ -47,6 +47,19 @@ export const SKILLS_SH_MAX_SCRIPTS = 16;
 /** The directory an acquired skill's executable files live under. */
 const SCRIPTS_DIRECTORY = "scripts";
 
+/**
+ * The filenames a script may have: printable ASCII without a path separator,
+ * a control codepoint, or a leading dot.
+ *
+ * An admitted path is not only checked, it is REPORTED — it reaches
+ * `loadedPaths`, the tool output, and the run record, none of which sanitize
+ * on the way out. A name is the publisher's text, so a control codepoint or a
+ * terminal escape in one would cross into an operator's console on the
+ * strength of having been admitted. The refusal is the whitelist's own:
+ * whatever this does not admit refuses the payload rather than being dropped.
+ */
+const SAFE_SCRIPT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
 export type SkillsShAcquisitionFailureCode =
   | "invalid_pin"
   | "request_failed"
@@ -255,12 +268,12 @@ const candidateRoot = (skillPath: string): string => {
  * Whether one tree entry is a script this acquisition admits: a regular file
  * directly under the root's `scripts/`, named by a single path segment.
  *
- * Nested directories, symlinks and submodules are not admitted, and each
- * refuses the whole payload rather than being dropped — the same rule the
- * whitelist has always held, applied to a wider set of paths. A symlink is the
- * one worth naming: its target is a path the tree does not vouch for, so
- * admitting it would make the acquired bytes something other than what the
- * inventory said.
+ * Nested directories, symlinks, submodules and unsafe filenames are not
+ * admitted, and each refuses the whole payload rather than being dropped — the
+ * same rule the whitelist has always held, applied to a wider set of paths. A
+ * symlink is the one worth naming: its target is a path the tree does not
+ * vouch for, so admitting it would make the acquired bytes something other
+ * than what the inventory said.
  */
 const isAdmittedScript = (
   entry: GithubTreeEntry,
@@ -270,7 +283,7 @@ const isAdmittedScript = (
   if (entry.mode !== "100644" && entry.mode !== "100755") return false;
   const segments = relativePath.split("/");
   return segments.length === 2 && segments[0] === SCRIPTS_DIRECTORY &&
-    segments[1] !== "";
+    SAFE_SCRIPT_NAME.test(segments[1] ?? "");
 };
 
 const displayPath = (path: string): string =>

@@ -247,6 +247,39 @@ describe("skills.sh pinned acquisition", () => {
     ]);
   });
 
+  it("refuses a script whose filename carries a control codepoint", async () => {
+    // An admitted path is reported — it reaches `loadedPaths`, the tool output
+    // and the run record, none of which sanitize on the way out — so a name
+    // the publisher chose is refused here rather than carried and cleaned
+    // later.
+    const { fetch, urls } = scriptFixture([
+      { path: "scripts", mode: "040000", type: "tree" },
+      { path: "scripts/re\u001b[2Kport.sh" },
+    ]);
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill(BUILDGREAT_PIN, { fetch }),
+    );
+
+    expect(refusal.code).toBe("instructions_only");
+    expect(refusal.offendingCount).toBe(1);
+    expect(urls).toEqual([BUILDGREAT_TREE_URL]);
+  });
+
+  it("refuses a script whose filename opens with a dot", async () => {
+    const { fetch } = scriptFixture([
+      { path: "scripts", mode: "040000", type: "tree" },
+      { path: "scripts/.hidden.sh" },
+    ]);
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill(BUILDGREAT_PIN, { fetch }),
+    );
+
+    expect(refusal.code).toBe("instructions_only");
+    expect(refusal.offendingPaths).toEqual(["scripts/.hidden.sh"]);
+  });
+
   it("refuses a symlink under the scripts directory instead of fetching its target", async () => {
     const { fetch, urls } = scriptFixture([
       { path: "scripts", mode: "040000", type: "tree" },
@@ -281,6 +314,26 @@ describe("skills.sh pinned acquisition", () => {
     expect(refusal.message).toContain(`${SKILLS_SH_MAX_SCRIPTS + 1} scripts`);
     // Refused off the inventory, so no script was fetched.
     expect(urls).toEqual([BUILDGREAT_TREE_URL]);
+  });
+
+  it("refuses script bytes that are not UTF-8", async () => {
+    const { fetch } = scriptFixture([
+      { path: "scripts", mode: "040000", type: "tree" },
+      { path: "scripts/binary.sh" },
+    ]);
+    const withBinaryScript: HarnessFetch = (input, init) => {
+      const url = String(input);
+      return url.endsWith("/scripts/binary.sh")
+        ? Promise.resolve(new Response(new Uint8Array([0xff, 0xfe, 0xfd])))
+        : fetch(input, init);
+    };
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill(BUILDGREAT_PIN, { fetch: withBinaryScript }),
+    );
+
+    expect(refusal.code).toBe("invalid_skill_text");
+    expect(refusal.message).toContain("scripts/binary.sh");
   });
 
   it("refuses a script that exceeds the byte cap while streaming", async () => {
