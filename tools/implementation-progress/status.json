@@ -99,8 +99,8 @@
     {
       "id": "C2",
       "title": "Partial materialization correctness",
-      "status": "review",
-      "detail": "Cold first-demand, remote membership, and reconnect acceptance are validated. Session-restoration repair #7308 and rendered reconnect acceptance #7312 are merged. Tracker reconciliation is in review in #7332; C3 producer checks are separate."
+      "status": "done",
+      "detail": "Cold first-demand, remote membership, and reconnect acceptance are validated. Session-restoration repair #7308 and rendered reconnect acceptance #7312 are merged. Acceptance reconciliation is complete; C3 producer checks are separate."
     },
     {
       "id": "C3",
