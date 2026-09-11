@@ -616,7 +616,10 @@ describe("schema-doc-sync", () => {
     // broken-ref case above: that document is quarantined, its innocent
     // sibling applies, and a well-formed reference-form member is embedded
     // as an obligation and resolves against the closure the frame carries.
-    const described = { type: "string", title: "meta-frame-described" };
+    const described = {
+      type: "string",
+      title: "meta-frame-described",
+    } as const;
     const describedHash = internSchemaAsTaggedHashString(described);
     const provider = readerStorage.open(space);
     const frame = {
