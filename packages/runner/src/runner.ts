@@ -107,6 +107,7 @@ import {
   type RawNodeCause,
 } from "./module.ts";
 import { runtimeOwnedStoreOwnerKey } from "./cfc/runtime-owned-stores.ts";
+import { writeResultSchemaMeta } from "./result-schema-meta.ts";
 import {
   resolveScopeKey,
   type ScopeKey,
@@ -2751,13 +2752,7 @@ export class Runner {
     resultSchema: JSONSchema | undefined,
   ): void {
     if (resultSchema === undefined) return;
-    const cell = resultCell.withTx(tx);
-    const previous = cell.getMetaRaw("schema", {
-      meta: ignoreReadForScheduling,
-    });
-    if (!deepEqual(previous, resultSchema)) {
-      cell.setMetaRaw("schema", resultSchema, rawMetaWriteAuthorization);
-    }
+    writeResultSchemaMeta(resultCell.withTx(tx), resultSchema);
   }
 
   /**
@@ -9248,9 +9243,7 @@ export class Runner {
         // transaction, which the create-only mark below gates, so the schema
         // and the value it describes commit together or not at all.
         const shape = receiptShapeSchema(receiptValue);
-        if (shape !== undefined) {
-          receipt.setMetaRaw("schema", shape, rawMetaWriteAuthorization);
-        }
+        if (shape !== undefined) writeResultSchemaMeta(receipt, shape);
         tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
       } else if (servedReceiptWrite) {
         // The ruled serving-side receipt write (owner, 2026-08-29): the
@@ -9295,9 +9288,7 @@ export class Runner {
           const receipt = receiptCell.withTx(tx);
           receipt.set(receiptValue);
           const shape = receiptShapeSchema(receiptValue);
-          if (shape !== undefined) {
-            receipt.setMetaRaw("schema", shape, rawMetaWriteAuthorization);
-          }
+          if (shape !== undefined) writeResultSchemaMeta(receipt, shape);
         }
       }
       return result;
@@ -9997,7 +9988,11 @@ export class Runner {
     // behind link VALUES like a builtin's result handle. Steady-state this is
     // ~free: covered selectors resolve without a server round trip.
     const presyncInputs = module.argumentSchema !== undefined
-      ? async (event: any, identity?: ScopeKeyIdentity): Promise<void> => {
+      ? async (
+        event: any,
+        identity: ScopeKeyIdentity | undefined,
+        tx: IExtendedStorageTransaction,
+      ): Promise<void> => {
         const eventInputs = {
           ...(inputs as Record<string, any>),
           $event: event,
@@ -10006,6 +10001,7 @@ export class Runner {
           resultCell.space,
           eventInputs,
           undefined,
+          tx,
         );
         const argument = inputsCell.asSchema(module.argumentSchema!).get();
         const promises: Promise<unknown>[] = [];

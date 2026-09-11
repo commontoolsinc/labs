@@ -1,10 +1,19 @@
+---
+status: historical
+created: 2026-09-10
+archived: 2026-09-10
+reason: "Executed A3 plan; pattern-test read budgets shipped in #7257."
+superseded-by: docs/features/read-accounting.md
+---
+
 # Pattern-test read budgets
 
-Status: A3 implementation contract under development. The runtime currently
-supports the
-[reactive-body accounting contract](../features/read-accounting.md). The surface
-and execution coverage below are pending implementation in the
-[computation-cost sequence](pattern-computation-cost-implementation.md).
+Status: completed. A3 landed in
+[PR #7257](https://github.com/commontoolsinc/labs/pull/7257) after all 69 CI gates
+and clean Cubic and antagonistic reviews. The authoring surface and measurement boundaries are documented in the
+[read-accounting contract](../../features/read-accounting.md#pattern-test-budgets).
+This plan tracks acceptance in the
+[computation-cost sequence](../../plans/pattern-computation-cost-implementation.md).
 
 ## Author contract
 
@@ -35,13 +44,15 @@ Initialization starts before pattern instantiation and ends after initial
 settlement and continuous UI mounting, when enabled. A budgeted step starts
 before the harness demands its descriptor or dispatches its event. It ends only
 after scheduler, storage, pending commits, and asynchronous builtin work settle.
-Assertion work belongs to its own step. Skipped steps execute no operation; any
-unrelated work observed in their interval must remain visible.
+Assertion work belongs to its own step. Skipped steps execute no operation and
+enforce no limits; their declarations are still validated, and work observed in
+their interval remains visible.
 
-Use the existing settlement primitives. Do not add sleeps, polling, or a second
-scheduler drain. Unbudgeted tests keep their existing demand and settlement
-behavior. A budget does not itself demand a subject's UI: tests must declare a
-render step or opt into continuous UI demand for that workload.
+Use `runtime.settled(Infinity)` at budget boundaries so a fixed round count
+cannot silently end measurement early. Do not add sleeps or polling. Unbudgeted
+tests keep their existing demand and settlement behavior. A budget does not
+itself demand a subject's UI: tests must declare a render step or opt into
+continuous UI demand for that workload.
 
 Measure every participating runtime locally. The initial implementation may
 support single-runtime tests only, provided multi-user declarations fail
@@ -64,12 +75,13 @@ completion record even when it throws, aborts, or its commit rejects. The
 accounting setting is captured when the attempt begins. Transaction wrappers
 preserve ownership, and diagnostic idempotency rechecks stay excluded.
 
-Document cardinality for an extended attempt comes from that attempt's full read
-activities, not a sum of body and commit cardinalities. Proxy and hop counters
-can be checkpointed at body completion while remaining active through commit
-preparation. Do not count storage-server CPU or network traffic as local proxy
-accesses. Explicitly describe any maintenance work outside these boundaries
-before naming the resulting report a whole-step cost.
+Document cardinality remains a body diagnostic. The collector retains document
+objects independently of storage logs, while attempt completion publishes only
+proxy and hop counters. These counters can be checkpointed at body completion
+while remaining active through commit preparation. Do not count storage-server
+CPU or network traffic as local proxy accesses. Explicitly describe any
+maintenance work outside these boundaries before naming the resulting report a
+whole-step cost.
 
 Relevant seams to examine and cover:
 
@@ -80,6 +92,8 @@ Relevant seams to examine and cover:
   Include the separate preflight dependency transaction as its own attempt.
 - `storage/extended-storage-transaction.ts`: commit preparation and early
   rejection. Preserve speculative commit scheduling and pending-commit barriers.
+- `runtime.editWithRetry`: include each attempt, covering asynchronous builtin
+  writebacks as well as failed callbacks and retried transactions.
 - `cli/lib/test-runner.ts`: named exports, descriptor metadata, initialization,
   step settlement, and result aggregation. The harness's direct `runtime.run`
   transaction must be measured; scheduler and event hooks alone do not cover
@@ -103,13 +117,13 @@ claim is needed to show the guard working.
 
 ## Acceptance sequence
 
-- [ ] Implement attempt lifecycle and verify body/commit attribution, error,
+- [x] Implement attempt lifecycle and verify body/commit attribution, error,
       abort, retry, fan-out, wrapper, and concurrent-runtime ownership.
-- [ ] Parse opt-in declarations before initialization; validate malformed limits
+- [x] Parse opt-in declarations before initialization; validate malformed limits
       and unsupported multi-user use explicitly.
-- [ ] Enforce exact-boundary pass and one-over failure for per-run and total
+- [x] Enforce exact-boundary pass and one-over failure for per-run and total
       limits, with separate initialization and step intervals.
-- [ ] Verify many cheap runs, removed actions, and failed attempts cannot evade
+- [x] Verify many cheap runs, removed actions, and failed attempts cannot evade
       the total. Verify unbudgeted execution is unchanged.
-- [ ] Publish the executable pass/fail demo, update author documentation, and
+- [x] Publish the executable pass/fail demo, update author documentation, and
       review both accounting completeness and failure diagnostics.

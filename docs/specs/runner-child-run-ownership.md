@@ -44,8 +44,11 @@ Each rule below is one of these two authorities applied to a case.
 A pattern that launches a child registers a *release* for it, which runs when
 the launching pattern is torn down. A list coordinator releases a child
 earlier than that: when the list no longer holds the element that child
-belongs to. The child would otherwise run, and hold a result nothing reads,
-for as long as the coordinator lives.
+belongs to, or when the result container changes scope. Each per-element
+result uses the container's scope; the coordinator releases a child from the
+previous scope even when the element identity remains present. Reconciliation
+and cold resume derive the same scoped child identity. The child would otherwise
+run, and hold a result nothing reads, for as long as the coordinator lives.
 
 A release stops the child's registration only when both of these hold:
 

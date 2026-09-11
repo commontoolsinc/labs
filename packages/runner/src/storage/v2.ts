@@ -70,7 +70,11 @@ import type { JSONSchema } from "../builder/types.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
-import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
+import {
+  classifySchemaMeta,
+  collectExternalSchemaRefHashes,
+  schemaMetaRefHashes,
+} from "../schema-decompose.ts";
 import {
   acquireSchemaRegistryLease,
   lookupSchemaDocument,
@@ -6709,10 +6713,15 @@ export class SpaceReplica
    * Validates the read-side delivery guarantee over a whole frame BEFORE
    * any of it is applied (`docs/specs/content-addressed-schemas.md`), and
    * registers the frame's schema documents: every schema ref a delivered
-   * document embeds — a registered schema document's own refs, or a link
-   * schema anywhere in an ordinary document's value — must reach a
+   * document embeds — a registered schema document's own refs, a link
+   * schema anywhere in an ordinary document's value, or the reserved
+   * `schema` metadata member any document carries (`cid:` documents
+   * included; content addressing hashes `.value` alone) — must reach a
    * VERIFIED schema document delivered by this frame (the prospective
-   * overlay) or already stored.
+   * overlay) or already stored. A `schema` member in the malformed form
+   * — a `cid:` reference outside a single root `$ref` — quarantines its
+   * document outright: the commit boundary refuses that form, so it can
+   * only predate the enforcement or come from out-of-band writing.
    *
    * A violated guarantee QUARANTINES the offending document — the caller
    * applies the frame without it, and this replica keeps whatever it
@@ -6782,6 +6791,26 @@ export class SpaceReplica
     for (const remove of sync.removes) {
       if (typeof remove.id === "string") deletedInFrame.add(remove.id);
     }
+    // The `schema` metadata member, read the same way on every document.
+    // Returns whether the document survives; a malformed member is
+    // quarantined here, before any obligation of its own is recorded.
+    const embedSchemaMeta = (id: string, doc: unknown): boolean => {
+      const form = classifySchemaMeta(doc);
+      if (form.kind === "malformed") {
+        quarantined.add(id);
+        overlay.delete(id);
+        logger.error("schema-doc-quarantine", () => [
+          `Document ${id} was delivered with malformed schema metadata ` +
+          `(${form.reason}). The commit boundary refuses this form, so ` +
+          `the stored document predates that enforcement or was written ` +
+          `out of band. The document is quarantined; this replica keeps ` +
+          `its previous state for it.`,
+        ]);
+        return false;
+      }
+      for (const hash of schemaMetaRefHashes(form)) embed(hash, id);
+      return true;
+    };
     for (const upsert of sync.upserts) {
       const id = upsert.id;
       if (typeof id !== "string") continue;
@@ -6793,6 +6822,7 @@ export class SpaceReplica
       if (!isObjectNotArray(doc)) continue;
       overlay.set(id, doc);
       deletedInFrame.delete(id);
+      if (!embedSchemaMeta(id, doc)) continue;
       if (id.startsWith("cid:")) {
         const value = (doc as { value?: unknown }).value;
         const hash = id.slice("cid:".length);
@@ -6828,8 +6858,9 @@ export class SpaceReplica
           continue;
         }
       }
-      // Link positions only — an `$alias`-shaped record in an arriving
-      // document is plain data, never a delivery obligation.
+      // Link positions — the `schema` metadata member was embedded above.
+      // An `$alias`-shaped record in an arriving document is plain data,
+      // never a delivery obligation.
       mapLinkSchemas(doc as FabricValue, (schema) => {
         for (
           const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
