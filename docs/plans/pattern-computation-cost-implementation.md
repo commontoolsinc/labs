@@ -294,7 +294,7 @@ passed before merge, with clean Cubic and antagonistic reviews.
 
 ## 6–9. Complete the collection algebra: B1–B4
 
-- [ ] **B1 contract — Specify `groupBy` and `keyBy` separately.** The
+- [x] **B1 contract — Specify `groupBy` and `keyBy` separately.** The
       [index contract](collection-index-contract.md) records semantic decisions
       and acceptance tests, agreed in
       [PR #7294](https://github.com/commontoolsinc/labs/pull/7294). Typed lookup
