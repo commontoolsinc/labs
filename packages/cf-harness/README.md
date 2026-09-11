@@ -127,8 +127,8 @@ What works today:
   - `write_file`
   - `delegate_task`
   - `describe_handle` (shape and labels of a handle's referent, and the tables
-    of one that is a database, never its data; see
-    [Inspecting a handle's shape](#inspecting-a-handles-shape))
+    of one that is a database together with how full each of them is, never its
+    data; see [Inspecting a handle's shape](#inspecting-a-handles-shape))
   - `run_pattern` (present only when the run configures a fabric session; see
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
   - `search_patterns` (present only when the run configures a pattern index with
@@ -967,6 +967,22 @@ channel is and the columns' annotations, prose and defaults do not ride out on
 the schema. The read is conditional on nothing being declared, so a referent
 that states its own shape is never opened.
 
+**How full each of those tables is answers beside the contract, under `fill`.**
+One entry per disclosed table: `rows`, every row the table holds, and `nonNull`,
+one count per disclosed column saying how many of those rows carry a value there
+rather than NULL. A column reading `0` beside a non-zero `rows` is filled on no
+row at all, so a query filtering on it matches nothing — and an empty result
+from such a query is indistinguishable, from inside the pattern, from a source
+that is genuinely empty. That is the difference these counts buy, and it is the
+reason they are worth the one quantity this tool reports: no row, no cell value
+and no column's contents cross with a count, and no predicate a caller chose is
+ever counted — a count is taken of a whole table and of whole columns, or not at
+all. A table that could not be counted reports `unread` with what refused it,
+never `0`, since zero rows and unknown rows are the two readings the counts
+exist to separate. `fill` is absent entirely where the run's storage provider
+offers no query, which claims nothing about any table rather than reporting them
+all as empty.
+
 Without it a database reads as an opaque value, and the code an agent writes
 over an opaque value is code that treats it as one — stringifying a handle and
 handing it to a language model rather than issuing a query against it.
@@ -1045,9 +1061,13 @@ structure before any of it crosses. An address the session can state no shape
 for is reported as shapeless rather than as a failed call.
 
 `describe_handle` is declared `effectClass: "read"`. It reads no value except a
-database handle's own table declaration, and it reports no datum from any of
-them. Answering from the fabric establishes the run's fabric session — loading
-the identity key and opening a remote connection — so the first call in a run
+database handle's own table declaration, and — where that handle names a
+database it can query — the count of its rows and of the non-NULL values in each
+disclosed column. It reports no datum from any of them: a count is derived from
+every row and identifies none, it is taken of a whole table and of whole columns
+rather than under a predicate a caller chose, and no cell value crosses with it.
+Answering from the fabric establishes the run's fabric session — loading the
+identity key and opening a remote connection — so the first call in a run
 carries that cost and that effect.
 
 Shape is also what makes a chain of steps checkable. An orchestrator that passes
@@ -1106,15 +1126,30 @@ discovery slug. No case folding or path normalization participates. Zero or
 multiple candidates refuse, and a tree response marked `truncated` refuses
 because an unread inventory is not evidence of absence.
 
-The instructions-only whitelist is scoped to the selected candidate root's
-subtree, so sibling skills and repository files outside that root do not leak
-into the payload decision. Within the subtree, exactly root `SKILL.md` is
-admitted. Every other path — including a directory, script, reference, asset, or
-package file — refuses the whole acquisition and is returned as sanitized, inert
-refusal metadata. Nothing is silently stripped: prose referring to a missing
-script would be a different and misleading skill. Only after this check does the
-host require root `SKILL.md` to be a regular Git tree file, stream at most 256
-KiB of pinned raw bytes, require non-empty UTF-8, and write them to a cell.
+The path whitelist is scoped to the selected candidate root's subtree, so
+sibling skills and repository files outside that root do not leak into the
+payload decision. Within the subtree, two things are admitted: root `SKILL.md`,
+and the regular files directly under `scripts/`. A skill is a directory, and the
+scripts its prose tells a model to run are part of it — prose referring to a
+missing script would be a different and misleading skill. Every other path — a
+reference, an asset, a package file, a directory nested below `scripts/`, a
+symlink or a submodule anywhere, a filename carrying a control codepoint or
+opening with a dot — refuses the whole acquisition and is returned as sanitized,
+inert refusal metadata. Nothing is silently stripped, and an admitted path is
+held to the filename rule rather than sanitized on the way out: `loadedPaths`
+and the tool output report it as it was.
+
+Two bounds sit beside each other and bound different things. The 256 KiB cap
+bounds each admitted file's bytes. A separate count cap refuses a skill shipping
+more than sixteen scripts, on the inventory and before a single one is fetched,
+which is what keeps the number of requests one acquisition makes ours rather
+than the publisher's.
+
+Only after this check does the host require root `SKILL.md` to be a regular Git
+tree file, stream at most 256 KiB of pinned raw bytes per admitted file, require
+non-empty UTF-8, and write the instructions to a cell. The scripts stay
+host-side: nothing is written into the skills root, and whether one may run is
+the operator allowlist's decision rather than the acquisition's.
 
 The successful write carries the weaker `kind: "fetch"` `ExternalIngest`
 provenance variant. It records the exact pinned raw URL, commit SHA, fetch time,

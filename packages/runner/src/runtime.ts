@@ -264,13 +264,14 @@ export interface ExperimentalOptions {
   modernCellRep?: boolean | undefined;
 
   /**
-   * Link writers replace inline schemas with references to
+   * Schema writers replace inline schemas with references to
    * content-addressed schema documents
    * (`docs/specs/content-addressed-schemas.md`, Phases 1 and 2): link
-   * writers stamp references, and selectors externalize opportunistically
-   * when their closure is already persisted in the target space. Gates
-   * emission only; readers and the server accept both forms
-   * unconditionally. Defaults to off.
+   * writers and `$alias` bindings stamp references, a result document's
+   * `schema` metadata takes the same reference form, and selectors
+   * externalize opportunistically when their closure is already persisted
+   * in the target space. Gates emission only; readers and the server
+   * accept both forms unconditionally. Defaults to on.
    */
   contentAddressedSchemas?: boolean | undefined;
 
@@ -2703,6 +2704,7 @@ export class Runtime {
     });
     if (this.#tearingDownWrites) return Promise.resolve(teardownResult());
     const tx = this.edit(options);
+    this.scheduler.beginReadAttempt(tx, "editWithRetry");
     tx.tx.immediate = true;
     (tx.tx as { deferRunnerStartUntilCommit?: boolean })
       .deferRunnerStartUntilCommit = true;
@@ -2728,7 +2730,12 @@ export class Runtime {
         tx.abort("editWithRetry stopped because the runtime is disposing");
         return Promise.resolve(teardownResult());
       }
-      this.prepareTxForCommit(tx);
+      try {
+        this.prepareTxForCommit(tx);
+      } catch (error) {
+        if (tx.status().status === "ready") tx.abort(error);
+        throw error;
+      }
       return tx.commit().then(async ({ error }) => {
         if (error) {
           if (maxRetries > 0 && isRetryableCommitRejection(error)) {

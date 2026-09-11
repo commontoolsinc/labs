@@ -90,6 +90,7 @@ export type {
 } from "./scheduler.ts";
 export type {
   ChangeGroup,
+  EventAppendDeliveryOutcome,
   IExtendedStorageTransaction,
   IOperationStorageCapability,
   MemorySpace,
@@ -351,6 +352,11 @@ export {
   parseCellPath,
   resolveCellPath,
 } from "./piece-helpers.ts";
+export {
+  readResultSchemaMeta,
+  resultSchemaMetaSpelling,
+  writeResultSchemaMeta,
+} from "./result-schema-meta.ts";
 export type { ModuleByteCache } from "./runtime.ts";
 export type { CompiledModuleArtifact } from "./harness/types.ts";
 export {

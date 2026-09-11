@@ -354,7 +354,14 @@ also fails a test.
 `packages/patterns/integration/lunch-poll-read-scale.bench.ts` measures a vote
 change with the production lunch poll's cards and summary demanded by a browser.
 Its three series hold 74, 296, and 1184 votes over 14 options, with 8, 24, and 87
-voters respectively. Voter links point to separate entities in the same space.
+voters respectively. `CF_READ_SCALE_PROFILE_LOCATION` selects `same-space`
+(the default) or `cross-space` voter profiles. Both variants use separately
+stored profiles with identical names, vote counts, and option counts. The
+cross-space variant seeds profiles in a dedicated space before seeding the
+poll, so no seed transaction writes across spaces. That seed requires existing
+profiles and rejects an unavailable profile instead of creating it. The
+benchmark verifies the first vote's resolved voter space and records the
+location in its artifacts.
 Seeding, navigation, sign-in, viewer selection, warmup, and teardown are outside
 the timed interval. The timer includes click-helper readiness, browser/protocol
 overhead, and a trusted green-vote click through view
@@ -391,3 +398,58 @@ and the latest diagnostic sample per size, after the timed interval. The fixture
 uses a dedicated space and a synthetic viewer. It supplies repeatable local
 measurements; comparisons to a deployed board require matching its execution
 posture, data, and cross-space links.
+
+### Headless render read limits
+
+The fixture's `main.test.tsx`, `296-votes.test.tsx`, and `1184-votes.test.tsx`
+under `packages/patterns/integration/fixtures/lunch-poll-read-scale/` enforce
+read budgets for two headless rendering windows: the seeded poll's first render,
+and a render after changing one vote to yellow. The harness recursively demands
+VDOM cells during each window and removes that demand before the next step.
+These limits cover rematerialization, not a continuously mounted browser update;
+the browser-worker measurements above remain a separate series.
+
+| Votes | First-render total limit | Updated-render total limit | Per-run limit in each render |
+| ----- | ------------------------ | -------------------------- | ---------------------------- |
+| 74    | 36,000                   | 30,000                     | 14,000                       |
+| 296   | 76,000                   | 67,000                     | 31,000                       |
+| 1184  | 236,000                  | 214,000                    | 96,000                       |
+
+Totals count completed transaction-attempt proxy accesses; per-run limits bound
+one reactive body's proxy accesses. The ceilings retain roughly ten percent
+headroom over their measured fixture costs. Setup, vote dispatch, and functional
+assertions occupy separate intervals with no declared limits. The fixture creates
+keyed vote entities and assigns their membership once during setup, avoiding a
+full membership-array update for each seeded vote. No timing limit is added by
+these fixtures.
+
+Run all three from the repository root:
+
+```sh
+deno task cf test packages/patterns/integration/fixtures/lunch-poll-read-scale --verbose
+```
+
+The command reports measured totals and per-run maxima for every interval. Keep
+the functional assertions, declared collection sizes, and render windows when
+adjusting a ceiling; a budget failure should lead to attribution of the added
+reads before changing the limit.
+
+## Scoped snapshot memo reuse
+
+`packages/runner/test/snapshot-memo.bench.ts` measures repeated CFC label-view
+requests within an ambient metadata scope, both at the current instant and at a
+historical read epoch. Each sample opens a fresh transaction and makes 74, 296,
+or 1,184 requests for one labeled address. Setup and transaction cleanup are
+outside the timed interval.
+
+The reused-memo case includes its first miss. The cleared-memo control clears
+only the active snapshot memo before each request; storage read caches remain
+active. That control includes clearing the map and journaling the additional
+reads. Both cases still merge label views for every request. They measure the
+cost of repeated derivation in this fixture, not a whole-pattern speedup.
+
+Untimed diagnostics verify one metadata read with reuse and one per request
+with clearing. These are transaction read activities, not proxy-access counts
+or storage network requests. Run with `deno bench -A --json
+packages/runner/test/snapshot-memo.bench.ts`; the JSON timing report goes to
+stdout and the exact read counts go to stderr.

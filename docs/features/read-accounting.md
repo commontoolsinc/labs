@@ -35,7 +35,7 @@ path.
 
 ## Execution boundary
 
-Accounting starts immediately before invoking the scheduler action and ends when
+Body accounting starts immediately before invoking the scheduler action and ends when
 its body resolves or throws, at the same boundary as its execution-time sample.
 It covers argument materialization and result construction performed by that
 invocation. Failed and retried runs each contribute their work.
@@ -44,11 +44,16 @@ Accounting belongs to the underlying storage transaction. Read-only and
 nonreactive wrappers share its counters; unrelated transactions and other
 runtimes do not. Asynchronous code retains its transaction's ownership.
 
+`ActionStats.reads` and `scheduler.run.complete` describe this body boundary.
 Commit preparation, commit processing, event-handler dispatch, and diagnostic
-idempotency reruns are outside this boundary. These reports describe reactive
-action bodies, not the entire cost of an interaction. Whole-step budgets need
-the additional execution coverage tracked by
-[the implementation sequence](../plans/pattern-computation-cost-implementation.md).
+idempotency reruns are outside their samples.
+
+Pattern-test budgets also collect the separate `scheduler.read-attempt` stream.
+Its transaction samples extend through commit or abort and include event
+preflight, handler presync and dispatch, initialization, and asynchronous
+writeback attempts. Each retry contributes its own attempt. The
+[pattern-test budget contract](#pattern-test-budgets) defines the covered paths
+and settlement boundaries; diagnostic idempotency reruns remain excluded.
 
 Read sites check `readStatsActive` before looking up a transaction's collector.
 Disabled accounting allocates no collector or document set. Enabled runs retain
@@ -73,3 +78,69 @@ their children's totals.
 
 The implementation is in `packages/runner/src/read-stats.ts`, the scheduler
 completion path, and `packages/cli/lib/action-read-report.ts`.
+
+## Pattern-test budgets
+
+A single-user test module can export `readBudgets` with `initialization` and
+`steps` objects. Each accepts optional `total` and `perRun` nonnegative safe
+integer limits on proxy accesses. Equality passes, zero is valid, and omitted
+limits impose no constraint. An executable test step's `readBudget` object
+replaces its default step limits completely; an empty override clears them.
+Step overrides require the module export, including an empty export object.
+Invalid declarations fail explicitly. Multi-user module budgets are rejected.
+
+`perRun` limits the largest completed reactive-body sample. `total` sums separate
+`scheduler.read-attempt` markers after full runtime settlement. It never adds
+body samples to attempt totals. Budget failures include the interval, actual
+count, limit, and largest contributors, and fail the test even when functional
+assertions pass. Verbose output reports each budgeted interval's total and body
+maximum. Budget declarations do not demand UI; use render steps or continuous
+UI demand to measure rendering work.
+
+Attempt accounting is enabled with
+`runtime.scheduler.setReadStatsEnabled(true, { attempts: true })`. It
+covers reactive transactions through settlement, event dependency preflights,
+handler input presync materialization, event handlers, the harness's
+pattern-instantiation transaction, and each
+`runtime.editWithRetry` attempt, including asynchronous builtin writebacks.
+Commit and abort callbacks emit each attempt once. Aborting inside a reactive
+body preserves its per-run sample. Probes stop at settlement; diagnostic
+idempotency reruns remain excluded.
+
+Attempt markers retain proxy-access and link-hop counts, independently of the
+transaction read logs that commit can clear. Document cardinality and dependency
+diagnostics remain body-only; no full-attempt document count is claimed.
+
+Initialization excludes compilation and default environment setup, and includes
+pattern instantiation, initial settlement, and continuous UI mounting when
+enabled. Steps settle scheduler, storage, pending commits, and asynchronous
+builtin work with uncapped `runtime.settled(Infinity)` before evaluating limits.
+A settlement failure ends budget measurement and preserves the original error;
+the harness does not restart settlement over already-failed work.
+Skipped steps omit their operation and budget enforcement but still validate
+their declarations and report any measured work in verbose mode. Unbudgeted tests retain their existing
+settlement behavior. These totals cover the named local transaction paths;
+unrelated transactions, standalone harness reads, storage-server work, and
+network traffic are outside the measure. Plain eager values and primitive Cell
+reads are not proxy accesses. A zero count does not mean zero CPU work or zero
+storage reads.
+
+## Compiler hints for nested scans
+
+The non-fatal `collection:nested-scan` warning identifies an inline reactive
+array callback that scans another captured reactive collection. For example,
+filtering the same captured entries separately for each group can make work
+grow with both collection sizes. The warning asks for a measurement of the
+demanded output; it does not assert that every update performs that work.
+
+The check covers `map`, `filter`, `flatMap`, `count`, `minBy`, and `maxBy` with
+inline callbacks and receivers that resolve to captured root bindings. Plain
+local arrays, each row's own child arrays, callback-local derived lists,
+sequential scans, and unrelated function scopes are excluded. It does not trace
+arbitrary helper calls, complex receivers, or other loop forms. Absence of this
+warning is not a complexity guarantee.
+
+Move shared work outside the callback when possible. A
+[named aggregate](collection-aggregates.md) can fit some workloads; check its
+cardinality, numeric, ordering, and update contract before changing the pattern.
+Use the counters and budgets above to validate the resulting behavior.

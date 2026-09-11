@@ -1827,6 +1827,10 @@ export const parseCfHarnessCliArgs = async (
     ...(browserAccess !== undefined ? { browserAccess } : {}),
     handleValueOrigins,
     inputCells,
+    // Connector grants are resolved from the loom instance a console was
+    // launched against, and this surface is launched against nothing: a batch
+    // run names the handle it wants with `--input-cell`.
+    connectorGrants: [],
     // A pattern reference is attached per task, and this surface takes one
     // prompt: a batch run names an indexed pattern in its prompt or finds it
     // with search_patterns.

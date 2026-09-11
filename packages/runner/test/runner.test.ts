@@ -18,6 +18,7 @@ import { Runtime } from "../src/runtime.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 import { validateSchemaValue } from "../src/cfc/mod.ts";
 import { resolvedSchema } from "./schema-ref-helpers.ts";
+import { resultSchemaMetaSpelling } from "../src/result-schema-meta.ts";
 import {
   areNormalizedLinksSame,
   getDerivedInternalCell,
@@ -393,7 +394,9 @@ describe("runPattern", () => {
     const argumentLink = getMetaLink(resultCell, "argument");
 
     expect(resultCellLink.scope).toBe("user");
-    expect(resultCell.getMetaRaw("schema")).toEqual(resultSchema);
+    expect(resultCell.getMetaRaw("schema")).toEqual(
+      resultSchemaMetaSpelling(resultSchema),
+    );
     expect(argumentLink).toBeDefined();
     expect(argumentLink!.path).toEqual([]);
     expect(argumentLink!.space).toBe(space);

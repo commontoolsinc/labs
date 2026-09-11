@@ -44,8 +44,11 @@ Each rule below is one of these two authorities applied to a case.
 A pattern that launches a child registers a *release* for it, which runs when
 the launching pattern is torn down. A list coordinator releases a child
 earlier than that: when the list no longer holds the element that child
-belongs to. The child would otherwise run, and hold a result nothing reads,
-for as long as the coordinator lives.
+belongs to, or when the result container changes scope. Each per-element
+result uses the container's scope; the coordinator releases a child from the
+previous scope even when the element identity remains present. Reconciliation
+and cold resume derive the same scoped child identity. The child would otherwise
+run, and hold a result nothing reads, for as long as the coordinator lives.
 
 A release stops the child's registration only when both of these hold:
 
@@ -61,6 +64,22 @@ release proceeds: it ends the registration its own launch installed, and
 leaves the start running. The start may go on to install a registration of
 its own and claim a lifetime for it, by the rule below. A stop of the same
 result instead terminates that start when it resolves.
+
+## List setup across serving instances
+
+A serving runtime can invoke one registered raw action for several principals
+and sessions. Map, filter, and flatMap keep separate coordinator bookkeeping for
+each demander's full resolution identity: result-container setup, element setup,
+resume flags, and pending synchronization. Completing one principal's child
+setup does not satisfy another principal's setup obligation.
+
+Durable child identities continue to derive from the owning container, source
+occurrence, and scope kind. The principal and session select the physical scoped
+instance of those addresses; they do not enter the canonical element key.
+Deferred synchronization and recovery writes retain the resolution identity that
+started them, including empty-container seeding and filter/flatMap republishing.
+The coordinator retains that identity independently of the transaction that
+first invoked it.
 
 ## Independent lifetimes
 

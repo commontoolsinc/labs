@@ -1437,11 +1437,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const optionCount = options.length;
     const voteCount = votes.length;
     // Current-day filter: the UI only shows votes cast on the current day
-    // (local calendar), per the shared tick. Derived at top level so every
-    // remote voter's vote entity resolves (same reason `ranked` is computed
-    // here, not per-option — see the swatch comment below). While `#now/300`
-    // is still resolving the day key reads "" and the current-day vote set is
-    // empty.
+    // (local calendar), per the shared tick. While `#now/300` is still
+    // resolving, the day key reads "" and the current-day vote set is empty.
     const todayKey = computed(() => (nowTick ? dayKeyOf(nowTick) : ""));
     const todaysVotes = computed(() => {
       if (!nowTick) return EMPTY_VOTES;
@@ -1792,88 +1789,66 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           gap: "4px",
                         }}
                       >
-                        {
-                          /* Build every row's swatches in ONE top-level
-                            `computed` over the resolved `ranked` tally, with
-                            plain JS maps. Two reasons this shape, not a reactive
-                            `ranked.map(...)`/subpattern or an inline
-                            `votes.filter(...)`:
-                            1. Votes are links to separate entities; the
-                               top-level `tallyOptions` call resolves every
-                               voter's entity (including remote ones on another
-                               replica), so reading `ranked` here sees them,
-                               whereas a `votes.filter` in a nested map sees only
-                               the votes a replica has materialized locally.
-                            2. A reactive map / subpattern re-renders its per-item
-                               swatches unreliably when a remote vote updates a
-                               row's voters; a single `computed` re-runs as a
-                               whole when `ranked` changes (like the count above),
-                               so the swatches track cross-replica votes
-                               reliably. `ranked` is pre-sorted, so this also
-                               gives the row order with no `order` CSS hack. */
-                        }
-                        {computed(() =>
-                          ranked.map((tally) => (
+                        {ranked.map((tally) => (
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              padding: "6px 10px",
+                              backgroundColor: "white",
+                              border: "1px solid #e5e7eb",
+                              borderRadius: "6px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                flex: 1,
+                                fontSize: "13px",
+                                fontWeight: 500,
+                                color: "#111827",
+                              }}
+                            >
+                              {tally.option.title}
+                            </div>
                             <div
                               style={{
                                 display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                                padding: "6px 10px",
-                                backgroundColor: "white",
-                                border: "1px solid #e5e7eb",
-                                borderRadius: "6px",
+                                gap: "4px",
+                                flexWrap: "wrap",
+                                justifyContent: "flex-end",
                               }}
                             >
-                              <div
-                                style={{
-                                  flex: 1,
-                                  fontSize: "13px",
-                                  fontWeight: 500,
-                                  color: "#111827",
-                                }}
-                              >
-                                {tally.option.title}
-                              </div>
-                              <div
-                                style={{
-                                  display: "flex",
-                                  gap: "4px",
-                                  flexWrap: "wrap",
-                                  justifyContent: "flex-end",
-                                }}
-                              >
-                                {tally.voters.map((voter) => (
-                                  <span
-                                    title={voter.name}
-                                    role="img"
-                                    aria-label={`${voter.name}: ${voter.voteType} vote`}
-                                    data-vote-swatch-name={voter.name}
-                                    style={{
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      minWidth: "22px",
-                                      height: "22px",
-                                      padding: "0 6px",
-                                      borderRadius: "9999px",
-                                      backgroundColor:
-                                        VOTE_SWATCH[voter.voteType],
-                                      color: "white",
-                                      fontSize: "11px",
-                                      fontWeight: 700,
-                                      boxShadow: voter.isSelf
-                                        ? "0 0 0 2px white, 0 0 0 3px #111827"
-                                        : "none",
-                                    }}
-                                  >
-                                    {voter.initials}
-                                  </span>
-                                ))}
-                              </div>
+                              {tally.voters.map((voter) => (
+                                <span
+                                  title={voter.name}
+                                  role="img"
+                                  aria-label={`${voter.name}: ${voter.voteType} vote`}
+                                  data-vote-swatch-name={voter.name}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    minWidth: "22px",
+                                    height: "22px",
+                                    padding: "0 6px",
+                                    borderRadius: "9999px",
+                                    backgroundColor:
+                                      VOTE_SWATCH[voter.voteType],
+                                    color: "white",
+                                    fontSize: "11px",
+                                    fontWeight: 700,
+                                    boxShadow: voter.isSelf
+                                      ? "0 0 0 2px white, 0 0 0 3px #111827"
+                                      : "none",
+                                  }}
+                                >
+                                  {voter.initials}
+                                </span>
+                              ))}
                             </div>
-                          ))
-                        )}
+                          </div>
+                        ))}
                       </div>
                     </div>
                   )

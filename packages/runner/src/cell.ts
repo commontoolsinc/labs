@@ -1,4 +1,9 @@
-import type { AnyBrandedCell, ReadonlyCell } from "@commonfabric/api";
+import type {
+  AnyBrandedCell,
+  CollectionIndexData,
+  CollectionIndexKey,
+  ReadonlyCell,
+} from "@commonfabric/api";
 import {
   assertValidFabricValueLayer,
   cloneIfNecessary,
@@ -30,6 +35,7 @@ import {
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import {
+  type ScopeKeyIdentity,
   type SqliteDbRef,
   type SqliteParamsWire,
   streamEntriesDocId,
@@ -50,6 +56,10 @@ import {
 import { toCell } from "./back-to-cell.ts";
 import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
 import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
+import {
+  collectionKeyBucket,
+  resolveCollectionKey,
+} from "./builtins/collection-index-key.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import { assertNoReservedCauseKeys, getTopFrame } from "./builder/pattern.ts";
 import {
@@ -167,6 +177,7 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import type {
   ChangeGroup,
+  EventAppendDeliveryOutcome,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   IReadOptions,
@@ -365,6 +376,19 @@ export type StreamSendOptions = {
   eventId?: string;
   session?: string;
   runtimeInjectedEventKeys?: readonly string[];
+
+  /**
+   * Fires once the sender's own authored act is durable, ahead of the
+   * commit callback: under server execution that act is the event append
+   * (events.md §1), and the handling the server runs for it settles the
+   * commit callback later; otherwise the act is the handling's own
+   * commit, and the two fire together. A caller that only needs its event
+   * on the record waits here and not for the handling.
+   */
+  onAppended?: (
+    delivery: EventAppendDeliveryOutcome,
+    tx: IExtendedStorageTransaction,
+  ) => void;
 };
 
 // The mint registry backing `runtimeInjectedEventKeys` (see
@@ -923,6 +947,18 @@ export function markCellDocumentSynced(cell: Cell<any>): void {
     throw new TypeError("Expected a runner CellImpl handle");
   }
   cell[markDocumentSynced]();
+}
+
+/** Loads a document for a captured resolution identity without retaining a transaction. */
+export function syncCellForIdentity<T>(
+  cell: Cell<T>,
+  identity: ScopeKeyIdentity | undefined,
+): Promise<Cell<T>> {
+  if (identity === undefined) return cell.sync();
+  markCellDocumentSynced(cell);
+  return cell.runtime.storageManager.syncCell(cell, {
+    scopeKeyIdentity: identity,
+  });
 }
 
 /**
@@ -1784,10 +1820,13 @@ export class CellImpl<T extends FabricValue>
           // present an error-status view of the tx; only a delivered
           // append whose handling consequenced (or a bare teardown,
           // reported as such) passes the tx through untouched.
-          if (onCommit !== undefined) {
+          const onAppended = sendOptions?.onAppended;
+          if (onCommit !== undefined || onAppended !== undefined) {
             const callerOnCommit = onCommit;
             onCommit = (echoTx: IExtendedStorageTransaction) => {
               void outcome.then(async (delivery) => {
+                onAppended?.(delivery, echoTx);
+                if (callerOnCommit === undefined) return;
                 if (!delivery.delivered) {
                   callerOnCommit(errorStatusTxView(
                     echoTx,
@@ -2080,11 +2119,44 @@ export class CellImpl<T extends FabricValue>
       // wave-stamped emission paths above intercept first and carry the
       // same actor explicitly, as the entry's `firedAt`; this carriage
       // covers the remaining in-process queueEvent shapes.)
+      // Off server execution the handling's commit is the sender's own
+      // authored act, so `onAppended` fires with the commit callback, and
+      // reports what the commit did: delivered when it landed, and when
+      // it collided on the handling's receipt — a retry of the same
+      // invocation, which settles on the original outcome — and refused,
+      // with the reason, when the handling threw or its commit was
+      // rejected. Under server execution the wrapper above fires the hook
+      // off the append itself.
+      const appendedWithCommit = sendOptions?.onAppended;
+      const settleCallback = firedEventId === undefined &&
+          appendedWithCommit !== undefined
+        ? (tx: IExtendedStorageTransaction) => {
+          const status = tx.status();
+          const deduplicated = status.status === "error" &&
+            "precondition" in status.error &&
+            status.error.precondition === "receipt-exists";
+          appendedWithCommit(
+            status.status === "error" && !deduplicated
+              ? {
+                delivered: false,
+                refused: status.error instanceof Error
+                  ? status.error.message
+                  : String(
+                    (status.error as { message?: unknown }).message ??
+                      status.error,
+                  ),
+              }
+              : { delivered: true },
+            tx,
+          );
+          onCommit?.(tx);
+        }
+        : onCommit;
       this.runtime.scheduler.queueEvent(
         resolvedToValueLink,
         event,
         undefined,
-        onCommit,
+        settleCallback,
         false,
         {
           // Under events-down the COMMITTED append's id is the one the
@@ -3579,6 +3651,42 @@ export class CellImpl<T extends FabricValue>
     });
     result.setSchema(listResultSchema(op.resultSchema));
     return result;
+  }
+
+  /** Reads one index bucket while retaining dependencies on key resolution. */
+  lookup(
+    key: CollectionIndexKey | null | undefined,
+  ): T extends CollectionIndexData<CollectionIndexKey, infer V> ? V : unknown {
+    const index = this as unknown as Cell<
+      CollectionIndexData<CollectionIndexKey, unknown>
+    >;
+    if (index.key("kind").get() !== "collection-index") {
+      throw new Error("lookup requires a collection index");
+    }
+    const resolved = resolveCollectionKey(
+      this.runtime,
+      this.runtime.readTx(this.tx),
+      key,
+    );
+    const value = resolved
+      ? index.key("buckets").key(collectionKeyBucket(resolved.identity)).get()
+      : undefined;
+    return (value === undefined
+      ? (index.key("mode").get() === "group" ? [] : undefined)
+      : value) as T extends CollectionIndexData<CollectionIndexKey, infer V> ? V
+        : unknown;
+  }
+
+  /** Reads occupied-key enumeration separately from bucket lookup. */
+  keys(): T extends CollectionIndexData<infer K, unknown> ? K[] : unknown[] {
+    const index = this as unknown as Cell<
+      CollectionIndexData<CollectionIndexKey, unknown>
+    >;
+    if (index.key("kind").get() !== "collection-index") {
+      throw new Error("keys requires a collection index");
+    }
+    return index.key("keys").get() as T extends
+      CollectionIndexData<infer K, unknown> ? K[] : unknown[];
   }
 
   /** @inheritDoc */
