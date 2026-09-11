@@ -263,8 +263,15 @@ passed before merge, with clean Cubic and antagonistic reviews.
   The artifact directory receives screenshots and assertion metadata for all
   four cases. Live poll access requires coordination with Mike.
 
-- [ ] **C2 — Repair partial materialization.** Verify complete inputs under cold
-      reads, remote inserts/removals, and reconnect where relevant.
+- [x] **C2 — Repair partial materialization.** Complete inputs are covered by
+      C1's cold-browser, remote insertion/removal, and reconnect acceptance.
+      The session-restoration query repair is merged in #7308; rendered
+      reconnect acceptance is merged in #7312. The same-space and cross-space
+      fixtures verify complete vote and profile inputs on first demand, after
+      membership changes, and after two reader outages. No additional
+      materialization change is required for these reproductions. Disconnects
+      during request issue remain the separate boundary stated above; C3's
+      producer-identity and rerun checks are tracked independently.
 - [x] **C3 — Repair remote row invalidation.** Client and serving-host
       acceptance verify correct derived values, stable normalized output links
       and producer identities, and no execution of the untouched row producer
@@ -350,14 +357,23 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
       [reproducible comparison](../history/development/performance/2026-09-11-computed-lift-collection-loops.md)
       validates three forms at 32, 128, and 512 linked rows, including unread-field
       edits. The dashboard tracks publication and review status.
-- [ ] **E2 — Publish the measured advice** where pattern authors encounter
+- [x] **E2 — Publish the measured advice** where pattern authors encounter
       collections, `computed`, and `lift`. Explain nested-scan cost and use only
-      available operators in replacement examples.
-- [ ] **E3 — Add a transformer warning** through the existing diagnostic
+      available operators in replacement examples. The
+      [computed/lift guide](../common/concepts/computed/computed.md#collection-loop-cost)
+      and [collection guide](../features/collection-aggregates.md#choosing-a-collection-computation)
+      explain lazy read width, repeated scans, explicit cell receivers, numeric
+      contract differences, and measurement limits. The author index links both;
+      dashboard publication status remains separate.
+- [x] **E3 — Add a transformer warning** through the existing diagnostic
       collector. Test recognizable nested reactive scans and negative cases
       involving plain arrays and unrelated scopes; inspect warning volume across
       authored patterns before shipping. Escalation to error requires separate
       evidence about false positives.
+      The [diagnostic acceptance report](../history/development/performance/2026-09-11-nested-collection-scan-diagnostic.md)
+      records the focused cases, full transformer suite, and all five distinct
+      findings across 413 pattern entries. Publication and review remain visible
+      in the dashboard.
 - [ ] **D1 — Follow the remaining lazy-materialization work** in its
       [own plan](lazy-cell-materialization.md), including handlers and flag
       removal. Keep implementation ownership there.
