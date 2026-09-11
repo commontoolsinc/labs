@@ -520,7 +520,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         // TODO(danfuzz): When we have a non-`mainResult` visit-result type,
         // we'll want to pass the result value(s) from the visits immediately
         // above instead of the original `key` and `value`.
-        const result = vis.visitedFabricPlainObject(plainObj, key, value);
+        const result = vis.visitedFabricPlainObjectEntry(plainObj, key, value);
         if (result?.type === "mainResult") {
           return result;
         }

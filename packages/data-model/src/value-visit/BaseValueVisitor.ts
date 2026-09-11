@@ -98,7 +98,7 @@ export abstract class BaseValueVisitor<
   ): BaselineVisitResult<ResultType>;
 
   /** @inheritDoc */
-  abstract visitedFabricPlainObject(
+  abstract visitedFabricPlainObjectEntry(
     container: FabricPlainObject,
     key: DomainFor<DomainExtra>,
     value: DomainFor<DomainExtra>,

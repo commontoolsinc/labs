@@ -168,12 +168,12 @@ export class Recorder extends ContainerIteratingValueVisitor<unknown, unknown> {
     return this.onVisitedGap ? this.onVisitedGap(start, count) : undefined;
   }
 
-  override visitedFabricPlainObject(
+  override visitedFabricPlainObjectEntry(
     container: FabricPlainObject | FabricInstance,
     key: unknown,
     value: unknown,
   ): BaselineVisitResult<unknown> {
-    this.events.push(["visitedFabricPlainObject", container, key, value]);
+    this.events.push(["visitedFabricPlainObjectEntry", container, key, value]);
     return this.onVisitedMapping
       ? this.onVisitedMapping(key, value)
       : undefined;

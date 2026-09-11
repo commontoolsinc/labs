@@ -315,12 +315,12 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   ): BaselineVisitResult<ResultType>;
 
   /**
-   * Indicates that `FabricPlainObject` was just visited. This method is called
-   * as a result of the visitor returning a `recurse` result for a visited
-   * `FabricPlainObject` and is called _after_ the object itself was directly
-   * visited.
+   * Indicates that `FabricPlainObject` entry was just visited. This method is
+   * called as a result of the visitor returning a `recurse` result for a
+   * visited `FabricPlainObject` and is called _after_ the entry's key and/or
+   * value were directly visited.
    */
-  visitedFabricPlainObject(
+  visitedFabricPlainObjectEntry(
     container: FabricPlainObject,
     key: DomainFor<DomainExtra>,
     value: DomainFor<DomainExtra>,
