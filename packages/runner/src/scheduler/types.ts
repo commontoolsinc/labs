@@ -6,8 +6,8 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   MediaType,
+  ReplicaLoadFailure,
 } from "../storage/interface.ts";
-import type { ReplicaLoadFailure } from "../storage/interface.ts";
 import type {
   SchedulerEventPreflightActionSummary,
   SchedulerEventPreflightStats,
@@ -105,11 +105,14 @@ export type EventHandler =
      * reads that actor's instances of its scoped inputs, so the presync
      * loads THOSE instances — the served save handler must find the
      * actor's own draft, not the service instance's empty one (the R7
-     * wall). Absent on every client-side event.
+     * wall). Absent on every client-side event. Materialization reads use
+     * `tx`, whose lifetime covers this callback and whose actor matches
+     * `identity`; the scheduler closes it before opening the event transaction.
      */
     presyncInputs?: (
       event: any,
-      identity?: ScopeKeyIdentity,
+      identity: ScopeKeyIdentity | undefined,
+      tx: IExtendedStorageTransaction,
     ) => Promise<void>;
   };
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;

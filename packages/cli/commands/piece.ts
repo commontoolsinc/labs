@@ -1,6 +1,6 @@
 import { Command, ValidationError } from "@cliffy/command";
 import { Table } from "@cliffy/table";
-import type { CellScope } from "@commonfabric/api";
+import type { CellScope, FabricValue } from "@commonfabric/api";
 import {
   type ApplyReport,
   type ApplyRow,
@@ -63,7 +63,6 @@ import {
   commandSpellingNotice,
   noCommandSpellingNotice,
 } from "../lib/deprecated-spelling.ts";
-import type { FabricValue } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model";
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
 

@@ -20,6 +20,7 @@ import {
   type HarnessPromptSlotBindingSource,
 } from "./contracts/cfc-policy-snapshot.ts";
 import {
+  ADDRESS_HANDLE_TOKEN_PREFIX,
   HANDLE_TOKEN_PATTERN,
   type HarnessHandleEntry,
   type HarnessHandleTable,
@@ -124,7 +125,6 @@ import {
   type CreateHarnessEngineOptions,
 } from "./engine.ts";
 import { OpenAICompatibleGatewayClient } from "./gateway/openai-client.ts";
-import { ADDRESS_HANDLE_TOKEN_PREFIX } from "./contracts/handle-table.ts";
 import {
   createHarnessHandleTable,
   defineOwnEntry,
@@ -1372,7 +1372,8 @@ const buildSubagentSystemPrompt = (
         "Read the passage, not the guide. Locate it first with bash — `grep -n` for the term — and read the lines around the hit with `sed -n '120,180p'`. Where you do reach for read_file on a document, bound it with `maxBytes`. A read is cut at roughly ten thousand characters with the full text left in the run artifact, so a whole-guide read spends the turn and still does not land on the passage.",
         "Read again rather than hoard. Everything you have read stays in front of you for the rest of the run whether you need it again or not, so read what the next call needs and come back to the file when a later question wants a different part of it.",
         "Every reference in your task is an address, not a value. Wire it into the pattern as a run_pattern `inputs` entry so the pattern reads it live; never try to read, print, or transcribe the data behind it yourself.",
-        "Use describe_handle on a reference you were given to see its shape before authoring against it. It answers with a schema and never with data.",
+        "Use describe_handle on a reference you were given to see its shape before authoring against it. It returns a shape, and for a database its tables and how full each of them is, never the data itself.",
+        "The references you were granted are the only data sources this run has, and there is nowhere to look another one up: a task or a part naming data you hold no reference for is not runnable, so return the failure branch naming the input you are missing rather than standing a different reference in its place. Before you build on a source, check what it holds — describe_handle reports each table's rows and how many of them each column is non-NULL on, and a pattern that counts rows settles it where that is absent — because an empty result is data rather than a failure: the query settles, everything derived from it is empty in turn, and nothing reports a problem.",
         'To read what the pattern computed, pass run_pattern a `resultSchema` describing the fields you want; without one you get a reference and no value at all. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. Numbers, booleans and enum strings come back as themselves; unconstrained strings and anything the schema does not model are withheld as text and come back as reference tokens addressing those positions, which you can describe_handle or wire into a later pattern. You do not need to declare $NAME or $UI.',
         `Return the resultRef run_pattern gave you for the pattern you ran last and the one-line \`describes\`${
           profileConfig.allowedToolIds.includes("search_patterns")

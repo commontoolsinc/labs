@@ -1499,13 +1499,17 @@ export async function dispatchQueuedEvent(state: {
   // runs (see EventHandler.presyncInputs). Fail open: a presync error should
   // surface as the handler's own read failure, not silently drop the event.
   if (typeof presyncedImplementation?.presyncInputs === "function") {
+    const presyncTx = state.runtime.edit();
     try {
-      // A served event's presync loads the event actor's instances (stage
-      // A — see EventHandler.presyncInputs); a client-side event passes
-      // nothing, byte-identical to before.
+      state.runtime.scheduler.beginReadAttempt(presyncTx, "presync", handlerId);
+      presyncTx.setReadOnly?.("scheduler.presyncInputs()");
+      const identity = eventScopeIdentity(queuedEvent);
+      if (identity !== undefined) presyncTx.tx.scopeKeyIdentity = identity;
+      // Materialization and synchronization use the same event actor.
       await presyncedImplementation.presyncInputs(
         eventValue,
-        eventScopeIdentity(queuedEvent),
+        identity,
+        presyncTx,
       );
     } catch (error) {
       logger.warn(
@@ -1513,6 +1517,9 @@ export async function dispatchQueuedEvent(state: {
         "handler input presync failed; dispatching anyway",
         { error, handlerId },
       );
+    } finally {
+      presyncTx.clearReadOnly?.();
+      if (presyncTx.status().status === "ready") presyncTx.abort();
     }
   }
 
@@ -2373,7 +2380,6 @@ export async function dispatchQueuedEvent(state: {
     }
   } catch (error) {
     finalizeFailure(error);
-    throw error;
   }
 }
 

@@ -79,7 +79,7 @@ import {
 import { EffectsChannel } from "./speculation/effects-channel.ts";
 import { waveRunContextOf } from "./executor/wave.ts";
 import { Action, Scheduler } from "./scheduler.ts";
-import { entityKey } from "./scheduler/keys.ts";
+import { entityKey, entityNameKey } from "./scheduler/keys.ts";
 import {
   type CommitBackpressurePolicy,
   resolveCommitBackpressure,
@@ -156,7 +156,6 @@ import {
 } from "./storage/reactivity-log.ts";
 import { isRetryableCommitRejection } from "./storage/rejection.ts";
 import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
-import { entityNameKey } from "./scheduler/keys.ts";
 import { toURI } from "./uri-utils.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";

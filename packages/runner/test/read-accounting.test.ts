@@ -272,6 +272,43 @@ describe("read-accounting", () => {
     expect(readStatsActive).toBe(false);
   });
 
+  for (const enabled of [false, true]) {
+    it(`closes rejected presync reads with accounting ${enabled ? "enabled" : "disabled"}`, async () => {
+      runtime.scheduler.setReadStatsEnabled(enabled, { attempts: true });
+      const markers: RuntimeTelemetryMarker[] = [];
+      runtime.telemetry.addEventListener("telemetry", (event) => {
+        if (event instanceof RuntimeTelemetryEvent) markers.push(event.marker);
+      });
+      let invoked = false;
+      let presyncTx: IExtendedStorageTransaction | undefined;
+      const handler: EventHandler = () => {
+        invoked = true;
+      };
+      handler.presyncInputs = (_event, _identity, tx) => {
+        presyncTx = tx;
+        expect(
+          runtime.getCell<{ value: number }>(space, "source", undefined, tx)
+            .get().value,
+        )
+          .toBe(7);
+        return Promise.reject(new Error("input sync failed"));
+      };
+      const link = runtime.getCell(space, "presync-budget-event")
+        .getAsNormalizedFullLink();
+      runtime.scheduler.addEventHandler(handler, link);
+      runtime.scheduler.queueEvent(link, undefined);
+      await runtime.settled();
+      expect(invoked).toBe(true);
+      expect(presyncTx?.status().status).toBe("error");
+      expect(
+        markers.filter((m) => m.type === "scheduler.read-attempt")
+          .filter((m) => m.kind === "presync")
+          .map((m) => m.reads.proxyAccesses),
+      ).toEqual(enabled ? [1] : []);
+      expect(readStatsActive).toBe(false);
+    });
+  }
+
   it("settles queued events after preflight setup fails", async () => {
     runtime.scheduler.setReadStatsEnabled(true, { attempts: true });
     const failure = new Error("preflight setup failed");
@@ -312,6 +349,56 @@ describe("read-accounting", () => {
     expect(commits).toHaveLength(1);
     expect(commits[0].status().status).toBe("error");
     expect(outcomes).toHaveLength(1);
+    expect(runtime.scheduler.accessForTestingOnly.eventQueue).toEqual([]);
+    expect(readStatsActive).toBe(false);
+  });
+
+  it("settles queued events after dispatch setup fails", async () => {
+    runtime.scheduler.setReadStatsEnabled(true, { attempts: true });
+    const failure = new Error("dispatch setup failed");
+    const errors: Error[] = [];
+    runtime.scheduler.onError((error) => errors.push(error));
+    const beginReadAttempt = runtime.scheduler.beginReadAttempt;
+    using _begin = stub(
+      runtime.scheduler,
+      "beginReadAttempt",
+      function (...args) {
+        beginReadAttempt.apply(this, args);
+        if (args[1] === "event" && errors.length === 0) throw failure;
+      },
+    );
+    let invoked = false;
+    const handler: EventHandler = () => {
+      invoked = true;
+    };
+    handler.populateDependencies = () => {};
+    const link = runtime.getCell(space, "dispatch-setup-event")
+      .getAsNormalizedFullLink();
+    const commits: IExtendedStorageTransaction[] = [];
+    const outcomes: ServedEventFailureOutcome[] = [];
+    runtime.scheduler.addEventHandler(handler, link);
+    runtime.scheduler.queueEvent(
+      link,
+      undefined,
+      false,
+      (tx) => commits.push(tx),
+      false,
+      {
+        served: { onFailure: (outcome) => outcomes.push(outcome) },
+      },
+    );
+    await runtime.settled();
+    expect(invoked).toBe(false);
+    expect(errors).toEqual([failure]);
+    expect(commits).toHaveLength(1);
+    expect(commits[0].status().status).toBe("error");
+    expect(outcomes).toHaveLength(1);
+    expect(runtime.scheduler.accessForTestingOnly.eventQueue).toEqual([]);
+    expect(readStatsActive).toBe(false);
+    runtime.scheduler.queueEvent(link, undefined);
+    await runtime.settled();
+    expect(invoked).toBe(true);
+    expect(errors).toEqual([failure]);
     expect(runtime.scheduler.accessForTestingOnly.eventQueue).toEqual([]);
     expect(readStatsActive).toBe(false);
   });
@@ -431,7 +518,7 @@ describe("read-accounting", () => {
       ).toBe(7);
       throw failure;
     });
-    await expect(dispatchQueuedEvent({
+    await dispatchQueuedEvent({
       ...access.eventExecutionState,
       handleError: (error) => {
         reported.push(error);
@@ -440,8 +527,7 @@ describe("read-accounting", () => {
       releaseLineageEvent: (_tx, event) => {
         released.push(event);
       },
-    }, queued))
-      .rejects.toBe(failure);
+    }, queued);
     expect(invoked).toBe(false);
     expect(
       markers.filter((m) => m.type === "scheduler.read-attempt").map((m) =>

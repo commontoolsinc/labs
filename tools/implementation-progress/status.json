@@ -1,10 +1,10 @@
 {
-  "updated": "2026-09-11T01:17:24.432078+00:00",
+  "updated": "2026-09-11T03:08:43.881124+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7257",
-  "activity": "Budget review repairs and integration with merged #7285/#7294 are validated. Full affected-package checks pass, including all 412 pattern type checks. Ready for fresh CI and Cubic in #7257; dependent scale limits remain in #7282.",
-  "review": "Antagonistic review is clean for the compiler, event failure, contributor attribution, and initialization settlement repairs. Fresh published-head CI and Cubic remain required for #7257.",
+  "activity": "Main integration passes local validation: 1,428 runner tests / 8,909 steps, full CLI suites, 46 type groups, 599 documentation blocks, and all four browser row cases. Publishing #7257 for current-head CI and Cubic review.",
+  "review": "Antagonistic review of the integrated changes is clean. Current-head CI and Cubic review are required before merging #7257.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
@@ -15,8 +15,12 @@
     "#7279: merged as 6472ea93df after all 69 CI gates, zero-issue Cubic review, and clean antagonistic review.",
     "#7289: merged as b18d90b6aa with clean CI and Cubic/antagonistic reviews.",
     "#7285: merged as 1407825b0c after all current-head CI gates, zero-issue Cubic review, and clean antagonistic review.",
-    "#7257: 1,423 runner tests / 8,892 steps; 1,167 transformer tests / 960 steps; full CLI passes all three runs; 146 generated patterns; eight vintages; all six scale assertions; 46 type groups and 599 docs blocks pass.",
-    "#7294: index/lookup contract merged as 039e8aecb0 after clean CI and Cubic/antagonistic reviews."
+    "#7257: 1,423 runner tests / 8,895 steps; 1,168 transformer tests / 961 steps; full CLI passes all three runs; 146 generated patterns; eight vintages; all six scale assertions; 46 type groups and 599 docs blocks pass.",
+    "#7294: index/lookup contract merged as 039e8aecb0 after clean CI and Cubic/antagonistic reviews.",
+    "Full-review follow-up: runner 1423 tests/8895 steps, CLI 1824 tests/2932 steps plus serial groups, all 46 type groups, 599 documentation blocks, all three scale budgets, and all four browser row cases pass. Skipped-step regression covers 27 previously uncovered CLI lines.",
+    "#7302 merged as 360d07680f after all 69 current-head CI gates and clean Cubic/antagonistic reviews.",
+    "Main integration: 1,428 runner tests / 8,909 steps, full CLI suites, 46 type groups, 599 documentation blocks, four synthetic browser row cases, repository formatting and lint pass.",
+    "#7300 merged as efc91a38b6 after all 69 current-head checks and clean Cubic/antagonistic reviews; generic Cell aliases preserve resolved payload types."
   ],
   "stages": [
     {
@@ -59,19 +63,19 @@
       "id": "C1",
       "title": "Multi-replica reproductions",
       "status": "active",
-      "detail": "Remote insertion, rename, removal, and restoration acceptance now lands through #7285 for nested/mapped rows with same-space/cross-space profiles. Before/after demo available. Cold materialization and reconnect acceptance remain."
+      "detail": "Remote edits, removal, and restoration landed in #7285; first-browser-materialization acceptance landed in #7302. Four nested/mapped \u00d7 same/cross-space cases pass, with local demos. Reconnect remains pending."
     },
     {
       "id": "B1",
       "title": "Grouping and unique-key indexing",
       "status": "active",
-      "detail": "Index/lookup contract landed in #7294. Compiler probe preserves key/value schemas with a single-payload typed handle. Public API and lowering prototype are next."
+      "detail": "Contract merged in #7294 and generic Cell alias support in #7300. Typed handles and key resolution are being prototyped. Operator lowering, bucket maintenance, and runtime integration remain pending."
     },
     {
       "id": "B2",
       "title": "Keyed lookup and join",
       "status": "todo",
-      "detail": "Specify cardinality and invalidation, then implement."
+      "detail": "Keyed lookup contract recorded in #7294; runtime implementation remains pending."
     },
     {
       "id": "B3",
@@ -183,9 +187,9 @@
     },
     {
       "id": "Q5",
-      "title": "Push coverage fix and dashboard checkpoint to GitHub?",
+      "title": "Push and merge implementation PRs after review?",
       "status": "Approved",
-      "proposal": "Mike authorized pushing the coverage fix and dashboard checkpoint to the existing PR #7241 branch in commontoolsinc/labs.",
+      "proposal": "Mike authorized continued implementation pushes and merges, including #7257, after antagonistic review, clean Cubic review, and passing CI.",
       "blocks": "None."
     },
     {
@@ -210,7 +214,7 @@
     {
       "title": "See remote updates",
       "state": "Available \u00b7 C1/C3",
-      "detail": "The row demo shows remote membership, colors, ranking, and cross-space profile updates; cold and reconnect acceptance checks remain."
+      "detail": "The row demo shows remote membership, colors, ranking, cross-space profiles, and first browser materialization. Reconnect acceptance remains pending."
     },
     {
       "title": "Compare optimized vote updates",
@@ -218,5 +222,9 @@
       "detail": "Compare the same interaction before and after migration, with read work and measured time."
     }
   ],
-  "validatedRevision": "21fc2fb6a9c0055a2d2e3055dcd7e1fba1bbeed3"
+  "validatedRevision": "21fc2fb6a9c0055a2d2e3055dcd7e1fba1bbeed3",
+  "validationProvenance": {
+    "revisionUrl": "https://github.com/commontoolsinc/labs/commit/21fc2fb6a9c0055a2d2e3055dcd7e1fba1bbeed3",
+    "scope": "Local package, type, pattern, browser, and vintage validation of the integrated implementation. This is the parent of published dashboard checkpoint d67c923566146faa6f7b2493b1828140295f7d47. It does not identify the separately recorded browser baseline capture."
+  }
 }

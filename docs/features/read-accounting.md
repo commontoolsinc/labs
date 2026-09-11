@@ -95,7 +95,8 @@ UI demand to measure rendering work.
 Attempt accounting is enabled with
 `runtime.scheduler.setReadStatsEnabled(true, { attempts: true })`. It
 covers reactive transactions through settlement, event dependency preflights,
-event handlers, the harness's pattern-instantiation transaction, and each
+handler input presync materialization, event handlers, the harness's
+pattern-instantiation transaction, and each
 `runtime.editWithRetry` attempt, including asynchronous builtin writebacks.
 Commit and abort callbacks emit each attempt once. Aborting inside a reactive
 body preserves its per-run sample. Probes stop at settlement; diagnostic

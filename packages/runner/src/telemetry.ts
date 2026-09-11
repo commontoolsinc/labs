@@ -177,7 +177,13 @@ export type RuntimeTelemetryMarker = {
   error?: string;
 } | {
   type: "scheduler.read-attempt";
-  kind: "reactive" | "event" | "preflight" | "initialization" | "editWithRetry";
+  kind:
+    | "reactive"
+    | "event"
+    | "presync"
+    | "preflight"
+    | "initialization"
+    | "editWithRetry";
   actionId?: string;
   reads: ReadAttemptCounts;
 } | {
