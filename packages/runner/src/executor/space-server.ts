@@ -1049,9 +1049,10 @@ export class SpaceServer implements TransactionSealDestination {
     return this.#watermark;
   }
 
-  /** Resolves when this SpaceServer has fully parked (lease released,
-   * runtime disposed). The host chains re-activation on it when a
-   * session-open or admission races a park in progress. */
+  /** Resolves when this SpaceServer has fully parked: its runtime
+   * disposed, and its lease released or the release's failure logged
+   * (the row expires by TTL either way). The host chains re-activation
+   * on it when a session-open or admission races a park in progress. */
   get whenParked(): Promise<void> {
     return this.#parked.promise;
   }
@@ -2664,6 +2665,41 @@ export class SpaceServer implements TransactionSealDestination {
     const wave = this.#currentWave;
     if (wave === undefined) return 0;
     return this.#pendingEffectsByWave.get(wave)?.length ?? 0;
+  }
+
+  /**
+   * Helper for the cycle boundaries, which drops the open wave when
+   * nothing rides it, so that the next seal opens a fresh one at the
+   * current serverSeq and lease tenure. A wave's basis is the serverSeq
+   * it was opened at, and every seal opens one if none is open — a read
+   * probe against the serving runtime, a no-op derivation, an all-no-op
+   * claim re-issue — including a seal that lands while the loop's own
+   * wave commit is still in flight, whose basis then predates that
+   * commit. Carried into the next cycle, such a wave loses every write
+   * it comes to hold on a document the intervening commits wrote, at the
+   * per-doc CAS of its own commit: a derivation's write as superseded,
+   * which nothing re-runs since no input changed, and the loop's own
+   * watermark advance whole, since a patch of the same path cannot
+   * rebase over the previous advance. Run at the start of a cycle and
+   * again ahead of the cycle's bookkeeping write.
+   *
+   * Empty means nothing would be lost: no contribution, no seal chained
+   * but not yet applied (a chained seal has captured the wave and must
+   * not be orphaned), no deferred effect batch, and no append staged by
+   * a transaction that has not sealed yet (its appends ride its
+   * contribution at the seal).
+   */
+  #discardEmptyWave(): void {
+    const wave = this.#currentWave;
+    if (wave === undefined) return;
+    if (
+      wave.contributionCount > 0 || this.#pendingWaveSeals > 0 ||
+      wave.hasUnsealedAppends ||
+      (this.#pendingEffectsByWave.get(wave)?.length ?? 0) > 0
+    ) {
+      return;
+    }
+    this.#currentWave = undefined;
   }
 
   /** Re-arm the event scan for DEFERRED (transient) drain outcomes —
@@ -4744,6 +4780,7 @@ export class SpaceServer implements TransactionSealDestination {
     const runtime = this.#runtime;
     if (runtime === undefined || !this.#active) return;
     this.#cycleCounter += 1;
+    this.#discardEmptyWave();
     // The tenure's owed space-root ensure (OW45 arm-B stage 1) runs
     // single-flight BEFORE the tenure's ordinary steps: the event drain
     // may dispatch into the root's addPiece stream, and the demand
@@ -5224,36 +5261,19 @@ export class SpaceServer implements TransactionSealDestination {
     }
     const shouldAdvance = !exhausted && advanceTo > this.#watermark;
 
+    // The wave the bookkeeping write below seals into must be one opened
+    // at this cycle's serverSeq, not one a seal opened earlier and left
+    // empty (see #discardEmptyWave): the watermark doc's head has moved
+    // with every own wave commit since, and a write sealed under an older
+    // basis is dropped whole as a semantic conflict with the loop's own
+    // previous write of the same path.
+    this.#discardEmptyWave();
+
     if (!haveContributions && !shouldAdvance && !havePendingEffects) {
       // Nothing sealed and no watermark movement: no commit (the
       // zero-delta case — light cycles cost nothing). An EXHAUSTED
       // empty cycle is still counted: a wedged never-quiescing settle
       // is exactly what §7's wavesBudgetExhausted exists to surface.
-      //
-      // An EMPTY wave does not outlive its cycle (fan-out stage B; the
-      // stage-A fix round's flagged residual vii(b), fixed here at the
-      // root): an empty seal — a read probe, a no-op derivation, an
-      // all-no-op claim re-issue — opens `#currentWave` at THAT
-      // moment's serverSeq and lease tenure. Left open across
-      // zero-delta cycles, the wave's basis went stale: the first
-      // contributions to seal into it later — the boot wave's demanded
-      // derivations, after the piece's own instantiation commits landed
-      // — were dropped as SUPERSEDED at the per-doc CAS (their docs'
-      // heads had advanced past the stale basis; a derivation drop
-      // re-arms nothing, so nothing served until the next input), and
-      // a stale tenure across a same-process lease reacquire aborted
-      // the first real seal `lease-lost`. Discarded only when NOTHING
-      // rides it: no contribution, no pending effect batch, and no seal
-      // chained-but-not-yet-applied (a chained seal has already
-      // captured this wave and must not be orphaned — the F4 counter is
-      // exactly that window). The next seal opens a fresh wave at the
-      // current serverSeq and tenure.
-      if (
-        wave !== undefined && this.#pendingWaveSeals === 0 &&
-        this.#currentWave === wave
-      ) {
-        this.#currentWave = undefined;
-      }
       if (exhausted) {
         this.#options.stats.wavesBudgetExhausted += 1;
         logger.debug?.("wave-budget-exhausted", () => [
@@ -5857,7 +5877,17 @@ export class SpaceServer implements TransactionSealDestination {
     }
     this.#runtime = undefined;
     this.#disposeRuntime = undefined;
-    this.#lease?.release();
+    try {
+      this.#lease?.release();
+    } catch (error) {
+      // The row expires by TTL either way; what the park owes the host
+      // is its completion below, which a throw here must not skip.
+      logger.warn("park-release-failed", () => [
+        `space ${this.#options.space}: releasing the lease during park ` +
+        `(${reason}) failed`,
+        error,
+      ]);
+    }
     this.#lease = undefined;
     logger.info?.("parked", () => [
       `space ${this.#options.space} parked (${reason})`,
