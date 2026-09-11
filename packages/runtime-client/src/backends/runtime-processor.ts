@@ -1428,7 +1428,7 @@ export class RuntimeProcessor {
   /**
    * Handles a `CellSetRequest`. A `CellHandle.set()` is a blind leaf overwrite
    * (last-write-wins); `CellHandle.push()` sends only appended members and
-   * uses `Cell.push()`'s native mergeable operation. The decision is made by
+   * retries conflicting appends against fresh state. The decision is made by
    * _method_, never by inspecting the value's shape.
    */
   handleCellSet(request: CellSetRequest): void | Promise<void> {
@@ -1443,31 +1443,33 @@ export class RuntimeProcessor {
   }
 
   handleCellPush(request: CellPushRequest): void | Promise<void> {
-    const tx = this.#runtime.edit();
     // A frame ordinal distinguishes members within one append. The operation
-    // cause distinguishes first members minted by independent client runtimes.
-    const frame = pushFrame({
-      cause: `runtime-client cell push ${crypto.randomUUID()}`,
-      runtime: this.#runtime,
-      tx,
-      space: request.cell.space,
-      generatedIdCounter: 0,
+    // cause distinguishes callers and keeps member identities stable across
+    // retries when companion reference metadata requires a fresh basis.
+    const cause = `runtime-client cell push ${crypto.randomUUID()}`;
+    const cell = getCell(
+      this.#runtime,
+      request.cell,
+      this.#referenceRegistry,
+    ) as Cell<FabricValue[]>;
+    const values = request.values.map((value) =>
+      mapCellRefsToSigilLinks(value, this.#referenceRegistry)
+    );
+    const commit = this.#runtime.editWithRetry((tx) => {
+      const frame = pushFrame({
+        cause,
+        runtime: this.#runtime,
+        tx,
+        space: request.cell.space,
+        generatedIdCounter: 0,
+      });
+      try {
+        cell.withTx(tx).push(...values);
+      } finally {
+        popFrame(frame);
+      }
+      return {};
     });
-    try {
-      const cell = getCell(
-        this.#runtime,
-        request.cell,
-        this.#referenceRegistry,
-      ) as Cell<FabricValue[]>;
-      const values = request.values.map((value) =>
-        mapCellRefsToSigilLinks(value, this.#referenceRegistry)
-      );
-      cell.withTx(tx).push(...values);
-    } finally {
-      popFrame(frame);
-    }
-    this.#runtime.prepareTxForCommit(tx);
-    const commit = tx.commit();
     if (request.awaitCommit) return this.#requireCellCommit(commit);
     this.#observeCellCommit(commit, "push");
   }

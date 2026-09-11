@@ -127,6 +127,11 @@ away from the slot labels that accompany them. Admission validates the retained
 dependencies before accepting the edit. Array edits with unchanged metadata
 retain their mergeable operations.
 
+Worker cell appends use Runtime's conflict-retry path. Each attempt retains the
+same operation cause and member identities while re-deriving reference metadata
+against the refreshed array. A confirmed append reports success only after an
+attempt commits; terminal refusals still reach its caller.
+
 Local confirmation retains every accepted contribution when several sealed
 writes share a wave commit sequence. An arriving full document supplies the
 complete committed value and supersedes that local reconstruction.

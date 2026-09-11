@@ -3482,6 +3482,11 @@ describe("runtime-processor", () => {
         processor: buildProcessor({
           runtime: {
             edit: () => tx,
+            editWithRetry: (action: (candidate: unknown) => object) => {
+              action(tx);
+              prepared = true;
+              return tx.commit();
+            },
             prepareTxForCommit: (candidate: unknown) => {
               expect(candidate).toBe(tx);
               prepared = true;
@@ -3671,6 +3676,72 @@ describe("runtime-processor", () => {
   });
 
   describe("direct cell appends", () => {
+    it("retains both concurrent appends when reference metadata conflicts", async () => {
+      const server = new MemoryV2Server.Server({
+        authorizeSessionOpen: () => cfcSigner.did(),
+        sessionOpenAuth: { audience: testSessionOpenAudience },
+      });
+      const runtimes = [0, 1].map(() => {
+        const storageManager = new SharedV2StorageManager({
+          as: cfcSigner,
+          memoryHost: new URL("memory://"),
+        }, server);
+        return new Runtime({
+          apiUrl: new URL("http://localhost/"),
+          storageManager,
+          cfcFlowLabels: "persist",
+        });
+      });
+      const schema = {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { optionId: { type: "string" } },
+          required: ["optionId"],
+        },
+      } as const;
+      const cells = runtimes.map((runtime) =>
+        runtime.getCell(cfcSigner.did(), "concurrent-client-appends", schema)
+      );
+      try {
+        expect(
+          (await runtimes[0].editWithRetry((tx) => {
+            cells[0].withTx(tx).set([]);
+          })).error,
+        ).toBeUndefined();
+        await cells[1].sync();
+        await cells[1].pull();
+
+        const outcomes = await Promise.allSettled(runtimes.map((runtime, i) => {
+          const processor = buildProcessor({ runtime });
+          const { cell } = processor.handleGetCell({
+            type: RequestType.GetCell,
+            space: cfcSigner.did(),
+            cause: "concurrent-client-appends",
+            schema,
+          });
+          return processor.handleCellPush({
+            type: RequestType.CellPush,
+            cell,
+            values: [{ optionId: i === 0 ? "library" : "studio" }],
+            awaitCommit: true,
+          });
+        }));
+        expect(outcomes.map((outcome) => outcome.status))
+          .toEqual(["fulfilled", "fulfilled"]);
+        await cells[0].pull();
+        expect(cells[0].get()?.map((entry) => entry.optionId).sort())
+          .toEqual(["library", "studio"]);
+        expect(cells[0].key(0).resolveAsCell().getAsNormalizedFullLink().id)
+          .not.toBe(
+            cells[0].key(1).resolveAsCell().getAsNormalizedFullLink().id,
+          );
+      } finally {
+        for (const runtime of runtimes) await runtime.dispose();
+        await server.close();
+      }
+    });
+
     it("keeps object members distinct across independent callers", async () => {
       const signer = await Identity.fromPassphrase(
         `direct-cell-push-${crypto.randomUUID()}`,
