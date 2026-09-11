@@ -241,7 +241,12 @@ describe("engine-read-through", () => {
     const tx = clientRuntime.edit();
     clientArg.withTx(tx).set({ n });
     expect((await tx.commit()).error).toBeUndefined();
-    const authoredSeq = Engine.serverSeq(engine);
+    // Only the authored input is the settlement target; the store head can
+    // already include a serving wave that followed it.
+    const authoredSeq = Engine.readState(engine, {
+      id: clientArg.getAsNormalizedFullLink().id,
+    })!.seq;
+    expect(Engine.commitClassOfSeq(engine, authoredSeq)).toBe("authored");
     await waitUntil(
       () => readWatermarkSeq(engine) >= authoredSeq,
       "watermark to reach the authored commit",
@@ -673,9 +678,27 @@ describe("engine-read-through", () => {
     });
     const creating = clientRuntime.edit();
     cell.withTx(creating).set({ made: true });
-    expect((await creating.commit()).error).toBeUndefined();
-    const authoredSeq = Engine.serverSeq(engine);
     const refreshesBefore = host.stats().storeRefreshes;
+    // Observe completion after a serving wave has landed, so the store head
+    // includes derived work as well as the authored creation.
+    const covered = Promise.withResolvers<void>();
+    const noteExecutorCommit = server.noteExecutorCommit.bind(server);
+    server.noteExecutorCommit = (notice) => {
+      noteExecutorCommit(notice);
+      const created = Engine.readState(engine, { id });
+      if (created && readWatermarkSeq(engine) >= created.seq) {
+        covered.resolve();
+      }
+    };
+    try {
+      expect((await creating.commit()).error).toBeUndefined();
+      await covered.promise;
+    } finally {
+      server.noteExecutorCommit = noteExecutorCommit;
+    }
+    const authoredSeq = Engine.readState(engine, { id })!.seq;
+    expect(Engine.commitClassOfSeq(engine, authoredSeq)).toBe("authored");
+    expect(Engine.serverSeq(engine)).toBeGreaterThan(authoredSeq);
     await waitUntil(
       () => readWatermarkSeq(engine) >= authoredSeq,
       "the watermark to cover the creating commit",
