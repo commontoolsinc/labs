@@ -1668,18 +1668,29 @@ export class PatternManager {
       }
     }
     if (!owed) return undefined;
+    return this.#readSourceDelegations(space, identity);
+  }
+
+  /**
+   * Helper for `readInheritedAuthority()`, which loads `identity`'s verified
+   * source closure in a transaction without writes, so the load registers
+   * the delegations it carries.
+   */
+  async #readSourceDelegations(
+    space: MemorySpace,
+    identity: string,
+  ): Promise<void> {
     const tx = this.#runtime.edit();
-    return loadVerifiedSourceClosure(this.#runtime, space, identity, tx)
-      .then(
-        () => {},
-        (error) => {
-          logger.warn("inherited-authority-read-failed", () => [
-            `reading the delegations of ${identity} in ${space} failed`,
-            error,
-          ]);
-        },
-      )
-      .finally(() => tx.abort("inherited authority read complete"));
+    try {
+      await loadVerifiedSourceClosure(this.#runtime, space, identity, tx);
+    } catch (error) {
+      logger.warn("inherited-authority-read-failed", () => [
+        `reading the delegations of ${identity} in ${space} failed`,
+        error,
+      ]);
+    } finally {
+      tx.abort("inherited authority read complete");
+    }
   }
 
   async compilePattern(

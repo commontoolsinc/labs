@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -9,6 +10,7 @@ import type { Cell } from "../src/cell.ts";
 import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
 import { computeModuleHashes } from "../src/harness/module-identity.ts";
 import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import {
   compiledDocKey,
   deriveModuleDelegations,
@@ -776,6 +778,25 @@ describe("module identity delegation", () => {
         runtime.grantsModuleDelegation(space, successor.identity, oldIdentity),
       ).toBe(false);
     });
+
+    it("settles without a grant when reading the successor's closure fails", async () => {
+      await storeSuccessorSource();
+
+      {
+        using _failingRead = stub(runtime, "getCell", () => {
+          throw new Error("injected read failure");
+        });
+        await runtime.patternManager.readInheritedAuthority(
+          space,
+          successor.identity,
+          [oldIdentity],
+        );
+      }
+
+      expect(
+        runtime.grantsModuleDelegation(space, successor.identity, oldIdentity),
+      ).toBe(false);
+    });
   });
   describe("a successor another runtime moved a piece to", () => {
     // `runtime` moves the piece from v1 to v2 through a source update.
@@ -911,6 +932,40 @@ describe("module identity delegation", () => {
       await observer.start(observed);
 
       expect(await setName(observer, observed, "after")).toBe("v2:after");
+    });
+
+    it("does not start a piece stopped while the authority read is in flight", async () => {
+      await moveToV2();
+      const entered = Promise.withResolvers<void>();
+      const reading = Promise.withResolvers<void>();
+
+      using _heldRead = stub(
+        observer.patternManager,
+        "readInheritedAuthority",
+        () => {
+          entered.resolve();
+          return reading.promise;
+        },
+      );
+      const started = observer.start(observed);
+      await entered.promise;
+      observer.runner.stop(observed);
+      reading.resolve();
+
+      expect(await started).toBe(false);
+    });
+
+    it("starts a piece whose source history is invalid without reading authority", async () => {
+      const seed = runtime.edit();
+      piece.withTx(seed).setMetaRaw("pieceSourceHistory", [{
+        revisionId: "broken",
+        timestamp: 42,
+      }], rawMetaWriteAuthorization);
+      expect((await seed.commit()).error).toBeUndefined();
+
+      expect(await observer.start(observed)).toBe(true);
+
+      expect(await setName(observer, observed, "after")).toBe("v1:after");
     });
   });
 });
