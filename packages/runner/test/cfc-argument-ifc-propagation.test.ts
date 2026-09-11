@@ -6,6 +6,11 @@
  * `pattern.test.ts` measures that, where the alias into a node's output holds
  * the label its module joined on.
  *
+ * The `result bindings` block measures the same division one level down, over
+ * the cells a result binds rather than over the result schema's root: the
+ * field carrying an author's `ifc` declaration is the only one whose binding
+ * carries it, and a public sibling's binding carries none.
+ *
  * The last block here holds the property the rest of that rests on. A pattern
  * body is handed reactive references rather than values, so its build carries
  * no observation of an argument to join — the structural exclusion of CFC
@@ -20,11 +25,12 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import { createNodeFactory } from "../src/builder/module.ts";
+import { createNodeFactory, lift } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -105,6 +111,59 @@ describe("cfc-argument-ifc-propagation", () => {
 
       expect(confidentialityOf(properties?.content)).toEqual([HEALTH_ATOM]);
       expect(confidentialityOf(properties?.revealSensitive)).toBeUndefined();
+    });
+
+    describe("result bindings", () => {
+      // Every cell a result binds, measured through the alias that binds it.
+      // `revealSensitive` is the discriminating field: it sits in the same
+      // argument as `content` and carries no declaration of its own, so a
+      // label on its binding, or on a lift reading it, could only have come
+      // from its neighbor.
+
+      // deno-lint-ignore no-explicit-any
+      const aliasSchema = (binding: any) =>
+        resolvedSchema(binding?.$alias?.schema);
+
+      const bindings = () => {
+        const factory = pattern(
+          (input: { content: string; revealSensitive: boolean }) => ({
+            $NAME: "surface",
+            $UI: null,
+            content: input.content,
+            revealSensitive: input.revealSensitive,
+            derived: lift((word: string) => word.length)(input.content),
+            derivedPublic: lift((shown: boolean) => !shown)(
+              input.revealSensitive,
+            ),
+          }),
+          ARGUMENT_SCHEMA,
+          RESULT_SCHEMA,
+        );
+        // deno-lint-ignore no-explicit-any
+        return factory.result as any;
+      };
+
+      it("binds the declared field to a schema carrying its label", () => {
+        expect(confidentialityOf(aliasSchema(bindings().content))).toEqual([
+          HEALTH_ATOM,
+        ]);
+      });
+
+      it("binds a public sibling to a schema carrying no label", () => {
+        expect(confidentialityOf(aliasSchema(bindings().revealSensitive)))
+          .toBeUndefined();
+      });
+
+      it("binds a lift's output to a schema carrying the module's join", () => {
+        expect(confidentialityOf(aliasSchema(bindings().derived))).toEqual([
+          HEALTH_ATOM,
+        ]);
+      });
+
+      it("binds a lift over a public field to a schema carrying no label", () => {
+        expect(confidentialityOf(aliasSchema(bindings().derivedPublic)))
+          .toBeUndefined();
+      });
     });
 
     // `build` runs the body for its effect on the reference it is handed and

@@ -770,6 +770,26 @@ const cellMethods = new Set<
   "query",
 ]);
 
+/**
+ * The list-builtin result-container schema for `result`, carrying the whole
+ * `ifc` its link schema already declares. CFC §8.5.4.3 puts the source
+ * container's label on the coordinator's structural writes, and that label
+ * reaches this cell through the node walk before the container shape is
+ * written over it.
+ */
+function listResultSchemaFor(
+  result: { export(): { schema?: JSONSchema } },
+  itemSchema?: JSONSchema,
+): JSONSchema {
+  const container = listResultSchema(itemSchema);
+  const existing = result.export().schema;
+  const ifc = isObjectNotArray(existing) ? existing.ifc : undefined;
+  return ifc === undefined ? container : internSchema({
+    ...ContextualFlowControl.toSchemaObj(container),
+    ifc,
+  });
+}
+
 // The schema for one element of an array schema, suitable for a standalone
 // element cell. The array's items schema is often a `$ref` into the array
 // schema's `$defs`; carry those `$defs` onto the element schema so the reference
@@ -3649,7 +3669,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    result.setSchema(listResultSchema(op.resultSchema));
+    result.setSchema(listResultSchemaFor(result, op.resultSchema));
     return result;
   }
 
@@ -3859,7 +3879,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    result.setSchema(listResultSchema());
+    result.setSchema(listResultSchemaFor(result));
     return result;
   }
 
@@ -3899,7 +3919,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    result.setSchema(listResultSchema());
+    result.setSchema(listResultSchemaFor(result));
     return result;
   }
 
