@@ -1,19 +1,19 @@
 {
-  "updated": "2026-09-11T00:09:28.246813+00:00",
+  "updated": "2026-09-11T00:26:49.955314+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7257",
-  "activity": "Published the captured-cell compiler repair in #7257 and integrated the merged dashboard and row fix. Fresh review and CI remain. Selector fix #7279 has a zero-issue Cubic review and is completing CI.",
-  "review": "Compiler repair and selector fix have clean antagonistic reviews. The merged dashboard passed all 69 CI gates and actual zero-issue Cubic review. Current budget-head CI/Cubic remain required.",
+  "activity": "Read budgets integrated with main and nullable Cell capture correction validated. Publishing for fresh Cubic and CI. Selector fix #7279 merged; A4 read limits are in draft #7282.",
+  "review": "Antagonistic review is clean for the nullable Cell correction. All focused and full transformer checks pass; current-head Cubic and CI remain required before landing.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
     "#7261 merged as c8a64af840: all CI gates passed; latest Cubic reported zero issues; antagonistic review clean. Browser recordings remain available below.",
     "#7265: merged as 3aee034aff after all 69 CI gates, zero-issue latest Cubic review, and clean antagonistic review.",
     "#7264: merged as 5d23bc5ba9 after all 69 CI gates and clean latest Cubic/antagonistic reviews.",
-    "#7279: full runner 1,422 tests / 8,866 steps, all 46 type-check groups, 599 docs blocks, format and lint passed. Awaiting CI and Cubic.",
-    "#7257 compiler repair 3b4c6e5959: full transformer 1,167 tests / 955 steps; CLI 1,821 tests / 2,921 steps with two NO_COLOR-environment failures, both passing when NO_COLOR is removed. All 13 budget CLI steps, 46 type-check groups, 599 docs blocks, fmt and lint pass.",
-    "#7259: named incremental aggregates merged as d9b45371ef; contracts and measurements are linked from the implementation tracker."
+    "#7259: named incremental aggregates merged as d9b45371ef; contracts and measurements are linked from the implementation tracker.",
+    "#7257: main integration passed 1,423 runner tests / 8,888 steps. Nullable Cell correction passed 1,167 transformer tests / 959 steps, 20 focused compiler/aggregate steps, all 13 CLI budget steps, 46 type-check groups, 599 docs blocks, fmt and lint.",
+    "#7279: merged as 6472ea93df after all 69 CI gates, zero-issue Cubic review, and clean antagonistic review."
   ],
   "stages": [
     {
@@ -38,13 +38,13 @@
       "id": "A3",
       "title": "Read budgets and whole-step coverage",
       "status": "review",
-      "detail": "Compiler collision repaired and pushed to #7257; full transformer suite and original budget regressions pass. Integration with the merged dashboard and row fix is being checked before fresh CI and Cubic review."
+      "detail": "Implementation, main integration, and nullable Cell capture correction validated. PR #7257 requires fresh Cubic review and current-head CI before landing."
     },
     {
       "id": "A4",
       "title": "Read-side benchmark",
       "status": "active",
-      "detail": "Browser benchmark landed in #7261. Three headless render budget fixtures pass with a one-over failure probe. Publication depends on A3 and the isolated union-branch schema-scope fix."
+      "detail": "Browser benchmark landed in #7261. Draft #7282 adds passing render limits at all three sizes and a verified one-over failure. Its prerequisite is #7257."
     },
     {
       "id": "A5",
@@ -215,5 +215,5 @@
       "detail": "Compare the same interaction before and after migration, with read work and measured time."
     }
   ],
-  "validatedRevision": "3b4c6e5959"
+  "validatedRevision": "6be9f46a291e957bb31fe01e81f26b0015539e1b"
 }
