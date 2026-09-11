@@ -646,7 +646,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   }
 
   //
-  // Instance members
+  // Public instance members
   //
 
   /**
@@ -675,6 +675,12 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
     this.#deepTypeCheck = deepTypeCheck;
     return this.#mainVisit(value);
   }
+
+  //
+  // Visitor engine implementation
+  //
+  // This is arranged in approximately top-down fashion, to aid in readability.
+  //
 
   /** Helper which implements most of a top-level visit. */
   #mainVisit(value: DomainFor<DomainExtra>): BaselineVisitResult<ResultType> {
@@ -737,6 +743,154 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
       case "iterateMapOf": {
         return this.#subvisitMap(result.value, result.mappings);
+      }
+    }
+  }
+
+  /**
+   * Iteratively calls `visitValue()`, `visitCycle()`, and the subtype-specific
+   * visitor methods, until the visitor returns something other than a `replace`
+   * or `visitSubtype` result.
+   */
+  #visitResolvingSubtype(
+    value: DomainFor<DomainExtra>,
+  ):
+    | IterateArrayOfForm<DomainExtra>
+    | IterateMapOfForm<DomainExtra>
+    | Exclude<
+      LeafVisitorResult<DomainExtra, ResultType>,
+      ReplaceForm<DomainExtra>
+    > {
+    const vis = this.#visitor;
+    const origValue = value;
+
+    for (;;) {
+      const resolvedResult = this.#visitResolvingCyclesAndReplacement(value);
+
+      switch (resolvedResult?.type) {
+        case "visitSubtype": {
+          // Need dispatch. `value` _has not_ been replaced.
+          break;
+        }
+
+        case "visitSubtypeOf": {
+          // Need dispatch. `value` _has_ been replaced.
+          value = resolvedResult.value;
+          break;
+        }
+
+        default: {
+          // No dispatch required.
+          return resolvedResult;
+        }
+      }
+
+      const tag = this.#tagFromValueElseNull(value);
+      let result: DispatchingVisitorResult<DomainExtra, ResultType>;
+
+      switch (tag) {
+        case VALUE_TAGS.Array: {
+          const array = value as FabricArray;
+          result = vis.visitFabricContainer(array);
+          if (result?.type === "visitSubtype") {
+            result = vis.visitFabricArray(array);
+          }
+          break;
+        }
+
+        case VALUE_TAGS.FabricInstance: {
+          const instance = value as FabricInstance;
+          result = vis.visitFabricContainer(instance);
+          if (result?.type === "visitSubtype") {
+            result = vis.visitFabricInstance(instance);
+          }
+          break;
+        }
+
+        case VALUE_TAGS.Object: {
+          const object = value as FabricPlainObject;
+          result = vis.visitFabricContainer(object);
+          if (result?.type === "visitSubtype") {
+            result = vis.visitFabricPlainObject(object);
+          }
+          break;
+        }
+
+        case null: {
+          // `null` means that `value` was not recognized as a `FabricValue`.
+          if (this.#assumeValid) {
+            const desc = toCompactDebugString(value);
+            throw new Error(
+              `Encountered a non-\`FabricValue\` while doing an "assume valid" visit: ${desc}`,
+            );
+          }
+          result = vis.visitNonFabricValue(value as DomainExtra);
+          break;
+        }
+
+        default: {
+          const prim = value as Primitive | FabricPrimitive;
+          result = vis.visitPrimitive(prim, tag);
+          break;
+        }
+      }
+
+      switch (result?.type) {
+        case "iterateArray":
+        case "iterateMap": {
+          return this.#adjustResultForm(origValue, value, result);
+        }
+
+        case "replace": {
+          value = result.value;
+          break; // ...and continue to iterate.
+        }
+
+        default: {
+          return result;
+        }
+      }
+    }
+  }
+
+  /**
+   * Iteratively calls `visitValue()` and `visitCycle()` on the visitor, until
+   * the visitor returns something other than a `replace` result.
+   */
+  #visitResolvingCyclesAndReplacement(
+    value: DomainFor<DomainExtra>,
+  ):
+    | IterateArrayOfForm<DomainExtra>
+    | IterateMapOfForm<DomainExtra>
+    | VisitSubtypeOfForm<DomainExtra>
+    | Exclude<
+      DispatchingVisitorResult<DomainExtra, ResultType>,
+      ReplaceForm<DomainExtra>
+    > {
+    const vis = this.#visitor;
+    const origValue = value;
+
+    for (;;) {
+      const cycleAt = this.#stack.indexOf(value);
+      const result = (cycleAt === -1)
+        ? vis.visitValue(value)
+        : vis.visitCycle(value, cycleAt, this.#stack.depth);
+
+      switch (result?.type) {
+        case "iterateArray":
+        case "iterateMap":
+        case "visitSubtype": {
+          return this.#adjustResultForm(origValue, value, result);
+        }
+
+        case "replace": {
+          value = result.value;
+          break;
+        }
+
+        default: {
+          return result;
+        }
       }
     }
   }
@@ -857,175 +1011,9 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
     }
   }
 
-  /**
-   * Iteratively calls `visitValue()` and `visitCycle()` on the visitor, until
-   * the visitor returns something other than a `replace` result.
-   */
-  #visitResolvingCyclesAndReplacement(
-    value: DomainFor<DomainExtra>,
-  ):
-    | IterateArrayOfForm<DomainExtra>
-    | IterateMapOfForm<DomainExtra>
-    | VisitSubtypeOfForm<DomainExtra>
-    | Exclude<
-      DispatchingVisitorResult<DomainExtra, ResultType>,
-      ReplaceForm<DomainExtra>
-    > {
-    const vis = this.#visitor;
-    const origValue = value;
-
-    for (;;) {
-      const cycleAt = this.#stack.indexOf(value);
-      const result = (cycleAt === -1)
-        ? vis.visitValue(value)
-        : vis.visitCycle(value, cycleAt, this.#stack.depth);
-
-      switch (result?.type) {
-        case "iterateArray":
-        case "iterateMap":
-        case "visitSubtype": {
-          return this.#adjustResultForm(origValue, value, result);
-        }
-
-        case "replace": {
-          value = result.value;
-          break;
-        }
-
-        default: {
-          return result;
-        }
-      }
-    }
-  }
-
-  /**
-   * Iteratively calls `visitValue()`, `visitCycle()`, and the subtype-specific
-   * visitor methods, until the visitor returns something other than a `replace`
-   * or `visitSubtype` result.
-   */
-  #visitResolvingSubtype(
-    value: DomainFor<DomainExtra>,
-  ):
-    | IterateArrayOfForm<DomainExtra>
-    | IterateMapOfForm<DomainExtra>
-    | Exclude<
-      LeafVisitorResult<DomainExtra, ResultType>,
-      ReplaceForm<DomainExtra>
-    > {
-    const vis = this.#visitor;
-    const origValue = value;
-
-    for (;;) {
-      const resolvedResult = this.#visitResolvingCyclesAndReplacement(value);
-
-      switch (resolvedResult?.type) {
-        case "visitSubtype": {
-          // Need dispatch. `value` _has not_ been replaced.
-          break;
-        }
-
-        case "visitSubtypeOf": {
-          // Need dispatch. `value` _has_ been replaced.
-          value = resolvedResult.value;
-          break;
-        }
-
-        default: {
-          // No dispatch required.
-          return resolvedResult;
-        }
-      }
-
-      const tag = this.#tagFromValueElseNull(value);
-      let result: DispatchingVisitorResult<DomainExtra, ResultType>;
-
-      switch (tag) {
-        case VALUE_TAGS.Array: {
-          const array = value as FabricArray;
-          result = vis.visitFabricContainer(array);
-          if (result?.type === "visitSubtype") {
-            result = vis.visitFabricArray(array);
-          }
-          break;
-        }
-
-        case VALUE_TAGS.FabricInstance: {
-          const instance = value as FabricInstance;
-          result = vis.visitFabricContainer(instance);
-          if (result?.type === "visitSubtype") {
-            result = vis.visitFabricInstance(instance);
-          }
-          break;
-        }
-
-        case VALUE_TAGS.Object: {
-          const object = value as FabricPlainObject;
-          result = vis.visitFabricContainer(object);
-          if (result?.type === "visitSubtype") {
-            result = vis.visitFabricPlainObject(object);
-          }
-          break;
-        }
-
-        case null: {
-          // `null` means that `value` was not recognized as a `FabricValue`.
-          if (this.#assumeValid) {
-            const desc = toCompactDebugString(value);
-            throw new Error(
-              `Encountered a non-\`FabricValue\` while doing an "assume valid" visit: ${desc}`,
-            );
-          }
-          result = vis.visitNonFabricValue(value as DomainExtra);
-          break;
-        }
-
-        default: {
-          const prim = value as Primitive | FabricPrimitive;
-          result = vis.visitPrimitive(prim, tag);
-          break;
-        }
-      }
-
-      switch (result?.type) {
-        case "iterateArray":
-        case "iterateMap": {
-          return this.#adjustResultForm(origValue, value, result);
-        }
-
-        case "replace": {
-          value = result.value;
-          break; // ...and continue to iterate.
-        }
-
-        default: {
-          return result;
-        }
-      }
-    }
-  }
-
-  /**
-   * Gets the tag for the given value, in a manner which honors the
-   * type-checking style indicated by the top-level `visit*()` call on this
-   * instance.
-   */
-  #tagFromValueElseNull(value: DomainFor<DomainExtra>): FabricValueTag | null {
-    if (this.#assumeValid) {
-      return tagFromFabricValueElseNull(value as FabricValue);
-    } else if (this.#deepTypeCheck) {
-      // TODO(danfuzz): If cached, `isValidDeepFrozenFabricValue()` is faster
-      // than `isValidFabricValue()`. The latter should actually sniff at the
-      // frozen cache.
-      const isFabricValue = isValidDeepFrozenFabricValue(value) ||
-        isValidFabricValue(value);
-      return isFabricValue ? tagFromFabricValue(value) : null;
-    } else {
-      return isValidFabricValueLayer(value)
-        ? tagFromFabricValue(value as FabricValue)
-        : null;
-    }
-  }
+  //
+  // Utility methods
+  //
 
   /**
    * Adjusts an `iterateArray`, `iterateMap`, or `visitSubtype` form if
@@ -1100,6 +1088,28 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
           value: finalValue,
         };
       }
+    }
+  }
+
+  /**
+   * Gets the tag for the given value, in a manner which honors the
+   * type-checking style indicated by the top-level `visit*()` call on this
+   * instance.
+   */
+  #tagFromValueElseNull(value: DomainFor<DomainExtra>): FabricValueTag | null {
+    if (this.#assumeValid) {
+      return tagFromFabricValueElseNull(value as FabricValue);
+    } else if (this.#deepTypeCheck) {
+      // TODO(danfuzz): If cached, `isValidDeepFrozenFabricValue()` is faster
+      // than `isValidFabricValue()`. The latter should actually sniff at the
+      // frozen cache.
+      const isFabricValue = isValidDeepFrozenFabricValue(value) ||
+        isValidFabricValue(value);
+      return isFabricValue ? tagFromFabricValue(value) : null;
+    } else {
+      return isValidFabricValueLayer(value)
+        ? tagFromFabricValue(value as FabricValue)
+        : null;
     }
   }
 }
