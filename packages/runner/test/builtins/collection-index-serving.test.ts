@@ -76,11 +76,17 @@ describe("collection index serving", () => {
             const actorStorage = EmulatedStorageManager.connectTo(server, {
               as: actor,
             });
-            const actorRuntime = new Runtime({
-              apiUrl: new URL(import.meta.url),
-              storageManager: actorStorage,
-              experimental: { serverExecution: false },
-            });
+            let actorRuntime: Runtime;
+            try {
+              actorRuntime = new Runtime({
+                apiUrl: new URL(import.meta.url),
+                storageManager: actorStorage,
+                experimental: { serverExecution: false },
+              });
+            } catch (error) {
+              await actorStorage.close();
+              throw error;
+            }
             actorRuntimes.push(actorRuntime);
             const identity = { ...actorRuntime.scopeKeyIdentity };
             identities.push(identity);
