@@ -10,6 +10,10 @@ import { findAndInlineDataUriLinks } from "../data-uri.ts";
 import { isNormalizedFullLink } from "../link-types.ts";
 import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import {
+  cfcSchemaResolvedRoot,
+  resolveCfcSchemaRefRoot,
+} from "./schema-refs.ts";
 import type { CfcAddress } from "./types.ts";
 
 type UiContractTrustRequirements = {
@@ -231,7 +235,15 @@ const uiContractsFromSchemaInternal = (
     return [];
   }
 
-  const childRoot = root ?? resolvedSchema;
+  // A ref whose chain ends in another document — a definition body that is
+  // an external ref — hands its descendants that document's root.
+  const documentRoot = root ?? resolvedSchema;
+  const childRoot = resolvedSchema !== schema && schema !== undefined
+    ? cfcSchemaResolvedRoot(
+      resolvedSchema,
+      resolveCfcSchemaRefRoot(schema, documentRoot),
+    )
+    : documentRoot;
   const entries: UiContractEntry[] = [];
   const contract = uiContractFromSchemaInternal(
     resolvedSchema,

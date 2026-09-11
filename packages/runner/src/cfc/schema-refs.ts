@@ -247,13 +247,15 @@ export const hoistCfcSchemaDefs = (
   fragments: JSONSchema[];
   definitions: SchemaDefinitions | undefined;
 } => {
-  let merged: Record<string, JSONSchema> | undefined;
+  // Accumulated as a `Map` so that a definition named `__proto__` is an entry
+  // like any other rather than a prototype assignment.
+  let merged: Map<string, JSONSchema> | undefined;
   const hoisted = fragments.map((fragment): JSONSchema => {
     if (!hasDefinitionMap(fragment)) return fragment;
     const { $defs: map, ...body } = fragment;
     const conflicts = merged !== undefined &&
       Object.entries(map).some(([name, definition]) => {
-        const existing = merged![name];
+        const existing = merged!.get(name);
         return existing !== undefined && existing !== definition &&
           !fabricAwareEqual(existing, definition);
       });
@@ -263,19 +265,22 @@ export const hoistCfcSchemaDefs = (
       const { $defs: renamed, ...renamedBody } = namespaceLocalDefinitionScope(
         body,
         map,
-        new Set(Object.keys(merged!)),
+        new Set(merged!.keys()),
         "union_arm",
       );
       stripped = renamedBody;
       additions = renamed!;
     }
-    merged ??= {};
+    merged ??= new Map();
     for (const [name, definition] of Object.entries(additions)) {
-      if (!Object.hasOwn(merged, name)) merged[name] = definition;
+      if (!merged.has(name)) merged.set(name, definition);
     }
     return stripped;
   });
-  return { fragments: hoisted, definitions: merged };
+  return {
+    fragments: hoisted,
+    definitions: merged === undefined ? undefined : Object.fromEntries(merged),
+  };
 };
 
 const addRefs = (target: Set<string>, source: ReadonlySet<string>): void => {
@@ -570,7 +575,7 @@ const pruneCfcSchemaDefinitionsInternal = (
         const selectedEntries = Object.entries(selected);
         for (let index = 0; index < selectedEntries.length; index++) {
           const [name, definition] = selectedEntries[index];
-          const pruned = pruneCfcSchemaDefinitionsInternal(definition, true);
+          const pruned = pruneCfcSchemaDefinitionsInternal(definition, false);
           if (pruned !== definition) {
             entries ??= selectedEntries;
             entries[index] = [name, pruned];
@@ -651,23 +656,22 @@ const lookupExternalCfcSchemaDocument = (
   return document;
 };
 
-// The member of `document` a fragment ref names, or `undefined` for a ref
-// into a document that is not a group or names no member of it.
-const externalCfcSchemaMember = (
+// A registered document a fragment ref can address into: one holding a
+// definition map. A definition map is a non-array record; an array would
+// resolve indices as member names.
+const isGroupDocument = (
   document: JSONSchema,
+): document is JSONSchemaObj & { $defs: SchemaDefinitions } =>
+  isObjectNotArray(document) && isObjectNotArray(document.$defs);
+
+// The member of `group` a fragment ref names, or `undefined` when it names no
+// member.
+const externalCfcSchemaMember = (
+  group: JSONSchemaObj & { $defs: SchemaDefinitions },
   parsed: ExternalSchemaRef & { defName: string },
 ): JSONSchema | undefined => {
-  // A definition map is a non-array record; an array here would resolve
-  // indices as member names.
-  if (!isObjectNotArray(document) || !isObjectNotArray(document.$defs)) {
-    logger.warn("cfc", () => [
-      "Fragment ref into a schema document without `$defs`: ",
-      parsed.taggedHash,
-    ]);
-    return undefined;
-  }
-  const member = Object.hasOwn(document.$defs, parsed.defName)
-    ? document.$defs[parsed.defName]
+  const member = Object.hasOwn(group.$defs, parsed.defName)
+    ? group.$defs[parsed.defName]
     : undefined;
   if (member === undefined || !isSubschema(member)) {
     logger.warn("cfc", () => [
@@ -679,6 +683,23 @@ const externalCfcSchemaMember = (
   return member;
 };
 
+// The group a fragment ref addresses into, or `undefined` for a ref into a
+// document that holds no definition map.
+const lookupExternalCfcSchemaGroup = (
+  parsed: ExternalSchemaRef & { defName: string },
+): (JSONSchemaObj & { $defs: SchemaDefinitions }) | undefined => {
+  const document = lookupExternalCfcSchemaDocument(parsed);
+  if (document === undefined) return undefined;
+  if (!isGroupDocument(document)) {
+    logger.warn("cfc", () => [
+      "Fragment ref into a schema document without `$defs`: ",
+      parsed.taggedHash,
+    ]);
+    return undefined;
+  }
+  return document;
+};
+
 /**
  * Resolve an external `cid:` ref through the schema-document registry, to
  * the document itself or to a view of the member a fragment ref names.
@@ -687,17 +708,19 @@ const externalCfcSchemaMember = (
 const resolveExternalCfcSchemaRef = (
   parsed: ExternalSchemaRef,
 ): JSONSchema | undefined => {
-  const document = lookupExternalCfcSchemaDocument(parsed);
-  if (document === undefined) return undefined;
-  if (parsed.defName === undefined) return document;
+  if (parsed.defName === undefined) {
+    return lookupExternalCfcSchemaDocument(parsed);
+  }
   const defName = parsed.defName;
-  let views = memberViewCache.get(document as JSONSchemaObj);
+  const group = lookupExternalCfcSchemaGroup({ ...parsed, defName });
+  if (group === undefined) return undefined;
+  let views = memberViewCache.get(group);
   if (views === undefined) {
     views = new Map();
-    memberViewCache.set(document as JSONSchemaObj, views);
+    memberViewCache.set(group, views);
   }
   if (views.has(defName)) return views.get(defName);
-  const member = externalCfcSchemaMember(document, { ...parsed, defName });
+  const member = externalCfcSchemaMember(group, { ...parsed, defName });
   let view: JSONSchema | undefined;
   if (member !== undefined) {
     const externalized = externalizeGroupMember(member, parsed.taggedHash);
@@ -732,23 +755,22 @@ export const resolveExternalCfcSchemaRefAsDocument = (
 ): JSONSchema | undefined => {
   const parsed = parseExternalSchemaRef(schemaRef);
   if (parsed === undefined) return undefined;
-  const document = lookupExternalCfcSchemaDocument(parsed);
-  if (document === undefined) return undefined;
-  if (parsed.defName === undefined) return document;
+  if (parsed.defName === undefined) {
+    return lookupExternalCfcSchemaDocument(parsed);
+  }
   const defName = parsed.defName;
-  let forms = memberDocumentCache.get(document as JSONSchemaObj);
+  const group = lookupExternalCfcSchemaGroup({ ...parsed, defName });
+  if (group === undefined) return undefined;
+  let forms = memberDocumentCache.get(group);
   if (forms === undefined) {
     forms = new Map();
-    memberDocumentCache.set(document as JSONSchemaObj, forms);
+    memberDocumentCache.set(group, forms);
   }
   if (forms.has(defName)) return forms.get(defName);
-  const member = externalCfcSchemaMember(document, { ...parsed, defName });
+  const member = externalCfcSchemaMember(group, { ...parsed, defName });
   const form = member === undefined
     ? undefined
-    : internSchema(definitionBodyWithDefs(
-      member,
-      (document as JSONSchemaObj).$defs,
-    ));
+    : internSchema(definitionBodyWithDefs(member, group.$defs));
   forms.set(defName, form);
   return form;
 };

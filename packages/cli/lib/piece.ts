@@ -2917,14 +2917,14 @@ function withoutSchemaProse(schema: JSONSchema): JSONSchema {
 }
 
 /**
- * One declared node that may describe a position, with the scope its own
- * references resolve against.
+ * One declared node that may describe a position, with the document root
+ * its own references resolve against.
  *
- * The scope travels WITH the node because a `$defs` closure is local: a
- * definition may carry definitions of its own, and its nested references name
- * those rather than the ones at the event root. Carrying one root for the whole
- * walk resolves such a reference in the wrong document, which finds either
- * nothing or — worse — a same-named definition belonging to someone else.
+ * The root travels WITH the node because a reference chain can end in
+ * another document — an embedded or external target — whose definitions its
+ * nested references then name. Carrying one root for the whole walk resolves
+ * such a reference in the wrong document, which finds either nothing or —
+ * worse — a same-named definition belonging to someone else.
  *
  * `direct` separates an account OF the position from an account of one
  * ALTERNATIVE at it. Both are read when looking a child up; only a direct one

@@ -1302,11 +1302,11 @@ const DERIVED_DROPPED: DerivedPosition = { cut: false };
  * position is additionally held to the fields it declares.
  *
  * Reference resolution is the canonical resolver's, one hop per recursion —
- * never a private pointer parser, whose recorded divergence class (escaped
- * names, nested `$defs` scopes) is exactly what `localRefTarget`'s history
- * warns about. A reference the resolver does not resolve leaves the position
- * unbounded, and a readback that still closes a circle then refuses with the
- * legible message rather than corrupting.
+ * never a private pointer parser, which diverges from it on escaped names.
+ * An embedded or external target is a document of its own, and its root
+ * is threaded below it. A reference the resolver does not resolve leaves the
+ * position unbounded, and a readback that still closes a circle then refuses
+ * with the legible message rather than corrupting.
  */
 function derivePosition(
   schema: JSONSchema | undefined,
@@ -1329,7 +1329,10 @@ function derivePosition(
     if (target === undefined) return DERIVED_WHOLE;
     return derivePosition(
       target,
-      isEmbeddedCfcSchemaRef(ref) ? target : root,
+      cfcSchemaResolvedRoot(
+        target,
+        isEmbeddedCfcSchemaRef(ref) ? target : root,
+      ),
       [...following, { root, ref }],
       bound,
     );
@@ -3239,24 +3242,43 @@ export async function deriveSelectedValue(
     additionalProperties: true,
   };
 
+  // Documents placed under the properties of one wrapper: their `$defs` move
+  // to the wrapper's root, which is where their `#/$defs/<name>` refs point
+  // once they sit below another root, with a name two documents define
+  // differently renamed apart.
+  const wrapProperties = (
+    documents: Readonly<Record<string, JSONSchema>>,
+  ): JSONSchema => {
+    const keys = Object.keys(documents);
+    const { fragments, definitions } = hoistCfcSchemaDefs(
+      keys.map((key) => documents[key]),
+    );
+    return {
+      type: "object",
+      properties: Object.fromEntries(
+        keys.map((key, index) => [key, fragments[index]]),
+      ),
+      required: keys,
+      additionalProperties: false,
+      ...(definitions !== undefined && { $defs: definitions }),
+    };
+  };
+  const wrapUnder = (key: string, document: JSONSchema): JSONSchema =>
+    wrapProperties({ [key]: document });
+
   let predicatePattern: ReturnType<typeof pattern> | undefined;
   if (selection.filter !== undefined) {
     const elementSchema = selectSourceSchema(
       sourceItemSchema,
       predicateItemMask!,
     );
-    const argumentSchema: JSONSchema = {
-      type: "object",
-      properties: {
-        element: sanitizeSchemaForLinks(
-          dereferencedElementSchema(elementSchema),
-          KeepAsCell.OnlyStream,
-        ),
-        params: paramsSchema,
-      },
-      required: ["element", "params"],
-      additionalProperties: false,
-    };
+    const argumentSchema = wrapProperties({
+      element: sanitizeSchemaForLinks(
+        dereferencedElementSchema(elementSchema),
+        KeepAsCell.OnlyStream,
+      ),
+      params: paramsSchema,
+    });
     const predicateModule = lift(
       ({ element, params }: {
         element: unknown;
@@ -3271,20 +3293,6 @@ export async function deriveSelectedValue(
       { type: "boolean" },
     );
   }
-
-  // A document placed under one property of a wrapper: its `$defs` move to
-  // the wrapper's root, which is where its `#/$defs/<name>` refs point once
-  // it sits below another root.
-  const wrapUnder = (key: string, document: JSONSchema): JSONSchema => {
-    const { fragments: [body], definitions } = hoistCfcSchemaDefs([document]);
-    return {
-      type: "object",
-      properties: { [key]: body },
-      required: [key],
-      additionalProperties: false,
-      ...(definitions !== undefined && { $defs: definitions }),
-    };
-  };
 
   let itemProjectionPattern: ReturnType<typeof pattern> | undefined;
   if (projection?.projectsArrayItems) {

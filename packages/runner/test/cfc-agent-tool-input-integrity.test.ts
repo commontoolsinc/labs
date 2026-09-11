@@ -1074,6 +1074,32 @@ describe("CFC trusted agent: floors behind reference-form schemas (D2)", () => {
     expect(failure).not.toContain("cannot resolve");
   });
 
+  it("refuses a local reference that only a nested object's own $defs could satisfy (fail closed)", () => {
+    // The event root declares no `$defs`, so `#/$defs/Floored` names nothing
+    // whatever `envelope` declares below it; the walk refuses rather than
+    // reading a definition the document does not hold.
+    const eventSchema = {
+      type: "object",
+      properties: {
+        envelope: {
+          type: "object",
+          $defs: {
+            Floored: {
+              type: "object",
+              ifc: { requiredIntegrity: [KERNEL_ATOM] },
+            },
+          },
+          properties: {
+            recipient: { $ref: "#/$defs/Floored" },
+          },
+        },
+      },
+    } as JSONSchema;
+    expect(gate(eventSchema, { envelope: { recipient: {} } })).toContain(
+      "cannot resolve",
+    );
+  });
+
   it("refuses a local reference it cannot resolve (fail closed)", () => {
     expect(gate({ $ref: "#/$defs/Missing" }, "x")).toContain(
       "cannot resolve",

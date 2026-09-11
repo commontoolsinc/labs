@@ -913,7 +913,7 @@ export function verbInputSchemaError(
  * The walk descends the payload beside the schema exactly as the
  * undeclared-field gate does — objects by `properties`, arrays by `items`
  * and `prefixItems`, conjunctions member-wise, local `$ref`s through
- * `localRefTarget` with the CFC child root threaded beside — and passes
+ * `localRefTarget` against the document root threaded beside — and passes
  * over disjunction interiors, where choosing a branch is the caller's.
  * Everything it does not recognize flows through untouched.
  */

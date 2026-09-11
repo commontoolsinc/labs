@@ -56,7 +56,9 @@ export const cfcSchemaEntries = (
     return entries;
   }
 
-  const childRoot = typeof schema.$ref === "string"
+  // A ref that did not resolve leaves `resolved` as the schema itself, whose
+  // own `$defs` is inert under the root it sits in.
+  const childRoot = resolved !== schema
     ? cfcSchemaResolvedRoot(
       resolved,
       resolveCfcSchemaRefRoot(schema, schemaRoot),

@@ -276,8 +276,9 @@ const preferAsCellBranch = (schema: JSONSchema): JSONSchema => {
 };
 
 /**
- * A branch with its `$ref` resolved against the union's `$defs`, or against
- * its own when the union declares none.
+ * A branch with its `$ref` resolved against the union's `$defs`. A `$defs`
+ * the branch declares of its own is inert below the union, and is removed
+ * before resolving when the union declares none.
  *
  * A branch that will not resolve narrows to `false` — nothing matches it. It
  * cannot be left as it was: a bare `$ref` declares no `type` and no `required`,
