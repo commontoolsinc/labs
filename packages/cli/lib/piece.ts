@@ -12,7 +12,12 @@ import {
   codecOf,
   NULL_LIVE_ENVIRONMENT,
 } from "@commonfabric/data-model/codec-common";
-import { createSession, isDID, Session } from "@commonfabric/identity";
+import {
+  createSession,
+  type Identity,
+  isDID,
+  Session,
+} from "@commonfabric/identity";
 import { collectDataFileNames } from "@commonfabric/js-compiler";
 import { TARGET } from "@commonfabric/js-compiler/typescript";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
@@ -134,6 +139,7 @@ import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
 import { loadIdentity } from "./identity.ts";
 import { stderrConsoleHandler } from "./json-output.ts";
 import { validateEmbeddedSpaces } from "./llm-friendly-ref.ts";
+import { instantiatePieceOnServer } from "./pattern-lifecycle.ts";
 import { claimProcessDeployment } from "./process-deployment.ts";
 import {
   deriveDiskHandleId,
@@ -466,6 +472,7 @@ interface PieceOperationDependencies extends PieceResolutionDeps {
   loadIdentity?: typeof loadIdentity;
   getProgramFromFile?: typeof getProgramFromFile;
   getPinnedProgramFromFile?: typeof getPinnedProgramFromFile;
+  instantiatePieceOnServer?: typeof instantiatePieceOnServer;
   reportSearchError?: (
     pieceId: string,
     source: "input data" | "result data" | "metadata",
@@ -1597,12 +1604,71 @@ export async function resolveLinkEndpointAddress(
 }
 
 /**
+ * Whether the deployment this connection speaks to runs the serving loop,
+ * in which case creating a piece is its to execute: the connection carries
+ * the deployment's own flag posture
+ * (docs/features/server-pattern-lifecycle.md).
+ */
+function servesLifecycleVerbs(pieces: PiecesController): boolean {
+  return (pieces.runtime as Runtime | undefined)?.experimental
+    .serverExecution === true;
+}
+
+async function lifecycleClient(
+  config: SpaceConfig,
+  deps: PieceOperationDependencies,
+): Promise<{ apiUrl: URL; identity: Identity }> {
+  return {
+    apiUrl: new URL(config.apiUrl),
+    identity: await (deps.loadIdentity ?? loadIdentity)(config.identity),
+  };
+}
+
+/**
+ * The served half of `newPiece`: the serving runtime compiles the program
+ * and materializes the piece — the creation act, with its registry entry
+ * and its name in the same transaction — and this connection then starts
+ * it the way it starts any piece it opens, running the graph as
+ * speculation while the server derives on demand. The request is awaited
+ * without a wall-clock bound: a creation the server is still committing
+ * is not one to walk away from, since it lands whether or not this
+ * process waits. `boundStart` is the bound the local start runs under.
+ */
+async function createOnServer(
+  config: SpaceConfig,
+  pieces: PiecesController,
+  program: RuntimeProgram,
+  entry: EntryConfig,
+  options: { start?: boolean; slug?: string; force?: boolean } | undefined,
+  deps: PieceOperationDependencies,
+  boundStart: <T>(start: Promise<T>) => Promise<T>,
+): Promise<{ id: string; getCell: () => Cell<unknown> }> {
+  const receipt = await (deps.instantiatePieceOnServer ??
+    instantiatePieceOnServer)(await lifecycleClient(config, deps), {
+      space: pieces.getSpace(),
+      program,
+      ...(entry.repository === undefined
+        ? {}
+        : { repository: entry.repository }),
+      ...(options?.slug === undefined ? {} : { slug: options.slug }),
+      ...(options?.force === undefined ? {} : { force: options.force }),
+      register: true,
+      ...(options?.start === false ? { start: false } : {}),
+    });
+  const cell = await pieces.getPieceCell(receipt.pieceId, false);
+  if (options?.start !== false) await boundStart(pieces.startPiece(cell));
+  return { id: receipt.pieceId, getCell: () => cell };
+}
+
+/**
  * Creates a new piece from source code and optional input.
  *
  * A `slug` that already points somewhere is refused the way `set-slug`
- * refuses one, and `force` takes it. The refusal arrives after the piece
- * exists, so it names the piece as well as the flag: an operator who meant to
- * repoint has an id to name, and one who did not has a piece to find.
+ * refuses one, and `force` takes it. Against a serving deployment the name
+ * rides the creation transaction, so the refusal leaves nothing behind.
+ * Otherwise the refusal arrives after the piece exists, so it names the
+ * piece as well as the flag: an operator who meant to repoint has an id to
+ * name, and one who did not has a piece to find.
  */
 export async function newPiece(
   config: SpaceConfig,
@@ -1615,15 +1681,21 @@ export async function newPiece(
     () => (deps.loadPieces ?? loadPieces)(config),
   );
 
-  // Registration through `pieces.add()` requires an existing default pattern
-  // and fails before sending if none exists. Ensuring it creates an absent
-  // root and reconciles and repairs an existing one; fail here with the cause
-  // if initialization fails.
+  // Against a serving deployment the space root is the serving loop's to
+  // ensure — it does so on activation, ahead of the verb this command sends
+  // — and a served creation that finds no root refuses with `no-space-root`.
+  // Otherwise registration through `pieces.add()` requires an existing
+  // default pattern and fails before sending if none exists. Ensuring it
+  // creates an absent root and reconciles and repairs an existing one; fail
+  // here with the cause if initialization fails.
+  const served = servesLifecycleVerbs(pieces);
   try {
-    await timeCliPhase(
-      "newPiece.ensureDefaultPattern",
-      () => pieces.ensureDefaultPattern(),
-    );
+    if (!served) {
+      await timeCliPhase(
+        "newPiece.ensureDefaultPattern",
+        () => pieces.ensureDefaultPattern(),
+      );
+    }
   } catch (error) {
     throw new Error(
       `Could not initialize the space's default pattern: ${
@@ -1655,11 +1727,7 @@ export async function newPiece(
   const PIECE_START_TIMEOUT_MS = 60_000;
   const runtimeErrors = runtimeErrorLog(pieces.runtime);
   const errorCountBefore = runtimeErrors.length;
-  const piece = await timeCliPhase("newPiece.create", () => {
-    const createPromise = pieces.create(program, {
-      repository: entry.repository,
-      start: options?.start,
-    });
+  const boundStart = <T>(starting: Promise<T>): Promise<T> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
@@ -1676,14 +1744,33 @@ export async function newPiece(
         );
       }, PIECE_START_TIMEOUT_MS);
     });
-    return Promise.race([createPromise, timeout]).finally(() =>
-      clearTimeout(timer)
-    );
-  });
+    return Promise.race([starting, timeout]).finally(() => clearTimeout(timer));
+  };
+  const piece = await timeCliPhase(
+    "newPiece.create",
+    () =>
+      served
+        ? createOnServer(
+          config,
+          pieces,
+          program,
+          entry,
+          options,
+          deps,
+          boundStart,
+        )
+        : boundStart(pieces.create(program, {
+          repository: entry.repository,
+          start: options?.start,
+        })),
+  );
   // Here rather than after the registry add below: the piece now exists in
   // the space, and a slug or registry step that throws afterwards leaves a
   // partial write that the operator is owed the location of.
   noteWroteTo(config.space);
+  // A served creation named and registered the piece in its own
+  // transaction; what follows is the client-side creation's second half.
+  if (served) return piece.id;
 
   if (options?.slug) {
     try {
@@ -1846,24 +1933,20 @@ export async function setPiecePattern(
     pieces,
     deps,
   );
+  const program = await (deps.getPinnedProgramFromFile ??
+    getPinnedProgramFromFile)(pieces, entry);
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
     undefined,
     resolvedConfig.pieceScope,
   );
-  const receipt = await piece.setPattern(
-    await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
-      pieces,
-      entry,
-    ),
-    {
-      repository: entry.repository,
-      ...(options.dangerouslyAllowIncompatibleSchema
-        ? { dangerouslyAllowIncompatibleSchema: true }
-        : {}),
-    },
-  );
+  const receipt = await piece.setPattern(program, {
+    repository: entry.repository,
+    ...(options.dangerouslyAllowIncompatibleSchema
+      ? { dangerouslyAllowIncompatibleSchema: true }
+      : {}),
+  });
   noteWroteTo(config.space);
   return receipt;
 }
@@ -1886,18 +1969,15 @@ export async function checkPiecePattern(
     pieces,
     deps,
   );
+  const program = await (deps.getPinnedProgramFromFile ??
+    getPinnedProgramFromFile)(pieces, entry);
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
     undefined,
     resolvedConfig.pieceScope,
   );
-  return await piece.checkPattern(
-    await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
-      pieces,
-      entry,
-    ),
-  );
+  return await piece.checkPattern(program);
 }
 
 export async function savePiecePattern(

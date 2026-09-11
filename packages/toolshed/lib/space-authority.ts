@@ -136,6 +136,61 @@ export const NOT_OWNER_MESSAGE =
   "hold the recovery phrase) and grant your CLI DID with `cf acl set`. A " +
   "passkey login cannot currently be exported to the CLI at all.";
 
+/** The one denial a writer check returns; see {@link authorizeSpaceWriter}. */
+export const NOT_WRITER_MESSAGE =
+  "Not authorized to write to that space, or no such space. Check the grant " +
+  "for the identity you are signing with: `cf acl ls --space <space>` and " +
+  '`cf id did "$CF_IDENTITY"`.';
+
+/**
+ * What a writer check returns: admitted, or the denial
+ * {@link SpaceAuthority} carries. It hands back no ACL, since a deployment
+ * with enforcement off admits without reading one.
+ */
+export type SpaceWriterAuthority =
+  | { ok: true }
+  | Extract<SpaceAuthority, { ok: false }>;
+
+/**
+ * Authorize `callerDid` to write into `space`: the memory server's own
+ * answer for an authored commit, with the wildcard grant and the service
+ * principals it honors. A deployment with ACL enforcement off admits every
+ * caller the way its memory server does.
+ *
+ * Like {@link authorizeSpaceOwner}, one denial covers a malformed DID, a
+ * space this deployment does not host, an absent or malformed ACL, and a
+ * caller without a grant, so the answer is not an existence oracle over
+ * the deployment's spaces; the distinguishing detail is logged.
+ */
+export async function authorizeSpaceWriter(
+  deps: SpaceAuthorityDeps,
+  space: string,
+  callerDid: string,
+): Promise<SpaceWriterAuthority> {
+  const deny = (logDetail: string): SpaceWriterAuthority => ({
+    ok: false,
+    kind: "not-owner",
+    message: NOT_WRITER_MESSAGE,
+    logDetail,
+  });
+  if (!isValidSpaceDid(space)) return deny("space did failed shape check");
+  const hosts = deps.hostsSpace ?? (() => true);
+  if (!hosts(space)) return deny("space not hosted by this deployment");
+  if (deps.aclMode === "off") return { ok: true };
+  let acl: ACL | null;
+  try {
+    acl = await new ACLManager(deps.runtime, space as DID).get();
+  } catch (error) {
+    return deny(`acl malformed or ownerless: ${error}`);
+  }
+  if (acl === null) return deny("space has no ACL (never initialized)");
+  const role = spaceReaderRole(acl, space, callerDid, deps.serviceDids);
+  if (role !== "owner" && role !== "writer") {
+    return deny(`caller role on ${space} is ${role ?? "none"}, need writer`);
+  }
+  return { ok: true };
+}
+
 /**
  * Authorize `callerDid` to administer ingest channels on `space`, and confirm
  * this deployment could actually write there.
