@@ -26,6 +26,8 @@ import {
   compiledDocKey,
   deriveModuleDelegations,
   getCompileCacheRuntimeVersion,
+  IMPORT_EDGE_SYNC_SCHEMA,
+  importEdgeCell,
   loadCompiledClosure,
   loadVerifiedSourceClosure,
   type ModuleDelegationMap,
@@ -3039,7 +3041,7 @@ export class PatternManager {
     delegated?: WritebackDelegation,
   ): Promise<void> {
     const writebackStart = performance.now();
-    await this.#syncSourceCacheWriteTargets(space, modules);
+    await this.#syncSourceCacheWriteTargets(space, modules, entryIdentity);
     let committedModuleDelegations = moduleDelegations;
     const { error } = await this.#runtime.editWithRetry((tx) => {
       // Compile-cache writeback is runtime-internal bookkeeping
@@ -3093,7 +3095,12 @@ export class PatternManager {
     delegated?: WritebackDelegation,
   ): Promise<void> {
     const writebackStart = performance.now();
-    await this.#syncCompileCacheWriteTargets(space, modules, opts);
+    await this.#syncCompileCacheWriteTargets(
+      space,
+      modules,
+      entryIdentity,
+      opts,
+    );
     // The closure is committed in CHUNKS of bounded module count rather than
     // one all-or-nothing transaction. A stale-refs recovery (compiler output
     // change over a pre-existing space) re-writes the entire closure; as a
@@ -3185,25 +3192,58 @@ export class PatternManager {
   async #syncSourceCacheWriteTargets(
     space: MemorySpace,
     modules: readonly CacheableModule[],
+    entryIdentity: string,
   ): Promise<void> {
-    await Promise.all(
-      modules.map((module) =>
+    await Promise.all([
+      ...modules.map((module) =>
         this.#runtime.getCell(
           space,
           sourceDocKey(module.identity),
           WRITE_TARGET_EDGE_SYNC_SCHEMA,
         ).sync()
       ),
-    );
+      ...this.#importEdgeSyncs(space, modules, entryIdentity),
+    ]);
+  }
+
+  /**
+   * The syncs of every import-edge document the source documents of
+   * `modules` will name — the authored imports and the entry's synthetic
+   * root links alike — so a write reads each with its true version rather
+   * than claiming it absent, a claim the store refuses when an earlier
+   * write of the same edge landed the document.
+   */
+  #importEdgeSyncs(
+    space: MemorySpace,
+    modules: readonly CacheableModule[],
+    entryIdentity: string,
+  ): Promise<unknown>[] {
+    const syncs: Promise<unknown>[] = [];
+    for (const [identity, doc] of buildSourceDocs(modules, entryIdentity)) {
+      for (const imp of doc.imports) {
+        syncs.push(
+          importEdgeCell(
+            this.#runtime,
+            space,
+            identity,
+            imp,
+            undefined,
+            IMPORT_EDGE_SYNC_SCHEMA,
+          ).sync(),
+        );
+      }
+    }
+    return syncs;
   }
 
   async #syncCompileCacheWriteTargets(
     space: MemorySpace,
     modules: readonly CacheableModule[],
+    entryIdentity: string,
     opts: { runtimeVersion: string },
   ): Promise<void> {
-    await Promise.all(
-      modules.flatMap((module) => [
+    const syncs: Promise<unknown>[] = [
+      ...modules.flatMap((module) => [
         this.#runtime.getCell(
           space,
           sourceDocKey(module.identity),
@@ -3215,7 +3255,9 @@ export class PatternManager {
           WRITE_TARGET_EDGE_SYNC_SCHEMA,
         ).sync(),
       ]),
-    );
+      ...this.#importEdgeSyncs(space, modules, entryIdentity),
+    ];
+    await Promise.all(syncs);
   }
 
   /** Resolves a `Pattern` from an evaluate result. */
