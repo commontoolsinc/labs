@@ -60,6 +60,29 @@ source as an empty collection: predicate count yields `0`, and the By forms
 yield `undefined`. Numeric aggregates require numbers, and score callbacks
 require numeric results.
 
+## Choosing a collection computation
+
+Use `computed` for an inline derivation or module-level `lift` to reuse one.
+Moving the same loop between them does not make it incremental. The
+[collection-loop measurements](../history/development/performance/2026-09-11-computed-lift-collection-loops.md)
+compared computed, broad lift, and narrow lift on 32, 128, and 512 linked rows.
+All three skipped an unread-field edit and scanned the collection for an edit
+to the summed field. At 512 rows that update performed 1,025 proxy reads and
+515 link hops in completed action bodies. These counters exclude setup,
+network traffic, and other runtime work; they do not establish equal latency.
+
+For an operation in the table above, compare its contract with the computation
+you need. In particular, `sum` rounds an exact accumulated total once, so it
+can differ from an ordered JavaScript reduction. Use an explicit cell receiver;
+`rows.map(score).sum()` is not an available replacement.
+
+A captured collection scanned separately for each row can multiply work by
+both collection sizes. Move work shared by all rows outside the row callback
+when that preserves dependencies and output identity. Measure the demanded
+result, including initialization, membership changes, and committed updates
+through settlement. A named aggregate whose callback reads a shared collection
+can still invalidate every callback.
+
 ## Work and ownership
 
 The runtime sorts element identity keys and builds a balanced tree with at most

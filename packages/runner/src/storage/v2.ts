@@ -70,7 +70,11 @@ import type { JSONSchema } from "../builder/types.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
-import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
+import {
+  classifySchemaMeta,
+  collectExternalSchemaRefHashes,
+  schemaMetaRefHashes,
+} from "../schema-decompose.ts";
 import {
   acquireSchemaRegistryLease,
   lookupSchemaDocument,
@@ -752,6 +756,15 @@ const compactCommitReads = <
   space: MemorySpace,
   reads: Read[],
 ): Read[] => {
+  const dependencyKeys = new Map<number | number[], string>();
+  const dependencyKeyFor = (localSeq: number | number[]): string => {
+    let key = dependencyKeys.get(localSeq);
+    if (key === undefined) {
+      key = localSeqKey(localSeq);
+      dependencyKeys.set(localSeq, key);
+    }
+    return key;
+  };
   const sorted = [...reads].sort((left, right) => {
     const leftScope = normalizeCellScope(left.scope);
     const rightScope = normalizeCellScope(right.scope);
@@ -768,8 +781,8 @@ const compactCommitReads = <
     }
 
     if ("localSeq" in left && "localSeq" in right) {
-      const leftKey = localSeqKey(left.localSeq);
-      const rightKey = localSeqKey(right.localSeq);
+      const leftKey = dependencyKeyFor(left.localSeq);
+      const rightKey = dependencyKeyFor(right.localSeq);
       if (leftKey !== rightKey) {
         return leftKey < rightKey ? -1 : 1;
       }
@@ -797,7 +810,7 @@ const compactCommitReads = <
         normalizeCellScope(candidate.scope)
       }:${candidate.id}:${candidate.seq}`
       : `pending:${normalizeCellScope(candidate.scope)}:${candidate.id}:${
-        localSeqKey(candidate.localSeq)
+        dependencyKeyFor(candidate.localSeq)
       }:${candidate.basisSeq}`;
     let group = grouped.get(dependencyKey);
     if (!group) {
@@ -855,8 +868,8 @@ const compactCommitReads = <
     }
 
     if ("localSeq" in left && "localSeq" in right) {
-      const leftKey = localSeqKey(left.localSeq);
-      const rightKey = localSeqKey(right.localSeq);
+      const leftKey = dependencyKeyFor(left.localSeq);
+      const rightKey = dependencyKeyFor(right.localSeq);
       if (leftKey !== rightKey) {
         return leftKey < rightKey ? -1 : 1;
       }
@@ -6539,6 +6552,13 @@ export class SpaceReplica
     // nonRecursive read at this parent (emitted after the loop).
     const structuralTarget = getBlindStructuralTarget(source);
 
+    // Pending bases belong to a document instance and the speculative-layer
+    // policy. Every path read in this synchronous build shares that same stack.
+    const pendingLayersByDocument = [
+      new Map<string, number[]>(),
+      new Map<string, number[]>(),
+    ];
+
     // Emit one commit read for `id`, baselined against the most recent in-flight
     // local version of that doc below this commit's localSeq if one exists, else
     // the confirmed seq (or an explicit `confirmedSeq` override, e.g. a read that
@@ -6597,9 +6617,8 @@ export class SpaceReplica
       confirmedSeq?: number,
       excludeSpeculativeLayers = false,
     ) => {
-      const record = this.#docs.get(
-        docKey(id, this.instanceKey(scope, identity)),
-      );
+      const recordKey = docKey(id, this.instanceKey(scope, identity));
+      const record = this.#docs.get(recordKey);
       // The read's materialized view sat on EVERY lower pending layer, not
       // just the nearest one: name them ALL (ascending; the last element is
       // the doc's top-of-stack below this commit) so a dropped deeper layer
@@ -6611,17 +6630,24 @@ export class SpaceReplica
       // servers base staleness at the highest element only — a lower-layer
       // basis WITHOUT that exclusion would false-conflict with the
       // session's own later stacked writes (CT-1872 1c).
-      const layers = [
-        ...new Set(
-          record?.pending
-            .filter((version) => version.localSeq < localSeq)
-            .filter((version) =>
-              !excludeSpeculativeLayers ||
-              !this.#speculativeLocalSeqs.has(version.localSeq)
-            )
-            .map((version) => version.localSeq) ?? [],
-        ),
-      ].sort((left, right) => left - right);
+      const layersByDocument = pendingLayersByDocument[
+        excludeSpeculativeLayers ? 1 : 0
+      ];
+      let layers = layersByDocument.get(recordKey);
+      if (layers === undefined) {
+        layers = [
+          ...new Set(
+            record?.pending
+              .filter((version) => version.localSeq < localSeq)
+              .filter((version) =>
+                !excludeSpeculativeLayers ||
+                !this.#speculativeLocalSeqs.has(version.localSeq)
+              )
+              .map((version) => version.localSeq) ?? [],
+          ),
+        ].sort((left, right) => left - right);
+        layersByDocument.set(recordKey, layers);
+      }
       const shape = nonRecursive ? { nonRecursive: true } : {};
       if (layers.length > 0) {
         pending.push({
@@ -6709,10 +6735,15 @@ export class SpaceReplica
    * Validates the read-side delivery guarantee over a whole frame BEFORE
    * any of it is applied (`docs/specs/content-addressed-schemas.md`), and
    * registers the frame's schema documents: every schema ref a delivered
-   * document embeds — a registered schema document's own refs, or a link
-   * schema anywhere in an ordinary document's value — must reach a
+   * document embeds — a registered schema document's own refs, a link
+   * schema anywhere in an ordinary document's value, or the reserved
+   * `schema` metadata member any document carries (`cid:` documents
+   * included; content addressing hashes `.value` alone) — must reach a
    * VERIFIED schema document delivered by this frame (the prospective
-   * overlay) or already stored.
+   * overlay) or already stored. A `schema` member in the malformed form
+   * — a `cid:` reference outside a single root `$ref` — quarantines its
+   * document outright: the commit boundary refuses that form, so it can
+   * only predate the enforcement or come from out-of-band writing.
    *
    * A violated guarantee QUARANTINES the offending document — the caller
    * applies the frame without it, and this replica keeps whatever it
@@ -6782,6 +6813,26 @@ export class SpaceReplica
     for (const remove of sync.removes) {
       if (typeof remove.id === "string") deletedInFrame.add(remove.id);
     }
+    // The `schema` metadata member, read the same way on every document.
+    // Returns whether the document survives; a malformed member is
+    // quarantined here, before any obligation of its own is recorded.
+    const embedSchemaMeta = (id: string, doc: unknown): boolean => {
+      const form = classifySchemaMeta(doc);
+      if (form.kind === "malformed") {
+        quarantined.add(id);
+        overlay.delete(id);
+        logger.error("schema-doc-quarantine", () => [
+          `Document ${id} was delivered with malformed schema metadata ` +
+          `(${form.reason}). The commit boundary refuses this form, so ` +
+          `the stored document predates that enforcement or was written ` +
+          `out of band. The document is quarantined; this replica keeps ` +
+          `its previous state for it.`,
+        ]);
+        return false;
+      }
+      for (const hash of schemaMetaRefHashes(form)) embed(hash, id);
+      return true;
+    };
     for (const upsert of sync.upserts) {
       const id = upsert.id;
       if (typeof id !== "string") continue;
@@ -6793,6 +6844,7 @@ export class SpaceReplica
       if (!isObjectNotArray(doc)) continue;
       overlay.set(id, doc);
       deletedInFrame.delete(id);
+      if (!embedSchemaMeta(id, doc)) continue;
       if (id.startsWith("cid:")) {
         const value = (doc as { value?: unknown }).value;
         const hash = id.slice("cid:".length);
@@ -6828,8 +6880,9 @@ export class SpaceReplica
           continue;
         }
       }
-      // Link positions only — an `$alias`-shaped record in an arriving
-      // document is plain data, never a delivery obligation.
+      // Link positions — the `schema` metadata member was embedded above.
+      // An `$alias`-shaped record in an arriving document is plain data,
+      // never a delivery obligation.
       mapLinkSchemas(doc as FabricValue, (schema) => {
         for (
           const hash of collectExternalSchemaRefHashes(schema as JSONSchema)

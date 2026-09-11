@@ -80,6 +80,15 @@ async function readFrames(): Promise<Frame[]> {
     .map((line) => JSON.parse(line) as Frame);
 }
 
+/** Counts mutable shared writes in an observed frame window. */
+function countMutableSharedWrites(frames: Frame[]): number {
+  return frames.filter((frame) =>
+    frame.dir === "out" && frame.type === "transact"
+  ).flatMap((frame) => frame.commit?.operations ?? []).filter((operation) =>
+    operation.scope === "space" && !operation.id.startsWith("cid:")
+  ).length;
+}
+
 try {
   if (mode === "seed") {
     const tx = runtime.edit();
@@ -110,7 +119,8 @@ try {
   }
   const source = runtime.getCell(space, "survey", schema);
   await source.pull();
-  const before = (await readFrames()).length;
+  const setupFrames = await readFrames();
+  const before = setupFrames.length;
   const value = await deriveSelectedValue(runtime, space, source, {
     projection: parseSelectProjection(
       "@,title,createdAt,lastActivityAt,commentCount",
@@ -136,11 +146,8 @@ try {
     unanswered: requests.filter((request) =>
       !responses.has(request.requestId)
     ).length,
-    mutableSharedWrites: requests.flatMap((request) =>
-      request.commit?.operations ?? []
-    ).filter((operation) =>
-      operation.scope === "space" && !operation.id.startsWith("cid:")
-    ).length,
+    setupMutableSharedWrites: countMutableSharedWrites(setupFrames),
+    mutableSharedWrites: countMutableSharedWrites(frames),
   }));
 } finally {
   await runtime.dispose();

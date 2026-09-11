@@ -18,6 +18,12 @@ interface ReadCounter {
   documents: Set<object>;
 }
 
+/** Local read work retained through a transaction's settlement. */
+export type ReadAttemptCounts = Pick<
+  ActionReadStats,
+  "proxyAccesses" | "linkResolutions"
+>;
+
 const counters = new WeakMap<object, ReadCounter>();
 let activeCount = 0;
 
@@ -25,11 +31,14 @@ let activeCount = 0;
 export let readStatsActive = false;
 
 /**
- * Starts accounting for `tx` and returns a function that stops it.
+ * Starts accounting for `tx` and returns a body checkpoint function.
+ * With a completion observer, counters remain active through commit or abort;
+ * otherwise the body checkpoint stops collection.
  * Transactions belonging to other actions remain independent across awaits.
  */
 export function startReadStats(
   tx: IExtendedStorageTransaction,
+  onComplete?: (counts: ReadAttemptCounts) => void,
 ): (registeredDependencies: number) => ActionReadStats {
   if (counters.has(tx.tx)) {
     throw new Error("Read accounting is already active for this transaction");
@@ -39,16 +48,28 @@ export function startReadStats(
     linkResolutions: 0,
     documents: new Set(),
   };
-  counters.set(tx.tx, counter);
-  activeCount++;
-  readStatsActive = true;
   let finished = false;
-  return (registeredDependencies) => {
+  const stop = () => {
     if (!finished) {
       counters.delete(tx.tx);
       readStatsActive = --activeCount > 0;
       finished = true;
     }
+  };
+  if (onComplete !== undefined) {
+    tx.addCommitCallback(() => {
+      stop();
+      onComplete({
+        proxyAccesses: counter.proxyAccesses,
+        linkResolutions: counter.linkResolutions,
+      });
+    });
+  }
+  counters.set(tx.tx, counter);
+  activeCount++;
+  readStatsActive = true;
+  return (registeredDependencies) => {
+    if (onComplete === undefined) stop();
     return {
       proxyAccesses: counter.proxyAccesses,
       linkResolutions: counter.linkResolutions,
