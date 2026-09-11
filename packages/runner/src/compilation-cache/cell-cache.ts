@@ -17,6 +17,7 @@ import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { computeModuleHashes } from "../harness/module-identity.ts";
 import type { CacheableModule } from "../harness/types.ts";
+import { areNormalizedLinksSame } from "../link-types.ts";
 import { createSigilLinkFromParsedLink, parseLink } from "../link-utils.ts";
 import { snapshotQueryResult } from "../query-result-proxy.ts";
 import type { MemorySpace, Runtime } from "../runtime.ts";
@@ -981,7 +982,7 @@ export function writeSourceDocs(
         const stored = edge.get();
         if (
           stored?.specifier !== specifier ||
-          !sameDocumentLink(parseLink(stored.link), parseLink(link))
+          !sameDocumentLink(stored.link, link)
         ) {
           edge.set({ specifier, link });
         }
@@ -1073,23 +1074,15 @@ const SOURCE_DOC_COMPARE_SCHEMA = {
 } as const satisfies JSONSchema;
 
 /**
- * Whether two parsed links name the same whole document: the id, the
- * space, and the scope, at the document root. A link that reaches the
- * right id through another space or below the root is not the edge a
- * write would record, and is rewritten.
+ * Whether two links name the same whole document, at the document root: a
+ * link that reaches the right id below the root is not the edge a write
+ * would record, and is rewritten.
  */
-function sameDocumentLink(
-  a:
-    | { id?: string; space?: string; path?: readonly string[]; scope?: unknown }
-    | undefined,
-  b:
-    | { id?: string; space?: string; path?: readonly string[]; scope?: unknown }
-    | undefined,
-): boolean {
-  return a !== undefined && b !== undefined && a.id === b.id &&
-    a.space === b.space && (a.path?.length ?? 0) === 0 &&
-    (b.path?.length ?? 0) === 0 &&
-    JSON.stringify(a.scope ?? null) === JSON.stringify(b.scope ?? null);
+function sameDocumentLink(link1: unknown, link2: unknown): boolean {
+  const a = parseLink(link1);
+  const b = parseLink(link2);
+  return a !== undefined && b !== undefined && a.path.length === 0 &&
+    b.path.length === 0 && areNormalizedLinksSame(a, b);
 }
 
 /**
@@ -1122,17 +1115,14 @@ function storedSourceDocMatches(
   ) {
     return false;
   }
-  if (!sameDocumentLink(parseLink(stored.code), parseLink(code))) return false;
+  if (!sameDocumentLink(stored.code, code)) return false;
   const storedImports = stored.imports ?? [];
   if (storedImports.length !== imports.length) return false;
   for (let i = 0; i < imports.length; i += 1) {
     const edge = storedImports[i];
     if (
       edge?.specifier !== imports[i].specifier || !isCell(edge.link) ||
-      !sameDocumentLink(
-        edge.link.getAsNormalizedFullLink(),
-        imports[i].target.getAsNormalizedFullLink(),
-      )
+      !sameDocumentLink(edge.link, imports[i].target)
     ) {
       return false;
     }
