@@ -45,6 +45,7 @@ import {
   type CellSelection,
   CellSelectionError,
   deriveSelectedValue,
+  isStoredContainer,
   LINK_MARKER_KEY,
 } from "./cell-selection.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
@@ -185,18 +186,17 @@ export interface CallableExecutionDeps {
    * to arrive in. Answered by the same selection step `cf cell get` reads
    * through, so one grammar covers reads and calls.
    *
-   * It shapes a result that exists rather than deciding what is fetched: the
-   * readback has already materialized the whole receipt by the time this
-   * applies. (A plain result's receipt does carry a descriptive schema of
-   * what it holds — a reactive result's carries none — but either way the
-   * fetch has happened first.) The shared step waits for its computed output
-   * with `Cell.pull()`, whose scheduler and linked-document convergence pool
-   * are runtime/manager-wide; a shaped call can therefore still share a wait
-   * with active work that the plain call's transaction-local acknowledgment
-   * does not. Declared object keys are ordered locally from the projection
-   * after that readiness boundary, with an open projection's retained extras
-   * following in value order. A verb that returns nothing keeps returning
-   * nothing — there is no value for a selection to be about. */
+   * A schemaless receipt holding a stored container is selected before its
+   * linked contents are fetched. Other receipts are materialized before
+   * selection to establish whether a result exists. The shared step waits
+   * for its computed output with `Cell.pull()`, whose scheduler and
+   * linked-document convergence pool are runtime/manager-wide; a shaped call
+   * can therefore still share a wait with active work that the plain call's
+   * transaction-local acknowledgment does not. Declared object keys are ordered
+   * locally from the projection after that readiness boundary, with an open
+   * projection's retained extras following in value order. A verb that returns
+   * nothing keeps returning nothing — there is no value for a selection to be
+   * about. */
   selection?: CellSelection;
 
   /** @internal Seam for tests, mirroring `getCellValue`'s. */
@@ -1734,10 +1734,27 @@ export async function executeResolvedCallable(
     let links: Record<string, InvocationResultLink> | undefined;
     if (link) {
       const receipt = resolved.pieces.runtime.getCellFromLink<any>(link);
-      const value = await timeCliPhase(
-        "executeCallable.receipt.pull",
-        () => receipt.pull(),
-      );
+      let value: unknown;
+      let raw: unknown;
+      if (deps.selection !== undefined && receipt.schema === undefined) {
+        const stored = receipt.asSchema(false);
+        await timeCliPhase(
+          "executeCallable.receipt.probe",
+          () => stored.pull(),
+        );
+        raw = stored.getRaw();
+      }
+      // A stored container establishes presence without loading its children.
+      // A root link needs materialization: its target can be absent.
+      if (isStoredContainer(raw)) {
+        value = raw;
+      } else {
+        value = await timeCliPhase(
+          "executeCallable.receipt.pull",
+          () => receipt.pull(),
+        );
+        raw = receipt.getRaw();
+      }
       // A value-less verb's receipt is an empty record — existence-only.
       // Presence is decided on the receipt's STORED value, never on the
       // materialized one: a `FabricInstance` crossing the cell read arrives
@@ -1748,7 +1765,6 @@ export async function executeResolvedCallable(
       // the plain empty record; every other stored shape — plain JSON, the
       // link a launched or chained-cell result converts to, an instance's
       // codec form, a keyless raw primitive — is a result.
-      const raw = receipt.getRaw();
       const valueLess = isObjectNotArray(raw) && !isInstance(raw) &&
         Object.keys(raw).length === 0;
       if (value !== undefined && !valueLess) {

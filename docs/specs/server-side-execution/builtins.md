@@ -60,11 +60,57 @@ reported rather than written into the conversation.
 
 | built-in | request inputs (memo key basis) | result cell | authority | notes |
 | --- | --- | --- | --- | --- |
-| `fetch` (`fetchData`) | url, method, headers (allowlisted), body, response schema | `{ result?, error?, pending, requestHash }` — today the hash lives in an internal cell `{requestId, lastActivity, inputHash}` (`fetch.ts:427-472`); the "migrate it onto the result doc" move was DEFERRED at stage G (deliberate): the internal-cell hash is functionally equivalent committed state (T10.Q1 — §4's memo rule reads it the same), and the migration is an OFF-arm cell-shape change, so it waits for an OFF-arm ruling batch that wants it (plausibly never) | capability handle bound at wiring (README §3.8) | redirects/deadlines per existing `fetch-request-deadlines` doc; today's outbox id `` `${kind.name}:${inputHash}` `` is the memo+outbox-dedupe precedent |
+| `fetch` (`fetchData`) | url, method, headers (allowlisted), body, response schema | `{ result?, error?, pending }`; the memo hash is committed in the internal cell `{requestId, lastActivity, inputHash}` (`fetch.ts`) | capability handle bound at wiring (README §3.8) | redirects/deadlines per existing `fetch-request-deadlines` doc; the memo base is `` `${kind.name}:${inputHash}` ``; the served outbox key also names the target document and its resolved user or session instance |
 | `fetch-program` | program source ref + integrity | compiled program ref | same | feeds `compile-and-run` |
-| `llm` (`generateText` / `generateObject`) | model, messages/prompt, schema, params | settled result only (protocol.md §6 — no partial commits in v2); `requestHash` already sits on the result cell today (`llm.ts:716-822`) — the precedent §4 generalizes | broker-held provider keys; grant from handle | temperature etc. are inputs, so nondeterminism is memo-stable by construction |
+| `llm` (`generateText` / `generateObject`) | model, messages/prompt, schema, params | settled result only (protocol.md §6 — no partial commits in v2); `requestHash` on the result cell selects the pending request and accompanies its settled result or error | broker-held provider keys; grant from handle | temperature etc. are inputs, so nondeterminism is memo-stable by construction |
 | `llm-dialog` | dialog state + params | settled turns | same | multi-turn = new key per turn |
 | `sqlite*` | database link, statement, params, reader principal | one cleared result cell per (query, reader) | read served under the reader's clearance | clearance = per-reader materialization (RULED 2026-08-02) — see below |
+
+The shared `fetch.ts` builtins retain independent request lifecycles for each
+served result instance. The requesting run's identity resolves the outbox key
+and every asynchronous claim, completion, error, abandonment, and teardown
+transaction before its first cell read. A served mutex claim commits the
+validated input hash with its claim id and activity timestamp, so a subsequent
+unchanged-input run recognizes that in-flight request. Each issuance captures
+its own run identity, including when a shared scope changes representatives.
+One graph-level cancellation callback visits retained instances; completed or
+idle instances retire after their accepted outbox requests, active work, and
+pending publications settle.
+Late refusal callbacks cannot mutate a replacement instance. Each result
+instance retains one latest pending publication per physical output-binding
+instance; declared result-container scope does not determine that address.
+Accepted publication, including memo and empty results, supersedes older
+requests selecting another target for the same binding. Distinct bindings can
+announce a shared result independently without changing another request's
+result fields. Unstamped client runs use the runtime's own identity and keep
+one local lifecycle.
+
+Served `llm`, `generateText`, and `generateObject` bind lifecycle state and
+outbox identity to the resolved output instance. The pending request writes
+`requestHash` with `pending: true`; only a settled result or error constitutes a
+memo hit. Unqueued completion checks the selected hash under the issuing
+identity and reads the current input label basis before writing. An A→B→A selection can
+therefore reuse the original in-flight A while a stale B response leaves the
+current result alone. A refused staging attempt can restore its own output
+binding without replacing an accepted request's pending state or result. Each
+live result instance retains the latest staging attempt per resolved output
+binding; a retry replaces that binding's prior attempt. Binding ownership uses
+the raw node's physical publication coordinate, which can differ from its
+declared result or container scope. An accepted publication
+to a different target supersedes older attempts for the same binding, including
+memo hits that publish an unchanged link and terminal refusal announcements.
+Publication acceptance waits for the wave verdict. Work from a withdrawn
+contribution does not reach the model.
+Parent binding publication follows the selected target separately from request
+state, so a scope change can return to an existing target. Settled in-memory
+instance state retires once no staging or dispatched work owns it; durable
+result cells retain memoization.
+
+Named queues retain their issued work when inputs are cleared. Queued
+`generateText` and `generateObject` publish each completion even when a later
+request is queued; `llm` publishes only its latest request's successful result.
+Queue completion writes remain bound to the issuing identity and read the live
+input label basis. This queue behavior applies with server execution on or off.
 
 `sqlite*` row clearance — RULED 2026-08-02: **per-reader
 materialization**, today's shape. The reader principal is part of
