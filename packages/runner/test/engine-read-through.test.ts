@@ -205,18 +205,6 @@ describe("engine-read-through", () => {
     }
   };
 
-  /**
-   * The seq of the latest authored commit in the space: the seq a client's
-   * commit landed at, read after that commit resolved. The serving loop's
-   * own derived commits can land between the client's commit and this
-   * read, so the server's head seq is not it, and the loop's watermark
-   * covers authored input only.
-   */
-  const latestAuthoredSeq = (engine: Engine.Engine): number =>
-    (engine.database.prepare(
-      `SELECT MAX(seq) AS seq FROM "commit" WHERE class = 'authored'`,
-    ).get() as { seq: number }).seq;
-
   /** The service principal's live sessions on the space. */
   const serviceSessions = () =>
     server.accessForTestingOnly.sessionsForSpace(space).filter((session) =>
@@ -263,7 +251,12 @@ describe("engine-read-through", () => {
     const tx = clientRuntime.edit();
     clientArg.withTx(tx).set({ n });
     expect((await tx.commit()).error).toBeUndefined();
-    const authoredSeq = latestAuthoredSeq(engine);
+    // Only the authored input is the settlement target; the store head can
+    // already include a serving wave that followed it.
+    const authoredSeq = Engine.readState(engine, {
+      id: clientArg.getAsNormalizedFullLink().id,
+    })!.seq;
+    expect(Engine.commitClassOfSeq(engine, authoredSeq)).toBe("authored");
     await waitUntil(
       () => readWatermarkSeq(engine) >= authoredSeq,
       () =>
@@ -760,15 +753,17 @@ describe("engine-read-through", () => {
     await hold.held();
     const creation = hold.commits.at(-1)!;
     await sealReadProbe();
+    const id = "of:read-through-window-doc" as URI;
     const cell = clientRuntime.getCellFromLink<{ made: boolean }>({
-      id: "of:read-through-window-doc" as URI,
+      id,
       space,
       path: [],
     });
     const creating = clientRuntime.edit();
     cell.withTx(creating).set({ made: true });
     expect((await creating.commit()).error).toBeUndefined();
-    const authoredSeq = latestAuthoredSeq(engine);
+    const authoredSeq = Engine.readState(engine, { id })!.seq;
+    expect(Engine.commitClassOfSeq(engine, authoredSeq)).toBe("authored");
     hold.release();
 
     await waitUntil(
@@ -814,7 +809,10 @@ describe("engine-read-through", () => {
     const next = clientRuntime.edit();
     clientArg.withTx(next).set({ n: 60 });
     expect((await next.commit()).error).toBeUndefined();
-    const authoredSeq = latestAuthoredSeq(engine);
+    const authoredSeq = Engine.readState(engine, {
+      id: clientArg.getAsNormalizedFullLink().id,
+    })!.seq;
+    expect(Engine.commitClassOfSeq(engine, authoredSeq)).toBe("authored");
     hold.release();
 
     await waitUntil(
@@ -860,9 +858,6 @@ describe("engine-read-through", () => {
     await tx.commit();
 
     // A commit creating the document reaches the replica through the feed.
-    // The refresh baseline is read ahead of the commit: the loop can have
-    // refreshed the record before the commit's own promise resolves.
-    const refreshesBefore = host.stats().storeRefreshes;
     const cell = clientRuntime.getCellFromLink<{ made: boolean }>({
       id,
       space,
@@ -870,8 +865,15 @@ describe("engine-read-through", () => {
     });
     const creating = clientRuntime.edit();
     cell.withTx(creating).set({ made: true });
+    // The refresh baseline is read ahead of the commit: the loop can have
+    // refreshed the record before the commit's own promise resolves.
+    const refreshesBefore = host.stats().storeRefreshes;
     expect((await creating.commit()).error).toBeUndefined();
-    const authoredSeq = latestAuthoredSeq(engine);
+    // The creating commit's own seq is the settlement target: the loop's
+    // wave commits can land between the client's commit and this read,
+    // and the watermark covers authored input only.
+    const authoredSeq = Engine.readState(engine, { id })!.seq;
+    expect(Engine.commitClassOfSeq(engine, authoredSeq)).toBe("authored");
     await waitUntil(
       () => readWatermarkSeq(engine) >= authoredSeq,
       () =>
