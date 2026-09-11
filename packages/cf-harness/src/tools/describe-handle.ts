@@ -5,6 +5,10 @@ import {
   type SqliteDbRef,
   type SqliteQueryResult,
 } from "@commonfabric/memory/v2";
+import {
+  rowLabelSpecOf,
+  ruleInputFields,
+} from "@commonfabric/memory/sqlite/row-label";
 import { type Cell, readResultSchemaMeta } from "@commonfabric/runner";
 import { cfcLabelViewForCellFailClosed } from "@commonfabric/runner/cfc";
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
@@ -126,6 +130,28 @@ export interface DescribeHandleTableFill {
   nonNull?: Record<string, number>;
 
   /**
+   * The columns this table's per-row label rule reads, when it has one. A
+   * query over such a table must project every one of them — located by true
+   * origin, so an alias does not stand in for the column — or the read is
+   * refused rather than returned unlabeled, and the refusal arrives on the
+   * result's error rather than as rows.
+   *
+   * Derived from the same declaration the runner evaluates, never restated
+   * here, so a rule this build cannot read reports nothing rather than a
+   * guess. Absent when the table declares no rule.
+   */
+  rowLabelReads?: string[];
+
+  /**
+   * Present when the rule reads a column this disclosure does not name, which
+   * makes {@link rowLabelReads} a part of the requirement rather than the
+   * whole of it: a query projecting everything named there is still refused.
+   * A partial list with nothing saying it is partial would read as the recipe
+   * for a read that cannot succeed.
+   */
+  rowLabelReadsWithheld?: true;
+
+  /**
    * Why this table holds no counts, in the words of whatever refused. A table
    * that could not be counted is reported as uncounted rather than as empty:
    * zero rows and unknown rows are the two readings these counts exist to
@@ -232,7 +258,7 @@ export const describeHandleToolDescriptor: HarnessToolDescriptor = {
   toolId: "describe_handle",
   title: "Describe Handle",
   description:
-    "Report the shape of a general handle's referent and the CFC labels it carries: its recorded schema, path and label atom types, never its data. A referent that is a SQLite database reports its tables instead of a schema, under `database`: the columns of each table with their types, the labels those columns carry, and under `fill` how many rows each table holds and how many of them are non-NULL in each column. Read `fill` before writing a query: a column whose count is 0 is NULL on every row of this database, so filtering on it returns nothing, and a table reporting `unread` was not counted rather than empty. Read such a referent with `db.query` over the handle rather than as a value. A capability-restricted handle returns a named refusal. Use it to check that a reference is the kind of thing a step expects, and what handling it demands, before passing it on.",
+    "Report the shape of a general handle's referent and the CFC labels it carries: its recorded schema, path and label atom types, never its data. A referent that is a SQLite database reports its tables instead of a schema, under `database`: the columns of each table with their types, the labels those columns carry, and under `fill` how many rows each table holds and how many of them are non-NULL in each column. Read `fill` before writing a query: a column whose count is 0 is NULL on every row of this database, so filtering on it returns nothing, and a table reporting `unread` was not counted rather than empty. A table reporting `rowLabelReads` carries a per-row label rule over those columns, and a query over it must select every one of them by its own name — an alias does not stand in for the column — or the read is refused and the refusal arrives on the result's `error` rather than as rows; `rowLabelReadsWithheld` means the rule reads a further column this reply does not name, so such a query is refused whatever it selects. Read such a referent with `db.query` over the handle rather than as a value. A capability-restricted handle returns a named refusal. Use it to check that a reference is the kind of thing a step expects, and what handling it demands, before passing it on.",
   effectClass: "read",
   inputSchema: {
     type: "object",
@@ -301,6 +327,8 @@ export const describeHandleToolDescriptor: HarnessToolDescriptor = {
                   type: "object",
                   additionalProperties: { type: "integer", minimum: 0 },
                 },
+                rowLabelReads: { type: "array", items: { type: "string" } },
+                rowLabelReadsWithheld: { type: "boolean" },
                 unread: { type: "string" },
               },
               required: ["table"],
@@ -492,6 +520,42 @@ const countOf = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
 /**
+ * The row-label rule's input columns for `table`, as much of them as this
+ * disclosure may name.
+ *
+ * Read off the declaration the runner itself evaluates rather than restated
+ * here, so the two cannot disagree about what a query has to project. Held to
+ * the same bound every other name in this reply is held to: a column the
+ * reduction refused is a column no rule may name either, and dropping one
+ * silently would hand back a list that looks like the whole requirement and
+ * is not — so a dropped input is reported as withheld.
+ */
+const rowLabelReadsOf = (
+  db: SqliteDbRef,
+  table: string,
+  disclosed: readonly string[],
+): Pick<
+  DescribeHandleTableFill,
+  "rowLabelReads" | "rowLabelReadsWithheld"
+> => {
+  const tables = db.tables as Record<string, unknown> | undefined;
+  // `rowLabelSpecOf` is the whole of the question: it answers both whether a
+  // rule is declared and what it is, so asking a separate predicate first
+  // would be a branch nothing can take.
+  const spec = rowLabelSpecOf(tables?.[table]);
+  if (spec === undefined) {
+    return {};
+  }
+  const named = new Set(disclosed);
+  const inputs = ruleInputFields(spec);
+  const reads = inputs.filter((field) => named.has(field));
+  return {
+    ...(reads.length > 0 ? { rowLabelReads: reads } : {}),
+    ...(reads.length < inputs.length ? { rowLabelReadsWithheld: true } : {}),
+  };
+};
+
+/**
  * How full each disclosed table of `db` is, read through the session's
  * storage provider.
  *
@@ -518,6 +582,10 @@ const readDatabaseFill = async (
   const fill: DescribeHandleTableFill[] = [];
   for (const [table, spec] of Object.entries(schemaProperties(reduced))) {
     const columns = Object.keys(schemaProperties(spec));
+    // Stated whether or not the counts arrive: what a query must project is a
+    // property of the declaration, and a table that could not be counted
+    // still has to be queried correctly.
+    const rule = rowLabelReadsOf(db, table, columns);
     let row: Record<string, unknown> | undefined;
     try {
       // Called on the provider rather than through a name lifted off it: the
@@ -534,13 +602,18 @@ const readDatabaseFill = async (
     } catch (error) {
       fill.push({
         table,
+        ...rule,
         unread: error instanceof Error ? error.message : String(error),
       });
       continue;
     }
     const rows = countOf(row?.n);
     if (rows === undefined) {
-      fill.push({ table, unread: "the count query returned no row count" });
+      fill.push({
+        table,
+        ...rule,
+        unread: "the count query returned no row count",
+      });
       continue;
     }
     const nonNull: Record<string, number> = {};
@@ -550,7 +623,7 @@ const readDatabaseFill = async (
         nonNull[column] = count;
       }
     }
-    fill.push({ table, rows, nonNull });
+    fill.push({ table, rows, nonNull, ...rule });
   }
   return fill;
 };
