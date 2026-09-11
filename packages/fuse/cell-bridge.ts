@@ -985,7 +985,9 @@ export class CellBridge {
     let patternRef: PiecePatternRef | undefined;
 
     try {
-      const result = await piece.result.get();
+      const result = await piece.result.get(undefined, {
+        materializeFactories: false,
+      });
       summary = this.#extractSummary(result);
     } catch {
       // Summary is best-effort only.
@@ -2339,7 +2341,9 @@ export class CellBridge {
       promise: (async (): Promise<boolean> => {
         try {
           const cell = await info.piece[propName].getCell();
-          const newValue = await info.piece[propName].get();
+          const newValue = await info.piece[propName].get(undefined, {
+            materializeFactories: false,
+          });
           await this.#enqueuePiecePropRebuild({
             cell,
             newValue,
@@ -2482,7 +2486,9 @@ export class CellBridge {
       return;
     }
     const cell = await writePath.piece[writePath.cell].getCell();
-    const newValue = await writePath.piece[writePath.cell].get();
+    const newValue = await writePath.piece[writePath.cell].get(undefined, {
+      materializeFactories: false,
+    });
     await this.#enqueuePiecePropRebuild({
       cell,
       newValue,
@@ -4206,11 +4212,13 @@ export class CellBridge {
               let rebuildValue = newValue;
               if (rebuildValue === undefined) {
                 if (typeof cell.pull === "function") {
-                  await cell.pull().catch(() => undefined);
+                  await cell.pull({ materializeFactories: false }).catch(() =>
+                    undefined
+                  );
                 }
-                rebuildValue = await piece[propName].get().catch(() =>
-                  undefined
-                );
+                rebuildValue = await piece[propName].get(undefined, {
+                  materializeFactories: false,
+                }).catch(() => undefined);
               }
               if (rebuildValue === undefined) {
                 return;
@@ -4242,7 +4250,7 @@ export class CellBridge {
               );
             });
           }, 150);
-        });
+        }, { materializeFactories: false });
         cancels.push(() => {
           cancel();
           if (debounceTimer !== undefined) {

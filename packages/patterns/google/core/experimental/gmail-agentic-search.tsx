@@ -104,23 +104,21 @@ export interface ToolDefinition {
   handler: Stream<any>;
 }
 
-type RateQueryFactory = HandlerFactory<
-  {
-    queryId: string;
-    rating: number;
-    localQueries: ReadonlyCell<LocalQuery[]>;
-  },
-  unknown
->;
+type RateQueryContext = {
+  queryId: string;
+  rating: number;
+  localQueries: ReadonlyCell<LocalQuery[]>;
+};
 
-type DeleteLocalQueryFactory = HandlerFactory<
-  {
-    queryId: string;
-    localQueries: Writable<{ id: string }[]>;
-    pendingSubmissions: Writable<{ localQueryId: string }[]>;
-  },
-  unknown
->;
+type RateQueryFactory = HandlerFactory<unknown, RateQueryContext>;
+
+type DeleteLocalQueryContext = {
+  queryId: string;
+  localQueries: Writable<LocalQuery[]>;
+  pendingSubmissions: Writable<PendingSubmission[]>;
+};
+
+type DeleteLocalQueryFactory = HandlerFactory<unknown, DeleteLocalQueryContext>;
 
 // ============================================================================
 // LOCAL QUERY TRACKING TYPES

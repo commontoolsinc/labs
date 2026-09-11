@@ -1115,7 +1115,7 @@ async function searchTextMatches(
     if (owner !== undefined && owner !== ownership.pieceId) return false;
   }
 
-  const value = await rootCell.pull();
+  const value = await rootCell.pull({ materializeFactories: false });
   const pending: Iterator<SearchEntry>[] = [
     singleSearchEntry(
       value,
@@ -1165,7 +1165,7 @@ async function searchTextMatches(
           if (owner !== undefined && owner !== ownership.pieceId) continue;
         }
 
-        const nested = await current.pull();
+        const nested = await current.pull({ materializeFactories: false });
         if (nested !== current) {
           pending.push(singleSearchEntry(nested, true, current));
         }
@@ -1227,7 +1227,9 @@ async function searchTextMatches(
           seenCells.add(cellKey);
 
           const materializedCell = sourceCell.asSchema(true);
-          const nested = await materializedCell.pull();
+          const nested = await materializedCell.pull({
+            materializeFactories: false,
+          });
           pending.push(singleSearchEntry(
             nested,
             true,
@@ -3794,7 +3796,10 @@ export async function linkPieces(
     } else if (resolvedSourcePath.length > 0) {
       const sourceData = await timeCliPhase(
         "linkPieces.readSourceResult",
-        () => sourcePiece.result.get(),
+        () =>
+          sourcePiece.result.get(undefined, {
+            materializeFactories: false,
+          }),
       );
       // Check source path resolves
       let current: any = sourceData;
@@ -3851,7 +3856,10 @@ export async function linkPieces(
       }
       const targetData = await timeCliPhase(
         "linkPieces.readTargetInput",
-        () => targetPiece.input.get(),
+        () =>
+          targetPiece.input.get(undefined, {
+            materializeFactories: false,
+          }),
       );
       let current: unknown = targetData;
       for (const segment of resolvedTargetPath) {
@@ -4341,8 +4349,12 @@ export async function inspectPiece(
   const id = piece.id;
   const name = piece.name();
   const patternRef = await piece.getPatternRef();
-  const source = (await piece.input.get()) as Readonly<unknown>;
-  const result = (await piece.result.get()) as Readonly<unknown>;
+  const source = (await piece.input.get(undefined, {
+    materializeFactories: false,
+  })) as Readonly<unknown>;
+  const result = (await piece.result.get(undefined, {
+    materializeFactories: false,
+  })) as Readonly<unknown>;
   const readingFrom = (await piece.readingFrom()).map((piece) => ({
     id: piece.id,
     name: piece.name(),
@@ -4381,8 +4393,9 @@ async function inspectSlugTargetCell(
   slug: string,
 ): Promise<PieceInspection> {
   const target = await resolveSlugTargetCell(pieces, slug);
-  await target.pull();
-  const result = target.get() as Readonly<unknown>;
+  const result = await target.pull({
+    materializeFactories: false,
+  }) as Readonly<unknown>;
   const name = isObjectOrArray(result) && typeof result[NAME] === "string"
     ? result[NAME]
     : undefined;
@@ -4715,7 +4728,7 @@ export async function getCellValue(
       if (path.length === 0) {
         await timeCliPhase(
           "getCellValue.step.piece.pull",
-          () => piece.getCell().pull(),
+          () => piece.getCell().pull({ materializeFactories: false }),
         );
       }
       const targetCell = options.input
@@ -4723,7 +4736,7 @@ export async function getCellValue(
         : (await piece.result.getCell()).key(...path);
       await timeCliPhase(
         "getCellValue.step.target.pull",
-        () => targetCell.pull(),
+        () => targetCell.pull({ materializeFactories: false }),
       );
       await timeCliPhase(
         "getCellValue.step.synced.beforeIdle",
@@ -4818,7 +4831,7 @@ export async function getCellValue(
     try {
       value = await timeCliPhase(
         `getCellValue.${prop}.get`,
-        () => piece[prop].get(path),
+        () => piece[prop].get(path, { materializeFactories: false }),
       );
     } catch (error) {
       if (

@@ -46,15 +46,24 @@ export function parseCellPath(path: string): CellPath {
 export function resolveCellPath<T>(
   cell: Cell<T>,
   path: CellPath,
-  options: { requireProjection?: boolean } = {},
+  options: {
+    requireProjection?: boolean;
+    materializeFactories?: boolean;
+  } = {},
 ): unknown {
-  if (path.length === 0) return cell.get();
+  const read = (current: Cell<unknown>): unknown =>
+    options.materializeFactories === false
+      ? current.getWithoutFactoryMaterialization()
+      : current.get();
+  if (path.length === 0) return read(cell as Cell<unknown>);
   let currentCell: Cell<unknown> = cell;
-  let value: unknown = options.requireProjection ? cell.get() : undefined;
+  let value: unknown = options.requireProjection
+    ? read(cell as Cell<unknown>)
+    : undefined;
   for (const [index, segment] of path.entries()) {
     if (isCell(value)) {
       currentCell = value;
-      value = value.get();
+      value = read(value);
     }
     const parentCell = currentCell;
     currentCell = parentCell.key(segment);
@@ -64,7 +73,7 @@ export function resolveCellPath<T>(
       // already readable. A missing or undefined child falls through to the
       // parent projection so membership and useful error messages remain
       // exact. Correlated schemas explicitly request that projection below.
-      const narrowed = currentCell.get();
+      const narrowed = read(currentCell);
       const unresolvedHandle = isCell(narrowed) &&
         currentCell.getRaw() === undefined;
       if (
@@ -75,7 +84,7 @@ export function resolveCellPath<T>(
         continue;
       }
     }
-    if (value === undefined) value = parentCell.get();
+    if (value === undefined) value = read(parentCell);
     if (value != null && typeof value !== "object") {
       throw new Error(
         `Cannot access path "${
@@ -100,7 +109,7 @@ export function resolveCellPath<T>(
     // would discard the branch selected by that parent's current value.
     value = (value as Record<string | number, unknown>)[segment];
   }
-  return isCell(value) ? value.get() : value;
+  return isCell(value) ? read(value) : value;
 }
 
 export function cellEntityIdString(cell: Cell<unknown>): string | undefined {

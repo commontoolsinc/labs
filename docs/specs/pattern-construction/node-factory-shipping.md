@@ -182,7 +182,7 @@ The same applies to modules and handlers:
 interface FactoryInputs {
   value: string;
   transform: ModuleFactory<{ value: string }, { length: number }>;
-  select: HandlerFactory<{ source: string }, { id: string }>;
+  select: HandlerFactory<{ id: string }, { source: string }>;
 }
 
 const useFactories = pattern<FactoryInputs>(({
@@ -194,6 +194,10 @@ const useFactories = pattern<FactoryInputs>(({
   onSelect: select({ source: value }),
 }));
 ```
+
+`HandlerFactory<Event, Context>` names the stream event first and the bound
+context second. Calling the factory supplies `Context`; sending the returned
+stream later supplies `Event`.
 
 Calling a received factory constructs a normal graph node. It does not execute
 the referenced implementation synchronously and does not fetch source during
@@ -571,8 +575,12 @@ factory without retaining or reading an origin-space link.
 
 Every executable runner exposure path uses this chokepoint: schema-driven
 `asFactory` reads, recursive Cell/query result materialization, dynamic module
-dispatch, and CLI/FUSE/tool adapters. Dependency-only traversal and graph
-binding preserve symbolic aliases without loading code. Transformed symbolic
+dispatch, and CLI/FUSE/tool invocation adapters. Dependency-only traversal and
+graph binding preserve symbolic aliases without loading code. Explicit
+presentation and inspection reads, including JSON output from `cf cell get`,
+likewise preserve inert Factory@1 atoms. Runner-owned convergence pulls that
+only settle a write do the same; neither boundary requires executable result
+values because no authored callback receives them. Transformed symbolic
 invocation passes the binding to the dynamic node, which reads its current
 value before calling the materializer. Context-free `valueFromJson()` remains
 the intentional shell-returning boundary.

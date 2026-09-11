@@ -222,6 +222,45 @@ describe("PiecesController Factory@1 result persistence", () => {
         ).toBeUndefined();
       }
 
+      // Updating an input settles the whole result after the commit. That
+      // runner-owned pull must preserve cold Factory@1 atoms: no authored
+      // callback receives the result, and executable exposure remains the
+      // explicit prepareFactory boundary below.
+      const freshController = await readerManager.get(id!, false);
+      await freshController.input.set({});
+      for (const symbol of FACTORY_SYMBOLS) {
+        expect(
+          readerRuntime.patternManager.artifactFromIdentitySync(
+            identity!,
+            symbol,
+          ),
+        ).toBeUndefined();
+      }
+
+      // JSON and inspection callers need the current value, not executable
+      // callbacks. Their explicit inert read must work from a cold runtime
+      // without loading the factory artifact.
+      await expect(freshController.result.get(["missing"], {
+        materializeFactories: false,
+      })).rejects.toThrow("Available keys: nested");
+      const inspectedResult = await freshController.result.get(undefined, {
+        materializeFactories: false,
+      }) as StoredFactoryResult;
+      for (let index = 0; index < FACTORY_SYMBOLS.length; index++) {
+        expectInertFactory(
+          resultFactories(inspectedResult)[index],
+          expectedStates[index],
+        );
+      }
+      for (const symbol of FACTORY_SYMBOLS) {
+        expect(
+          readerRuntime.patternManager.artifactFromIdentitySync(
+            identity!,
+            symbol,
+          ),
+        ).toBeUndefined();
+      }
+
       const freshPiece = await readerManager.getPieceCell<StoredFactoryResult>(
         id!,
       );
