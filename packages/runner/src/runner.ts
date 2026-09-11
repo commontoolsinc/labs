@@ -211,7 +211,10 @@ import {
   readVerifiedSourceClosure,
 } from "./compilation-cache/cell-cache.ts";
 import { createRef } from "./create-ref.ts";
-import { diffAndUpdate } from "./data-updating.ts";
+import {
+  diffAndUpdate,
+  initializeScopedArgumentSlots,
+} from "./data-updating.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import { setResultCell } from "./result-utils.ts";
 import {
@@ -2717,6 +2720,12 @@ export class Runner {
       argumentLink,
       storable,
       argumentLink,
+    );
+    initializeScopedArgumentSlots(
+      this.#runtime,
+      tx,
+      argumentLink,
+      argumentSchema,
     );
   }
 
@@ -11157,6 +11166,7 @@ export class Runner {
         // storm. Container-minting builtins (map/filter/flatMap) read it to
         // defer their per-element sub-pattern runs until sync completes too.
         defersInitialRunUntilSynced(schedulerRehydration),
+        resolvedOutputSpot,
       );
     } finally {
       popFrame(builtinFrame);

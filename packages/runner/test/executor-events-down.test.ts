@@ -686,13 +686,22 @@ describe("Phase 3 events-down (serving side)", () => {
     // settle callback fires from the append + authoritative consequence
     // outcome — captured here, asserted after the consequence lands.
     let ackStatus: string | undefined;
+    // The sender's own act — the append — settles `onAppended` on its
+    // own, ahead of the handling: a caller that only needs its event on
+    // the record waits there.
+    let appended: { delivered: boolean } | undefined;
     (result.key("bump") as unknown as {
       send(
         value: unknown,
         onCommit?: (tx: { status(): { status: string } }) => void,
+        options?: { onAppended?: (delivery: { delivered: boolean }) => void },
       ): unknown;
     }).send({}, (ackTx) => {
       ackStatus = ackTx.status().status;
+    }, {
+      onAppended: (delivery) => {
+        appended = delivery;
+      },
     });
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
@@ -708,6 +717,9 @@ describe("Phase 3 events-down (serving side)", () => {
       () => sidecarIdsIn(engine).length === 1,
       "the event append to land",
     );
+    await waitUntil(() => appended !== undefined, "the append to settle");
+    expect(appended).toEqual({ delivered: true });
+    expect(ackStatus).toBeUndefined();
     const sidecarId = sidecarIdsIn(engine)[0];
     await waitUntil(
       () => {

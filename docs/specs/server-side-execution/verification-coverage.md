@@ -25,7 +25,7 @@ The status corrections in this register are bounded to the rows below:
 | OW18 / OW45 source freshness | Tenure activation ensures root existence; explicit opens follow source, including served wish-sidecar opens. |
 | OW28 | Closed: accepted compile effects, child execution, restart, supersession, and independently reactive user/session program selection have direct coverage. |
 | OW28-createRef | Closed: the compile cache snapshots program content, separates compilation with and without a space, and persists shared compiles into each requested space when CFC is enforced. |
-| OW28-supersession-family / OW28-instance-family | Investigation follow-ups; reproduce current residuals and reconcile the instance family with OW53. |
+| OW28-supersession-family / OW28-instance-family | Shared fetch user/session isolation and served `llm`, `generateText`, and direct `generateObject` supersession and isolation are covered. Other effect callers, provider reads, and later-user session initialization remain open. |
 | OW30 | Stream sibling validation is fixed; the non-Stream counter/container observation remains unresolved. |
 | OW31 residual (vii) | Read-triggered remount is implemented; automatic replay of the entire watch set remains separate. |
 | OW55 | Open: serving pattern-source trust, with root creation and wish sidecars among its consumers. |
@@ -1120,9 +1120,9 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   cost is recorded, not a correctness need). Stage-A residuals,
   FLAGGED (not filled): (i) an effect COMPLETION for a per-instance
   run seals its local layer under the outbox carriage's identity
-  (matching its engine row) but the writeback transaction is unstamped,
-  so its hash-guard READS resolve the service's instances — a
-  per-instance node's effect completion is unpinned; (ii) a
+  (matching its engine row) but a builtin that leaves its writeback transaction unstamped reads the
+  service's instances in its hash guard. OW28-instance-family records the
+  remaining callers and the fetch/compile closure; (ii) a
   handler-only write to a never-written PerUser slot lands at the
   slot's base scope (the handler's handle carries no scope cap until
   the slot redirects — pre-existing OFF behavior, verified at OFF;
@@ -1172,14 +1172,15 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   own pins (served preflight/presync identity, `Cell.sync` identity,
   the traversal kick identity, `SpaceReplica.#buildReads()` identity,
   `WatchView` key). Residuals SHARPENED, still flagged: (i) effect
-  completion — the writeback tx is unstamped, so its hash-guard reads resolve
-  the service's instances while the seal is under the carriage identity;
+  completion — remaining unstamped builtin writebacks read the service's
+  instances while the seal is under the carriage identity (the current
+  caller boundary is OW28-instance-family);
   `SpaceReplica.#buildReads()` then attests the CARRIAGE identity's records (a
   never-
   loaded record yields seq-0 confirmed reads); the engine does not
   reject a mis-attested basis on derived commits today, so the
   consequence is confined to local cascade/hash-guard tracking — but
-  any per-user node with an effect is served with an unattested basis;
+  those remaining per-user effect paths have an unattested basis;
   fix shape: stamp the completion tx with the carriage identity at
   `markEffectCompletion` (needs the runtime's outbox carriage — a
   stamper hook, threaded through the builtins), NOT filled here;
@@ -2617,36 +2618,86 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   CFC-disabled calls share compilation without issuing replication. This cache
   boundary is shared by OFF and the served compiler; closing it does not
   discharge OW28's serving port.
-- OW28-supersession-family — INVESTIGATE: LLM completion abandonment when
-  inputs change A→B→A during A's in-flight effect. The preserved OW28 branch
-  reports that run-counter cancellation abandons a completion to which the
-  final A attaches through outbox deduplication. Current `llm.ts` retains
-  run-counter cancellation, but the family has no fresh reproduction in the
-  coverage audit. Reproduce the current request/partial/completion lifecycle
-  before choosing a fix; completion must either land for the current request
-  or release the superseded effect. Trigger: the next served LLM supersession
-  scenario. This is an investigation obligation, not a confirmed-current
-  claim that every LLM or fetch builtin wedges.
-- OW28-instance-family — INVESTIGATE with OW53's residuals:
-  `effectTargetKey` accepts an explicit resolution identity. Served
-  `compileAndRun` supplies it, and its completion reads and child selection
-  use the same user or session instance. The other builtin callers retain
-  their scope-name keys unless they explicitly supply that identity. OW53
-  closes SQLite's served acting-identity/clearance fixes and separately names
-  non-SQLite unstamped hash-guard reads, non-clearance instance keys, and the
-  provider READ partition. Owed: one- and two-demander regressions for those
-  narrowed requests, without reopening fixed SQLite cases or counting the
-  compile regression twice.
+- OW28-supersession-family — PARTIALLY CLOSED: served `llm`, `generateText`,
+  and direct `generateObject` accept unqueued completions by the selected
+  request hash in the resolved output instance. Returning from A to B to A while the original
+  A remains in flight attaches to that A through outbox deduplication; a local
+  run generation does not discard its result. A pending request hash is a
+  selection marker, not a settled memo hit.
 
-  A separate child-input residual remains: passing an uninitialized
-  `PerUser<Writable<Default<0>>>` value into a child can give both users the
-  same space-scoped writable handle. It also occurs with an ordinary nested
-  child without `compileAndRun`. Explicitly initializing each user's input
-  through the parent's schema produces separate user-scoped handles. The
-  served compile handler regression initializes those inputs; it establishes
-  program selection, not correct scope creation for an uninitialized default.
-  Owed: preserve the declared scope when that default writable handle is
-  materialized, with a two-user child-handler regression.
+  `executor-llm-supersession.test.ts` drives controlled responses through a real
+  serving host and outbox, covering A→B and A→B→A, stale responses, model errors,
+  and suppression of durable partial writes. `llm-served-lifecycle.test.ts`
+  covers withdrawn contributions, reissue after withdrawal, and initial and
+  superseded dispatch refusals, including the result announcement. It also
+  proves space→user→space result rebinding with serving both on and off,
+  retirement of settled state, retention across uncommitted staging, and
+  delayed refusals after withdrawal or instance retirement. It also covers
+  refusal of a duplicate accepted request, accepted memo/empty publication
+  superseding an older scope, per-binding announcement ownership for a shared
+  result, bounded retry ownership, and OFF/served queue completion parity.
+  The shared-result binding checks observe the raw publication callback;
+  the host suite separately proves durable user/session result isolation.
+  These are no-network direct-provider controls; they do not establish tool-loop,
+  `llmDialog`, or other effect-family supersession. Those remain investigation
+  obligations rather than claims that every caller has this failure.
+- OW28-instance-family — PARTIALLY CLOSED. Served `compileAndRun`, the
+  shared `fetch.ts` builtins (`fetchText`, `fetchBinary`, `fetchJson`, and
+  `fetchJsonUnchecked`), `llm`, `generateText`, and `generateObject` pass the
+  requesting identity to `effectTargetKey`.
+  Fetch keeps its request id, cancellation, and abandonment state per resolved
+  scope instance. Its claim, result, error, abandonment, and teardown reads use
+  that same identity; an authoritative claim records its validated input hash
+  with the claim id and activity timestamp. The `fetch-served-instances` tests
+  pin user/session key separation and sharing at the declared scope.
+  `executor-fetch-instances` pins a service-identity host with one requester,
+  two users, two sessions, and one request superseding or failing while the
+  neighboring instance completes independently. Idle and completed instances
+  retire without accumulating graph cleanup callbacks; a returning session
+  can issue again, and graph stop still aborts a pending owner. Direct staged
+  tests pin equivalent-request retirement, late-refusal ownership, and each
+  issuance's representative identity while an earlier request is held. Refusal
+  publication tests cover scope changes, shared results across distinct output
+  bindings, memo and empty results, and withdrawn waves; output binding
+  publication is independent of ownership of the request's result fields.
+
+  LLM lifecycle state is partitioned by the resolved output instance, and
+  completion reads bind that identity before checking the selected request
+  or its live input label basis. `served-llm-instances.test.ts` covers
+  deterministic same-user keys, separate user/session keys, and two users
+  sharing one builtin closure. `executor-llm-supersession.test.ts` covers
+  concurrent responses landing in distinct user and session instances, with
+  no service-instance result.
+
+  Remaining investigation obligations: `fetchProgram`, tool-loop LLM requests,
+  `llmDialog`, non-clearance SQLite instance keys, and the provider READ
+  partition. `fetchProgram` can retire an effect with its requesting instance's
+  cache still pending; its user/session completion path remains open. The
+  direct LLM response controls do not discharge the provider/tool READ
+  partition. OW53's SQLite acting-identity, owner, and clearance fixes remain
+  closed. Owed: one- and two-demander request/completion regressions for the
+  remaining callers, without reopening fixed SQLite cases or counting compile
+  coverage twice.
+
+  Child-input default creation is covered separately from builtin instance
+  identity. `executor-compile-and-run.test.ts` passes uninitialized
+  `PerUser<Writable<number | Default<0>>>` and `PerSession` inputs to static
+  and compiled children, then dispatches their handlers under separate users
+  or two sessions of the initializing user. Argument setup creates missing
+  declared scope redirects through whole-object input references.
+  `scoped-input-initialization.test.ts` preserves explicit values and
+  references, including references to missing targets, and rejects
+  initialization that races with an explicit write.
+  `scoped-default-writable.test.ts` covers direct projection of an absent
+  defaulted slot, its write destination, and its dependency behavior.
+
+  A separate session-initialization gap remains: after one user initializes
+  a `PerSession` input, a later user's intermediate user instance can lack
+  its session redirect. Completing that hop must preserve an explicitly
+  supplied reference to the same field in user scope; pointer shape alone
+  cannot distinguish that reference from an automatically created redirect.
+  Owed: durable initialization ownership and a later-user, two-session
+  handler regression, including explicit-reference and reload controls.
 - OW29 — space-root demanders + demand-arrival re-runs (the reverted
   Phase-7 extension recorded under OW17): a client whose only watch is
   the space-scoped piece root supplies NO identity to the run supply,
@@ -9074,14 +9125,13 @@ supply; OW29/OW32/OW34 closed):
     (`llm-dialog.ts:2426` — same family, named untouched by OW34 §7
     and by this close; no ON surface pins it yet); NOTE-6 below
     (delegated read sessions' demand under the process DID —
-    label-inert, unchanged); the OTHER effect kinds' UNSTAMPED
-    writebacks — every non-sqlite effect kind: the
-    `fetch*`/`generate*` families, `llm`, and llm-dialog (which
+    label-inert, unchanged); the remaining effect kinds' UNSTAMPED
+    writebacks — `fetchProgram`, the `generate*` family, `llm`, and llm-dialog (which
     additionally marks completions at 4 sites with bare
     `llmDialog:`-prefixed keys never widened by `effectTargetKey` —
     a separate pre-existing quirk) — whose hash-guard reads still
     resolve the service's instances (the OW17 stage-A flag's
-    remaining scope after this row's sqlite carve-out; the
+    remaining scope after the SQLite and shared fetch fixes; the
     space-server.ts `#commitEffectCompletion` comment names the
     split); the acting≠demanded split: every context the stamper
     produces derives `acting` FROM the demanded pair where both
