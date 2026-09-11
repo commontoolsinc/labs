@@ -2719,6 +2719,7 @@ export function generateObject<T extends Record<string, unknown>>(
                 objectKeys: Object.keys(objectResponse.object ?? {}),
               });
 
+              await runtime.idle();
               if (isWriteStale()) {
                 logGenerateObject(
                   "write-skipped-cancelled",
@@ -2726,9 +2727,6 @@ export function generateObject<T extends Record<string, unknown>>(
                 );
                 return;
               }
-
-              await runtime.idle();
-              if (isWriteStale()) return;
 
               const writeback = await runtime.editWithRetry((tx) => {
                 if (isWriteStale()) return false;
@@ -3057,6 +3055,7 @@ export function generateObject<T extends Record<string, unknown>>(
 
           return resultPromise
             .then(async (response) => {
+              await runtime.idle();
               if (isWriteStale()) {
                 logGenerateObject(
                   "write-skipped-cancelled",
@@ -3064,9 +3063,6 @@ export function generateObject<T extends Record<string, unknown>>(
                 );
                 return;
               }
-
-              await runtime.idle();
-              if (isWriteStale()) return;
 
               const writeback = await runtime.editWithRetry((tx) => {
                 if (isWriteStale()) return false;
