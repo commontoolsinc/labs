@@ -148,6 +148,26 @@ should not permanently inflate an estimate, and the largest across days
 rather than an average, because a cost model that under-estimates blows
 the time budget.
 
+A day is one population, whatever order its records reached the store in
+and however many runs read them. A day is therefore held as its slowest
+executions and the count of all of them, so that the parts a day arrives
+in combine into the percentile of the whole. Holding a percentile of each
+part instead would let a part carrying one execution report that
+execution as the percentile of every execution beside it.
+
+Only executions that passed are measured. A cost predicts what a lane
+will spend running the test again, and a failure measures something else.
+It ended where the failure was reached. Where a wait's safety net ended
+it, its duration is that net's bound. The bound a safety net carries and
+the bound a lane is killed at are the same order of magnitude, so a test
+that hits one is otherwise reported as fitting no lane and held out of
+every pull request that does not touch it.
+
+A test with no passing execution inside the window has no measured cost
+and is charged nothing. Such a test has either barely run or is failing
+everywhere, and one failing everywhere holds up the default branch, which
+is a louder alarm than any lane's budget and is answered first.
+
 ## Flakes
 
 A flake is a test that disagrees with itself. `flakeRate` is how often it

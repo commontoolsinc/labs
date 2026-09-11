@@ -32,6 +32,38 @@ describe("captured cell value fields", () => {
       });
     }
   }
+  it("retains fields used through a helper alongside a direct member read", async () => {
+    const output = await transformSource(
+      `import { pattern, computed, Writable } from "commonfabric";
+      function readLabel(value: { count: number; label: string }) {
+        return value.label.toLowerCase();
+      }
+      export default pattern(() => {
+        const value = Writable.of({ count: 1, label: "Ready" });
+        return computed(() => {
+          const snapshot = value.get();
+          return readLabel(snapshot) + value.get().count;
+        });
+      });`,
+      { types: COMMONFABRIC_TYPES, typeCheck: true },
+    );
+    expect(emittedSchemas(parseModule(output))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          properties: expect.objectContaining({
+            value: expect.objectContaining({
+              asCell: ["readonly"],
+              properties: {
+                count: { type: "number" },
+                label: { type: "string" },
+              },
+            }),
+          }),
+        }),
+      ]),
+    );
+  });
+
   for (
     const { declaration, read } of [
       { declaration: "value?: Writable<Data>", read: "value!.get().count" },

@@ -12,9 +12,7 @@ const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
-    counter: __cfHelpers.ReadonlyCell<{
-        count: number;
-    }>;
+    counter: __cfHelpers.ReadonlyCell<{ count: number; }>;
 }, number>(({ counter }) => {
     const current = counter.get();
     return current.count * 2;

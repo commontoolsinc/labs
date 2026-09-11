@@ -97,6 +97,41 @@ describe("read-budgets", () => {
     ]);
   });
 
+  it("keeps an action named preflight separate from anonymous preflight attempts", () => {
+    const measured = new ReadBudgetMeasurement();
+    measured.record({
+      type: "scheduler.read-attempt",
+      kind: "preflight",
+      reads: { proxyAccesses: 7, linkResolutions: 0 },
+    });
+    measured.record({
+      type: "scheduler.read-attempt",
+      kind: "reactive",
+      actionId: "preflight",
+      reads: { proxyAccesses: 3, linkResolutions: 0 },
+    });
+    measured.record({
+      type: "scheduler.run.complete",
+      actionId: "preflight",
+      src: "poll.tsx:10:5",
+      durationMs: 0,
+      reads: {
+        proxyAccesses: 2,
+        linkResolutions: 0,
+        distinctDocuments: 1,
+        registeredDependencies: 1,
+      },
+    });
+    expect(measured.total).toBe(10);
+    expect(measured.contributors("total")).toEqual([
+      "7 accesses — preflight: preflight",
+      "3 accesses — poll.tsx:10:5",
+    ]);
+    expect(measured.contributors("perRun")).toEqual([
+      "2 accesses — poll.tsx:10:5",
+    ]);
+  });
+
   it("distinguishes no opt-in from an empty declaration", () => {
     expect(parseReadBudgets(undefined)).toBeUndefined();
     expect(parseReadBudgets({})).toEqual({});

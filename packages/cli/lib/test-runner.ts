@@ -1179,6 +1179,7 @@ export async function runTestPattern(
   const readCost = options.verbose ? new ActionReadReport() : undefined;
   let readBudgets: ReadBudgets | undefined;
   let initializationBudgetPending = false;
+  let initializationBudgetSettlement: Promise<void> | undefined;
   const budgetMeasurement = new ReadBudgetMeasurement();
   const budgetFailures: string[] = [];
   const budgetResults: TestResult[] = [];
@@ -1423,7 +1424,10 @@ export async function runTestPattern(
       }
     }
 
-    await withPhase(["runTestPattern", "initialSettle"], async () => {
+    initializationBudgetSettlement = withPhase([
+      "runTestPattern",
+      "initialSettle",
+    ], async () => {
       // Wait for initial setup to complete
       await runtime.idle();
       // Also wait for all in-flight storage subscriptions to settle.
@@ -1432,6 +1436,8 @@ export async function runTestPattern(
       await storageManager.synced();
       await runtime.idle();
     });
+    await initializationBudgetSettlement;
+    initializationBudgetSettlement = undefined;
 
     // 4. Get the tests array from pattern output (the reserved [TESTS] key)
     const testsCell = await withPhase(
@@ -1584,8 +1590,9 @@ export async function runTestPattern(
       ? []
       : budgetResults;
     if (readBudgets !== undefined) {
+      initializationBudgetSettlement = runtime.settled(Infinity);
+      await initializationBudgetSettlement;
       initializationBudgetPending = false;
-      await runtime.settled(Infinity);
       for (
         const error of checkBudget("initialization", readBudgets.initialization)
       ) {
@@ -2117,7 +2124,7 @@ export async function runTestPattern(
     let errorMessage = err instanceof Error ? err.message : String(err);
     if (initializationBudgetPending) {
       try {
-        await runtime.settled(Infinity);
+        await (initializationBudgetSettlement ?? runtime.settled(Infinity));
         checkBudget("initialization", readBudgets?.initialization);
       } catch (error) {
         budgetFailures.push(

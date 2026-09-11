@@ -376,6 +376,10 @@ therefore retains its value type and cell capability when captured by `computed`
 or `assert`, even when the wrapper has a method with the same name. Inline
 object values in optional cell handles and optional stored values retain their
 requested fields and read-only capability while preserving nullish alternatives.
+A `.get()` whose result is not resolved to a specific member path retains the
+receiver's complete stored shape, including when the result passes through a
+helper. Optional member reads retain the receiver without imposing a full-shape
+read.
 
 The type-driven shrink also guards its descent on (type, requested-paths): a
 pair already on the path falls back to the named type reference — no
