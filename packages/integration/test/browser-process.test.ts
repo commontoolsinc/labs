@@ -310,6 +310,19 @@ describe("browser-process", () => {
 
     describe("static members", () => {
       describe("start()", () => {
+        it("rejects an unsupported platform before launching a browser", async () => {
+          const build = Deno.build;
+          Object.defineProperty(Deno, "build", {
+            value: { ...build, os: "windows" },
+          });
+          try {
+            await expect(BrowserProcess.start({ path: "unused-browser" }))
+              .rejects.toThrow("Browser tests require macOS or Linux");
+          } finally {
+            Object.defineProperty(Deno, "build", { value: build });
+          }
+        });
+
         it("gives each browser its own process group", async () => {
           const options = await fakeBrowser(
             "no endpoint",

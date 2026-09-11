@@ -110,6 +110,9 @@ EOF wait. When investigating a teardown stall, capture every holder of the
 pipe, including renderers and detached updater processes, and record assertion
 completion separately from suite and process completion.
 
+Browser tests require macOS or Linux. The launcher rejects other platforms
+before it starts a browser.
+
 ### Focused browser regressions
 
 A package can reserve a `*.browser.test.ts` file for DOM behavior that needs a

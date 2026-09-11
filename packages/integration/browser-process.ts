@@ -290,6 +290,11 @@ export class BrowserProcess {
    * that starts and then fails to connect is stopped before this throws.
    */
   static async start(options: LaunchOptions): Promise<BrowserProcess> {
+    if (Deno.build.os !== "darwin" && Deno.build.os !== "linux") {
+      throw new Error(
+        `Browser tests require macOS or Linux; received ${Deno.build.os}.`,
+      );
+    }
     const spawned = await spawnBrowser(options);
     try {
       const browser = await connectToBrowser(
