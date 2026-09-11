@@ -272,8 +272,9 @@ root's map is therefore inert: a union arm that declares `$defs` of its own
 still resolves its `$ref` against the union's document, and `#/$defs/<name>`
 is the only local pointer form the runtime resolves, so nothing reaches a
 nested map by path either. A document whose root declares no `$defs` has no
-local definitions, and a `#/$defs/<name>` ref below it does not resolve
-whatever `$defs` a subschema declares; a self-contained schema placed under
+local definitions, and a `$defs` a subschema declares below such a root is
+not a scope the runtime keeps: the pruner drops it, decomposition refuses it,
+and no stored schema carries one, so a self-contained schema placed under
 such a wrapper needs its `$defs` hoisted to the wrapper's root. Following an
 embedded or `cid:` external ref enters another document, whose own map
 governs everything below it. The runtime attaches a document's map to
