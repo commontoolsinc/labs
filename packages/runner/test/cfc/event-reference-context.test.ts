@@ -21,6 +21,7 @@ import {
 import { Identity } from "@commonfabric/identity";
 
 import {
+  restoreRuntimeEventDispatch,
   restoreRuntimeEventReferences,
   serializeRuntimeEvent,
 } from "../../src/cfc/event-reference-context.ts";
@@ -680,6 +681,66 @@ describe("event-reference-context", () => {
     expect(restoreRuntimeEventReferences(roundtrip(event.payload), undefined))
       .toEqual({ amount: 3 });
     tx.abort();
+  });
+
+  it("binds primitive dispatch context to its target and isolates same-address deliveries", async () => {
+    const held = await selectedReference();
+    const send = runtime.edit();
+    const target = held.getAsNormalizedFullLink();
+    const event = serializeRuntimeEvent(3, send, space, target);
+    send.abort();
+    const rawTarget = { ...target };
+    const privateDelivery = restoreRuntimeEventDispatch(
+      roundtrip(event.payload),
+      event.runtimeReferenceContext,
+      rawTarget,
+    );
+    const publicDelivery = restoreRuntimeEventDispatch(3, undefined, rawTarget);
+    expect(getCfcReferenceProvenance(privateDelivery.target)?.confidentiality)
+      .toContainEqual(secret);
+    expect(getCfcReferenceProvenance(publicDelivery.target)).toBeUndefined();
+    for (
+      const changed of [
+        { ...rawTarget, path: ["other"] },
+        { ...rawTarget, scope: "user" as const },
+        { ...rawTarget, id: "of:other" as typeof rawTarget.id },
+      ]
+    ) {
+      expect(() =>
+        restoreRuntimeEventDispatch(3, event.runtimeReferenceContext, changed)
+      )
+        .toThrow("Invalid Runtime event reference context");
+    }
+    expect(() =>
+      restoreRuntimeEventDispatch(4, event.runtimeReferenceContext, rawTarget)
+    )
+      .toThrow("Invalid Runtime event reference context");
+    expect(() =>
+      restoreRuntimeEventReferences(3, event.runtimeReferenceContext)
+    )
+      .toThrow("Invalid Runtime event reference context");
+    const context = fabricFromJsonValue(
+      event.runtimeReferenceContext!,
+    ) as unknown as Record<string, unknown>;
+    for (
+      const altered of [
+        { ...context, version: 1 },
+        { ...context, dispatchReference: undefined },
+        {
+          ...context,
+          dispatchReference: { binding: null, confidentiality: [] },
+        },
+      ]
+    ) {
+      expect(() =>
+        restoreRuntimeEventDispatch(
+          3,
+          jsonFromFabricValue(altered as FabricValue),
+          rawTarget,
+        )
+      )
+        .toThrow("Invalid Runtime event reference context");
+    }
   });
 
   it("refuses an explicit relative link without acquisition evidence", () => {

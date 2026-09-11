@@ -1325,10 +1325,12 @@ export class CellImpl<T extends FabricValue>
    * name yields undefined rather than throwing, so every stream would
    * quietly stop being recognized as one.
    */
-  private isStream(resolvedToValueLink?: NormalizedFullLink): boolean {
+  private isStream(
+    resolvedToValueLink?: NormalizedFullLink,
+    tx?: IExtendedStorageTransaction,
+  ): boolean {
     if (this.#kind === "stream") return true;
-
-    const tx = this.runtime.readTx(this.tx);
+    tx ??= this.runtime.readTx(this.tx);
 
     if (!resolvedToValueLink) {
       // A content read: the terminal-value read below is what decides, so
@@ -1728,16 +1730,33 @@ export class CellImpl<T extends FabricValue>
     // prepared before commit (prepareTxForCommit), which every
     // runtime-owned commit path already does; a hand-rolled edit()/commit()
     // that sets through an ifc-bearing crossing owes the same call.
+    const readTx = this.runtime.readTx(this.tx);
+    const tracesBefore = readTx.getCfcState().dereferenceTraces.length;
     const resolvedToValueLink = resolveLink(
       this.runtime,
-      this.runtime.readTx(this.tx),
+      readTx,
       this.#link,
       "value",
       { markIfcCrossings: true },
     );
 
     // Check if we're dealing with a stream
-    if (this.isStream(resolvedToValueLink)) {
+    if (this.isStream(resolvedToValueLink, readTx)) {
+      const dispatchTarget = createCell(
+        this.runtime,
+        resolvedToValueLink,
+        readTx,
+        this.#synced,
+        undefined,
+        mergeCfcLabelViews([
+          this.#cfcLabelView,
+          cfcLabelViewForDereferenceTraces(
+            readTx,
+            readTx.getCfcState().dereferenceTraces.slice(tracesBefore),
+            this.#cfcLabelView,
+          ),
+        ]),
+      ).getAsNormalizedFullLink();
       if (this.tx !== undefined) requireCommitReadValidation(this.tx);
       // Stream behavior
 
@@ -1757,10 +1776,15 @@ export class CellImpl<T extends FabricValue>
       // the client side.
       //
       // TODO(danfuzz): constrain `T`, so that neither cast is needed.
-      const { payload: event, runtimeReferenceContext } = serializeRuntimeEvent(
+      const {
+        payload: event,
+        runtimeReferenceContext,
+        target: eventLink = resolvedToValueLink,
+      } = serializeRuntimeEvent(
         newValue as CellLinkInput,
-        this.runtime.readTx(this.tx),
+        readTx,
         resolvedToValueLink.space,
+        dispatchTarget,
       );
       propagateRendererTrustedEvent(newValue, event);
 
@@ -2075,7 +2099,7 @@ export class CellImpl<T extends FabricValue>
             // vote-toggle double); either way the durable entry is the
             // truth and the drain delivers it ONCE, with a streamEntry.
             this.runtime.scheduler.queueEvent(
-              resolvedToValueLink,
+              eventLink,
               event,
               false,
               undefined,
@@ -2225,7 +2249,7 @@ export class CellImpl<T extends FabricValue>
         }
         : onCommit;
       this.runtime.scheduler.queueEvent(
-        resolvedToValueLink,
+        eventLink,
         event,
         undefined,
         settleCallback,

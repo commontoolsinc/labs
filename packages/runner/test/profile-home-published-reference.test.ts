@@ -122,6 +122,61 @@ describe("Home published profile references", () => {
       expect((await forward.commit()).error).toBeUndefined();
       await result.pull();
       expect(result.key("defaultProfile").key("name").get()).toBe("Ada");
+      const incomingLinks: Array<{
+        baseline: string;
+        version: 1 | 2;
+        link: ReturnType<typeof result.getAsNormalizedFullLink>;
+      }> = [];
+      for (
+        const baseline of [
+          "20260729T022742Z-mKLGw1aighDtz0A6",
+          "20260818T220011Z-KnU5UM1qdaNt22eV",
+        ]
+      ) {
+        const contract = JSON.parse(Deno.readTextFileSync(
+          new URL(
+            `../../patterns/baselines/system/home.tsx/${baseline}.json`,
+            import.meta.url,
+          ),
+        ));
+        for (const version of [1, 2] as const) {
+          const seed = runtime.edit();
+          const incoming = runtime.getCell(
+            space,
+            `incoming-${baseline}-${version}`,
+            undefined,
+            seed,
+          );
+          writeSeedEnvelopeDoc(seed, space);
+          seed.writeOrThrow(
+            { ...incoming.getAsNormalizedFullLink(), path: [] },
+            {
+              value: {
+                home: result.asSchema(contract.resultSchema).getAsLink(),
+              },
+              cfc: {
+                version,
+                schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+                labelMap: {
+                  version: 1,
+                  entries: version === 1 ? [] : [{
+                    path: ["home"],
+                    origin: "link",
+                    observes: "followRef",
+                    label: { confidentiality: [] },
+                  }],
+                },
+              },
+            },
+          );
+          expect((await seed.commit()).error).toBeUndefined();
+          incomingLinks.push({
+            baseline,
+            version,
+            link: incoming.getAsNormalizedFullLink(),
+          });
+        }
+      }
       const resultLink = result.getAsNormalizedFullLink();
       await runtime.patternManager.flushCompileCacheWrites();
       await runtime.storageManager.synced();
@@ -134,6 +189,7 @@ describe("Home published profile references", () => {
         apiUrl: new URL(import.meta.url),
         storageManager: coldManager,
         cfcFlowLabels: "persist",
+        cfcWriteFloor: "enforce",
         errorHandlers: [(error) => errors.push(error)],
       });
       try {
@@ -145,6 +201,27 @@ describe("Home published profile references", () => {
         const selected = resumed.key("defaultProfile").resolveAsCell();
         expect(selected.getAsNormalizedFullLink().space).toBe(profileSpace);
         expect(await selected.key("name").pull()).toBe("Ada");
+        let expectedName = "Ada";
+        for (const entry of incomingLinks) {
+          const incoming = cold.getCellFromLink(entry.link);
+          await incoming.sync();
+          const oldProfile = incoming.key("home", "defaultProfile");
+          if (entry.version === 1) {
+            expect(() => oldProfile.key("name").get()).toThrow(
+              "Reference acquisition lacks complete legacy provenance",
+            );
+            expect(() => oldProfile.key("setName").send({ name: "refused" }))
+              .toThrow(
+                "Reference acquisition lacks complete legacy provenance",
+              );
+          } else {
+            expect(oldProfile.key("name").get()).toBe(expectedName);
+            expectedName = `Ada ${entry.baseline}`;
+            oldProfile.key("setName").send({ name: expectedName });
+          }
+          await cold.idle();
+          expect(await selected.key("name").pull()).toBe(expectedName);
+        }
         expect(errors).toEqual([]);
       } finally {
         await cold.dispose();

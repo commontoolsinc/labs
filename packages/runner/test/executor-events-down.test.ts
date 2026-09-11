@@ -31,6 +31,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { stub } from "@std/testing/mock";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
@@ -66,6 +67,12 @@ import {
   markRendererTrustedEvent,
 } from "../src/cfc/ui-contract.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { normalizeClause } from "../src/cfc/clause.ts";
+import type { CfcMetadata } from "../src/cfc/types.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { waitUntil } from "./support/wait-until.ts";
 
 /** The serving-loop harness's settle-gate seam (see
@@ -3040,8 +3047,36 @@ describe("Phase 3 events-down (serving side)", () => {
     const cancelDemand = result.sink(() => {});
     await clientRuntime.idle();
     await clientManager.synced();
+    const secret = normalizeClause({
+      anyOf: ["stream-selection", cfcAtom.space(space)],
+    });
+    const seed = clientRuntime.edit();
+    const selected = clientRuntime.getCell(
+      space,
+      "private-cascade-stream",
+      undefined,
+      seed,
+    );
+    writeSeedEnvelopeDoc(seed, space);
+    seed.writeOrThrow({ ...selected.getAsNormalizedFullLink(), path: [] }, {
+      value: result.key("first").getAsLink(),
+      cfc: {
+        version: 2,
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: [],
+            origin: "link",
+            observes: "followRef",
+            label: { confidentiality: [secret] },
+          }],
+        },
+      },
+    });
+    expect((await seed.commit()).error).toBeUndefined();
     host = newHost();
-    result.key("first").send({});
+    selected.withTx(undefined).send({});
     await clientRuntime.idle();
     await clientManager.synced();
     const entries = () =>
@@ -3057,7 +3092,7 @@ describe("Phase 3 events-down (serving side)", () => {
     );
     expect(
       entries().filter((entry) => entry.runtimeReferenceContext !== undefined),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     for (const entry of entries()) {
       expect(entry.status).toBeUndefined();
       expect(entry.error).toBeUndefined();
@@ -3067,6 +3102,14 @@ describe("Phase 3 events-down (serving side)", () => {
       (Engine.read(engine, { id: argument.getAsNormalizedFullLink().id })
         ?.value as { value: number }).value,
     ).toBe(11);
+    const metadata = Engine.read(engine, {
+      id: argument.getAsNormalizedFullLink().id,
+    })?.cfc as CfcMetadata;
+    expect(
+      metadata.labelMap.entries.flatMap((entry) =>
+        entry.label.confidentiality ?? []
+      ),
+    ).toContainEqual(secret);
     cancelDemand();
   });
 

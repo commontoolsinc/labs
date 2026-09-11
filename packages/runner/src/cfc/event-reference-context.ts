@@ -22,6 +22,7 @@ import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 import { type CellLinkInput, convertCellsToLinks } from "../cell.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
 import {
   createSigilLinkFromParsedLink,
   inlineExternalSchemaRefsInValue,
@@ -61,9 +62,10 @@ type EventReference = {
 };
 
 type EventReferenceContext = {
-  version: 1;
+  version: 1 | 2;
   payloadHash: string;
   references: EventReference[];
+  dispatchReference?: CfcReferenceProvenance;
 };
 
 /** A malformed attestation is a terminal event failure. */
@@ -197,7 +199,12 @@ export function serializeRuntimeEvent(
   value: CellLinkInput,
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
-): { payload: FabricValue; runtimeReferenceContext?: string } {
+  target?: NormalizedFullLink,
+): {
+  payload: FabricValue;
+  runtimeReferenceContext?: string;
+  target?: NormalizedFullLink;
+} {
   if (tx.getCfcState().flowLabelsMode !== "persist") {
     return { payload: convertCellsToLinks(value) };
   }
@@ -260,8 +267,16 @@ export function serializeRuntimeEvent(
       return result;
     },
   });
-  if (references.length === 0 && cycles.length === 0) return { payload };
+  if (references.length === 0 && cycles.length === 0 && target === undefined) {
+    return { payload };
+  }
   const flow = deriveFlowJoin(tx).confidentiality;
+  const acquiredTarget = getCfcReferenceProvenance(target);
+  if (
+    target !== undefined &&
+    (acquiredTarget === undefined ||
+      !cfcReferenceBindingMatches(acquiredTarget, target))
+  ) invalidContext();
   if (cycles.length > 0) {
     // A cycle names an ancestor inside these exact immutable payload bytes.
     // Its proof covers the payload's slots, including cycles back to itself.
@@ -300,8 +315,17 @@ export function serializeRuntimeEvent(
     })));
   }
   const context: EventReferenceContext = {
-    version: 1,
+    version: target === undefined ? 1 : 2,
     payloadHash: hashStringOf(payload),
+    ...(acquiredTarget === undefined ? {} : {
+      dispatchReference: {
+        ...acquiredTarget,
+        confidentiality: joinCfcObservedConfidentiality([
+          acquiredTarget.confidentiality,
+          flow,
+        ]),
+      },
+    }),
     references: references.map((record) => ({
       ...record,
       reference: {
@@ -316,10 +340,15 @@ export function serializeRuntimeEvent(
   const runtimeReferenceContext = jsonFromFabricValue(
     context as unknown as FabricValue,
   );
-  return {
-    payload: restoreRuntimeEventReferences(payload, runtimeReferenceContext),
-    runtimeReferenceContext,
-  };
+  return target === undefined
+    ? {
+      payload: restoreRuntimeEventReferences(payload, runtimeReferenceContext),
+      runtimeReferenceContext,
+    }
+    : {
+      ...restoreRuntimeEventDispatch(payload, runtimeReferenceContext, target),
+      runtimeReferenceContext,
+    };
 }
 
 /** Restores an admitted entry's exact acquisitions onto an isolated payload. */
@@ -329,7 +358,26 @@ export function restoreRuntimeEventReferences(
 ): FabricValue {
   if (runtimeReferenceContext === undefined) return payload;
   try {
-    return restoreAttestedReferences(payload, runtimeReferenceContext);
+    return restoreAttestedReferences(payload, runtimeReferenceContext).payload;
+  } catch {
+    return invalidContext();
+  }
+}
+
+/** Restores an admitted dispatch without sharing its target's private state. */
+export function restoreRuntimeEventDispatch(
+  payload: FabricValue,
+  runtimeReferenceContext: string | undefined,
+  target: NormalizedFullLink,
+): { payload: FabricValue; target: NormalizedFullLink } {
+  if (runtimeReferenceContext === undefined) return { payload, target };
+  try {
+    const restored = restoreAttestedReferences(
+      payload,
+      runtimeReferenceContext,
+      target,
+    );
+    return { payload: restored.payload, target: restored.target ?? target };
   } catch {
     return invalidContext();
   }
@@ -338,14 +386,24 @@ export function restoreRuntimeEventReferences(
 function restoreAttestedReferences(
   payload: FabricValue,
   runtimeReferenceContext: string,
-): FabricValue {
+  target?: NormalizedFullLink,
+): { payload: FabricValue; target?: NormalizedFullLink } {
   const context = fabricFromJsonValue(
     runtimeReferenceContext,
   ) as unknown as EventReferenceContext;
   if (
-    context?.version !== 1 || context.payloadHash !== hashStringOf(payload) ||
+    (context?.version !== 1 && context?.version !== 2) ||
+    context.payloadHash !== hashStringOf(payload) ||
     !Array.isArray(context.references)
   ) invalidContext();
+  const dispatchReference = context.dispatchReference;
+  if (context.version === 2) {
+    if (
+      target === undefined || dispatchReference === undefined ||
+      !validReference(dispatchReference) ||
+      !cfcReferenceBindingMatches(dispatchReference, target)
+    ) invalidContext();
+  } else if (dispatchReference !== undefined) invalidContext();
   const records = new Map<string, EventReference>();
   for (const record of context.references) {
     if (
@@ -404,5 +462,16 @@ function restoreAttestedReferences(
     },
   });
   if (records.size !== 0) invalidContext();
-  return restored;
+  if (dispatchReference === undefined) return { payload: restored };
+  const restoredTarget = linkWithRetainedScopeCaps(
+    { ...target! },
+    dispatchReference.scopeCaps,
+  );
+  const reference = deepFreeze(dispatchReference);
+  const view = withCfcReferenceConfidentiality(
+    undefined,
+    reference.confidentiality,
+  );
+  registerCfcReferenceCarrier(restoredTarget, () => reference, () => view);
+  return { payload: restored, target: restoredTarget };
 }

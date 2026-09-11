@@ -45,11 +45,12 @@ import { table } from "@commonfabric/memory/sqlite/schema";
 import { runQuery } from "@commonfabric/memory/sqlite/exec";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import {
-  restoreRuntimeEventReferences,
+  restoreRuntimeEventDispatch,
   serializeRuntimeEvent,
 } from "../src/cfc/event-reference-context.ts";
 import { normalizeClause } from "../src/cfc/clause.ts";
 import { deriveFlowJoin } from "../src/cfc/prepare.ts";
+import { getCfcReferenceProvenance } from "../src/cfc/reference-provenance.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
   IExtendedStorageTransaction,
@@ -517,9 +518,20 @@ describe("stage G outbox + sqlite discharge", () => {
       undefined,
       send,
     );
-    const event = serializeRuntimeEvent({ box }, send, targetSpace);
+    const dispatchTarget = runtime.getCell(
+      targetSpace,
+      "reference-outbox-stream",
+      undefined,
+      send,
+    ).getAsNormalizedFullLink();
+    const event = serializeRuntimeEvent(
+      { box },
+      send,
+      targetSpace,
+      dispatchTarget,
+    );
     send.abort();
-    const stream = { id: "of:reference-outbox-stream", path: [] as string[] };
+    const stream = { id: dispatchTarget.id, path: dispatchTarget.path };
     const sidecar = streamEntriesDocId(stream);
     insertExecutionOutboxRows(engine, {
       branch: "",
@@ -564,12 +576,15 @@ describe("stage G outbox + sqlite discharge", () => {
     });
     const read = runtime.edit();
     read.setCfcFlowLabelsMode("persist");
-    const restored = restoreRuntimeEventReferences(
+    const restored = restoreRuntimeEventDispatch(
       entries[0].payload,
       entries[0].runtimeReferenceContext,
+      { ...dispatchTarget },
     );
+    expect(getCfcReferenceProvenance(restored.target)?.confidentiality)
+      .toContainEqual(secret);
     expect(
-      runtime.getImmutableCell(space, restored, undefined, read).key(
+      runtime.getImmutableCell(space, restored.payload, undefined, read).key(
         "box",
         "item",
       ).get(),

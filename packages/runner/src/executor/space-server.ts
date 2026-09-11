@@ -134,7 +134,7 @@ import { effectCompletionKeyOf } from "./effect-completion.ts";
 import { markRendererTrustedEvent } from "../cfc/ui-contract.ts";
 import {
   InvalidRuntimeEventReferenceContext,
-  restoreRuntimeEventReferences,
+  restoreRuntimeEventDispatch,
 } from "../cfc/event-reference-context.ts";
 import { EVENT_DEFERRAL_DROP_THRESHOLD } from "../scheduler/constants.ts";
 import { LT1_LATE_SEAL_REFUSED } from "../scheduler/types.ts";
@@ -3620,9 +3620,10 @@ export class SpaceServer implements TransactionSealDestination {
           // client's own admission). Without it a per-user served
           // handler's write to an owner-protected cell is refused at
           // prepare ("missing trusted-event policy input").
-          const payload = restoreRuntimeEventReferences(
+          const { payload, target } = restoreRuntimeEventDispatch(
             entry.payload,
             entry.runtimeReferenceContext,
+            link,
           );
           if (entry.rendererTrusted === true) {
             markRendererTrustedEvent(payload);
@@ -3631,7 +3632,7 @@ export class SpaceServer implements TransactionSealDestination {
           const eventId = entry.eventId;
           const tenure = runtime;
           runtime.scheduler.queueEvent(
-            link,
+            target,
             payload,
             // No scheduler-side backoff: a transiently-failed seal leaves
             // the entry unconsequenced and durable, and the post-wave

@@ -90,6 +90,11 @@ A stored stream binding retains its own CFC declarations. Child schemas under
 the stream wrapper describe future event payloads, so publishing that binding
 does not inspect or declare those children as stored stream contents. The
 unwrapped event schema retains its payload policies for event processing.
+Sending through a stored stream reference validates every traversed slot before
+local queuing or durable append. The dispatch consumes the selected stream's
+reference confidentiality, including a held Cell's history, even when its event
+payload is a primitive. Handler dispatch records that restriction before running
+the handler, so its writes and cascades retain the selection context.
 
 ## Verification before storage submission
 
@@ -184,7 +189,9 @@ value's descendants.
 Durable events carry an optional opaque `runtimeReferenceContext` outside the
 application payload. The sending Runtime captures authenticated acquisitions at
 exact payload slots, binds the context to the canonical payload hash and full
-reference bindings, and joins the sending attempt's confidentiality. The serving
+reference bindings, and joins the sending attempt's confidentiality. Context
+version 2 additionally binds the dispatch to its selected stream and carries
+that selection and sending flow into the handler. The serving
 Runtime validates completeness and restores confidentiality, scope caps, and
 private immutable reference tables onto an isolated payload before dispatch.
 This conveys no target-content integrity. The handler owns value projection;
@@ -200,8 +207,8 @@ cannot mint it. Memory validates the optional field's shape and retains it
 through same-space emission, cross-space outbox delivery, restart, and explicit
 Retry; it does not interpret CFC policy. An invalid context is a terminal event
 refusal. Without a context, ordinary precise reference-acquisition checks still
-apply, so decoded reference bytes cannot become public acquisitions. Primitive
-events need no context.
+apply, so decoded reference bytes cannot become public acquisitions. A primitive
+event's dispatch can still require context for the stream-selection history.
 
 Explicit host acquisition APIs, including `GetCell(cause)`,
 `RuntimeClient.acquireCell(address)`, `Runtime.acquireExternalInput(space, data)`,
@@ -236,8 +243,12 @@ query result, introspection returns the common unavailable result.
 ## Format and rollout
 
 The [precise reference rollout plan](../plans/cfc-precise-reference-rollout.md)
-requires a state-preserving Home migration and complete reference provenance
-throughout each activation cohort before precise operation begins.
+allows the intended deployment activation to precede the existing-Home migration.
+An activation that includes this reference profile admits only fresh or verified
+ready Homes and their participating reference graph; unresolved Homes remain on
+a compatible deployment until migration. The Home contract transition requires a
+state-preserving migration and compatibility replay. A global flag change alone
+cannot establish readiness or waive that gate.
 
 CFC envelope version 2 supports precise reference entries. Each stored reference
 slot requires its own complete entry; upgrading one slot does not authenticate
