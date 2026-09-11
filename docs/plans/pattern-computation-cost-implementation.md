@@ -5,12 +5,12 @@ The controlled A0 fixture, accounting regressions, and dashboard shipped in
 #7241, with browser and remote-row demonstrations added in #7264. A3 budgets
 landed in #7257 after full validation, all 69 CI gates, and clean Cubic and
 antagonistic reviews. A4's browser benchmark shipped in #7261; count limits
-landed in #7282. C1's remote-row
-reproductions and C3's inline-element dependency repair landed in #7265;
-removal/restoration acceptance landed in #7285 and first-browser-materialization
-acceptance landed in #7302, both with local demonstrations. Reconnect and
-remaining row-invalidation acceptance stay open. B1/B2's contract landed in
-#7294; the typed lookup foundation landed in #7304. Producer lowering,
+landed in #7282. C1's remote-row reproductions and C3's inline-element dependency
+repair landed in #7265; removal/restoration acceptance landed in #7285 and
+first-browser-materialization acceptance landed in #7302. Reconnect repair
+landed in #7308; rendered acceptance is validated in #7312, pending merge gates.
+Remaining row-invalidation acceptance stays open. B1/B2's contract landed in
+#7294 and its typed lookup foundation landed in #7304. Producer lowering,
 bucket maintenance, and joins remain pending.
 
 B3's named aggregates are implemented and validated in
@@ -386,8 +386,8 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-A3/A4 and the typed lookup foundation are landed. Verify C1's rendered rows after
-reconnect, and complete C1/C3's remaining acceptance checks while retaining the
+Complete merge review for C1's rendered reconnect acceptance in #7312. Complete
+C3's remaining acceptance checks while retaining the
 production workaround. The first-materialization cases in
 [PR #7302](https://github.com/commontoolsinc/labs/pull/7302) pass all four
 nested/mapped and same/cross-space browser combinations.
