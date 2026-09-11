@@ -26,8 +26,6 @@ import {
   compiledDocKey,
   deriveModuleDelegations,
   getCompileCacheRuntimeVersion,
-  IMPORT_EDGE_SYNC_SCHEMA,
-  importEdgeCell,
   loadCompiledClosure,
   loadVerifiedSourceClosure,
   type ModuleDelegationMap,
@@ -37,7 +35,6 @@ import {
   type SourceDoc,
   sourceDocKey,
   stageModuleDelegations,
-  WRITE_TARGET_EDGE_SYNC_SCHEMA,
   writeSourceAndCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
@@ -3041,7 +3038,7 @@ export class PatternManager {
     delegated?: WritebackDelegation,
   ): Promise<void> {
     const writebackStart = performance.now();
-    await this.#syncSourceCacheWriteTargets(space, modules, entryIdentity);
+    await this.#syncSourceCacheWriteTargets(space, modules);
     let committedModuleDelegations = moduleDelegations;
     const { error } = await this.#runtime.editWithRetry((tx) => {
       // Compile-cache writeback is runtime-internal bookkeeping
@@ -3095,12 +3092,7 @@ export class PatternManager {
     delegated?: WritebackDelegation,
   ): Promise<void> {
     const writebackStart = performance.now();
-    await this.#syncCompileCacheWriteTargets(
-      space,
-      modules,
-      entryIdentity,
-      opts,
-    );
+    await this.#syncCompileCacheWriteTargets(space, modules, opts);
     // The closure is committed in CHUNKS of bounded module count rather than
     // one all-or-nothing transaction. A stale-refs recovery (compiler output
     // change over a pre-existing space) re-writes the entire closure; as a
@@ -3129,17 +3121,17 @@ export class PatternManager {
     // all chunks equals the single-transaction effective map exactly.
     const committedModuleDelegations = new Map<string, ReadonlySet<string>>();
     for (const chunk of chunks) {
-      // The pre-write sync above loads every document the write reads —
-      // the source documents, their edge documents, and the compiled
-      // documents — so a write-back against a quiet store commits on its
-      // first attempt. The retries are the backstop for another writer
-      // advancing one of those documents between the sync and the commit:
-      // the engine reports every stale instance in one rejection and
-      // editWithRetry pulls the named set before re-running. The
-      // edge-proportional budget is headroom for such concurrent writes.
-      // Applying the floor per chunk would multiply the minimum budget by
-      // the chunk count, so only a single-chunk write-back receives the
-      // full floor.
+      // The pre-write sync above loads every record the write reads and
+      // writes — the source and compiled records, each written whole and
+      // touching no other document — so a write-back against a quiet store
+      // commits on its first attempt. The retries are the backstop for
+      // another writer advancing one of those records between the sync and
+      // the commit: the engine reports every stale instance in one
+      // rejection and editWithRetry pulls the named set before re-running.
+      // The edge-proportional budget is headroom for such concurrent
+      // writes. Applying the floor per chunk would multiply the minimum
+      // budget by the chunk count, so only a single-chunk write-back
+      // receives the full floor.
       const importEdges = chunk.reduce((n, m) => n + m.imports.length, 0);
       const writebackMaxRetries = chunks.length === 1
         ? Math.max(16, 2 * importEdges + 8)
@@ -3181,83 +3173,40 @@ export class PatternManager {
   }
 
   /**
-   * Pre-syncs the write targets, carrying the one-hop edge selector: a
-   * schema-less sync delivers only the root doc, leaving the per-edge element
-   * docs unknown to the replica, so a re-write of pre-existing docs touches
-   * them blind and needs conflict repair. With the edge docs materialized up
-   * front the write-back diffs against true state and commits on the first
-   * attempt; the retry budget in `#writeBackCompileCache()` remains as a
-   * backstop. Same-microtask syncs batch into a single server round trip.
+   * Loads every record a source-cache write-back writes, so the write reads
+   * each with its true version rather than claiming it absent — a claim the
+   * store refuses when the record exists. A record is written whole and
+   * links to nothing the write touches, so the record itself is all the
+   * sync needs: a schema-less sync delivers the record and follows no link.
+   * Same-microtask syncs batch into a single server round trip; the retry
+   * budget in `#writeBackCompileCache()` remains as a backstop.
    */
   async #syncSourceCacheWriteTargets(
     space: MemorySpace,
     modules: readonly CacheableModule[],
-    entryIdentity: string,
   ): Promise<void> {
-    await Promise.all([
-      ...modules.map((module) =>
-        this.#runtime.getCell(
-          space,
-          sourceDocKey(module.identity),
-          WRITE_TARGET_EDGE_SYNC_SCHEMA,
-        ).sync()
+    await Promise.all(
+      modules.map((module) =>
+        this.#runtime.getCell(space, sourceDocKey(module.identity)).sync()
       ),
-      ...this.#importEdgeSyncs(space, modules, entryIdentity),
-    ]);
+    );
   }
 
-  /**
-   * The syncs of every import-edge document the source documents of
-   * `modules` will name — the authored imports and the entry's synthetic
-   * root links alike — so a write reads each with its true version rather
-   * than claiming it absent, a claim the store refuses when an earlier
-   * write of the same edge landed the document.
-   */
-  #importEdgeSyncs(
-    space: MemorySpace,
-    modules: readonly CacheableModule[],
-    entryIdentity: string,
-  ): Promise<unknown>[] {
-    const syncs: Promise<unknown>[] = [];
-    for (const [identity, doc] of buildSourceDocs(modules, entryIdentity)) {
-      for (const imp of doc.imports) {
-        syncs.push(
-          importEdgeCell(
-            this.#runtime,
-            space,
-            identity,
-            imp,
-            undefined,
-            IMPORT_EDGE_SYNC_SCHEMA,
-          ).sync(),
-        );
-      }
-    }
-    return syncs;
-  }
-
+  /** As {@link #syncSourceCacheWriteTargets}, for source and compiled records. */
   async #syncCompileCacheWriteTargets(
     space: MemorySpace,
     modules: readonly CacheableModule[],
-    entryIdentity: string,
     opts: { runtimeVersion: string },
   ): Promise<void> {
-    const syncs: Promise<unknown>[] = [
-      ...modules.flatMap((module) => [
-        this.#runtime.getCell(
-          space,
-          sourceDocKey(module.identity),
-          WRITE_TARGET_EDGE_SYNC_SCHEMA,
-        ).sync(),
+    await Promise.all(
+      modules.flatMap((module) => [
+        this.#runtime.getCell(space, sourceDocKey(module.identity)).sync(),
         this.#runtime.getCell(
           space,
           compiledDocKey(opts.runtimeVersion, module.identity),
-          WRITE_TARGET_EDGE_SYNC_SCHEMA,
         ).sync(),
       ]),
-      ...this.#importEdgeSyncs(space, modules, entryIdentity),
-    ];
-    await Promise.all(syncs);
+    );
   }
 
   /** Resolves a `Pattern` from an evaluate result. */

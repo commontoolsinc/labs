@@ -4,11 +4,22 @@ import { Identity } from "@commonfabric/identity";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
+  compiledDocKey,
   setCompileCacheRuntimeVersionForTesting,
   sourceDocKey,
-  WRITE_TARGET_EDGE_SYNC_SCHEMA,
+  writeSourceAndCompiledDocs,
 } from "../src/compilation-cache/cell-cache.ts";
+import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+import {
+  computeModuleHashes,
+  resolveModuleImports,
+} from "../src/harness/module-identity.ts";
+import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+
+// The second test drives the writers directly, below the async flow
+// boundaries that normally load the deferred compiler stack.
+await ensureCompilerStack();
 
 const signer = await Identity.fromPassphrase("writeback churn test");
 const space = signer.did();
@@ -46,12 +57,54 @@ const program = {
   ],
 };
 
-describe("compile-cache write-back over successive runtime versions", () => {
-  it("lands on every version bump, so a later cold runtime hits by identity", async () => {
-    // The clone's shape: a program whose source docs already exist from
+/** The `imports` array as the store holds it for the record `id`. */
+function storedImports(sm: EmulatedStorageManager, id: string): unknown[] {
+  const raw = (sm.open(space) as unknown as {
+    get(id: string): { value?: { imports?: unknown[] } } | undefined;
+  }).get(id);
+  return raw?.value?.imports ?? [];
+}
+
+/**
+ * Each import edge is stored inline in the record: an object naming the
+ * specifier and linking the imported module, not a link to a document of
+ * its own.
+ */
+function expectInlineEdges(edges: unknown[], count: number): void {
+  expect(edges.length).toBe(count);
+  for (const edge of edges) {
+    const el = edge as { "/"?: unknown; specifier?: unknown; link?: unknown };
+    expect(el["/"]).toBeUndefined();
+    expect(typeof el.specifier).toBe("string");
+    expect(typeof el.link).toBe("object");
+  }
+}
+
+/** Synthesize the engine's `CacheableModule[]` from an authored program. */
+function toModules(
+  program: RuntimeProgram,
+): { modules: CacheableModule[]; entryIdentity: string } {
+  const ids = computeModuleHashes(program);
+  const edges = resolveModuleImports(program);
+  const modules = program.files.map((f) => ({
+    identity: ids.get(f.name)!,
+    filename: f.name,
+    source: f.contents,
+    js: `/* compiled */ ${f.name}`,
+    imports: (edges.get(f.name)?.internalDeps ?? []).map((d) => ({
+      specifier: d.specifier,
+      targetIdentity: ids.get(d.target)!,
+    })),
+  }));
+  return { modules, entryIdentity: ids.get(program.main)! };
+}
+
+describe("compile-cache write-back of a closure the store already holds", () => {
+  it("lands on every runtime version bump, so a later cold runtime hits by identity", async () => {
+    // The clone's shape: a program whose source records already exist from
     // earlier builds is recompiled by each new runtime version, and each
-    // write-back rewrites the source docs' import element docs. Every
-    // write-back must land, or every later call recompiles.
+    // write-back writes the same source records again. Every write-back
+    // must land, or every later call recompiles.
     const server = newSharedServer();
     const restoreVersion = setCompileCacheRuntimeVersionForTesting("churn-v0");
     const managers: EmulatedStorageManager[] = [];
@@ -78,43 +131,22 @@ describe("compile-cache write-back over successive runtime versions", () => {
       await tx.commit();
       await first.sm.synced();
 
-      // The documents the entry's import edges live in are named by the
-      // edges, so every later write-back of the same closure lands on the
-      // same documents instead of minting new ones.
-      const edgeDocIds = async (
-        { sm, runtime }: { sm: EmulatedStorageManager; runtime: Runtime },
-      ) => {
-        const entry = runtime.getCell(
-          space,
-          sourceDocKey(ref.identity),
-          WRITE_TARGET_EDGE_SYNC_SCHEMA,
-        );
-        await entry.sync();
-        const raw = (sm.open(space) as unknown as {
-          get(id: string): { value?: { imports?: unknown[] } } | undefined;
-        }).get(entry.getAsNormalizedFullLink().id);
-        return (raw?.value?.imports ?? []).map((el) =>
-          (el as { "/"?: { "link@1"?: { id?: string } } })?.["/"]?.["link@1"]
-            ?.id
-        );
-      };
-      const firstEdges = await edgeDocIds(first);
-      // The source documents are independent of the runtime version, so a
-      // later version's write-back leaves them at the revision the first
-      // write left them at; only the compiled documents are new.
-      const engine = await server.engineForSpace(space);
       const entrySourceId = first.runtime.getCell(
         space,
         sourceDocKey(ref.identity),
       ).getAsNormalizedFullLink().id;
+      // Two authored imports and the synthetic root link, stored inline.
+      expectInlineEdges(storedImports(first.sm, entrySourceId), 3);
+
+      // The source records are independent of the runtime version, so a
+      // later version's write-back leaves them at the revision the first
+      // write left them at; only the compiled records are new.
+      const engine = await server.engineForSpace(space);
       const sourceRevision = () =>
         (engine.database.prepare(
           "SELECT max(seq) AS seq FROM revision WHERE id = :id",
         ).get({ id: entrySourceId }) as { seq: number }).seq;
       const firstRevision = sourceRevision();
-      // Two authored imports and the synthetic root link.
-      expect(firstEdges.length).toBe(3);
-      expect(firstEdges.every((id) => typeof id === "string")).toBe(true);
 
       for (const version of ["churn-v1", "churn-v2", "churn-v3", "churn-v4"]) {
         setCompileCacheRuntimeVersionForTesting(version);
@@ -137,9 +169,91 @@ describe("compile-cache write-back over successive runtime versions", () => {
         expect(
           warm.runtime.patternManager.getCompileCacheStats().byIdentityHits,
         ).toBeGreaterThan(0);
-        expect(await edgeDocIds(warm)).toEqual(firstEdges);
         expect(sourceRevision()).toBe(firstRevision);
       }
+    } finally {
+      restoreVersion();
+      for (const runtime of runtimes.reverse()) await runtime.dispose();
+      for (const sm of managers.reverse()) await sm.close();
+      await server.close();
+    }
+  });
+
+  it("a second session's write of the same source and compiled records commits without writing", async () => {
+    // A session that finds the closure incomplete rewrites all of it, the
+    // records an earlier session landed included. That write must commit,
+    // and must leave every record the store already holds at its revision.
+    const server = newSharedServer();
+    const runtimeVersion = "churn-same-version";
+    const restoreVersion = setCompileCacheRuntimeVersionForTesting(
+      runtimeVersion,
+    );
+    const { modules, entryIdentity } = toModules(program);
+    const managers: EmulatedStorageManager[] = [];
+    const runtimes: Runtime[] = [];
+    const open = () => {
+      const sm = EmulatedStorageManager.connectTo(server, { as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+      });
+      managers.push(sm);
+      runtimes.push(runtime);
+      return { sm, runtime };
+    };
+    // The write-back's shape: the records are loaded first, so the write
+    // reads each with its true version; then the closure is written in one
+    // transaction.
+    const writeBack = async (
+      { sm, runtime }: { sm: EmulatedStorageManager; runtime: Runtime },
+    ) => {
+      await Promise.all(modules.flatMap((module) => [
+        runtime.getCell(space, sourceDocKey(module.identity)).sync(),
+        runtime.getCell(
+          space,
+          compiledDocKey(runtimeVersion, module.identity),
+        ).sync(),
+      ]));
+      const tx = runtime.edit();
+      writeSourceAndCompiledDocs(
+        runtime,
+        space,
+        modules,
+        entryIdentity,
+        { runtimeVersion },
+        tx,
+      );
+      tx.prepareCfc();
+      const { error } = await tx.commit();
+      await sm.synced();
+      return error;
+    };
+    try {
+      const first = open();
+      expect(await writeBack(first)).toBeUndefined();
+      const entrySourceId = first.runtime.getCell(
+        space,
+        sourceDocKey(entryIdentity),
+      ).getAsNormalizedFullLink().id;
+      const entryCompiledId = first.runtime.getCell(
+        space,
+        compiledDocKey(runtimeVersion, entryIdentity),
+      ).getAsNormalizedFullLink().id;
+      expectInlineEdges(storedImports(first.sm, entrySourceId), 2);
+      expectInlineEdges(storedImports(first.sm, entryCompiledId), 2);
+
+      const engine = await server.engineForSpace(space);
+      const revision = (id: string) =>
+        (engine.database.prepare(
+          "SELECT max(seq) AS seq FROM revision WHERE id = :id",
+        ).get({ id }) as { seq: number }).seq;
+      const sourceRevision = revision(entrySourceId);
+      const compiledRevision = revision(entryCompiledId);
+
+      const second = open();
+      expect(await writeBack(second)).toBeUndefined();
+      expect(revision(entrySourceId)).toBe(sourceRevision);
+      expect(revision(entryCompiledId)).toBe(compiledRevision);
     } finally {
       restoreVersion();
       for (const runtime of runtimes.reverse()) await runtime.dispose();

@@ -516,14 +516,14 @@ linked data:
    may roll `runtimeVersion` alone only after the fingerprint inputs distinguish
    it from executable semantics.
 
-A source document's `imports` array holds links, one per edge, to documents
-named by the edge itself — importer, specifier, imported module — so every
-write of the same edge lands on the same document, and a source document
-the store already holds with the same code, edges, and delegations is left
-as it is. A write-back re-anchoring edges as fresh documents would collide
-with the ids an earlier write-back minted, and a write that never read its
-target claims the target absent, which the store refuses; the pre-write sync
-covers the edge documents so a write reads each with its true version.
+A source or compiled document is written whole, and only when the stored
+document differs. Its `imports` elements are stored inline in the document,
+not in documents of their own, so a write of the same document from any
+session lands on that one document and touches no other. A stored document
+whose elements sit in documents of their own is rewritten whole, and those
+element documents are left behind. The pre-write sync loads each document the
+write-back writes, so the write reads it with its true version rather than
+claiming it absent, a claim the store refuses.
 
 Each new source document whose reachable graph contains an external dependency
 also records the runtime fingerprint used for its identity. A source document
