@@ -35,6 +35,10 @@ import type {
   PieceConfig,
 } from "../lib/piece.ts";
 import { captureStderr } from "./utils.ts";
+import {
+  deferSkewNoteUntilFailureExit,
+  resetDeferredSkewNoteForTest,
+} from "../lib/version-check.ts";
 
 const SPACE = "did:key:z6MkjcdxtxTiUWkPkPffhs8ENkCcJjuRCQPpJFb2xyzwHqEk";
 const PIECE = "fid1:call-from-command-piece";
@@ -786,6 +790,50 @@ describe("callFromCommand()", () => {
       ]);
       expect(hinted[0]).toContain(`cf piece verbs --cell ${PIECE}`);
       expect(exited).toEqual([1]);
+    });
+
+    it("keeps version context for runtime failures and suppresses it for input refusals", async () => {
+      for (
+        const failure of [
+          {
+            error: new VerbInputValidationError("addItem", "title is required"),
+            retainsContext: false,
+          },
+          { error: new ValidationError("unknown flag"), retainsContext: false },
+          { error: new Error("event delivery failed"), retainsContext: true },
+        ]
+      ) {
+        resetDeferredSkewNoteForTest();
+        const notes: string[] = [];
+        const unload: Array<() => void> = [];
+        deferSkewNoteUntilFailureExit("version context", {
+          warn: (note) => notes.push(note),
+          addUnloadListener: (handler) => unload.push(handler),
+          exitCode: () => 1,
+        });
+        const { deps } = exitSinks();
+        try {
+          await expect(callFromCommand(
+            options,
+            "call",
+            "addItem",
+            [],
+            ["--cell", PIECE, "addItem"],
+            [],
+            { ...deps, executePieceCallable: failingExecutor(failure.error) },
+          )).rejects.toThrow(
+            failure.error instanceof ValidationError
+              ? "unknown flag"
+              : "exit-sentinel",
+          );
+          unload[0]();
+          expect(notes).toEqual(
+            failure.retainsContext ? ["version context"] : [],
+          );
+        } finally {
+          resetDeferredSkewNoteForTest();
+        }
+      }
     });
 
     it("names the phase a failed dispatch reached beside its invocation id", async () => {

@@ -32,6 +32,16 @@ both single-runtime and multi-user tests. Verification stays enabled by default;
 a measurement with it disabled does not establish idempotency. Read-cost tables
 currently cover the single-runtime runner.
 
+Single-user test modules can export `readBudgets` with separate `initialization`
+and default `steps` limits. Each accepts `total` (settled transaction-attempt
+proxy accesses) and `perRun` (maximum reactive-body proxy accesses). An
+executable step's `readBudget` replaces the default limits. Zero is valid,
+equality passes, and a violation fails the test with attributed diagnostics even
+when functional assertions pass. Limits require module-level opt-in; multi-user
+declarations are rejected. See the
+[budget contract](../../docs/features/read-accounting.md#pattern-test-budgets)
+for measured transactions, exclusions, and settlement behavior.
+
 ## View pager
 
 `cf view [file]` is an interactive pager for transformed TypeScript, source
@@ -545,6 +555,13 @@ A receipt alone is never proof that the updated piece starts.
 
 ## Piece discovery
 
+`cf piece describe --cell <piece>` documents a piece's readable fields and
+callable operations. `cf piece verbs --cell <piece>` lists operations to call;
+it does not describe the piece's readable data. To read field values, use
+`cf cell get --cell <piece> <field>`, with a projection for a large collection.
+Both discovery commands read the piece's pinned pattern. That pattern reference
+identifies its contract independently of the server's runtime commit.
+
 `cf piece ls` lists the pieces in the selected space's piece registry. It reads
 the default pattern and starts each registered piece to obtain its name and
 pattern metadata. It does not enumerate every stored piece root.
@@ -829,6 +846,21 @@ memo, which names a space once for the life of the process.
   warnings (npm "Ignored build scripts" banner) never reach users.
 
 ### What a call refuses before it dispatches
+
+When ordinary callable lookup finds no verb, `cf piece call` checks the deployed
+pattern's catalog before attempting a stream cast. A name absent from an
+available catalog is refused without dispatching: stderr lists the public verbs,
+including labeled wrappers and deprecated verbs, and commands to discover and
+read fields. The call exits 1 and writes no invocation result. Stored callables
+remain callable without a catalog, and unavailable pattern metadata leaves the
+stream fallback usable.
+
+An unknown-verb refusal, rejected payload, or pre-dispatch argument validation
+failure suppresses the deferred CLI-ahead version note. Other failures can carry
+neutral version context: commit distance alone does not establish
+incompatibility or explain a failure. For a local server you control, restarting
+it from the CLI's checkout aligns the versions. Warnings for an older CLI,
+diverged versions, or unknown ancestry retain their connection-time behavior.
 
 `cf piece call` judges the payload against the verb's declared event schema
 before anything is sent, so a refusal costs nothing: the invocation id was never

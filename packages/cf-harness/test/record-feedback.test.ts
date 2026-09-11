@@ -58,8 +58,15 @@ interface IndexStub {
   calls: { fn: string; body: Record<string, unknown> }[];
 }
 
-/** An index answering every call with `status`, recording what it was sent. */
-const stubIndex = (status = 200): IndexStub => {
+/**
+ * An index answering every call with `status`, recording what it was sent.
+ * `body` replaces the answer, for the case a 2xx carries a refusal rather than
+ * a confirmation.
+ */
+const stubIndex = (
+  status = 200,
+  body?: Record<string, unknown>,
+): IndexStub => {
   const calls: { fn: string; body: Record<string, unknown> }[] = [];
   const fetchFn: HarnessFetch = (input, init) => {
     const fn = String(input).split("/").pop() ?? "";
@@ -70,7 +77,8 @@ const stubIndex = (status = 200): IndexStub => {
     return Promise.resolve(
       new Response(
         JSON.stringify(
-          status === 200 ? { ok: true } : { error: "no such pattern" },
+          body ??
+            (status === 200 ? { ok: true } : { error: "no such pattern" }),
         ),
         { status },
       ),
@@ -164,6 +172,17 @@ describe("record-feedback", () => {
     const output = result.output as RecordFeedbackToolErrorOutput;
     expect(output.status).toBe("error");
     expect(output.message).toContain("404");
+  });
+
+  it("reports an index that answered without recording the event", async () => {
+    const index = stubIndex(200, { ok: false });
+    const result = await createEngine(index).invokeBuiltinTool(
+      "record_feedback",
+      { patternId: "pat-expenses", verdict: "up" },
+    );
+    const output = result.output as RecordFeedbackToolErrorOutput;
+    expect(output.status).toBe("error");
+    expect(output.message).toContain("did not record the thumbs_up event");
   });
 
   it("refuses a verdict the index has no event for", async () => {

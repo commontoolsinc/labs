@@ -3,6 +3,7 @@
 // contexts to visualize or log events inside the runtime.
 
 import type { CfcRefusalDetail } from "./cfc/refusal-detail.ts";
+import type { ReadAttemptCounts } from "./read-stats.ts";
 import type { FabricValue } from "@commonfabric/data-model";
 
 import { IMemoryChange } from "./storage/interface.ts";
@@ -174,6 +175,17 @@ export type RuntimeTelemetryMarker = {
   actionId: string;
   actionInfo?: SchedulerActionInfo;
   error?: string;
+} | {
+  type: "scheduler.read-attempt";
+  kind:
+    | "reactive"
+    | "event"
+    | "presync"
+    | "preflight"
+    | "initialization"
+    | "editWithRetry";
+  actionId?: string;
+  reads: ReadAttemptCounts;
 } | {
   // Emitted when an action run finishes, next to the ActionStats recording —
   // the same wall-clock measurement, surfaced as a marker so consumers (OTel
