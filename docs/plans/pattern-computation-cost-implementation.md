@@ -267,6 +267,13 @@ passed before merge, with clean Cubic and antagonistic reviews.
       reads, remote inserts/removals, and reconnect where relevant.
 - [ ] **C3 — Repair remote row invalidation.** Verify affected rows update,
       stable element identities survive, and untouched rows do not rerun.
+      Client-execution acceptance is in PR #7329. The
+      [serving-loop acceptance](../../packages/runner/test/executor-serving-loop.test.ts)
+      separately checks correct derived values, stable normalized output links
+      and producer identities, and affected-only producer execution for edits
+      to each of two linked rows. It observes the actual serving runtime and
+      waits for the authored input watermark. Both acceptance slices must land
+      before this item closes.
 - [x] **C4 — Restore reactive lunch-poll rows.** Direct reactive option and
       voter maps use the scoped callback-child repair. Repository acceptance
       includes 93 assertions, unchanged A4 budgets at all three sizes, and
