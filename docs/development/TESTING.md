@@ -97,10 +97,14 @@ ephemeral test profile cannot start maintenance of the installed browser.
 Detached updater crash handlers can inherit Chrome's stderr and keep it open
 after the browser exits. Chrome's own crash reporting remains enabled.
 
-`BrowserProcess.close()` signals the browser and waits for its exit status
-and both output streams to reach EOF before profile removal. A browser's exit
-and its output reaching EOF are separate events: inherited descriptors can
-outlive the process that opened them. When investigating a teardown stall,
+`BrowserProcess.close()` sends `SIGKILL` to the browser and waits for its exit
+status and both output streams to reach EOF before profile removal. Test
+callers dispose their page runtimes and collect coverage before closing the
+browser. Process termination does not wait for the browser's event loop to
+handle a signal. An output reader failure is propagated after the browser
+process has been reaped. A browser's exit and its output reaching EOF are
+separate events: inherited descriptors can outlive the process that opened
+them. When investigating a teardown stall,
 capture every holder of the pipe, including detached updater processes, and
 record assertion completion separately from suite and process completion.
 

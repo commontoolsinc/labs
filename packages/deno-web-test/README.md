@@ -95,19 +95,19 @@ names, every missing parent included, whenever it writes into it, so the removal
 has to follow the last of Chrome's processes rather than the browser process,
 which the crash handler and the rendering processes outlive.
 
-The harness spawns Chrome itself and attaches astral to the running browser with
-`connect()`. Every process Chrome starts inherits the two pipes the browser was
-spawned with, and holds a pipe until it exits or closes that pipe, so spawning
-the browser here is what keeps those pipes in reach. The wait is for the read
-ends of both to reach end of file, which is once the last process holding either
-of them has gone, whichever of the two it held. Piping standard output as well
-keeps what the browser writes out of the harness's own output, which a spawn
-leaves inherited for any stream it asks no pipe for. Both pipes are read to the
-end rather than left alone, because a pipe nobody reads fills up and stops the
-process writing into it, and what a browser writes says nothing the run acts on.
-Closing the browser returns on that end of file, and the removal follows. The
-spawning and the wait are [`BrowserProcess`](../integration/browser-process.ts),
-which the browser integration tests use for the same reason.
+The harness spawns Chrome itself and attaches astral with `connect()`. It
+disables Chrome's updater scheduler so detached maintenance services cannot
+inherit the test browser's output pipes. Chrome's own crash reporting remains
+enabled.
+
+Closing the browser sends `SIGKILL` to its root process and waits for its exit
+status and both output pipes to reach end of file. A child that inherits a pipe
+holds its write end until it exits or closes that descriptor; EOF establishes
+that those descriptors are closed, not that every descendant has exited. Both
+pipes are drained continuously because an unread pipe can fill and block its
+writer. Profile removal follows the process and output waits. The spawning and
+the waits belong to [`BrowserProcess`](../integration/browser-process.ts), which
+the browser integration tests also use.
 
 ## Support
 

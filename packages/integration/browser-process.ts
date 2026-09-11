@@ -71,26 +71,29 @@ export async function readToEnd(
 }
 
 /**
- * Kills `child` and waits for its output to close and its exit status to settle.
+ * Kills `child` with `SIGKILL` and waits for its output and exit status.
  *
- * `closed` is what `readBrowserOutput()` reported for the same child. A
- * browser asked to close over the protocol is usually still shutting down when
- * the kill lands, and is occasionally gone already, which throws rather than
- * doing nothing.
+ * `closed` is what `readBrowserOutput()` reported for the same child. Process
+ * termination must complete without cooperation from the browser's event
+ * loop. Output remains drained while the browser's children shut down, and an
+ * output failure is reported only after the root process has been reaped.
  */
 export async function stopBrowserProcess(
   child: Pick<Deno.ChildProcess, "kill" | "status">,
   closed: Promise<void>,
 ): Promise<void> {
   try {
-    child.kill();
+    child.kill("SIGKILL");
   } catch (error) {
     if (!isChildProcessGone(error)) {
       throw error;
     }
   }
-  await closed;
-  await child.status;
+  try {
+    await closed;
+  } finally {
+    await child.status;
+  }
 }
 
 /**

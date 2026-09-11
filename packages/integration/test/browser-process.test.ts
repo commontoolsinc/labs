@@ -130,12 +130,52 @@ describe("browser-process", () => {
   });
 
   describe("stopBrowserProcess()", () => {
-    it("ends a running process with `SIGTERM`", async () => {
+    it("ends a running process with `SIGKILL`", async () => {
       const child = shell("read line", { stdin: "piped" });
 
       await stopBrowserProcess(child, readToEnd(child.stderr));
 
-      expect((await child.status).signal).toBe("SIGTERM");
+      expect((await child.status).signal).toBe("SIGKILL");
+    });
+
+    it("ends a suspended process without resuming its event loop", async () => {
+      const child = shell("read line", { stdin: "piped" });
+      child.kill("SIGSTOP");
+
+      try {
+        await stopBrowserProcess(child, readToEnd(child.stderr));
+
+        expect((await child.status).signal).toBe("SIGKILL");
+      } finally {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // A completed stop has already reaped this process.
+        }
+        await child.status;
+      }
+    });
+
+    it("reaps the browser before reporting an output reader failure", async () => {
+      const child = shell("read line", { stdin: "piped" });
+      const readFailure = new Error("Could not read browser output");
+      let exited = false;
+      const status = child.status.then((status) => {
+        exited = true;
+        return status;
+      });
+
+      try {
+        await expect(stopBrowserProcess({
+          kill: (signal) => child.kill(signal),
+          status,
+        }, Promise.reject(readFailure))).rejects.toBe(readFailure);
+
+        expect(exited).toBe(true);
+      } finally {
+        await status;
+        await readToEnd(child.stderr);
+      }
     });
 
     it("returns for a process that has already exited, leaving its exit status intact", async () => {
@@ -221,7 +261,7 @@ describe("browser-process", () => {
             .close();
 
           expect(disconnected).toBe(true);
-          expect((await child.status).signal).toBe("SIGTERM");
+          expect((await child.status).signal).toBe("SIGKILL");
         });
       });
     });
