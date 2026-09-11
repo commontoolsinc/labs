@@ -311,6 +311,10 @@ type StartAttempt = {
   // instead of running a second resolution pipeline. Assigned by start() once
   // the pipeline promise exists.
   settled?: Promise<boolean>;
+  // The pattern keys this attempt has read inherited authority for. The walk
+  // runs again from the top after the read, and must not read again for a
+  // grant the durable metadata does not carry.
+  authorityReadFor?: Set<string>;
 };
 
 // One root of the argument link-target scan: an argument document plus the
@@ -5117,18 +5121,27 @@ export class Runner {
     if (stoppedPatternKey !== undefined && !wasStoppedLocally) {
       this.#locallyStoppedResults.delete(setupKey);
     }
-    const start = () =>
-      this.#startAvailablePattern(
-        rootCell,
-        identityRef,
-        wasSyncedAtEntry,
-        wasPreparedLocally,
-        wasStoppedLocally,
-        seenCells,
-        attempt,
-      );
-    const owed = this.#readInheritedAuthority(rootCell, identityRef);
-    return owed === undefined ? start() : owed.then(start);
+    const owed = attempt.authorityReadFor?.has(currentPatternKey)
+      ? undefined
+      : this.#readInheritedAuthority(rootCell, identityRef);
+    if (owed !== undefined) {
+      (attempt.authorityReadFor ??= new Set()).add(currentPatternKey);
+      return owed.then(() => {
+        if (!this.#isStartAttemptCurrent(attempt)) return false;
+        // The piece may have started, or its pointer moved, while the read
+        // was in flight, so the walk runs again from the top.
+        return this.#doStart(rootCell, seenCells, attempt);
+      });
+    }
+    return this.#startAvailablePattern(
+      rootCell,
+      identityRef,
+      wasSyncedAtEntry,
+      wasPreparedLocally,
+      wasStoppedLocally,
+      seenCells,
+      attempt,
+    );
   }
 
   /**

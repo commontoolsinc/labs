@@ -273,9 +273,9 @@ export default pattern<{seed?: ${seedType}}>(() => {
     });
 
     afterEach(async () => {
-      // Disposing a runtime closes the storage manager it shares with
-      // `runtime`, which the outer `afterEach` disposes after this one.
-      await observer.dispose();
+      // The storage manager belongs to `runtime`, which the outer `afterEach`
+      // disposes after this one.
+      await observer.dispose({ closeStorage: false });
     });
 
     const invokeSetName = async (
