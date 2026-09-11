@@ -15,12 +15,12 @@ import {
   Default,
   equals,
   NAME,
+  pattern,
   Stream,
   TESTS,
   UI,
   Writable,
 } from "commonfabric";
-import { pattern } from "commonfabric";
 import {
   type MentionableRow,
   mentionableRowsOf,

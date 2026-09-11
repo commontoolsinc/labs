@@ -79,8 +79,7 @@ import { type Announce } from "./announce.ts";
 import { connectionEntries, type HeldConnection } from "./connection.ts";
 import { resolveHandle } from "./handles.ts";
 import { renderVerbList, renderVerbPage, type VerbHelp } from "./help.ts";
-import { splitLine } from "./line.ts";
-import { quoteToken } from "./line.ts";
+import { quoteToken, splitLine } from "./line.ts";
 import {
   type ListingHandles,
   listingLines,

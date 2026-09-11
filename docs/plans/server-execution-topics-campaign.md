@@ -14,6 +14,8 @@ The authoritative execution ledger is under
   exact head/base, validation, review state, and remaining work.
 - `metadata/campaign-current.md` holds the current table and dated execution
   records. Its older entries describe their capture times.
+- `DELIVERY-CURRENT.md` consolidates dispositions, measurements, validation,
+  exact PR heads, and remaining gates.
 - `reviews/` holds paginated inline comments, complete review conversations,
   review summaries, timeline comments, and exact-head check snapshots.
 - `runs/`, `source/`, `patches/`, and `validation/` retain exact commands,
@@ -34,7 +36,7 @@ belongs with its PR; large artifacts need hashes and retrieval instructions.
 | C | 1: terminal confirmation | Remove redundant intermediate syncs while retaining owning-result traversal, complete scoped addresses, leases, creation-race rearming, cancellation, and settle coverage. This PR depends on B. | [#7234](https://github.com/commontoolsinc/labs/pull/7234) |
 | D | 2: watch maintenance | Stage incremental ownership and graph updates before transactional publication. Retain rollback, overlap, scoped and operation interests, absent-target arrival, and retirement. | [#7251](https://github.com/commontoolsinc/labs/pull/7251) |
 | E | 4: sidecar source | Share bounded raw-source work while preserving fresh identity resolution, destination-space closure persistence, per-piece reconciliation, owner origins, invalidation, retry, and disposal. | [#7274](https://github.com/commontoolsinc/labs/pull/7274) |
-| F | 6: deadline and grace | Retain both constants. Document input bypass, burst coalescing, timer/pass attribution, and the deadline's multi-user consequence-visibility role. Publish the prepared evidence disposition and complete its review gates. | `codex/demand-grace-evidence` |
+| F | 6: deadline and grace | Retain both constants. Document input bypass, burst coalescing, timer/pass attribution, and the deadline's multi-user consequence-visibility role. Keep the evidence disposition and runtime-emission proof current with its prerequisite. | [#7296](https://github.com/commontoolsinc/labs/pull/7296) |
 
 The [shared prerequisite](https://github.com/commontoolsinc/labs/pull/7229)
 contains the baseline tools and evidence. Its identity-commit fixtures use
