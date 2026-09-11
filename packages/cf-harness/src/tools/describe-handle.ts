@@ -512,8 +512,7 @@ const readDatabaseFill = async (
   db: SqliteDbRef,
   reduced: JSONSchema,
 ): Promise<DescribeHandleTableFill[] | undefined> => {
-  const query = provider.sqliteQuery;
-  if (query === undefined) {
+  if (provider.sqliteQuery === undefined) {
     return undefined;
   }
   const fill: DescribeHandleTableFill[] = [];
@@ -521,7 +520,13 @@ const readDatabaseFill = async (
     const columns = Object.keys(schemaProperties(spec));
     let row: Record<string, unknown> | undefined;
     try {
-      const result = await query(db, countTableSql(table, columns));
+      // Called on the provider rather than through a name lifted off it: the
+      // storage provider is an object whose query reads its own state, and a
+      // detached call arrives with no receiver.
+      const result = await provider.sqliteQuery(
+        db,
+        countTableSql(table, columns),
+      );
       const first = result.rows[0];
       row = first === undefined || typeof first !== "object" || first === null
         ? undefined

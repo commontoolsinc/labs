@@ -1107,7 +1107,20 @@ describe("describe_handle", () => {
           session.pieces.getSpace(),
         ) as { sqliteQuery?: unknown };
         const previous = provider.sqliteQuery;
-        provider.sqliteQuery = query;
+        // Installed as a method that reads its receiver, because the real one
+        // does: a count read that lifted the name off the provider and called
+        // it detached would arrive here with `this` undefined, and a fake
+        // arrow function would never notice.
+        provider.sqliteQuery = query === undefined ? undefined : function (
+          this: unknown,
+          db: unknown,
+          sql: string,
+        ) {
+          if (this === undefined) {
+            throw new Error("sqliteQuery was called without its provider");
+          }
+          return query(db, sql);
+        };
         return () => {
           provider.sqliteQuery = previous;
         };
