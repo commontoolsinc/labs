@@ -42,6 +42,7 @@ import {
   type SpaceServerPolicy,
   STORE_REFRESH_ATTEMPTS,
 } from "../src/executor/space-server.ts";
+import type { WaveCommitSink } from "../src/executor/wave.ts";
 import { readWatermarkSeq, waitForSettled } from "../src/executor/watermark.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { waitUntil } from "./support/wait-until.ts";
@@ -106,6 +107,12 @@ describe("engine-read-through", () => {
   /** The serving runtime the factory built at the last activation. */
   let factoryRuntime: Runtime | undefined;
 
+  /** The host's wave-commit sink decorator, for the test that holds a
+   * wave commit in flight. Undefined everywhere else. */
+  let decorateWaveCommitSink:
+    | ((sink: WaveCommitSink) => WaveCommitSink)
+    | undefined;
+
   const newHost = (policy: SpaceServerPolicy): ExecutorHost =>
     new ExecutorHost({
       server,
@@ -143,6 +150,9 @@ describe("engine-read-through", () => {
         });
       },
       policy,
+      ...(decorateWaveCommitSink === undefined
+        ? {}
+        : { decorateWaveCommitSink }),
     });
 
   /**
@@ -241,10 +251,17 @@ describe("engine-read-through", () => {
     const tx = clientRuntime.edit();
     clientArg.withTx(tx).set({ n });
     expect((await tx.commit()).error).toBeUndefined();
-    const authoredSeq = Engine.serverSeq(engine);
+    // Only the authored input is the settlement target; the store head can
+    // already include a serving wave that followed it.
+    const authoredSeq = Engine.readState(engine, {
+      id: clientArg.getAsNormalizedFullLink().id,
+    })!.seq;
+    expect(Engine.commitClassOfSeq(engine, authoredSeq)).toBe("authored");
     await waitUntil(
       () => readWatermarkSeq(engine) >= authoredSeq,
-      "watermark to reach the authored commit",
+      () =>
+        `the watermark (${readWatermarkSeq(engine)}) to reach the authored ` +
+        `commit (${authoredSeq})`,
     );
     const settled = await waitForSettled(clientRuntime, space, authoredSeq, {
       timeoutMs: 10_000,
@@ -297,6 +314,7 @@ describe("engine-read-through", () => {
     factoryContext = undefined;
     factoryManager = undefined;
     factoryRuntime = undefined;
+    decorateWaveCommitSink = undefined;
     clientManager = SharedServerStorageManager.connectTo(server, {
       as: aliceSigner,
     });
@@ -523,6 +541,170 @@ describe("engine-read-through", () => {
     }
   });
 
+  it("reads the schema document a document's schema metadata member names along with it", async () => {
+    // The frame validator holds a document's `schema` metadata member to
+    // the same delivery guarantee as its link positions: the reference
+    // form names a schema document, and the document is quarantined unless
+    // that one arrives with it. The chase follows the member as a
+    // session's walk does.
+    const decomposed = decomposeSchema({
+      type: "object",
+      properties: { text: { type: "string" } },
+    });
+    const store = new Map<string, { value: FabricValue; schema?: JSONSchema }>(
+      [...decomposed.documents].map((
+        [hash, document],
+      ) => [`cid:${hash}`, { value: document as FabricValue }]),
+    );
+    const carrier = {
+      value: { text: "held" },
+      schema: { $ref: decomposed.rootRef },
+    };
+    store.set("of:meta-carrier", carrier);
+    const reads: string[] = [];
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    try {
+      manager.installStoreReadThrough(space, ({ id, scopeKey }) => {
+        reads.push(id);
+        const doc = store.get(id);
+        return {
+          branch: "",
+          id,
+          scope: "space",
+          scopeKey,
+          ...(doc === undefined
+            ? { seq: 0, deleted: true as const }
+            : { seq: 1, doc }),
+        };
+      });
+      const replica = manager.open(space).replica as SpaceReplica;
+      expect(replica.getDocument("of:meta-carrier" as URI)).toEqual(carrier);
+      expect(reads).toEqual([
+        "of:meta-carrier",
+        ...[...decomposed.documents.keys()].reverse().map((hash) =>
+          `cid:${hash}`
+        ),
+      ]);
+      // Held now: a second read reaches the store for nothing.
+      expect(replica.getDocument("of:meta-carrier" as URI)).toEqual(carrier);
+      expect(reads.length).toBe(1 + decomposed.documents.size);
+    } finally {
+      await manager.close();
+    }
+  });
+
+  it("reads the store for a pull of a held document no further, and serves the value the feed last refreshed", async () => {
+    // A held document is kept current by the feed's refresh at every
+    // cycle, the way a session's covered selector is by its watch; a
+    // later sync of it is answered from the replica. The refresh is what
+    // moves it: the store's newer version reaches a sync only through
+    // `integrateStoreWrites()`.
+    const store = new Map<
+      string,
+      { seq: number; doc: { value: FabricValue } }
+    >();
+    store.set("of:held", { seq: 1, doc: { value: { n: 1 } } });
+    const reads: string[] = [];
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    try {
+      manager.installStoreReadThrough(space, ({ id, scopeKey }) => {
+        reads.push(id);
+        const entry = store.get(id);
+        return {
+          branch: "",
+          id,
+          scope: "space",
+          scopeKey,
+          ...(entry === undefined
+            ? { seq: 0, deleted: true as const }
+            : { seq: entry.seq, doc: entry.doc }),
+        };
+      });
+      const replica = manager.open(space).replica as SpaceReplica;
+      expect((await replica.sync("of:held" as URI)).ok).toBeDefined();
+      expect(replica.getDocument("of:held" as URI)).toEqual({
+        value: { n: 1 },
+      });
+      store.set("of:held", { seq: 2, doc: { value: { n: 2 } } });
+      expect((await replica.sync("of:held" as URI)).ok).toBeDefined();
+      expect(reads).toEqual(["of:held"]);
+      expect(replica.getDocument("of:held" as URI)).toEqual({
+        value: { n: 1 },
+      });
+      expect(
+        manager.integrateStoreWrites(space, [
+          { id: "of:held", scopeKey: "space" },
+        ]),
+      ).toBe(1);
+      expect(replica.getDocument("of:held" as URI)).toEqual({
+        value: { n: 2 },
+      });
+      expect(reads).toEqual(["of:held", "of:held"]);
+    } finally {
+      await manager.close();
+    }
+  });
+
+  it("integrates a feed refresh at the seq a local commit already confirmed, since the store's document may carry what the commit merged", async () => {
+    // A commit of this replica's own write promotes its record to the
+    // commit's seq with the value it materialized locally; the store's
+    // document at that seq can hold more — content the engine merged in
+    // beside a mergeable write — and the refresh that carries it is the
+    // replica's first delivery of that seq, never a repeat.
+    const store = new Map<
+      string,
+      { seq: number; doc: { value: FabricValue } }
+    >();
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: manager,
+    });
+    try {
+      manager.installStoreReadThrough(space, ({ id, scopeKey }) => {
+        const entry = store.get(id);
+        return {
+          branch: "",
+          id,
+          scope: "space",
+          scopeKey,
+          ...(entry === undefined
+            ? { seq: 0, deleted: true as const }
+            : { seq: entry.seq, doc: entry.doc }),
+        };
+      });
+      const cell = runtime.getCell<{ n: number; merged?: boolean }>(
+        space,
+        "read-through-promoted",
+        undefined,
+      );
+      const id = cell.getAsNormalizedFullLink().id;
+      const tx = runtime.edit();
+      cell.withTx(tx).set({ n: 1 });
+      expect((await tx.commit()).error).toBeUndefined();
+      const replica = manager.open(space).replica as SpaceReplica;
+      const confirmed = replica.get({ id, path: [], scope: "space" })?.since;
+      expect(confirmed).toBeGreaterThan(0);
+      store.set(id, {
+        seq: confirmed!,
+        doc: { value: { n: 1, merged: true } },
+      });
+      expect(
+        manager.integrateStoreWrites(space, [{ id, scopeKey: "space" }]),
+      ).toBe(1);
+      expect(replica.getDocument(id)?.value).toEqual({ n: 1, merged: true });
+    } finally {
+      await runtime.dispose();
+      await manager.close();
+    }
+  });
+
   it("does not read the store for a pull whose scope the identity cannot resolve", async () => {
     // Such a scope keys by its name, which names no store row: the store
     // would read the name as the space scope and answer with the wrong
@@ -546,6 +728,8 @@ describe("engine-read-through", () => {
       },
     });
     try {
+      // A read on access under such a scope is not served either.
+      expect(replica.getDocument("of:by-name" as URI, "user")).toBeUndefined();
       expect((await replica.sync("of:by-name" as URI, undefined, "user")).ok)
         .toBeDefined();
       expect(reads).toEqual([]);
@@ -638,6 +822,180 @@ describe("engine-read-through", () => {
     expect(liveExecutionLeaseHolder(engine, space)).toBe(rival);
   });
 
+  /** One wave commit the decorated sink saw: the wave's basis, and the
+   * seq the commit landed at once it has. */
+  type ObservedWaveCommit = { basisSeq: number; seq?: number };
+
+  /**
+   * Installs a sink decorator on the next host that records every wave
+   * commit and holds one in flight: the first one after `arm()`. `held()`
+   * resolves once that commit is held, with it last in `commits`, and
+   * fails the test on the shared backstop if no commit ever arrives;
+   * `release()` lets it land. Every seal opens a wave when none is open,
+   * at that moment's serverSeq, so a seal landing inside the hold opens
+   * one whose basis the held commit passes; what is authored inside the
+   * hold is the following cycle's batch, the one that would inherit that
+   * wave. Under this posture an input reaches the serving runtime only
+   * through a cycle's refresh, which keeps every seal but the test's own
+   * out of the window.
+   */
+  const holdableWaveCommit = (): {
+    arm: () => void;
+    held: () => Promise<void>;
+    release: () => void;
+    commits: ObservedWaveCommit[];
+  } => {
+    const release = Promise.withResolvers<void>();
+    const commits: ObservedWaveCommit[] = [];
+    let armed = false;
+    let holding = false;
+    decorateWaveCommitSink = (sink) => ({
+      currentHeads: (space, docs) => sink.currentHeads(space, docs),
+      concurrentWritePaths: (space, doc, sinceSeq) =>
+        sink.concurrentWritePaths(space, doc, sinceSeq),
+      commitWave: async (batch) => {
+        const observed: ObservedWaveCommit = { basisSeq: batch.basisSeq };
+        commits.push(observed);
+        if (armed) {
+          armed = false;
+          holding = true;
+          await release.promise;
+        }
+        const result = await sink.commitWave(batch);
+        if (result.ok !== undefined) observed.seq = result.ok.seq;
+        return result;
+      },
+    });
+    return {
+      arm: () => {
+        armed = true;
+      },
+      held: () => waitUntil(() => holding, "the armed wave commit to be held"),
+      release: () => release.resolve(),
+      commits,
+    };
+  };
+
+  /** The basis of every wave committed after `heldCommit` landed is at or
+   * past the seq it landed at: none was opened while it was in flight. */
+  const expectWavesOpenedAfter = (
+    commits: readonly ObservedWaveCommit[],
+    heldCommit: ObservedWaveCommit,
+  ): void => {
+    expect(heldCommit.seq).toBeDefined();
+    const later = commits.slice(commits.indexOf(heldCommit) + 1);
+    expect(later.length).toBeGreaterThan(0);
+    for (const commit of later) {
+      expect(commit.basisSeq).toBeGreaterThanOrEqual(heldCommit.seq!);
+    }
+  };
+
+  /** Seals a read probe against the serving runtime: a transaction that
+   * reads the argument document and writes nothing. */
+  const sealReadProbe = async (): Promise<void> => {
+    const probe = factoryRuntime!.edit();
+    factoryRuntime!.getCell<{ n: number }>(space, "read-through-arg", undefined)
+      .withTx(probe).get();
+    expect((await probe.commit()).error).toBeUndefined();
+  };
+
+  it("advances the watermark document over a commit authored while the wave creating that document was in flight, when nothing derives from it", async () => {
+    // The activation's first wave creates the watermark document. A cycle
+    // inheriting a wave opened during that commit carries only the next
+    // watermark advance, a write to a document its basis predates the
+    // creation of, which the per-doc CAS drops whole; the loop's own
+    // view of W would advance anyway, and nothing would re-advance the
+    // document until a later input.
+    const hold = holdableWaveCommit();
+    await instantiatePiece();
+    hold.arm();
+    host = newHost({
+      flushDeadlineMs: 5_000,
+      idleParkMs: 600_000,
+      storeReadThrough: true,
+    });
+    await demandFromClient();
+    const engine = await server.engineForSpace(space);
+    await hold.held();
+    const creation = hold.commits.at(-1)!;
+    await sealReadProbe();
+    const id = "of:read-through-window-doc" as URI;
+    const cell = clientRuntime.getCellFromLink<{ made: boolean }>({
+      id,
+      space,
+      path: [],
+    });
+    const creating = clientRuntime.edit();
+    cell.withTx(creating).set({ made: true });
+    expect((await creating.commit()).error).toBeUndefined();
+    const authoredSeq = Engine.readState(engine, { id })!.seq;
+    expect(Engine.commitClassOfSeq(engine, authoredSeq)).toBe("authored");
+    hold.release();
+
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= authoredSeq,
+      "the watermark document to cover the commit authored inside the window",
+    );
+    const settled = await waitForSettled(clientRuntime, space, authoredSeq, {
+      timeoutMs: 10_000,
+    });
+    expect(settled).toBeGreaterThanOrEqual(authoredSeq);
+    expectWavesOpenedAfter(hold.commits, creation);
+  });
+
+  it("derives from an input authored while its own previous wave commit was in flight, and serves the derived value", async () => {
+    // A cycle inheriting a wave opened during the commit of the wave
+    // deriving the previous input would seal the next derivation's write
+    // to the computed document under a basis that commit passed, and the
+    // per-doc CAS would drop it as superseded with nothing re-running it
+    // (serving-loop.md §3d).
+    const hold = holdableWaveCommit();
+    await instantiatePiece();
+    host = newHost({
+      flushDeadlineMs: 5_000,
+      idleParkMs: 600_000,
+      storeReadThrough: true,
+    });
+    const { clientResult, clientArg } = await demandFromClient();
+    const engine = await server.engineForSpace(space);
+    await deriveFromClient(clientArg, clientResult, 41);
+    // The content wave's trailing quiescence advance lands first, so the
+    // hold catches the wave deriving the next input and no other.
+    await waitUntil(
+      () => host!.stats().settleAdvances.count >= 1,
+      "the drain-settle quiescence advance to land",
+    );
+    hold.arm();
+    const input = clientRuntime.edit();
+    clientArg.withTx(input).set({ n: 50 });
+    expect((await input.commit()).error).toBeUndefined();
+    await hold.held();
+    const previous = hold.commits.at(-1)!;
+    await sealReadProbe();
+    const next = clientRuntime.edit();
+    clientArg.withTx(next).set({ n: 60 });
+    expect((await next.commit()).error).toBeUndefined();
+    const authoredSeq = Engine.readState(engine, {
+      id: clientArg.getAsNormalizedFullLink().id,
+    })!.seq;
+    expect(Engine.commitClassOfSeq(engine, authoredSeq)).toBe("authored");
+    hold.release();
+
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= authoredSeq,
+      "the watermark document to cover the input authored inside the window",
+    );
+    await waitForSettled(clientRuntime, space, authoredSeq, {
+      timeoutMs: 10_000,
+    });
+    await waitUntil(
+      () => clientResult.key("total").get() === 61,
+      "the client to observe the derived value 61",
+    );
+    expect(host!.stats().supersededWrites).toBe(0);
+    expectWavesOpenedAfter(hold.commits, previous);
+  });
+
   it("holds no record for an address the store has nothing at, reads it once, and picks it up from the feed once a commit creates it", async () => {
     await instantiatePiece();
     host = newHost({
@@ -673,12 +1031,20 @@ describe("engine-read-through", () => {
     });
     const creating = clientRuntime.edit();
     cell.withTx(creating).set({ made: true });
-    expect((await creating.commit()).error).toBeUndefined();
-    const authoredSeq = Engine.serverSeq(engine);
+    // The refresh baseline is read ahead of the commit: the loop can have
+    // refreshed the record before the commit's own promise resolves.
     const refreshesBefore = host.stats().storeRefreshes;
+    expect((await creating.commit()).error).toBeUndefined();
+    // The creating commit's own seq is the settlement target: the loop's
+    // wave commits can land between the client's commit and this read,
+    // and the watermark covers authored input only.
+    const authoredSeq = Engine.readState(engine, { id })!.seq;
+    expect(Engine.commitClassOfSeq(engine, authoredSeq)).toBe("authored");
     await waitUntil(
       () => readWatermarkSeq(engine) >= authoredSeq,
-      "the watermark to cover the creating commit",
+      () =>
+        `the watermark (${readWatermarkSeq(engine)}) to cover the creating ` +
+        `commit (${authoredSeq})`,
     );
     expect(host.stats().storeRefreshes).toBeGreaterThan(refreshesBefore);
     // Held by the refresh: this read costs the engine nothing.
