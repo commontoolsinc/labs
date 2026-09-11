@@ -62,6 +62,49 @@ describe("a stream send's appended hook off server execution", () => {
       expect(settled).toEqual(["appended", "commit"]);
       expect(appended).toEqual({ delivered: true });
       expect(appendedTx).toBe(committedTx);
+
+      // A handling that throws reports its act as refused, with the
+      // transaction's reason (the handler's own error is on the runtime's
+      // error log, which the CLI reads), on the same transaction the commit
+      // callback carries as failed.
+      const failing = handler(
+        true as const,
+        { type: "object", properties: {} } as const,
+        (_event, _ctx) => {
+          throw new Error("the handler declined");
+        },
+      );
+      const declining = pattern<{ value: number }>(({ value }) => ({
+        value,
+        bump: failing({}),
+      }));
+      const tx2 = runtime.edit();
+      const declined = runtime.getCell<{ value: number; bump: unknown }>(
+        space,
+        "stream-send-appended-declined",
+        undefined,
+        tx2,
+      );
+      runtime.run(tx2, declining, { value: 0 }, declined);
+      await tx2.commit();
+      await runtime.idle();
+      let refused: EventAppendDeliveryOutcome | undefined;
+      let failedStatus: string | undefined;
+      await new Promise<void>((resolve) => {
+        (declined.key("bump") as any).send({}, (committed: any) => {
+          failedStatus = committed.status().status;
+          resolve();
+        }, {
+          onAppended: (delivery: EventAppendDeliveryOutcome) => {
+            refused = delivery;
+          },
+        });
+      });
+      expect(failedStatus).toBe("error");
+      expect(refused).toEqual({
+        delivered: false,
+        refused: expect.any(String),
+      });
     } finally {
       await runtime.dispose();
       await storageManager.close();

@@ -1661,8 +1661,14 @@ export async function executeResolvedCallable(
             delivery: EventAppendDeliveryOutcome,
             appendedTx: IExtendedStorageTransaction,
           ) => {
-            if (delivery.delivered) resolve(appendedTx);
-            else {
+            // A refusal the transaction itself carries — a handling that
+            // threw or whose commit was rejected — is reported below off
+            // the transaction's status, with the runtime error it
+            // recorded; only an append refused on an otherwise clean
+            // transaction is reported here.
+            if (delivery.delivered || appendedTx.status().status === "error") {
+              resolve(appendedTx);
+            } else {
               reject(new Error(`event append refused: ${delivery.refused}`));
             }
           };

@@ -2107,17 +2107,35 @@ export class CellImpl<T extends FabricValue>
       // same actor explicitly, as the entry's `firedAt`; this carriage
       // covers the remaining in-process queueEvent shapes.)
       // Off server execution the handling's commit is the sender's own
-      // authored act, so `onAppended` fires with the commit callback and
-      // always as delivered: the act reached the store, and what the
-      // handling made of it — a failure, or a receipt-exists collision
-      // that settles on the original outcome — is the transaction's
-      // status, which the commit callback hands over. Under server
-      // execution the wrapper above fires the hook off the append itself.
+      // authored act, so `onAppended` fires with the commit callback, and
+      // reports what the commit did: delivered when it landed, and when
+      // it collided on the handling's receipt — a retry of the same
+      // invocation, which settles on the original outcome — and refused,
+      // with the reason, when the handling threw or its commit was
+      // rejected. Under server execution the wrapper above fires the hook
+      // off the append itself.
       const appendedWithCommit = sendOptions?.onAppended;
       const settleCallback = firedEventId === undefined &&
           appendedWithCommit !== undefined
         ? (tx: IExtendedStorageTransaction) => {
-          appendedWithCommit({ delivered: true }, tx);
+          const status = tx.status();
+          const deduplicated = status.status === "error" &&
+            "precondition" in status.error &&
+            status.error.precondition === "receipt-exists";
+          appendedWithCommit(
+            status.status === "error" && !deduplicated
+              ? {
+                delivered: false,
+                refused: status.error instanceof Error
+                  ? status.error.message
+                  : String(
+                    (status.error as { message?: unknown }).message ??
+                      status.error,
+                  ),
+              }
+              : { delivered: true },
+            tx,
+          );
           onCommit?.(tx);
         }
         : onCommit;
