@@ -1,7 +1,43 @@
 import { normalize as normalizeResourcePath } from "@std/path/posix";
 import type { HarnessAllowedSkillScript } from "../contracts/skill.ts";
+import { parseSkillsShSkillId } from "../skills-sh/pin.ts";
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** A full lowercase Git commit SHA, which is the whole of an acquired pin. */
+const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
+
+/**
+ * Whether `skill` names an acquired skill rather than a registry one: a
+ * discovery id and the commit its bytes were read at, joined by `@`.
+ *
+ * An acquired skill has no registry name to key an allowlist entry on, and the
+ * pin is what it has instead — it names the exact bytes, which is more than a
+ * name does. Both forms go through one key, one uniqueness rule and one
+ * membership test, because what the operator is deciding is the same thing.
+ */
+const acquiredSkillPin = (
+  skill: string,
+): { readonly id: string; readonly commitSha: string } | undefined => {
+  const at = skill.lastIndexOf("@");
+  if (at <= 0) return undefined;
+  const id = skill.slice(0, at);
+  const commitSha = skill.slice(at + 1);
+  if (!COMMIT_SHA_PATTERN.test(commitSha)) return undefined;
+  try {
+    parseSkillsShSkillId(id);
+  } catch {
+    return undefined;
+  }
+  return { id, commitSha };
+};
+
+/**
+ * Whether `skill` is a name this allowlist may key on: a registry skill's
+ * name, or an acquired skill's pin.
+ */
+export const isAllowedSkillScriptSkill = (skill: string): boolean =>
+  SKILL_NAME_PATTERN.test(skill) || acquiredSkillPin(skill) !== undefined;
 
 export const normalizeSkillScriptPath = (path: string): string => {
   const trimmed = path.trim();
@@ -36,9 +72,9 @@ export const normalizeAllowedSkillScript = (
   if (skill.length === 0) {
     throw new Error("skill name must be non-empty");
   }
-  if (!SKILL_NAME_PATTERN.test(skill)) {
+  if (!isAllowedSkillScriptSkill(skill)) {
     throw new Error(
-      `skill name should be lowercase alphanumeric with single hyphen separators: ${skill}`,
+      `skill should be a registry name — lowercase alphanumeric with single hyphen separators — or an acquired pin, owner/repo/slug@<commit sha>: ${skill}`,
     );
   }
   return {
@@ -47,6 +83,14 @@ export const normalizeAllowedSkillScript = (
   };
 };
 
+/**
+ * The `skill:scripts/path` form an operator writes, where `skill` is a
+ * registry name or an acquired pin.
+ *
+ * Split on the FIRST colon, which neither a registry name, a discovery id nor
+ * a commit SHA may contain — so widening the skill field did not move where
+ * this separator is.
+ */
 export const parseAllowedSkillScriptSpec = (
   spec: string,
 ): HarnessAllowedSkillScript => {
