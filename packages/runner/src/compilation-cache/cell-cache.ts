@@ -17,6 +17,7 @@ import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { computeModuleHashes } from "../harness/module-identity.ts";
 import type { CacheableModule } from "../harness/types.ts";
+import { areNormalizedLinksSame } from "../link-types.ts";
 import { createSigilLinkFromParsedLink, parseLink } from "../link-utils.ts";
 import { snapshotQueryResult } from "../query-result-proxy.ts";
 import type { MemorySpace, Runtime } from "../runtime.ts";
@@ -922,6 +923,47 @@ export function writeSourceDocs(
       const delegatedModuleIdentities = [
         ...(doc.delegatedModuleIdentities ?? []),
       ];
+      const code = codeLink(space, doc.code, tx);
+      const imports = doc.imports.map((imp) => ({
+        specifier: imp.specifier,
+        target: runtime.getCell(
+          space,
+          sourceDocKey(imp.identity),
+          undefined,
+          tx,
+        ),
+        edge: importEdgeCell(runtime, space, identity, imp, tx),
+      }));
+      // A source document is content-addressed by its module identity, so
+      // one already stored with this code, these import edges, and these
+      // delegations is left as it is. Rewriting it would anchor every import
+      // edge as a fresh element document whose id can collide with one an
+      // earlier write-back minted, and a write to a document this
+      // transaction never read claims the document absent: the commit is
+      // refused as stale, one edge per attempt, until the retry budget runs
+      // out and the whole cache write is lost.
+      // The comparison is content against content — the code document is
+      // content-addressed and the edges name documents by identity — so
+      // an undelegated document needs no label to be trusted; a delegated
+      // one carries the compiled-by atom at its delegation list, which is
+      // where the stored list is read from.
+      const unchanged = existing !== undefined &&
+        (delegatedModuleIdentities.length === 0 ||
+          cellCarriesIntegrity(
+            baseCell,
+            COMPILED_INTEGRITY_ATOM,
+            tx,
+            SOURCE_DELEGATION_PATH,
+          )) &&
+        storedSourceDocMatches(
+          baseCell,
+          identity,
+          code,
+          doc.filename,
+          imports,
+          delegatedModuleIdentities,
+        );
+      if (unchanged) continue;
       // A source document without delegation metadata remains an ordinary,
       // self-verifying cache write. Attaching an addIntegrity schema even when
       // the field is absent would make every legacy/direct source-cache write
@@ -929,30 +971,165 @@ export function writeSourceDocs(
       const cell = delegatedModuleIdentities.length > 0
         ? baseCell.asSchema(sourceDocWriteSchema())
         : baseCell;
+      // Each import edge lives in a document named by the edge, written only
+      // when it does not already say this, and the source document holds a
+      // link to it: an element written inline here would be hoisted into a
+      // document named by the ambient frame's counter and cause, which is
+      // the piece being started, so the same edge would take a new id on
+      // every write and collide with the ids earlier writes minted.
+      for (const { specifier, target, edge } of imports) {
+        const link = target.getAsLink();
+        const stored = edge.get();
+        if (
+          stored?.specifier !== specifier ||
+          !sameDocumentLink(stored.link, link)
+        ) {
+          edge.set({ specifier, link });
+        }
+      }
+      // Written as links to the edge documents; read back through a cell,
+      // each link resolves to the edge it points at, which is the
+      // `imports` element {@link StoredSourceDoc} describes.
       cell.set({
         kind: "source",
         identity,
-        code: codeLink(space, doc.code, tx),
+        code,
         filename: doc.filename,
-        imports: doc.imports.map((imp) => ({
-          specifier: imp.specifier,
-          link: runtime.getCell(
-            space,
-            sourceDocKey(imp.identity),
-            undefined,
-            tx,
-          ).getAsLink(),
-        })),
+        imports: imports.map(({ edge }) => edge.getAsLink()),
         ...(delegatedModuleIdentities.length > 0
           ? { delegatedModuleIdentities }
           : {}),
         ...(isObjectOrArray(existingAnnotations)
           ? { annotations: existingAnnotations }
           : {}),
-      } as StoredSourceDoc);
+      } as unknown as StoredSourceDoc);
     }
   });
   return effectiveModuleDelegations;
+}
+
+/** What an import-edge document holds: the edge as the source document's
+ * `imports` entry names it, with `link` pointing at the imported module's
+ * source document. */
+type StoredImportEdge = { specifier: string; link: SigilLink };
+
+/** The schema an import-edge document is synced under ahead of a write. */
+export const IMPORT_EDGE_SYNC_SCHEMA = {
+  type: "object",
+  properties: { specifier: { type: "string" }, link: true },
+} as const satisfies JSONSchema;
+
+/**
+ * The document one import edge of module `identity` lives in, named by the
+ * edge itself — importer, specifier, imported module — so every write of
+ * the same edge lands on the same document.
+ */
+export function importEdgeCell(
+  runtime: Runtime,
+  space: MemorySpace,
+  identity: string,
+  imp: { specifier: string; identity: string },
+  tx?: IExtendedStorageTransaction,
+  schema?: JSONSchema,
+): Cell<StoredImportEdge> {
+  return runtime.getCell<StoredImportEdge>(
+    space,
+    {
+      compileCacheImportEdge: {
+        of: identity,
+        specifier: imp.specifier,
+        to: imp.identity,
+      },
+    },
+    schema,
+    tx,
+  );
+}
+
+/**
+ * The schema a stored source document is compared under before a write:
+ * each import edge's `link` as the cell it points at, so the comparison is
+ * of document ids rather than of link spellings, and `code` as it is stored
+ * (a link to the code document, or the string an older writer inlined).
+ */
+const SOURCE_DOC_COMPARE_SCHEMA = {
+  type: "object",
+  properties: {
+    kind: { type: "string" },
+    identity: { type: "string" },
+    code: true,
+    filename: { type: "string" },
+    imports: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          specifier: { type: "string" },
+          link: { asCell: ["cell"] },
+        },
+      },
+    },
+    delegatedModuleIdentities: { type: "array", items: { type: "string" } },
+  },
+} as const satisfies JSONSchema;
+
+/**
+ * Whether two links name the same whole document, at the document root: a
+ * link that reaches the right id below the root is not the edge a write
+ * would record, and is rewritten.
+ */
+function sameDocumentLink(link1: unknown, link2: unknown): boolean {
+  const a = parseLink(link1);
+  const b = parseLink(link2);
+  return a !== undefined && b !== undefined && a.path.length === 0 &&
+    b.path.length === 0 && areNormalizedLinksSame(a, b);
+}
+
+/**
+ * Whether the source document behind `cell` already says what a write of
+ * `identity` with `code`, `filename`, `imports`, and `delegated` would say.
+ * Annotations are not compared: a write preserves what is stored, so they
+ * never make a rewrite necessary.
+ */
+function storedSourceDocMatches(
+  cell: Cell<StoredSourceDoc>,
+  identity: string,
+  code: SigilLink,
+  filename: string,
+  imports: readonly { specifier: string; target: Cell<unknown> }[],
+  delegated: readonly string[],
+): boolean {
+  const stored = cell.asSchema(SOURCE_DOC_COMPARE_SCHEMA).get() as
+    | {
+      kind?: unknown;
+      identity?: unknown;
+      code?: unknown;
+      filename?: unknown;
+      imports?: readonly { specifier?: unknown; link?: unknown }[];
+      delegatedModuleIdentities?: readonly unknown[];
+    }
+    | undefined;
+  if (
+    stored === undefined || stored.kind !== "source" ||
+    stored.identity !== identity || stored.filename !== filename
+  ) {
+    return false;
+  }
+  if (!sameDocumentLink(stored.code, code)) return false;
+  const storedImports = stored.imports ?? [];
+  if (storedImports.length !== imports.length) return false;
+  for (let i = 0; i < imports.length; i += 1) {
+    const edge = storedImports[i];
+    if (
+      edge?.specifier !== imports[i].specifier || !isCell(edge.link) ||
+      !sameDocumentLink(edge.link, imports[i].target)
+    ) {
+      return false;
+    }
+  }
+  const storedDelegated = new Set(stored.delegatedModuleIdentities ?? []);
+  return storedDelegated.size === delegated.length &&
+    delegated.every((d) => storedDelegated.has(d));
 }
 
 /**
