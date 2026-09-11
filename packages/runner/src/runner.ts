@@ -12104,6 +12104,7 @@ export class Runner {
         // storm. Container-minting builtins (map/filter/flatMap) read it to
         // defer their per-element sub-pattern runs until sync completes too.
         defersInitialRunUntilSynced(schedulerRehydration),
+        resolvedOutputSpot,
       );
     } finally {
       popFrame(builtinFrame);
