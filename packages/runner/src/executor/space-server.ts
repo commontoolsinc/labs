@@ -115,6 +115,7 @@ import { ensureSpaceRootPattern } from "../ensure-space-root.ts";
 import {
   stampWaveRunContext,
   WaveAccumulator,
+  type WaveCommitOutcome,
   type WaveCommitSink,
   waveRunContextOf,
   type WaveWriteAnnotation,
@@ -421,6 +422,78 @@ const neverAPieceRootId = (id: string): boolean =>
   id === SERVER_EXECUTION_EFFECTS_DOC_ID ||
   id.startsWith("computed:") ||
   id.startsWith("cid:");
+
+/**
+ * A pattern-lifecycle verb the serving loop runs on the space's runtime on
+ * a requester's behalf — an `upload` or `instantiate` request
+ * (docs/features/server-pattern-lifecycle.md). The loop runs `run` as a
+ * step of a wave cycle, ahead of that cycle's event drain, so every
+ * transaction the verb seals joins the cycle's wave. The request settles
+ * once that wave has committed and `confirm` has passed.
+ */
+export type LifecycleVerb<T> = {
+  /** The verb's name, for logs. */
+  name: string;
+
+  /** Runs the verb on the serving runtime and returns its receipt. */
+  run: (runtime: Runtime) => Promise<T>;
+
+  /**
+   * Reads the durable state the verb was to leave and throws when it is
+   * not there. Called after the carrying wave's commit step, so it is
+   * the request's durability witness: a seal's acceptance is not
+   * durability, since the wave commit can withdraw a contribution
+   * (serving-loop.md §3d), and a withdrawn contribution leaves no trace
+   * for this read to find.
+   */
+  confirm?: (runtime: Runtime, receipt: T) => Promise<void>;
+
+  /**
+   * The document ids of the piece roots the verb staged, which the loop
+   * takes as warm demand for the rest of the tenure — the identity-less
+   * root key the explicit warm request uses (serving-loop.md §1) — so the
+   * cycle's demand pass loads and derives them. The verb's own commit is
+   * the loop's, never its input, and a graph instantiated ahead of any
+   * demand is not live; naming the root here is what gets a staged piece
+   * derived. The receipt does not wait for that derivation: it follows
+   * the wave commit, when the piece is durable and the loop owes its
+   * first run.
+   */
+  demandRoots?: (receipt: T) => ReadonlyArray<string>;
+};
+
+/**
+ * The message a queued verb rejects with when its space parks before the
+ * verb ran; the host runs such a verb again on the successor tenure.
+ */
+export const LIFECYCLE_VERB_SPACE_PARKED =
+  "the space parked before the lifecycle verb ran";
+
+type QueuedLifecycleVerb = {
+  verb: LifecycleVerb<unknown>;
+  resolve: (receipt: unknown) => void;
+  reject: (error: unknown) => void;
+};
+
+type RanLifecycleVerb = QueuedLifecycleVerb & {
+  outcome: { failed: false; ok: unknown } | { failed: true; error: unknown };
+
+  /**
+   * The verb's own contributions, each by the wave it sealed into and its
+   * index there — what the wave's commit outcome is read by to settle the
+   * verb. Empty when the verb sealed nothing.
+   */
+  contributions: ReadonlyArray<{ wave: WaveAccumulator; index: number }>;
+
+  /** The roots the verb named as demand, loaded once its wave committed. */
+  demandRoots: ReadonlyArray<string>;
+
+  /**
+   * Every space-scoped document the verb's transactions wrote, the roots
+   * included — what the warm re-announcement carries.
+   */
+  stagedWrites: ReadonlyArray<{ id: string; scopeKey: "space" }>;
+};
 
 /**
  * One space's serving loop. The SpaceServer IS the seal destination — a
@@ -790,6 +863,44 @@ export class SpaceServer implements TransactionSealDestination {
    * admission, and the ensure re-sets it only from another no-owner
    * skip. */
   #rootEnsureAwaitingOwner = false;
+
+  /**
+   * Lifecycle verbs awaiting the next wave cycle, in arrival order
+   * ({@link runLifecycleVerb}). Drained by the cycle that runs them;
+   * emptied, each rejected, by a park.
+   */
+  readonly #lifecycleVerbs: QueuedLifecycleVerb[] = [];
+
+  /**
+   * What the currently running verb's transactions seal, recorded by
+   * `seal()` while `#runQueuedLifecycleVerbs` awaits the verb: the
+   * space-scoped documents they write, and each accepted seal's
+   * contribution, by wave and index. Seals are chained one at a time, so
+   * the count right after a seal resolves names that seal's contribution
+   * — another action's transaction sealing meanwhile gets its own entry
+   * nowhere here, and cannot settle the verb.
+   */
+  #runningLifecycleVerb:
+    | {
+      writes: Map<string, { id: string; scopeKey: "space" }>;
+      contributions: { wave: WaveAccumulator; index: number }[];
+    }
+    | undefined;
+
+  /**
+   * The seq of the last wave this tenure committed with content, the seq
+   * a verb's warm re-announcement names (`#settleLifecycleVerbs`).
+   */
+  #lastCommittedWaveSeq: number | undefined;
+
+  /**
+   * The wave the current cycle's serving step closed and its commit
+   * outcome, which settles the lifecycle verbs that sealed into it;
+   * `undefined` until the step reaches its commit.
+   */
+  #servedWave:
+    | { wave: WaveAccumulator; outcome: WaveCommitOutcome }
+    | undefined;
 
   /** F6 (log hygiene): the no-owner WARN fires once per tenure — a
    * permanently-ownerless space whose ACL doc keeps getting written
@@ -1575,6 +1686,29 @@ export class SpaceServer implements TransactionSealDestination {
     }, DEMAND_WAKE_GRACE_MS);
   }
 
+  /**
+   * Queue a lifecycle verb for the next wave cycle. Resolves with the
+   * verb's receipt once the wave that carried its writes has committed
+   * and its `confirm` step has passed; rejects with the verb's own
+   * error, with `confirm`'s, or with {@link LIFECYCLE_VERB_SPACE_PARKED}
+   * when the space parks before the verb ran — the one rejection the
+   * host answers by queuing the verb on the successor tenure.
+   */
+  runLifecycleVerb<T>(verb: LifecycleVerb<T>): Promise<T> {
+    if (!this.#active) {
+      return Promise.reject(new Error(LIFECYCLE_VERB_SPACE_PARKED));
+    }
+    return new Promise<T>((resolve, reject) => {
+      this.#lifecycleVerbs.push({
+        verb: verb as LifecycleVerb<unknown>,
+        resolve: resolve as (receipt: unknown) => void,
+        reject,
+      });
+      // A verb is input: wake the loop out of its idle wait.
+      this.#feedArrived?.resolve();
+    });
+  }
+
   //
   // TransactionSealDestination
   //
@@ -1636,8 +1770,16 @@ export class SpaceServer implements TransactionSealDestination {
     }
     const wave = this.#openWave();
     this.#waveByTx.set(tx, wave);
+    const runningVerb = this.#runningLifecycleVerb;
+    this.#recordLifecycleVerbWrites(tx);
     const sealed = this.#sealChain.then(() => wave.seal(tx)).then(
       (result) => {
+        if (result.error === undefined && runningVerb !== undefined) {
+          runningVerb.contributions.push({
+            wave,
+            index: wave.contributionCount - 1,
+          });
+        }
         if (result.error !== undefined) {
           // An EVENT-STAMPED tx that failed its seal requeues its
           // event (owner review P1-2): the served navigateTo's intent
@@ -2505,6 +2647,7 @@ export class SpaceServer implements TransactionSealDestination {
 
   #hasWork(): boolean {
     return this.#feed.length > 0 ||
+      this.#lifecycleVerbs.length > 0 ||
       (this.#currentWave?.contributionCount ?? 0) > 0 ||
       // Chained-not-yet-applied wave seals (the F4 fix): real work the
       // contribution count cannot see yet.
@@ -2856,7 +2999,7 @@ export class SpaceServer implements TransactionSealDestination {
   }
 
   async #waitForInput(maxMs: number): Promise<void> {
-    if (this.#feed.length > 0) return;
+    if (this.#feed.length > 0 || this.#lifecycleVerbs.length > 0) return;
     if (this.#pendingDemandWake) {
       // Consume the demand latch (stage B): a watch set changed since
       // the last demand pass began; run a cycle now so the pass sees the
@@ -4448,14 +4591,6 @@ export class SpaceServer implements TransactionSealDestination {
   }
 
   /**
-   * One wave (serving-loop.md §3): drain input, let the scheduler run
-   * the affected graph to quiescence — or to the consequence-flush
-   * deadline (the second exhaustion trigger, RULED 2026-08-04) — then
-   * commit ONE derived transaction carrying the wave's writes, the
-   * watermark doc write, and `derivedThrough`.
-   */
-
-  /**
    * The LT1 leftover PURGE (stage C build W3, (α1); events.md §4's RULED
    * sentence: "the serving loop purges unrun in-process leftovers at the
    * flush deadline"): synchronously at the deadline decision — before the
@@ -4631,6 +4766,218 @@ export class SpaceServer implements TransactionSealDestination {
       await this.#ensureSpaceRoot(runtime);
       timing.time(ensureStart, "executor", "wave", "root-ensure");
     }
+    // The queued lifecycle verbs run next, fully awaited like the ensure,
+    // and for the same reason: their seals join this cycle's wave, whose
+    // commit at the cycle's end is what settles them (`#serveWave`'s
+    // outcome is what `#settleLifecycleVerbs` reads through `confirm`).
+    // A verb that ran is settled either way: with its receipt or its
+    // error after the wave commits, or with the cycle's own error if the
+    // wave never gets that far.
+    const verbs = await this.#runQueuedLifecycleVerbs(runtime);
+    this.#servedWave = undefined;
+    try {
+      await this.#serveWave(runtime);
+    } catch (error) {
+      // A cycle that throws parks the space without committing its wave,
+      // so nothing the verbs sealed is durable; their `confirm` reads
+      // would see the replica the wave never withdrew from.
+      for (const entry of verbs) entry.reject(error);
+      throw error;
+    }
+    await this.#settleLifecycleVerbs(runtime, verbs);
+  }
+
+  /**
+   * Run the lifecycle verbs queued when this cycle began, one at a time
+   * and each awaited before the next, so a verb's seals join this cycle's
+   * wave (a seal resolves at acceptance, ahead of the wave commit, so
+   * awaiting it here cannot deadlock against the wave). The batch is the
+   * queue as it stood at the start: a verb arriving while one runs waits
+   * for the next cycle, so a steady arrival of requests cannot keep the
+   * cycle from reaching its serving step. A verb that throws is settled
+   * as rejected once the cycle ends; the verbs behind it still run. A
+   * park mid-batch rejects the verbs not yet run the way a park rejects
+   * the queue.
+   */
+  async #runQueuedLifecycleVerbs(
+    runtime: Runtime,
+  ): Promise<RanLifecycleVerb[]> {
+    const ran: RanLifecycleVerb[] = [];
+    const stats = this.#options.stats.lifecycleVerbs;
+    const batch = this.#lifecycleVerbs.splice(0);
+    for (const [index, queued] of batch.entries()) {
+      if (!this.#active) {
+        for (const unrun of batch.slice(index)) {
+          unrun.reject(new Error(LIFECYCLE_VERB_SPACE_PARKED));
+        }
+        break;
+      }
+      const start = performance.now();
+      const staged = new Map<string, { id: string; scopeKey: "space" }>();
+      const running = { writes: staged, contributions: [] };
+      this.#runningLifecycleVerb = running;
+      try {
+        const ok = await queued.verb.run(runtime);
+        const demandRoots = queued.verb.demandRoots?.(ok) ?? [];
+        for (const id of demandRoots) {
+          staged.set(toDirtyKey(id, "space"), { id, scopeKey: "space" });
+        }
+        const stagedWrites = demandRoots.length > 0 ? [...staged.values()] : [];
+        this.#warmLifecycleVerbRoots(stagedWrites);
+        ran.push({
+          ...queued,
+          outcome: { failed: false, ok },
+          contributions: running.contributions,
+          demandRoots,
+          stagedWrites,
+        });
+      } catch (error) {
+        stats.failures += 1;
+        logger.warn("lifecycle-verb-failed", () => [
+          `space ${this.#options.space}: lifecycle verb ` +
+          `${queued.verb.name} failed`,
+          error,
+        ]);
+        ran.push({
+          ...queued,
+          outcome: { failed: true, error },
+          contributions: [],
+          demandRoots: [],
+          stagedWrites: [],
+        });
+      } finally {
+        this.#runningLifecycleVerb = undefined;
+      }
+      stats.runs += 1;
+      timing.time(start, "executor", "wave", "lifecycle-verb");
+    }
+    return ran;
+  }
+
+  /**
+   * Why a verb's writes are not durable after its cycle's serving step,
+   * read off the wave commit outcome: the wave aborted, a different wave
+   * was served, or one of the verb's own contributions was withdrawn or
+   * partly dropped at the commit. `undefined` when every contribution
+   * committed, or when the verb sealed nothing.
+   */
+  #lifecycleVerbNotDurable(entry: RanLifecycleVerb): string | undefined {
+    if (entry.contributions.length === 0) return undefined;
+    const served = this.#servedWave;
+    for (const { wave, index } of entry.contributions) {
+      if (served === undefined || served.wave !== wave) {
+        return "the wave carrying its writes was not committed";
+      }
+      if (served.outcome.aborted !== undefined) {
+        return `the wave carrying its writes aborted (${served.outcome.aborted})`;
+      }
+      const disposition = served.outcome.dispositions[index];
+      if (disposition === undefined || disposition.kind !== "committed") {
+        return `a contribution of its was ${
+          disposition?.kind ?? "unaccounted for"
+        } at the wave commit`;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Register the documents a verb staged as warm demand (see
+   * {@link LifecycleVerb.demandRoots}): the roots and every document the
+   * verb's transactions wrote, since a piece's computed values live in
+   * documents of their own and a writer becomes live only when the
+   * document it writes is demanded.
+   */
+  #warmLifecycleVerbRoots(
+    writes: ReadonlyArray<{ id: string; scopeKey: "space" }>,
+  ): void {
+    let captured = false;
+    for (const write of writes) {
+      const key = toDirtyKey(write.id, write.scopeKey);
+      if (this.#warmDemandKeys.has(key)) continue;
+      this.#warmDemandKeys.set(key, write);
+      captured = true;
+    }
+    if (captured) this.noteDemandChanged("warm");
+  }
+
+  /**
+   * Record a running verb's space-scoped writes off the transaction's
+   * journal at its seal; no-op outside a verb's run.
+   */
+  #recordLifecycleVerbWrites(tx: IExtendedStorageTransaction): void {
+    const staged = this.#runningLifecycleVerb?.writes;
+    if (staged === undefined) return;
+    for (const detail of tx.tx.getWriteDetails?.(this.#options.space) ?? []) {
+      const { id, scope } = detail.address;
+      if (scope !== undefined && scope !== "space") continue;
+      staged.set(toDirtyKey(id, "space"), { id, scopeKey: "space" });
+    }
+  }
+
+  /**
+   * Settle the verbs a cycle ran, after the cycle's wave commit step: a
+   * verb whose run threw rejects with that error; one whose contributions
+   * the wave commit did not carry whole rejects, as does one whose
+   * `confirm` throws; every other resolves with its receipt. The wave's
+   * commit outcome is the positive witness — the verb's contributions
+   * committed — and `confirm` the read behind it, against the serving
+   * runtime's replica, which the outcome has already applied to.
+   *
+   * A verb's staged documents go back to the loop as a warm-marked notice
+   * — the explicit warm request's carrier (serving-loop.md §1), which
+   * provisioning uses for the setup it stages in another space. The pass
+   * of the verb's own cycle could not load them, since it syncs from a
+   * store the wave committed to only at the cycle's end; the notice is
+   * input to the next cycle, whose pass loads the piece from the committed
+   * store and derives it.
+   */
+  async #settleLifecycleVerbs(
+    runtime: Runtime,
+    ran: RanLifecycleVerb[],
+  ): Promise<void> {
+    for (const entry of ran) {
+      if (entry.outcome.failed) {
+        entry.reject(entry.outcome.error);
+        continue;
+      }
+      try {
+        const notDurable = this.#lifecycleVerbNotDurable(entry);
+        if (notDurable !== undefined) throw new Error(notDurable);
+        await entry.verb.confirm?.(runtime, entry.outcome.ok);
+        const seq = this.#lastCommittedWaveSeq;
+        if (this.#active && entry.demandRoots.length > 0 && seq !== undefined) {
+          this.#options.server.noteExecutorCommit({
+            space: this.#options.space,
+            seq,
+            class: "authored",
+            sessionId: this.#holder,
+            writes: [...entry.stagedWrites],
+            warm: true,
+          });
+        }
+      } catch (error) {
+        this.#options.stats.lifecycleVerbs.failures += 1;
+        logger.warn("lifecycle-verb-unconfirmed", () => [
+          `space ${this.#options.space}: lifecycle verb ` +
+          `${entry.verb.name} ran but its effect is not durable`,
+          error,
+        ]);
+        entry.reject(error);
+        continue;
+      }
+      entry.resolve(entry.outcome.ok);
+    }
+  }
+
+  /**
+   * One wave (serving-loop.md §3): drain the input batch, let the
+   * scheduler run the affected graph to quiescence — or to the
+   * consequence-flush deadline (the second exhaustion trigger, RULED
+   * 2026-08-04) — then commit ONE derived transaction carrying the wave's
+   * writes, the watermark doc write, and `derivedThrough`.
+   */
+  async #serveWave(runtime: Runtime): Promise<void> {
     const { batchHead } = this.#drainFeed(runtime);
     // The event drain stays a fully-awaited, single-flight step AHEAD
     // of the deadline race (Phase 3's shape): at most one drain runs
@@ -5043,6 +5390,8 @@ export class SpaceServer implements TransactionSealDestination {
       ? advanceTo
       : this.#watermark;
     const outcome = await closing.commitWave(this.#sink!, { derivedThrough });
+    this.#servedWave = { wave: closing, outcome };
+    if (outcome.seq !== undefined) this.#lastCommittedWaveSeq = outcome.seq;
     // The EXPLICIT WARM REQUEST (serving-loop.md §1's third activation
     // trigger; RULED 2026-08-21): every foreign provisioning batch this
     // wave durably committed is reported to the co-hosted memory server
@@ -5419,6 +5768,9 @@ export class SpaceServer implements TransactionSealDestination {
       this.#deferredRescanTimer = undefined;
     }
     this.#feedArrived?.resolve();
+    for (const queued of this.#lifecycleVerbs.splice(0)) {
+      queued.reject(new Error(LIFECYCLE_VERB_SPACE_PARKED));
+    }
     // The drain's in-flight copies die with the scheduler queue below.
     this.#drainInFlight.clear();
     for (const timer of this.#deliveryFailureWakeTimers.values()) {
