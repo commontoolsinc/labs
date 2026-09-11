@@ -142,9 +142,15 @@ async function report(): Promise<void> {
         );
       } finally {
         runtime?.telemetry.removeEventListener("telemetry", collect);
-        cancel?.();
-        await runtime?.dispose({ closeStorage: false });
-        await storage.close();
+        try {
+          cancel?.();
+        } finally {
+          try {
+            await runtime?.dispose({ closeStorage: false });
+          } finally {
+            await storage.close();
+          }
+        }
       }
     }
   }
