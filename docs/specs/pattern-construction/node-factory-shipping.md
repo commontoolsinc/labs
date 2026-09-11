@@ -991,10 +991,12 @@ when the callback only forwards or writes the capture and even after earlier
 compiler stages have rebuilt the working source tree. Compiler schema resolution
 therefore uses exact semantic types and the type checker's canonical program
 source scope rather than transient symbols from an emitted working tree.
-Factory construction also records every derived internal Cell's explicit
-resolved scope in the manifest, including the default `space` scope. Full-graph
-serialization must preserve that field; absence is not an alternative spelling
-for the resolved default.
+Factory construction records every derived internal Cell's explicitly declared
+scope in the manifest, including an explicitly declared `space` scope. An
+unscoped internal Cell omits that field and inherits the owning result Cell's
+scope when materialized. Full-graph serialization preserves this distinction:
+absence means inheritance and is not an alternative spelling for an authored
+`space` declaration.
 Every emitted descendant type node for which the compiler carries an exact
 semantic type remains paired with that type: node syntax is authoritative for
 compiler refinements and wrapper syntax such as `Default`, while the semantic

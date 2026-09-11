@@ -15,7 +15,7 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 
 import { type AliasBinding } from "../alias-binding.ts";
-import { isCell, setCellUnlinkedSpace } from "../cell.ts";
+import { isCell, schemaCellScope, setCellUnlinkedSpace } from "../cell.ts";
 import type { ImplementationIdentity } from "../cfc/types.ts";
 import { createRef } from "../create-ref.ts";
 import { defineAuthoredDebugAccessors } from "../harness/authored-debug-source.ts";
@@ -620,7 +620,8 @@ function factoryFromPattern<T, R>(
   >();
   allCellsAndInternalRoots.forEach((cell) => {
     // Only process roots of extra cells:
-    const { cell: top, path, value, schema, scope, external } = cell.export();
+    const { cell: top, path, value, schema, external } = cell.export();
+    const explicitScope = schemaCellScope(schema);
     if (top === inputRootCell || top === paramsRootCell) return;
     if (path.length > 0 || external) return;
 
@@ -636,7 +637,7 @@ function factoryFromPattern<T, R>(
       derivedInternalCells.push({
         partialCause,
         ...(descriptorSchema !== undefined && { schema: descriptorSchema }),
-        ...(scope !== undefined && { scope }),
+        ...(explicitScope !== undefined && { scope: explicitScope }),
       });
     }
   });

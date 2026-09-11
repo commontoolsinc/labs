@@ -87,7 +87,7 @@ describe("computed cell kinds", () => {
         doubled: double(x),
       }));
       expect(testPattern.derivedInternalCells).toEqual([
-        { partialCause: "doubled", kind: "computed", scope: "space" },
+        { partialCause: "doubled", kind: "computed" },
       ]);
     });
 
@@ -102,9 +102,8 @@ describe("computed cell kinds", () => {
         {
           partialCause: { $generated: 0 },
           kind: "computed",
-          scope: "space",
         },
-        { partialCause: "doubled", kind: "computed", scope: "space" },
+        { partialCause: "doubled", kind: "computed" },
       ]);
     });
 
@@ -116,9 +115,9 @@ describe("computed cell kinds", () => {
         return { double: double({ x }) };
       });
       expect(testPattern.derivedInternalCells).toEqual([
-        { partialCause: "double", kind: "computed", scope: "space" },
+        { partialCause: "double", kind: "computed" },
         // `x` is seeded state with no compute writer — never tagged.
-        { partialCause: "x", schema: { default: 1 }, scope: "space" },
+        { partialCause: "x", schema: { default: 1 } },
       ]);
     });
 
@@ -358,7 +357,7 @@ describe("computed cell kinds", () => {
         doubled: double(x),
       }));
       expect(testPattern.derivedInternalCells).toEqual([
-        { partialCause: "doubled", scope: "space" },
+        { partialCause: "doubled" },
       ]);
     });
 

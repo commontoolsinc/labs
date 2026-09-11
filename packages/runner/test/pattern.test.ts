@@ -87,12 +87,10 @@ describe("pattern", () => {
       {
         partialCause: "double",
         kind: "computed",
-        scope: "space",
       },
       {
         partialCause: "x",
         schema: { default: 1 },
-        scope: "space",
       },
     ]);
   });
@@ -109,12 +107,10 @@ describe("pattern", () => {
       {
         partialCause: { $generated: 0 },
         kind: "computed",
-        scope: "space",
       },
       {
         partialCause: "doubled",
         kind: "computed",
-        scope: "space",
       },
     ]);
     expect(testPattern.nodes[0].outputs).toMatchObject({
@@ -151,7 +147,6 @@ describe("pattern", () => {
         partialCause: "isSelected",
         schema: { type: "boolean" },
         kind: "computed",
-        scope: "space",
       },
       {
         partialCause: {
@@ -160,7 +155,6 @@ describe("pattern", () => {
         },
         schema: { type: "boolean" },
         kind: "computed",
-        scope: "space",
       },
     ]);
   });

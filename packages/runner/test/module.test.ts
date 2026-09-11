@@ -367,7 +367,6 @@ describe("module", () => {
       expect(clickPattern.derivedInternalCells).toEqual([{
         partialCause: { stream: "click" },
         schema: { default: { $stream: true } },
-        scope: "space",
       }]);
       const handlerInputs = clickPattern.nodes[0].inputs as {
         $event: unknown;
@@ -403,7 +402,6 @@ describe("module", () => {
       expect(clickPattern.derivedInternalCells).toEqual([{
         partialCause: generatedStreamCause,
         schema: { default: { $stream: true } },
-        scope: "space",
       }]);
       const handlerInputs = clickPattern.nodes[0].inputs as {
         $event: unknown;

@@ -235,6 +235,18 @@ describe("factory-aware graph and static walks", () => {
     ]);
   });
 
+  it("omits an implicit space scope so the internal cell inherits its piece", () => {
+    const { pattern, Writable } = createTrustedBuilder(runtime).commonfabric;
+    const containingPattern = pattern(() => {
+      const inherited = Writable.of("");
+      return { inherited };
+    });
+
+    expect(containingPattern.derivedInternalCells).toEqual([
+      expect.not.objectContaining({ scope: expect.anything() }),
+    ]);
+  });
+
   it("keeps special values atomic in graph and serialization walks", () => {
     const bytes = new FabricBytes(new Uint8Array([10, 11, 12]));
     const factory = bindPattern({ bytes });
