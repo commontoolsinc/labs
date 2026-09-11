@@ -377,10 +377,12 @@ on wave budget exhaustion — EITHER trigger (deadline RULED, owner
 2026-08-04): (a) a cascade that will not quiesce within the
 scheduler's pass budget, or (b) the CONSEQUENCE-FLUSH DEADLINE — a
 wave still running at T_flush commits what is sealed so far. ONE
-mechanism for both: commit the wave anyway — the in-memory state is
-a consistent snapshot — count wavesBudgetExhausted, and advance W NOT AT
-ALL: an exhausted wave's commit carries no watermark movement
-(`derivedThrough` stays at the current W). Continuation waves carry the
+mechanism for both: close a wave when it has sealed contributions or pending
+effects, count `wavesBudgetExhausted`, and keep W unchanged. A zero-delta
+cycle with no pending effects closes no wave and makes no durable commit,
+but still increments the exhaustion counter. A committed exhausted wave
+contains a consistent sealed snapshot; its `derivedThrough` stays at the
+current W. Continuation waves carry the
 cascade as dirtiness; W jumps to the top of the pending input batch only
 at true quiescence. Crash recovery stays sound because the basis index
 re-marks the truncated dirty frontier (§3b, §6) and memo hits suppress
@@ -439,9 +441,14 @@ Light waves never reach the deadline and stay single-commit — the
 zero-delta case, which is why this is a trigger on the EXISTING
 exhaustion machinery rather than a new commit topology. T_flush is
 a policy knob (order 50–100 ms), tuned in Phase 6 with the other
-budgets; `wavesBudgetExhausted` counts both triggers, and the
-amplification budget's inspection rule treats deadline flushes
-under load as a legitimate re-baseline reason (testing.md §4).
+budgets. The configured default is 100 ms. `wavesBudgetExhausted` counts
+exhausted cycles, including those with no wave closure or durable commit;
+`waves` counts closures, including vacuous or aborted outcomes. Their ratio
+is not a committed-wave exhaustion fraction. The amplification budget's
+inspection rule treats deadline flushes under load as a reason to inspect
+and, with the required evidence, re-baseline (testing.md §4). The deadline
+allows sealed consequences to become visible under sustained multi-user
+input while full input coverage remains gated on quiescence.
 
 **Sealing order makes the first flush worth flushing**: events and
 their handler consequences MUST seal ahead of deep demanded
@@ -1494,9 +1501,13 @@ registry deltas; the label is wall time, review MINOR-3);
 `demandChanged`, the `session.watch.set`/`.add` notifies, and the warm
 request's staged-instance captures — the third kept apart so
 `watchWakes` keeps meaning exactly the session-watch notifies) BEFORE the
-300 ms-grace coalescing — a burst is several notifies but one demand pass,
-so these exceed the pass-wake count (review NIT-5); the service (loopback)
-session's notifies are DROPPED — its tracked-set growth is the serving
+300 ms grace coalesces notifications into one pending callback. Each
+notification advances the demand generation; a notification racing a pass
+can require another pass after it completes. Input-driven cycles reconcile
+demand before a held grace callback fires, so 300 ms is not a universal
+cold-session latency floor. Count notifications, callbacks, passes, wave
+closures, and durable commits separately. The service (loopback) session's
+notifies are DROPPED — its tracked-set growth is the serving
 graph's own reads, not client demand (review MINOR-4). `demandArrivals`
 (top-level) the root-level arrival re-arm's count. The `settle` block is
 SERVER SETTLE per authored input — admission (the feed's admitted-commit

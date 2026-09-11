@@ -33,8 +33,13 @@
 
 export type ServingLoopStats = {
   activeSpaces: number;
+
+  /** Completed wave closures, including effect-only and aborted outcomes. */
   waves: number;
+
+  /** Exhausted cycles, including zero-delta cycles that close no wave. */
   wavesBudgetExhausted: number;
+
   supersededWrites: number;
   authoredSeen: number;
   effectAcks: number;
@@ -240,9 +245,10 @@ export type ServingLoopStats = {
    * the reconcile itself is the O(rows) map work — W1 review MINOR-3);
    * `pushGrowthWakes` / `watchWakes` count NOTIFIES (the push-time
    * `demandChanged` and the `session.watch.set` / `.add` notifies) BEFORE
-   * the 300 ms-grace coalescing — a burst is several notifies but one
-   * pass, so these exceed the actual demand-pass wake count (W1 review
-   * NIT-5); the service (loopback) session's notifies are dropped (they
+   * the 300 ms grace coalesces them into a pending callback. A callback
+   * can lead to multiple passes, and input cycles can run a pass before
+   * it fires; notification and pass counts have different boundaries.
+   * The service (loopback) session's notifies are dropped (they
    * are the serving graph's own reads, MINOR-4). `demandArrivals` is the
    * pre-existing top-level `servingLoop.demandArrivals` counter (the
    * root-level arrival re-arm's count), not duplicated here. */
@@ -312,8 +318,9 @@ export type ServingLoopStats = {
        * when promoted. */
       growthWaves?: number;
 
-      /** ms from the growth WAKE to its landing (the demand-wake grace +
-       * derive); present only when promoted and a wake time was seen. */
+      /** ms from the growth notification to its attributed landing.
+       * Includes intervening scheduling and derivation; input-driven work
+       * can bypass the grace timer. Present when a wake time was seen. */
       graceMs?: number;
 
       /** performance.now() of the growth landing; present only when
