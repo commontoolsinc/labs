@@ -187,6 +187,7 @@ describe("collection index resume sync", () => {
               kind: "collection-index",
               mode: "group",
               keys: [],
+              keyEntries: [],
               buckets: {},
             });
           }

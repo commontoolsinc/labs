@@ -1128,6 +1128,11 @@ Key rewrite rules:
 - `a || b`: lowers to `unless(condition, fallback)` only in pattern context
 - ternary `cond ? x : y`:
   - becomes `ifElse(cond, x, y)` with branch/predicate processing
+  - when rewriting a collection receiver establishes callback ownership, the
+    callback is registered before its body is visited, so discriminator
+    comparisons are evaluated reactively
+  - whole-branch wrappers exclude bindings declared inside nested callbacks
+    while retaining outer captures, including outer bindings with the same name
 - array-method family calls are never wrapped as a unit: the analysis marks
   them `skip-call-rewrite`, so only the receiver chain before the method is
   processed. Via §5's spelling fallback this equally covers an

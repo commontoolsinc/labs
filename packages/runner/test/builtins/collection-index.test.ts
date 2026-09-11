@@ -1,3 +1,4 @@
+import { cloneWithoutValueAtPath } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
@@ -251,6 +252,15 @@ describe("collection-index", () => {
       expect(keyRuns[0]).toBe(0);
       expect(await result.key("index").key("buckets").key(bucket).pull())
         .toHaveLength(2);
+      const legacyEdit = first.edit();
+      const legacyIndex = result.withTx(legacyEdit).key("index")
+        .resolveAsCell();
+      const descriptor = legacyIndex.getRawUntyped();
+      expect(descriptor).toHaveProperty("keyEntries");
+      legacyIndex.setRawUntyped(
+        cloneWithoutValueAtPath(descriptor, ["keyEntries"]),
+      );
+      expect((await legacyEdit.commit()).error).toBeUndefined();
       await storages[0].synced();
       cancel();
       first.runner.stop(result);
@@ -271,6 +281,8 @@ describe("collection-index", () => {
       expect(await second.start(restored)).toBe(true);
       await second.idle();
       expect(keyRuns[1]).toBe(0);
+      expect(restored.key("index").resolveAsCell().getRawUntyped())
+        .toHaveProperty("keyEntries");
       expect(await restored.key("index").key("buckets").key(bucket).pull())
         .toHaveLength(2);
       const edit = second.edit();
@@ -285,6 +297,9 @@ describe("collection-index", () => {
       expect(keyRuns[1]).toBe(0);
       expect(await restored.key("index").key("keys").pull()).toEqual(["A"]);
       expect(keyRuns[1]).toBeGreaterThan(0);
+      expect(await restored.key("index").key("keyEntries").pull()).toEqual([
+        { kind: "value", value: "A" },
+      ]);
     } finally {
       for (const cancel of cancellations) cancel();
       runtimes.forEach((runtime, index) =>

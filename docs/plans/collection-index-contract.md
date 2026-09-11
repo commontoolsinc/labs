@@ -6,8 +6,8 @@ The [feature documentation](../features/collection-indexes.md) describes index
 producers and lookup. The remaining acceptance work includes mixed primitive/Cell `keys()`
 enumeration: the runtime union materializer can wrap a primitive alternative as
 a Cell. Membership and lookup preserve the distinction; the enumeration output
-representation is approved as explicit tagged enumeration; implementation and
-acceptance remain pending. Isolation, scale measurements, and joins have
+representation is explicit tagged enumeration through `keyEntries()`; full
+validation and review remain pending. Isolation, scale measurements, and joins have
 implementation evidence in #7323 and remain subject to its final review gates.
 
 ## Key domain and equality
@@ -60,14 +60,14 @@ Q7 is resolved: provide an explicit tagged enumeration API for mixed keys,
 with `{ kind: "value", value: primitiveKey }` and
 `{ kind: "cell", cell: cellKey }` entries. Preserve homogeneous `keys()` usage.
 The [decision record](../history/features/2026-09-11-index-key-enumeration-decision.md)
-records the context, consequences, and alternatives. Implementation is pending;
-approval alone does not establish mixed enumeration correctness.
+records the context, consequences, and alternatives. Tagged enumeration is
+implemented and under validation; approval alone does not establish acceptance.
 
 - [x] Approve explicit tagged enumeration and record the decision.
-- [ ] Add the public tagged type, enumeration method, and compiler/runtime wiring.
-- [ ] Verify compiled consumers preserve primitive values and Cell identities,
+- [x] Add the public tagged type, enumeration method, and compiler/runtime wiring.
+- [x] Verify compiled consumers preserve primitive values and Cell identities,
       including equal contents, distinct Cells, and lookup round trips.
-- [ ] Verify cross-space references, removal/reinsertion, cold resume, and
+- [x] Verify cross-space references, removal/reinsertion, cold resume, and
       demand-only enumeration without broadening lookup dependencies.
 - [ ] Update current API documentation and demonstrations, then complete tests,
       antagonistic review, and Cubic review.
@@ -94,7 +94,8 @@ reactive value containing a group or an optional original element. A Cell passed
 as the key always denotes its identity; callers use an explicit value read when
 its stored primitive should be the key. This keeps Cell identity unambiguous
 when an index accepts both primitive and Cell keys. A separate
-`keys()` operation observes occupied-key membership. Each lookup subscribes to
+`keys()` operation observes homogeneous occupied keys; `keyEntries()` exposes
+explicit tags for mixed primitive/Cell keys. Each lookup subscribes to
 one key's bucket and the lookup key's resolution path; it must not subscribe to
 index enumeration.
 

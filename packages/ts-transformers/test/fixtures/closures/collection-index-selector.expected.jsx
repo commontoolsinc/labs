@@ -252,6 +252,41 @@ export default pattern((__cf_pattern_input) => {
                             }]
                     }
                 },
+                keyEntries: {
+                    anyOf: [{
+                            type: "undefined"
+                        }, {
+                            type: "array",
+                            items: {
+                                anyOf: [{
+                                        type: "object",
+                                        properties: {
+                                            kind: {
+                                                type: "string",
+                                                "enum": ["value"]
+                                            },
+                                            value: {
+                                                type: "string"
+                                            }
+                                        },
+                                        required: ["kind", "value"]
+                                    }, {
+                                        type: "object",
+                                        properties: {
+                                            kind: {
+                                                type: "string",
+                                                "enum": ["cell"]
+                                            },
+                                            cell: {
+                                                type: "string",
+                                                asCell: ["cell"]
+                                            }
+                                        },
+                                        required: ["kind", "cell"]
+                                    }]
+                            }
+                        }]
+                },
                 buckets: {
                     type: "object",
                     properties: {},
@@ -281,6 +316,26 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
+                },
+                keyEntries: {
+                    anyOf: [{
+                            type: "undefined"
+                        }, {
+                            type: "array",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    kind: {
+                                        type: "string",
+                                        "enum": ["value"]
+                                    },
+                                    value: {
+                                        type: "string"
+                                    }
+                                },
+                                required: ["kind", "value"]
+                            }
+                        }]
                 },
                 buckets: {
                     type: "object",

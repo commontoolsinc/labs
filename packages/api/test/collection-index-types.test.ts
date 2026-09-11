@@ -1,7 +1,12 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import type { Cell, GroupIndex, KeyIndex } from "@commonfabric/api";
+import type {
+  Cell,
+  CollectionIndexKeyEntry,
+  GroupIndex,
+  KeyIndex,
+} from "@commonfabric/api";
 
 /** Checks lookup cardinality, key domains, and the handle's read-only surface. */
 function checkIndexTypes(
@@ -14,6 +19,10 @@ function checkIndexTypes(
   const emptyGroup: { name: string }[] = grouped.lookup(undefined);
   const match: { score: number } | undefined = unique.lookup(profile);
   const keys: Cell<{ name: string }>[] = unique.keys();
+  const tagged: CollectionIndexKeyEntry<Cell<{ name: string }>>[] = unique
+    .keyEntries();
+  const primitiveEntries: { kind: "value"; value: string }[] = grouped
+    .keyEntries();
   const primitiveValue: { name: string }[] = grouped.lookup(
     primitiveCell.get(),
   );
@@ -27,7 +36,15 @@ function checkIndexTypes(
   grouped.get();
   // @ts-expect-error Index handles do not expose writes.
   unique.set({});
-  return { group, emptyGroup, match, keys, primitiveValue };
+  return {
+    group,
+    emptyGroup,
+    match,
+    keys,
+    tagged,
+    primitiveEntries,
+    primitiveValue,
+  };
 }
 
 describe("collection index types", () => {

@@ -1,9 +1,9 @@
 {
-  "updated": "2026-09-11T18:01:14.230110+00:00",
+  "updated": "2026-09-11T19:02:17.463912+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7331",
-  "activity": "Q7 approved: implementing explicit tagged mixed-key enumeration and recording its consequences and alternatives. Producer and independent cross-space fixture review fixes continue through validation. Live poll unchanged.",
+  "activity": "Q7 tagged enumeration is implemented and reviewed locally. Full runner sweep: 1,447 passed, two outdated descriptor/setup tests failed; corrected suites pass all seven steps. All 46 type groups and other package checks pass. Publishing for fresh CI and Cubic review; live poll untouched.",
   "review": "Each slice requires clean current-head CI, actual Cubic review, and antagonistic review before landing. The checks ledger records completed merges.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
@@ -33,7 +33,8 @@
     "#7332 merged as 881bda4ba1c0805ca88c3e5d2046cfefbcba5e4a: all 69 exact-head gates passed or skipped; Cubic 103278889723 reviewed both files with zero issues on db78661841; antagonistic review clean. C2 acceptance reconciliation is complete.",
     "#7317 merged as 3e55b4e42dfd70fef3bd1cf4346fa706c4f2d87c: Restore reactive lunch-poll option and voter rows. All 69 exact-head gates passed or skipped on c2e63c1306da1723547b72d98e7c78fc16b878e5; clean Cubic and antagonistic reviews preceded merge.",
     "#7320 merged as 3f2401638594bdca616906816a6c06011a39b643: Separate list coordinator state across serving principals and sessions. All 69 exact-head gates passed or skipped on d843b3be374d9b999f3cbd4975ae9f75d4f5e9c1; clean Cubic and antagonistic reviews preceded merge.",
-    "#7321 merged as 2fda18e1acc435f0c6642ff93809d14cd1ecc543: Index pending schema policies to bound document lookup work. All 69 exact-head gates passed or skipped on 8d9937f7192f16fc70cc01641bcae8b24ad83551; clean Cubic and antagonistic reviews preceded merge."
+    "#7321 merged as 2fda18e1acc435f0c6642ff93809d14cd1ecc543: Index pending schema policies to bound document lookup work. All 69 exact-head gates passed or skipped on 8d9937f7192f16fc70cc01641bcae8b24ad83551; clean Cubic and antagonistic reviews preceded merge.",
+    "Q7 local delta: transformers 1,172/981, API29/7, static68/33 plus24 browser cases,46 type groups,600 docs blocks,fmt/lint/cycles pass. Runner sweep1447 passed with2 stale descriptor/setup test failures; repaired suites pass2/7, final legacy recovery1/2, tagged consumers coverbothmodes. Antagonistic review clean. Final full CI required."
   ],
   "stages": [
     {
@@ -69,8 +70,8 @@
     {
       "id": "A5",
       "title": "Browser and cross-space comparison",
-      "status": "todo",
-      "detail": "Match workload and explain probe/product differences."
+      "status": "waiting",
+      "detail": "Synthetic same-space/cross-space comparison merged in #7340 with both final-head browser acceptances and clean reviews. Deployed-board confirmation remains waiting on Q4 coordination; the live poll is untouched."
     },
     {
       "id": "C1",
@@ -81,8 +82,8 @@
     {
       "id": "B1",
       "title": "Grouping and unique-key indexing",
-      "status": "active",
-      "detail": "Typed lookup and key-resolution foundation landed in #7304. GroupBy/keyBy producers, bucket maintenance, and ownership work continue."
+      "status": "review",
+      "detail": "Tagged keyEntries() and both producer modes pass authored mixed-key/lifecycle acceptance. Full sweep exposed two stale expected-shape tests, now extended and passing. Final CI and Cubic remain before merge."
     },
     {
       "id": "B2",
@@ -216,7 +217,7 @@
       "id": "Q7",
       "title": "How should enumeration expose mixed primitive and Cell keys?",
       "proposal": "Mike approved explicit tagged mixed-key enumeration, preserving homogeneous keys() usage. Decision, consequences, and alternatives are recorded in docs/history/features/2026-09-11-index-key-enumeration-decision.md.",
-      "blocks": "No unanswered decision. Tagged API implementation and acceptance remain in progress.",
+      "blocks": "No unanswered decision; final validation and review are in progress.",
       "status": "Approved"
     }
   ],

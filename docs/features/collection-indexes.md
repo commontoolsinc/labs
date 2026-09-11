@@ -55,13 +55,23 @@ Keys are strings, finite numbers, booleans, or Cell references. Primitive domain
 are distinct, and positive and negative zero share a numeric key. Nullish keys
 omit an occurrence. Unsupported keys fail through the shared key resolver.
 
-Mixed primitive/Cell selectors are supported for membership and lookup, but
-mixed-key `keys()` enumeration is not accepted yet. The runtime can materialize
-a primitive alternative as a Cell when the result schema admits both. Do not
-rely on mixed `keys()` preserving that distinction. The
-[index contract](../plans/collection-index-contract.md#tagged-enumeration-acceptance)
-specifies the approved tagged enumeration API, whose implementation and
-acceptance remain pending.
+`keys()` is the simple enumeration surface for homogeneous key domains. Use
+`keyEntries()` for mixed primitive/Cell selectors. Each occupied key has either
+`{ kind: "value", value: primitiveKey }` or `{ kind: "cell", cell: cellKey }`
+shape. Branch on `kind` and pass the selected field to lookup within that branch.
+Combining both fields into an untagged intermediate value reintroduces the
+primitive/Cell union materialization boundary.
+
+Both surfaces preserve deterministic typed-key order and observe occupied-key
+membership independently of bucket lookup. Cell entries retain resolved identity,
+including cross-space identity. As with other Cell-valued pattern results,
+consumers need a Cell-bearing input schema to retain reference capabilities;
+a value-only view materializes stored contents.
+
+The [decision record](../history/features/2026-09-11-index-key-enumeration-decision.md)
+records the selected representation and alternatives. The
+[acceptance checklist](../plans/collection-index-contract.md#tagged-enumeration-acceptance)
+tracks validation.
 
 A Cell key denotes its resolved space, document, path, and scope. Its schema and
 stored contents do not participate in equality. Selecting a Cell preserves that

@@ -310,8 +310,11 @@ passed before merge, with clean Cubic and antagonistic reviews.
         entries, preserving homogeneous `keys()` usage. The
         [decision record](../history/features/2026-09-11-index-key-enumeration-decision.md)
         records consequences and alternatives.
-  - [ ] Implement tagged enumeration and verify authored output acceptance,
-        lookup round trips, cross-space identities, and durable resume.
+  - [x] Implement tagged enumeration and verify authored output acceptance,
+        lookup round trips, cross-space identities, and durable resume. The
+        [authored consumer tests](../../packages/runner/test/collection-index-key-entries.test.ts)
+        exercise both producer modes with equal-valued primitive and Cell keys;
+        stored-descriptor recovery preserves lookup-only demand behavior.
   - [ ] Bound invalidation to affected keys; state initialization, update,
         lookup, and storage complexity.
 - [x] **B2 contract — Specify lookup and join.** The index contract defines
