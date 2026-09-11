@@ -827,6 +827,31 @@ function buildShrunkTypeNodeFromType(
     );
   }
 
+  // Normalized cell paths address the stored value. Preserve the wrapper so
+  // a value field named after a cell method resolves against the inner type.
+  if (isCellLikeType(type, checker)) {
+    const node = typeToTypeNodeWithRegistry(
+      type,
+      { checker, factory, sourceFile },
+      typeRegistry,
+      typeToNodeFlags,
+    );
+    if (
+      node && ts.isTypeReferenceNode(node) && isCellLikeTypeNode(node) &&
+      node.typeArguments?.length
+    ) {
+      return buildShrunkTypeNodeFromTypeNode(
+        node,
+        normalized,
+        factory,
+        checker,
+        typeRegistry,
+        normalizedFullShapePaths,
+      );
+    }
+    return node;
+  }
+
   // Keep array-like roots as arrays. Narrowing `T[]` to `{ length: number }`
   // breaks runtime schema matching for downstream lift-applied calls.
   // However, when only array-intrinsic properties like `length` are accessed
