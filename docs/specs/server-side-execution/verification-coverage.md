@@ -9200,8 +9200,9 @@ supply; OW29/OW32/OW34 closed):
     picking whose rows a cleared read admits. The non-clearance user/session
     result-key and lifecycle gap is covered by the raw and ExecutorHost
     controls in OW28-instance-family.
-    They use a space database and preserve the existing cleared hash and
-    acting/owner rules. The remaining distinct surface is the
+    They use a space database and reader-independent query hashes.
+    Cleared-query hashing and acting/owner selection follow the OW53 rules
+    above. The remaining distinct surface is the
     provider READ RPC's partition resolution (recorded 2026-08-22
     by the session-identity build, flagged not filled): a
     sub-space-scoped db's ON-DISK partition resolves from the
