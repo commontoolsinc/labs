@@ -1,3 +1,4 @@
+import { getCellWrapperInfo } from "@commonfabric/schema-generator/cell-brand";
 import ts from "typescript";
 import { getCellKind, isBrandedCellType } from "../transformers/cell-type.ts";
 import {
@@ -328,7 +329,8 @@ export function unwrapOpaqueLikeType(
     // Look for an OpaqueCell<T> part and extract its type argument
     for (const part of type.types) {
       if (isBrandedCellType(part, checker)) {
-        const inner = getTypeReferenceArgument(part);
+        const inner = getCellWrapperInfo(part, checker)?.typeRef.typeArguments
+          ?.[0];
         if (inner) {
           // Recursively unwrap in case T itself contains Reactive types
           return unwrapOpaqueLikeType(inner, checker, seen) ?? inner;
@@ -350,7 +352,7 @@ export function unwrapOpaqueLikeType(
 
   if (isBrandedCellType(type, checker)) {
     const inner = unwrapOpaqueLikeType(
-      getTypeReferenceArgument(type),
+      getCellWrapperInfo(type, checker)?.typeRef.typeArguments?.[0],
       checker,
       seen,
     );
@@ -374,7 +376,7 @@ export function unwrapCellLikeType(
     return opaqueUnwrapped;
   }
 
-  return getTypeReferenceArgument(type) ?? type;
+  return getCellWrapperInfo(type, checker)?.typeRef.typeArguments?.[0] ?? type;
 }
 
 /**

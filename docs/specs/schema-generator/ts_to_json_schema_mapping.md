@@ -385,6 +385,10 @@ pre-cleanup schemas.
 
 ### 6.3 Node/type interplay
 
+- A generic alias whose resolved type is a Cell uses that resolved wrapper's
+  payload. The alias's own first argument need not be the payload; source
+  type arguments supply an inner node only when the source node resolves to
+  the matching wrapper kind.
 - Capability re-wrap fidelity: when a **synthetic** node narrows a capability
   brand (the transformer re-wraps `Cell<T>` as `ReadonlyCell<T>`) and the
   node's own inner degrades to `any`, the resolved type's inner supplies the

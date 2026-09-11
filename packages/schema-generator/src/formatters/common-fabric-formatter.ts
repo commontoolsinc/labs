@@ -899,14 +899,12 @@ export class CommonFabricFormatter implements TypeFormatter {
       | undefined,
     targetKind: WrapperKind,
   ): ts.TypeReferenceNode | undefined {
+    // Alias declaration arguments can be unbound or describe a different
+    // parameter list. Only direct wrapper syntax names the resolved payload.
     if (
-      originalNode &&
-      ts.isTypeReferenceNode(originalNode) &&
-      originalNode.typeArguments
+      resolvedWrapper?.kind === targetKind &&
+      resolvedWrapper.node === originalNode
     ) {
-      return originalNode;
-    }
-    if (resolvedWrapper?.kind === targetKind) {
       return resolvedWrapper.node;
     }
     return undefined;
