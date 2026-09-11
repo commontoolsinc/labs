@@ -346,15 +346,17 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Complete A3's CI and fresh Cubic review after its six review fixes. Continue
-C1's nested-filter and remote-row reproductions from
-[PR #7265](https://github.com/commontoolsinc/labs/pull/7265), and complete
-C1/C3's remaining acceptance checks while retaining the production workaround.
+Complete A3's coverage gate and merge review. Verify C1's rendered rows after
+reconnect, and complete C1/C3's remaining acceptance checks while retaining the
+production workaround. The first-materialization cases in
+[PR #7302](https://github.com/commontoolsinc/labs/pull/7302) pass all four
+nested/mapped and same/cross-space browser combinations.
 A4's browser benchmark is available; count regression limits remain. A5 still
 needs cross-space and deployed measurements before product performance claims.
 Live poll access requires coordination with Mike.
 
-For the pending collection operators, settle B1's index contracts before
-implementing `groupBy`/`keyBy`, then build B2's keyed lookup and join. Their
+For the pending collection operators, prototype B1's typed handles against the
+[agreed index contract](collection-index-contract.md), implement `groupBy`/`keyBy`,
+then build B2's keyed lookup and join. Their
 measurements use the shipped counters and the aggregate comparison method; A4/A5
 gate deployed-product claims rather than operator implementation.
