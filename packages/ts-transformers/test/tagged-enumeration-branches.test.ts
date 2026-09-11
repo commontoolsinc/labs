@@ -7,6 +7,26 @@ import { callsNamed, collect, parseModule } from "./transformed-ast.ts";
 import { transformSource } from "./utils.ts";
 
 describe("tagged enumeration branches", () => {
+  it("preserves an authored symbol-less lowered-method callback", async () => {
+    const output = parseModule(
+      await transformSource(
+        `
+      import {pattern} from "commonfabric";
+      declare const receiver: any;
+      export default pattern<{n: number}>(({n}) => ({
+        output: receiver.mapWithPattern((row: number) => row + n, {}),
+      }));
+    `,
+        { types: COMMONFABRIC_TYPES },
+      ),
+    );
+    const calls = callsNamed(output, "mapWithPattern");
+    expect(calls).toHaveLength(1);
+    expect(ts.isArrowFunction(calls[0].arguments[0])).toBe(true);
+    expect(ts.isObjectLiteralExpression(calls[0].arguments[1])).toBe(true);
+    expect(callsNamed(output, "pattern")).toHaveLength(1);
+  });
+
   it("evaluates an enumerated discriminator inside a computation", async () => {
     const source = `
       import {pattern, GroupIndex, Cell} from "commonfabric";

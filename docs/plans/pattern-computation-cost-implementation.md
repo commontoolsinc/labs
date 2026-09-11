@@ -294,13 +294,15 @@ passed before merge, with clean Cubic and antagonistic reviews.
 
 ## 6–9. Complete the collection algebra: B1–B4
 
-- [ ] **B1 contract — Specify `groupBy` and `keyBy` separately.** The
+- [x] **B1 contract — Specify `groupBy` and `keyBy` separately.** The
       [index contract](collection-index-contract.md) records semantic decisions
       and acceptance tests, agreed in
       [PR #7294](https://github.com/commontoolsinc/labs/pull/7294). Typed lookup
       landed in [PR #7304](https://github.com/commontoolsinc/labs/pull/7304);
       producers are under review in [PR #7323](https://github.com/commontoolsinc/labs/pull/7323);
-      measured initialization and maintenance bounds remain open.
+      initialization and maintenance counts are validated separately in
+      [PR #7362](https://github.com/commontoolsinc/labs/pull/7362), with 12 cases
+      and 96 phases. Source-size and affected-bucket costs remain explicit.
   - [x] Key domain and equality, including resolved link identity and
         retargeting a key link without editing its containing element.
   - [x] Duplicate-key handling that remains deterministic for unordered input;
@@ -316,21 +318,26 @@ passed before merge, with clean Cubic and antagonistic reviews.
         [authored consumer tests](../../packages/runner/test/collection-index-key-entries.test.ts)
         exercise both producer modes with equal-valued primitive and Cell keys;
         stored-descriptor recovery preserves lookup-only demand behavior.
-  - [ ] Bound invalidation to affected keys; state initialization, update,
+  - [x] Bound invalidation to affected keys; state initialization, update,
         lookup, and storage complexity.
 - [x] **B2 contract — Specify lookup and join.** The index contract defines
       a left lookup join, unmatched rows, deterministic duplicate matches,
       left occurrence ordering, link retargeting, and owned cleanup.
-- [ ] **B1 implementation — Build grouping and unique-key indexing.**
-  - [ ] Reuse collection element-identity/reconciliation rules from existing
+- [x] **B1 implementation — Build grouping and unique-key indexing.**
+      PR #7323 carries the implementation and runner acceptance; PR #7362
+      supplies the separate phase-count probe. Delivery gates remain pending.
+  - [x] Reuse collection element-identity/reconciliation rules from existing
         builtins; cover primitives, linked elements, and inline values.
-  - [ ] Wire builtin registration, replayability, `Cell` methods and reactive
+  - [x] Wire builtin registration, replayability, `Cell` methods and reactive
         operation list, author-facing types, and transformer lowering.
-  - [ ] Test inserts, edits, moves between keys, removals, reorder, duplicate
+  - [x] Test inserts, edits, moves between keys, removals, reorder, duplicate
         keys, link retargeting, replay, and teardown. Assert unaffected-key
         consumers do not rerun and measure maintenance work as size grows.
-- [ ] **B2 implementation — Build keyed lookup, then join.** Test lookup and
-      join contracts, both-side updates, and affected-row-only invalidation.
+- [x] **B2 implementation — Build keyed lookup, then join.** Lookup and join
+      contracts, both-side updates, unmatched rows, and affected-row-only
+      invalidation pass the local/cross-space and restart acceptance tests in
+      [PR #7323](https://github.com/commontoolsinc/labs/pull/7323). Publication
+      remains subject to its CI and review gates.
 - [x] **B3 contract — Specify deterministic aggregates.**
   - [x] Define combine order from the current collection, independent of edit
         history; define floating-point behavior explicitly.
@@ -343,13 +350,14 @@ passed before merge, with clean Cubic and antagonistic reviews.
         and edit histories. Test count bounds on single-element updates and
         initialization separately.
   - [x] Keep ordinary `reduce` as the full-rerun order-dependent operation.
-- [ ] **B4 — Publish contracts and complexity with each operator.** Update
+- [x] **B4 — Document contracts and complexity with each operator.** Update
       public doc comments, pattern-author documentation, and executable examples
       in the same slice that ships the API. The aggregate portion is documented
       in [collection aggregates](../features/collection-aggregates.md); index
       semantics and current costs are documented in
       [collection indexes](../features/collection-indexes.md). Measured scale
-      acceptance and join documentation remain pending.
+      acceptance is recorded in PR #7362; join documentation and acceptance tests
+      are in PR #7323. Repository publication remains gated by CI and review.
 
 **Deferred B3a:** Reconsider restricted append folds only after B1–B3 ship and a
 remaining use case justifies them. Requires a separate contract excluding
@@ -435,9 +443,9 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Complete mixed primitive/Cell key enumeration acceptance and publish the
-validated producer optimizations and join composition through #7323. Follow
-with the local lunch-poll operator migration and its measured acceptance.
+Complete publication gates for the validated producers, tagged enumeration, and
+join composition in #7323, and the maintenance phase-count probe in #7362.
+Then publish the validated repository lunch-poll migration in #7336.
 The [512-row measurements](../history/development/performance/2026-09-11-demanded-index-enumeration.md)
 separate initialization, bucket maintenance, enumeration, and lookup costs.
 Local browser acceptance covers 74, 296, and 1,184 votes. A5 still needs a

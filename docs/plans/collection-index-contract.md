@@ -8,7 +8,10 @@ enumeration; homogeneous domains also support `keys()`. The implementation and
 focused authored-consumer acceptance are complete in #7323. Publication remains
 subject to current-head CI and review, tracked separately on the execution
 dashboard. Isolation, scale measurements, and joins have implementation evidence
-in that PR.
+in that PR. The separate phase-count probe in
+[PR #7362](https://github.com/commontoolsinc/labs/pull/7362) validates membership
+edits and lookup retargeting across increasing sizes. Its publication gates
+remain pending too.
 
 ## Key domain and equality
 
@@ -171,15 +174,26 @@ groups.
 - [x] Implement shared key resolution and per-element extraction, reusing
       runtime identity and ownership machinery.
 - [x] Implement `groupBy`, unique-key selection, and per-key lookup.
-- [ ] Test primitive domains, missing/invalid keys, duplicate occurrences,
+- [x] Test primitive domains, missing/invalid keys, duplicate occurrences,
       source reorder, key edits, link-only retargeting, and cross-space keys.
-- [ ] Test absent lookup before insertion, last-member removal, reinsertion,
+      Verified in #7323 by the collection-index key, producer, and tagged-entry
+      runner tests.
+- [x] Test absent lookup before insertion, last-member removal, reinsertion,
       rejected transactions, teardown, cold resume, and independent readers.
-- [ ] Count callback and consumer runs. A change to key A must leave a key B
+      Verified in #7323 by the builtin, serving, resume-sync, and lookup tests.
+- [x] Count callback and consumer runs. A change to key A must leave a key B
       lookup's run count unchanged when its declared dependencies are unchanged.
-- [ ] Implement the left lookup join; cover both-side updates and unmatched
-      rows.
-- [ ] Benchmark initialization, membership reconciliation, one linked-row edit,
-      lookup, and skewed duplicates independently at increasing sizes.
-- [ ] Publish contracts, measured limits, and a synthetic roster/tally demo.
+      The collection-index invalidation tests in #7323 assert both the idle
+      unrelated consumer and its later response to a matching change.
+- [x] Implement the left lookup join; cover both-side updates and unmatched
+      rows. The local/cross-space join tests in #7323 also cover restart.
+- [x] Benchmark initialization, membership reconciliation, one linked-row edit,
+      lookup, and skewed duplicates as separate phases at increasing sizes.
+      PR #7362 completes 12 cases and 96 phases with output assertions and a
+      failing negative control. Phases share an evolving fixture per case;
+      counts cover completed action bodies, not all runtime work.
+- [x] Implement contracts, measured limits, and a synthetic roster/tally demo.
+      The feature documentation and local dashboard expose the operator
+      contracts, join behavior, and measurements; PRs #7323 and #7362 carry
+      repository publication through the separate gates above.
       Live poll migration remains subject to coordination with Mike.

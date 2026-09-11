@@ -8,6 +8,7 @@ import {
   collectionKeyBucket,
   resolveCollectionKey,
 } from "../src/builtins/collection-index-key.ts";
+import { CellImpl } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 
@@ -30,6 +31,26 @@ describe("collection index lookup", () => {
     await storage.synced();
     await runtime.dispose();
     await storage.close();
+  });
+
+  it("rejects uncompiled callbacks and enumeration on ordinary data", () => {
+    const tx = runtime.edit();
+    try {
+      const rows = runtime.getCell<string[]>(
+        space,
+        "direct-index-rows",
+        undefined,
+        tx,
+      );
+      rows.set(["a"]);
+      expect(() => rows.groupBy(() => "a")).toThrow("groupByWithPattern");
+      expect(() => rows.keyBy(() => "a")).toThrow("keyByWithPattern");
+      expect(() => CellImpl.prototype.keyEntries.call(rows)).toThrow(
+        "keyEntries requires a collection index",
+      );
+    } finally {
+      tx.abort();
+    }
   });
 
   it("forwards index proxy methods while preserving ordinary same-named fields", () => {
