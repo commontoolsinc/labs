@@ -1077,18 +1077,20 @@ constructs its first storage read from the union of predicate-observed and
 projected paths. Structurally declared properties, including local `$ref` item
 schemas, are pruned to that union: predicate-only fields can decide membership
 without appearing in the result, and omitted linked subgraphs are not hydrated.
-Schema-less or root-union sources retain a value-shape read before the transform
-because their array/object projection semantics cannot be established from the
-declaration. Ambiguous source-schema compositions remain intact and can retain a
-wider selector. The runtime's list filter/map builtins therefore handle CFC
-exactly as authored pattern expressions do: predicate observations label array
-membership, projection reads propagate labels, and filtered elements retain
-their source links. Projection map/lift nodes construct the requested shape from
-a source-schema-selected read rather than returning a widening identity alias.
-Nested non-stream Cell handles are materialized before the predicate/projection
-JavaScript runs; stream handles remain capabilities. The source cell's schema
-remains authoritative for Common Fabric metadata. A caller cannot introduce or
-override `ifc`, `asCell`, `scope`, or `default` through `--schema`.
+A schemaless source first loads its stored root without following children; an
+object or array establishes its projection shape directly. Root links and
+instances need materialization, as do ambiguous schema unions, whose schema can
+transform the stored value. Ambiguous source-schema compositions remain intact
+and can retain a wider selector. The runtime's list filter/map builtins
+therefore handle CFC exactly as authored pattern expressions do: predicate
+observations label array membership, projection reads propagate labels, and
+filtered elements retain their source links. Projection map/lift nodes construct
+the requested shape from a source-schema-selected read rather than returning a
+widening identity alias. Nested non-stream Cell handles are materialized before
+the predicate/projection JavaScript runs; stream handles remain capabilities.
+The source cell's schema remains authoritative for Common Fabric metadata. A
+caller cannot introduce or override `ifc`, `asCell`, `scope`, or `default`
+through `--schema`.
 
 #### Which keywords a `--schema` projection may contain
 
@@ -1244,27 +1246,28 @@ no longer say which positions they came from, and an address names a position.
 
 #### What a selection means for a call
 
-A selection shapes a result that already exists. It does not narrow what the
-call fetches: the readback materializes the whole receipt before the selection
-runs. (A plain result's receipt does carry a descriptive schema of what it holds
-— a receipt holding anything reactive carries none — but either way the fetch
-has happened before the selection applies.) The same holds for a tool, whose
-result is read off the cell the tool wrote. Use a selection to control what
-reaches stdout, not to control what travels.
+A selection over a schemaless handler receipt starts by loading the receipt
+without following its children. If it holds an object or array, the CLI selects
+from that container directly. An address-only selection can therefore return a
+stored child link without loading the child. The verb's declared result remains
+available for cycle bounding; it does not replace the selection's source schema.
 
-A selection also adds a computed read after the call. The shaped readback runs
-through the same shared read step as `cf cell get`, and waits for its output
-with one `Cell.pull()`. That pull drives the output's transitive computation and
-linked-document loads through the runtime scheduler and its manager-wide
-convergence pool, so work already active in that runtime can still share the
-wait. Declared object keys are then ordered locally from the projection before
-rendering, and the keys an open projection retains beyond its declaration follow
-them in the value's own order; that step starts no graph or storage work. When
-isolating the read matters, shape the collect instead. Call plain (or
-`--no-wait`), then collect from the receipt with
-`cf cell get --cell <receipt id> --select …`.
+Root links, instances, scalars, and receipts read through an explicit schema are
+materialized before selection. A root link can resolve to an absent value, so
+its stored existence alone does not establish a result. Tool calls also
+materialize their result before selection.
 
-Three cases follow from that:
+A shaped readback uses the same shared read step as `cf cell get`. Its
+`Cell.pull()` calls drive transitive computation and linked-document loads
+through the runtime scheduler and its manager-wide convergence pool, so work
+already active in that runtime can still share the wait. Declared object keys
+are then ordered locally from the projection before rendering, and the keys an
+open projection retains beyond its declaration follow them in the value's own
+order; that step starts no graph or storage work. When isolating the read
+matters, shape the collect instead. Call plain (or `--no-wait`), then collect
+from the receipt with `cf cell get --cell <receipt id> --select …`.
+
+Selections also follow these rules:
 
 - **A value-less verb still reports nothing.** Its receipt is the empty witness,
   and the Invocation JSON omits `result` to say so. A selection is about a
