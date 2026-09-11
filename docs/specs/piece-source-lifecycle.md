@@ -1061,6 +1061,11 @@ is the batch lane's,
      closure and select the stored export symbol.
    - Before any cross-space copy, enforce the source's CFC provenance labels
      for the destination and fail closed when the flow is not permitted.
+     Public `LinkReference` evidence on a version-2 reference observation
+     identifies the stored source link. Verified source-byte recovery creates
+     destination links with their own evidence. Confidentiality on that
+     reference, and content integrity that the copy cannot preserve, still
+     prevent recovery across spaces.
 3. If the resolved identity, symbol, complete-program digest, and origin revision
    equal the values accepted by the current revision, start the current pattern
    without writing a revision. That shortcut requires the accepted source to

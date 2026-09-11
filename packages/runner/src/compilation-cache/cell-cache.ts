@@ -1496,10 +1496,11 @@ export function stageModuleDelegations(
               `compiled source update artifact ${identity} is untrusted`,
             );
           }
-          compiled.asSchema(compiledDocWriteSchema()).key(
-            "delegatedModuleIdentities",
-          )
-            .set([...predecessors]);
+          // The compiler renews the whole record's attestation after checking
+          // its stored evidence. Keep the root schema on this partial update.
+          compiled.asSchema(compiledDocWriteSchema()).update({
+            delegatedModuleIdentities: [...predecessors],
+          });
         }
       }
     }
