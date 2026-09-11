@@ -23,10 +23,13 @@ import {
  * * `FabricInstance` -- _the_ state value (it only has the one).
  * * `FabricPlainObject`s -- values only.
  *
- * The implementation includes a definition for all container-specific `visit()`
- * methods, which all return `DO_RECURSE_VALUES` (per the above description),
- * and also implements no-op (empty) `visited*()` methods. Every other method of
- * the interface remains `abstract`.
+ * The implementation includes a definition for all container-specific
+ * `visit*()` methods, which all return `DO_RECURSE_VALUES` (per the above
+ * description), and also implements no-op (empty) `visited*()` methods. Every
+ * other method of the interface remains `abstract`. The `visit*()` method
+ * implementations are intended to make it easy to override implementations
+ * selectively, by overriding `visitFabricContainer()` to return
+ * `DO_VISIT_SUBTYPE` and then whatever specific subtypes need to be altered.
  */
 export abstract class ContainerIteratingValueVisitor<
   DomainExtra = never,
