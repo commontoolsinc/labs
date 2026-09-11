@@ -3081,6 +3081,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.status();
   }
 
+  committedSeq(space: MemorySpace): number | undefined {
+    return this.tx.committedSeq?.(space);
+  }
+
   read(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
@@ -4369,6 +4373,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   status(): StorageTransactionStatus {
     return this.#wrapped.status();
+  }
+
+  committedSeq(space: MemorySpace): number | undefined {
+    return this.#wrapped.committedSeq?.(space);
   }
 
   #transformReadOptions(options?: IReadOptions): IReadOptions {

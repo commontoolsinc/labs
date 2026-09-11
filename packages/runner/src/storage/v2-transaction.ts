@@ -35,6 +35,7 @@ import {
 } from "../../../memory/v2/path.ts";
 import type { CellScope } from "../builder/types.ts";
 import { normalizeCellScope } from "../scope.ts";
+import { getCommitSeq } from "./commit-identity.ts";
 import type {
   Activity,
   ChangeGroup,
@@ -1210,6 +1211,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { status: "pending", journal: this.journal };
     }
     return { status: "ready", journal: this.journal };
+  }
+
+  committedSeq(space: MemorySpace): number | undefined {
+    return getCommitSeq(this, space);
   }
 
   getReadActivities(): readonly IReadActivity[] {

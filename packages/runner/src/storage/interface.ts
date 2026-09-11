@@ -1443,6 +1443,16 @@ export interface IStorageTransaction {
   status(): StorageTransactionStatus;
 
   /**
+   * The store seq `space` accepted this transaction's commit at: the position
+   * in that space's commit log the writes landed at, which
+   * `cf inspect value-at --seq` and `diff --from/--to` read. Known once the
+   * commit's verdict arrives; undefined before it, for a commit the space
+   * rejected, and for a space this transaction wrote nothing to. Optional the
+   * same way as the read hooks above; absent means unknown.
+   */
+  committedSeq?(space: MemorySpace): number | undefined;
+
+  /**
    * Reads a value from a (local) memory address and captures corresponding
    * `Read` in the transaction invariants. If value was written in read memory
    * address in this transaction read will return value that was written as

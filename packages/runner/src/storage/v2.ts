@@ -96,7 +96,7 @@ import { entityKey } from "../scheduler/keys.ts";
 import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
-import { recordCommitLocalSeq } from "./commit-identity.ts";
+import { recordCommitLocalSeq, recordCommitSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import {
   type CommitReadBasis,
@@ -5434,6 +5434,9 @@ export class SpaceReplica
       // The cover class: a sealed native commit is the co-hosted
       // executor's wave commit (speculative seals resolve withdrawn and
       // never reach here) — the wave admission class, derived.
+      if (source !== undefined) {
+        recordCommitSeq(source, this.#space, v.committed.seq);
+      }
       this.#confirmPending(
         localSeq,
         operations,
@@ -6211,6 +6214,7 @@ export class SpaceReplica
             operations,
             applied,
             resolveAtVerdict,
+            source,
           );
           // Tx-sourced commits ALWAYS record the coverage wait: the inner
           // settlement promise carries commit callbacks and the
@@ -6265,6 +6269,7 @@ export class SpaceReplica
           operations,
           outcome.applied,
           resolveAtVerdict,
+          source,
         );
         // Same rule as the direct-await branch above: tx-sourced commits
         // always record; only the direct path honors the verdict opt-out.
@@ -7928,11 +7933,17 @@ export class SpaceReplica
     operations: NativeCommitOperation[],
     applied: AppliedCommit,
     resolveAtVerdict = false,
+    source?: IStorageTransaction,
   ): Promise<void> {
     // The retirement floor's ack record (speculation.md §4): known at
     // VERDICT time, before any parking — a parked promotion changes when
     // the value becomes visible, not that the origin acked.
     this.#recordAcknowledgedCommit(localSeq, applied.seq);
+    // The same seq, on the transaction that produced the commit: its caller
+    // can name the commit after the bounded record above has forgotten it.
+    if (source !== undefined) {
+      recordCommitSeq(source, this.#space, applied.seq);
+    }
     // The input barrier's own-echo race repair (Phase 2 revisit (a)):
     // the frame can OUTRUN this verdict handler on the same socket, so
     // an own-echo upsert may have been mis-recorded as shadowed foreign

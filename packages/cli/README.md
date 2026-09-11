@@ -553,6 +553,12 @@ That status means “source changed, running deploy unverified,” not rollback:
 `piece render`, `piece inspect`, and `piece getsrc` to determine the live state.
 A receipt alone is never proof that the updated piece starts.
 
+In either case the receipt names the committed pattern ref, the source revision,
+and the seq at which the space's commit log accepted the update. That seq is
+what `cf inspect value-at --seq` and `diff --from` take, so the piece can be
+read at exactly the commit that applied the update, or diffed against what has
+landed since.
+
 ## Where a piece is created
 
 Against a deployment that runs the serving loop — one whose published posture

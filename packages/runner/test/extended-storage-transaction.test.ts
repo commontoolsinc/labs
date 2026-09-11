@@ -775,4 +775,24 @@ describe("extended-storage-transaction", () => {
       }
     });
   });
+
+  it("reports a committed seq through the sample wrapper", async () => {
+    // `Cell.sample()` and `Cell.sink()` hand out this wrapper, and the
+    // accessor is optional on the interface, so a wrapper that dropped it
+    // would compile and answer undefined for a commit the wrapped
+    // transaction knows the seq of.
+
+    const tx = runtime.edit();
+    runtime.getCell(space, "wrapped committed seq", undefined, tx).set({
+      title: "after",
+    });
+    const wrapper = createNonReactiveTransaction(tx);
+    expect(wrapper.committedSeq?.(space)).toBeUndefined();
+
+    await tx.commit();
+
+    const seq = tx.committedSeq?.(space);
+    expect(seq).toBeGreaterThan(0);
+    expect(wrapper.committedSeq?.(space)).toBe(seq);
+  });
 });

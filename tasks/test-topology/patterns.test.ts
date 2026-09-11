@@ -211,7 +211,7 @@ describe("the pattern and package suites", () => {
       },
     );
     expect(invocation!.env?.DENO_COVERAGE_DIR).toBe(
-      "/cov/pattern-integration-patterns",
+      "/cov/packages__patterns",
     );
   });
 

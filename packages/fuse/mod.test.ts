@@ -219,6 +219,8 @@ Deno.test("source projection failures after commit become warnings, not rejected
     ref: { identity: "A".repeat(43), symbol: "default" },
     revisionId: "revision-committed-before-finalize",
     detachedOrigin: null,
+    space: "did:key:test" as const,
+    seq: 12,
     refresh: { status: "completed" as const },
   };
   const failure = new Error("projection rebuild failed");

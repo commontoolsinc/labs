@@ -1125,6 +1125,15 @@ type SetupResult<R> = {
 export interface PatternSetupCommitReceipt {
   /** Content-addressed pattern pointer written by the transaction. */
   pattern: { identity: string; symbol: string };
+  /** The space whose commit log accepted the transaction. */
+  space: MemorySpace;
+  /**
+   * Position in `space`'s commit log at which storage accepted the
+   * transaction. With `space` it is the coordinate `cf inspect value-at --seq`
+   * and `diff --from/--to` read, and it orders this receipt against every
+   * other commit to the space.
+   */
+  seq: number;
 }
 
 /** Result of running a pattern through an owned setup transaction. */
@@ -6886,6 +6895,7 @@ export class Runner {
     const givenTx = resultCell.tx?.status().status === "ready" && resultCell.tx;
     let setupRes: SetupResult<any> | undefined;
     let commit: PatternSetupCommitReceipt | undefined;
+    let committedTx: IExtendedStorageTransaction | undefined;
     const assertExpectedPatternIdentity = (
       cell: Cell<any>,
     ): void => {
@@ -6929,6 +6939,9 @@ export class Runner {
     } else {
       const outcome = await this.#runtime.editWithRetry(
         (tx) => {
+          // The attempt that commits is the last one this callback sees, so
+          // the receipt below names the commit it produced.
+          committedTx = tx;
           // Receipts and source-update authority require this transaction's
           // durable acceptance. Check each attempt because a seal destination
           // can be installed during synchronization or between retries.
@@ -7013,7 +7026,17 @@ export class Runner {
             );
           }
           // deno-coverage-ignore-stop
-          commit = { pattern: patternRef };
+          // Recorded on the transaction at its verdict, before the commit
+          // promise resolved, so a resolved commit carries it; like the
+          // pointer above, a missing seq is the type's edge and fails loudly
+          // rather than minting a receipt that names no commit.
+          const seq = committedTx?.committedSeq?.(resultCell.space);
+          if (seq === undefined) {
+            throw new Error(
+              "the pattern setup committed without recording its store seq",
+            );
+          }
+          commit = { pattern: patternRef, space: resultCell.space, seq };
         }
       }
     }
