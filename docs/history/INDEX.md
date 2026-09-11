@@ -148,6 +148,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Investigations, journals, and working notes
 
+- [Scoped snapshot memo verification](development/performance/2026-09-10-scoped-snapshot-memo.md) — D3 metadata/epoch isolation regressions and exact label-view reuse counts at three sizes.
+
 - [Pattern read accounting: first-batch baseline](development/performance/2026-09-pattern-read-accounting.md) — 2026-09-10: transaction-scoped read counters, generic reduction update costs, headless lunch-poll attribution, and instrumentation overhead measurements.
 - [Incremental aggregate comparison](development/performance/2026-09-incremental-aggregates.md) — 2026-09-10: compiled aggregate initialization costs, paired update timings, read-work scaling, and coordinator rescan findings.
 
