@@ -148,11 +148,16 @@ for why.
 
 ### Reading a Value Narrowly and Handing It Back Whole
 
-A `lift()`'s declared parameter is what it reads, and reading is what it becomes
-reactive to — so declaring the few fields the body touches is how a derivation
-over a large collection stays cheap. Often the body then hands an element
-straight back, and the caller wants the whole element, not the sliver that was
-read.
+A `lift()`'s parameter schema describes the view its body can read. With lazy
+materialization enabled by default, accessing that view records dependencies
+on the paths the body touches. A narrower declaration documents the required
+input, but does not by itself make a collection scan incremental: the
+[measured collection loops](#collection-loop-cost) read the same amount under
+broad and narrow declarations. A body that visits every row still visits every
+row when a used field changes.
+
+A derivation can read a few fields and return the original element, preserving
+the caller's access to its other fields.
 
 Declare that with a type parameter. The result type is the element type, so the
 caller gets back exactly what it passed in:
@@ -172,7 +177,8 @@ const kept = nonEmpty({ rows });
 ```
 
 The schema generated for the lift comes from the constraint, argument and result
-alike, so `nonEmpty` reads `{ key: string }` and nothing more. The elements
+alike. Here the predicate accesses `key`; it does not inspect each element's
+payload. The elements
 survive because a value forwarded out of a derivation is written as a reference,
 and a reference resolves to its whole document however little the derivation
 declared.
