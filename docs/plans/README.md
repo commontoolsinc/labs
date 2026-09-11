@@ -71,7 +71,7 @@ a record: archive it to `docs/history/plans/` following the procedure in
 - [Pre-syncing from node plans](presync-from-node-plans.md) makes one
   derivation per pattern node serve both instantiation and the pre-sync, so a
   resume and a fresh start name exactly what each lift, handler, builtin, and
-  nested pattern reads under its transformer-narrowed schema, then holds each
+  nested pattern reads under their declared read schemas, then holds each
   node's first run on the loads it named instead of on a space-wide timer.
 - [Making pattern computation cost declarable and visible](pattern-computation-cost.md)
   pairs two repairs to the same gap: the collection algebra has incremental

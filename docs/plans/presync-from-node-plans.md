@@ -75,17 +75,18 @@ loads its own reads registered. Computations have no such park.
 
 ### One plan per node
 
-`#nodePlan(node, argumentLink, resultCell, pattern, tx)` returns:
+`#nodePlan(tx, node, resultCell, pattern, moduleRefName?, argumentLink?)`
+returns:
 
-- `inputsCell`, the immutable cell `#instantiateJavaScriptActionNode` and
-  `#buildRawNodeInputs` already build from the bound input bindings;
-- `readSchema`, the module schema the node reads `inputsCell` under, with a
-  handler's `$event` slot excluded;
+- `inputsCell`, the immutable cell built from the bound input bindings, which
+  the node reads its argument from;
+- `module`, whose argument schema is the read schema the pre-sync syncs
+  `inputsCell` under, with a handler's `$event` slot excluded
+  (`schemaWithoutEventSlot`);
 - `outputs`, the bound output bindings, and `writes`, their write-redirect
   links, each carrying the output binding's schema;
 - for a pattern node, `childResultCell` under the child's result schema and
-  the bound child pattern, derived as `#collectResumeOwnedCells` and
-  `#instantiatePatternNode` derive them today.
+  the bound child pattern, derived as `#instantiatePatternNode` derives them.
 
 Instantiation consumes the plan: `#bindNodeIO`, `#buildRawNodeInputs`, the
 passthrough node, and `#instantiatePatternNode` each take their bound values
@@ -96,8 +97,10 @@ run's read set and nothing the authored schema reaches beyond it.
 
 ### The pre-sync syncs each plan under its schema
 
-Each node's pre-sync is one call: `inputsCell.asSchema(readSchema).sync()`.
-The inputs cell is a data-URI document, and syncing one under a schema runs
+Each node's pre-sync is a sync of `inputsCell` under its read schema, plus
+its write targets under their output schemas and, for a handler, every hop
+of the stream document its `$event` slot names. The inputs cell is a
+data-URI document, and syncing one under a schema runs
 the storage manager's `#collectLinkedCellSyncs`, which hands the server a
 selector for each binding link under the sub-schema the link's place
 selects. From there the server's query walk follows links the way a read
@@ -111,7 +114,11 @@ budget, wave loop, dedupe sets, opaque stop, and undeclared fallback;
 `syncAllMentionedCells`; and the schema-less use of the same walk on the
 pattern-update path, which `syncStoredPieceCells` covers once it runs the
 plan syncs. `LINK_HOPS`, `ArgumentLinkRoot`, `narrowChildSchema`, and
-`isReferenceOnlySchema` go with them. The reference graphs that motivated the
+`isReferenceOnlySchema` go with them. One walk stays, one hop wide: the
+stored argument's direct link targets and the result document owning each
+are named root-only (`#syncStoredArgumentLinkTargets`), because setup's
+supplied-link proof reads them and that read is no node's. The reference
+graphs that motivated the
 hop budget are declared `unknown` at their edges, where the traverser answers
 presence and stops, so no depth constant stands in for that.
 
@@ -122,16 +129,18 @@ therefore collapses to the same call over the inputs with the event folded
 in; its handle collection goes.
 
 Cross-space targets past the first hop are the one thing the server walk
-cannot deliver, since its query is per space. Nothing in the pre-sync needs
-to stand in for it. A read that dead-ends on a link into another space kicks
-a load there (`ensureLinkedDocLoaded`), and that load is the subscription:
-the storage manager opens the space, tracks the load so `synced()` awaits
-it, and the absent document is a tracked read, so the run re-runs when it
-arrives. A space the transaction only read produces no commit, and its reads
-enter no commit's basis (`v2-transaction.ts`, the read-only-spaces handoff),
-so the cold read costs one re-run and never a conflict. Whether that re-run
-is worth parking the first run on the load it kicked is a stage 4 question,
-answered by measurement.
+cannot deliver, since its query is per space. A read that dead-ends on a link
+into another space kicks a load there (`ensureLinkedDocLoaded`), and that
+load is the subscription: the storage manager opens the space and tracks the
+load. The pre-sync uses exactly that: after a wave's plan syncs land, it
+reads each plan's inputs under its read schema through a read transaction,
+awaits the loads those reads kicked (`crossSpaceSettled`), and reads again
+until a round kicks nothing (`#syncCrossSpaceReads`). The read's own
+traversal decides what is missing, so no second walk exists. The pass is
+owed rather than optional: a space the transaction only read enters no
+commit's basis, so a cold cross-space read costs no conflict, but an action
+that destructures the cold value throws instead of re-running, and the home
+profile flow reads profile documents in their own spaces that way.
 
 One correction on the way: `#collectLinkedCellSyncs` syncs a first-hop link
 under `link.schema ?? schema`, the link's declared schema before the
@@ -142,8 +151,8 @@ authored slice pulls the authored slice.
 Outputs are named under the output binding's schema for every node kind. For
 a JavaScript or raw node that is the write target, a derived internal cell or
 a result path, under the module's declared result schema. For a pattern node
-it is the child result cell under the child's result schema, which today is
-not named at all. A pattern node's inputs are not synced at the parent level:
+it is the child result cell under the child's result schema, which the
+pre-sync this plan replaced never named. A pattern node's inputs are not synced at the parent level:
 the child's own nodes read through the child's argument document, and the
 recursion below syncs them under their own module schemas.
 
@@ -265,9 +274,9 @@ writes rather than plans.
       third local. This one was green before the change too: the input
       link's direct sync already handed the server the declared chain, and
       only the client-side walk was capped.
-- [ ] Test: the `defaultProfile` shape, a container in the piece's space
-      linking to a document in another space. The first run's read kicks the
-      load, the run re-runs once when it lands, and no commit conflicts.
+- [x] Test: the `defaultProfile` shape, a container in the piece's space
+      linking to a document in another space, is named by the cross-space
+      pass before the first run (stage 3's cross-space case).
 - [x] Test: a handler whose argument holds a cell handle finds the handle's
       document local at dispatch without the handle collection
       (`resume-node-plan-presync.test.ts`).
@@ -287,8 +296,9 @@ writes rather than plans.
       warnings on a cold resume. `docs/development/debugging/profiling.md`
       names the rows.
 
-Exit: the runner holds no link walk of its own for pre-syncing, and the
-measurements are recorded in the pull request.
+Exit, not yet met: the runner holds no link walk of its own for pre-syncing
+beyond the one-hop stored-argument naming, and the measurements are recorded
+in the pull request.
 
 ### Stage 3. Children and fresh starts
 
@@ -301,8 +311,10 @@ measurements are recorded in the pull request.
       returns the instances it names so a list child's nodes join the
       rounds. A pattern node's inputs are no longer synced under the child's
       authored argument schema.
-- [x] Give `runSynced` and `run()` the plan walk against an immutable
-      stand-in for the caller's argument. The storage manager's data-URI
+- [x] Give `runSynced` the plan walk against an immutable stand-in for the
+      caller's argument. A plain `run()` still reaches setup and start with
+      no pre-sync of its own, which stays owed: the pre-sync is asynchronous
+      and `run()` is not. The storage manager's data-URI
       walk crosses a link into a data-URI document locally, following a
       link it meets mid-path with the rest of the path appended, since the
       transformer captures paths (`def.next`), not only roots. A module's
@@ -324,6 +336,9 @@ measurements are recorded in the pull request.
       a link no child body reads leaves it cold; a grandchild reads through
       a link the level between holds as `unknown` and finds it local
       (`resume-node-plan-presync.test.ts`).
+- [x] Test, red first: a body reading through a link into another space
+      finds the far document local the moment the pre-sync step resolves;
+      the flag-on home profile reload test was the field report.
 - [x] Test, red first: a fresh `runSynced` finds what its lift reads two
       documents deep local the moment the pre-sync step resolves, observed
       through the dependency-syncer seam, and the lift runs once. Measured

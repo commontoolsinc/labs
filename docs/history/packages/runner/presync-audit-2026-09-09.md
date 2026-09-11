@@ -1,7 +1,7 @@
 ---
 status: historical
-created: 2026-09-09
-archived: 2026-09-09
+created: 2026-09-10
+archived: 2026-09-10
 reason: "Audit snapshot of the runner's pre-sync sites for new starts and resumes, and of every use of the argument meta rail, at labs 924dce02af."
 ---
 

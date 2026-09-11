@@ -163,8 +163,10 @@ describe("home rehydration", () => {
     const c = reload.churn;
     // Read-mostly reload: re-commits stay bounded rather than scaling into a
     // storm. Resuming reads confirmed-loaded state before re-deriving — owned
-    // cells are pre-synced, argument link targets are pulled two levels deep,
-    // the manifest probe no longer reads not-yet-loaded derived cells, and the
+    // cells are pre-synced, each node's plan is synced under its narrowed read
+    // schema and the server's query walk follows links from there as far as
+    // the declaration goes, the manifest probe no longer reads not-yet-loaded
+    // derived cells, and the
     // list builtins defer their reconcile until the durable container lands
     // instead of overwriting it with [].
     //
