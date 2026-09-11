@@ -5294,13 +5294,11 @@ export class SpaceServer implements TransactionSealDestination {
       // The owed re-drain rides quiet cycles too (round-2 thread 9): a
       // transport-failed delivery must retry on the NEXT loop cycle,
       // not wait for a new input wave or a re-activation.
-      if (!exhausted) {
-        await this.#viewPlanPublisher.publish(
-          runtime,
-          this.#options.server,
-          this.#options.space,
-        );
-      }
+      await this.#viewPlanPublisher.publish(
+        runtime,
+        this.#options.server,
+        this.#options.space,
+      );
       await this.#drainOutboxAppends(false);
       return;
     }
@@ -5679,7 +5677,7 @@ export class SpaceServer implements TransactionSealDestination {
       }
     }
 
-    if (outcome.aborted === undefined && !exhausted) {
+    if (outcome.aborted === undefined) {
       await this.#viewPlanPublisher.publish(
         runtime,
         this.#options.server,

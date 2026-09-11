@@ -94,7 +94,7 @@ for (const size of [10, 14, 18, 36]) {
         b.end();
         expect(current).toBe(true);
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storage.close();
       }
     },

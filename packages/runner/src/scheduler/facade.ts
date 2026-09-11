@@ -97,11 +97,13 @@ import {
 import {
   addSchedulerEventHandler,
   dropQueuedEvent,
+  eventHandlerImplementations,
   isHeadEventParked as isHeadEventParkedState,
   processPullQueuedEventDuringExecute,
   queueSchedulerEvent,
   type SchedulerEventExecutionState,
   type SchedulerEventQueueState,
+  selectEventImplementation,
 } from "./events.ts";
 import {
   buildPullInitialSeeds,
@@ -1982,10 +1984,20 @@ export class Scheduler {
         );
         if (log !== undefined) {
           const writes = sortAndCompactPaths([
-            ...(this.getMightWrite(node.action) ?? []),
+            ...resolveRegistrationSurface(node.action, log),
             ...log.writes,
           ]);
           this.#writeIndex.setSurface(node.action, writes);
+          for (const dependent of [...this.getDependents(node.action)]) {
+            const dependencies = this.#dependencies.get(dependent);
+            if (dependencies !== undefined) {
+              updateDependentEdgesForLog(
+                this.#dependencyGraphState,
+                dependent,
+                dependencies,
+              );
+            }
+          }
           registerDependentsForWriterSurface(
             this.#dependencyGraphState,
             node.action,
@@ -2104,7 +2116,6 @@ export class Scheduler {
     space: MemorySpace,
     identities: readonly ScopeKeyIdentity[],
   ): void {
-    if (identities.length === 0 && !this.#viewConsumers.has(space)) return;
     const keys = new Set(
       identities.map((identity) =>
         `${identity.principal ?? ""}\0${identity.sessionId ?? ""}`
@@ -2112,18 +2123,20 @@ export class Scheduler {
     );
     if (keys.size === 0) this.#viewConsumers.delete(space);
     else this.#viewConsumers.set(space, keys);
-    for (const [, handler] of this.#eventHandlers) {
-      if (
-        (handler as Partial<TelemetryAnnotations>).viewPiece?.space !== space
-      ) continue;
-      const logs = this.#viewHandlerLogs.get(handler);
-      for (const key of logs?.keys() ?? []) {
-        if (!keys.has(key)) logs!.delete(key);
+    for (const [, registered] of this.#eventHandlers) {
+      for (const handler of eventHandlerImplementations(registered)) {
+        if (
+          (handler as Partial<TelemetryAnnotations>).viewPiece?.space !== space
+        ) continue;
+        const logs = this.#viewHandlerLogs.get(handler);
+        for (const key of logs?.keys() ?? []) {
+          if (!keys.has(key)) logs!.delete(key);
+        }
       }
     }
   }
 
-  /** Records a successful handler's reads under its actual resolution identity. */
+  /** Records handler reads until publication prunes inactive viewing identities. */
   recordViewHandlerLog(
     handler: EventHandler,
     identity: ScopeKeyIdentity,
@@ -2131,9 +2144,7 @@ export class Scheduler {
   ): void {
     const space = (handler as Partial<TelemetryAnnotations>).viewPiece?.space;
     const key = `${identity.principal ?? ""}\0${identity.sessionId ?? ""}`;
-    if (space === undefined || !this.#viewConsumers.get(space)?.has(key)) {
-      return;
-    }
+    if (space === undefined) return;
     let logs = this.#viewHandlerLogs.get(handler);
     if (logs === undefined) {
       this.#viewHandlerLogs.set(handler, logs = new Map());
@@ -2188,24 +2199,37 @@ export class Scheduler {
         writes: this.getMightWrite(node.action) ?? log.writes,
       });
     }
-    for (const [stream, handler] of this.#eventHandlers) {
-      const annotated = handler as Partial<TelemetryAnnotations>;
-      if (
-        annotated.viewPiece?.space !== space ||
-        annotated.viewNodeId === undefined
-      ) continue;
-      const log = this.#viewHandlerLogs.get(handler)?.get(
-        `${identity.principal ?? ""}\0${identity.sessionId ?? ""}`,
-      );
-      if (log === undefined) continue;
-      result.push({
-        id: annotated.viewNodeId,
-        piece: annotated.viewPiece,
-        kind: "handler",
-        stream,
-        log,
-        writes: log.writes,
-      });
+    let selectionTx: IExtendedStorageTransaction | undefined;
+    try {
+      for (const [stream, registered] of this.#eventHandlers) {
+        if (stream.space !== space) continue;
+        if (selectionTx === undefined) {
+          selectionTx = this.runtime.readTx();
+          selectionTx.tx.scopeKeyIdentity = identity;
+        }
+        const handler = selectEventImplementation(registered, selectionTx);
+        if (handler === undefined) continue;
+        const annotated = handler as Partial<TelemetryAnnotations>;
+        if (
+          annotated.viewPiece?.space !== space ||
+          annotated.viewNodeId === undefined
+        ) continue;
+        const log = this.#viewHandlerLogs.get(handler)?.get(
+          `${identity.principal ?? ""}\0${identity.sessionId ?? ""}`,
+        );
+        if (log === undefined) continue;
+        result.push({
+          id: annotated.viewNodeId,
+          piece: annotated.viewPiece,
+          kind: "handler",
+          stream,
+          log,
+          writes: log.writes,
+        });
+      }
+    } finally {
+      selectionTx?.clearReadOnly?.();
+      selectionTx?.abort("view handler selection complete");
     }
     return result;
   }

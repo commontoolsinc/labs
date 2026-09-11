@@ -15,7 +15,10 @@ import type {
   IExtendedStorageTransaction,
   ISpaceReplica,
 } from "../src/storage/interface.ts";
-import { LocalReadUnavailable } from "../src/storage/local-read-policy.ts";
+import {
+  LocalReadUnavailable,
+  validateLocalReadBasis,
+} from "../src/storage/local-read-policy.ts";
 import { viewInputFingerprint } from "../src/view-input-basis.ts";
 
 const signer = await Identity.fromPassphrase("initial view currency");
@@ -458,5 +461,77 @@ describe("view-server-currency", () => {
   it("keeps effect and ordinary registrations on their execution path", () => {
     expect(runtime.scheduler.isDirty(register({ isEffect: true }))).toBe(true);
     expect(runtime.scheduler.isDirty(register({ adopt: false }))).toBe(true);
+  });
+  it("revokes a canceled local producer's currency in an open reader transaction", async () => {
+    emit([{
+      ...plan,
+      generation: 2,
+      eligibleActions: ["visible", "consumer"],
+    }]);
+    const action = register();
+    const cancel = output.sink(() => {});
+    await runtime.editWithRetry((tx) => input.withTx(tx).set(5));
+    await runtime.idle();
+    expect(completedRuns).toBe(1);
+    expect(output.get()).toBe(9);
+    const consumer: Action = Object.assign(() => {}, {
+      viewPiece: root.getAsNormalizedFullLink(),
+      viewNodeId: "consumer",
+      viewLocalOnly: true,
+    });
+    const tx = runtime.edit();
+    try {
+      runtime.scheduler.prepareViewAction(tx, consumer);
+      expect(output.withTx(tx).get()).toBe(9);
+      expect(validateLocalReadBasis(tx)).toBeUndefined();
+      runtime.scheduler.unsubscribe(action);
+      expect(validateLocalReadBasis(tx)).toBeInstanceOf(LocalReadUnavailable);
+    } finally {
+      tx.abort();
+      cancel();
+    }
+  });
+
+  it("removes retired observed writes and their reader edges from an adopted producer", async () => {
+    const retired = runtime.getCell<number>(space, "retired output", {
+      type: "number",
+    });
+    await runtime.editWithRetry((tx) => retired.withTx(tx).set(11));
+    await runtime.storageManager.synced();
+    const expanded = {
+      ...plan.producers![0],
+      writes: [basis(output), basis(retired)],
+      basis: {
+        reads: [basis(input), basis(middle)],
+        outputs: [basis(output), basis(retired)],
+      },
+    };
+    emit([{
+      ...plan,
+      generation: 2,
+      inputs: [...plan.inputs!, retired.getAsNormalizedFullLink()],
+      producers: [expanded, plan.producers![1]],
+    }]);
+    const action = register();
+    const reader: Action = (tx) => {
+      retired.withTx(tx).get();
+    };
+    const cancelReader = runtime.scheduler.register(reader, { isEffect: true });
+    try {
+      await runtime.idle();
+      expect(runs).toBe(0);
+      expect(runtime.scheduler.getDependents(action).has(reader)).toBe(true);
+      emit([{ ...plan, generation: 3 }]);
+      await runtime.idle();
+      expect(runs).toBe(0);
+      expect(
+        runtime.scheduler.getMightWrite(action)?.some((write) =>
+          write.id === retired.getAsNormalizedFullLink().id
+        ),
+      ).toBe(false);
+      expect(runtime.scheduler.getDependents(action).has(reader)).toBe(false);
+    } finally {
+      cancelReader();
+    }
   });
 });

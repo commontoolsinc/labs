@@ -51,7 +51,7 @@ describe("view-scoped replication flags", () => {
       try {
         expect(runtime.viewScopedReplicationRequested).toBe(arm.enabled);
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -68,7 +68,7 @@ describe("view-scoped replication flags", () => {
     try {
       expect(runtime.viewScopedReplicationRequested).toBe(false);
     } finally {
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
       await storageManager.close();
     }
   });

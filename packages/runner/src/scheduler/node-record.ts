@@ -159,6 +159,7 @@ export class NodeRegistry {
   remove(action: Action): SchedulerNode | undefined {
     const record = this.#records.get(action);
     if (!record) return undefined;
+    record.registrationToken = {};
     record.adoptedViewIdentity = undefined;
     record.cancelLocalReadWake?.();
     record.cancelLocalReadWake = undefined;

@@ -368,8 +368,11 @@ describe("list-result-container-seed", () => {
         readyToRetry: () => Promise.resolve(),
       });
       const stamped: ServerRunInfo[] = [];
+      const transactionIdentities:
+        IExtendedStorageTransaction["tx"]["scopeKeyIdentity"][] = [];
       const stamp = runtime.stampServerRun.bind(runtime);
       runtime.stampServerRun = (tx, info) => {
+        transactionIdentities.push(tx.tx.scopeKeyIdentity);
         stamped.push(info);
         stamp(tx, info);
       };
@@ -386,6 +389,7 @@ describe("list-result-container-seed", () => {
       pull.resolve();
       await seeded;
       expect(commits()).toBe(2);
+      expect(transactionIdentities).toEqual([identity, identity]);
       expect(stamped.map((info) => info.scopeKeyIdentity)).toEqual([
         identity,
         identity,

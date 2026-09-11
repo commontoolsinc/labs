@@ -182,7 +182,7 @@ export class ViewPlanPublisher {
         for (const read of selected.reads) {
           if (read.space === space) addRoot(read.id, read.scope);
         }
-        const pieces = new Map<string, ViewPlan["pieces"][number]>();
+        const pieces = new PathKeyMap<ViewPlan["pieces"][number]>();
         const tx = runtime.readTx();
         tx.tx.scopeKeyIdentity = identity;
         let metadataReads: TransactionReactivityLog;
@@ -191,7 +191,7 @@ export class ViewPlanPublisher {
             addRoot(link.id, link.scope);
             const piece = runtime.getCellFromLink(link, undefined, tx);
             const ref = getPatternIdentityRef(piece);
-            pieces.set(`${link.scope}\0${link.id}`, {
+            pieces.set([link.scope ?? "space", link.id], {
               id: link.id,
               scope: link.scope,
               ...(ref === undefined
@@ -201,7 +201,7 @@ export class ViewPlanPublisher {
             for (const field of ["argument", "internal"] as const) {
               const metadata = field === "internal"
                 ? getMetaCell(piece, field, tx).getAsNormalizedFullLink()
-                : getMetaLink(piece, field);
+                : getMetaLink(piece, field, {});
               if (metadata?.space === space) {
                 addRoot(metadata.id, metadata.scope);
               }
@@ -249,7 +249,7 @@ export class ViewPlanPublisher {
         const selection: Selection = {
           delivery: [{ roots: [...roots.entries()].map(([, root]) => root) }],
           eligibleActions: view.mode === "speculate" ? selected.actions : [],
-          pieces: [...pieces.values()],
+          pieces: [...pieces.entries()].map(([, piece]) => piece),
           errors: candidates.flatMap((node) =>
             errorAncestors.has(node) && node.error !== undefined
               ? [node.error]

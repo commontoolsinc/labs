@@ -18,6 +18,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import { Identity } from "@commonfabric/identity";
 import { getLogger } from "@commonfabric/utils/logger";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -35,9 +36,12 @@ import {
 import {
   decodeMemoryBoundary,
   resolveScopeKey,
+  type SessionViewInterest,
   streamEntriesDocId,
   type StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
+import { COMPONENT_READ_CONTRACT_VERSION } from "../src/component-read-contract.ts";
+import type { Action } from "../src/scheduler/types.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { getMetaLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -1694,6 +1698,140 @@ describe("stage G SpaceServer recovery seams", () => {
           {}) as StreamEventsDocValue).entries ?? [];
       expect(earlyEntries.length).toBe(1);
     } finally {
+      for (const cancel of cancels) cancel();
+    }
+  });
+  it("publishes settled view producers from an exhausted wave before new input arrives", async () => {
+    const current = newSpaceServer();
+    await current.activate();
+    const held = Promise.withResolvers<void>();
+    let hold = false;
+    const runtime = servingRuntime!;
+    const root = runtime.getCell(space, "partial view", undefined);
+    const input = runtime.getCell<number>(space, "partial input", {
+      type: "number",
+    });
+    const fast = runtime.getCell<number>(space, "partial fast", {
+      type: "number",
+    });
+    const slow = runtime.getCell<number>(space, "partial slow", {
+      type: "number",
+    });
+    const cancels: (() => void)[] = [];
+    const action = (id: string, run: Action): Action =>
+      Object.assign(run, {
+        viewNodeId: id,
+        viewPiece: root.getAsNormalizedFullLink(),
+        module: { type: "javascript", implementation: () => {} },
+      });
+    await current.runLifecycleVerb({
+      name: "prepare partial view",
+      run: async () => {
+        const tx = runtime.edit();
+        stampWaveRunContext(tx, {
+          actionId: "partial-view/setup",
+          kind: "bookkeeping",
+        });
+        input.withTx(tx).set(1);
+        root.withTx(tx).set({
+          $UI: {
+            type: "vnode",
+            name: "div",
+            props: {},
+            children: [fast, slow, {
+              type: "vnode",
+              name: "cf-input",
+              props: { $value: input },
+              children: [],
+            }],
+          },
+        });
+        expect((await tx.commit()).error).toBeUndefined();
+        cancels.push(runtime.scheduler.register(
+          action("fast", (tx) => {
+            fast.withTx(tx).set(input.withTx(tx).get() * 2);
+          }),
+          { isEffect: true },
+        ));
+        cancels.push(runtime.scheduler.register(
+          action("slow", (tx) => {
+            const value = input.withTx(tx).get();
+            const write = () => {
+              slow.withTx(tx).set(value * 3);
+            };
+            return hold ? held.promise.then(write) : write();
+          }),
+          { isEffect: true },
+        ));
+      },
+    });
+    const interest: SessionViewInterest = {
+      handle: {
+        sessionId: "partial-viewer",
+        sessionEpoch: "partial-session",
+        viewEpoch: "partial-view",
+        viewId: "screen",
+        revision: 0,
+      },
+      principal: serviceSigner.did(),
+      attached: true,
+      view: {
+        id: "screen",
+        revision: 0,
+        mode: "speculate",
+        componentContractVersion: COMPONENT_READ_CONTRACT_VERSION,
+        query: {
+          roots: [{
+            id: root.getAsNormalizedFullLink().id,
+            selector: { path: [] },
+          }],
+        },
+      },
+    };
+    const interests = stub(server, "viewInterestsForSpace", () => [interest]);
+    const publications = stub(
+      server,
+      "setViewSelection",
+      () => Promise.resolve(true),
+    );
+    try {
+      const exhaustedBefore = lastStats.wavesBudgetExhausted;
+      hold = true;
+      await current.runLifecycleVerb({
+        name: "change partial view input",
+        run: async () => {
+          const tx = runtime.edit();
+          stampWaveRunContext(tx, {
+            actionId: "partial-view/edit",
+            kind: "bookkeeping",
+          });
+          input.withTx(tx).set(2);
+          expect((await tx.commit()).error).toBeUndefined();
+        },
+      });
+      expect(lastStats.wavesBudgetExhausted).toBeGreaterThan(exhaustedBefore);
+      expect(publications.calls.length).toBeGreaterThan(0);
+      const selection = publications.calls.at(-1)!.args[2];
+      expect(
+        selection.producers?.find((producer) => producer.id === "fast")?.basis,
+      ).toBeDefined();
+      expect(selection.producers?.find((producer) => producer.id === "slow"))
+        .toBeDefined();
+      expect(
+        selection.producers?.find((producer) => producer.id === "slow")?.basis,
+      ).toBeUndefined();
+      expect(fast.get()).toBe(4);
+      expect(slow.get()).toBe(3);
+    } finally {
+      hold = false;
+      held.resolve();
+      await runtime.idle();
+      await current.runLifecycleVerb({
+        name: "drain partial view",
+        run: () => Promise.resolve(),
+      });
+      interests.restore();
+      publications.restore();
       for (const cancel of cancels) cancel();
     }
   });

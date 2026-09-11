@@ -8,6 +8,8 @@ import type { SessionViewInterest } from "@commonfabric/memory/v2";
 import { COMPONENT_READ_CONTRACT_VERSION } from "../src/component-read-contract.ts";
 import { ViewPlanPublisher } from "../src/executor/view-plan-publisher.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import type { EventHandler } from "../src/scheduler/types.ts";
 import { rendererVDOMSchema } from "../src/schemas.ts";
 import { Runtime } from "../src/runtime.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -277,5 +279,189 @@ describe("view plan publisher", () => {
     await publish();
     expect(fixture.reads.calls.length - replaced).toBeGreaterThan(1);
     expect(fixture.publications.calls).toHaveLength(3);
+  });
+  it("publishes a handler's first observation before the initial consumer snapshot", async () => {
+    fixture.observations.restore();
+    const stream = fixture.runtime.getCell(space, "first event", undefined);
+    const handler: EventHandler = Object.assign(() => {}, {
+      viewPiece: fixture.root.getAsNormalizedFullLink(),
+      viewNodeId: "first-handler",
+    });
+    const cancel = fixture.runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+    try {
+      await fixture.runtime.editWithRetry((tx) => {
+        stream.withTx(tx).set({ $stream: true });
+        fixture.root.withTx(tx).set({
+          $UI: {
+            type: "vnode",
+            name: "button",
+            props: { onClick: stream },
+            children: [fixture.output],
+          },
+        });
+      });
+      fixture.runtime.scheduler.recordViewHandlerLog(handler, {
+        principal: signer.did(),
+        sessionId: "viewer",
+      }, {
+        reads: [toMemorySpaceAddress(fixture.hidden.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [],
+      });
+      await publish();
+      expect(fixture.publications.calls.at(-1)!.args[2].eligibleActions)
+        .toContain("first-handler");
+      expect(
+        fixture.publications.calls.at(-1)!.args[2].inputs?.map((input) =>
+          input.id
+        ),
+      )
+        .toContain(fixture.hidden.getAsNormalizedFullLink().id);
+    } finally {
+      cancel();
+      fixture.observations = stub(
+        fixture.runtime.scheduler,
+        "viewExecutionNodes",
+        () => fixture.nodes,
+      );
+    }
+  });
+
+  it("selects each guarded handler's observations and prunes them after viewer departure", async () => {
+    fixture.observations.restore();
+    const stream = fixture.runtime.getCell(space, "guarded event", undefined);
+    const choice = fixture.runtime.getCell<string>(space, "selected handler", {
+      type: "string",
+    });
+    const actor = { principal: signer.did(), sessionId: "viewer" };
+    const makeHandler = (key: string): EventHandler =>
+      Object.assign(() => {}, {
+        viewPiece: fixture.root.getAsNormalizedFullLink(),
+        viewNodeId: "same-node-index",
+        implementationSelection: {
+          key,
+          matches: (tx: Parameters<EventHandler>[0]) =>
+            choice.withTx(tx).get() === key,
+        },
+      });
+    const first = makeHandler("first");
+    const second = makeHandler("second");
+    const cancels = [first, second].map((handler) =>
+      fixture.runtime.scheduler.addEventHandler(
+        handler,
+        stream.getAsNormalizedFullLink(),
+      )
+    );
+    try {
+      await fixture.runtime.editWithRetry((tx) => {
+        choice.withTx(tx).set("first");
+        stream.withTx(tx).set({ $stream: true });
+        fixture.root.withTx(tx).set({
+          $UI: {
+            type: "vnode",
+            name: "button",
+            props: { onClick: stream },
+            children: [fixture.output],
+          },
+        });
+      });
+      fixture.runtime.scheduler.setViewConsumers(space, [actor]);
+      for (
+        const [handler, cell] of [[first, fixture.hidden], [
+          second,
+          fixture.input,
+        ]] as const
+      ) {
+        fixture.runtime.scheduler.recordViewHandlerLog(handler, actor, {
+          reads: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
+          shallowReads: [],
+          writes: [],
+        });
+      }
+      await publish();
+      const inputs = () =>
+        fixture.publications.calls.at(-1)!.args[2].inputs?.map((input) =>
+          input.id
+        );
+      expect(fixture.publications.calls.at(-1)!.args[2].eligibleActions)
+        .toContain("same-node-index");
+      expect(inputs()).toContain(fixture.hidden.getAsNormalizedFullLink().id);
+      expect(inputs()).not.toContain(
+        fixture.input.getAsNormalizedFullLink().id,
+      );
+      await fixture.runtime.editWithRetry((tx) =>
+        choice.withTx(tx).set("second")
+      );
+      await publish();
+      expect(inputs()).toContain(fixture.input.getAsNormalizedFullLink().id);
+      expect(inputs()).not.toContain(
+        fixture.hidden.getAsNormalizedFullLink().id,
+      );
+      fixture.runtime.scheduler.setViewConsumers(space, []);
+      fixture.runtime.scheduler.setViewConsumers(space, [actor]);
+      await publish();
+      expect(fixture.publications.calls.at(-1)!.args[2].eligibleActions).not
+        .toContain("same-node-index");
+      await fixture.runtime.editWithRetry((tx) =>
+        choice.withTx(tx).set("first")
+      );
+      await publish();
+      expect(fixture.publications.calls.at(-1)!.args[2].eligibleActions).not
+        .toContain("same-node-index");
+    } finally {
+      for (const cancel of cancels) cancel();
+      fixture.observations = stub(
+        fixture.runtime.scheduler,
+        "viewExecutionNodes",
+        () => fixture.nodes,
+      );
+    }
+  });
+
+  it("replaces an argument root when only its metadata link changes", async () => {
+    const first = fixture.runtime.getCell(space, "first argument", undefined);
+    const second = fixture.runtime.getCell(space, "second argument", undefined);
+    await fixture.runtime.editWithRetry((tx) => {
+      first.withTx(tx).set({ count: 1 });
+      second.withTx(tx).set({ count: 2 });
+      fixture.root.withTx(tx).set({
+        $UI: {
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [fixture.output, {
+            type: "vnode",
+            name: "cf-input",
+            props: { $value: fixture.input },
+            children: [],
+          }],
+        },
+      });
+      fixture.root.withTx(tx).setMetaRaw(
+        "argument",
+        first.getAsLink(),
+        rawMetaWriteAuthorization,
+      );
+    });
+    await publish();
+    const inputs = () =>
+      fixture.publications.calls.at(-1)!.args[2].inputs?.map((input) =>
+        input.id
+      );
+    expect(inputs()).toContain(first.getAsNormalizedFullLink().id);
+    expect(inputs()).not.toContain(second.getAsNormalizedFullLink().id);
+    await fixture.runtime.editWithRetry((tx) => {
+      fixture.root.withTx(tx).setMetaRaw(
+        "argument",
+        second.getAsLink(),
+        rawMetaWriteAuthorization,
+      );
+    });
+    await publish();
+    expect(inputs()).toContain(second.getAsNormalizedFullLink().id);
+    expect(inputs()).not.toContain(first.getAsNormalizedFullLink().id);
   });
 });

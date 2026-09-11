@@ -92,8 +92,17 @@ function isGuardedDispatcher(
   return guardedImplementations in handler;
 }
 
+/** Enumerates the implementations retained by a live stream registration. */
+export function eventHandlerImplementations(
+  handler: EventHandler,
+): readonly EventHandler[] {
+  if (!isGuardedDispatcher(handler)) return [handler];
+  return [...handler[guardedImplementations].implementations.values()]
+    .map(({ handler }) => handler);
+}
+
 /** Resolve exactly one implementation while recording every selector read. */
-function selectEventImplementation(
+export function selectEventImplementation(
   handler: EventHandler,
   tx: IExtendedStorageTransaction,
 ): EventHandler | undefined {
