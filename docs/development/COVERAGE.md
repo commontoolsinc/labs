@@ -616,7 +616,7 @@ each place in that package that takes down a child it spawned, so one branch was
 three waiting to flap — and two of the three had never been covered on any run.
 Extract the signal alone rather than the whole teardown: what those three shared
 was the arm, and each of them waits for the process to go in a different way.
-[The investigation record](../history/development/coverage-flake-child-already-exited-2026-09-10.md)
+[The investigation record](../history/development/coverage-flake-child-already-exited-2026-09-11.md)
 follows the single line from the group-level `+1` down to the one call in
 twenty-seven that covered it.
 

@@ -1,7 +1,7 @@
 ---
 status: historical
-created: 2026-09-10
-archived: 2026-09-10
+created: 2026-09-11
+archived: 2026-09-11
 reason: "Investigation record: the one uncovered line that moved the `packages/connectors` coverage count between a `main` run and the pull request measured against it."
 ---
 
