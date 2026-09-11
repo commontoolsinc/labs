@@ -97,6 +97,11 @@ session absent from a newer complete inventory.
 
 ### Command worker and ledger
 
+Commands arrive on one or more owner-protected queues: the debug view's, and one
+per producer pattern the host is configured to accept commands from. Each queue
+admits writes from one verified handler, so a pattern can send commands only
+through the queue bound to it.
+
 `CommandWorker` validates command values and deduplicates command IDs. It
 persists and publishes an in-flight receipt before it invokes a provider. This
 claim prevents a process restart from silently executing the same command again.

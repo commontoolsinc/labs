@@ -34,9 +34,10 @@ deno task agents-host \
 options. Command-line values take precedence.
 
 The program prints the destination space DID, command cell ID, receipt cell ID,
-durable command ledger path, and debug piece ID after the initial collection.
-The owner-confidential debug registration is not added to the space-wide default
-app registry. The printed piece ID is its local discovery handle.
+durable command ledger path, debug piece ID, and every command producer's queue
+cell ID after the initial collection. The owner-confidential debug registration
+is not added to the space-wide default app registry. The printed piece ID is its
+local discovery handle.
 
 ## Command-line interface
 
@@ -137,6 +138,17 @@ branch, commit, and remotes in the session indexes. Discovery stops descending
 when it finds a checkout. A failed or cancelled discovery leaves the previous
 session and checkout indexes unchanged.
 
+`commandProducers` is an optional array of deployed pieces the host accepts
+commands from, each `{ "id", "piece" }`. `id` is a stable lowercase token that
+names the producer's queue; `piece` is the piece's ID in the destination space.
+A producer's pattern declares `commandAuthorization`, the verified handler that
+may write its queue, the way the debug pattern does. At startup the host reads
+that declaration from the deployed piece, creates the producer's own
+deterministic queue protected for the owner with that handler as its only
+writer, links the queue into the piece's `commands` input, and reads commands
+from it beside the debug view's queue. A producer whose pattern declares no
+authorization fails startup. Producer IDs must be unique.
+
 The source fields are the connector's `AgentSourceConfig` contract:
 
 | Field                   | Use                                                                                                                                    |
@@ -192,17 +204,22 @@ flowchart LR
    owner through the pattern's command-sending handler. The host binds command
    processing to that exact protected queue. It stores the debug registration
    under the owner label and does not add the piece to the space-wide default
-   app registry. `--no-debug-view` skips this step and disables command
-   acceptance.
-6. The host opens the command ledger.
-7. `AgentsHost.start()` creates and starts every enabled driver. A failed source
+   app registry. `--no-debug-view` skips this step; command acceptance then
+   depends on the next step alone.
+6. `bindCommandProducers()` handles each configured command producer: it reads
+   the producer's verified command-writer declaration from the deployed piece,
+   binds the producer's own owner-scoped queue to that handler, and links the
+   queue into the piece's `commands` input. A host with neither a debug view nor
+   a producer accepts no commands.
+7. The host opens the command ledger.
+8. `AgentsHost.start()` creates and starts every enabled driver. A failed source
    remains visible in health while successful sources continue. A source whose
    failed startup cannot be cleaned up makes the complete host startup fail. The
    host then publishes recovered and previously unpublished receipts from the
    ledger.
-8. The host performs and publishes one complete collection. It then subscribes
-   to the owner-protected Fabric command cell unless `--once` or
-   `--no-debug-view` was used.
+9. The host performs and publishes one complete collection. It then subscribes
+   to every bound owner-protected command queue unless `--once` was used or no
+   queue was bound.
 
 The command-line host keeps startup health local until it has completed these
 steps and owns a ready or degraded host. Its first health publication includes
@@ -305,7 +322,9 @@ The debug pattern's inspection surfaces cannot change connector data. Its
 command composer can append a validated command after showing the exact value in
 a confirmation modal. The command queue requires the configured owner and the
 debug pattern's command-sending handler. Another principal cannot modify that
-queue, including by reusing the pattern handler. The pattern cannot write
+queue, including by reusing the pattern handler. Each configured command
+producer has a queue of its own under the same rule, bound to that producer's
+handler, so no pattern can write another's queue. The pattern cannot write
 indexes, health, receipts, session manifests, or event chunks. Drafts,
 confirmation state, tab selection, and filters are session-scoped and are not
 shared between viewers.

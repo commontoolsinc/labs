@@ -12,6 +12,7 @@ import {
 import type { CommandLedger } from "@commonfabric/agents-connector/command-ledger";
 import { abortable } from "./abort.ts";
 import { discoverGitCheckoutDirectories } from "./checkout-discovery.ts";
+import type { BoundCommandProducer } from "./command-producers.ts";
 
 export type AgentsHostStatus =
   | "created"
@@ -69,6 +70,7 @@ export interface AgentsHostTargetDescription {
   spaceDid: string;
   ownerDid: string;
   debugPieceId?: string;
+  commandProducers?: BoundCommandProducer[];
   cells: {
     recentIndex: string;
     allIndex: string;

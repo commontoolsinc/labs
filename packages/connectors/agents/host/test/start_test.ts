@@ -102,6 +102,7 @@ function startHarness(options: {
   ) => Promise<number>;
   hostStop?: AgentsHost["stop"];
   claimStorage?: () => Promise<void>;
+  commandsAreBound?: () => boolean;
   runtimeSettled?: () => Promise<void>;
   runtimeDispose?: () => Promise<void>;
   releaseLock?: (path: string) => Promise<void>;
@@ -115,7 +116,7 @@ function startHarness(options: {
       events.push("target.claimStorage");
       return Promise.resolve();
     }),
-    commandsAreBound: () => true,
+    commandsAreBound: options.commandsAreBound ?? (() => true),
   } as unknown as AgentFabricTarget;
   const fabric = {
     runtime: {
@@ -165,6 +166,14 @@ function startHarness(options: {
       deployDebugView: () => {
         events.push("debug.deploy");
         return Promise.resolve("debug-piece");
+      },
+      bindCommandProducers: (_manager, _target, producers) => {
+        events.push(`producers.bind:${producers.map((p) => p.id).join(",")}`);
+        return Promise.resolve(producers.map((producer) => ({
+          id: producer.id,
+          piece: producer.piece,
+          commandCellId: `queue-${producer.id}`,
+        })));
       },
       openLedger: () => {
         events.push("ledger.open");
@@ -374,4 +383,65 @@ Deno.test("startAgentsHost drains owned startup work after cancellation", async 
     AggregateError,
     "cancel owned startup; owned host stop failed",
   );
+});
+
+Deno.test("startAgentsHost binds configured command producers and accepts their commands without a debug view", async () => {
+  let bound = false;
+  let acceptCommands: boolean | undefined;
+  const harness = startHarness({
+    commandsAreBound: () => bound,
+    hostStart: (options) => {
+      acceptCommands = options?.acceptCommands;
+      return Promise.resolve(0);
+    },
+  });
+  const originalBind = harness.dependencies.bindCommandProducers;
+  harness.dependencies.bindCommandProducers = async (...args) => {
+    const producers = await originalBind(...args);
+    bound = true;
+    return producers;
+  };
+
+  const running = await startAgentsHost(
+    {
+      ...startOptions(),
+      debugView: false,
+      commandProducers: [{ id: "workbench", piece: "piece-1" }],
+    },
+    harness.dependencies,
+  );
+
+  assertEquals(running.debugPieceId, undefined);
+  assertEquals(running.commandProducers, [{
+    id: "workbench",
+    piece: "piece-1",
+    commandCellId: "queue-workbench",
+  }]);
+  assertEquals(acceptCommands, true);
+  assertEquals(harness.events.includes("producers.bind:workbench"), true);
+  await running.stop();
+});
+
+Deno.test("startAgentsHost accepts no commands when nothing bound a queue", async () => {
+  let acceptCommands: boolean | undefined;
+  const harness = startHarness({
+    commandsAreBound: () => false,
+    hostStart: (options) => {
+      acceptCommands = options?.acceptCommands;
+      return Promise.resolve(0);
+    },
+  });
+
+  const running = await startAgentsHost(
+    { ...startOptions(), debugView: false },
+    harness.dependencies,
+  );
+
+  assertEquals(running.commandProducers, []);
+  assertEquals(acceptCommands, false);
+  assertEquals(
+    harness.events.some((event) => event.startsWith("producers.bind")),
+    false,
+  );
+  await running.stop();
 });

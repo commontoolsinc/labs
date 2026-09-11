@@ -31,6 +31,7 @@ import {
   cellHasOwnerProtection,
   pushStableCellGraph,
   readStableCellGraphValue,
+  stableCellId,
 } from "../src/fabric-graph.ts";
 import {
   materializeStableArrayCells,
@@ -2181,6 +2182,99 @@ Deno.test("newer session refresh wins over an older full collection", async () =
       ),
       [{ nativeSessionId: "session-1", syncStatus: "deleted" }],
     );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("Fabric target binds producer queues and reads commands from every bound queue", async () => {
+  const owner = await Identity.fromPassphrase("producer queue binding owner");
+  const storageManager = StorageManager.emulate({ as: owner });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const writerAuthorizationFor = (path: string) => ({
+    __ctWriterIdentityOf: {
+      file: `${path}/main.tsx`,
+      moduleIdentity: `fid1:verified-${path}`,
+      path: ["sendCommand"],
+    },
+  });
+  const pushAs = async (
+    cell: Cell<unknown>,
+    authorization: ReturnType<typeof writerAuthorizationFor>,
+    value: string,
+  ) => {
+    const tx = runtime.edit();
+    tx.setCfcImplementationIdentity({
+      kind: "verified",
+      moduleIdentity: authorization.__ctWriterIdentityOf.moduleIdentity,
+      sourceFile: authorization.__ctWriterIdentityOf.file,
+      bindingPath: authorization.__ctWriterIdentityOf.path,
+    });
+    const queue = cell.withTx(tx);
+    const existing = queue.getRawUntyped({ frozen: false });
+    queue.setRawUntyped([...(Array.isArray(existing) ? existing : []), value]);
+    tx.prepareCfc();
+    const result = await tx.commit();
+    if (result.error) throw result.error;
+  };
+  try {
+    const target = await AgentFabricTarget.open({
+      runtime,
+      spaceDid: owner.did(),
+      ownerDid: owner.did(),
+    });
+    assertEquals(target.commandsAreBound(), false);
+    await assertRejects(
+      () => target.bindProducerCommandCell("workbench", { bogus: true }),
+      Error,
+      "command writer authorization is invalid",
+    );
+
+    const workbenchAuthorization = writerAuthorizationFor("workbench");
+    const workbenchQueue = await target.bindProducerCommandCell(
+      "workbench",
+      workbenchAuthorization,
+    );
+    assertEquals(target.commandsAreBound(), true);
+    assertEquals(
+      target.producerCommandCellIds(),
+      { workbench: stableCellId(workbenchQueue.resolveAsCell()) },
+    );
+    assertNotEquals(
+      target.producerCommandCellIds().workbench,
+      target.commandCellId(),
+    );
+    assertEquals(
+      cellHasOwnerProtection(runtime.readTx(), workbenchQueue, owner.did()),
+      true,
+    );
+    assertEquals(await target.pollCommands(), []);
+
+    const received: unknown[][] = [];
+    const cancel = await target.subscribeCommands((commands) => {
+      received.push(commands);
+    });
+    try {
+      await pushAs(workbenchQueue, workbenchAuthorization, "from-workbench");
+      await runtime.storageManager.synced();
+      assertEquals(await target.pollCommands(), ["from-workbench"]);
+
+      const ownerAuthorization = writerAuthorizationFor("debug-view");
+      await target.bindCommandCell(target.cells.commands, ownerAuthorization);
+      await pushAs(target.cells.commands, ownerAuthorization, "from-owner");
+      await runtime.storageManager.synced();
+      assertEquals(
+        (await target.pollCommands()).toSorted(),
+        ["from-owner", "from-workbench"],
+      );
+      assertEquals(received.flat().includes("from-workbench"), true);
+    } finally {
+      cancel();
+    }
   } finally {
     await runtime.dispose();
     await storageManager.close();
