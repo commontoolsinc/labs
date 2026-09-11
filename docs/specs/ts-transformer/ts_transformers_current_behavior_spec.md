@@ -380,6 +380,17 @@ this implements is
 `contract-nested-unread-reference`, and `contract-authored-shapes` fixtures
 pin the shapes.
 
+The type-driven shrink preserves cell wrappers and resolves normalized value
+paths against their inner types. A stored field named `count`, `map`, or `get`
+therefore retains its value type and cell capability when captured by `computed`
+or `assert`, even when the wrapper has a method with the same name. Inline
+object values in optional cell handles and optional stored values retain their
+requested fields and read-only capability while preserving nullish alternatives.
+A `.get()` whose result is not resolved to a specific member path retains the
+receiver's complete stored shape, including when the result passes through a
+helper. Optional member reads retain the receiver without imposing a full-shape
+read.
+
 The type-driven shrink also guards its descent on (type, requested-paths): a
 pair already on the path falls back to the named type reference — no
 structural fallback — which schema generation resolves through `$defs`
@@ -1414,6 +1425,9 @@ builder call it rebuilds carries the replaced call's source-map range (§11.5).
 - `_param` convention implies `never` schema for that parameter
 - failed inference falls back to `unknown`
 - `typeRegistry` is consulted first for synthetic nodes/types
+- Common Fabric generic aliases retain their authored type arguments when
+  qualified through `__cfHelpers`; argument pairing uses the alias arguments,
+  which can differ from the arguments of its underlying reference type.
 
 ### 10.2 `pattern(...)`
 

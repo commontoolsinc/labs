@@ -1,8 +1,9 @@
 /**
- * The two index atoms that read a loom connector store —
- * `packages/patterns/primitives/ledger-month-transactions.tsx` and
- * `mailbox-month-headers.tsx` — reached the way a harness session reaches
- * them: through `run_pattern` over an injected `SqliteDb` handle.
+ * The index atoms that read a loom connector store —
+ * `packages/patterns/primitives/ledger-month-transactions.tsx`,
+ * `mailbox-month-headers.tsx` and `source-row-count.tsx` — reached the way a
+ * harness session reaches them: through `run_pattern` over an injected
+ * `SqliteDb` handle.
  *
  * What is stated here is what only this route can state. A pattern test builds
  * its database with `sqliteDatabase()`, which is a cell-derived database in
@@ -306,6 +307,53 @@ describe("connector-reading primitives", () => {
       expect(result.errorMessage).toBe("");
       expect(result.month).toBe(thisMonth);
       expect(result.rowCount).toBe(1);
+    });
+  });
+
+  describe("source-row-count", () => {
+    it("counts the whole table and the rows the predicate admits", async () => {
+      const source = await seedDatabase(LEDGER_TABLES, [
+        ledgerRow("live", "2026-03-04", "Pacific Gas", 84.2, 0),
+        ledgerRow("also-live", "2026-03-05", "Water Co", 12, 0),
+        ledgerRow("gone", "2026-03-06", "Refunded Co", 9, 1),
+      ]);
+
+      const result = await runAtom(
+        await atomSource("source-row-count.tsx"),
+        {
+          source,
+          table: "rows_plaid_transaction",
+          predicate: "deleted = 0",
+        },
+      );
+
+      expect(result.errorMessage).toBe("");
+      expect(result.total).toBe(3);
+      expect(result.matching).toBe(2);
+    });
+
+    it("counts no row for a predicate the store's rows do not satisfy", async () => {
+      // The other tombstone spelling over a store that writes the text column
+      // never-NULL: the difference between the two numbers is what says the
+      // predicate is wrong rather than the table empty.
+
+      const source = await seedDatabase(LEDGER_TABLES, [
+        ledgerRow("live", "2026-03-04", "Pacific Gas", 84.2, 0),
+        ledgerRow("gone", "2026-03-06", "Refunded Co", 9, 1),
+      ]);
+
+      const result = await runAtom(
+        await atomSource("source-row-count.tsx"),
+        {
+          source,
+          table: "rows_plaid_transaction",
+          predicate: "deleted_at IS NULL",
+        },
+      );
+
+      expect(result.errorMessage).toBe("");
+      expect(result.total).toBe(2);
+      expect(result.matching).toBe(0);
     });
   });
 

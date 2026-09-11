@@ -67,16 +67,20 @@ those six. Each is a single self-contained file taking real, optional inputs,
 with an embeddable `[UI]` — a fragment rather than a `cf-screen` — so a host can
 drop it in as a JSX tag or run it standalone.
 
-`ledger-month-transactions.tsx` and `mailbox-month-headers.tsx` read a loom
-connector store instead of a caller's own cell. Their input is a `SqliteDb`
-handle, so neither is in the `demo/` host: a host that embeds one has to hand it
-a database. Their pattern tests build one with `sqliteDatabase()` and drive the
-atom's reactive `month` input, which is what re-runs a query the atom declares
-no `reactOn` for; `packages/cf-harness/test/primitives-connector-reads.test.ts`
-states what only an injected handle can. Between them they carry the two
-tombstone conventions a connector store uses — the integer `deleted = 0` flag on
-a connector ledger, `deleted_at IS NULL` on the mail store — which is the thing
-a session reading one of these databases has no other way to learn.
+`ledger-month-transactions.tsx`, `mailbox-month-headers.tsx` and
+`source-row-count.tsx` read a database handed to them instead of a caller's own
+cell. Their input is a `SqliteDb` handle, so none is in the `demo/` host: a host
+that embeds one has to hand it a database. Their pattern tests build one with
+`sqliteDatabase()` and drive one of the atom's own reactive inputs — the month,
+or the predicate — which is what re-runs a query the atom declares no `reactOn`
+for; `packages/cf-harness/test/primitives-connector-reads.test.ts` states what
+only an injected handle can. The first two carry the two tombstone conventions a
+connector store uses — the integer `deleted = 0` flag on a connector ledger,
+`deleted_at IS NULL` on the mail store — which is the thing a session reading
+one of these databases has no other way to learn. `source-row-count.tsx` reports
+a table's row count beside the count its predicate admits, from one aggregate
+statement, so the two numbers say whether a predicate matched nothing or the
+table holds nothing.
 
 Their adopter is the pattern index: they are published to it as composable
 parts, and their descriptions are derived from their doc comments by

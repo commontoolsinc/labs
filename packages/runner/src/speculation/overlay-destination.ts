@@ -85,6 +85,7 @@ import {
 } from "@commonfabric/memory/v2";
 import type { Runtime, ServerRunInfo } from "../runtime.ts";
 import type {
+  CommitError,
   IExtendedStorageTransaction,
   IStorageTransaction,
   ITransactionSealSink,
@@ -96,7 +97,6 @@ import type {
   Unit,
   URI,
 } from "../storage/interface.ts";
-import type { CommitError } from "../storage/interface.ts";
 import type { PostCommitSideEffect } from "../cfc/types.ts";
 import { CoalescedDocListener } from "./doc-notification-listener.ts";
 

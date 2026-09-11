@@ -162,11 +162,7 @@ describe("availability scheduler support", () => {
     let releaseCalls = 0;
     const eventQueue = [queuedEvent];
     const state = {
-      runtime: {
-        storageManager: {
-          pendingCrossSpacePromiseCount: () => 0,
-        },
-      },
+      runtime,
       eventQueue,
       lineageStatus: () => status,
       getOriginLocalSeq: () => 1,

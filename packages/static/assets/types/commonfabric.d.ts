@@ -1479,6 +1479,54 @@ export interface IEquatable {
   equalLinks(other: AnyCell<any> | object | undefined): boolean;
 }
 
+/** Primitive or Cell identity accepted by a collection index. */
+export type CollectionIndexKey =
+  | string
+  | number
+  | boolean
+  | AnyBrandedCell<unknown>;
+
+/** Stored descriptor whose buckets are addressed independently by keyed lookup. */
+export interface CollectionIndexData<K extends CollectionIndexKey, V> {
+  /** Descriptor marker used to recognize an index receiver. */
+  readonly kind: "collection-index";
+
+  /** Missing-key behavior: an empty group or an absent unique match. */
+  readonly mode: "group" | "key";
+
+  /** Occupied keys in deterministic typed-key order. */
+  readonly keys: K[];
+
+  /** Per-key results addressed by the index's internal typed-key encoding. */
+  readonly buckets: Record<string, V>;
+}
+
+/** Read-only index handle with a single stored-payload type for schema extraction. */
+export interface CollectionIndexHandle<
+  T extends CollectionIndexData<CollectionIndexKey, unknown>,
+> extends BrandedCell<T, "readonly">, IAnyCell<T> {
+  /**
+   * Resolves one key without observing occupied-key enumeration. A Cell key
+   * identifies the Cell; read its value explicitly to use a primitive key.
+   */
+  lookup(
+    key: T["keys"][number] | null | undefined,
+  ): Reactive<T["buckets"][string]>;
+
+  /** Enumerates occupied keys in deterministic typed-key order. */
+  keys(): Reactive<T["keys"]>;
+}
+
+/** Index whose missing-key lookup yields an empty group. */
+export type GroupIndex<K extends CollectionIndexKey, T> = CollectionIndexHandle<
+  CollectionIndexData<K, T[]>
+>;
+
+/** Index whose missing-key lookup yields undefined. */
+export type KeyIndex<K extends CollectionIndexKey, T> = CollectionIndexHandle<
+  CollectionIndexData<K, T | undefined>
+>;
+
 /**
  * Cells that allow deriving new cells from existing cells via array methods:
  * direct helpers mirror supported Array methods and return Reactive results.
@@ -3225,6 +3273,8 @@ type TestStepKey =
 type OnlyTestStep<Own extends TestStepKey, Fields> =
   & Fields
   & { skip?: boolean }
+  & (Own extends "label" | "await" ? { readBudget?: never }
+    : { readBudget?: { total?: number; perRun?: number } })
   & { [Other in Exclude<TestStepKey, Own>]?: never };
 
 /**
@@ -3246,7 +3296,10 @@ type OnlyTestStep<Own extends TestStepKey, Fields> =
  *   announces reaching `label`, and another participant blocks on `await`
  *   until that marker is announced. They are inert in a single-user test.
  *
- * `skip` omits the step.
+ * `skip` omits the step. Single-user tests with a module-level `readBudgets`
+ * export may set `readBudget` on executable steps. Its `total` ceiling limits
+ * completed transaction-attempt proxy accesses; `perRun` limits the largest
+ * reactive body. A step declaration replaces the module's default step limits.
  */
 export type TestStep =
   | OnlyTestStep<"assertion", { assertion: Reactive<AssertRecord> }>

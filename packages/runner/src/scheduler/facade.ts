@@ -15,6 +15,7 @@ import type {
   ErrorWithContext,
   Runtime,
 } from "../runtime.ts";
+import { startReadStats } from "../read-stats.ts";
 import { getCommitLocalSeq } from "../storage/commit-identity.ts";
 import type {
   ChangeGroup,
@@ -325,6 +326,7 @@ export class Scheduler {
   );
 
   #collectReadStats = false;
+  #readAttemptAccountingEnabled = false;
 
   #actionTimingState: ActionTimingState = {
     actionStats: this.#actionStats,
@@ -1895,12 +1897,35 @@ export class Scheduler {
     this.#filterStats.executed = 0;
   }
 
-  /**
-   * Enables or disables read accounting for subsequent action runs. A fan-out
-   * run retains its starting setting across every instance.
-   */
-  setReadStatsEnabled(enabled: boolean): void {
+  /** Enables or disables per-action read accounting for subsequent runs. */
+  setReadStatsEnabled(
+    enabled: boolean,
+    options: { attempts?: boolean } = {},
+  ): void {
     this.#collectReadStats = enabled;
+    this.#readAttemptAccountingEnabled = enabled && options.attempts === true;
+  }
+
+  /** Starts opt-in accounting for a transaction outside a reactive body. */
+  beginReadAttempt(
+    tx: IExtendedStorageTransaction,
+    kind:
+      | "event"
+      | "presync"
+      | "preflight"
+      | "initialization"
+      | "editWithRetry",
+    actionId?: string,
+  ): void {
+    if (!this.#readAttemptAccountingEnabled) return;
+    startReadStats(tx, (reads) => {
+      this.runtime.telemetry.submit({
+        type: "scheduler.read-attempt",
+        kind,
+        actionId,
+        reads,
+      });
+    });
   }
 
   /**
@@ -2825,6 +2850,7 @@ export class Scheduler {
       actionChangeGroups: this.#actionChangeGroups,
       actionTimingState: this.#actionTimingState,
       getReadStatsEnabled: () => this.#collectReadStats,
+      getReadAttemptAccountingEnabled: () => this.#readAttemptAccountingEnabled,
       retries: this.#retries,
       offBudgetRetries: this.#offBudgetRetries,
       pending: this.#pending,

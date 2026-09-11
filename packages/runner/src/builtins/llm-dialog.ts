@@ -53,7 +53,11 @@ import {
   recordRelevantSchemaWritePolicyInput,
 } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { cfcSchemaChildRoot } from "../cfc/schema-refs.ts";
+import {
+  cfcSchemaChildRoot,
+  cfcSchemaToObject,
+  resolveCfcSchemaRefs,
+} from "../cfc/schema-refs.ts";
 import { isExternalSchemaRef } from "../schema-decompose.ts";
 import type { CfcConfClause } from "../cfc/clause.ts";
 import {
@@ -72,7 +76,6 @@ import {
   uniqueCfcAtoms,
 } from "../cfc/observation.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
-import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { settleAbandonedRequest } from "./abandoned-request.ts";
 import { markEffectCompletion } from "../executor/effect-completion.ts";

@@ -1041,233 +1041,268 @@ export function preflightQueuedEventDependencies(state: {
 
   // Get the handler's dependencies (read-only, just capturing what will be read)
   const depTx = state.runtime.edit();
-  depTx.setReadOnly?.("scheduler.populateDependencies()");
-  // Selection and input probes use the dispatch actor. Their scoped reads
-  // register that actor's instance loads, which park the head event until its
-  // program and inputs are available.
-  const probeIdentity = eventScopeIdentity(queuedEvent);
-  if (probeIdentity !== undefined) depTx.tx.scopeKeyIdentity = probeIdentity;
-  let stepStart = performance.now();
-  logger.timeStart(
-    "scheduler",
-    "execute",
-    "event",
-    "pullPopulateDependencies",
-  );
+  let failureReported = false;
+  const reportFailure = (error: unknown) => {
+    if (failureReported) return;
+    failureReported = true;
+    try {
+      state.handleError(
+        error instanceof Error ? error : new Error(String(error)),
+        queuedEvent.preflightImplementation ?? handler,
+      );
+    } catch {
+      throw error;
+    } finally {
+      state.dropEvent(
+        queuedEvent,
+        `Event dropped: dependency preflight failed for ${queuedEvent.eventLink.id}`,
+      );
+    }
+  };
   try {
-    const implementation = selectEventImplementation(handler, depTx);
-    queuedEvent.preflightImplementation = implementation;
-    implementation?.populateDependencies?.(depTx, eventValue);
-    inputReadiness = implementation?.inputReadiness?.(depTx, eventValue) ?? {
-      ready: true,
-    };
-  } catch (error) {
-    state.handleError(
-      error as Error,
-      queuedEvent.preflightImplementation ?? handler,
-    );
-    // Dropping the event here is its final outcome — settle the commit
-    // callback like the other drop paths instead of leaving callers that
-    // await it hanging.
-    state.dropEvent(
-      queuedEvent,
-      `Event dropped: populateDependencies threw during dependency ` +
-        `preflight for ${queuedEvent.eventLink.id}`,
-    );
-    shouldSkipEvent = true;
-  } finally {
-    logger.timeEnd(
+    state.runtime.scheduler.beginReadAttempt(depTx, "preflight");
+    depTx.setReadOnly?.("scheduler.populateDependencies()");
+    // Selection and input probes use the dispatch actor. Their scoped reads
+    // register that actor's instance loads, which park the head event until its
+    // program and inputs are available.
+    const probeIdentity = eventScopeIdentity(queuedEvent);
+    if (probeIdentity !== undefined) depTx.tx.scopeKeyIdentity = probeIdentity;
+    let stepStart = performance.now();
+    logger.timeStart(
       "scheduler",
       "execute",
       "event",
       "pullPopulateDependencies",
     );
-  }
-  populateMs = performance.now() - stepStart;
-
-  stepStart = performance.now();
-  logger.timeStart(
-    "scheduler",
-    "execute",
-    "event",
-    "pullTxToReactivityLog",
-  );
-  const deps: ReactivityLog = shouldSkipEvent
-    ? { reads: [], shallowReads: [], writes: [] }
-    : txToReactivityLog(depTx);
-  logger.timeEnd(
-    "scheduler",
-    "execute",
-    "event",
-    "pullTxToReactivityLog",
-  );
-  txToLogMs = performance.now() - stepStart;
-
-  // Commit the read-only inspection tx as a no-op so dependency discovery
-  // does not participate in CFC prepare or commit gating. Do this even
-  // after populateDependencies errors so the transaction is closed.
-  stepStart = performance.now();
-  logger.timeStart(
-    "scheduler",
-    "execute",
-    "event",
-    "pullDepCommitStart",
-  );
-  depTx.commit();
-  logger.timeEnd(
-    "scheduler",
-    "execute",
-    "event",
-    "pullDepCommitStart",
-  );
-  depCommitMs = performance.now() - stepStart;
-
-  const invalidDeps = new Set<Action>();
-  stepStart = performance.now();
-  logger.timeStart(
-    "scheduler",
-    "execute",
-    "event",
-    "pullCollectInvalidUpstream",
-  );
-  let hasInvalidDependencies = false;
-  state.setEventPreflightTraceContext(preflightStats);
-  try {
-    hasInvalidDependencies = state.collectInvalidUpstreamForLog(
-      deps,
-      invalidDeps,
-    );
-  } finally {
-    state.setEventPreflightTraceContext(undefined);
-    logger.timeEnd(
-      "scheduler",
-      "execute",
-      "event",
-      "pullCollectInvalidUpstream",
-    );
-  }
-  collectMs = performance.now() - stepStart;
-
-  if (!shouldSkipEvent && hasInvalidDependencies) {
-    stepStart = performance.now();
-    logger.timeStart(
-      "scheduler",
-      "execute",
-      "event",
-      "pullScheduleInvalidUpstream",
-    );
     try {
-      const eventDirtyPlan = planEventInvalidDependencyScheduling({
-        invalidDeps,
-        isDebouncedComputationWaiting: (dep) =>
-          state.isDebouncedComputationWaiting(dep),
-        getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),
-        getNextEligibleRunTime: (dep) => state.getNextEligibleRunTime(dep),
-      });
-      for (const dep of eventDirtyPlan.runnableDeps) {
-        state.pendingActions.add(dep);
-        state.eventBlockingDeps.add(dep);
-      }
-      if (eventDirtyPlan.runnableDeps.length > 0) {
-        shouldSkipEvent = true;
-      } else if (eventDirtyPlan.nextEligibleAt !== undefined) {
-        queuedEvent.notBefore = eventDirtyPlan.nextEligibleAt;
-        state.scheduleWake(eventDirtyPlan.nextEligibleAt);
-        shouldSkipEvent = true;
-      }
+      const implementation = selectEventImplementation(handler, depTx);
+      queuedEvent.preflightImplementation = implementation;
+      implementation?.populateDependencies?.(depTx, eventValue);
+      inputReadiness = implementation?.inputReadiness?.(depTx, eventValue) ?? {
+        ready: true,
+      };
+    } catch (error) {
+      reportFailure(error);
+      shouldSkipEvent = true;
     } finally {
       logger.timeEnd(
         "scheduler",
         "execute",
         "event",
-        "pullScheduleInvalidUpstream",
+        "pullPopulateDependencies",
       );
     }
-    scheduleMs = performance.now() - stepStart;
-  }
+    populateMs = performance.now() - stepStart;
 
-  // The transient-demander preflight (server-execution v2 fan-out stage B,
-  // design §B5's motivating case; independent review F2). A SERVED event's
-  // actor whose handler reads a per-user DERIVATION she does not watch has
-  // no instance of that node — the node is node-level CLEAN (it ran for
-  // the watchers), so the invalid-upstream pass above found nothing, and
-  // the handler would read the actor's MISSING instance (its argument
-  // fails the schema and the run is skipped — which, until the
-  // mark/effects-atomicity fix below in `finalize`, sealed the entry
-  // consequenced with no error: silent event loss. The finalize now
-  // withdraws a skipped served dispatch, so the residual cost of a miss
-  // here is a deferral-and-re-drain cycle, not a lost event — this
-  // preflight remains what makes the FIRST delivery succeed). B7 made
-  // cleanliness
-  // per instance: re-arm the fanned-out nodes in the handler's closure
-  // whose instance for THIS actor is not current, materializing her own
-  // instance (as her transient demand) before the handler runs. The
-  // handler then reads a current instance instead of losing its event.
-  // Runs even when the node-level pass already skipped (a dirty input can
-  // coexist with a never-run actor instance — the review's dirty-input
-  // variant); the two schedule the same node, and the fan-out loop runs
-  // both the dirty watcher instance and the actor's uncomputed one. Off
-  // the serving posture `rearmNotCurrentFanOutForActor` is undefined and
-  // this is inert.
-  const actorFiredAt = queuedEvent.served?.firedAt;
-  if (
-    !shouldSkipEvent && actorFiredAt?.user !== undefined &&
-    state.rearmNotCurrentFanOutForActor !== undefined
-  ) {
-    const actor: ScopeKeyIdentity = {
-      principal: actorFiredAt.user,
-      ...(actorFiredAt.session !== undefined &&
-          actorFiredAt.session !== "server"
-        ? { sessionId: actorFiredAt.session as never }
-        : {}),
-    };
-    const rearmed = state.rearmNotCurrentFanOutForActor(deps, actor);
-    if (rearmed.length > 0) {
-      for (const dep of rearmed) {
-        state.pendingActions.add(dep);
-        state.eventBlockingDeps.add(dep);
+    stepStart = performance.now();
+    logger.timeStart(
+      "scheduler",
+      "execute",
+      "event",
+      "pullTxToReactivityLog",
+    );
+    const deps: ReactivityLog = shouldSkipEvent
+      ? { reads: [], shallowReads: [], writes: [] }
+      : txToReactivityLog(depTx);
+    logger.timeEnd(
+      "scheduler",
+      "execute",
+      "event",
+      "pullTxToReactivityLog",
+    );
+    txToLogMs = performance.now() - stepStart;
+
+    // Commit the read-only inspection tx as a no-op so dependency discovery
+    // does not participate in CFC prepare or commit gating. Do this even
+    // after populateDependencies errors so the transaction is closed.
+    stepStart = performance.now();
+    logger.timeStart(
+      "scheduler",
+      "execute",
+      "event",
+      "pullDepCommitStart",
+    );
+    depTx.commit();
+    logger.timeEnd(
+      "scheduler",
+      "execute",
+      "event",
+      "pullDepCommitStart",
+    );
+    depCommitMs = performance.now() - stepStart;
+
+    const invalidDeps = new Set<Action>();
+    stepStart = performance.now();
+    logger.timeStart(
+      "scheduler",
+      "execute",
+      "event",
+      "pullCollectInvalidUpstream",
+    );
+    let hasInvalidDependencies = false;
+    state.setEventPreflightTraceContext(preflightStats);
+    try {
+      hasInvalidDependencies = state.collectInvalidUpstreamForLog(
+        deps,
+        invalidDeps,
+      );
+    } finally {
+      state.setEventPreflightTraceContext(undefined);
+      logger.timeEnd(
+        "scheduler",
+        "execute",
+        "event",
+        "pullCollectInvalidUpstream",
+      );
+    }
+    collectMs = performance.now() - stepStart;
+
+    if (!shouldSkipEvent && hasInvalidDependencies) {
+      stepStart = performance.now();
+      logger.timeStart(
+        "scheduler",
+        "execute",
+        "event",
+        "pullScheduleInvalidUpstream",
+      );
+      try {
+        const eventDirtyPlan = planEventInvalidDependencyScheduling({
+          invalidDeps,
+          isDebouncedComputationWaiting: (dep) =>
+            state.isDebouncedComputationWaiting(dep),
+          getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),
+          getNextEligibleRunTime: (dep) => state.getNextEligibleRunTime(dep),
+        });
+        for (const dep of eventDirtyPlan.runnableDeps) {
+          state.pendingActions.add(dep);
+          state.eventBlockingDeps.add(dep);
+        }
+        if (eventDirtyPlan.runnableDeps.length > 0) {
+          shouldSkipEvent = true;
+        } else if (eventDirtyPlan.nextEligibleAt !== undefined) {
+          queuedEvent.notBefore = eventDirtyPlan.nextEligibleAt;
+          state.scheduleWake(eventDirtyPlan.nextEligibleAt);
+          shouldSkipEvent = true;
+        }
+      } finally {
+        logger.timeEnd(
+          "scheduler",
+          "execute",
+          "event",
+          "pullScheduleInvalidUpstream",
+        );
       }
-      shouldSkipEvent = true;
+      scheduleMs = performance.now() - stepStart;
     }
-  }
 
-  // Replica-staleness gate (CT-1795): with no invalid upstream left, an
-  // address the closure depends on may still have a load in flight — the
-  // wish shape, where a computation settles CLEAN on a provisional value
-  // while its fire-and-forget pull is outstanding. Handlers are at-most-once
-  // (D7), so park the head until those loads complete (absent counts as
-  // complete); load completion is the wake source, mirroring the lineage
-  // park.
-  if (!shouldSkipEvent && !hasInvalidDependencies && inputReadiness.ready) {
-    const parkKeys = state.collectPendingLoadParkKeys(queuedEvent, deps);
-    if (parkKeys.length > 0) {
-      state.parkHeadEventForLoads(queuedEvent, parkKeys);
-      shouldSkipEvent = true;
+    // The transient-demander preflight (server-execution v2 fan-out stage B,
+    // design §B5's motivating case; independent review F2). A SERVED event's
+    // actor whose handler reads a per-user DERIVATION she does not watch has
+    // no instance of that node — the node is node-level CLEAN (it ran for
+    // the watchers), so the invalid-upstream pass above found nothing, and
+    // the handler would read the actor's MISSING instance (its argument
+    // fails the schema and the run is skipped — which, until the
+    // mark/effects-atomicity fix below in `finalize`, sealed the entry
+    // consequenced with no error: silent event loss. The finalize now
+    // withdraws a skipped served dispatch, so the residual cost of a miss
+    // here is a deferral-and-re-drain cycle, not a lost event — this
+    // preflight remains what makes the FIRST delivery succeed). B7 made
+    // cleanliness
+    // per instance: re-arm the fanned-out nodes in the handler's closure
+    // whose instance for THIS actor is not current, materializing her own
+    // instance (as her transient demand) before the handler runs. The
+    // handler then reads a current instance instead of losing its event.
+    // Runs even when the node-level pass already skipped (a dirty input can
+    // coexist with a never-run actor instance — the review's dirty-input
+    // variant); the two schedule the same node, and the fan-out loop runs
+    // both the dirty watcher instance and the actor's uncomputed one. Off
+    // the serving posture `rearmNotCurrentFanOutForActor` is undefined and
+    // this is inert.
+    const actorFiredAt = queuedEvent.served?.firedAt;
+    if (
+      !shouldSkipEvent && actorFiredAt?.user !== undefined &&
+      state.rearmNotCurrentFanOutForActor !== undefined
+    ) {
+      const actor: ScopeKeyIdentity = {
+        principal: actorFiredAt.user,
+        ...(actorFiredAt.session !== undefined &&
+            actorFiredAt.session !== "server"
+          ? { sessionId: actorFiredAt.session as never }
+          : {}),
+      };
+      const rearmed = state.rearmNotCurrentFanOutForActor(deps, actor);
+      if (rearmed.length > 0) {
+        for (const dep of rearmed) {
+          state.pendingActions.add(dep);
+          state.eventBlockingDeps.add(dep);
+        }
+        shouldSkipEvent = true;
+      }
     }
+
+    // Replica-staleness gate (CT-1795): with no invalid upstream left, an
+    // address the closure depends on may still have a load in flight — the
+    // wish shape, where a computation settles CLEAN on a provisional value
+    // while its fire-and-forget pull is outstanding. Handlers are at-most-once
+    // (D7), so park the head until those loads complete (absent counts as
+    // complete); load completion is the wake source, mirroring the lineage
+    // park.
+    if (!shouldSkipEvent && !hasInvalidDependencies && inputReadiness.ready) {
+      const parkKeys = state.collectPendingLoadParkKeys(queuedEvent, deps);
+      if (parkKeys.length > 0) {
+        state.parkHeadEventForLoads(queuedEvent, parkKeys);
+        shouldSkipEvent = true;
+      }
+    }
+    const inputUnavailableReason = inputReadiness.ready
+      ? undefined
+      : inputReadiness.reason;
+    return {
+      shouldSkipEvent,
+      shouldParkForInputs: !shouldSkipEvent &&
+        (inputUnavailableReason === "pending" ||
+          inputUnavailableReason === "syncing"),
+      ...(inputUnavailableReason !== undefined && {
+        inputUnavailableReason,
+      }),
+      deps,
+      invalidDeps,
+      hasInvalidDependencies,
+      dirtySizeBefore,
+      pendingSizeBefore,
+      populateMs,
+      txToLogMs,
+      depCommitMs,
+      collectMs,
+      scheduleMs,
+      preflightStats,
+    };
+  } catch (error) {
+    if (depTx.status().status === "ready") {
+      depTx.clearReadOnly?.();
+      depTx.abort(error);
+    }
+    try {
+      reportFailure(error);
+    } catch {
+      // The event's failure notification and queue removal finalize the failure.
+    }
+    return {
+      shouldSkipEvent: true,
+      shouldParkForInputs: false,
+      deps: { reads: [], shallowReads: [], writes: [] },
+      invalidDeps: new Set(),
+      hasInvalidDependencies: false,
+      dirtySizeBefore,
+      pendingSizeBefore,
+      populateMs,
+      txToLogMs,
+      depCommitMs,
+      collectMs,
+      scheduleMs,
+      preflightStats,
+    };
   }
-  const inputUnavailableReason = inputReadiness.ready
-    ? undefined
-    : inputReadiness.reason;
-  return {
-    shouldSkipEvent,
-    shouldParkForInputs: !shouldSkipEvent &&
-      (inputUnavailableReason === "pending" ||
-        inputUnavailableReason === "syncing"),
-    ...(inputUnavailableReason !== undefined && {
-      inputUnavailableReason,
-    }),
-    deps,
-    invalidDeps,
-    hasInvalidDependencies,
-    dirtySizeBefore,
-    pendingSizeBefore,
-    populateMs,
-    txToLogMs,
-    depCommitMs,
-    collectMs,
-    scheduleMs,
-    preflightStats,
-  };
 }
 
 /** Recheck a presynced handler's availability without starting another load gate. */
@@ -1277,16 +1312,25 @@ function probeEventInputReadiness(
   handler: EventHandler,
 ): { readiness: HandlerInputReadiness; deps: ReactivityLog } {
   const tx = runtime.edit();
-  tx.setReadOnly?.("scheduler.inputReadiness()");
-  const identity = eventScopeIdentity(queuedEvent);
-  if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
   try {
+    runtime.scheduler.beginReadAttempt(tx, "preflight");
+    tx.setReadOnly?.("scheduler.inputReadiness()");
+    const identity = eventScopeIdentity(queuedEvent);
+    if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
     const readiness = handler.inputReadiness?.(tx, queuedEvent.event) ?? {
       ready: true,
     };
     return { readiness, deps: txToReactivityLog(tx) };
+  } catch (error) {
+    if (tx.status().status === "ready") {
+      tx.clearReadOnly?.();
+      tx.abort(error);
+    }
+    throw error;
   } finally {
-    tx.commit();
+    if (tx.status().status === "ready") {
+      tx.commit();
+    }
   }
 }
 
@@ -1431,20 +1475,35 @@ export async function processPullQueuedEventDuringExecute(
     // The dependency preflight selects the implementation and handles any
     // selector loads before handler-only input cells are synchronized.
     if (didPresync) {
+      const presyncTx = state.runtime.edit();
+      const presyncHandlerId = state.getActionId(presyncImplementation);
       try {
+        state.runtime.scheduler.beginReadAttempt(
+          presyncTx,
+          "presync",
+          presyncHandlerId,
+        );
+        presyncTx.setReadOnly?.("scheduler.presyncInputs()");
+        const identity = eventScopeIdentity(queuedEvent);
+        if (identity !== undefined) {
+          presyncTx.tx.scopeKeyIdentity = identity;
+        }
         await presyncImplementation.presyncInputs!(
           queuedEvent.event,
-          eventScopeIdentity(queuedEvent),
+          identity,
+          presyncTx,
         );
       } catch (error) {
         logger.warn(
           "scheduler",
           "handler input presync failed; checking readiness anyway",
-          {
-            error,
-            handlerId: state.getActionId(presyncImplementation),
-          },
+          { error, handlerId: presyncHandlerId },
         );
+      } finally {
+        presyncTx.clearReadOnly?.();
+        if (presyncTx.status().status === "ready") {
+          presyncTx.abort();
+        }
       }
 
       // Presync is an async boundary. A speculative origin can fail while it
@@ -1618,124 +1677,191 @@ export async function dispatchQueuedEvent(state: {
   // dispatch has no second async boundary before claiming the FIFO slot.
   state.eventQueue.shift();
   const tx = state.runtime.edit();
-  tx.dispatchedEventId = queuedEvent.id;
-  tx.dispatchedEventTime = queuedEvent.time;
-  tx.dispatchedRuntimeInjectedEventKeys = queuedEvent.runtimeInjectedEventKeys;
-  tx.tx.immediate = true;
-  tx.tx.sourceAction = action;
-  // Server-execution v2 stage F (serving-loop.md §3d): the event-dispatch
-  // choke point — a serving runtime's installed stamper attaches the wave
-  // run context (kind event-handler, the durable event id) before the
-  // handler runs. A no-op everywhere else. The action identity is the
-  // HANDLER's durable id (`handlerId`, computed above): the queued
-  // `action` is a per-event wrapper closure, and stamping IT hands the
-  // basis index a non-durable identity — the wrapper's inferred name
-  // collapses every handler onto one constant id (rows overwrite across
-  // handlers), while the requeue paths' anonymous wrappers split rows
-  // per event; scheduler_basis requires "durable ... restart-stable"
-  // (serving-loop.md §3b).
   const served = queuedEvent.served;
-  //
-  // Stage P2-F — the LT6 inheritance rule (events.md §2, RULED
-  // 2026-08-03: "an event emitted by ANY run carries that run's acting
-  // identity — events run as the session they originated from"): a
-  // server-side event whose ORIGIN transaction ran under a stamped
-  // per-run identity hands that identity to the handler run, so a
-  // cascade rooted in a demanded (user, session) derivation preserves
-  // the acting pair hop by hop instead of blanking to the userless
-  // service fallback. Off the serving posture `waveRunContextOf` finds
-  // no stamp and this is inert. Phase 3's events carry the
-  // server-stamped `firedAt` through their own carriage (`served`,
-  // below), and that explicit carriage WINS where it speaks: a drained
-  // entry's stamp is the event's own durable actor, while the origin
-  // inheritance covers the in-process queueEvent shapes that carry no
-  // served stamp.
-  const originContext = queuedEvent.originTx !== undefined
-    ? waveRunContextOf(queuedEvent.originTx)
-    : undefined;
-  state.runtime.stampServerRun(tx, {
-    actionId: handlerId,
-    kind: "event-handler",
-    eventId: queuedEvent.id,
-    // The same-wave cascade's fold key (C8d; review 2026-08-11 M2):
-    // the emitter's own eventId, threaded from the emission's
-    // dispatch carriage so the wave can roll a cascade child back
-    // with its requeued parent. The client-echo thread
-    // (QueuedEvent.parentEventId, independent review M1) carries the
-    // same fact on a flag-ON client's speculative cascade, where the
-    // navigate capture derives its ATTEMPT-MINTED tag from it
-    // (navigate-context.ts) — the speculation stamp is never a wave
-    // context, so the fold semantics stay server-only.
-    ...((served?.parentEventId ?? queuedEvent.parentEventId) !== undefined
-      ? {
-        parentEventId: served?.parentEventId ?? queuedEvent.parentEventId,
-      }
-      : {}),
-    ...(served?.firedAt !== undefined
-      ? {
-        // LD1 (protocol.md §2, scopes.md §5): the handler runs AS the
-        // event's server-stamped actor — its scoped reads and writes
-        // resolve against the acting identity, and the attribution
-        // annotations carry it. A run with NO acting user carries no
-        // attribution at all (protocol.md §1); a sessionless chain
-        // supplies no session component, so a session-scoped write
-        // fails closed in resolveScopeKey (events.md §2's
-        // sessionless-actor error).
-        ...(served.firedAt.user !== undefined
-          ? {
-            acting: {
-              user: served.firedAt.user,
-              ...(served.firedAt.session !== undefined &&
-                  served.firedAt.session !== "server"
-                ? { session: served.firedAt.session }
-                : {}),
-            },
-          }
-          : {}),
-        scopeKeyIdentity: {
-          principal: served.firedAt.user,
-          sessionId: served.firedAt.session === "server"
-            ? undefined
-            : served.firedAt.session,
-        } as never,
-      }
-      : originContext?.scopeKeyIdentity !== undefined
-      ? { scopeKeyIdentity: originContext.scopeKeyIdentity }
-      : {}),
-    ...(originContext?.actionScopeKey !== undefined
-      ? { actionScopeKey: originContext.actionScopeKey }
-      : {}),
-    ...(served?.streamEntry !== undefined
-      ? { streamEntry: served.streamEntry }
-      : {}),
-    // The LT1 in-process copy's appending-wave identity (stage C build
-    // W3, (α)): the emitter's transaction, resolved by the SpaceServer's
-    // stamper to the wave that carries this event's durable entry.
-    ...(served?.lt1 !== undefined ? { lt1: served.lt1 } : {}),
-  });
-  if (queuedEvent.originTx !== undefined) {
-    const originLocalSeq = state.getOriginLocalSeq(
-      queuedEvent.originTx,
-      queuedEvent.eventLink.space,
-    );
-    if (
-      originLocalSeq !== undefined &&
-      state.lineageStatus(queuedEvent.originTx) === "pending" &&
-      state.runtime.experimental.commitPreconditions === true &&
-      // Events-down (runtime-mapping N26): the receipt/precondition
-      // exactly-once machinery is SUBSUMED by the stream's
-      // `eventWatermark` (events.md §4) and the two mechanisms MUST NOT
-      // be active for the same event. Under the flag the handler run is
-      // a diverted echo (client) or a wave-sealed run (server) — its
-      // tx never carries wire preconditions.
-      state.runtime.experimental.serverExecution !== true
-    ) {
-      tx.addCommitPrecondition?.(queuedEvent.eventLink.space, {
-        kind: "origin-committed",
-        originLocalSeq,
-      });
-    }
+  let lineageReleased = false;
+  const releaseLineage = () => {
+    if (lineageReleased || queuedEvent.originTx === undefined) return;
+    lineageReleased = true;
     state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
+  };
+  const runFinalCommitCallback = () => {
+    if (queuedEvent.finalOutcomeNotified) return;
+    queuedEvent.finalOutcomeNotified = true;
+    if (!onCommit) return;
+    try {
+      onCommit(tx);
+    } catch (callbackError) {
+      logger.error(
+        "schedule-error",
+        "Error in event commit callback:",
+        callbackError,
+      );
+    }
+  };
+  let failureFinalized = false;
+  // A failed setup or handler completes every owner notification once, even
+  // when one observer throws. The original failure remains the event outcome.
+  const finalizeFailure = (error: unknown) => {
+    if (failureFinalized) return;
+    failureFinalized = true;
+    const handlerError = error instanceof Error
+      ? error
+      : new Error(String(error));
+    for (
+      const complete of [
+        () => {
+          if (tx.status().status === "ready") {
+            tx.clearReadOnly?.();
+            tx.abort(handlerError);
+          }
+        },
+        releaseLineage,
+        () => state.handleError(handlerError, action),
+        () =>
+          reportServedEventFailure(served, {
+            kind: "error",
+            message: handlerError.message,
+          }),
+        runFinalCommitCallback,
+        () => tx.abandonStagedWork(eventAbandonError("event execution failed")),
+      ]
+    ) {
+      try {
+        complete();
+      } catch (notificationError) {
+        logger.error(
+          "schedule-error",
+          "Error completing failed event:",
+          notificationError,
+        );
+      }
+    }
+  };
+
+  try {
+    tx.dispatchedEventId = queuedEvent.id;
+    state.runtime.scheduler.beginReadAttempt(tx, "event", handlerId);
+    tx.dispatchedEventTime = queuedEvent.time;
+    tx.dispatchedRuntimeInjectedEventKeys =
+      queuedEvent.runtimeInjectedEventKeys;
+    tx.tx.immediate = true;
+    tx.tx.sourceAction = action;
+    // Server-execution v2 stage F (serving-loop.md §3d): the event-dispatch
+    // choke point — a serving runtime's installed stamper attaches the wave
+    // run context (kind event-handler, the durable event id) before the
+    // handler runs. A no-op everywhere else. The action identity is the
+    // HANDLER's durable id (`handlerId`, computed above): the queued
+    // `action` is a per-event wrapper closure, and stamping IT hands the
+    // basis index a non-durable identity — the wrapper's inferred name
+    // collapses every handler onto one constant id (rows overwrite across
+    // handlers), while the requeue paths' anonymous wrappers split rows
+    // per event; scheduler_basis requires "durable ... restart-stable"
+    // (serving-loop.md §3b).
+    //
+    // Stage P2-F — the LT6 inheritance rule (events.md §2, RULED
+    // 2026-08-03: "an event emitted by ANY run carries that run's acting
+    // identity — events run as the session they originated from"): a
+    // server-side event whose ORIGIN transaction ran under a stamped
+    // per-run identity hands that identity to the handler run, so a
+    // cascade rooted in a demanded (user, session) derivation preserves
+    // the acting pair hop by hop instead of blanking to the userless
+    // service fallback. Off the serving posture `waveRunContextOf` finds
+    // no stamp and this is inert. Phase 3's events carry the
+    // server-stamped `firedAt` through their own carriage (`served`,
+    // below), and that explicit carriage WINS where it speaks: a drained
+    // entry's stamp is the event's own durable actor, while the origin
+    // inheritance covers the in-process queueEvent shapes that carry no
+    // served stamp.
+    const originContext = queuedEvent.originTx !== undefined
+      ? waveRunContextOf(queuedEvent.originTx)
+      : undefined;
+    state.runtime.stampServerRun(tx, {
+      actionId: handlerId,
+      kind: "event-handler",
+      eventId: queuedEvent.id,
+      // The same-wave cascade's fold key (C8d; review 2026-08-11 M2):
+      // the emitter's own eventId, threaded from the emission's
+      // dispatch carriage so the wave can roll a cascade child back
+      // with its requeued parent. The client-echo thread
+      // (QueuedEvent.parentEventId, independent review M1) carries the
+      // same fact on a flag-ON client's speculative cascade, where the
+      // navigate capture derives its ATTEMPT-MINTED tag from it
+      // (navigate-context.ts) — the speculation stamp is never a wave
+      // context, so the fold semantics stay server-only.
+      ...((served?.parentEventId ?? queuedEvent.parentEventId) !== undefined
+        ? {
+          parentEventId: served?.parentEventId ?? queuedEvent.parentEventId,
+        }
+        : {}),
+      ...(served?.firedAt !== undefined
+        ? {
+          // LD1 (protocol.md §2, scopes.md §5): the handler runs AS the
+          // event's server-stamped actor — its scoped reads and writes
+          // resolve against the acting identity, and the attribution
+          // annotations carry it. A run with NO acting user carries no
+          // attribution at all (protocol.md §1); a sessionless chain
+          // supplies no session component, so a session-scoped write
+          // fails closed in resolveScopeKey (events.md §2's
+          // sessionless-actor error).
+          ...(served.firedAt.user !== undefined
+            ? {
+              acting: {
+                user: served.firedAt.user,
+                ...(served.firedAt.session !== undefined &&
+                    served.firedAt.session !== "server"
+                  ? { session: served.firedAt.session }
+                  : {}),
+              },
+            }
+            : {}),
+          scopeKeyIdentity: {
+            principal: served.firedAt.user,
+            sessionId: served.firedAt.session === "server"
+              ? undefined
+              : served.firedAt.session,
+          } as never,
+        }
+        : originContext?.scopeKeyIdentity !== undefined
+        ? { scopeKeyIdentity: originContext.scopeKeyIdentity }
+        : {}),
+      ...(originContext?.actionScopeKey !== undefined
+        ? { actionScopeKey: originContext.actionScopeKey }
+        : {}),
+      ...(served?.streamEntry !== undefined
+        ? { streamEntry: served.streamEntry }
+        : {}),
+      // The LT1 in-process copy's appending-wave identity (stage C build
+      // W3, (α)): the emitter's transaction, resolved by the SpaceServer's
+      // stamper to the wave that carries this event's durable entry.
+      ...(served?.lt1 !== undefined ? { lt1: served.lt1 } : {}),
+    });
+    if (queuedEvent.originTx !== undefined) {
+      const originLocalSeq = state.getOriginLocalSeq(
+        queuedEvent.originTx,
+        queuedEvent.eventLink.space,
+      );
+      if (
+        originLocalSeq !== undefined &&
+        state.lineageStatus(queuedEvent.originTx) === "pending" &&
+        state.runtime.experimental.commitPreconditions === true &&
+        // Events-down (runtime-mapping N26): the receipt/precondition
+        // exactly-once machinery is SUBSUMED by the stream's
+        // `eventWatermark` (events.md §4) and the two mechanisms MUST NOT
+        // be active for the same event. Under the flag the handler run is
+        // a diverted echo (client) or a wave-sealed run (server) — its
+        // tx never carries wire preconditions.
+        state.runtime.experimental.serverExecution !== true
+      ) {
+        tx.addCommitPrecondition?.(queuedEvent.eventLink.space, {
+          kind: "origin-committed",
+          originLocalSeq,
+        });
+      }
+      releaseLineage();
+    }
+  } catch (error) {
+    finalizeFailure(error);
+    return;
   }
   const actionId = state.getActionId(action);
 
@@ -1860,21 +1986,6 @@ export async function dispatchQueuedEvent(state: {
     return requeued;
   };
 
-  const runFinalCommitCallback = () => {
-    if (!onCommit) {
-      return;
-    }
-    try {
-      onCommit(tx);
-    } catch (callbackError) {
-      logger.error(
-        "schedule-error",
-        "Error in event commit callback:",
-        callbackError,
-      );
-    }
-  };
-
   const finalize = (error?: unknown): void => {
     // A RetryImmediately signal means the handler referenced an inSpace("name")
     // target that has now been resolved into the runtime cache. Abort this run's
@@ -1903,29 +2014,7 @@ export async function dispatchQueuedEvent(state: {
     }
 
     if (error) {
-      const handlerError = error instanceof Error
-        ? error
-        : new Error(String(error));
-      try {
-        state.handleError(handlerError, action);
-      } finally {
-        if (tx.status().status === "ready") {
-          tx.abort(handlerError);
-        }
-        // The serving drain's ERROR arm (events.md §5): the handler
-        // threw server-side — the error IS the consequence. The
-        // handler tx (with its consequenced mark) aborted above; the
-        // drain seals the error consequence in its own transaction.
-        reportServedEventFailure(served, {
-          kind: "error",
-          message: handlerError.message,
-        });
-        // A throwing handler is a final outcome for this event — settle the
-        // commit callback (with the aborted tx) instead of leaving callers
-        // that await it hanging.
-        runFinalCommitCallback();
-        tx.abandonStagedWork(eventAbandonError("handler threw"));
-      }
+      finalizeFailure(error);
       return;
     }
 

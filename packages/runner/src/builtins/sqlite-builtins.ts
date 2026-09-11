@@ -33,7 +33,7 @@ import type { RawBuiltinResult } from "../module.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
-import type { CellScope } from "../builder/types.ts";
+import type { CellScope, JSONSchema } from "../builder/types.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
@@ -67,7 +67,6 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { selectUnavailableInput } from "../data-unavailability.ts";
 import type { SqliteQueryResult } from "@commonfabric/api";
 import { validateSchemaValue } from "../cfc/schema-sanitization.ts";
-import type { JSONSchema } from "../builder/types.ts";
 
 import { type Cell, createCell, encodeSqliteParams } from "../cell.ts";
 import type { CfcConfClause } from "../cfc/clause.ts";
