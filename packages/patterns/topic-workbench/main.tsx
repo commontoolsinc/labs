@@ -11,6 +11,7 @@ import {
   UI,
   type VNode,
   Writable,
+  WriteAuthorizedBy,
 } from "commonfabric";
 
 import { snippet, TOPICS_THEME, whenLabel } from "../topics/topic.tsx";
@@ -27,9 +28,11 @@ import { snippet, TOPICS_THEME, whenLabel } from "../topics/topic.tsx";
 // reference to the topic and reads the person's connector index; nothing here
 // writes into the topic.
 //
-// v0 (2026-09-08): attachments are the workbench's own record, sessions are
-// read from the connector's complete index, and "start a session" composes
-// the command to run until the connector grows a start command.
+// Attachments are the workbench's own record, sessions are read from the
+// connector's complete index, and "start a session" sends the connector a
+// `start` command through a queue the connector's host binds to this
+// pattern's own handler. The composed shell command stays as the fallback for
+// a person whose host has no queue for this piece.
 
 // ===== Views of what this reads =====
 
@@ -79,6 +82,15 @@ export interface CheckoutEntry {
   commit?: string | null;
 }
 
+/** One source the connector collects, as the index's status rows name it. */
+export interface SourceEntry {
+  id: string;
+  driver: string;
+}
+
+/** A JSON-encoded connector command, as the connector's queues hold them. */
+export type CommandValue = string;
+
 /** The connector's session index, declared to the depth the workbench reads.
  * Every array element the connector publishes is a linked child cell; the
  * `undefined` branch is a child that has not loaded yet, and the reads below
@@ -86,7 +98,10 @@ export interface CheckoutEntry {
  * workbench reads the shallow fields and never forwards a row as a cell. */
 export interface SessionIndexView {
   schema: string;
+  /** The connector owner's DID; every command the workbench sends names it. */
+  ownerDid?: string;
   generatedAt?: string;
+  sources?: Array<SourceEntry | undefined>;
   sessions: Array<SessionEntry | undefined>;
   checkouts?: Array<CheckoutEntry | undefined>;
 }
@@ -149,6 +164,11 @@ export interface WorkbenchInput {
   sessions?: SessionIndexView;
   /** Sessions attached to the topic, the workbench's own durable record. */
   attached?: Writable<Attachment[] | Default<[]>>;
+  /**
+   * The command queue the connector's host binds for this piece. Absent until
+   * the host has linked it; a start sent before then reaches nothing.
+   */
+  commands?: Writable<CommandValue[] | Default<[]>>;
 }
 
 export interface WorkbenchOutput {
@@ -164,10 +184,23 @@ export interface WorkbenchOutput {
   kickoff: string;
   spawnPrompt: PerSession<Writable<string>>;
   spawnRoot: PerSession<Writable<string>>;
+  spawnSource: PerSession<Writable<string>>;
   /** Attach a session by provider identity. Idempotent. */
   attach: Stream<AttachEvent, AttachResult>;
   /** Detach a session by provider identity. */
   detach: Stream<DetachEvent>;
+  /**
+   * Start a session for the topic: sends the connector a `start` command
+   * carrying the kickoff prompt, the picked checkout, and the topic's name as
+   * the session title, and attaches the new session at once.
+   */
+  startSession: Stream<void>;
+  // The connector's host reads this field's schema to learn which handler may
+  // write the queue it binds for this piece. The field has no stored value.
+  commandAuthorization?: WriteAuthorizedBy<
+    boolean,
+    typeof startSessionCommand
+  >;
 }
 
 // ===== Derivations =====
@@ -273,6 +306,22 @@ const presentLinksOf = lift((
   (links ?? []).filter((l) => l.removedAt === undefined).toSorted((a, b) =>
     (a.kind === "pr" ? 0 : 1) - (b.kind === "pr" ? 0 : 1)
   )
+);
+
+/** The connector's sources, as picker options; Claude sources first. */
+const sourceOptionsOf = lift((
+  { index }: { index?: SessionIndexView },
+): CheckoutOption[] =>
+  (index?.sources ?? [])
+    .flatMap((source) =>
+      source?.id
+        ? [{ label: `${source.id}  (${source.driver})`, value: source.id }]
+        : []
+    )
+    .toSorted((a, b) =>
+      (a.label.includes("claude-agent-sdk") ? 0 : 1) -
+      (b.label.includes("claude-agent-sdk") ? 0 : 1)
+    )
 );
 
 /** Checkouts the connector discovered, as picker options. */
@@ -411,12 +460,67 @@ const pickRoot = handler<void, {
   spawnRoot.set(root);
 });
 
+/** A version 4 UUID, which is the shape a Claude session id must have. */
+const mintSessionId = (): string =>
+  "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = Math.floor(Math.random() * 16);
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+
+/**
+ * Sends the connector a `start` command and attaches the session it names.
+ * Exported because the connector's host binds this piece's queue to this
+ * handler by name: only a write from here is accepted on that queue.
+ */
+export const startSessionCommand = handler<void, {
+  commands: Writable<CommandValue[] | Default<[]>>;
+  attached: Writable<Attachment[] | Default<[]>>;
+  spawnRoot: Writable<string>;
+  spawnSource: Writable<string>;
+  sourceOptions: CheckoutOption[];
+  kickoff: string;
+  ownerDid: string;
+  shortName: string;
+  title: string;
+}>((_, state) => {
+  const sourceId = (state.spawnSource.get() || state.sourceOptions[0]?.value ||
+    "").trim();
+  if (!state.ownerDid || !sourceId || !state.kickoff.trim()) return;
+  const nativeSessionId = mintSessionId();
+  const createdAt = new Date().toISOString();
+  const sessionTitle = state.shortName
+    ? `topic #${state.shortName}: ${state.title}`
+    : state.title;
+  const cwd = state.spawnRoot.get().trim();
+  state.commands.push(JSON.stringify({
+    schema: "commonfabric.agent-connector.command",
+    ownerDid: state.ownerDid,
+    id: `workbench:${createdAt}:${nativeSessionId.slice(0, 8)}`,
+    createdAt,
+    sourceId,
+    nativeSessionId,
+    type: "start",
+    payload: {
+      text: state.kickoff,
+      ...(cwd ? { cwd } : {}),
+      ...(sessionTitle ? { title: sessionTitle } : {}),
+    },
+  }));
+  // Attached now, so the session shows as starting before the index carries
+  // it; the row joins the live index entry when the connector publishes it.
+  state.attached.set([
+    ...state.attached.get(),
+    { sourceId, nativeSessionId, title: sessionTitle, attachedAt: Date.now() },
+  ]);
+});
+
 // ===== The pattern =====
 
 export default pattern<WorkbenchInput, WorkbenchOutput>(
-  ({ topic, sessions, attached }) => {
+  ({ topic, sessions, attached, commands }) => {
     const spawnPrompt = new Writable.perSession("");
     const spawnRoot = new Writable.perSession("");
+    const spawnSource = new Writable.perSession("");
 
     const title = topic?.title ?? "";
     const shortName = topic?.shortName ?? "";
@@ -432,6 +536,8 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
     const recentSessions = recentRowsOf({ rows, limit: 8 });
     const links = presentLinksOf({ links: topic?.links });
     const checkoutOptions = checkoutOptionsOf({ index: sessions });
+    const sourceOptions = sourceOptionsOf({ index: sessions });
+    const ownerDid = sessions?.ownerDid ?? "";
     const defaultPrompt = defaultPromptOf({ shortName, title, body });
     const kickoff = kickoffOf({
       prompt: spawnPrompt,
@@ -442,6 +548,17 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
       links,
     });
     const spawnCommand = spawnCommandOf({ root: spawnRoot, prompt: kickoff });
+    const startSession = startSessionCommand({
+      commands,
+      attached,
+      spawnRoot,
+      spawnSource,
+      sourceOptions,
+      kickoff,
+      ownerDid,
+      shortName,
+      title,
+    });
 
     const hasAttached = attachedSessions.length > 0;
     const hasRelated = relatedSessions.length > 0;
@@ -804,6 +921,12 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
                         />
                       </cf-field>
                       <cf-hstack gap="2" align="end" style="flex-wrap: wrap;">
+                        <cf-field label="Harness" style="flex: 1 1 12rem;">
+                          <cf-select
+                            $value={spawnSource}
+                            items={sourceOptions}
+                          />
+                        </cf-field>
                         <cf-field label="Checkout" style="flex: 1 1 14rem;">
                           <cf-select
                             $value={spawnRoot}
@@ -820,6 +943,19 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
                           Add the topic's words
                         </cf-button>
                       </cf-hstack>
+                      <cf-hstack gap="2" align="center">
+                        <cf-button
+                          variant="primary"
+                          data-start=""
+                          onClick={startSession}
+                        >
+                          Start
+                        </cf-button>
+                        <cf-text variant="caption" tone="muted">
+                          Runs the first turn on this Mac through the connector;
+                          the session appears above as it starts.
+                        </cf-text>
+                      </cf-hstack>
                       {hasPrompt
                         ? (
                           <cf-vstack gap="2">
@@ -832,7 +968,7 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
                                 {kickoff}
                               </cf-text>
                             </cf-field>
-                            <cf-field label="Command">
+                            <cf-field label="Or run it yourself">
                               <cf-text
                                 block
                                 data-spawn-command=""
@@ -860,8 +996,10 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
       kickoff,
       spawnPrompt,
       spawnRoot,
+      spawnSource,
       attach,
       detach,
+      startSession,
     };
   },
 );
