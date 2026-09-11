@@ -23,7 +23,9 @@ import {
   type EntityDocument,
   getMemoryProtocolFlags,
   type PatchOp,
+  resetServerExecutionConfig,
   type SessionSync,
+  setServerExecutionConfig,
   type SqliteOperation,
   toDocumentPath,
 } from "@commonfabric/memory/v2";
@@ -41,10 +43,6 @@ import {
 } from "@commonfabric/utils/logger";
 
 import { applyPatch } from "../../memory/v2/patch.ts";
-import {
-  resetServerExecutionConfig,
-  setServerExecutionConfig,
-} from "@commonfabric/memory/v2";
 import {
   parentPath,
   parsePointer,

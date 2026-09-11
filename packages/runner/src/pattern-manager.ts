@@ -34,6 +34,7 @@ import {
   ROOT_LINK_SPECIFIER,
   type SourceDoc,
   sourceDocKey,
+  stageModuleDelegations,
   WRITE_TARGET_EDGE_SYNC_SCHEMA,
   writeSourceAndCompiledDocs,
   writeSourceDocs,
@@ -54,6 +55,7 @@ import type {
 } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
+import { snapshotQueryResult } from "./query-result-proxy.ts";
 import type { MemorySpace, Runtime, ServerRunInfo } from "./runtime.ts";
 
 import {
@@ -92,6 +94,21 @@ export type CompileCacheWriter = (
   moduleDelegations?: ModuleDelegationMap,
   delegated?: WritebackDelegation,
 ) => Promise<void>;
+
+declare const preparedSourceUpdateBrand: unique symbol;
+
+/** Verified, operation-local authority for an atomic source transition. */
+export interface PreparedSourceUpdate {
+  readonly [preparedSourceUpdateBrand]: true;
+}
+
+type SourceUpdatePreparation = {
+  space: MemorySpace;
+  previousEntryIdentity: string;
+  entryIdentity: string;
+  runtimeVersion: string | undefined;
+  delegations: ModuleDelegationMap;
+};
 
 const logger = getLogger("pattern-manager");
 
@@ -381,8 +398,42 @@ type ParkedReplication = {
   delegated: WritebackDelegation | undefined;
 };
 
+/** A shared compilation and the spaces requesting its durable closure. */
+type ProgramCompilation = {
+  /** Compile and initial persistence completion shared by all callers. */
+  readonly promise: Promise<Pattern>;
+
+  /** Spaces whose closures are registered for replication on completion. */
+  readonly spaces: Set<MemorySpace>;
+};
+
+/**
+ * Helper for the program caches, which hashes a detached program in its
+ * compilation context. Space-aware compilation uses a separate entry because it
+ * resolves fabric imports in that space and can produce a durable closure.
+ */
+function programCompilationKey(
+  program: RuntimeProgram,
+  space?: MemorySpace,
+): string {
+  return toURI(
+    createRef(
+      { src: program, spaceScoped: space !== undefined },
+      "pattern source",
+    ),
+  );
+}
+
 export class PatternManager {
   #runtime: Runtime;
+
+  readonly #sourceUpdates = new WeakMap<
+    PreparedSourceUpdate,
+    SourceUpdatePreparation
+  >();
+
+  /** Cold previews whose next ordinary load must repair the durable cache. */
+  readonly #unpersistedPatternRecoveries = new Set<string>();
 
   /**
    * Maps each storage slot written during this `PatternManager` session to its
@@ -413,15 +464,8 @@ export class PatternManager {
    */
   #failedCompileCacheRecoveries = new Set<string>();
 
-  /**
-   * Single-flight dedup and in-memory result cache for `compileOrGetPattern()`,
-   * keyed by a content hash of the program (_not_ a cell id, _not_ the retired
-   * `patternId`) so identical source returns one shared, already-compiled
-   * pattern instance. The hash is computed with `createRef()` purely as a
-   * stable digest function — no `pattern:` cell is ever minted. Bounded FIFO to
-   * cap memory.
-   */
-  readonly #inProgressCompilations = new Map<string, Promise<Pattern>>();
+  /** Compilations in progress, keyed by program content and compilation context. */
+  readonly #inProgressCompilations = new Map<string, ProgramCompilation>();
 
   /**
    * Single-flight dedup for the expensive tail of `loadPatternByIdentity()`
@@ -448,13 +492,11 @@ export class PatternManager {
   #coldLoadNegativeMemo = new ColdLoadNegativeMemo();
 
   /**
-   * Content hash → the compiled pattern and the space its closure was first
-   * written into. The space is tracked so a cross-space cache hit can replicate
-   * the source/compiled closure into the requested space (see
-   * `compileOrGetPattern()`): identical source dedupes the expensive TS
-   * compile, but every space holding a piece that points at the pattern still
-   * needs the closure persisted there to reload by `{ identity, symbol }` in a
-   * fresh runtime.
+   * Compiled patterns keyed by program content and compilation context.
+   * Requests with and without a space use separate entries; identical programs
+   * within a context share compilation. With CFC enforcement, a space-aware
+   * entry also records the space holding its closure, so a cross-space cache
+   * hit can replicate it into the requested space for fresh-runtime reloads.
    */
   #compiledByContent = new Map<
     string,
@@ -758,7 +800,7 @@ export class PatternManager {
       string,
       Promise<Pattern | undefined>
     >;
-    readonly inProgressCompilations: Map<string, Promise<Pattern>>;
+    readonly inProgressCompilations: Map<string, ProgramCompilation>;
     maxEvaluatedModuleCacheSize: number;
     readonly modulesByIdentity: Map<string, { exports: Exports }>;
     readonly persistedCompileCacheClosures: Map<string, string>;
@@ -769,10 +811,6 @@ export class PatternManager {
       opts: { runtimeVersion: string },
       moduleDelegations?: ModuleDelegationMap,
     ): Promise<boolean>;
-    loadPreviousSourceClosure(
-      space: MemorySpace,
-      entryIdentity: string,
-    ): Promise<Map<string, SourceDoc>>;
     persistCompileCacheTracked(
       space: MemorySpace,
       modules: CacheableModule[],
@@ -824,8 +862,6 @@ export class PatternManager {
           opts,
           moduleDelegations,
         ),
-      loadPreviousSourceClosure: (space, entryIdentity) =>
-        this.#loadPreviousSourceClosure(space, entryIdentity),
       persistCompileCacheTracked: (
         space,
         modules,
@@ -922,7 +958,10 @@ export class PatternManager {
    */
   async pendingPatternWorkSettled(): Promise<void> {
     await Promise.allSettled([
-      ...this.#inProgressCompilations.values(),
+      ...Array.from(
+        this.#inProgressCompilations.values(),
+        ({ promise }) => promise,
+      ),
       ...this.#inProgressByIdentityLoads.values(),
       ...this.#compileCacheWrites,
     ]);
@@ -1386,7 +1425,10 @@ export class PatternManager {
       // `#parkedFailedReplications` and the register's RULING block), so
       // the short-circuit stays exactly as cheap and mask-free as
       // designed while no rescueable interleaving is lost.
-      const inFlightCompilations = [...this.#inProgressCompilations.values()];
+      const inFlightCompilations = Array.from(
+        this.#inProgressCompilations.values(),
+        ({ promise }) => promise,
+      );
       const inFlightLoads = [...this.#inProgressByIdentityLoads.values()];
       if (inFlightCompilations.length > 0 || inFlightLoads.length > 0) {
         logger.warn("closure-replication-await-inflight", () => [
@@ -1436,6 +1478,7 @@ export class PatternManager {
         filename: doc.filename,
         source: doc.code,
         js: compiled?.code ?? "",
+        ...(compiled?.kind === "data" ? { isData: true } : {}),
         ...(compiled?.sourceMap !== undefined
           ? { sourceMap: compiled.sourceMap }
           : {}),
@@ -1492,28 +1535,107 @@ export class PatternManager {
     }
   }
 
-  async #loadPreviousSourceClosure(
+  /**
+   * Derive proposed authority from two verified durable source closures. The
+   * proposal belongs to this update and remains absent from ordinary transactions.
+   */
+  async prepareSourceUpdate(
     space: MemorySpace,
+    previousEntryIdentity: string,
     entryIdentity: string,
-  ): Promise<Map<string, SourceDoc>> {
+  ): Promise<PreparedSourceUpdate> {
     const tx = this.#runtime.edit();
     try {
-      const closure = await loadVerifiedSourceClosure(
+      const previous = await loadVerifiedSourceClosure(
+        this.#runtime,
+        space,
+        previousEntryIdentity,
+        tx,
+      );
+      const candidate = await loadVerifiedSourceClosure(
         this.#runtime,
         space,
         entryIdentity,
         tx,
       );
-      if (!closure?.has(entryIdentity)) {
+      if (
+        !previous?.has(previousEntryIdentity) || !candidate?.has(entryIdentity)
+      ) {
         throw new Error(
-          `cannot authorize module update from ${entryIdentity}: ` +
-            "verified source closure is unavailable",
+          "cannot authorize source update without verified source closures",
         );
       }
-      return closure;
+      const runtimeVersion = moduleByteCacheRuntimeVersion(
+        await getCompileCacheRuntimeVersion(),
+        { patternCoverage: this.#patternCoverageFor() !== undefined },
+      );
+      const prepared = Object.freeze({}) as PreparedSourceUpdate;
+      this.#sourceUpdates.set(prepared, {
+        space,
+        previousEntryIdentity,
+        entryIdentity,
+        runtimeVersion,
+        delegations: deriveModuleDelegations(
+          previous,
+          [...candidate].map(([identity, doc]) => ({
+            identity,
+            filename: doc.filename,
+          })),
+        ),
+      });
+      return prepared;
     } finally {
-      tx.abort?.("setsrc predecessor source load complete");
+      tx.abort("source update preparation complete");
     }
+  }
+
+  /** Verified proposed authority used when pinning the setup transaction. */
+  sourceUpdateDelegations(prepared: PreparedSourceUpdate): {
+    space: MemorySpace;
+    delegations: ModuleDelegationMap;
+  } {
+    const proposal = this.#sourceUpdates.get(prepared);
+    if (proposal === undefined) {
+      throw new Error("unrecognized source update preparation");
+    }
+    return {
+      space: proposal.space,
+      delegations: new Map(
+        [...proposal.delegations].map((
+          [identity, predecessors],
+        ) => [identity, new Set(predecessors)]),
+      ),
+    };
+  }
+
+  /** Stage the proposal with its matching source transition and register on commit. */
+  stageSourceUpdate(
+    prepared: PreparedSourceUpdate,
+    space: MemorySpace,
+    previousEntryIdentity: string,
+    entryIdentity: string,
+    tx: IExtendedStorageTransaction,
+  ): void {
+    const proposal = this.#sourceUpdates.get(prepared);
+    if (
+      proposal === undefined || proposal.space !== space ||
+      proposal.previousEntryIdentity !== previousEntryIdentity ||
+      proposal.entryIdentity !== entryIdentity
+    ) {
+      throw new Error(
+        "source update preparation does not match the transition",
+      );
+    }
+    const committed = stageModuleDelegations(
+      this.#runtime,
+      space,
+      proposal.delegations,
+      proposal.runtimeVersion,
+      tx,
+    );
+    tx.addVerdictCallback((_tx, result) => {
+      if (result.ok) this.#runtime.registerModuleDelegations(space, committed);
+    });
   }
 
   async compilePattern(
@@ -1529,10 +1651,8 @@ export class PatternManager {
       // compile (warm-by-identity or cold). Lets the caller persist it (e.g.
       // into pattern metadata) so subsequent loads can take the fast path.
       onEntryIdentity?: (entryIdentity: string) => void;
-      // `piece setsrc` predecessor. Its verified recursive source closure is
-      // matched to the emitted module set by canonical filename, producing the
-      // per-module update-authority delegations persisted with the successor.
-      previousEntryIdentity?: string;
+      // Preview compilation reuses verified bytes without publishing artifacts.
+      persist?: boolean;
     },
   ): Promise<Pattern> {
     let program: RuntimeProgram;
@@ -1652,8 +1772,9 @@ export class PatternManager {
    * ESM compile + evaluate backed by the content-addressed cell cache in
    * `cacheCtx.space`. On a warm full hit the per-module compiled bodies are
    * reused (no TypeScript compile / transformer pipeline / SES re-verify); on a
-   * miss the program is compiled and its modules are written back (source +
-   * integrity-stamped compiled docs) on a fresh transaction before returning.
+   * miss the program is compiled. Ordinary compilation persists source and
+   * integrity-stamped compiled docs before returning; `persist: false` prepares
+   * an in-memory candidate whose artifacts require saving before use in storage.
    */
   async #compileViaCellCache(
     program: RuntimeProgram,
@@ -1662,17 +1783,11 @@ export class PatternManager {
       tx?: IExtendedStorageTransaction;
       knownEntryIdentity?: string;
       onEntryIdentity?: (entryIdentity: string) => void;
-      previousEntryIdentity?: string;
+      persist?: boolean;
     },
   ): Promise<Pattern> {
     const harness = this.#runtime.harness;
     const { space } = cacheCtx;
-    const previousSourceDocs = cacheCtx.previousEntryIdentity === undefined
-      ? undefined
-      : await this.#loadPreviousSourceClosure(
-        space,
-        cacheCtx.previousEntryIdentity,
-      );
     const patternCoverage = this.#patternCoverageFor();
     // The instrumented compile is a distinct cached variant: the coverage suffix
     // keeps its compiled bytes from colliding with an ordinary compile of the
@@ -1693,14 +1808,13 @@ export class PatternManager {
             ...(patternCoverage ? { patternCoverage } : {}),
           },
         );
-      const moduleDelegations = previousSourceDocs === undefined
-        ? new Map<string, ReadonlySet<string>>()
-        : deriveModuleDelegations(previousSourceDocs, modules);
-      await this.#persistSourceCacheTracked(
+      if (cacheCtx.persist !== false) {
+        await this.#persistSourceCacheTracked(space, modules, entryIdentity);
+      }
+      this.#recordDeferredCacheRepair(
         space,
         modules,
-        entryIdentity,
-        moduleDelegations,
+        cacheCtx.persist === false,
       );
       cacheCtx.onEntryIdentity?.(entryIdentity);
       // Yield ahead of the synchronous SES evaluation (see compilePattern).
@@ -1721,7 +1835,7 @@ export class PatternManager {
     // entirely. Falls through to the compile path on any miss/incompleteness
     // (evaluateCachedModules re-verifies the graph, so an incomplete closure
     // throws and we recompile).
-    if (cacheCtx.knownEntryIdentity && previousSourceDocs === undefined) {
+    if (cacheCtx.knownEntryIdentity) {
       const byIdentity = await this.#tryWarmLoadByIdentity(
         cacheCtx.knownEntryIdentity,
         space,
@@ -1864,9 +1978,6 @@ export class PatternManager {
       readTx.abort?.("compile-cache read complete");
     }
     const { id, graph, mainSpecifier, entryIdentity, modules } = compiled;
-    const moduleDelegations = previousSourceDocs === undefined
-      ? new Map<string, ReadonlySet<string>>()
-      : deriveModuleDelegations(previousSourceDocs, modules);
     cacheCtx.onEntryIdentity?.(entryIdentity);
 
     // Populate the process byte cache with this program's module bytes (freshly
@@ -1893,12 +2004,11 @@ export class PatternManager {
     } else {
       this.#esmCacheStats[compiledBodiesServed ? "hits" : "misses"]++;
     }
-    if (!warmHit || moduleDelegations.size > 0) {
+    if (cacheCtx.persist !== false && !warmHit) {
       // Persist the module set into this space. AWAITED (identity E4): refs-only
-      // pattern JSON makes artifact persistence part of the compilation
-      // contract — a cell can only carry a `$patternRef` after compilePattern
-      // returned, so completing the write here guarantees every persisted ref
-      // has a durable closure behind it (no race against session end). This
+      // pattern JSON makes artifact persistence part of ordinary compilation.
+      // Preview callers explicitly skip persistence and cannot use the returned
+      // artifact as a durable source until an ordinary compile saves it. This
       // covers BOTH a cold compile AND a process-byte-cache hit: in the latter
       // the transform-and-emit step was skipped, but this space's persisted
       // cache may be empty (e.g. a fresh space), and the by-identity reload path
@@ -1910,11 +2020,28 @@ export class PatternManager {
         modules,
         entryIdentity,
         cacheOpts,
-        moduleDelegations,
       );
     }
 
+    this.#recordDeferredCacheRepair(
+      space,
+      modules,
+      cacheCtx.persist === false && !warmHit,
+    );
     return this.#patternFromEvaluation(result, program, entryIdentity);
+  }
+
+  /** Track every indexed module whose preview deferred a durable cache repair. */
+  #recordDeferredCacheRepair(
+    space: MemorySpace,
+    modules: readonly Pick<CacheableModule, "identity">[],
+    deferred: boolean,
+  ): void {
+    for (const { identity } of modules) {
+      const key = compileCacheRecoveryKey(space, identity);
+      if (deferred) this.#unpersistedPatternRecoveries.add(key);
+      else this.#unpersistedPatternRecoveries.delete(key);
+    }
   }
 
   /**
@@ -2053,11 +2180,13 @@ export class PatternManager {
     entryIdentity: string,
     symbol: string,
     space: MemorySpace,
+    options: { repairCache?: boolean } = {},
   ): Promise<Pattern | undefined> {
     const recoveryKey = compileCacheRecoveryKey(space, entryIdentity);
-    const retryFailedRecovery = this.#failedCompileCacheRecoveries.has(
-      recoveryKey,
-    );
+    const retryFailedRecovery =
+      this.#failedCompileCacheRecoveries.has(recoveryKey) ||
+      (options.repairCache !== false &&
+        this.#unpersistedPatternRecoveries.has(recoveryKey));
     // In-memory artifact index: the pattern may already be live this session —
     // an evaluated ESM artifact, or a hand-built pattern given a synthetic
     // pointer via `associatePatternIdentity`. This path is independent of the
@@ -2110,14 +2239,16 @@ export class PatternManager {
       return undefined;
     }
     // Single-flight the expensive tail (see `#inProgressByIdentityLoads`).
-    const pending = this.#inProgressByIdentityLoads.get(key);
+    const loadKey = options.repairCache === false ? `${key}\0preview` : key;
+    const pending = this.#inProgressByIdentityLoads.get(loadKey);
     if (pending === undefined) {
       const load = this.#loadPatternByIdentityFromStorage(
         entryIdentity,
         symbol,
         space,
-      ).finally(() => this.#inProgressByIdentityLoads.delete(key));
-      this.#inProgressByIdentityLoads.set(key, load);
+        options,
+      ).finally(() => this.#inProgressByIdentityLoads.delete(loadKey));
+      this.#inProgressByIdentityLoads.set(loadKey, load);
       return await load;
     }
     // Follower: the leader's evaluation indexes every symbol of the closure,
@@ -2131,7 +2262,12 @@ export class PatternManager {
     // attempt — the same load it would have run without dedup. Each pass
     // consumes a settled leader, so the recursion is bounded by the number of
     // concurrent callers.
-    return await this.loadPatternByIdentity(entryIdentity, symbol, space);
+    return await this.loadPatternByIdentity(
+      entryIdentity,
+      symbol,
+      space,
+      options,
+    );
   }
 
   /**
@@ -2143,6 +2279,7 @@ export class PatternManager {
     entryIdentity: string,
     symbol: string,
     space: MemorySpace,
+    options: { repairCache?: boolean } = {},
   ): Promise<Pattern | undefined> {
     const harness = this.#runtime.harness;
     const patternCoverage = this.#patternCoverageFor();
@@ -2154,7 +2291,13 @@ export class PatternManager {
       { patternCoverage: patternCoverage !== undefined },
     );
     if (runtimeVersion === undefined) {
-      return await this.#tryColdLoadByIdentity(entryIdentity, symbol, space);
+      return await this.#tryColdLoadByIdentity(
+        entryIdentity,
+        symbol,
+        space,
+        undefined,
+        options,
+      );
     }
     const cacheOpts = { runtimeVersion };
 
@@ -2186,6 +2329,7 @@ export class PatternManager {
         symbol,
         space,
         cacheOpts,
+        options,
       );
     }
 
@@ -2244,6 +2388,9 @@ export class PatternManager {
       this.#failedCompileCacheRecoveries.delete(
         compileCacheRecoveryKey(space, entryIdentity),
       );
+      this.#unpersistedPatternRecoveries.delete(
+        compileCacheRecoveryKey(space, entryIdentity),
+      );
       this.#esmCacheStats.byIdentityHits++;
       return pattern;
     } catch (error) {
@@ -2257,6 +2404,7 @@ export class PatternManager {
         symbol,
         space,
         cacheOpts,
+        options,
       );
     }
   }
@@ -2291,6 +2439,7 @@ export class PatternManager {
     symbol: string,
     space: MemorySpace,
     cacheOpts?: { runtimeVersion: string },
+    options: { repairCache?: boolean } = {},
   ): Promise<Pattern | undefined> {
     const harness = this.#runtime.harness;
     const readTx = this.#runtime.edit();
@@ -2371,7 +2520,14 @@ export class PatternManager {
         },
       );
       const pattern = this.#patternFromMain(result, symbol, entryIdentity);
-      if (cacheOpts !== undefined) {
+      if (cacheOpts === undefined || options.repairCache === false) {
+        this.#recordDeferredCacheRepair(
+          space,
+          compiled.modules,
+          cacheOpts !== undefined,
+        );
+      }
+      if (cacheOpts !== undefined && options.repairCache !== false) {
         const recoveryKey = compileCacheRecoveryKey(space, entryIdentity);
         const repair = this.#persistCompileCacheTracked(
           space,
@@ -2381,6 +2537,7 @@ export class PatternManager {
           moduleDelegations,
         ).then(() => {
           this.#failedCompileCacheRecoveries.delete(recoveryKey);
+          this.#recordDeferredCacheRepair(space, compiled.modules, false);
         }).catch((error) => {
           this.#failedCompileCacheRecoveries.add(recoveryKey);
           logger.warn("load-pattern-by-identity-writeback-failed", () => [
@@ -2972,27 +3129,15 @@ export class PatternManager {
     for (const chunk of chunks) {
       // The write-back re-writes source docs whose values carry quote-cell
       // indirections (one derived doc per import edge). On a cold replica
-      // those derived docs are unknown, and each commit attempt discovers
-      // exactly ONE of them: the engine rejects on the first stale read,
-      // editWithRetry pulls that doc, and only then does the next attempt's
-      // diff reach the following one (CT-1824, live-traced on the browser
-      // rig — the system-app closure re-write conflicts on ~24 pre-existing
-      // edge docs, one per round). Convergence therefore needs one retry per
-      // pre-existing derived doc; the general DEFAULT_MAX_RETRIES (5)
-      // exhausts long before that and the cache never heals, so every later
-      // cold boot recompiles. Budget by the chunk's edge count (source +
-      // compiled edge docs) with slack. Rounds are bounded by actual
-      // conflicts — a conflict-free write-back still commits on the first
-      // attempt — so the ceiling is only paid during recovery after a
-      // compiler-version bump.
-      //
-      // The historical fixed floor (16) is NOT applied per chunk — that would
-      // multiply the minimum by chunk count (six low-edge chunks = 96 retries
-      // vs the old closure-wide 16; Codex review on #5094). A single-chunk
-      // write-back keeps the exact historical budget; a multi-chunk one gives
-      // each chunk its edge-proportional share plus one round of slack, so
-      // the aggregate stays >= 16 (8 * 2 chunks minimum) without the 16x
-      // chunk-count inflation.
+      // those derived docs are unknown. The engine reports every stale instance
+      // in one rejection and editWithRetry pulls the whole named set before
+      // re-running. Further retries remain possible when a re-run reaches a
+      // new dependency layer or another writer advances a document again.
+      // The edge-proportional budget is conservative headroom for those
+      // additional layers and concurrent writes, not one retry per edge.
+      // A conflict-free write-back commits on its first attempt. Applying the
+      // floor per chunk would multiply the minimum budget by the chunk count,
+      // so only a single-chunk write-back receives the full floor.
       const importEdges = chunk.reduce((n, m) => n + m.imports.length, 0);
       const writebackMaxRetries = chunks.length === 1
         ? Math.max(16, 2 * importEdges + 8)
@@ -3037,11 +3182,10 @@ export class PatternManager {
    * Pre-syncs the write targets, carrying the one-hop edge selector: a
    * schema-less sync delivers only the root doc, leaving the per-edge element
    * docs unknown to the replica, so a re-write of pre-existing docs touches
-   * them blind and conflicts one engine round per edge. With the edge docs
-   * materialized up front the write-back diffs against true state and commits
-   * on the first attempt; the retry budget in `#writeBackCompileCache()`
-   * remains as a backstop. Same-microtask syncs batch into a single server
-   * round trip.
+   * them blind and needs conflict repair. With the edge docs materialized up
+   * front the write-back diffs against true state and commits on the first
+   * attempt; the retry budget in `#writeBackCompileCache()` remains as a
+   * backstop. Same-microtask syncs batch into a single server round trip.
    */
   async #syncSourceCacheWriteTargets(
     space: MemorySpace,
@@ -3129,21 +3273,35 @@ export class PatternManager {
   }
 
   /**
-   * Compile a pattern from source, or return a cached/in-flight result.
-   * Provides single-flight deduplication based on program content.
+   * Returns the process-cached pattern without compiling or replicating source.
+   * The caller must first complete `compileOrGetPattern` for this program and
+   * space so target-space persistence work is registered with the barrier.
+   */
+  getCompiledPatternForProgramSync(
+    input: RuntimeProgram,
+    space: MemorySpace,
+  ): Pattern | undefined {
+    const key = programCompilationKey(snapshotQueryResult(input), space);
+    return this.#compiledByContent.get(key)?.pattern;
+  }
+
+  /**
+   * Compiles a pattern from source, or returns a cached/in-flight result.
+   * Snapshots the program at entry and deduplicates by its content and
+   * compilation context, including when the input is a query-result view.
    *
    * @param input - Source code string or RuntimeProgram to compile
-   * @param space - When provided, routes the ESM compile through the
-   *   content-addressed cell cache in this space (CT-1623): cold compiles write
-   *   their module set back, and subsequent loads of the same source skip the TS
-   *   compile. Without it (e.g. tests), compilation is uncached as before.
+   * @param space - Resolves fabric imports within this space. With CFC
+   *   enforcement, routes the ESM compile through its content-addressed cell
+   *   cache: cold compiles write their module set back, and subsequent loads of
+   *   the same source skip the TS compile. Without a space or enforcement,
+   *   compilation evaluates without writing a durable compiled closure.
    * @returns The compiled pattern (from cache, in-flight compilation, or new)
    */
   compileOrGetPattern(
     input: string | RuntimeProgram,
     space?: MemorySpace,
   ): Promise<Pattern> {
-    // Normalize to RuntimeProgram
     let program: RuntimeProgram;
     if (typeof input === "string") {
       program = {
@@ -3154,31 +3312,43 @@ export class PatternManager {
       program = input;
     }
 
-    // Content-hash key (createRef as a pure digest, NOT a cell id). Identical
-    // source returns the same compiled instance; concurrent compiles share one
-    // evaluation.
-    const dedupeKey = toURI(createRef({ src: program }, "pattern source"));
+    // Query views name cells to `createRef()`. Detach their contents so the key
+    // and the asynchronous compiler consume the same program snapshot.
+    program = snapshotQueryResult(program);
+
+    // Identical programs in the same compilation context share one evaluation.
+    const dedupeKey = programCompilationKey(program, space);
+    const persistenceSpace = this.#runtime.cfcEnforcementMode === "disabled"
+      ? undefined
+      : space;
 
     const cached = this.#compiledByContent.get(dedupeKey);
     if (cached) {
       // Refresh recency (FIFO ~LRU).
       this.#compiledByContent.delete(dedupeKey);
       this.#compiledByContent.set(dedupeKey, cached);
-      // The content cache is space-agnostic, but a piece persisted in `space`
-      // needs the source/compiled closure IN that space to reload by
-      // { identity, symbol } in a fresh runtime (the meta-cell fallback is
-      // gone). When this hit serves a different space than the one we first
-      // compiled into, replicate the closure there — cheap (no TS recompile),
-      // with persistence writes deduplicated and tracked in `#compileCacheWrites`.
-      if (space && cached.space && space !== cached.space) {
-        this.replicatePatternToSpace(cached.pattern, space, cached.space);
+      // A persistent cross-space hit needs the closure in its requested space
+      // to reload by { identity, symbol } in a fresh runtime. Replication reuses
+      // the compiled modules and tracks writes in `#compileCacheWrites`.
+      if (
+        persistenceSpace && cached.space && persistenceSpace !== cached.space
+      ) {
+        this.replicatePatternToSpace(
+          cached.pattern,
+          persistenceSpace,
+          cached.space,
+        );
       }
       return Promise.resolve(cached.pattern);
     }
 
     const inProgress = this.#inProgressCompilations.get(dedupeKey);
-    if (inProgress) return inProgress;
+    if (inProgress) {
+      if (persistenceSpace) inProgress.spaces.add(persistenceSpace);
+      return inProgress.promise;
+    }
 
+    const spaces = new Set(persistenceSpace ? [persistenceSpace] : []);
     // Pass the cell-cache context when a space is available so nested/dynamic
     // compiles benefit from the cache too.
     const compilationPromise = this.compilePattern(
@@ -3186,7 +3356,22 @@ export class PatternManager {
       space ? { space } : undefined,
     )
       .then((pattern) => {
-        this.#compiledByContent.set(dedupeKey, { pattern, space });
+        this.#compiledByContent.set(dedupeKey, {
+          pattern,
+          space: persistenceSpace,
+        });
+        // Register follower persistence before the shared promise resolves.
+        // Replications remain independently tracked: their supplier waits must
+        // be able to await this compile without forming a cycle.
+        if (persistenceSpace) {
+          for (const targetSpace of spaces) {
+            this.replicatePatternToSpace(
+              pattern,
+              targetSpace,
+              persistenceSpace,
+            );
+          }
+        }
         while (this.#compiledByContent.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
           const oldest = this.#compiledByContent.keys().next().value;
           if (oldest === undefined) break;
@@ -3198,7 +3383,10 @@ export class PatternManager {
         this.#inProgressCompilations.delete(dedupeKey);
       });
 
-    this.#inProgressCompilations.set(dedupeKey, compilationPromise);
+    this.#inProgressCompilations.set(dedupeKey, {
+      promise: compilationPromise,
+      spaces,
+    });
     return compilationPromise;
   }
 

@@ -1,3 +1,4 @@
+import type { JSONSchema } from "@commonfabric/api";
 import {
   cloneIfNecessary,
   fabricFromNativeValue,
@@ -48,19 +49,25 @@ import {
   type BrowserWorkerPresetParams,
   type Cancel,
   type Cell,
+  ContextualFlowControl,
   convertCellsToLinks,
   encodeSqliteParams,
   entityIdFrom,
   type EventIntentOutcome,
   getCellOrThrow,
+  getMetaLink,
   getPatternIdentityRef,
   hasOperationStorageCapability,
   type IExtendedStorageTransaction,
   type IOperationStorageCapability,
   isCell,
   isCellResult,
+  isLoopbackHostname,
+  KeepAsCell,
   markDurableReadTx,
+  type NormalizedFullLink,
   normalizeSpaceHost,
+  parseLink,
   PatternCoverageCollector,
   popFrame,
   pushFrame,
@@ -101,12 +108,6 @@ import {
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 
-import {
-  getMetaLink,
-  KeepAsCell,
-  type NormalizedFullLink,
-  parseLink,
-} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   type ActionRunTraceResponse,
@@ -193,6 +194,7 @@ import {
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
   type SetMemoryMessageCompressionRequest,
+  type SetReadStatsEnabledRequest,
   type SetSettleStatsEnabledRequest,
   type SetTelemetryEnabledRequest,
   type SettleStatsHistoryResponse,
@@ -910,6 +912,14 @@ export class RuntimeProcessor {
    * each space that contains only an HTTP or HTTPS origin. Fire-and-forget:
    * resolution hints are an enhancement, never a boot dependency.
    *
+   * One entry is read rather than registered. A loopback origin names the
+   * toolshed as the machine that wrote the row sees it, so it is no route for a
+   * page that reached the toolshed by another name — and a browser refuses the
+   * `ws://` socket it implies from an `https` page. When the entry is loopback
+   * and this runtime's `apiUrl` is not, the space stays on `apiUrl`, and the
+   * row retires any earlier row for that space. A page that did reach loopback
+   * registers it as usual.
+   *
    * ORDERING CONTRACT for embedders: push a newly learned hint through the
    * RegisterSpaceHost IPC before relying on that space, and proceed only when
    * registration succeeds. The first hint can replace a provisional
@@ -953,6 +963,29 @@ export class RuntimeProcessor {
                   `[RuntimeProcessor] Ignoring invalid site-table entry for ${entry.did}:`,
                   error.message,
                 );
+                continue;
+              }
+              // A loopback entry names the toolshed from the machine that
+              // wrote it, so a page served from anywhere else cannot reach it
+              // — and a browser on an https page refuses the ws:// socket it
+              // implies. Leave those spaces on the URL this runtime already
+              // reached its toolshed at.
+              if (
+                isLoopbackHostname(host.hostname) &&
+                !isLoopbackHostname(this.#runtime.apiUrl.hostname)
+              ) {
+                const key = `${entry.did}|${host.toString()}`;
+                if (!this.#siteTableWarned.has(key)) {
+                  this.#siteTableWarned.add(key);
+                  console.debug(
+                    `[RuntimeProcessor] Ignoring loopback site-table entry for ${entry.did} ` +
+                      `(${host.toString()}); using ${this.#runtime.apiUrl.toString()}`,
+                  );
+                }
+                // The table is last-row-wins, so this row also retires an
+                // earlier non-loopback row for the same space: the space has
+                // since moved to the writer's own toolshed.
+                latestEntries.delete(entry.did);
                 continue;
               }
               latestEntries.set(entry.did, {
@@ -2127,10 +2160,20 @@ export class RuntimeProcessor {
   }
 
   /**
-   * Handles a `PieceGetRequest`. Resolves a redirect here rather than through
-   * the runner's slug resolution, which `handleSlugResolve()` uses. Do not copy
-   * the bare `parseLink()` below into a new caller: a slug cell can be written
-   * by a foreign client over the memory protocol, and `parseSlugRedirect()` in
+   * Handles a `PieceGetRequest`. The answer is an address — a cell carrying
+   * the schema it is read under — so what this loads is what deciding the
+   * address takes: the requested document, and behind a redirect the document
+   * the redirect lands in, whose metadata says whether it is a piece and what
+   * result schema a cell inside it takes. Serving a slug document, the server
+   * resolves the redirect through the links on its path, which is the floor
+   * for an address a redirect answers. Nothing here reads the target's value,
+   * so whatever that value reaches stays cold until a caller subscribes to
+   * the cell it was handed.
+   *
+   * Resolves a redirect here rather than through the runner's slug
+   * resolution, which `handleSlugResolve()` uses. Do not copy the bare
+   * `parseLink()` below into a new caller: a slug cell can be written by a
+   * foreign client over the memory protocol, and `parseSlugRedirect()` in
    * `packages/runner/src/slug-resolution.ts` exists to fold the `TypeError` a
    * sigil-shaped payload with broken internals throws into a typed refusal.
    * These are one walk with two implementations, and this is the copy to
@@ -2153,6 +2196,9 @@ export class RuntimeProcessor {
       undefined,
       request.scope,
     );
+    // Schema-less, so the selector rejects the value's subtree: the document
+    // arrives, plus what the server resolves at the address itself when the
+    // value stored there is a link.
     await requestedCell.sync();
     const redirect = parseLink(
       requestedCell.getRaw(),
@@ -2164,27 +2210,51 @@ export class RuntimeProcessor {
         space: redirect.space ?? cc.getSpace(),
         scope: redirect.scope ?? "space",
       });
-      await target.sync();
       const targetLink = target.getAsNormalizedFullLink();
-      const hasPattern = getPatternIdentityRef(target) !== undefined ||
-        target.getMetaRaw("pattern") !== undefined;
-      if (!hasPattern || targetLink.path.length > 0) {
-        const pieceCell = hasPattern && targetLink.path.length > 0
-          ? target.asSchemaFromLinks()
-          : target;
-        await pieceCell.pull();
-        return {
-          piece: createPieceRef(pieceCell),
-        };
+      // The document the redirect lands in, at its root. Whether it is a
+      // piece, and the result schema a cell inside it takes, are its
+      // metadata. Synced at the root rather than at the redirect's path, so
+      // the watch this leaves behind covers the document alone rather than
+      // every link the server resolves along that path.
+      const landing = targetLink.path.length === 0
+        ? target
+        : this.#runtime.getCellFromLink({
+          id: targetLink.id,
+          space: targetLink.space,
+          scope: targetLink.scope,
+          path: [],
+        });
+      await landing.sync();
+      const hasPattern = getPatternIdentityRef(landing) !== undefined ||
+        landing.getMetaRaw("pattern") !== undefined;
+      if (!hasPattern) {
+        return { piece: createPieceRef(target) };
       }
-
-      const cell = await cc.getPieceCell(
-        target,
-        request.runIt ?? false,
-      );
-      return {
-        piece: createPieceRef(cell),
-      };
+      if (targetLink.path.length > 0) {
+        // The schema a cell inside a piece is read under: what the links
+        // along its path carry, as `getPieceCell()` resolves a piece cell
+        // reached with a path; else what the redirect itself carries; else
+        // the piece's result schema at that path. Reached through the
+        // landing document, whose sync it shares, so that nothing here
+        // starts a watch at the path.
+        const inside = landing.key(...targetLink.path);
+        const linked = inside.asSchemaFromLinks();
+        if (linked.getAsNormalizedFullLink().schema !== undefined) {
+          return { piece: createPieceRef(linked) };
+        }
+        if (targetLink.schema !== undefined) {
+          return { piece: createPieceRef(inside.asSchema(targetLink.schema)) };
+        }
+        const resultSchema = landing.getMetaRaw("schema") as
+          | JSONSchema
+          | undefined;
+        const cell = resultSchema === undefined ? inside : inside.asSchema(
+          ContextualFlowControl.schemaAtPath(resultSchema, targetLink.path),
+        );
+        return { piece: createPieceRef(cell) };
+      }
+      const cell = await cc.getPieceCell(landing, request.runIt ?? false);
+      return { piece: createPieceRef(cell) };
     }
 
     const cell = await cc.getPieceCell(
@@ -2559,6 +2629,11 @@ export class RuntimeProcessor {
     this.#runtime.scheduler.setEventPreflightTelemetryEnabled(request.enabled);
   }
 
+  /** Sets body accounting independently of telemetry transport. */
+  setReadStatsEnabled(request: SetReadStatsEnabledRequest): void {
+    this.#runtime.scheduler.setReadStatsEnabled(request.enabled);
+  }
+
   /** Changes memory-message compression for every remote storage session. */
   async setMemoryMessageCompression(
     request: SetMemoryMessageCompressionRequest,
@@ -2884,6 +2959,8 @@ export class RuntimeProcessor {
         return this.setLoggerEnabled(request);
       case RequestType.SetTelemetryEnabled:
         return this.setTelemetryEnabled(request);
+      case RequestType.SetReadStatsEnabled:
+        return this.setReadStatsEnabled(request);
       case RequestType.SetMemoryMessageCompression:
         return await this.setMemoryMessageCompression(request);
       case RequestType.ResetLoggerBaselines:

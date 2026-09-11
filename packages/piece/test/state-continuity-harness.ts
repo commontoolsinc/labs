@@ -819,7 +819,11 @@ export async function readStateUnder(
       [],
       schemaRelaxedForComparison(schema) as never,
     );
-    await cell.sync();
+    // Pulled, not merely synced: a link the schema reads through into
+    // another space loads on a round trip of its own after the root arrives,
+    // and the read has to converge on that target too, or both sides of a
+    // comparison read the same absence.
+    await cell.pull();
     const detached = comparableState(cell.get());
     // Narrow rather than cast. A root is an object in practice, but asserting
     // it would hand `strandedKeys` a non-object to enumerate — and "no keys"

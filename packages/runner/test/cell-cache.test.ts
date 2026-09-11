@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
+import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -14,6 +16,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 
 import {
   buildSourceDocs,
+  codeFieldVerifies,
   COMPILED_INTEGRITY_ATOM,
   compiledDocKey,
   compiledDocWriteSchema,
@@ -28,7 +31,10 @@ import {
   writeCompiledDocs,
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
+import { parseLink } from "../src/link-utils.ts";
 import { compileCachePersistenceSlotKey } from "../src/pattern-manager.ts";
+import type { URI } from "../src/sigil-types.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { observeCacheWriteBacks } from "./support/telemetry-observers.ts";
 
@@ -605,6 +611,90 @@ describe("cell-cache", () => {
       expect(verifySourceDocs(entryIdentity, loaded).ok).toBe(true);
     });
 
+    it("stores a module's code as a link to the document holding it", async () => {
+      const { modules, entryIdentity } = toModules(PROGRAM);
+      const tx = runtime.edit();
+      writeSourceDocs(runtime, spaceA, modules, entryIdentity, tx);
+
+      const entry = modules.find((m) => m.identity === entryIdentity)!;
+      const codeId = `cid:${taggedHashStringOf(entry.source)}` as URI;
+      const record = runtime.getCell(
+        spaceA,
+        sourceDocKey(entryIdentity),
+        undefined,
+        tx,
+      );
+      const stored = record.getRaw() as { code?: unknown };
+      expect(parseLink(stored.code, record)?.id).toBe(codeId);
+      expect(
+        tx.readOrThrow({
+          space: spaceA,
+          id: codeId,
+          type: "application/json",
+          path: [],
+        }),
+      ).toEqual({ value: entry.source });
+      const loaded = (await loadSourceClosure(
+        runtime,
+        spaceA,
+        entryIdentity,
+        tx,
+      ))!;
+      expect(loaded.get(entryIdentity)?.code).toBe(entry.source);
+    });
+
+    it("loads a record that stores its code inline", async () => {
+      const identity = "source-inline-code";
+      const code = "export const value = 1;";
+      const tx = runtime.edit();
+      runtime.getCell(spaceA, sourceDocKey(identity), undefined, tx).set({
+        kind: "source",
+        identity,
+        code,
+        filename: "/inline.ts",
+        imports: [],
+      });
+
+      const loaded = await loadSourceClosure(runtime, spaceA, identity, tx);
+
+      expect(loaded?.get(identity)?.code).toBe(code);
+    });
+
+    it("verifies a record's code against the document its link names", () => {
+      const { modules, entryIdentity } = toModules(PROGRAM);
+      const tx = runtime.edit();
+      writeSourceDocs(runtime, spaceA, modules, entryIdentity, tx);
+      const entry = modules.find((m) => m.identity === entryIdentity)!;
+      const record = runtime.getCell(
+        spaceA,
+        sourceDocKey(entryIdentity),
+        undefined,
+        tx,
+      );
+
+      expect(codeFieldVerifies(record, entry.source)).toBe(true);
+      // A string the link's document does not hash to, and no string at all.
+      expect(codeFieldVerifies(record, `${entry.source}\n`)).toBe(false);
+      expect(codeFieldVerifies(record, undefined)).toBe(false);
+
+      const inlineIdentity = "source-inline-verify";
+      const inline = runtime.getCell(
+        spaceA,
+        sourceDocKey(inlineIdentity),
+        undefined,
+        tx,
+      );
+      inline.set({
+        kind: "source",
+        identity: inlineIdentity,
+        code: "inline",
+        filename: "/inline.ts",
+        imports: [],
+      });
+      expect(codeFieldVerifies(inline, "inline")).toBe(true);
+      expect(codeFieldVerifies(inline, "other")).toBe(false);
+    });
+
     it("loads duplicate source import links once", async () => {
       const entryIdentity = "source-entry-with-duplicate-imports";
       const childIdentity = "source-duplicate-child";
@@ -906,6 +996,74 @@ describe("cell-cache", () => {
       expect(new Set([...loaded.values()].map((d) => d.filename))).toEqual(
         new Set(["/main.tsx", "/util.ts", "/types.ts"]),
       );
+    });
+
+    it("links records with byte-identical code to one code document", async () => {
+      const { modules, entryIdentity } = toModules(PROGRAM);
+      const wtx = runtime.edit();
+      writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+      writeCompiledDocs(
+        runtime,
+        spaceA,
+        modules,
+        entryIdentity,
+        { runtimeVersion: "rt-test-2" },
+        wtx,
+      );
+      wtx.prepareCfc();
+      await wtx.commit();
+
+      const rtx = runtime.edit();
+      const codeIdOf = (version: string) => {
+        const record = runtime.getCell(
+          spaceA,
+          compiledDocKey(version, entryIdentity),
+          undefined,
+          rtx,
+        );
+        const stored = record.getRaw() as { code?: unknown };
+        return parseLink(stored.code, record)?.id;
+      };
+      const entry = modules.find((m) => m.identity === entryIdentity)!;
+      expect(codeIdOf(RTVER)).toBe(`cid:${taggedHashStringOf(entry.js)}`);
+      expect(codeIdOf("rt-test-2")).toBe(codeIdOf(RTVER));
+      rtx.abort?.();
+    });
+
+    it("loads a compiled record that stores its code inline", async () => {
+      const utilIdentity = identityOf(PROGRAM, "/util.ts");
+      const wtx = runtime.edit();
+      const prior = wtx.getCfcState().implementationIdentity;
+      wtx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "compile-cache",
+      });
+      runtime.getCell(
+        spaceA,
+        compiledDocKey(RTVER, utilIdentity),
+        compiledDocWriteSchema(),
+        wtx,
+      ).set({
+        kind: "compiled",
+        identity: utilIdentity,
+        code: "/* inline */",
+        filename: "/util.ts",
+        imports: [],
+      });
+      wtx.setCfcImplementationIdentity(prior);
+      wtx.prepareCfc();
+      await wtx.commit();
+
+      const rtx = runtime.edit();
+      const loaded = await loadCompiledClosure(
+        runtime,
+        spaceA,
+        utilIdentity,
+        opts(),
+        rtx,
+      );
+      rtx.abort?.();
+      expect(loaded.get(utilIdentity)?.code).toBe("/* inline */");
     });
 
     it("round-trips JSON coverage spans and rejects unsupported stored spans", async () => {
@@ -2476,6 +2634,131 @@ describe("cell-cache", () => {
       expect(source?.has(utilModule!.identity)).toBe(true);
       expect(compiledClosure.has(entryIdentity)).toBe(true);
       expect(compiledClosure.has(utilModule!.identity)).toBe(true);
+    });
+  });
+
+  describe("code documents forged below the commit boundary", () => {
+    // The commit boundary admits no code document whose string does not hash
+    // to its id, so a forgery reaches a store only out of band. These cases
+    // model that with direct database manipulation on the shared server and
+    // pin that a replica syncing the result refuses the record, on the source
+    // path and the compiled path alike.
+
+    let server: MemoryV2Server.Server;
+    let smA: EmulatedStorageManager;
+    let smB: EmulatedStorageManager;
+    let rtA: Runtime;
+    let rtB: Runtime;
+    const space = e2eSignerA.did();
+    const RTVER = "rt-forged-1";
+
+    beforeEach(() => {
+      server = newSharedServer();
+      smA = EmulatedStorageManager.connectTo(server, { as: e2eSignerA });
+      smB = EmulatedStorageManager.connectTo(server, { as: e2eSignerB });
+      rtA = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: smA,
+        trustSnapshotProvider: () => ({
+          id: "forged-user-a",
+          actingPrincipal: e2eSignerA.did(),
+        }),
+      });
+      rtB = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: smB,
+        trustSnapshotProvider: () => ({
+          id: "forged-user-b",
+          actingPrincipal: e2eSignerB.did(),
+        }),
+      });
+    });
+
+    afterEach(async () => {
+      await rtA?.dispose();
+      await rtB?.dispose();
+      await smA?.close();
+      await smB?.close();
+      await server?.close();
+    });
+
+    // Rewrites the stored document holding `code` to hold `forged` instead,
+    // then syncs it into the READER's replica and returns a transaction there
+    // that has read the forged string back — so what the loaders below refuse
+    // is a document that is present and holds the wrong content, never one
+    // that is absent.
+    const forgeCodeDocument = async (
+      code: string,
+      forged: string,
+    ): Promise<IExtendedStorageTransaction> => {
+      const id = `cid:${taggedHashStringOf(code)}` as URI;
+      const engine = await server.engineForSpace(space);
+      engine.database.prepare(
+        `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
+      ).run({ data: encodeMemoryBoundary({ value: forged }), id });
+      engine.database.prepare(
+        `UPDATE head SET seq = seq + 1 WHERE id = :id`,
+      ).run({ id });
+      const synced = await smB.open(space).sync(id, {
+        path: [],
+        schema: false,
+      });
+      expect(synced.error).toBeUndefined();
+      const rtx = rtB.edit();
+      expect(
+        rtx.readOrThrow({ space, id, type: "application/json", path: [] }),
+      ).toEqual({ value: forged });
+      return rtx;
+    };
+
+    it("leaves a source record out of the closure when its code document holds other content", async () => {
+      const { modules, entryIdentity } = toModules(PROGRAM);
+      const wtx = rtA.edit();
+      writeSourceDocs(rtA, space, modules, entryIdentity, wtx);
+      expect((await wtx.commit()).error).toBeUndefined();
+      await smA.synced();
+      const entry = modules.find((m) => m.identity === entryIdentity)!;
+      const rtx = await forgeCodeDocument(
+        entry.source,
+        `${entry.source}\n// tampered`,
+      );
+
+      const loaded = await loadSourceClosure(rtB, space, entryIdentity, rtx);
+      rtx.abort?.();
+
+      expect(loaded?.has(entryIdentity)).toBe(false);
+    });
+
+    it("treats a compiled record whose code document holds other content as a miss", async () => {
+      const { modules, entryIdentity } = toModules(PROGRAM);
+      const wtx = rtA.edit();
+      writeCompiledDocs(
+        rtA,
+        space,
+        modules,
+        entryIdentity,
+        { runtimeVersion: RTVER },
+        wtx,
+      );
+      wtx.prepareCfc();
+      expect((await wtx.commit()).error).toBeUndefined();
+      await smA.synced();
+      const entry = modules.find((m) => m.identity === entryIdentity)!;
+      const rtx = await forgeCodeDocument(
+        entry.js,
+        `${entry.js} /* tampered */`,
+      );
+
+      const loaded = await loadCompiledClosure(
+        rtB,
+        space,
+        entryIdentity,
+        { runtimeVersion: RTVER },
+        rtx,
+      );
+      rtx.abort?.();
+
+      expect(loaded.size).toBe(0);
     });
   });
 });

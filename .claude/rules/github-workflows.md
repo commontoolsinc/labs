@@ -60,6 +60,35 @@ steps wrap their command in `deno task run-recorded <kind> <scope> <name>
 without the ship step runs fine and records nothing — which is how a new
 job silently falls out of the flake and duration history.
 
+A job whose every test another workflow already records against the same
+commit is the exception, and it records nothing: no spool directory, no
+`run-recorded` wrapper, no ship step. Recording there would file each of
+those tests twice against one commit. The Dashboard workflow's tests job
+is the one such job, and the relay does not follow that workflow. The
+exemption covers tests, not jobs, so a test that runs only in such a job
+is recorded there.
+
+A check that no lane can be asked to run is the other exception, and it
+records nothing either: no spool directory, no `run-recorded` wrapper, no
+ship step. `docs/specs/test-records.md` under "Recording" holds the
+criterion. The `Coverage Check` job in `deno.yml` is one, because it reads
+the coverage artifacts of every test job in its own run; the CFC Property
+Suite's audit step is the other, because it reads the corpus the suite in
+the step before it has just written. A gate comparing against a base ref
+is not this: `check-baselines-append-only` and `check-test-aliases` each
+resolve a merge base, and both record.
+
+Which of a job's steps are wrapped is a separate question from either
+exemption. A wrapper records the command under it, so it belongs on a
+command that is itself the check and not on one whose own tests are the
+checks — the wrapper passes recording through, so a wrapped test command
+files a summary of the invocation beside whatever its tests record. The
+CFC Property Suite's test step is the case to learn from: it runs
+`deno test` directly, which without a `--junit-path` to ingest records
+nothing, so its wrapper's line was the job's only record of a step whose
+tests CI records through `workspace-unit`. That step and the audit step
+together leave that workflow taking no part in test records at all.
+
 ## Before splitting or rebalancing jobs
 
 `docs/development/CI_PERFORMANCE.md` says when that work is worth starting and,

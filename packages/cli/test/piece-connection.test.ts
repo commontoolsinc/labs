@@ -258,7 +258,13 @@ describe("piece-connection", () => {
           getMetaRaw: () => ({ identity: "id-a", symbol: "default" }),
         }),
         result: { get: () => Promise.resolve(result) },
-        input: { get: () => Promise.resolve(input) },
+        input: {
+          get: () => Promise.resolve(input),
+          getCell: () =>
+            Promise.resolve({
+              getAsNormalizedFullLink: () => ({ schema: true }),
+            }),
+        },
       });
       return {
         get: (id: string) =>

@@ -23,7 +23,9 @@ export type AclConnectionDeps = Pick<PieceResolutionDeps, "loadPieces">;
 
 // Open the space and hand an ACLManager to `run`. The ACL document is
 // addressed by the space DID and read through the ACLManager, so the space
-// cell's contents are never needed here and their sync is deferred.
+// cell's contents are never needed here and their sync is deferred. That is
+// now `loadPieces`'s default too; it stays explicit here because the check
+// below depends on it, not on whatever the default happens to be.
 async function withAcl<T>(
   config: SpaceConfig,
   run: (acl: ACLManager) => Promise<T>,

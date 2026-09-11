@@ -1,5 +1,8 @@
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
-import { isDeepFrozen } from "@commonfabric/data-model";
+import {
+  isDeepFrozen,
+  isWalkableObjectOrArray,
+} from "@commonfabric/data-model";
 import {
   hashSchema,
   internSchema,
@@ -16,6 +19,7 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { cfcSchemaChildRoot } from "../cfc/schema-refs.ts";
 import {
   externalResolutionMissCount,
   onSchemaRegistryClear,
@@ -289,7 +293,8 @@ export class SelectorTracker<T = Result<Unit, Error>> {
 
   /**
    * The standardized hashes an anyOf item can match under: its plain form,
-   * its `$defs`-grafted form, and its `$ref`-resolved form. Computing these
+   * its inherited-`$defs` form, and its `$ref`-resolved form. Branch-local
+   * definitions keep their own scope. Computing these
    * builds fresh schema objects and re-hashes them, so cache the resulting
    * hash strings per (parent schema, item) identity when the parent is
    * deep-frozen (its items then are too).
@@ -325,7 +330,9 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     const missesBefore = externalResolutionMissCount();
     let current = SelectorTracker.getStandardSchema(item);
     hashes.push(hashSchema(current));
-    if (schema.$defs !== undefined) {
+    if (
+      schema.$defs !== undefined && cfcSchemaChildRoot(item, schema) === schema
+    ) {
       current = SelectorTracker.getStandardSchema(
         schemaWithProperties(current, { $defs: schema.$defs }),
       );
@@ -338,7 +345,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       // miss counter.
       const resolved = ContextualFlowControl.resolveSchemaRefs(
         current,
-        schema,
+        cfcSchemaChildRoot(current, schema),
       );
       if (resolved !== undefined) {
         hashes.push(
@@ -383,16 +390,18 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       return byContent;
     }
     // TODO(danfuzz): this rebuild filters by key name only, so it also
-    // rebuilds `default`/`examples` VALUES: `isObjectOrArray` admits a
-    // `FabricSpecialObject` and `Object.entries` sees none of its state, so
-    // a fabric-valued default standardizes to `{}` — losing the value in the
-    // interned schema and making two schemas that differ only in such a
-    // default intern identically. Value-bearing keys want to pass through by
-    // reference.
+    // rebuilds `default`/`examples` VALUES, dropping an `asCell` that a
+    // default value happens to carry. Value-bearing keys want to pass
+    // through by reference.
+    //
+    // A fabric value passes through by reference either way: the rebuild
+    // reads a node by property name and would standardize one to `{}`,
+    // losing it from the interned schema and making two schemas that differ
+    // only in such a default intern identically.
     const traverse = (
       value: Readonly<any>,
     ): FabricValue => {
-      if (isObjectOrArray(value)) {
+      if (isWalkableObjectOrArray(value)) {
         if (Array.isArray(value)) {
           return value.map((val) => traverse(val));
         } else {

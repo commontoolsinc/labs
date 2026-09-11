@@ -62,6 +62,12 @@ const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
 const OTHER_SPACE = "did:key:z6MkHomeSpace" as MemorySpace;
 const HANDLE = "of:fid1:abcdefghijklmnop";
 
+/**
+ * The spelling a piece reports its own id as, and so the spelling the pieces
+ * facet prints beside a row number.
+ */
+const BARE_HANDLE = "fid1:abcdefghijklmnop";
+
 /** The handle the space's index points the slug `board` at. */
 const BOARD = "of:fid1:qrstuvwxyz012345";
 
@@ -990,6 +996,37 @@ describe("verbs", () => {
         moved(shuttle.place, "pieces");
         const outcome = await runLine(`cd ${HANDLE}`, shuttle, settling(null));
         expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
+      });
+
+      it("lands a handle written as the bare hash a listing prints, asking the index about it", async () => {
+        // The pieces facet prints a piece's own id, which carries no entity
+        // scheme, and `%n` hands that spelling back — so the walk to the row
+        // has to admit it and the lookup has to be asked about it. Reading
+        // both spellings of one entity is `entityIdExists`'s own
+        // (`PiecesController`, `pieces-entity-id-exists.test.ts`), which is
+        // why this case reads what the index was asked rather than what it
+        // answered.
+
+        const asked: string[] = [];
+        const shuttle = shuttleIn(
+          {
+            dispose: () => Promise.resolve(),
+            getSpace: () => SPACE,
+            getSpaceName: () => SPACE_NAME,
+            entityIdExists: (id: string) => {
+              asked.push(id);
+              return Promise.resolve(true);
+            },
+          } as unknown as PiecesController,
+        );
+        moved(shuttle.place, "pieces");
+        const outcome = await runLine(
+          `cd ${BARE_HANDLE}`,
+          shuttle,
+          settling(null),
+        );
+        expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
+        expect(asked).toEqual([BARE_HANDLE]);
       });
 
       it("lands a handle where the server does not answer the lookup", async () => {

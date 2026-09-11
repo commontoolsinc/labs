@@ -10,7 +10,10 @@ import type {
 } from "@/api.ts";
 import type { FabricValue } from "@/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
-import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
+import {
+  BaseFabricPrimitive,
+  VALUE_TAG,
+} from "@/fabric-bases/BaseFabricPrimitive.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
@@ -21,6 +24,10 @@ import {
   REALM_CODEC,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
+import {
+  FABRIC_PRIMITIVE_VALUE_TAGS,
+  type FabricPrimitiveValueTag,
+} from "@/value-tags.ts";
 
 /**
  * Immutable byte sequence in the fabric type system.
@@ -59,6 +66,11 @@ export class FabricBytes extends BaseFabricPrimitive implements ApiFabricBytes {
   //
   // Instance members
   //
+
+  /** @inheritDoc */
+  get [VALUE_TAG](): FabricPrimitiveValueTag {
+    return FABRIC_PRIMITIVE_VALUE_TAGS.FabricBytes;
+  }
 
   /** The number of bytes. */
   get length(): number {

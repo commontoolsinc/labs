@@ -64,7 +64,6 @@ import {
   type RunFamilyMeasurement,
 } from "./measure-runs.ts";
 
-const TOKEN_COOKIE = "cf_harness_console_token";
 const CHAT_SSE_EVENT = "chat";
 const DEFAULT_CONSOLE_URL = "http://127.0.0.1:8100";
 const DEFAULT_FABRIC_API_URL = "http://localhost:8000";
@@ -732,13 +731,12 @@ const indexSnapshotOf = (answer: unknown): IndexSnapshot => {
 /**
  * One console server, driven the way its own page drives it.
  *
- * `/api` is gated on a token the server hands out as a cookie when the page
- * loads, so the first thing a client does is load the page and keep what it
- * was given. Everything after that carries the cookie.
+ * `/api` carries no credential, so opening one is a liveness question rather
+ * than a handshake: `open` asks health, which is the cheapest answer that
+ * distinguishes a console from nothing listening.
  */
 export class ConsoleClient {
   readonly #baseUrl: string;
-  readonly #token: string;
   readonly #fetch: typeof globalThis.fetch;
 
   /**
@@ -750,11 +748,9 @@ export class ConsoleClient {
 
   private constructor(
     baseUrl: string,
-    token: string,
     fetchImpl: typeof globalThis.fetch,
   ) {
     this.#baseUrl = baseUrl.replace(/\/$/, "");
-    this.#token = token;
     this.#fetch = fetchImpl;
   }
 
@@ -763,17 +759,14 @@ export class ConsoleClient {
     fetchImpl: typeof globalThis.fetch = globalThis.fetch,
   ): Promise<ConsoleClient> {
     const url = baseUrl.replace(/\/$/, "");
-    const response = await fetchImpl(`${url}/`);
+    const response = await fetchImpl(`${url}/api/health`);
     await response.body?.cancel();
-    const cookie = response.headers.getSetCookie()
-      .map((entry) => entry.split(";", 1)[0])
-      .find((entry) => entry.startsWith(`${TOKEN_COOKIE}=`));
-    if (cookie === undefined) {
+    if (!response.ok) {
       throw new Error(
-        `${url}/ handed out no ${TOKEN_COOKIE} cookie; is a console server listening there?`,
+        `${url}/api/health answered ${response.status}; is a console server listening there?`,
       );
     }
-    return new ConsoleClient(url, cookie, fetchImpl);
+    return new ConsoleClient(url, fetchImpl);
   }
 
   async #json(
@@ -784,7 +777,6 @@ export class ConsoleClient {
       ...init,
       headers: {
         ...(init.headers ?? {}),
-        cookie: this.#token,
         ...(init.body === undefined
           ? {}
           : { "content-type": "application/json" }),
@@ -1060,7 +1052,7 @@ export class ConsoleClient {
           `${this.#baseUrl}/api/events?sessionId=${
             encodeURIComponent(started.sessionId)
           }&afterSequence=${this.#sequence}`,
-          { headers: { cookie: this.#token, accept: "text/event-stream" } },
+          { headers: { accept: "text/event-stream" } },
         );
         if (!response.ok || response.body === null) {
           return {

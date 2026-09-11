@@ -43,6 +43,17 @@ Preconditions cover what the read set cannot express on its own: that an earlier
 commit from the same session has landed, that an entity is absent, or that an
 entity's value hashes to a specific value.
 
+## Runtime compatibility
+
+The `stableExpressionResultIds` marker in `hello` and `hello.ok` identifies
+runtimes whose expression result stores use stable output coordinates. The
+server refuses session admission without it, and the client refuses a server
+that does not enforce it. Existing incompatible tabs need a reload and CLI
+checkouts need an update. Backend replacement must disconnect existing sockets
+so they pass through admission again; document contents do not need migration.
+The [protocol specification](../../docs/specs/memory-v2/04-protocol.md)
+describes the terminal refusal and its reconnect behavior.
+
 ## Layout
 
 - `v2.ts` — the protocol vocabulary: documents, operations, commits, queries,

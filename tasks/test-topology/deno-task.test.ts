@@ -4,6 +4,7 @@ import {
   memberTasks,
   memberTestFiles,
   parseTestTask,
+  taskEnvironment,
   unquote,
 } from "./deno-task.ts";
 
@@ -89,6 +90,56 @@ describe("reading a member's test task", () => {
   it("refuses a task that is not a deno test at all", () => {
     expect(parseTestTask("deno run test/runner.ts")).toBeUndefined();
     expect(parseTestTask("echo 'No tests defined.'")).toBeUndefined();
+  });
+});
+
+describe("reading the environment a task sets", () => {
+  it("takes the assignments standing before the command", async () => {
+    const dir = await member({
+      tasks: { integration: "LOG_LEVEL=warn TEST_HTTP=1 deno test -A" },
+    });
+    expect(await taskEnvironment(dir, "integration")).toEqual({
+      LOG_LEVEL: "warn",
+      TEST_HTTP: "1",
+    });
+  });
+
+  it("answers for a command the test-task parser declines", async () => {
+    // Every `integration` task in the workspace names a shell variable
+    // among its flags, and a shell variable is a metacharacter that
+    // `parseTestTask` stops at. The environment is readable regardless,
+    // and it is the whole of what the suites want from these tasks.
+
+    const command =
+      'LOG_LEVEL=warn deno test -A $INTEGRATION_TEST_FLAGS "./integration/*.test.ts"';
+    expect(parseTestTask(command)).toBeUndefined();
+    const dir = await member({ tasks: { integration: command } });
+    expect(await taskEnvironment(dir, "integration")).toEqual({
+      LOG_LEVEL: "warn",
+    });
+  });
+
+  it("stops at the command, so a later argument is not environment", async () => {
+    const dir = await member({
+      tasks: { integration: "deno test -A --env=LOG_LEVEL=debug" },
+    });
+    expect(await taskEnvironment(dir, "integration")).toEqual({});
+  });
+
+  it("gives nothing for a task the manifest does not define", async () => {
+    const dir = await member({ tasks: { test: "deno test" } });
+    expect(await taskEnvironment(dir, "integration")).toEqual({});
+  });
+
+  it("reads a task written as an object with dependencies", async () => {
+    const dir = await member({
+      tasks: {
+        integration: { command: "LOG_LEVEL=warn deno test", dependencies: [] },
+      },
+    });
+    expect(await taskEnvironment(dir, "integration")).toEqual({
+      LOG_LEVEL: "warn",
+    });
   });
 });
 

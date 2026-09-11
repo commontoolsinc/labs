@@ -14,9 +14,9 @@
  * The gap is silent until something calls it: `Error.isError(value)` throws
  * `TypeError: Error.isError is not a function`, and only in the post-lockdown
  * process. Code that classifies unknown values — data-model's
- * `tagFromNativeValue`, for one — reaches for it precisely because it is the
- * only correct error test across realms, `instanceof` being the thing it
- * exists to replace.
+ * `tagFromNativeValueElseNull`, for one — reaches for it precisely because it
+ * is the only correct error test across realms, `instanceof` being the thing
+ * it exists to replace.
  *
  * We restore the genuine intrinsic rather than polyfill it. Captured at module
  * evaluation (before any lockdown), it is a pure predicate over the

@@ -7,6 +7,8 @@
  */
 
 import type { Option } from "@cliffy/command";
+
+import { CFC_ENFORCEMENT_MODES } from "@commonfabric/runner/cfc";
 import { languageNames } from "../view/languages/language.ts";
 import type { AnyCommand, CompletionLine, PreParseGlobal } from "./line.ts";
 import { longName, PRE_PARSE_GLOBALS } from "./line.ts";
@@ -34,7 +36,7 @@ const ENUMERATED_OPTION_VALUES: Readonly<Record<string, readonly string[]>> = {
   "log-level": ["debug", "info", "warn", "error", "silent"],
   "color": ["auto", "always", "never"],
   "language": languageNames(),
-  "cfc-mode": ["off", "warn", "enforce"],
+  "cfc-mode": [...CFC_ENFORCEMENT_MODES],
   // `cf piece map --format`.
   "format": ["ascii", "dot"],
   // `cf piece survey --side`: which document holds the collection.

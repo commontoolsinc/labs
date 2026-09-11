@@ -251,9 +251,11 @@ export interface TopicsExport {
  * one points at. A document write cannot carry a `$link`, so these are routed
  * aside and re-linked after the apply.
  *
- * Three today: `mentionable` (the board's universe), `boardCrossrefs` (its
- * reference pivot), and `boardNames` (its names table, which a topic reads its
- * own member name out of).
+ * Three today: `mentionable` (the board's derived mention index),
+ * `boardCrossrefs` (its reference pivot), and `boardNames` (its names table,
+ * which a topic reads its own member name out of). The mention index publishes
+ * display rows with stable strings and unread member references, matching
+ * the wiring the board supplies when it creates a topic.
  *
  * Adding a wiring input to the topic pattern means adding it here. Leaving it
  * out is not silent: `buildRestoreDocument` throws on any link-valued field it
@@ -263,7 +265,7 @@ export interface TopicsExport {
  * throw into a failing check rather than a surprise mid-incident.
  */
 export const STRUCTURAL_LINK_SOURCES: Record<string, string> = {
-  mentionable: "topics",
+  mentionable: "mentionable",
   boardCrossrefs: "crossrefs",
   boardNames: "namesTable",
 };

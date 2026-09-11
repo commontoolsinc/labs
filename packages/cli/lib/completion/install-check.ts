@@ -80,8 +80,8 @@ export function missingCommandWarning(name: string): string {
     `         silently do nothing — it calls '${name} completion complete' on`,
     `         every Tab, and that failure is swallowed by design.`,
     ``,
-    `  mise users: already handled by mise.toml; run 'mise trust' in the repo.`,
-    `  otherwise:  ${link}`,
+    `  Put one there once: deno task install-cf`,
+    `  or by hand:         ${link}`,
     ``,
     `  See "Installing ${name} on PATH" in packages/cli/README.md.`,
   ].join("\n");

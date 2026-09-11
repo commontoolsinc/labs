@@ -116,7 +116,13 @@ export type LLMToolResult = {
 export type LLMRequestMetadata = Record<string, JSONValue | undefined>;
 
 export type LLMRequest = {
+  /**
+   * Whether this request asks for its response to be cached. A request that
+   * leaves the field out asks for caching; only `false` declines. The
+   * toolshed may answer live for reasons of its own.
+   */
   cache?: boolean;
+
   messages: readonly BuiltInLLMMessage[];
   model: ModelName;
   system?: string;
@@ -134,7 +140,14 @@ export type LLMGenerateObjectRequest = {
   messages: readonly BuiltInLLMMessage[];
   model?: ModelName;
   system?: string;
+
+  /**
+   * Whether this request asks for its response to be cached. A request that
+   * leaves the field out asks for caching; only `false` declines. The
+   * toolshed may answer live for reasons of its own.
+   */
   cache?: boolean;
+
   maxTokens?: number;
   metadata?: LLMRequestMetadata;
 };
@@ -218,6 +231,24 @@ export function extractTextFromLLMResponse(response: LLMResponse): string {
 }
 
 /**
+ * Names what stops `messages` from being a conversation to send a model, or
+ * `undefined` when nothing does. Every request carries one, and this is what
+ * they check it with.
+ */
+function conversationProblem(messages: unknown): string | undefined {
+  if (!Array.isArray(messages)) return "'messages' must be an array.";
+  // The model provider refuses an empty conversation, `system` field or no,
+  // so a request carrying one is the caller's to fix rather than the
+  // provider's to report.
+  if (messages.length === 0) return "'messages' must not be empty.";
+  for (const [index, message] of messages.entries()) {
+    const problem = llmMessageProblem(message);
+    if (problem !== undefined) return `Message ${index} ${problem}.`;
+  }
+  return undefined;
+}
+
+/**
  * Names what stops `input` from being an `LLMRequest`, or `undefined` when
  * nothing does. A route that refuses a request returns this text, so its
  * caller learns which part of the payload to change.
@@ -225,16 +256,11 @@ export function extractTextFromLLMResponse(response: LLMResponse): string {
 export function llmRequestProblem(input: unknown): string | undefined {
   if (!isObjectNotArray(input)) return "The request must be an object.";
   if (typeof input.model !== "string") return "'model' must be a string.";
-  if (!Array.isArray(input.messages)) return "'messages' must be an array.";
-  // The model provider refuses an empty conversation, `system` field or no,
-  // so a request carrying one is the caller's to fix rather than the
-  // provider's to report.
-  if (input.messages.length === 0) return "'messages' must not be empty.";
-  for (const [index, message] of input.messages.entries()) {
-    const problem = llmMessageProblem(message);
-    if (problem !== undefined) return `Message ${index} ${problem}.`;
+  const conversation = conversationProblem(input.messages);
+  if (conversation !== undefined) return conversation;
+  if ("cache" in input && typeof input.cache !== "boolean") {
+    return "'cache' must be a boolean.";
   }
-  if (!("cache" in input)) return "'cache' must be present.";
   if ("system" in input && typeof input.system !== "string") {
     return "'system' must be a string.";
   }
@@ -270,6 +296,37 @@ export function llmRequestProblem(input: unknown): string | undefined {
     return `'nativeModelToolIds' must be an array drawn from ${
       LLM_NATIVE_MODEL_TOOL_IDS.join(", ")
     }.`;
+  }
+  return undefined;
+}
+
+/**
+ * Names what stops `input` from being an `LLMGenerateObjectRequest`, or
+ * `undefined` when nothing does. A route that refuses a request returns this
+ * text, so its caller learns which part of the payload to change.
+ */
+export function llmGenerateObjectRequestProblem(
+  input: unknown,
+): string | undefined {
+  if (!isObjectNotArray(input)) return "The request must be an object.";
+  if (!isObjectNotArray(input.schema)) return "'schema' must be an object.";
+  if ("model" in input && typeof input.model !== "string") {
+    return "'model' must be a string.";
+  }
+  const conversation = conversationProblem(input.messages);
+  if (conversation !== undefined) return conversation;
+  if ("cache" in input && typeof input.cache !== "boolean") {
+    return "'cache' must be a boolean.";
+  }
+  if ("system" in input && typeof input.system !== "string") {
+    return "'system' must be a string.";
+  }
+  if ("maxTokens" in input && typeof input.maxTokens !== "number") {
+    return "'maxTokens' must be a number.";
+  }
+  if ("metadata" in input && !isLLMRequestMetadata(input.metadata)) {
+    return "'metadata' must be an object whose values ordinary JSON " +
+      "serialization carries faithfully.";
   }
   return undefined;
 }

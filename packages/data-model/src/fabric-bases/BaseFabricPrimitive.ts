@@ -1,6 +1,6 @@
 /**
  * The implementation side of the primitive hierarchy: the base class that
- * concrete primitives extend, and the symbol seeding its plumbing members.
+ * concrete primitives extend, and the symbol keying the tag each one reports.
  *
  * `FabricPrimitive` is the contract external code is written against, and this
  * is where the shared implementation behind it lives. The split is held by
@@ -11,23 +11,14 @@
 
 import { FabricPrimitive } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
+import type { FabricPrimitiveValueTag } from "@/value-tags.ts";
 
 /**
- * Well-known symbol seeding `BaseFabricPrimitive`'s symbol-keyed member set.
- *
- * `BaseFabricPrimitive` is intended to accumulate symbol-keyed "implementation
- * plumbing" members over time -- the same regular-name-for-clients /
- * unique-symbol-for-plumbing pattern that `BaseFabricInstance` uses for
- * `[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`. This is a deliberate placeholder seed:
- * it gives the class one concrete member today so that its instance type is
- * non-empty, which is what lets `BaseFabricPrimitive.isInstance()` narrow as an
- * ordinary `value is` guard (a structurally-empty type makes such a guard's
- * negative branch collapse to `never`). Replace it with the first real
- * primitive-plumbing member once one is identified.
+ * Well-known symbol keying the getter through which a concrete primitive
+ * reports its `ValueTag`. A symbol rather than a name, so that the member is
+ * implementation plumbing and no part of a primitive's client-facing surface.
  */
-export const EXAMPLE_METHOD: unique symbol = Symbol(
-  "data-model.exampleMethod",
-);
+export const VALUE_TAG: unique symbol = Symbol("data-model.valueTag");
 
 /**
  * Abstract base class for `FabricPrimitive` subclasses. Concrete
@@ -36,8 +27,8 @@ export const EXAMPLE_METHOD: unique symbol = Symbol(
  * against, while `BaseFabricPrimitive` is the designated home for shared
  * implementation. Its counterpart `BaseFabricInstance` carries the
  * `shallowClone()` template method; this class carries the construction-time
- * freeze, the static invariant guard, and a placeholder seed member (see
- * `[EXAMPLE_METHOD]`).
+ * freeze, the static invariant guard, and the `[VALUE_TAG]` getter that each
+ * subclass supplies.
  */
 export abstract class BaseFabricPrimitive extends FabricPrimitive {
   /** Constructs an instance. */
@@ -53,6 +44,18 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
     // addition into a throw.
     Object.freeze(this);
   }
+
+  //
+  // Subclass contract
+  //
+
+  /**
+   * The tag this instance reports, one of `FABRIC_PRIMITIVE_VALUE_TAGS`, which
+   * the `tagFrom*()` dispatches return for it. Each concrete class supplies
+   * its own. A subclass of one that does not is tagged as its parent, which
+   * is a bug in that subclass and not one the dispatches defend against.
+   */
+  abstract get [VALUE_TAG](): FabricPrimitiveValueTag;
 
   //
   // Instance members
@@ -72,19 +75,6 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
    */
   [Symbol.for("Deno.customInspect")](): string {
     return toCompactDebugString(this);
-  }
-
-  /**
-   * Placeholder seed member (a throwing stub). Its only purpose today is to
-   * give `BaseFabricPrimitive` a non-empty instance type so `isInstance()`
-   * narrows normally; it has no callers and no real behavior yet, and is the
-   * first of the intended symbol-keyed primitive-plumbing members. Replace it
-   * with a real member once one is identified.
-   *
-   * @throws Always -- it is not implemented.
-   */
-  [EXAMPLE_METHOD](): never {
-    throw new Error("Not implemented: `[EXAMPLE_METHOD]` is a placeholder.");
   }
 
   //

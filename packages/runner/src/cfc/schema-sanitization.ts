@@ -12,13 +12,12 @@ import {
 } from "@commonfabric/data-model-schema";
 import {
   cloneIfNecessary,
+  fabricAwareEqual,
   type FabricPlainObject,
   FabricPrimitive,
   type FabricValue,
   isFabricPlainObject,
-  valueEqual,
 } from "@commonfabric/data-model";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   isObjectNotArray,
   isObjectOrArray,
@@ -675,14 +674,6 @@ const isAbsentOptional = (
   (value as Record<string, unknown>)[key] === undefined &&
   !requiredKeys.has(key);
 
-const schemaValueEqual = (left: unknown, right: unknown): boolean => {
-  try {
-    return valueEqual(left as FabricValue, right as FabricValue);
-  } catch {
-    return deepEqual(left, right);
-  }
-};
-
 const SUPPORTED_SCHEMA_TYPES = new Set([
   "unknown",
   "string",
@@ -1114,7 +1105,7 @@ const validateSchemaDefinitionInternal = (
       for (let index = 0; index < schema.enum.length; index++) {
         if (
           schema.enum.slice(0, index).some((entry) =>
-            schemaValueEqual(entry, schema.enum![index])
+            fabricAwareEqual(entry, schema.enum![index])
           )
         ) {
           return `${path}.enum: values must be unique`;
@@ -1344,6 +1335,15 @@ const VALUE_VALIDATION: SchemaValidationOptions = {
 
 interface SchemaValidationContext {
   activeByRoot: WeakMap<object, SchemaRootValidationActivity>;
+
+  /** Completed object proofs, keyed by options, schema root, schema, and value. */
+  successful: WeakMap<
+    SchemaValidationOptions,
+    WeakMap<object, WeakMap<object, WeakSet<object>>>
+  >;
+
+  /** Active recursion cutoffs encountered during this validation. */
+  cycleVersion: number;
 }
 
 interface SchemaRootValidationActivity {
@@ -1376,6 +1376,8 @@ const atValidationPath = (
 
 const createSchemaValidationContext = (): SchemaValidationContext => ({
   activeByRoot: new WeakMap(),
+  successful: new WeakMap(),
+  cycleVersion: 0,
 });
 
 const primitiveValidationKey = (value: unknown): string =>
@@ -1689,7 +1691,53 @@ export const validateAgainstSchemaForSanitization = (
     createSchemaValidationContext(),
   )?.message;
 
+/** Reuses completed proofs without turning an active cycle into acceptance. */
 const validateAgainstSchemaInternal = (
+  schema: JSONSchema,
+  value: unknown,
+  fullSchema: JSONSchema,
+  options: SchemaValidationOptions,
+  context: SchemaValidationContext,
+): SchemaValidationFailure | undefined => {
+  let successful: WeakSet<object> | undefined;
+  if (isObjectNotArray(schema) && typeof value === "object" && value !== null) {
+    const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
+    const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
+    let byRoot = context.successful.get(options);
+    if (byRoot === undefined) {
+      byRoot = new WeakMap();
+      context.successful.set(options, byRoot);
+    }
+    let bySchema = byRoot.get(rootKey);
+    if (bySchema === undefined) {
+      bySchema = new WeakMap();
+      byRoot.set(rootKey, bySchema);
+    }
+    successful = bySchema.get(schema);
+    if (successful?.has(value)) return undefined;
+    if (successful === undefined) {
+      successful = new WeakSet();
+      bySchema.set(schema, successful);
+    }
+  }
+  const cycleVersion = context.cycleVersion;
+  const failure = validateAgainstSchemaUncached(
+    schema,
+    value,
+    fullSchema,
+    options,
+    context,
+  );
+  // Even an accepted union branch can depend on a recursion cutoff elsewhere
+  // in the proof. Only cycle-independent successes can be reused on any path.
+  if (failure === undefined && cycleVersion === context.cycleVersion) {
+    successful?.add(value as object);
+  }
+  return failure;
+};
+
+/** Checks one schema/value pair with active-path recursion detection. */
+const validateAgainstSchemaUncached = (
   schema: JSONSchema,
   value: unknown,
   fullSchema: JSONSchema,
@@ -1704,6 +1752,7 @@ const validateAgainstSchemaInternal = (
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
   const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
   if (!markSchemaValueActive(rootKey, schema, value, context)) {
+    context.cycleVersion++;
     return indeterminate("recursive schema validation made no progress");
   }
 
@@ -1806,13 +1855,13 @@ const validateAgainstSchemaInternal = (
 
     if (
       Array.isArray(schema.enum) &&
-      !schema.enum.some((entry) => schemaValueEqual(entry, value))
+      !schema.enum.some((entry) => fabricAwareEqual(entry, value))
     ) {
       return mismatch("value is not in enum");
     }
     if (
       Object.hasOwn(schema, "const") &&
-      !schemaValueEqual(schema.const, value)
+      !fabricAwareEqual(schema.const, value)
     ) {
       return mismatch("value does not match const");
     }
@@ -2095,7 +2144,7 @@ function validateStrictSchemaConstraints(
         if (!Object.hasOwn(value, index)) continue;
         if (
           value.slice(0, index).some((entry) =>
-            schemaValueEqual(entry, value[index])
+            fabricAwareEqual(entry, value[index])
           )
         ) {
           return mismatch("array items are not unique");

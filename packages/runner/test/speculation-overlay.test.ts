@@ -2676,6 +2676,97 @@ describe("Phase 2 speculation overlay", () => {
     cancelDemand();
   });
 
+  it("keeps entries until the replica can prove safe retirement", async () => {
+    const space = (await Identity.fromPassphrase("retirement capabilities"))
+      .did() as MemorySpace;
+    for (const missing of ["view", "acknowledgments"]) {
+      let capable = false;
+      let watermark: ((value: unknown) => void) | undefined;
+      const replica = {
+        sealNative: (
+          native: { operations: unknown[] },
+          _source: unknown,
+          verdict: Promise<unknown>,
+        ) => ({
+          localSeq: 10,
+          commit: {
+            localSeq: 10,
+            reads: {
+              confirmed: [{ id: "of:input", seq: 1 }],
+              pending: [],
+            },
+            operations: native.operations,
+          },
+          settled: verdict.then(() => undefined, () => undefined),
+        }),
+        get speculationRetirementView() {
+          return !capable && missing === "view" ? undefined : () => ({
+            confirmedSeq: 10,
+            pendingLocalSeqs: [],
+          });
+        },
+        get ackedSeqOf() {
+          return !capable && missing === "acknowledgments"
+            ? undefined
+            : () => undefined;
+        },
+      };
+      // The replica and watermark sink are the destination's public inputs;
+      // scripting them makes capability arrival independent of scheduling.
+      const runtime = {
+        storageManager: { open: () => ({ replica }) },
+        getCellFromLink: () => ({
+          sink: (callback: (value: unknown) => void) => {
+            watermark = callback;
+            return () => {};
+          },
+        }),
+      } as unknown as Runtime;
+      const destination = new SpeculationOverlayDestination(runtime);
+      try {
+        const tx = {
+          tx: {
+            markWholeDocumentWrites: () => {},
+            sealInto: (collector: {
+              sealSpaceCommit: (
+                space: MemorySpace,
+                native: unknown,
+                source: unknown,
+              ) => Promise<unknown>;
+            }) =>
+              collector.sealSpaceCommit(space, {
+                operations: [{
+                  op: "set",
+                  id: "of:output",
+                  scope: "space",
+                  value: { value: 7 },
+                }],
+                preconditions: [],
+              }, undefined).then(() => ({ ok: {} })),
+          },
+        } as unknown as IExtendedStorageTransaction;
+        stampSpeculationRunContext(tx, {
+          actionId: "capability-arrival",
+          kind: "derivation",
+        });
+        expect((await destination.seal(tx)).ok).toBeDefined();
+        expect(destination.entryCount(space)).toBe(1);
+        expect(watermark).toBeDefined();
+
+        watermark!({ seq: 2 });
+        expect(destination.entryCount(space)).toBe(1);
+
+        capable = true;
+        const retired = destination.waitForSpaceQuiescence(space);
+        watermark!({ seq: 3 });
+        await retired;
+        expect(destination.entryCount(space)).toBe(0);
+      } finally {
+        destination.close();
+      }
+    }
+  });
+
   it("an entry whose origin's accept verdict lands AFTER the covering watermark still retires — the ack wake re-sweeps; no further watermark event needed (leg-C 1c)", async () => {
     // Destination-level pin with a scripted replica: deterministic
     // control over the verdict-vs-watermark race. Pre-fix: the sweep at

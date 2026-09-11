@@ -12,7 +12,11 @@
  * outright.
  */
 
-import { FabricInstance, FabricPrimitive } from "@commonfabric/data-model";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  refuseFabricInstance,
+} from "@commonfabric/data-model";
 import {
   isLinkRef,
   linkRefFrom,
@@ -20,7 +24,6 @@ import {
 } from "@commonfabric/data-model/cell-rep";
 import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 import { isObjectOrArray } from "@commonfabric/utils/types";
-import { refuseFabricInstance } from "../fabric-special-object.ts";
 import type { CellLinkRefPayload, SigilLink } from "../sigil-types.ts";
 import type { CfcLabelView } from "./label-view-core.ts";
 

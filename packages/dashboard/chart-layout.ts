@@ -27,7 +27,7 @@ export function tileContentRules(
   return `${TILE_LABEL_RULE}
   .lbl .spacer{flex:1}
   .drill{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:10px;color:var(--text-muted);letter-spacing:0;text-transform:none}
-  .hmtd{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--text-muted);letter-spacing:0;text-transform:none;font-variant-numeric:tabular-nums;margin-right:8px}
+  .hfacet{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--text-muted);letter-spacing:0;text-transform:none;font-variant-numeric:tabular-nums;margin-right:8px}
   .big{font-size:30px;font-weight:600;margin:0;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .sub{font-size:13px;color:var(--text-muted);margin:5px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .running{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:var(--text-muted);letter-spacing:.02em;text-transform:none;margin-top:10px}
