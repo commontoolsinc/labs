@@ -61,6 +61,7 @@ describe("rendered vote rows across replicas", () => {
         space: spaceName,
         apiUrl: new URL(env.API_URL),
         identity,
+        cfcFlowLabels: "persist",
       });
       let browser: Awaited<ReturnType<typeof Browser.launch>> | undefined;
       try {
@@ -73,6 +74,7 @@ describe("rendered vote rows across replicas", () => {
             space: `${spaceName}-profiles`,
             apiUrl: new URL(env.API_URL),
             identity,
+            cfcFlowLabels: "persist",
           });
           try {
             const profiles = cc.runtime.getCell<{ name: string }[]>(
