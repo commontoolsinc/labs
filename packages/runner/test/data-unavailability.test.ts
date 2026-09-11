@@ -555,6 +555,83 @@ describe("JavaScript-node data unavailability", () => {
     expect(verifierReads).toHaveLength(1);
   });
 
+  it("does not traverse opaque guard operands below their root", async () => {
+    const nested = runtime.getCell(
+      space,
+      `opaque guard nested ${nextResultId++}`,
+    );
+    const target = runtime.getCell(
+      space,
+      `opaque guard target ${nextResultId++}`,
+    );
+    const seedTx = runtime.edit();
+    nested.withTx(seedTx).setRaw(DataUnavailable.pending());
+    target.withTx(seedTx).setRaw({ nested: nested.getAsLink() });
+    await seedTx.commit();
+
+    let calls = 0;
+    const output = await runValueNode({
+      argument: { value: target.getAsLink() },
+      moduleType: "javascript-availability",
+      argumentSchema: { type: "unknown" },
+      resultSchema: { type: "boolean" },
+      unavailableInputPolicy: [{ path: [], reasons: ["error"] }],
+      implementation: (value) => {
+        calls++;
+        return value instanceof DataUnavailable && value.reason === "error";
+      },
+    });
+
+    expect(calls).toBe(1);
+    expect(output).toBe(false);
+
+    const markerTx = runtime.edit();
+    target.withTx(markerTx).setRaw(
+      DataUnavailable.error(new Error("opaque root failure")),
+    );
+    await markerTx.commit();
+    const markerOutput = await runValueNode({
+      argument: { value: target.getAsLink() },
+      moduleType: "javascript-availability",
+      argumentSchema: { type: "unknown" },
+      resultSchema: { type: "boolean" },
+      unavailableInputPolicy: [{ path: [], reasons: ["error"] }],
+      implementation: (value) => {
+        calls++;
+        return value instanceof DataUnavailable && value.reason === "error";
+      },
+    });
+
+    expect(calls).toBe(2);
+    expect(markerOutput).toBe(true);
+
+    const structuralTx = runtime.edit();
+    target.withTx(structuralTx).setRaw({ nested: nested.getAsLink() });
+    await structuralTx.commit();
+    const structuralOutput = await runValueNode({
+      argument: { value: target.getAsLink() },
+      moduleType: "javascript-availability",
+      argumentSchema: {
+        anyOf: [
+          { type: "unknown" },
+          {
+            type: "object",
+            properties: { nested: { type: "object" } },
+            required: ["nested"],
+          },
+        ],
+      },
+      unavailableInputPolicy: [{ path: [], reasons: ["error"] }],
+      implementation: () => {
+        calls++;
+        return "should not run";
+      },
+    });
+
+    expect(calls).toBe(2);
+    expectUnavailable(structuralOutput, "pending");
+  });
+
   it("keeps legacy schema modes subscribed to linked availability", async () => {
     for (
       const [label, argumentSchema] of [

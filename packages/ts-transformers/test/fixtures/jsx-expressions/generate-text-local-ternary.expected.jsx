@@ -17,7 +17,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     type: "object",
     properties: {
         text: {
-            type: ["object", "string"]
+            type: "unknown"
         }
     },
     required: ["text"]

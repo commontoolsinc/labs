@@ -165,7 +165,10 @@ worth calling out:
 
 - `AvailabilityAnalysisTransformer` (stage 12) records availability
   observations and diagnostics before lift lowering consumes that provenance;
-  the complete contract is in `docs/specs/data-unavailability.md`.
+  the complete contract is in `docs/specs/data-unavailability.md`. Capability
+  analysis treats a guard-only operand as an identity-only path, so its input
+  schema is opaque at that root; any structural use of the successful value
+  retains the complete usable schema.
 - `BuilderCallHoistingTransformer` (stage 20) runs **after**
   `SchemaInjectionTransformer` (stage 19) so each builder call it relocates to
   module scope already carries its injected schemas — see CT-1644 and

@@ -437,12 +437,10 @@ around a reactive guard expression, just as it does for other reactive
 expressions, but a guard encountered inside an existing compute remains the
 same pure call.
 
-Purity alone is not sufficient. If the source operand is an `AsyncResult<T>`,
-the generated lift must preserve that union in its capture schema. If the
-source operand is statically only `T`, calling a type predicate does not widen
-the generated lift's capture, so the transformer must attach
-`T | <probed variant>` before capture-schema generation. The latter case
-conceptually lowers to:
+Purity alone is not sufficient. If the source operand is statically only `T`,
+calling a type predicate does not widen the generated lift's capture, so the
+transformer must attach `T | <probed variant>` before it analyzes and lowers
+the capture. The latter case conceptually lowers to:
 
 ```typescript
 // Shown for illustration only.
@@ -452,17 +450,27 @@ lift<{ value: Repo | HasError }, boolean>(
 ```
 
 The concrete lowering also supplies the generated argument and result schemas
-and the path policy. Whether the union came from `AsyncResult<T>` or synthetic
-widening, all three artifacts must agree:
+and the path policy. A callback which only passes the operand to availability
+guards needs the reached root's identity, not the successful value's contents.
+Capability shrinking therefore emits an opaque `unknown` schema at that path.
+Preflight follows links to the root and checks its concrete marker, while a
+successful value reaches the pure predicate as an opaque presence value. If
+the callback also reads the successful value, that structural use cancels the
+identity-only optimization and retains the usable structural schema its reads
+require.
+
+Whether the union came from `AsyncResult<T>` or synthetic widening, the
+artifacts must agree:
 
 - the lift input type includes `Repo | HasError`;
-- the input schema can materialize that union; and
+- the input schema materializes either the usable structure the callback reads
+  or, for a guard-only path, its opaque reached root;
 - the path policy authorizes only the `"error"` marker at `value`.
 
-Without the widened lift input type and schema, runner preflight would reach
-ordinary argument materialization and reject the error before the pure
-predicate could run. The widening applies only to the probed operand path, not
-to every capture of the synthesized lift.
+Without the widened lift input type and matching path policy, runner preflight
+would reject the error before the pure predicate could run. The widening
+applies only to the probed operand path, not to every capture of the synthesized
+lift.
 
 This removes the need to rewrite a factory call to a differently named runtime
 predicate inside `computed()`. The transformer still gives the guard calls a
@@ -506,10 +514,12 @@ capture-granular: a captured projected result gates the whole computation even
 when the branch the author expected to take would not read it.
 
 The policy, not a structural schema match, authorizes the callback to receive a
-control value. Generated schemas still include the widened TypeScript union so
-the accepted FabricType can be materialized. For v1, the schema generator may
-represent the `DataUnavailable` arm as an opaque object branch; the runner
-checks the concrete class and reason before schema traversal. That arm
+control value. The generated lift input type always includes the widened
+TypeScript union. Its schema retains the usable structural paths when the
+callback also reads the successful value, while a guard-only path emits the
+opaque reached-root schema described above. Some source-union schemas may
+retain a `DataUnavailable` arm as an opaque object branch; the runner checks the
+concrete class and reason before schema traversal. When present, that arm
 structurally admits arbitrary objects for non-object usable types, a known
 property documented in the
 [schema-generator README](../../packages/schema-generator/README.md#availability-marker-union-arms);
@@ -537,8 +547,10 @@ The transformer must:
 7. For a guard expression in pattern context over a statically plain `T`,
    attach `T | <probed variant>` to only the probed capture of the synthesized
    computation.
-8. Emit exact-path unavailable input policy on the owning module and verify
-   that captured type, generated schema, and policy describe the same variants.
+8. Emit exact-path unavailable input policy on the owning module. A path used
+   only as a guard operand is identity-only and receives an opaque input
+   schema; any structural use of the successful value retains its complete
+   schema.
 9. Leave every guard as the same pure runtime call; no factory-to-predicate
    rewrite is needed.
 10. Preserve alias provenance, types, and policy through closure hoisting,
@@ -558,7 +570,7 @@ the implementation argument is materialized through `argumentSchema`.
 For every value-producing node run, the runner performs these steps:
 
 1. Walk the bound inputs in deterministic argument order, following the same
-   links the argument read would follow.
+   links and opaque-reference boundaries the argument read would follow.
 2. Record every concrete `DataUnavailable` value and its argument-relative
    path.
 3. Remove from consideration only markers whose exact path policy accepts
@@ -578,6 +590,11 @@ For every value-producing node run, the runner performs these steps:
 This preflight must happen before ordinary object schema matching. Otherwise an
 object-shaped `T` could accidentally accept the opaque FabricType leaf and run
 without an explicit policy.
+
+An opaque schema position still checks the concrete value at its reached root.
+Preflight does not descend below a normal root at that position, because
+ordinary materialization does not expose that subtree to the implementation.
+It does preserve and classify a `DataUnavailable` root before returning.
 
 The restoration in step 7 is required even when the generated capture schema
 contains a structural marker arm. JSON Schema cannot authenticate or recreate
@@ -629,10 +646,11 @@ failure, a separate aggregate variant can include paths and positions without
 changing the deterministic single-marker rule.
 
 The preflight walk is depth-first, cycle-safe, and bounded by the serialized
-input tree, but v1 still pays that walk on each run and each handler readiness
-check. Read metadata is shared so schema-less modules do not perform duplicate
-effective reads; that does not eliminate traversal cost. Add a representative
-wide/deep input benchmark before expanding the walk or introducing more
+input tree. It stops at opaque schema positions; other value computations and
+handler readiness checks still pay the remaining walk on each run. Read
+metadata is shared so schema-less modules do not perform duplicate effective
+reads; that does not eliminate traversal cost. Add a representative wide/deep
+input benchmark before expanding the walk or introducing more
 availability-aware boundaries, and optimize only with measured evidence.
 
 ### Nodes with no value output
@@ -1107,6 +1125,8 @@ runtime/compiler version gate before patterns emit the new type or policy.
 
 - Type-predicate narrowing in true and false branches.
 - Direct pattern-context guard lowering with reason-specific policy.
+- Guard-only operands use opaque root materialization, while a structurally
+  read successful value retains its usable schema.
 - Explicit computed guards over visible `AsyncResult<T>` unions without an
   observation cast.
 - `resultOf()` remains a zero-node alias and canonicalizes with its source when

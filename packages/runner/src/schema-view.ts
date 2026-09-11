@@ -307,9 +307,9 @@ const resolveBranch = (
  * surviving branch narrows to it; several merge the way an eager read merges
  * them; none is a mismatch.
  */
-const narrowForValue = (
+export const narrowSchemaForValue = (
   schema: JSONSchema | undefined,
-  value: FabricValue,
+  value: unknown,
 ): JSONSchema | undefined => {
   if (!isObjectOrArray(schema)) return schema;
   const rawBranches = schema.anyOf ?? schema.oneOf;
@@ -491,7 +491,7 @@ export function materializeSchemaView(
     return value;
   }
 
-  const schema = narrowForValue(link.schema, value);
+  const schema = narrowSchemaForValue(link.schema, value);
   if (schema === false) {
     return mismatch("no branch of the schema matches this value");
   }

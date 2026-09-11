@@ -19,6 +19,8 @@ import {
 } from "@commonfabric/data-model";
 import {
   combineSchemaForLink,
+  getJsonType,
+  isOpaquePosition,
   resolveSchemaRefsCanonical,
   SchemaObjectTraverser,
 } from "./traverse.ts";
@@ -153,7 +155,7 @@ import {
 } from "./scheduler.ts";
 import type { HandlerInputReadiness } from "./scheduler/types.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
-import { isSchemaMismatchError } from "./schema-view.ts";
+import { isSchemaMismatchError, narrowSchemaForValue } from "./schema-view.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
@@ -496,6 +498,19 @@ function scanUnavailableInputs(
         selected = { value, path };
         selectedIsSyntheticSyncing = false;
       }
+      return;
+    }
+
+    // An opaque schema position observes only the reached root. Its ordinary
+    // materialization follows links to that root but never reads below it, so
+    // preflight applies the same boundary after checking the root marker.
+    const valueType = getJsonType(value);
+    const narrowedSchema = narrowSchemaForValue(schemaAtPath, value);
+    if (
+      !isCellLink(value) && narrowedSchema !== undefined &&
+      narrowedSchema !== false && valueType !== null &&
+      isOpaquePosition(narrowedSchema, valueType)
+    ) {
       return;
     }
 

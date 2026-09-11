@@ -219,6 +219,23 @@ Deno.test("a visible AsyncResult guard inside computed needs no observation cast
     'unavailableInputPolicy: [{ path: ["input", "request"], reasons: ["error"] }]',
   );
   assertEquals(output.includes("observeAvailability"), false);
+
+  const root = parseModule(output);
+  const declaration = collect(root, ts.isVariableDeclaration).find((node) =>
+    ts.isIdentifier(node.name) && node.name.text.startsWith("__cfLift_") &&
+    node.initializer?.getText(root).includes("hasError")
+  );
+  assert(
+    declaration?.initializer && ts.isCallExpression(declaration.initializer),
+  );
+  const inputSchema = literalToValue(declaration.initializer.arguments[1]!) as {
+    properties: {
+      input: { properties: { request: Record<string, unknown> } };
+    };
+  };
+  assertEquals(inputSchema.properties.input.properties.request, {
+    type: "unknown",
+  });
 });
 
 Deno.test("a computed-local alias retains its captured availability path", async () => {
@@ -1625,11 +1642,7 @@ Deno.test("an observed computed capture survives aliasing and hoisting with alig
   const inputSchema = literalToValue(liftCall.arguments[1]!) as {
     properties: { alias: Record<string, unknown> };
   };
-  assert(Array.isArray(inputSchema.properties.alias.anyOf));
-  assertEquals(
-    (inputSchema.properties.alias.anyOf as unknown[]).includes(true),
-    false,
-  );
+  assertEquals(inputSchema.properties.alias, { type: "unknown" });
   assertEquals(literalToValue(liftCall.arguments[2]!), {
     type: "boolean",
   });
@@ -1747,7 +1760,7 @@ Deno.test("an omitted observation reason widens and authorizes every variant", a
   );
 });
 
-Deno.test("a generic named value keeps its concrete arm beside the observed variant", async () => {
+Deno.test("a guard-only generic value materializes as an opaque root", async () => {
   const output = await transformSource(
     `
     import {
@@ -1776,8 +1789,6 @@ Deno.test("a generic named value keeps its concrete arm beside the observed vari
     output,
     "observed: Item | __cfHelpers.HasError",
   );
-  assertStringIncludes(output, '$ref: "#/$defs/Item"');
-  assertEquals(output.includes('$ref: "#/$defs/HasError"'), false);
   const root = parseModule(output);
   const declaration = collect(root, ts.isVariableDeclaration).find((node) =>
     ts.isIdentifier(node.name) && node.name.text.startsWith("__cfLift_")
@@ -1786,18 +1797,53 @@ Deno.test("a generic named value keeps its concrete arm beside the observed vari
     declaration?.initializer && ts.isCallExpression(declaration.initializer),
   );
   const inputSchema = literalToValue(declaration.initializer.arguments[1]!) as {
-    properties: { observed: { anyOf: unknown[] } };
+    properties: { observed: Record<string, unknown> };
   };
-  assertEquals(
-    inputSchema.properties.observed.anyOf.includes(true),
-    false,
+  assertEquals(inputSchema.properties.observed, { type: "unknown" });
+});
+
+Deno.test("a guarded value read keeps its usable schema", async () => {
+  const output = await transformSource(
+    `
+    import {
+      computed,
+      hasError,
+      observeAvailability,
+      pattern,
+    } from "commonfabric";
+
+    type Item = { id: string };
+
+    export default pattern((input: { value: Item }) => {
+      const observed = observeAvailability(input.value, "error");
+      const label = computed(() =>
+        hasError(observed) ? "failed" : observed.id
+      );
+      return { label };
+    });
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+      typeCheck: true,
+    },
   );
-  assertEquals(
-    inputSchema.properties.observed.anyOf.some((arm) =>
-      JSON.stringify(arm) === JSON.stringify({ type: "object" })
-    ),
-    true,
+
+  const root = parseModule(output);
+  const declaration = collect(root, ts.isVariableDeclaration).find((node) =>
+    ts.isIdentifier(node.name) && node.name.text.startsWith("__cfLift_") &&
+    node.initializer?.getText(root).includes("hasError")
   );
+  assert(
+    declaration?.initializer && ts.isCallExpression(declaration.initializer),
+  );
+  const inputSchema = literalToValue(declaration.initializer.arguments[1]!) as {
+    properties: { observed: Record<string, unknown> };
+  };
+  assertEquals(inputSchema.properties.observed, {
+    type: "object",
+    properties: { id: { type: "string" } },
+    required: ["id"],
+  });
 });
 
 Deno.test("an authored same-named type does not collide with the availability schema arm", async () => {
@@ -1833,7 +1879,7 @@ Deno.test("an authored same-named type does not collide with the availability sc
   );
 });
 
-Deno.test("a direct pattern guard widens only its probed capture and emits exact policy", async () => {
+Deno.test("a direct pattern guard reads only its probed root and emits exact policy", async () => {
   const output = await transformSource(`
     import { hasError, pattern } from "commonfabric";
 
@@ -1870,8 +1916,7 @@ Deno.test("a direct pattern guard widens only its probed capture and emits exact
     properties: { input: { properties: { value: Record<string, unknown> } } };
   };
   const valueSchema = inputSchema.properties.input.properties.value;
-  assert(Array.isArray(valueSchema.anyOf));
-  assertEquals((valueSchema.anyOf as unknown[]).includes(true), false);
+  assertEquals(valueSchema, { type: "unknown" });
   assertEquals(literalToValue(liftCall.arguments[2]!), {
     type: "boolean",
   });

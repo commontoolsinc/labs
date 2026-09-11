@@ -5425,7 +5425,7 @@ function getPlainJsonType(
 }
 
 /** Refine the broad JSON Schema type so integer values can be distinguished. */
-function getJsonType(value: unknown): JSONSchemaTypes | null {
+export function getJsonType(value: unknown): JSONSchemaTypes | null {
   return (typeof value === "number")
     ? getJsonNumberType(value)
     : getPlainJsonType(value);
