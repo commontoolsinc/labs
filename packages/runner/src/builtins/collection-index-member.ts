@@ -49,20 +49,26 @@ export function collectionIndexMember(
   const index = inputs.key("index").resolveAsCell();
   return Object.assign((tx: IExtendedStorageTransaction) => {
     const args = inputs.withTx(tx);
-    const extracted = args.key("extracted");
+    const extracted = args.key("extracted").resolveAsCell()
+      .asSchema<CollectionIndexMemberInput["extracted"]>(undefined);
     const cellKey = extracted.key("isCell").get();
     if (cellKey === undefined) return;
     const value = cellKey
       ? extracted.key("value").asSchema({ asCell: ["cell"] }).get()
       : extracted.key("value").get();
+    // Maintenance reads concrete slots behind the opaque setup references.
     maintainCollectionIndexMembership(
       tx,
-      args.key("state").resolveAsCell(),
-      args.key("index").resolveAsCell(),
+      args.key("state").resolveAsCell().asSchema<CollectionIndexMembership>(
+        undefined,
+      ),
+      args.key("index").resolveAsCell().asSchema<MaintainedCollectionIndex>(
+        undefined,
+      ),
       args.key("mode").get(),
       args.key("occurrence").get(),
       resolveCollectionKey(runtime, tx, value),
-      args.key("element").resolveAsCell(),
+      args.key("element").resolveAsCell().asSchema<unknown>(undefined),
     );
     sendResult(tx, true);
   }, {
