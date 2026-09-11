@@ -1138,6 +1138,50 @@ describe("console/server", () => {
       );
     });
 
+    it("answers 400 for an input cell whose name is already a connector grant", async () => {
+      // The caller cannot see the console's grants, so the refusal names the
+      // connection the colliding grant came from rather than only the word.
+
+      const granted = new ConsoleServer(
+        await resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+          ],
+          {
+            CF_HARNESS_CONNECTOR_GRANTS: JSON.stringify([{
+              name: "email",
+              ref: `/${CELL_ID}`,
+              source: {
+                connection: "gmail-work",
+                piece: "cf-gmail-messages--gmail-work",
+              },
+            }]),
+          },
+          "/console",
+        ),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: answeringLoop,
+            now: advancingClock(),
+            onEvent,
+          }),
+      );
+      const response = await granted.handle(jsonRequest("/api/task", {
+        text: "summarize the trip",
+        inputCells: [{ name: "email", ref: `/${CELL_ID}/days` }],
+      }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "inputCells names `email`, which is already this console's grant for the `gmail-work` connector handle",
+      );
+    });
+
     it("starts a task that names no input cells at all", async () => {
       const started = await startTask({
         text: "track my books",
