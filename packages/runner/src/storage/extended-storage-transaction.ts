@@ -7,51 +7,12 @@ import {
   shallowMutableClone,
   taggedHashStringOf,
 } from "@commonfabric/data-model";
-import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
-import {
-  classifySchemaMeta,
-  collectExternalSchemaRefHashes,
-  collectSchemaMetaRefHashes,
-  MalformedSchemaMetaError,
-  SCHEMA_META_MEMBER,
-} from "../schema-decompose.ts";
-import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
-import { lookupSchemaDocument } from "../schema-registry.ts";
-import type { URI } from "../sigil-types.ts";
 import { aclDocId } from "@commonfabric/memory/acl";
-import {
-  type CommitError,
-  createReadOnlyTransactionError,
-  type IAttestation,
-  type IExtendedStorageTransaction,
-  type IMemorySpaceAddress,
-  type InactiveTransactionError,
-  type INotFoundError,
-  type IReadActivity,
-  type IReadOptions,
-  type IStorageTransaction,
-  type ITransactionJournal,
-  type IWriteAttempt,
-  type IWriteOptions,
-  type MemorySpace,
-  type Metadata,
-  type ReadError,
-  type Result,
-  type StorageTransactionFailed,
-  type StorageTransactionStatus,
-  toThrowable,
-  type TransactionCommitOptions,
-  type TransactionReactivityLog,
-  type TransactionSealDestination,
-  type TransactionWriteDetail,
-  type Unit,
-  type WriteError,
-  type WriterError,
-} from "./interface.ts";
 import type {
   CommitPrecondition,
   SqliteOperation,
 } from "@commonfabric/memory/v2";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -114,6 +75,7 @@ import {
   type TrustSnapshot,
   type WritePolicyInput,
 } from "../cfc/mod.ts";
+import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
 import {
   runtimeOwnedStoreKey,
   type RuntimeOwnedStores,
@@ -122,7 +84,6 @@ import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   runtimeWritePolicyAuthorized,
 } from "../cfc/types.ts";
-import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
 import { isTerminalRefusal, plainReason } from "../cfc/verdict-reason.ts";
 import {
   type NormalizedFullLink,
@@ -135,9 +96,48 @@ import {
   storedMetaFields,
 } from "../meta-seam.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
+import {
+  classifySchemaMeta,
+  collectExternalSchemaRefHashes,
+  collectSchemaMetaRefHashes,
+  MalformedSchemaMetaError,
+  SCHEMA_META_MEMBER,
+} from "../schema-decompose.ts";
+import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
+import { lookupSchemaDocument } from "../schema-registry.ts";
 import { normalizeCellScope, scopeRank } from "../scope.ts";
+import type { URI } from "../sigil-types.ts";
+import {
+  type CommitError,
+  createReadOnlyTransactionError,
+  type IAttestation,
+  type IExtendedStorageTransaction,
+  type IMemorySpaceAddress,
+  type InactiveTransactionError,
+  type INotFoundError,
+  type IReadActivity,
+  type IReadOptions,
+  type IStorageTransaction,
+  type ITransactionJournal,
+  type IWriteAttempt,
+  type IWriteOptions,
+  type MemorySpace,
+  type Metadata,
+  type ReadError,
+  type Result,
+  type StorageTransactionFailed,
+  type StorageTransactionStatus,
+  toThrowable,
+  type TransactionCommitOptions,
+  type TransactionReactivityLog,
+  type TransactionSealDestination,
+  type TransactionWriteDetail,
+  type Unit,
+  type WriteError,
+  type WriterError,
+} from "./interface.ts";
+import { validateLocalReadBasis } from "./local-read-policy.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
-import { CFC_ENFORCEMENT_REJECTION_PREFIX } from "./rejection.ts";
 import {
   allowMutableTransactionRead,
   clearSchemaRefusalTx,
@@ -152,6 +152,7 @@ import {
   takeSchemaRefusalTx,
   unmarkLazyMaterializationTx,
 } from "./reactivity-log.ts";
+import { CFC_ENFORCEMENT_REJECTION_PREFIX } from "./rejection.ts";
 import {
   TransactionAborted,
   TransactionCompleteError,
@@ -3227,6 +3228,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           : TransactionCompleteError(),
       };
     }
+    const unavailable = validateLocalReadBasis(this);
+    if (unavailable !== undefined) {
+      if (this.isReadOnly()) this.clearReadOnly();
+      this.abort(unavailable);
+      return { error: TransactionAborted(unavailable) };
+    }
     const readOnly = this.isReadOnly();
     if (readOnly) {
       this.tx.clearReadOnly?.();
@@ -3235,10 +3242,21 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // Before the CFC probes and the prepared-digest recheck: writes added
       // here must precede any prepare, and the dedupe set makes this a
       // no-op for transactions prepareCfc() already covered.
-      this.#materializeReferencedSchemaDocuments();
-      // Settle relevance and prepare, so the ladder below decides on a
-      // settled verdict: a relevant transaction arrives at it prepared.
-      this.prepareForCommit();
+      try {
+        this.#materializeReferencedSchemaDocuments();
+        // Settle relevance before choosing the commit disposition.
+        this.prepareForCommit();
+      } catch (error) {
+        const unavailable = validateLocalReadBasis(this);
+        if (unavailable === undefined) throw error;
+        this.abort(unavailable);
+        return { error: TransactionAborted(unavailable) };
+      }
+      const unavailable = validateLocalReadBasis(this);
+      if (unavailable !== undefined) {
+        this.abort(unavailable);
+        return { error: TransactionAborted(unavailable) };
+      }
       if (
         this.#cfcState.relevant &&
         this.#cfcState.enforcementMode !== "disabled" &&

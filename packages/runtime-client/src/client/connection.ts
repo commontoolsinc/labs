@@ -79,9 +79,17 @@ export type PendingRequestDiagnostic = {
   ageMs: number;
 };
 
+/** Terminal disposition of a request, including waits ended without a reply. */
+export type RequestOutcome =
+  | "success"
+  | "error"
+  | "timeout"
+  | "cancelled"
+  | "send-error";
+
 /**
  * One entry of the bounded boot-window request timeline: when the request was
- * sent and when its response settled, as offsets (ms) from the connection's
+ * sent and when its wait ended, as offsets (ms) from the connection's
  * construction. Aggregate stats say a request was slow; this timeline says
  * WHEN it was slow and what else was in flight — the ordering evidence the
  * per-type histograms cannot carry. Only the first `REQUEST_TIMELINE_CAP`
@@ -93,6 +101,7 @@ export type RequestTimelineEntry = {
   sentAtMs: number;
   doneAtMs?: number;
   error?: boolean;
+  outcome?: RequestOutcome;
 };
 
 const REQUEST_TIMELINE_CAP = 96;
@@ -310,7 +319,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     const deferred = defer<CommandResponse<T>, Error>();
 
     const timeoutId = setTimeout(() => {
-      this.#settle(msgId);
+      this.#settle(msgId, "timeout");
       deferred.reject(
         new Error(`RuntimeClient request timed out: ${data.type}`),
       );
@@ -329,7 +338,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     // cancellation when the connection is disposed.
     if (data.type !== RequestType.Dispose) {
       const onAbort = () => {
-        this.#settle(msgId);
+        this.#settle(msgId, "cancelled");
         deferred.reject(signal.reason);
       };
       pending.onAbort = onAbort;
@@ -370,19 +379,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     try {
       this.#transport.send(message);
     } catch (error) {
-      this.#settle(msgId);
-      // The timeline reads a missing `doneAtMs` as still in flight, which is
-      // what a reader mid-diagnosis would take from it -- and this request is
-      // as finished as one gets. It never left, so it is marked done at the
-      // moment it failed, and as an error.
-      const timelineEntry = this.#timelineByMsgId.get(msgId);
-      if (timelineEntry) {
-        timelineEntry.doneAtMs = Math.round(
-          performance.now() - this.#constructedAt,
-        );
-        timelineEntry.error = true;
-        this.#timelineByMsgId.delete(msgId);
-      }
+      this.#settle(msgId, "send-error");
       throw error;
     }
 
@@ -390,11 +387,11 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   }
 
   /**
-   * Removes a pending request's bookkeeping: clears its timeout and detaches
-   * its abort listener. Returns the entry so the caller can settle its
-   * deferred.
+   * Records a terminal wait and releases its timeout and abort listener.
+   * Returns the entry so the caller can settle its deferred. Timeout durations
+   * measure the wait abandoned by the caller, not worker completion.
    */
-  #settle(msgId: number): PendingRequest | undefined {
+  #settle(msgId: number, outcome: RequestOutcome): PendingRequest | undefined {
     const pending = this.#pendingRequests.get(msgId);
     if (!pending) return undefined;
     clearTimeout(pending.timeoutId);
@@ -402,6 +399,22 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       this.#lifetime.signal.removeEventListener("abort", pending.onAbort);
     }
     this.#pendingRequests.delete(msgId);
+    const now = performance.now();
+    ipcLogger.time(pending.startTime, now, "ipc", pending.type);
+    ipcLogger.time(
+      pending.startTime,
+      now,
+      "ipc-outcome",
+      outcome,
+      pending.type,
+    );
+    const timeline = this.#timelineByMsgId.get(msgId);
+    if (timeline) {
+      timeline.doneAtMs = Math.round(now - this.#constructedAt);
+      timeline.outcome = outcome;
+      if (outcome !== "success") timeline.error = true;
+      this.#timelineByMsgId.delete(msgId);
+    }
     return pending;
   }
 
@@ -522,7 +535,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   /**
    * The bounded send/settle timeline of the first requests on this
    * connection (see RequestTimelineEntry). Entries without `doneAtMs` were
-   * still unsettled (pending, timed out, or cancelled) when read.
+   * still pending when read; terminal entries include their outcome.
    */
   getRequestTimelineDiagnostics(): RequestTimelineEntry[] {
     // Copy so a caller cannot mutate the ledger, and late responses cannot
@@ -617,7 +630,10 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       return;
     }
     const { msgId } = message;
-    const pending = this.#settle(msgId);
+    const pending = this.#settle(
+      msgId,
+      "error" in message && message.error ? "error" : "success",
+    );
     if (!pending) {
       // A late response for a request we already settled. Expected after
       // disposal cancelled its in-flight requests; surprising otherwise.
@@ -627,17 +643,6 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
         );
       }
       return;
-    }
-
-    // Record IPC round-trip time using hierarchical keys
-    ipcLogger.time(pending.startTime, "ipc", pending.type);
-    const timelineEntry = this.#timelineByMsgId.get(msgId);
-    if (timelineEntry) {
-      timelineEntry.doneAtMs = Math.round(
-        performance.now() - this.#constructedAt,
-      );
-      if ("error" in message && message.error) timelineEntry.error = true;
-      this.#timelineByMsgId.delete(msgId);
     }
 
     if ("error" in message && message.error) {

@@ -3,6 +3,24 @@ import type {
   FabricValue,
   SchemaPathSelector,
 } from "@commonfabric/api";
+import {
+  type ACL,
+  type AuthorizationError as IAuthorizationError,
+  type ConflictError as IConflictError,
+  type ConnectionError as IConnectionError,
+  type DID,
+  type MemorySpace,
+  type QueryError as IQueryError,
+  type Result,
+  type Revision,
+  type Signer,
+  type State,
+  type The as MediaType,
+  type TransactionError,
+  type Unit,
+  type URI,
+  type Variant,
+} from "@commonfabric/memory/interface";
 import type {
   ApplyOpOperation,
   ApplyOpResolution,
@@ -25,31 +43,13 @@ import type {
   SqliteParamsWire,
   SqliteQueryResult,
   SqliteRegisterDiskSourceResult,
+  ViewInterest,
+  ViewPlan,
 } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
-import type { Cancel } from "../cancel.ts";
-import type { EntityId } from "../create-ref.ts";
-import type { MergeableOpDelta } from "./mergeable-ops.ts";
-import {
-  type ACL,
-  type AuthorizationError as IAuthorizationError,
-  type ConflictError as IConflictError,
-  type ConnectionError as IConnectionError,
-  type DID,
-  type MemorySpace,
-  type QueryError as IQueryError,
-  type Result,
-  type Revision,
-  type Signer,
-  type State,
-  type The as MediaType,
-  type TransactionError,
-  type Unit,
-  type URI,
-  type Variant,
-} from "@commonfabric/memory/interface";
 import type { Immutable } from "@commonfabric/utils/types";
 
+import type { Cancel } from "../cancel.ts";
 import { Cell } from "../cell.ts";
 import type {
   CfcAddress,
@@ -75,9 +75,11 @@ import type {
   TrustSnapshot,
   WritePolicyInput,
 } from "../cfc/mod.ts";
+import type { EntityId } from "../create-ref.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { RAW_META_WRITE } from "../meta-seam.ts";
 import { BaseMemoryAddress } from "../traverse.ts";
+import type { MergeableOpDelta } from "./mergeable-ops.ts";
 export type {
   ACL,
   DID,
@@ -2696,6 +2698,21 @@ export type EventAppendDeliveryOutcome =
   | { delivered: true; deduped?: boolean }
   | { delivered: false; refused: string };
 
+/** Exclusive renderer ownership across runtimes sharing one replica. */
+export interface ViewInterestLease {
+  /** Whether this lease still owns the replica's renderer interests. */
+  isCurrent(): boolean;
+
+  /** Allocates a revision that outlives an individual runtime. */
+  nextRevision(): number;
+
+  /** Replaces only this owner's interests; retired leases are inert. */
+  set(views: ViewInterest[]): Promise<boolean>;
+
+  /** Releases this ownership without clearing a replacement owner's views. */
+  release(): void;
+}
+
 export interface ISpaceReplica extends ISpace {
   /**
    * Return a state for the requested entry or returns `undefined` if replica
@@ -2719,6 +2736,43 @@ export interface ISpaceReplica extends ISpace {
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined;
+
+  /** Claims renderer ownership and retires the previous owner's local graphs. */
+  acquireViewInterests?(onReplaced: Cancel): ViewInterestLease;
+
+  /** Replaces renderer interests while the optional ownership fence holds. */
+  setViewInterests?(
+    views: ViewInterest[],
+    isCurrent?: () => boolean,
+  ): Promise<boolean>;
+
+  /** Negotiates view delivery on this replica's authenticated session. */
+  supportsViewReplication?(): Promise<boolean>;
+
+  /** Whether the current connection retains the negotiated view protocol. */
+  viewReplicationSupported?(): boolean;
+
+  /** Waits for session restoration before issuing fallback subscriptions. */
+  whenSessionRestored?(): Promise<void>;
+
+  /** Observes plan snapshots after their input documents arrive. */
+  subscribeViewPlans?(
+    observer: (plans: readonly ViewPlan[]) => void,
+  ): () => void;
+
+  /** Whether a complete local basis exists, including confirmed absence. */
+  hasLocalDocumentCoverage?(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean;
+
+  /** Observes changes in residency, including delivery of a known absence. */
+  subscribeLocalCoverage?(
+    observer: (
+      addresses: readonly Pick<IMemorySpaceAddress, "id" | "scope">[],
+    ) => void,
+  ): () => void;
 
   /**
    * The doc's NON-speculative document: confirmed state plus only the

@@ -19,11 +19,18 @@ function runtimeErrorCode(error: Error): RuntimeErrorCode | undefined {
  */
 export function runtimeErrorPost(error: Error): ErrorNotification {
   const code = runtimeErrorCode(error);
+  const context = error as ContextualRuntimeError;
   return {
     type: NotificationType.ErrorReport,
     message: error.message,
     ...(code ? { code } : {}),
     stackTrace: error.stack,
+    ...(context.pieceId === undefined ? {} : { pieceId: context.pieceId }),
+    ...(context.space === undefined ? {} : { space: context.space }),
+    ...(context.patternId === undefined
+      ? {}
+      : { patternId: context.patternId }),
+    ...(context.spellId === undefined ? {} : { spellId: context.spellId }),
   };
 }
 

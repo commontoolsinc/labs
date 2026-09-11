@@ -1,15 +1,17 @@
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
-import { arraysOverlap } from "../reactive-dependencies.ts";
+
 import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
+import { arraysOverlap } from "../reactive-dependencies.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   TransactionReactivityLog,
 } from "../storage/interface.ts";
+import { localReadWakeDependencies } from "../storage/local-read-policy.ts";
 import { reactivityLogFromActivities } from "../storage/reactivity-log.ts";
 import {
   getDirectTransactionReactivityLog,
@@ -134,7 +136,9 @@ export function filterIgnoredAddresses(
 export function txToReactivityLog(
   tx: IExtendedStorageTransaction,
 ): ReactivityLog {
-  return toSchedulerReactivityLog(txToTransactionReactivityLog(tx));
+  const log = toSchedulerReactivityLog(txToTransactionReactivityLog(tx));
+  const wakes = localReadWakeDependencies(tx);
+  return wakes.length === 0 ? log : { ...log, reads: [...log.reads, ...wakes] };
 }
 
 function txToTransactionReactivityLog(

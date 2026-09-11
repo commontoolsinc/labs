@@ -13,6 +13,14 @@ serving loop from its row plus the referenced sections.
   RawBuiltinResult` whose `action(tx)` runs under the scheduler. Served
   built-ins keep this shape — the serving loop hosts the same runtime.
 
+The negotiated
+[view-scoped client mode](../../features/view-scoped-client-replication.md) uses
+stored output links for raw builtin boundaries. It constructs neither their
+factories nor request-input hash computations. This also conservatively defers
+pure raw structural builtins and dynamic child setup; the ordinary client's
+speculation permissions below remain broader. The UI keeps authoritative
+pending/error state until the server updates it.
+
 ## 1. Pure structural — serve as-is, speculable
 
 `map`, `filter`, `flatmap`, `if-else`, `when`, `unless`,

@@ -2,7 +2,7 @@
 // dbOwner() and {__ctDbOwner} ceiling placeholders) is minted ONCE, by the
 // initialization that CREATES the handle. The sqliteDatabase builtin re-runs
 // its init in every runtime that opens the piece (the action's `initialized`
-// guard is per-runtime-instance), so a re-initialization must preserve the
+// guard is per scoped instance), so a re-initialization must preserve the
 // committed owner rather than re-mint the CURRENT acting principal — last
 // opener wins would rotate row-read authority to whoever opened the piece
 // most recently. Companion multi-runtime repro:

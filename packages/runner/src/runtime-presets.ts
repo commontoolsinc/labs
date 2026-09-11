@@ -133,6 +133,7 @@
 
 import { toCompactDebugString } from "@commonfabric/data-model";
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
+
 import {
   type CfcConfClause,
   type CfcEnforcementMode,
@@ -147,10 +148,7 @@ import {
   ungatedSink,
 } from "./cfc/mod.ts";
 import { parseFlagValue } from "./experimental-posture.ts";
-import type { CommitBackpressurePolicy } from "./scheduler/backpressure.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
-import type { IStorageManager } from "./storage/interface.ts";
-import type { RuntimeTelemetry } from "./telemetry.ts";
 import type {
   ConsoleHandler,
   ErrorHandler,
@@ -162,6 +160,9 @@ import type {
   RuntimeFetch,
   RuntimeOptions,
 } from "./runtime.ts";
+import type { CommitBackpressurePolicy } from "./scheduler/backpressure.ts";
+import type { IStorageManager } from "./storage/interface.ts";
+import type { RuntimeTelemetry } from "./telemetry.ts";
 
 //
 // Gate 1: the exhaustive option registry.
@@ -187,6 +188,7 @@ export const RUNTIME_OPTION_KEYS = [
   "debug",
   "telemetry",
   "experimental",
+  "clientClass",
   "cfcEnforcementMode",
   "cfcFlowLabels",
   "cfcWriteFloor",
@@ -269,6 +271,8 @@ export const EXPERIMENTAL_ENV_VARS = {
   // declared arm. Env-reachable so every server-side process can be flipped
   // either way, and an explicit value always wins over the constant.
   serverExecution: "EXPERIMENTAL_SERVER_EXECUTION",
+  viewScopedReplication: "EXPERIMENTAL_VIEW_SCOPED_REPLICATION",
+  webViewScopedReplication: "EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 
 /**
@@ -355,6 +359,9 @@ export const EXPERIMENTAL_FLAG_AUTHORITY = {
   lazyMaterialization: "server",
   // The whole point of the flag is which side computes what is stored.
   serverExecution: "server",
+  // Defaults are published fleet-wide; each session negotiates the mode.
+  viewScopedReplication: "server",
+  webViewScopedReplication: "server",
   // The server's traversal decides what a subscription loads, tracks, and
   // ships; a client resolving hops under the other combine rule expects
   // documents the server did not send (or ignores ones it did). The arms
@@ -1050,6 +1057,7 @@ export const runtimePresets = {
    */
   browserWorker(params: BrowserWorkerPresetParams): RuntimeOptions {
     return {
+      clientClass: "web",
       ...coreOptions(params),
       patternEnvironment: { apiUrl: params.apiUrl },
       ...(params.spaceHostMap !== undefined

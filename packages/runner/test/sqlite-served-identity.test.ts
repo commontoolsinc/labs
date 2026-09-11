@@ -136,6 +136,46 @@ describe("sqlite-served-identity", () => {
     expect(handle.owner).toBe(aliceSigner.did());
   });
 
+  it("initializes each demanded session through the same database factory", async () => {
+    const setup = runtime.edit();
+    const parent = runtime.getCell(space, "session factory", undefined, setup);
+    parent.set({});
+    const inputs = runtime.getImmutableCell(
+      space,
+      { tables: {} },
+      undefined,
+      setup,
+    );
+    expect((await setup.commit()).error).toBeUndefined();
+    const handles: SqliteDbRef[] = [];
+    const builtin = sqliteDatabase(
+      inputs,
+      (tx, handle) =>
+        handles.push((handle as Cell<SqliteDbRef>).withTx(tx).get()),
+      () => {},
+      [parent],
+      parent,
+      runtime,
+      { ...parent.getAsNormalizedFullLink(), scope: "session" },
+    );
+    for (const session of ["first", "second", "first"]) {
+      const tx = runtime.edit();
+      demandedStamp(tx, serviceSigner.did(), session);
+      builtin.action(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    expect(handles).toHaveLength(2);
+    expect(handles[0].id).toBe(handles[1].id);
+    expect(handles.map((handle) => handle.scope)).toEqual([
+      "session",
+      "session",
+    ]);
+    expect(handles.map((handle) => handle.owner)).toEqual([
+      serviceSigner.did(),
+      serviceSigner.did(),
+    ]);
+  });
+
   it("mints no owner on a served creation whose run carries no acting principal (fail closed, ownerless handle)", async () => {
     const tx = runtime.edit();
     // An actor-less served run (wave-fallback shape): stamped, but the

@@ -7,6 +7,7 @@ import {
   waitForCondition,
 } from "@commonfabric/integration";
 import { toIndentedDebugString } from "@commonfabric/data-model";
+import type { RequestOutcome } from "@commonfabric/runtime-client";
 
 /**
  * Attribute a mark predicate stamps on the element it resolved, so the test can
@@ -454,16 +455,19 @@ const focusMarkedTarget = (target: HTMLElement): void => {
   target.focus();
 };
 
-// The `index`-th element matching `selector`. The selector already resolves to
-// clickable elements, so the match is taken directly rather than reached
-// through a host's shadow root.
+// The `index`-th element matching `selector`, once it and its wrapped control
+// are enabled. The index includes disabled matches so enabling a control does
+// not change which one the click targets.
 const findNthClickTarget = (
   probe: ProbeApi,
   selector: string,
   index: number,
 ): readonly HTMLElement[] | undefined => {
   const target = probe.collect(selector)[index] as HTMLElement | undefined;
-  return target ? [target] : undefined;
+  if (!target || probe.isDisabled(target)) return undefined;
+  const inner = target.shadowRoot?.querySelector("[data-cf-button]");
+  if (inner && probe.isDisabled(inner)) return undefined;
+  return [target];
 };
 
 // The first rendered, enabled element carrying `data-ui-action="<action>"`.
@@ -2034,11 +2038,17 @@ export interface BrowserLoadSummary {
   label: string;
 
   /**
-   * Main-thread `runtime-client` IPC round-trip timing. p95/max here ballooning
-   * (and approaching the 60s request timeout) is the multi-browser-slowness
-   * signal: the main thread is waiting on a saturated worker.
+   * Main-thread `runtime-client` IPC wait timing, including terminal failures.
+   * Long waits can reflect worker computation or downstream storage and server
+   * waits; worker and server profiles distinguish those causes.
    */
   ipc: TimingStatRow[];
+
+  /** Every non-success terminal outcome, without ranking or truncation. */
+  ipcFailures: TimingStatRow[];
+
+  /** Whether worker statistics could be collected for this snapshot. */
+  workerStatus: "collected" | "skipped" | "unavailable";
 
   /**
    * Requests still in flight on the main thread when the summary was taken
@@ -2073,22 +2083,24 @@ export interface BrowserLoadSummary {
     sentAtMs: number;
     doneAtMs?: number;
     error?: boolean;
+    outcome?: RequestOutcome;
   }>;
 }
 
 /**
- * Collect aggregate timing stats from one browser: main-thread IPC round-trips
+ * Collect aggregate timing stats from one browser: main-thread IPC waits
  * (`commonfabric.getTimingStatsBreakdown()`) plus the worker's
- * scheduler/runner/storage timing (`commonfabric.rt.getLoggerCounts()`). One
- * IPC round-trip; safe to call in a `finally`/teardown (worker errors are
- * swallowed). Reading these across all profiles after a run quantifies the
- * cross-browser contention behind dual-browser slowness.
+ * scheduler/runner/storage timing (`commonfabric.rt.getLoggerCounts()`).
+ * Worker collection is skipped after an IPC timeout, or when `includeWorker`
+ * is false, so failure diagnostics can be read without another request to a
+ * stalled worker. Missing worker statistics are identified by `workerStatus`.
  */
 export async function collectBrowserLoadSummary(
   page: Page,
   label: string,
+  options: { includeWorker?: boolean } = {},
 ): Promise<BrowserLoadSummary> {
-  const collected = await page.evaluate(async () => {
+  const collected = await page.evaluate(async (includeWorker: boolean) => {
     type Stats = {
       count?: number;
       average?: number;
@@ -2134,33 +2146,41 @@ export async function collectBrowserLoadSummary(
             sentAtMs: number;
             doneAtMs?: number;
             error?: boolean;
+            outcome?: RequestOutcome;
           }>;
         };
       };
     }).commonfabric;
 
-    const mainTiming = cf?.getTimingStatsBreakdown?.() ?? {};
-    const ipc = toRows(mainTiming["runtime-client"], 14);
-    let pendingIpc: Array<{ type: string; ageMs: number }> = [];
-    let requestTimeline: Array<{
-      type: string;
-      sentAtMs: number;
-      doneAtMs?: number;
-      error?: boolean;
-    }> = [];
-    try {
-      pendingIpc = (cf?.rt?.getPendingRequests?.() ?? [])
-        .map(({ type, ageMs }) => ({ type, ageMs }));
-      requestTimeline = (cf?.rt?.getRequestTimeline?.() ?? [])
-        .map(({ type, sentAtMs, doneAtMs, error }) => ({
-          type,
-          sentAtMs,
-          ...(doneAtMs !== undefined ? { doneAtMs } : {}),
-          ...(error ? { error } : {}),
-        }));
-    } catch {
-      // A disposed runtime still yields a useful summary without this.
-    }
+    const collectMain = () => {
+      const timing = cf?.getTimingStatsBreakdown?.()["runtime-client"] ?? {};
+      const rows = toRows(timing, Infinity);
+      return {
+        ipc: rows.filter((row) => !row.key.startsWith("ipc-outcome/"))
+          .slice(0, 14),
+        ipcFailures: rows.filter((row) =>
+          row.key.startsWith("ipc-outcome/") &&
+          !row.key.startsWith("ipc-outcome/success/")
+        ),
+        pendingIpc: (cf?.rt?.getPendingRequests?.() ?? [])
+          .map(({ type, ageMs }) => ({ type, ageMs })),
+        requestTimeline: (cf?.rt?.getRequestTimeline?.() ?? [])
+          .map(({ type, sentAtMs, doneAtMs, error, outcome }) => ({
+            type,
+            sentAtMs,
+            ...(doneAtMs !== undefined ? { doneAtMs } : {}),
+            ...(error ? { error } : {}),
+            ...(outcome !== undefined ? { outcome } : {}),
+          })),
+      };
+    };
+    const skipWorker = !includeWorker ||
+      collectMain().ipcFailures.some((row) =>
+        row.key.startsWith("ipc-outcome/timeout/")
+      );
+    let workerStatus: "collected" | "skipped" | "unavailable" = skipWorker
+      ? "skipped"
+      : "unavailable";
 
     let worker: ReturnType<typeof toRows> = [];
     let workerIpc: Record<string, number> = {};
@@ -2180,7 +2200,10 @@ export async function collectBrowserLoadSummary(
       overlayCascadeEchoFlickers: 0,
     };
     try {
-      const workerCounts = await cf?.rt?.getLoggerCounts?.();
+      const workerCounts = skipWorker
+        ? undefined
+        : await cf?.rt?.getLoggerCounts?.();
+      if (workerCounts !== undefined) workerStatus = "collected";
       const workerTiming = workerCounts?.timing ?? {};
       // Prefix-match so sub-loggers are included: storage commit/conflict
       // timings live under `storage.v2` (+ `.transaction`/`.multi-space-commit`),
@@ -2263,11 +2286,13 @@ export async function collectBrowserLoadSummary(
       // the contention story.
     }
 
-    return { ipc, pendingIpc, workerIpc, worker, churn, requestTimeline };
-  });
+    return { ...collectMain(), workerIpc, worker, churn, workerStatus };
+  }, { args: [options.includeWorker ?? true] });
   return {
     label,
     ipc: collected.ipc,
+    ipcFailures: collected.ipcFailures,
+    workerStatus: collected.workerStatus,
     pendingIpc: collected.pendingIpc,
     workerIpc: collected.workerIpc,
     worker: collected.worker,
@@ -2694,17 +2719,21 @@ export function logBrowserLoadSummary(summary: BrowserLoadSummary): void {
         row.doneAtMs !== undefined
           ? String(row.doneAtMs).padStart(7)
           : "pending"
-      } ${row.type}${row.error ? " ERROR" : ""}`
+      } ${row.type}${
+        row.outcome ? ` ${row.outcome}` : row.error ? " ERROR" : ""
+      }`
     ).join("\n");
   console.log(
-    `\n[${summary.label}] main-thread runtime-client IPC round-trips (ms):\n` +
+    `\n[${summary.label}] main-thread runtime-client IPC waits (ms):\n` +
       `${formatRows(summary.ipc)}\n` +
+      `[${summary.label}] terminal IPC failures (ms):\n` +
+      `${formatRows(summary.ipcFailures)}\n` +
       `[${summary.label}] main-thread IPC still pending:\n${pendingLine}\n` +
       `[${summary.label}] request timeline (sentAt..doneAt ms):\n` +
       `${timelineLine}\n` +
       `[${summary.label}] worker request ledger (received/responded):\n` +
       `${workerIpcLine}\n` +
-      `[${summary.label}] worker scheduler/runner/storage (ms):\n` +
+      `[${summary.label}] worker scheduler/runner/storage (${summary.workerStatus}, ms):\n` +
       `${formatRows(summary.worker)}\n` +
       `[${summary.label}] churn / conflict counters:\n${churnLine}`,
   );

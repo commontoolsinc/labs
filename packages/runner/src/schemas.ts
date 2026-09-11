@@ -245,6 +245,15 @@ export const nameSchema = internSchema(
 
 export type NameSchema = Schema<typeof nameSchema>;
 
+/** Piece chrome and the opaque UI tip; mounted renderers own deeper reads. */
+export const viewPieceSchema = internSchema({
+  type: "object",
+  properties: {
+    [NAME]: { type: "string" },
+    [UI]: { type: "unknown", asCell: ["cell"] },
+  },
+});
+
 export const uiSchema = internSchema(
   {
     type: "object",

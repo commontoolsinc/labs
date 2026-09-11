@@ -59,6 +59,10 @@ import type { Runtime } from "../runtime.ts";
  * `settled(Infinity)` before it tears anything down, so the store a reader is
  * handed afterwards carries whatever the seed wrote. A caller does not register
  * the returned promise; this function registers the chain.
+ *
+ * `scopeKeyIdentity` carries the deferring run's viewing identity through the
+ * asynchronous pull and each seed attempt, so scoped containers initialize the
+ * instance whose absence caused the deferral.
  */
 export function seedResultContainerWhenPullSettles(
   runtime: Runtime,

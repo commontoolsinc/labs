@@ -1,22 +1,23 @@
 import type { MemorySpace } from "@commonfabric/memory/interface";
+
 import type {
   ChangeGroup,
   IMemoryChange,
   IMemorySpaceAddress,
   StorageNotification,
 } from "../storage/interface.ts";
-import type { TriggerIndexState } from "./trigger-index.ts";
+import { summarizeTriggerTraceValue } from "./diagnostics.ts";
+import { dirtyFanOutAll, dirtyFanOutForCause } from "./fan-out.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
 import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
-import { dirtyFanOutAll, dirtyFanOutForCause } from "./fan-out.ts";
-import { summarizeTriggerTraceValue } from "./diagnostics.ts";
-import { shaperInstanceGroupKey } from "./wake-shaping.ts";
+import type { TriggerIndexState } from "./trigger-index.ts";
 import type {
   Action,
   SpaceScopeAndURI,
   TriggerTraceActionRecord,
   TriggerTraceEntry,
 } from "./types.ts";
+import { shaperInstanceGroupKey } from "./wake-shaping.ts";
 
 export type SchedulerMode = "pull";
 
@@ -279,7 +280,7 @@ export function markInvalid(
   }
   // Status transition goes through the registry so the invalid-node index
   // stays in lockstep; never-ran nodes keep their status (already indexed).
-  if (record.status === "clean") {
+  if (record.status === "clean" || record.status === "unavailable") {
     nodes.setStatus(action, "invalid");
   }
 }

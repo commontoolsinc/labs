@@ -1,5 +1,4 @@
 import type { CellScope } from "@commonfabric/api";
-import type { MetaField } from "@commonfabric/runner";
 import type {
   FabricArray,
   FabricPlainObject,
@@ -18,6 +17,7 @@ import type {
   OpCursor,
   OperationFieldSnapshot,
 } from "@commonfabric/memory/v2";
+import type { MetaField } from "@commonfabric/runner";
 import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
 import type {
@@ -742,6 +742,12 @@ export type InitializationData = {
      * answer.
      */
     serverExecution?: boolean;
+
+    /** Global default for server-selected view replication. */
+    viewScopedReplication?: boolean;
+
+    /** Web client override of the global view replication default. */
+    webViewScopedReplication?: boolean;
 
     /**
      * Whether a link writer emits `cid:` schema-document references, each

@@ -1,5 +1,3 @@
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   fabricAwareEqual,
   FabricInstance,
@@ -10,16 +8,30 @@ import {
   valueEqual,
 } from "@commonfabric/data-model";
 import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model-schema";
+import { getServerExecutionConfig } from "@commonfabric/memory/v2";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import { isAliasBinding } from "./alias-binding.ts";
+import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
+import type {
+  Cell,
+  CellScope,
+  DerivedInternalCellDescriptor,
+} from "./builder/types.ts";
 import {
   type FabricExecValue,
   isPattern,
   type JSONSchema,
   type JSONValue,
 } from "./builder/types.ts";
-import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
 import { type AnyCell } from "./cell.ts";
-import { resolveLink } from "./link-resolution.ts";
+import {
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
 import { diffAndUpdate } from "./data-updating.ts";
+import { resolveLink } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
@@ -34,24 +46,13 @@ import {
   sanitizeSchemaForLinks,
   sigilLinkAddressOnly,
 } from "./link-utils.ts";
-import { isAliasBinding } from "./alias-binding.ts";
-import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
+import { isCellScope, scopeRank } from "./scope.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   internalVerifierRead,
   machineryRead,
 } from "./storage/reactivity-log.ts";
-import {
-  ContextualFlowControl,
-  resolveExternalRootRefForStructure,
-} from "./cfc.ts";
-import type {
-  Cell,
-  CellScope,
-  DerivedInternalCellDescriptor,
-} from "./builder/types.ts";
-import { isCellScope, scopeRank } from "./scope.ts";
-import { getServerExecutionConfig } from "@commonfabric/memory/v2";
 
 /**
  * Longest rendering of a binding an error message carries. A binding can
@@ -835,7 +836,10 @@ export function opaqueArgumentKeys(
 export function findAllWriteRedirectCells<T>(
   binding: unknown,
   baseCell: AnyCell<T>,
-  options?: { skipTopLevelKeys?: ReadonlySet<string> },
+  options?: {
+    skipTopLevelKeys?: ReadonlySet<string>;
+    followRedirectChains?: boolean;
+  },
 ): NormalizedFullLink[] {
   const skipTopLevelKeys = options?.skipTopLevelKeys;
   const seen: NormalizedFullLink[] = [];
@@ -864,6 +868,7 @@ export function findAllWriteRedirectCells<T>(
       const link = parseLink(binding, baseCell.getAsNormalizedFullLink());
       if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
       seen.push(link);
+      if (options?.followRedirectChains === false) return;
       const linkCell = baseCell.runtime.getCellFromLink(
         link,
         undefined,

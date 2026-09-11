@@ -1,4 +1,5 @@
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import { ToolsArraySchema } from "@commonfabric/runner/component-read-contract";
+import { type CellHandle } from "@commonfabric/runtime-client";
 import { consume } from "@lit/context";
 import { css, html, nothing, render } from "lit";
 import { property, state } from "lit/decorators.js";
@@ -54,54 +55,6 @@ export type ToolsRecord = Record<
 type ToolsInput = ToolsChipTool[] | ToolsRecord;
 
 // JSON Schema for tools array (used when binding CellHandle)
-const ToolsArraySchema = {
-  anyOf: [
-    {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          description: { type: "string" },
-          schema: {
-            type: "object",
-            properties: { "description": { type: "string" } },
-          },
-        },
-        required: ["name"],
-      },
-    },
-    {
-      type: "object",
-      additionalProperties: {
-        type: "object",
-        properties: {
-          description: { type: "string" },
-          handler: {
-            type: "object",
-            properties: {
-              "description": { type: "string" },
-              "argumentSchema": {
-                type: "object",
-                properties: { "description": { type: "string" } },
-              },
-            },
-          },
-          pattern: {
-            type: "object",
-            properties: {
-              "description": { type: "string" },
-              "argumentSchema": {
-                type: "object",
-                properties: { "description": { type: "string" } },
-              },
-            },
-          },
-        },
-      },
-    },
-  ],
-} as const satisfies JSONSchema;
 
 export class CFToolsChip extends BaseElement {
   /** Cell controller for tools binding */

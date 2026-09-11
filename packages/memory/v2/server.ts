@@ -2,6 +2,7 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 
 import type { FabricValue } from "@commonfabric/api";
+import { cloneIfNecessary, valueEqual } from "@commonfabric/data-model";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { metrics, SpanStatusCode, trace } from "@opentelemetry/api";
@@ -68,6 +69,8 @@ import {
   type SessionOpenResult,
   type SessionRevokedMessage,
   type SessionSync,
+  type SessionViewHandle,
+  type SessionViewInterest,
   type SqliteDbRef,
   type SqliteNamedParamsWire,
   type SqliteNativeRow,
@@ -84,6 +87,9 @@ import {
   type StreamLinkRef,
   type TransactRequest,
   type V2Error,
+  type ViewInterest,
+  type ViewPlan,
+  type ViewQuery,
   type WatchAddRequest,
   type WatchAddResult,
   type WatchSetRequest,
@@ -93,7 +99,15 @@ import {
 } from "../v2.ts";
 import { classifyCommitTelemetry } from "./commit-telemetry.ts";
 import * as Engine from "./engine.ts";
+import {
+  executionLeaseHolder,
+  liveExecutionLeaseHolder,
+} from "./execution-lease.ts";
 import { respondToHello } from "./handshake.ts";
+import {
+  createDefaultOperationCodecRegistry,
+  type OperationCodecRegistry,
+} from "./operation-codec.ts";
 import {
   cloneTrackedGraphState,
   createQueryEvaluationCache,
@@ -114,15 +128,6 @@ import {
   type TrackedGraphState,
   trackGraph,
 } from "./query.ts";
-import {
-  executionLeaseHolder,
-  liveExecutionLeaseHolder,
-} from "./execution-lease.ts";
-import {
-  createDefaultOperationCodecRegistry,
-  type OperationCodecRegistry,
-} from "./operation-codec.ts";
-import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import {
   buildDiffSync,
   buildFullSync,
@@ -158,7 +163,13 @@ import { assertReadOnly } from "./sqlite/guard.ts";
 import { ReadConnectionPool } from "./sqlite/read-pool.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
+import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
+import {
+  parseViewInterests,
+  parseViewQuery,
+  viewWatches,
+} from "./view-interest.ts";
 
 export { SessionRegistry } from "./session-registry.ts";
 
@@ -1327,6 +1338,7 @@ class Connection {
       derivedDirty: ReadonlySet<string>;
       group: "prioritized" | "followers";
     },
+    publicationLocked = false,
   ): Promise<number> {
     if (this.#closed) {
       return 0;
@@ -1365,6 +1377,7 @@ class Connection {
           sessionId,
           dirtyIds,
           dirtyOrigins,
+          publicationLocked,
         );
       } catch (error) {
         // A refresh evaluation failure means one of two things: a bad
@@ -4395,8 +4408,235 @@ export class Server {
     }
   }
 
+  /** Lists live authenticated views for the co-hosted execution planner. */
+  viewInterestsForSpace(
+    space: string,
+    options: { excludePrincipal?: string } = {},
+  ): readonly SessionViewInterest[] {
+    return this.#sessions.sessionsForSpace(space).flatMap((session) => {
+      if (
+        options.excludePrincipal !== undefined &&
+        session.principal === options.excludePrincipal
+      ) return [];
+      return session.views.map((view) => ({
+        handle: {
+          sessionId: session.id,
+          sessionEpoch: session.viewEpoch,
+          viewEpoch: session.viewEpochs.get(view.id)!,
+          viewId: view.id,
+          revision: view.revision,
+        },
+        principal: session.principal,
+        attached: session.ownerConnectionId !== null,
+        view,
+        selectionGeneration: session.viewSelections.get(view.id)?.generation,
+      }));
+    });
+  }
+
+  /** Installs delivery roots for a still-current view under its READ authority. */
+  async setViewSelection(space: string, handle: SessionViewHandle, selection: {
+    generation: number;
+    delivery: readonly ViewQuery[];
+    eligibleActions?: readonly string[];
+    pieces?: ViewPlan["pieces"];
+    inputs?: ViewPlan["inputs"];
+    producers?: ViewPlan["producers"];
+    errors?: ViewPlan["errors"];
+  }): Promise<boolean> {
+    selection = cloneIfNecessary(selection, { frozen: false });
+    return await this.#withSpacePublicationLock(space, async () => {
+      const session = this.#sessions.get(space, handle.sessionId);
+      const current = () =>
+        session !== null &&
+        this.#sessions.get(space, handle.sessionId) === session &&
+        session.viewEpoch === handle.sessionEpoch &&
+        session.viewEpochs.get(handle.viewId) === handle.viewEpoch &&
+        session.views.some((view) =>
+          view.id === handle.viewId && view.revision === handle.revision
+        );
+      if (!current()) return false;
+      if (
+        !Number.isSafeInteger(selection.generation) ||
+        selection.generation < 0 ||
+        selection.delivery.some((query) => parseViewQuery(query) === null)
+      ) {
+        throw new Error("Invalid view selection");
+      }
+      const engine = await this.#openEngine(space);
+      if (
+        !current() || this.#authorizeCurrentSessionWithEngine(
+          engine,
+          space,
+          handle.sessionId,
+          session!,
+          "READ",
+        )
+      ) return false;
+      const denyForeign = this.#denyForeignServingScopedRead(
+        space,
+        session!,
+        watchReadRoots(selection.delivery.map((query, index) => ({
+          id: `selection:${index}`,
+          kind: "graph" as const,
+          query,
+        }))),
+      );
+      if (denyForeign) return false;
+      // Resolve schema and graph closure before publishing planner output.
+      // A failed selection leaves the session's existing delivery intact.
+      await this.evaluateWatchSet(
+        space,
+        selection.delivery.map((query, index) => ({
+          id: `selection:${index}`,
+          kind: "graph" as const,
+          query,
+        })),
+        engine,
+        { principal: session!.principal, sessionId: session!.id },
+      );
+      if (!current()) return false;
+      const previous = session!.viewSelections.get(handle.viewId);
+      if (
+        previous !== undefined && selection.generation <= previous.generation
+      ) {
+        return selection.generation === previous.generation &&
+          valueEqual(previous, { ...selection, revision: handle.revision });
+      }
+      session!.viewSelections.set(handle.viewId, {
+        ...selection,
+        revision: handle.revision,
+      });
+      session!.forceFullResync = true;
+      this.markSpaceDirty(space, []);
+      return true;
+    });
+  }
+
+  /** Publishes eligibility only with the document frame that supplies its inputs. */
+  #attachViewPlans(session: SessionState, sync: SessionSync): void {
+    sync.viewPlans = session.views.map((view) => {
+      const selection = session.viewSelections.get(view.id);
+      return {
+        id: view.id,
+        revision: view.revision,
+        generation: selection?.generation ?? 0,
+        eligibleActions: [...(selection?.eligibleActions ?? [])],
+        pieces: [...(selection?.pieces ?? [])],
+        inputs: [...(selection?.inputs ?? [])],
+        producers: [...(selection?.producers ?? [])],
+        errors: [...(selection?.errors ?? [])],
+      };
+    });
+  }
+
+  /** Evaluates demand independently from delivery-only supporting roots. */
+  async #evaluateViewWatchSet(
+    session: SessionState,
+    watches: readonly WatchSpec[],
+    views: readonly ViewInterest[],
+    engine?: Engine.Engine,
+  ) {
+    engine ??= await this.#openEngine(session.space);
+    const identity = { principal: session.principal, sessionId: session.id };
+    const renderWatches = views.length === 0
+      ? [...watches]
+      : [...watches, ...viewWatches(views)].map((watch, index) => ({
+        ...watch,
+        id: `view-demand:${index}`,
+      }));
+    const demand = await this.evaluateWatchSet(
+      session.space,
+      renderWatches,
+      engine,
+      identity,
+    );
+    const selected: WatchSpec[] = [];
+    for (const view of views) {
+      const selection = session.viewSelections.get(view.id);
+      if (selection?.revision !== view.revision) continue;
+      for (const [index, query] of selection.delivery.entries()) {
+        selected.push({
+          id: `view-support:${view.id}:${index}`,
+          kind: "graph",
+          query,
+        });
+      }
+    }
+    const delivery = selected.length === 0
+      ? demand
+      : await this.evaluateWatchSet(
+        session.space,
+        selected,
+        engine,
+        identity,
+      );
+    const graphs = new Map([...demand.graphs].map(([branch, graph]) => [
+      views.length === 0 ? branch : `view-demand:${branch}`,
+      graph,
+    ]));
+    if (delivery !== demand) {
+      for (const [branch, graph] of delivery.graphs) {
+        graphs.set(`view-support:${branch}`, graph);
+      }
+    }
+    return {
+      ...delivery,
+      graphs,
+      entities: this.#entriesFromGraphs(graphs.values(), identity),
+      demandGraphs: demand.graphs,
+      demandEntities: demand.entities,
+    };
+  }
+
+  /** Extends ordinary demand while retaining the view's rendered and support graphs. */
+  async #extendViewWatchSet(
+    session: SessionState,
+    watches: readonly WatchSpec[],
+    engine?: Engine.Engine,
+  ) {
+    engine ??= await this.#openEngine(session.space);
+    const existing = new Set(session.watches.map((watch) => watch.id));
+    const { graphs: demandGraphs } = this.#extendWatchGraphs(
+      session,
+      engine,
+      watches.filter((watch) => !existing.has(watch.id)),
+      session.viewDemandGraphs,
+    );
+    const graphs = new Map(session.graphs);
+    for (const [branch, graph] of demandGraphs) {
+      graphs.set(`view-demand:${branch}`, graph);
+    }
+    const identity = this.#sessionScopeIdentity(session);
+    return {
+      serverSeq: Engine.serverSeq(engine),
+      graphs,
+      entities: this.#entriesFromGraphs(graphs.values(), identity),
+      demandGraphs,
+      demandEntities: this.#entriesFromGraphs(demandGraphs.values(), identity),
+    };
+  }
+
   async watchSet(
     message: WatchSetRequest,
+  ): Promise<ResponseMessage<WatchSetResult>> {
+    if (
+      message.views !== undefined ||
+      (this.#sessions.get(message.space, message.sessionId)?.views.length ??
+          0) > 0
+    ) {
+      return await this.#withSpacePublicationLock(
+        message.space,
+        () => this.#watchSet(message),
+      );
+    }
+    return await this.#watchSet(message);
+  }
+
+  /** Helper for watchSet(), which stages and installs one watch union. */
+  async #watchSet(
+    message: WatchSetRequest,
+    incremental = false,
   ): Promise<ResponseMessage<WatchSetResult>> {
     const session = this.#sessions.get(message.space, message.sessionId);
     if (session === null) {
@@ -4404,6 +4644,54 @@ export class Server {
         message.requestId,
         toError("SessionError", "Unknown session for space"),
       );
+    }
+    if (incremental) {
+      for (const watch of message.watches) {
+        const previous = session.watches.find((candidate) =>
+          candidate.id === watch.id
+        );
+        if (previous !== undefined && !sameWatchSpec(previous, watch)) {
+          return respondTypedError<WatchSetResult>(
+            message.requestId,
+            toError(
+              "ProtocolError",
+              "session.watch.add may not replace an existing watch id",
+            ),
+          );
+        }
+      }
+      message = {
+        ...message,
+        watches: mergeWatchesById(session.watches, message.watches),
+      };
+    }
+    const parsedViews = parseViewInterests(message.views);
+    if (
+      parsedViews === null ||
+      ((parsedViews?.length ?? 0) > 0 && !getServerExecutionConfig())
+    ) {
+      return respondTypedError<WatchSetResult>(
+        message.requestId,
+        toError(
+          "ProtocolError",
+          "View replication requires valid interests and server execution",
+        ),
+      );
+    }
+    const views = parsedViews ?? session.views;
+    for (const view of views) {
+      const previous = session.views.find((candidate) =>
+        candidate.id === view.id
+      );
+      if (
+        previous !== undefined && (view.revision < previous.revision ||
+          (view.revision === previous.revision && !valueEqual(view, previous)))
+      ) {
+        return respondTypedError<WatchSetResult>(
+          message.requestId,
+          toError("ProtocolError", "A changed view requires a newer revision"),
+        );
+      }
     }
     const aclEngine = this.#aclMode() === "off"
       ? undefined
@@ -4431,7 +4719,7 @@ export class Server {
       const denyForeign = this.#denyForeignServingScopedRead(
         message.space,
         session,
-        watchReadRoots(message.watches),
+        watchReadRoots([...message.watches, ...viewWatches(views)]),
       );
       if (denyForeign) {
         return respondTypedError<WatchSetResult>(
@@ -4460,30 +4748,50 @@ export class Server {
 
     try {
       const nextOperationCursors = new Map<string, OpCursor>();
-      const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
-        message.space,
-        message.watches,
-        aclEngine,
-        {
-          principal: session.principal,
-          sessionId: message.sessionId,
-        },
-      );
+      const evaluated: Awaited<ReturnType<Server["evaluateWatchSet"]>> & {
+        demandGraphs?: typeof session.graphs;
+        demandEntities?: typeof session.entities;
+      } = views.length === 0
+        ? await this.evaluateWatchSet(
+          message.space,
+          message.watches,
+          aclEngine,
+          {
+            principal: session.principal,
+            sessionId: message.sessionId,
+          },
+        )
+        : incremental && !session.forceFullResync
+        ? await this.#extendViewWatchSet(session, message.watches, aclEngine)
+        : await this.#evaluateViewWatchSet(
+          session,
+          message.watches,
+          views,
+          aclEngine,
+        );
+      const { serverSeq, graphs, entities } = evaluated;
+      const demandGraphs = evaluated.demandGraphs ?? graphs;
+      const demandEntities = evaluated.demandEntities ?? entities;
       // Stage A (OW17's wire leg): a session whose lease-holder read
       // exemption is live receives instance-KEYED frames — it may
       // name two instances of one (branch, id, scope), which the
       // scope name alone cannot distinguish. Every other session's
       // frames are byte-identical to before.
       const keyed = session.leaseHolderReads === true;
-      // A client that declares its holdings gets the DIFFERENCE between
-      // the new union and what it says it holds: a re-establishing
-      // reconnect (the server forgot the session) then re-delivers only
-      // what the client lacks or has stale, and retracts what it holds
-      // that the union no longer covers, instead of the whole union. A
-      // request without holdings is the full union as before — the
-      // server's memory of a session it forgot is empty, and a client
-      // that did not speak is not assumed to hold anything.
-      const sync = message.holdings === undefined
+      // Additions diff against this session's delivery state. Replacements
+      // use the client's declared holdings, or supply the full union when
+      // it declares none. A re-established session can therefore recover
+      // missing documents without assuming that its client holds them.
+      const sync = incremental
+        ? buildDiffSync(
+          session.entities,
+          entities,
+          session.lastSyncedSeq,
+          serverSeq,
+          undefined,
+          keyed,
+        )
+        : message.holdings === undefined
         ? buildFullSync(
           session.entities,
           entities,
@@ -4509,6 +4817,42 @@ export class Server {
         message.watches,
         nextOperationCursors,
       );
+      if (
+        (message.views !== undefined || views.length > 0) &&
+        this.#sessions.get(message.space, message.sessionId) !== session
+      ) {
+        return respondTypedError<WatchSetResult>(
+          message.requestId,
+          toError(
+            "SessionError",
+            "View session was replaced during evaluation",
+          ),
+        );
+      }
+      const viewEpochs = new Map<string, string>();
+      for (const view of views) {
+        const previous = session.views.find((candidate) =>
+          candidate.id === view.id
+        );
+        viewEpochs.set(
+          view.id,
+          previous?.revision === view.revision
+            ? session.viewEpochs.get(view.id) ?? crypto.randomUUID()
+            : crypto.randomUUID(),
+        );
+      }
+      session.viewEpochs = viewEpochs;
+      session.views = views;
+      session.viewSelections = new Map(
+        [...session.viewSelections].filter(([id, selection]) =>
+          views.some((view) =>
+            view.id === id && view.revision === selection.revision
+          )
+        ),
+      );
+      session.forceFullResync = false;
+      session.viewDemandGraphs = demandGraphs;
+      session.viewDemandEntities = demandEntities;
       session.watches = message.watches;
       session.operationCursors = nextOperationCursors;
       session.graphs = graphs;
@@ -4519,7 +4863,14 @@ export class Server {
         { principal: session.principal, sessionId: message.sessionId },
       );
       this.#addMissedToTrackedIds(session.trackedIds, graphs.values());
+      for (const key of trackedIdsFromEntries(demandEntities.values())) {
+        session.trackedIds.add(key);
+      }
+      this.#addMissedToTrackedIds(session.trackedIds, demandGraphs.values());
       session.lastSyncedSeq = serverSeq;
+      if (message.views !== undefined || views.length > 0) {
+        this.#attachViewPlans(session, sync);
+      }
       this.#notifyDemandChanged(message.space, "watch", session.principal);
       return {
         type: "response",
@@ -4544,6 +4895,73 @@ export class Server {
     }
   }
 
+  /** Stages additions without re-evaluating roots already covered by a graph. */
+  #extendWatchGraphs(
+    session: SessionState,
+    engine: Engine.Engine,
+    watches: readonly WatchSpec[],
+    previous: SessionState["graphs"],
+  ) {
+    const graphs = new Map(previous);
+    const identity = this.#sessionScopeIdentity(session);
+
+    const updates = new Map<string, SessionCacheEntry>();
+    const recordUpdate = (docKey: QueryDocKey, entity: EntitySnapshot) => {
+      const { scopeKey } = fromDocKey(docKey);
+      const entry = toCacheEntry(entity, identity, scopeKey);
+      updates.set(
+        cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
+        entry,
+      );
+    };
+    const attribution = createRootAttribution();
+    for (const [branch, query] of groupedQueries(watches)) {
+      const existing = graphs.get(branch);
+      if (existing === undefined) {
+        const tracked = trackGraph(
+          session.space,
+          engine,
+          query,
+          undefined,
+          {
+            principal: session.principal,
+            sessionId: session.id,
+            evaluationCache: this.#evaluationCacheFor(session.space),
+          },
+        );
+        foldRootAttribution(attribution, tracked.stats);
+        // Enforced per evaluation, not per request: a later group's
+        // failure (or a failing operation-field attachment) must not
+        // leave an already-inserted entry over budget.
+        this.#enforceEvaluationCacheBudget();
+        graphs.set(branch, tracked.state);
+        for (const [docKey, entity] of tracked.state.entities) {
+          recordUpdate(docKey, entity);
+        }
+        continue;
+      }
+
+      if (isGraphQueryCoveredByState(session.space, existing, query)) {
+        continue;
+      }
+
+      const staged = cloneTrackedGraphState(engine, existing);
+      graphs.set(branch, staged);
+      const extended = extendTrackedGraph(
+        session.space,
+        engine,
+        staged,
+        query,
+      );
+      foldRootAttribution(attribution, extended.stats);
+      for (const [docKey, entity] of extended.updates) {
+        recordUpdate(docKey, entity);
+      }
+    }
+
+    return { graphs, updates, attribution };
+  }
+
   /** Add session watches, timing admission through the handler's completion. */
   async watchAdd(
     message: WatchAddRequest,
@@ -4565,6 +4983,16 @@ export class Server {
       return respondTypedError<WatchAddResult>(
         message.requestId,
         toError("SessionError", "Unknown session for space"),
+      );
+    }
+    if (session.views.length > 0) {
+      return await this.#withSpacePublicationLock(
+        message.space,
+        () =>
+          this.#watchSet({
+            ...message,
+            type: "session.watch.set",
+          }, true),
       );
     }
     const aclEngine = this.#aclMode() === "off"
@@ -4667,62 +5095,12 @@ export class Server {
       }
 
       const nextWatches = mergeWatchesById(session.watches, newWatches);
-      const graphs = new Map(session.graphs);
-      const identity = this.#sessionScopeIdentity(session);
-
-      const updates = new Map<string, SessionCacheEntry>();
-      const recordUpdate = (docKey: QueryDocKey, entity: EntitySnapshot) => {
-        const { scopeKey } = fromDocKey(docKey);
-        const entry = toCacheEntry(entity, identity, scopeKey);
-        updates.set(
-          cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
-          entry,
-        );
-      };
-      const attribution = createRootAttribution();
-      for (const [branch, query] of groupedQueries(newWatches)) {
-        const existing = graphs.get(branch);
-        if (existing === undefined) {
-          const tracked = trackGraph(
-            message.space,
-            engine,
-            query,
-            undefined,
-            {
-              principal: session.principal,
-              sessionId: message.sessionId,
-              evaluationCache: this.#evaluationCacheFor(message.space),
-            },
-          );
-          foldRootAttribution(attribution, tracked.stats);
-          // Enforced per evaluation, not per request: a later group's
-          // failure (or a failing operation-field attachment) must not
-          // leave an already-inserted entry over budget.
-          this.#enforceEvaluationCacheBudget();
-          graphs.set(branch, tracked.state);
-          for (const [docKey, entity] of tracked.state.entities) {
-            recordUpdate(docKey, entity);
-          }
-          continue;
-        }
-
-        if (isGraphQueryCoveredByState(message.space, existing, query)) {
-          continue;
-        }
-
-        const staged = cloneTrackedGraphState(engine, existing);
-        graphs.set(branch, staged);
-        const extended = extendTrackedGraph(
-          message.space,
-          engine,
-          staged,
-          query,
-        );
-        foldRootAttribution(attribution, extended.stats);
-        for (const [docKey, entity] of extended.updates) {
-          recordUpdate(docKey, entity);
-        }
-      }
+      const { graphs, updates, attribution } = this.#extendWatchGraphs(
+        session,
+        engine,
+        newWatches,
+        session.graphs,
+      );
 
       // Build the complete result before mutating the session. Its entity
       // cache is the delivered-entry diff base, and operation snapshot
@@ -4953,7 +5331,6 @@ export class Server {
       managers: new Map(),
     };
     const graphs = new Map<string, TrackedGraphState>();
-    const entities = new Map<string, SessionCacheEntry>();
     let serverSeq = Engine.serverSeq(resolvedEngine);
 
     const attribution = createRootAttribution();
@@ -4972,7 +5349,27 @@ export class Server {
       serverSeq = result.serverSeq;
       this.#enforceEvaluationCacheBudget();
       graphs.set(branch, result.state);
-      for (const [docKey, entity] of result.state.entities) {
+    }
+
+    recordSlowQueryDuration("session.watch.set", space, startedAt, {
+      watches: watches.length,
+      ...attribution,
+    });
+    return {
+      serverSeq,
+      graphs,
+      entities: this.#entriesFromGraphs(graphs.values(), scopeContext),
+    };
+  }
+
+  /** Merges document snapshots without merging demand and delivery provenance. */
+  #entriesFromGraphs(
+    graphs: Iterable<TrackedGraphState>,
+    scopeContext: { principal?: string; sessionId?: string },
+  ): Map<string, SessionCacheEntry> {
+    const entities = new Map<string, SessionCacheEntry>();
+    for (const graph of graphs) {
+      for (const [docKey, entity] of graph.entities) {
         const { scopeKey } = fromDocKey(docKey);
         const entry = toCacheEntry(entity, scopeContext, scopeKey);
         const key = cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey);
@@ -4986,16 +5383,14 @@ export class Server {
         }
       }
     }
+    return entities;
+  }
 
-    recordSlowQueryDuration("session.watch.set", space, startedAt, {
-      watches: watches.length,
-      ...attribution,
-    });
-    return {
-      serverSeq,
-      graphs,
-      entities,
-    };
+  /** Returns execution demand, including absent dependencies, for a view session. */
+  #viewDemandIds(session: SessionState): Set<string> {
+    const ids = trackedIdsFromEntries(session.viewDemandEntities.values());
+    this.#addMissedToTrackedIds(ids, session.viewDemandGraphs.values());
+    return ids;
   }
 
   /** Roll back the delivery state a computed-but-undelivered sync frame
@@ -5169,7 +5564,38 @@ export class Server {
     }
   }
 
+  /** Evaluates a frame under the same publication turn as its view manifest. */
   syncSessionForConnection(
+    space: string,
+    sessionId: string,
+    dirtyIds?: ReadonlySet<string>,
+    dirtyOrigins?: ReadonlyMap<string, DirtyOrigin>,
+    publicationLocked = false,
+  ): Promise<SessionEffectMessage | null> {
+    if (
+      !publicationLocked &&
+      (this.#sessions.get(space, sessionId)?.views.length ?? 0) > 0
+    ) {
+      return this.#withSpacePublicationLock(
+        space,
+        () =>
+          this.#syncSessionForConnection(
+            space,
+            sessionId,
+            dirtyIds,
+            dirtyOrigins,
+          ),
+      );
+    }
+    return this.#syncSessionForConnection(
+      space,
+      sessionId,
+      dirtyIds,
+      dirtyOrigins,
+    );
+  }
+
+  #syncSessionForConnection(
     space: string,
     sessionId: string,
     dirtyIds?: ReadonlySet<string>,
@@ -5228,6 +5654,7 @@ export class Server {
               sync.caughtUpLocalSeq = session.caughtUpLocalSeq;
             }
             await this.#attachOperationFields(space, sessionId, sync);
+            if (session.views.length > 0) this.#attachViewPlans(session, sync);
             return {
               type: "session/effect",
               space,
@@ -5244,7 +5671,10 @@ export class Server {
             const mayCarryOperations = session.watches.some((watch) =>
               watch.kind === "operation"
             ) && serverSeq > fromSeq;
-            if (!hasPendingCatchUp && !mayCarryOperations) {
+            if (
+              !hasPendingCatchUp && !mayCarryOperations &&
+              (session.views.length === 0 || !preCallForceFullResync)
+            ) {
               return null;
             }
             session.lastSyncedSeq = Math.max(session.lastSyncedSeq, serverSeq);
@@ -5258,13 +5688,14 @@ export class Server {
             const message = await finishCatchUp(sync);
             if (
               !hasPendingCatchUp &&
-              (sync.operationFields?.length ?? 0) === 0
+              (sync.operationFields?.length ?? 0) === 0 &&
+              sync.viewPlans === undefined
             ) {
               return null;
             }
             return message;
           };
-          if (session.watches.length === 0) {
+          if (session.watches.length === 0 && session.views.length === 0) {
             // A session with no watches covers nothing: whatever its
             // delivery memory still lists — a lost frame's rolled-back
             // tombstones, a resuming client's declared holdings — is
@@ -5354,6 +5785,10 @@ export class Server {
                 return await emptyCatchUp();
               }
               sessionKind = "touched";
+              const previousViewDemand = session.views.length > 0 &&
+                  this.#serverExecutionObserver?.demandChanged !== undefined
+                ? this.#viewDemandIds(session)
+                : undefined;
 
               const engine = await this.#openEngine(space);
               const fromSeq = session.lastSyncedSeq;
@@ -5403,7 +5838,7 @@ export class Server {
                   "walk",
                 );
               }
-              if (updates.size === 0) {
+              if (updates.size === 0 && session.views.length === 0) {
                 return await emptyCatchUp();
               }
 
@@ -5490,7 +5925,7 @@ export class Server {
                   // NIT-6 note covers the `push-growth` reason on a shrink).
                   const wantsDemandNotify =
                     this.#serverExecutionObserver?.demandChanged !== undefined;
-                  const previous = session.trackedIds;
+                  const previous = previousViewDemand ?? session.trackedIds;
                   for (const [key, entry] of updates) {
                     session.entities.set(key, entry);
                   }
@@ -5540,11 +5975,20 @@ export class Server {
                     "tracked",
                     "missed",
                   );
+                  if (session.views.length > 0) {
+                    session.viewDemandEntities = this.#entriesFromGraphs(
+                      session.viewDemandGraphs.values(),
+                      identity,
+                    );
+                  }
                   let changed = false;
                   if (wantsDemandNotify) {
-                    changed = previous.size !== session.trackedIds.size;
+                    const next = previousViewDemand === undefined
+                      ? session.trackedIds
+                      : this.#viewDemandIds(session);
+                    changed = previous.size !== next.size;
                     if (!changed) {
-                      for (const key of session.trackedIds) {
+                      for (const key of next) {
                         if (!previous.has(key)) {
                           changed = true;
                           break;
@@ -5640,15 +6084,12 @@ export class Server {
             }
           }
 
-          const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
-            space,
-            session.watches,
-            undefined,
-            {
-              principal: session.principal,
-              sessionId,
-            },
-          );
+          const { serverSeq, graphs, entities, demandGraphs, demandEntities } =
+            await this.#evaluateViewWatchSet(
+              session,
+              session.watches,
+              session.views,
+            );
           // protocol.md §3's applicable-set filter on the FULL
           // evaluation path: explicit foreign instances enter `entities`
           // only through admitted lease-holder reads, and the exemption
@@ -5697,6 +6138,20 @@ export class Server {
             session.watches,
             { principal: session.principal, sessionId },
           );
+          for (const key of trackedIdsFromEntries(demandEntities.values())) {
+            evaluatedTrackedIds.add(key);
+          }
+          this.#addMissedToTrackedIds(
+            evaluatedTrackedIds,
+            demandGraphs.values(),
+          );
+          const evaluatedDemandIds = trackedIdsFromEntries(
+            demandEntities.values(),
+          );
+          this.#addMissedToTrackedIds(
+            evaluatedDemandIds,
+            demandGraphs.values(),
+          );
           const commitWatchState = () => {
             // (d′) — flag 2, the full-evaluation branch: the
             // set is REPLACED (this is where it can shrink — R-D's coarse
@@ -5714,10 +6169,21 @@ export class Server {
               this.#serverExecutionObserver?.demandChanged !== undefined;
             let changed = false;
             if (wantsDemandNotify) {
-              const previous = session.trackedIds;
-              changed = previous.size !== evaluatedTrackedIds.size;
+              const previous = session.views.length === 0
+                ? session.trackedIds
+                : trackedIdsFromEntries(session.viewDemandEntities.values());
+              if (session.views.length > 0) {
+                this.#addMissedToTrackedIds(
+                  previous,
+                  session.viewDemandGraphs.values(),
+                );
+              }
+              const next = session.views.length === 0
+                ? evaluatedTrackedIds
+                : evaluatedDemandIds;
+              changed = previous.size !== next.size;
               if (!changed) {
-                for (const key of evaluatedTrackedIds) {
+                for (const key of next) {
                   if (!previous.has(key)) {
                     changed = true;
                     break;
@@ -5725,6 +6191,8 @@ export class Server {
                 }
               }
             }
+            session.viewDemandGraphs = demandGraphs;
+            session.viewDemandEntities = demandEntities;
             session.graphs = graphs;
             session.entities = entities;
             session.trackedIds = evaluatedTrackedIds;
@@ -5963,7 +6431,7 @@ export class Server {
       ) {
         continue;
       }
-      for (const watch of session.watches) {
+      for (const watch of [...session.watches, ...viewWatches(session.views)]) {
         if (watch.kind === "operation") continue;
         for (const root of watch.query.roots) {
           const scope = root.scope ?? "space";
@@ -6055,7 +6523,7 @@ export class Server {
       };
       // The session's watch ROOT keys (instance-keyed like trackedIds).
       const rootKeys = new Set<string>();
-      for (const watch of session.watches) {
+      for (const watch of [...session.watches, ...viewWatches(session.views)]) {
         if (watch.kind === "operation") continue;
         for (const root of watch.query.roots) {
           const scope = root.scope ?? "space";
@@ -6082,10 +6550,15 @@ export class Server {
       // wake the push loop, but they are not graph execution demand. Rebuild
       // the graph-only provenance from delivered entries plus traversal misses
       // before producing demand rows.
-      const graphTrackedIds = trackedIdsFromEntries(session.entities.values());
+      const graphTrackedIds = trackedIdsFromEntries(
+        (session.views.length === 0
+          ? session.entities
+          : session.viewDemandEntities).values(),
+      );
       this.#addMissedToTrackedIds(
         graphTrackedIds,
-        session.graphs.values(),
+        (session.views.length === 0 ? session.graphs : session.viewDemandGraphs)
+          .values(),
       );
       const emit = (dirtyKey: string, root: boolean) => {
         const rowKey = `${dirtyKey}\0${session.id}`;
@@ -6813,6 +7286,7 @@ export class Server {
                         dirtyIds,
                         dirtyOrigins,
                         { derivedDirty, group: "prioritized" },
+                        true,
                       );
                     }
                     let followers = 0;
@@ -6822,6 +7296,7 @@ export class Server {
                         dirtyIds,
                         dirtyOrigins,
                         { derivedDirty, group: "followers" },
+                        true,
                       );
                     }
                     if (prioritized > 0 && followers > 0) {
@@ -6833,6 +7308,8 @@ export class Server {
                         space,
                         dirtyIds,
                         dirtyOrigins,
+                        undefined,
+                        true,
                       );
                     }
                   }
@@ -7416,6 +7893,8 @@ export const parseClientMessage = (
     typeof parsed.sessionId === "string" &&
     Array.isArray(parsed.watches)
   ) {
+    const views = parseViewInterests(parsed.views);
+    if (views === null) return null;
     const holdings = parseHoldings(parsed.holdings);
     if (holdings === null) return null;
     return {
@@ -7424,6 +7903,7 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       watches: parsed.watches as WatchSpec[],
+      ...(views === undefined ? {} : { views }),
       ...(holdings === undefined ? {} : { holdings }),
     };
   }

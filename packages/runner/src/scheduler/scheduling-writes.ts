@@ -236,20 +236,23 @@ export function readsOverlapWrites(
  * (once per matching read) — visitors dedupe via their own set; returning
  * true stops the whole scan.
  */
-export function forEachOverlappingWriter(
+export function forEachOverlappingWriter<Writer = Action>(
   state: {
-    readonly scopeKeyIdentity: () => ScopeKeyIdentity;
-    readonly writersByEntity: ReadonlyMap<SpaceScopeAndURI, Set<Action>>;
+    readonly scopeKeyIdentity?: () => ScopeKeyIdentity;
+    readonly writersByEntity: ReadonlyMap<
+      SpaceScopeAndURI,
+      ReadonlySet<Writer>
+    >;
     readonly getSchedulingWrites: (
-      action: Action,
+      action: Writer,
     ) => readonly IMemorySpaceAddress[] | undefined;
   },
   reads: readonly IMemorySpaceAddress[],
   shallowReads: readonly IMemorySpaceAddress[],
-  visit: (writer: Action) => boolean | void,
+  visit: (writer: Writer) => boolean | void,
   hooks: {
-    readonly filter?: (writer: Action) => boolean;
-    readonly onCandidate?: (writer: Action) => void;
+    readonly filter?: (writer: Writer) => boolean;
+    readonly onCandidate?: (writer: Writer) => void;
   } = {},
 ): void {
   const scan = (

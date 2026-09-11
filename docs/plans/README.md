@@ -16,6 +16,15 @@ a record: archive it to `docs/history/plans/` following the procedure in
 - [Pattern computation cost: implementation sequence](pattern-computation-cost-implementation.md)
   executes the design in PR #7155 with checkable measurement, collection
   operator, multi-replica correctness, and authoring-guidance stages.
+- [View-scoped client replication](view-scoped-client-replication.md) proposes
+  selecting browser data and speculative computation from active render roots,
+  shared component read contracts, and the server's scoped dependency graph. It
+  separates execution demand from delivery and stages document selection before
+  optional field projections.
+- [Initialize view computations from settled server evidence](view-replication-server-currency.md)
+  sizes optional initial scheduler state adoption, its proof and invalidation
+  requirements, and the tests and measurements required before rollout.
+
 - [Cast-free patterns](cast-free-patterns.md) sequences shared type and API
   repairs, migration of authored patterns and their tests, and enforcement
   through lint and new-source admission.

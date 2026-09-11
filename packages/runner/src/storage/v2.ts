@@ -9,6 +9,7 @@ import {
   hasDataUriScheme,
   valueFromDataUri,
 } from "@commonfabric/data-model/codec-data-uri";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { aclDocId, sameAcl } from "@commonfabric/memory/acl";
 import type { ACL, Entity } from "@commonfabric/memory/interface";
 import {
@@ -54,10 +55,12 @@ import {
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
+  type ViewInterest,
+  type ViewPlan,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
-import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
@@ -67,9 +70,16 @@ import {
   PatchApplyError,
 } from "../../../memory/v2/patch.ts";
 import type { JSONSchema } from "../builder/types.ts";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
+import { ContextualFlowControl } from "../cfc.ts";
+import {
+  isPrimitiveCellLink,
+  type NormalizedLink,
+  parseLinkPrimitive,
+} from "../link-types.ts";
+import { sortAndCompactPaths } from "../reactive-dependencies.ts";
+import { entityKey } from "../scheduler/keys.ts";
 import {
   classifySchemaMeta,
   collectExternalSchemaRefHashes,
@@ -81,19 +91,19 @@ import {
   registerSchemaDocument,
 } from "../schema-registry.ts";
 import { isSubschema } from "../schema-walk.ts";
-import { ContextualFlowControl } from "../cfc.ts";
-import {
-  isPrimitiveCellLink,
-  type NormalizedLink,
-  parseLinkPrimitive,
-} from "../link-types.ts";
-import { sortAndCompactPaths } from "../reactive-dependencies.ts";
-import { entityKey } from "../scheduler/keys.ts";
 import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
+import {
+  type EventAppendOutcome,
+  type EventAppendPacing,
+  EventAppendQueue,
+  type EventAppendQueueStore,
+  memoryEventAppendQueueStore,
+  type QueuedEventAppend,
+} from "./event-append-queue.ts";
 import {
   IMemoryAddress,
   IMergedChanges,
@@ -122,21 +132,8 @@ import {
   TransactionCommitOptions,
   UnexaminedAbsence,
   Unit,
+  type ViewInterestLease,
 } from "./interface.ts";
-import { SelectorTracker } from "./selector-tracker.ts";
-import {
-  type EventAppendOutcome,
-  type EventAppendPacing,
-  EventAppendQueue,
-  type EventAppendQueueStore,
-  memoryEventAppendQueueStore,
-  type QueuedEventAppend,
-} from "./event-append-queue.ts";
-import {
-  getDirectTransactionMergeableOpAddresses,
-  getDirectTransactionReadActivities,
-  getTransactionWriteAttempts,
-} from "./transaction-inspection.ts";
 import {
   getBlindStructuralTarget,
   isDurableReadTx,
@@ -148,7 +145,13 @@ import {
   notifyCommitRejected,
   recordCoverageWait,
 } from "./reactivity-log.ts";
+import { SelectorTracker } from "./selector-tracker.ts";
 import * as SubscriptionManager from "./subscription.ts";
+import {
+  getDirectTransactionMergeableOpAddresses,
+  getDirectTransactionReadActivities,
+  getTransactionWriteAttempts,
+} from "./transaction-inspection.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
 import {
   createStorageAddressResolver,
@@ -3507,6 +3510,18 @@ export class SpaceReplica
     ) => Promise<Result<Unit, PullError>>)
     | undefined;
 
+  #viewPlans: readonly ViewPlan[] = [];
+  #viewCapabilitySession: MemoryV2Client.SpaceSession | undefined;
+  #cancelViewCapabilityLost: Cancel | undefined;
+  #viewOwnerVersion = 0;
+  #viewOwnerRetired: (() => void) | undefined;
+  #viewRevision = 0;
+  #viewPlanObservers = new Set<(plans: readonly ViewPlan[]) => void>();
+
+  #localCoverageObservers = new Set<
+    (addresses: readonly LocalDocAddress[]) => void
+  >();
+
   #settings: IRemoteStorageProviderSettings;
 
   constructor(options: SpaceReplicaOptions) {
@@ -4258,6 +4273,123 @@ export class SpaceReplica
     );
   }
 
+  /** @inheritDoc */
+  subscribeLocalCoverage(
+    observer: (addresses: readonly LocalDocAddress[]) => void,
+  ): () => void {
+    this.#localCoverageObservers.add(observer);
+    return () => this.#localCoverageObservers.delete(observer);
+  }
+
+  /** Negotiates view delivery on this replica's authenticated session. */
+  async supportsViewReplication(): Promise<boolean> {
+    const { client, session } = await this.#memoizedSessionHandle();
+    if (this.#viewCapabilitySession !== session) {
+      this.#cancelViewCapabilityLost?.();
+      this.#viewCapabilitySession = session;
+      this.#cancelViewCapabilityLost = session.subscribeViewCapabilityLost(() =>
+        this.#publishViewPlans([])
+      );
+    }
+    return client.serverFlags?.viewScopedReplicationV1 === true;
+  }
+
+  /** Whether the current connection retains the negotiated view protocol. */
+  viewReplicationSupported(): boolean {
+    return this.#sessionClient?.serverFlags?.viewScopedReplicationV1 === true;
+  }
+
+  /** Waits for session authentication and watch restoration after reconnect. */
+  async whenSessionRestored(): Promise<void> {
+    const { session } = await this.#memoizedSessionHandle();
+    await session.whenRestored();
+  }
+
+  /** @inheritDoc */
+  acquireViewInterests(onReplaced: () => void): ViewInterestLease {
+    const previous = this.#viewOwnerRetired;
+    const version = ++this.#viewOwnerVersion;
+    this.#viewOwnerRetired = onReplaced;
+    previous?.();
+    const isCurrent = () => !this.#closed && this.#viewOwnerVersion === version;
+    return {
+      isCurrent,
+      nextRevision: () => {
+        if (!isCurrent()) throw new Error("View interest owner has retired");
+        return this.#viewRevision++;
+      },
+      set: (views) => this.setViewInterests(views, isCurrent),
+      release: () => {
+        if (!isCurrent()) return;
+        this.#viewOwnerRetired = undefined;
+        const releasedVersion = ++this.#viewOwnerVersion;
+        void this.setViewInterests(
+          [],
+          () => this.#viewOwnerVersion === releasedVersion,
+        ).catch(() => {});
+      },
+    };
+  }
+
+  /** Replaces renderer demand while preserving ordinary watch ownership. */
+  async setViewInterests(
+    views: ViewInterest[],
+    isCurrent: () => boolean = () => true,
+  ): Promise<boolean> {
+    if (!isCurrent() || this.#closed) return false;
+    const { client, session } = await this.#memoizedSessionHandle();
+    if (!isCurrent() || this.#closed) return false;
+    if (
+      views.length > 0 && client.serverFlags?.viewScopedReplicationV1 !== true
+    ) return false;
+    const { view, precedingSyncs, sync } = await session.viewSetSync(views);
+    if (this.#closed) return false;
+    this.#watchView = view;
+    for (const precedingSync of precedingSyncs) {
+      this.#applySessionSync(precedingSync, "integrate");
+    }
+    this.#applySessionSync(sync, "integrate");
+    this.#consumeWatchView(view);
+    return true;
+  }
+
+  /** Observes complete eligibility snapshots after their input documents arrive. */
+  subscribeViewPlans(
+    observer: (plans: readonly ViewPlan[]) => void,
+  ): () => void {
+    this.#viewPlanObservers.add(observer);
+    observer(this.#viewPlans);
+    return () => this.#viewPlanObservers.delete(observer);
+  }
+
+  #publishViewPlans(plans: readonly ViewPlan[]): void {
+    this.#viewPlans = plans;
+    for (const observer of this.#viewPlanObservers) {
+      try {
+        observer(plans);
+      } catch (error) {
+        logger.error(
+          "view-plan-observer-error",
+          "View plan observer failed",
+          error,
+        );
+      }
+    }
+  }
+
+  /** @inheritDoc */
+  hasLocalDocumentCoverage(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    const key = this.#docKeyOf({ id, scope }, identity);
+    const record = this.#docs.get(key);
+    return this.#delivered.has(key) ||
+      (record?.confirmed.seq ?? 0) > 0 ||
+      record?.pending.some((entry) => entry.op !== "patch") === true;
+  }
+
   getDocument(
     uri: URI,
     scope?: CellScope,
@@ -4487,6 +4619,16 @@ export class SpaceReplica
   }
 
   async close(): Promise<void> {
+    this.#localCoverageObservers.clear();
+    this.#viewPlanObservers.clear();
+    this.#cancelViewCapabilityLost?.();
+    this.#cancelViewCapabilityLost = undefined;
+    this.#viewCapabilitySession = undefined;
+    this.#viewPlans = [];
+    const retireViewOwner = this.#viewOwnerRetired;
+    this.#viewOwnerRetired = undefined;
+    this.#viewOwnerVersion++;
+    retireViewOwner?.();
     this.#closed = true;
     this.#closeSignal.resolve();
     this.#eventAppendQueue?.close();
@@ -4652,6 +4794,16 @@ export class SpaceReplica
   }
 
   closeNow(): void {
+    this.#localCoverageObservers.clear();
+    this.#viewPlanObservers.clear();
+    this.#cancelViewCapabilityLost?.();
+    this.#cancelViewCapabilityLost = undefined;
+    this.#viewCapabilitySession = undefined;
+    this.#viewPlans = [];
+    const retireViewOwner = this.#viewOwnerRetired;
+    this.#viewOwnerRetired = undefined;
+    this.#viewOwnerVersion++;
+    retireViewOwner?.();
     this.#closed = true;
     this.#closeSignal.resolve();
     this.#eventAppendQueue?.close();
@@ -6999,6 +7151,7 @@ export class SpaceReplica
       sync.upserts.length === 0 &&
       sync.removes.length === 0
     ) {
+      if (sync.viewPlans !== undefined) this.#publishViewPlans(sync.viewPlans);
       this.#noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
       return;
     }
@@ -7010,8 +7163,13 @@ export class SpaceReplica
     // applies.
     const quarantined = this.#validateArrivedSchemaDocuments(sync);
     if (quarantined.size > 0) {
+      const suspendedPlans = (sync.viewPlans ?? this.#viewPlans).map((
+        plan,
+      ) => ({ ...plan, eligibleActions: [] }));
+      this.#publishViewPlans(suspendedPlans);
       sync = {
         ...sync,
+        ...(sync.viewPlans === undefined ? {} : { viewPlans: suspendedPlans }),
         upserts: sync.upserts.filter((upsert) =>
           typeof upsert.id !== "string" || !quarantined.has(upsert.id)
         ),
@@ -7034,6 +7192,20 @@ export class SpaceReplica
         ...(remove.scopeKey !== undefined ? { scopeKey: remove.scopeKey } : {}),
       })),
     ];
+
+    const coverageChanges = this.#localCoverageObservers.size === 0
+      ? []
+      : touched.filter((address) => {
+        const key = this.#docKeyOf(address);
+        return !this.#delivered.has(key) ||
+          sync.removes.some((remove) =>
+            this.#docKeyOf({
+              id: remove.id as URI,
+              scope: remove.scope,
+              scopeKey: remove.scopeKey,
+            }) === key
+          );
+      });
 
     const shouldNotifySubscribers = this.#hasNotificationSubscribers();
     const shouldNotifySinks = this.#hasSinkSubscribers(touched);
@@ -7183,6 +7355,8 @@ export class SpaceReplica
       }
     }
 
+    if (sync.viewPlans !== undefined) this.#publishViewPlans(sync.viewPlans);
+
     // Parked accepts apply BEFORE the differential compare: when the frame
     // authoritatively covers a doc the session itself wrote (mixed
     // provenance), the integrated base already CONTAINS the parked write,
@@ -7222,6 +7396,19 @@ export class SpaceReplica
           "speculationArrivalObserver threw during frame integration",
           error,
         ]);
+      }
+    }
+    if (coverageChanges.length > 0) {
+      for (const observer of this.#localCoverageObservers) {
+        try {
+          observer(coverageChanges);
+        } catch (error) {
+          logger.error(
+            "local-coverage-observer-error",
+            "Local coverage observer failed",
+            error,
+          );
+        }
       }
     }
     this.#hydrateArrivedCfcSchemaRefs(sync);
@@ -8162,6 +8349,7 @@ export class SpaceReplica
           // authoritative reinstall sync that follows replaces — never
           // double-applies — their contribution.
           resolved.session.onSessionReplaced = () => {
+            this.#publishViewPlans([]);
             this.#applyParkedAcceptsNow();
             // A replaced session rejected its outstanding commits; queued
             // event intents re-submit under fresh localSeqs (the target's

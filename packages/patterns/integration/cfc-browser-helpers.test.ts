@@ -18,6 +18,7 @@ import {
   clickCfButtonsConcurrently,
   clickNthCfButton,
   clickTrustedAction,
+  collectBrowserLoadSummary,
   fillCfInput,
   installSenderEchoProbe,
   readSenderEchoReport,
@@ -65,6 +66,56 @@ describe("CFC browser helpers", () => {
 
   afterAll(async () => {
     await browser.close();
+  });
+
+  it("retains timeout outcomes without contacting the stalled worker", async () => {
+    await page.evaluate(() => {
+      const row = {
+        count: 1,
+        average: 60_000,
+        totalTime: 60_000,
+        p50: 60_000,
+        p95: 60_000,
+        max: 60_000,
+      };
+      const global = globalThis as unknown as { commonfabric: unknown };
+      global.commonfabric = {
+        getTimingStatsBreakdown: () => ({
+          "runtime-client": {
+            "ipc/runtime:idle": row,
+            "ipc-outcome/timeout/runtime:idle": row,
+          },
+        }),
+        rt: {
+          getLoggerCounts: () => {
+            throw new Error("worker contacted");
+          },
+          getRequestTimeline: () => [{
+            type: "runtime:idle",
+            sentAtMs: 0,
+            doneAtMs: 60_000,
+            error: true,
+            outcome: "timeout",
+          }],
+        },
+      };
+    });
+    try {
+      const summary = await collectBrowserLoadSummary(page, "timed out");
+      expect(summary.workerStatus).toBe("skipped");
+      expect(summary.ipcFailures).toMatchObject([{
+        key: "ipc-outcome/timeout/runtime:idle",
+        count: 1,
+        total: 60_000,
+      }]);
+      expect(summary.requestTimeline[0]).toMatchObject({ outcome: "timeout" });
+      expect(summary.ipc).toHaveLength(1);
+    } finally {
+      await page.evaluate(() => {
+        delete (globalThis as unknown as { commonfabric?: unknown })
+          .commonfabric;
+      });
+    }
   });
 
   it("settles the view before clicking a rendered control", async () => {
@@ -984,6 +1035,50 @@ describe("CFC browser helpers", () => {
     );
     // One settle binds the control, and one follows the click.
     assertEquals(result.settleCalls, 2);
+  });
+
+  it("waits for the indexed control to become enabled before clicking it", async () => {
+    await page.evaluate(() => {
+      const controls = ["first", "second"].map((label) => {
+        const control = document.createElement("div");
+        control.className = "waiting-indexed-control";
+        control.textContent = label;
+        control.style.cssText = "display:inline-block;padding:16px";
+        document.body.append(control);
+        return control;
+      });
+      const target = controls[1];
+      target.setAttribute("aria-disabled", "true");
+      const clicks: string[] = [];
+      controls[0].addEventListener("click", () => clicks.push("first"));
+      target.addEventListener("click", () => {
+        clicks.push(
+          target.hasAttribute("aria-disabled") ? "disabled" : "second",
+        );
+      });
+      let settles = 0;
+      const global = globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+        __indexedEnabledClicks: string[];
+      };
+      global.commonfabric = {
+        viewSettled: () => {
+          if (++settles === 2) target.removeAttribute("aria-disabled");
+          return Promise.resolve();
+        },
+      };
+      global.__indexedEnabledClicks = clicks;
+    });
+
+    await clickNthCfButton(page, ".waiting-indexed-control", 1);
+
+    expect(
+      await page.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __indexedEnabledClicks: string[];
+        }).__indexedEnabledClicks
+      ),
+    ).toEqual(["second"]);
   });
 
   it("settles the view before clicking a trusted action", async () => {

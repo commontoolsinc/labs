@@ -581,6 +581,23 @@ the target's `eventWatermark` makes processing exactly-once.
 
 ## 3. Subscription and push
 
+A server with execution enabled advertises optional `viewScopedReplicationV1`.
+Clients without that capability use ordinary watches. An opted-in web client
+adds session-owned `views` to `session.watch.set`; omitting `views` preserves
+existing view ownership, while an empty array removes it. Ordinary watches keep
+separate ownership. View revisions and server-side session/view lifetime tokens
+reject stale publications, and `viewPlans` in a session sync frame apply after
+the frame's documents. A plan-only frame is meaningful and must be delivered.
+
+Visible roots contribute execution demand. The additional complete documents
+selected for local previews contribute delivery only, under the same READ and
+instance-scoping rules. The optional plan includes eligible graph positions,
+source identities, admitted inputs, observed write surfaces, and fingerprints of
+settled producer inputs/outputs. These are compact eligibility evidence, not the
+durable scheduler-basis table. See the
+[feature contract](../../features/view-scoped-client-replication.md) for guarded
+execution and downgrade behavior.
+
 - Clients subscribe to docs/queries as today
   (`packages/runner/src/storage/query.ts` path). The SpaceServer
   subscribes to the whole space's accepted-commit feed from a seq.

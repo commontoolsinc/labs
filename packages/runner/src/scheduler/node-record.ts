@@ -3,7 +3,7 @@ import type { FanOutNodeState } from "./fan-out.ts";
 import type { Action } from "./types.ts";
 
 export type NodeKind = "computation" | "effect";
-export type NodeStatus = "never-ran" | "clean" | "invalid";
+export type NodeStatus = "never-ran" | "clean" | "invalid" | "unavailable";
 
 export interface SchedulerGateState {
   debounceMs?: number;
@@ -32,6 +32,12 @@ export interface SchedulerNode {
   parentAction?: Action;
   children?: Set<Action>;
   status: NodeStatus;
+
+  /** Identity of the current registration lifetime, including reactivation. */
+  registrationToken: object;
+
+  /** Releases the residency wake of a parked local computation. */
+  cancelLocalReadWake?: () => void;
   declaredReads: IMemorySpaceAddress[];
 
   /**
@@ -127,6 +133,7 @@ export class NodeRegistry {
       ordinal: this.#nextOrdinal++,
       kind,
       status: "never-ran",
+      registrationToken: {},
       declaredReads: [],
       invalidCauses: new Map(),
       liveRefs: 0,
@@ -149,6 +156,8 @@ export class NodeRegistry {
   remove(action: Action): SchedulerNode | undefined {
     const record = this.#records.get(action);
     if (!record) return undefined;
+    record.cancelLocalReadWake?.();
+    record.cancelLocalReadWake = undefined;
     this.#all.delete(record);
     this.#activeEffects.delete(action);
     this.#activeComputations.delete(action);
@@ -326,6 +335,7 @@ export class NodeRegistry {
   }
 
   #activate(record: SchedulerNode): void {
+    if (!this.#all.has(record)) record.registrationToken = {};
     this.#all.add(record);
     if (record.kind === "effect") {
       this.#activeEffects.add(record.action);
