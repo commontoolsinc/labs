@@ -381,6 +381,7 @@ export function flatMap(
       runtime,
       elementRuns,
       new Set(elementKeys.values()),
+      outputScope,
     );
 
     if (list.length > 0) resumeBatchAwaitSync = false;
