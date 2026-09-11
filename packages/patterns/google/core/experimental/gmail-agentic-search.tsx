@@ -33,7 +33,6 @@ import {
   NAME,
   navigateTo,
   pattern,
-  type ReadonlyCell,
   Stream,
   toIndentedDebugString,
   UI,
@@ -107,7 +106,7 @@ export interface ToolDefinition {
 type RateQueryContext = {
   queryId: string;
   rating: number;
-  localQueries: ReadonlyCell<LocalQuery[]>;
+  localQueries: Writable<LocalQuery[]>;
 };
 
 type RateQueryFactory = HandlerFactory<unknown, RateQueryContext>;

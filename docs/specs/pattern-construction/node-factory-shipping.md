@@ -1469,7 +1469,10 @@ conditionals; it is not serialized and is never populated from a decoded
 `Factory@1` value. This applies equally to pattern, module/lift, and handler
 factories. Inferred lift/handler contracts are captured after capability
 shrinking so the containing schema equals the schemas actually injected at the
-builder call. Scheduled container lowering retains authored capture origins,
+builder call. A handler contract must retain every write capability required by
+the callback, including a write through a dynamic Cell key; it must not weaken
+that position to read-only merely because the exact descendant path is dynamic.
+Scheduled container lowering retains authored capture origins,
 follows statically selected object spreads and imported const initializers, and
 propagates the recovered factory contract through the scheduled input schema,
 scheduled result schema, and enclosing pattern result schema. These three

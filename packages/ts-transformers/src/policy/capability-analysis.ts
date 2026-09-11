@@ -1990,6 +1990,13 @@ export function analyzeFunctionCapabilities(
             return receiverBinding;
           }
           if (methodName === "key") {
+            // Once a dynamic key has been crossed, later literal keys are not
+            // a static path into the authored shape. Keep the last known
+            // prefix so a recognized read or write can retain its capability
+            // without claiming precision below the dynamic selection.
+            if (receiverBinding.dynamic) {
+              return receiverBinding;
+            }
             const argPath = extractLiteralPathArguments(
               current.arguments,
               checker,
@@ -2341,6 +2348,7 @@ export function analyzeFunctionCapabilities(
     const trackWriteRef = (ref: SourceRef): void => {
       if (ref.dynamic) {
         markWildcard(ref.root, ref.path);
+        trackWrite(ref.root, ref.path);
         return;
       }
       trackWrite(ref.root, ref.path);

@@ -1542,6 +1542,11 @@ adjustments:
 - pattern boundaries apply defaults-only mode to preserve broad shape continuity
   while still applying extracted static defaults
 - wildcard roots disable path shrinking for affected parameters/arguments
+- a recognized writer reached through a dynamic `.key(...)` keeps the last
+  statically known receiver prefix as a write path and also marks that prefix
+  wildcard. Literal keys after the dynamic selection do not claim false static
+  precision. The wildcard disables path shrinking while the retained write
+  path preserves the required write capability
 - capability analysis resolves member access through `.get()` when the member
   access itself is observed (`notes.get().length` records `["length"]` rather
   than a blanket root read) and suppresses the redundant blanket `.get()` read

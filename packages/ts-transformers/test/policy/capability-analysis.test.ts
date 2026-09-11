@@ -695,6 +695,25 @@ Deno.test("Capability analysis classifies read+write usage as writable", () => {
   assert(input.writePaths.includes("count"));
 });
 
+Deno.test("Capability analysis preserves writes through chained dynamic keys", () => {
+  const fn = parseFirstCallback(
+    `const fn = (_, state) => {
+      const index = 0;
+      state.localQueries.key(index).key("effectiveness").set(state.rating);
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const state = getPaths(summary, "state");
+
+  assertEquals(state.capability, "writable");
+  assertEquals(state.writePaths.includes("localQueries"), true);
+  assertEquals(
+    state.writePaths.includes("localQueries.effectiveness"),
+    false,
+  );
+  assertEquals(state.wildcard, true);
+});
+
 Deno.test("Capability analysis classifies update-only usage as writeonly", () => {
   const fn = parseFirstCallback(
     `const fn = (input) => {
