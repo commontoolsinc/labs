@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-11T11:42:48.685339+00:00",
+  "updated": "2026-09-11T12:04:33.232541+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7307",
@@ -143,8 +143,8 @@
     {
       "id": "E1",
       "title": "Computed versus lift measurements",
-      "status": "todo",
-      "detail": "Measure current defaults and declared read width."
+      "status": "done",
+      "detail": "Merged #7327: validated computed/broad-lift/narrow-lift measurements at 32/128/512 linked rows, with unread-field edits and a reproducible command."
     },
     {
       "id": "E2",
