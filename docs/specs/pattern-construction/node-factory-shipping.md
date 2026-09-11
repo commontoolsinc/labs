@@ -1187,6 +1187,18 @@ publish the rebuilt aggregate. Ordinary aggregate comparison reads remain
 non-scheduling to avoid read-own-output feedback; only this absent-container
 presence probe owns the recovery wake-up.
 
+An asynchronous replay of a session-local projection may still own
+broader-scoped computed cells whose identities survive the session. The caller
+must pre-sync the deterministic cells named by the pattern before staging
+setup, even when the session-local result has no stored internal-cell manifest.
+Setup then compares their metadata and values with durable state instead of
+reconstructing them from an empty cache. Once setup has installed the current
+argument, the caller performs the normal stored-piece pre-sync again so list
+coordinators can name and load their per-row children. A byte-identical replay
+therefore emits no shared mutable writes; a genuinely absent computed cell is
+initialized normally. A pre-sync failure aborts projection startup and is
+reported through the projection's normal transform-failure boundary.
+
 Reactive array lowering does not support the optional JavaScript `thisArg`.
 Pattern callbacks have no ambient JavaScript receiver, and the canonical list
 node accepts only the bound factory, so a second array-method argument fails

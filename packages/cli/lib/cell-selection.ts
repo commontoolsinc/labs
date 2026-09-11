@@ -3385,6 +3385,28 @@ export async function deriveSelectedValue(
   if (installedPattern === undefined) reads.patterns.set(readKey, mainPattern);
   const errors = runtimeErrorLog(runtime);
   const errorCountBefore = errors.length;
+  // A fresh session-local projection can reuse broader-scoped computed cells
+  // from an earlier process even though its own result manifest is new. Pull
+  // the pattern-owned cells before setup so their metadata and value are
+  // compared with durable state instead of being rebuilt from an empty cache.
+  // The post-setup pass below then has the committed argument it needs to name
+  // the list coordinator's per-row children.
+  try {
+    await timeSelectionPhase(
+      "preSetup",
+      () =>
+        runtime.runner.syncStoredPieceCells(
+          resultCell.withTx(),
+          installedPattern ?? mainPattern,
+        ),
+    );
+  } catch (error) {
+    throw new CellSelectionError(
+      `Could not apply get transform: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
   const result = await runtime.setup(
     tx,
     installedPattern ?? mainPattern,
