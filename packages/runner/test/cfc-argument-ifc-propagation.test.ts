@@ -41,12 +41,18 @@ const HEALTH_ATOM = {
   subject: "did:example:patient",
 } as const;
 
-// One confidential field, the shape a `Confidential<...>` argument compiles to.
+// One confidential field, the shape a `Confidential<...>` argument compiles to,
+// and one confidential array, for the builders that reduce over a collection.
 const ARGUMENT_SCHEMA = {
   type: "object",
   properties: {
     content: { type: "string", ifc: { confidentiality: [HEALTH_ATOM] } },
     revealSensitive: { type: "boolean" },
+    readings: {
+      type: "array",
+      items: { type: "number" },
+      ifc: { confidentiality: [HEALTH_ATOM] },
+    },
   },
 } as const satisfies JSONSchema;
 
@@ -126,7 +132,13 @@ describe("cfc-argument-ifc-propagation", () => {
 
       const bindings = () => {
         const factory = pattern(
-          (input: { content: string; revealSensitive: boolean }) => ({
+          (
+            input: {
+              content: string;
+              revealSensitive: boolean;
+              readings: number[];
+            },
+          ) => ({
             $NAME: "surface",
             $UI: null,
             content: input.content,
@@ -135,6 +147,8 @@ describe("cfc-argument-ifc-propagation", () => {
             derivedPublic: lift((shown: boolean) => !shown)(
               input.revealSensitive,
             ),
+            // deno-lint-ignore no-explicit-any
+            total: (input.readings as any).sum(),
           }),
           ARGUMENT_SCHEMA,
           RESULT_SCHEMA,
@@ -163,6 +177,17 @@ describe("cfc-argument-ifc-propagation", () => {
       it("binds a lift over a public field to a schema carrying no label", () => {
         expect(confidentialityOf(aliasSchema(bindings().derivedPublic)))
           .toBeUndefined();
+      });
+
+      it("binds an aggregate to a schema carrying its source's label", () => {
+        // A sum has no per-value attribution, so CFC §8.17.1 gives it the join
+        // of its contributors. The built-in writes its own scalar schema over
+        // the cell its node factory labeled, which is where the label would go
+        // missing.
+        const total = aliasSchema(bindings().total) as JSONSchemaObj;
+
+        expect(total?.type).toBe("number");
+        expect(confidentialityOf(total)).toEqual([HEALTH_ATOM]);
       });
     });
 

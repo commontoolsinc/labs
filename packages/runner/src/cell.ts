@@ -238,7 +238,7 @@ function createAggregate<T>(
   });
   const result = aggregateFactory({ list, operation, elements });
   if (operation !== "minBy" && operation !== "maxBy") {
-    result.setSchema({ type: "number" });
+    result.setSchema(schemaCarryingLinkIfc(result, { type: "number" }));
   }
   return result;
 }
@@ -771,21 +771,21 @@ const cellMethods = new Set<
 ]);
 
 /**
- * The list-builtin result-container schema for `result`, carrying the whole
- * `ifc` its link schema already declares. CFC §8.5.4.3 puts the source
- * container's label on the coordinator's structural writes, and that label
- * reaches this cell through the node walk before the container shape is
- * written over it.
+ * `schema` for `result`, carrying the whole `ifc` its link schema already
+ * declares. A node factory labels the cell it mints from that node's inputs,
+ * and a built-in stamping its own shape onto the same link composes that
+ * label back in. CFC §8.5.4.3 puts a collection coordinator's source label on
+ * its structural writes, and §8.17.1 puts the join of a count's or a sum's
+ * contributors on the scalar it produces.
  */
-function listResultSchemaFor(
+function schemaCarryingLinkIfc(
   result: { export(): { schema?: JSONSchema } },
-  itemSchema?: JSONSchema,
+  schema: JSONSchema,
 ): JSONSchema {
-  const container = listResultSchema(itemSchema);
   const existing = result.export().schema;
   const ifc = isObjectNotArray(existing) ? existing.ifc : undefined;
-  return ifc === undefined ? container : internSchema({
-    ...ContextualFlowControl.toSchemaObj(container),
+  return ifc === undefined ? schema : internSchema({
+    ...ContextualFlowControl.toSchemaObj(schema),
     ifc,
   });
 }
@@ -3669,7 +3669,9 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    result.setSchema(listResultSchemaFor(result, op.resultSchema));
+    result.setSchema(
+      schemaCarryingLinkIfc(result, listResultSchema(op.resultSchema)),
+    );
     return result;
   }
 
@@ -3879,7 +3881,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    result.setSchema(listResultSchemaFor(result));
+    result.setSchema(schemaCarryingLinkIfc(result, listResultSchema()));
     return result;
   }
 
@@ -3919,7 +3921,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    result.setSchema(listResultSchemaFor(result));
+    result.setSchema(schemaCarryingLinkIfc(result, listResultSchema()));
     return result;
   }
 

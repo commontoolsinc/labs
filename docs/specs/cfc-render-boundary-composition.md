@@ -115,21 +115,25 @@ component §8.12.8 reserves for declarations, which is the join
 `factoryFromPattern` stopped taking.
 
 A built-in that writes its own schema over its output's link composes that
-label back in rather than replacing it. The three list ops are the case:
-`mapWithPattern`, `filterWithPattern` and `flatMapWithPattern` each stamp a
-result-container schema onto the cell their node factory has just labeled, and
-`listResultSchemaFor` in `packages/runner/src/cell.ts` carries the label onto
-the container. CFC §8.5.4.3 requires it: a decomposed collection operation's
-coordinator taints its own structural writes — container, membership, order,
-length — with what its journal consumed. §8.9.2's propagation takes the output
-container's confidentiality from the source container's, through
-`lengthPreserved` for a map and `propagateCollectionConstraint` for the two
-that change length. The label lands at the container root, which is the
-conservative shape rather than the pointwise one: `joinSchema` flattens a
-source's member-level atoms in with its container-level ones, so what §8.5.6.1
-keeps apart as member and structural confidentiality arrives together.
+label back in rather than replacing it. Four do: `mapWithPattern`,
+`filterWithPattern` and `flatMapWithPattern` stamp a result-container schema
+onto the cell their node factory has just labeled, and a named aggregate stamps
+a scalar one. `schemaCarryingLinkIfc` in `packages/runner/src/cell.ts` carries
+the label onto what they write. CFC §8.5.4.3 requires it: a decomposed
+collection operation's coordinator taints its own structural writes —
+container, membership, order, length — with what its journal consumed. §8.9.2's
+propagation takes the output container's confidentiality from the source
+container's, through `lengthPreserved` for a map and
+`propagateCollectionConstraint` for the two that change length. The label lands
+at the container root, which is the conservative shape rather than the
+pointwise one: `joinSchema` flattens a source's member-level atoms in with its
+container-level ones, so what §8.5.6.1 keeps apart as member and structural
+confidentiality arrives together.
 `packages/runner/test/list-result-schema.test.ts` measures a labeled source and
-an unlabeled one.
+an unlabeled one. An aggregate reduces without per-value attribution, so
+§8.17.1 gives its scalar the join of its contributors — a count and a sum are
+that section's own examples — and
+`packages/runner/test/cfc-argument-ifc-propagation.test.ts` measures one.
 
 The declared result schema adds none of its own: `factoryFromPattern` stores
 the schema the author declared, so a pattern that accepts a confidential
