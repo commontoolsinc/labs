@@ -378,9 +378,12 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
       PR #7336 limits the 74-vote fixture to 6,000 initial-render accesses,
       1,100 updated-render accesses, and 300 accesses per reactive body. The
       local combined run measured 4,857 / 958 / 224. The scan control passes
-      functional assertions but fails three budget checks. Maintained groups
-      cost more to initialize than that control; this is an update-work bound,
-      not a total-cost or latency claim.
+      functional assertions and the initial-render limit at 3,176 accesses. It
+      fails the 300-access per-body limit in both render windows (360 each)
+      and the 1,100-access updated-render limit (1,240). Maintained groups use
+      more initial-render accesses (4,857 versus 3,176) and fewer updated-render
+      accesses (958 versus 1,240); this is an update-work bound, not a total-cost
+      or latency claim.
 - [ ] **B6 — Measure savings and maintenance together.** Compare the same
       operation before/after on both probe and browser rigs, then validate with
       the representative poll copy after A5. Report accesses, runs, nodes,
@@ -458,6 +461,6 @@ A5/B6, then serve an isolated local copy and inventory its linked-profile depend
 the live poll unchanged. The
 [lazy-materialization plan](lazy-cell-materialization.md) owns its remaining
 handler and rollout stages. Track its changes under D1 and rerun the motivating
-baseline under D2 when they land. The local dashboard
+baseline under D2 when they land. The execution dashboard
 records the outstanding coordination questions and preserves the synthetic
 74-, 296-, and 1,184-vote evidence with its measurement limits.
