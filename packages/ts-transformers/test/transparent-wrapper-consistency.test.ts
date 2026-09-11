@@ -17,7 +17,9 @@ import ts from "typescript";
 
 import { transformFiles, transformSource, validateSource } from "./utils.ts";
 import {
+  callSchemas,
   callsMatching,
+  callsNamed,
   hasKeyPathRead,
   parseModule,
 } from "./transformed-ast.ts";
@@ -363,5 +365,88 @@ describe("transparent wrapper consistency", () => {
 
       expect(normalizeDataFlows(graphOf(a!, b!)).length).toBe(2);
     });
+  });
+
+  describe("conditional-helper operand tidying", () => {
+    // The synthesized `ifElse`/`when`/`unless` operands read a deliberately
+    // narrower set than the classifying stages: `unwrapParentheses` strips
+    // only parentheses, because the schema stages read operand types at these
+    // argument positions and every other transparent wrapper can carry a
+    // type. These pin both halves — the tidying, and the wrapper that must
+    // survive it.
+
+    const source = (ui: string) =>
+      `      import { pattern, UI } from "commonfabric";
+      interface Input {
+        flag: boolean;
+        label: string;
+        note?: string;
+      }
+      export default pattern<Input>((state) => ({
+        [UI]: ${ui},
+      }));
+    `;
+
+    const undefinedArmed = (schema: Record<string, unknown>): boolean =>
+      Array.isArray(schema.type) && schema.type.includes("undefined");
+
+    it("keeps the operand schema non-nullable for a non-null asserted branch", async () => {
+      const output = await transformSource(
+        source(`<p>{state.flag ? (state.note)! : "off"}</p>`),
+        { types: COMMONFABRIC_TYPES },
+      );
+      const schemas = callSchemas(parseModule(output), "ifElse");
+
+      expect(schemas.length).toBeGreaterThan(0);
+      expect(schemas.some(undefinedArmed)).toBe(false);
+    });
+
+    it("emits the `undefined` arm for the same branch without the assertion", async () => {
+      // The control: the `undefined` arm is present until the author asserts
+      // it away, so its absence in the asserted case is the assertion's doing.
+
+      const output = await transformSource(
+        source(`<p>{state.flag ? state.note : "off"}</p>`),
+        { types: COMMONFABRIC_TYPES },
+      );
+      const schemas = callSchemas(parseModule(output), "ifElse");
+
+      expect(schemas.some(undefinedArmed)).toBe(true);
+    });
+
+    const TIDIED: readonly {
+      helper: string;
+      ui: string;
+      operand: string;
+    }[] = [
+      {
+        helper: "ifElse",
+        ui: `<p>{state.flag ? ("on") : "off"}</p>`,
+        operand: "on",
+      },
+      { helper: "when", ui: `<p>{state.flag && ("yes")}</p>`, operand: "yes" },
+      {
+        helper: "unless",
+        ui: `<p>{state.label || ("fallback")}</p>`,
+        operand: "fallback",
+      },
+    ];
+
+    for (const { helper, ui, operand } of TIDIED) {
+      it(`strips redundant parentheses from the synthesized \`${helper}\` operands`, async () => {
+        const output = await transformSource(source(ui), {
+          types: COMMONFABRIC_TYPES,
+        });
+        const call = callsNamed(parseModule(output), helper).at(-1);
+
+        expect(call).toBeDefined();
+        expect(call!.arguments.some(ts.isParenthesizedExpression)).toBe(false);
+        expect(
+          call!.arguments.some((argument) =>
+            ts.isStringLiteral(argument) && argument.text === operand
+          ),
+        ).toBe(true);
+      });
+    }
   });
 });

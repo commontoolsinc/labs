@@ -1,10 +1,19 @@
 # Pattern computation cost: implementation sequence
 
-Status: A1/A2 instrumentation is shipped in
-[PR #7246](https://github.com/commontoolsinc/labs/pull/7246). The controlled A0
-fixture, accounting and reporting regressions, and dashboard are being reconciled
-in [PR #7241](https://github.com/commontoolsinc/labs/pull/7241). A3's local
-implementation requires adaptation to the shipped accounting API before review.
+Status: A1/A2 instrumentation shipped in #7246, and the controlled A0 fixture,
+accounting regressions, and dashboard shipped in #7241. A3 budgets are under
+review in #7257. A4's browser benchmark shipped in #7261; count limits remain.
+C1's remote-row reproductions and the C3 inline-element dependency repair landed
+in [PR #7265](https://github.com/commontoolsinc/labs/pull/7265).
+Cold-materialization, removal, reconnect, and remaining row-invalidation
+acceptance checks stay open.
+
+B3's named aggregates are implemented and validated in
+[PR #7259](https://github.com/commontoolsinc/labs/pull/7259), with
+[contracts](../features/collection-aggregates.md) and
+[measured update and initialization costs](../history/development/performance/2026-09-incremental-aggregates.md).
+The aggregate comparison precedes B1/B2; index contracts and keyed lookup are
+the next collection-operator priority.
 
 This tracker executes the design in
 [PR #7155](https://github.com/commontoolsinc/labs/pull/7155), reviewed at commit
@@ -44,7 +53,7 @@ deferred and does not block completion of the active work.
 | 6     | B1/B2 contracts      | 2; incorporate C1 findings                  | Written index, lookup, and join contracts              |
 | 7     | B1, B4               | 6                                           | Incremental grouping and unique-key indexing           |
 | 8     | B2, B4               | 7                                           | Keyed lookup and incremental join                      |
-| 9     | B3 contracts, B3, B4 | 8                                           | Deterministic named aggregates                         |
+| 9     | B3 contracts, B3, B4 | 2                                           | Deterministic named aggregates                         |
 | 10    | C2, C3, C4           | 5; use 2 for cost evidence                  | Remote updates work through reactive rows              |
 | 11    | B5, B6               | 3, 4, 8, 9; coordinate with 10              | Measured lunch-poll migration                          |
 | 12    | E1, E2, E3           | 2 for measurements; 7–9 for operator advice | Measured guidance and warning diagnostic               |
@@ -88,9 +97,9 @@ replacement advice requires a shipped replacement.
       are the initial boundary; event dispatch and commit work must be added
       before claiming whole-step budget coverage.
   - [x] Define proxy access events, actual link crossings, distinct documents
-        identified by replica document object, and registered dependencies. Specify
-        repeated reads, missing values, enumeration, shallow reads, and memo
-        hits. A read activity is not interchangeable with a proxy access.
+        identified by replica document object, and registered dependencies.
+        Specify repeated reads, missing values, enumeration, shallow reads, and
+        memo hits. A read activity is not interchangeable with a proxy access.
   - [x] Define per-run ownership, cumulative totals, and per-step aggregation.
         Distinguish a union of documents across a step from a sum of per-run
         cardinalities. Define failure, restart, idempotency verification, nested
@@ -149,11 +158,13 @@ durations are used as performance evidence.
         individually cheap runs exceeding the step budget. Verify unbudgeted
         tests preserve their behavior.
 - [ ] **A4 — Add the read-side benchmark.**
-  - [ ] Follow [BENCHMARKS.md](../development/BENCHMARKS.md); measure one vote
+  - [x] Follow [BENCHMARKS.md](../development/BENCHMARKS.md); measure one vote
         settling with its tally on screen across declared collection sizes.
-  - [ ] Preserve the existing write-burst benchmark as a separate workload.
-        Record reads, runs, commits, and timing; assert counts in regression
-        tests and report timing as benchmark trends.
+  - [x] Preserve the existing write-burst benchmark as a separate workload.
+        Record reads, runs, commits, and timing in
+        [PR #7261](https://github.com/commontoolsinc/labs/pull/7261).
+  - [ ] Add read-count regression limits after A3 lands; benchmark timing is
+        reported as a trend.
 - [ ] **A5 — Explain probe/product differences.**
   - [ ] Compare matched inputs in the headless probe and browser, varying worker
         boundary and single-space/cross-space voter links separately.
@@ -173,6 +184,41 @@ durations are used as performance evidence.
   - [ ] Establish failure before repair, or demonstrate that the current system
         already passes the faithful reproduction. Record the cause or evidence
         before deciding what C2/C3 need to change.
+
+  The
+  [independent-replica probes](../../packages/patterns/integration/reactive-vote-rows.test.ts)
+  assert nested-filter membership and derived tally updates. The
+  [browser tests](../../packages/patterns/integration/reactive-vote-rows-browser.test.ts)
+  cover same-space and cross-space profiles, remote colors, profile-only edits,
+  membership additions, ranking changes, and nested mapped swatches. The browser
+  subscribes before votes are created. Cross-space profiles are created in a
+  separate transaction and edited directly in their own space. Headless result
+  reads explicitly pull data, so browser rendering owns the passive-update
+  check. C1 remains open for cold-materialization verification, removals, and
+  reconnects. These synthetic probes do not authorize removing the lunch-poll
+  workaround or accessing the live poll.
+
+  C3's landed fix records the mutable inline element used when resolving a
+  nested array to a content-addressed snapshot. The
+  [cell callback regression](../../packages/runner/test/cell-callbacks.test.ts)
+  fails without the fix after initial demand settles, then passes with the fix;
+  it also verifies that changing a neighboring inline element causes no rerun.
+  Four browser cases and the full runner suite (1,411 tests / 8,764 steps) pass
+  before the current-main merge. After integrating main `ce3602b18a`, all 46
+  type-check groups and 142 focused runtime checks pass. The fix landed in #7265
+  with all 69 CI gates and clean Cubic and antagonistic reviews. C3 remains open
+  for its remaining acceptance checks.
+
+  To record synthetic browser evidence with a local test server, set `API_URL`
+  and `FRONTEND_URL`, then run:
+
+  ```sh
+  CF_ROW_REPRO_ARTIFACT_DIR=/tmp/reactive-row-artifacts deno test -A packages/patterns/integration/reactive-vote-rows-browser.test.ts
+  ```
+
+  The artifact directory receives screenshots and assertion metadata for all
+  four cases. Live poll access requires coordination with Mike.
+
 - [ ] **C2 — Repair partial materialization.** Verify complete inputs under cold
       reads, remote inserts/removals, and reconnect where relevant.
 - [ ] **C3 — Repair remote row invalidation.** Verify affected rows update,
@@ -205,21 +251,23 @@ durations are used as performance evidence.
         consumers do not rerun and measure maintenance work as size grows.
 - [ ] **B2 implementation — Build keyed lookup, then join.** Test lookup and
       join contracts, both-side updates, and affected-row-only invalidation.
-- [ ] **B3 contract — Specify deterministic aggregates.**
-  - [ ] Define combine order from the current collection, independent of edit
+- [x] **B3 contract — Specify deterministic aggregates.**
+  - [x] Define combine order from the current collection, independent of edit
         history; define floating-point behavior explicitly.
-  - [ ] Define ties, empty collections, NaN, infinities, and signed zero for
+  - [x] Define ties, empty collections, NaN, infinities, and signed zero for
         `sum`, `min`, `max`, `minBy`, and `maxBy`; define predicate counting.
-- [ ] **B3 implementation — Add `count`, `sum`, `min`/`max`, `minBy`/`maxBy`.**
-  - [ ] Maintain partial aggregates using existing element identities and
+- [x] **B3 implementation — Add `count`, `sum`, `min`/`max`, `minBy`/`maxBy`.**
+  - [x] Maintain partial aggregates using existing element identities and
         deterministic combination; avoid inverse subtraction.
-  - [ ] Reach identical results through different insertion, deletion, reorder,
+  - [x] Reach identical results through different insertion, deletion, reorder,
         and edit histories. Test count bounds on single-element updates and
         initialization separately.
-  - [ ] Keep ordinary `reduce` as the full-rerun order-dependent operation.
+  - [x] Keep ordinary `reduce` as the full-rerun order-dependent operation.
 - [ ] **B4 — Publish contracts and complexity with each operator.** Update
       public doc comments, pattern-author documentation, and executable examples
-      in the same slice that ships the API.
+      in the same slice that ships the API. The aggregate portion is documented
+      in [collection aggregates](../features/collection-aggregates.md); index
+      and join documentation remains pending.
 
 **Deferred B3a:** Reconsider restricted append folds only after B1–B3 ship and a
 remaining use case justifies them. Requires a separate contract excluding
@@ -291,10 +339,15 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Define A3's budget declaration and extend measurement to event dispatch and
-commit work before enforcing whole-step budgets. Preserve separate
-initialization limits and include short-lived actions and failed attempts. The
-controlled A0 fixture is available for count comparisons; A4/A5 still need
-browser and cross-space measurements before product performance claims. Do not
-implement collection operators before the measurement and semantic gates above
-are satisfied.
+Complete A3's CI and fresh Cubic review after its six review fixes. Continue
+C1's nested-filter and remote-row reproductions from
+[PR #7265](https://github.com/commontoolsinc/labs/pull/7265), and complete
+C1/C3's remaining acceptance checks while retaining the production workaround.
+A4's browser benchmark is available; count regression limits remain. A5 still
+needs cross-space and deployed measurements before product performance claims.
+Live poll access requires coordination with Mike.
+
+For the pending collection operators, settle B1's index contracts before
+implementing `groupBy`/`keyBy`, then build B2's keyed lookup and join. Their
+measurements use the shipped counters and the aggregate comparison method; A4/A5
+gate deployed-product claims rather than operator implementation.

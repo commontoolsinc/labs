@@ -98,7 +98,10 @@ Representative places that mint one:
 - `resolveAsCell()` in `packages/runner/src/cell.ts` re-roots a link whose path
   passes through an array element. Its helper
   `maybeConvertArrayPathToDataURILink` encodes that element's value into a
-  `data:` identifier and keeps the rest of the path.
+  `data:` identifier and keeps the rest of the path. The read dependency remains
+  on that mutable inline element, because its content determines the snapshot's
+  identity. Changes to the element cause a reactive reader to resolve it again;
+  changes to another array element do not require that reader to rerun.
 - Query traversal in `packages/runner/src/traverse.ts` substitutes a `data:`
   document for an array element it needs to read recursively.
 - The lazy schema view in `packages/runner/src/schema-view.ts` does the same for
