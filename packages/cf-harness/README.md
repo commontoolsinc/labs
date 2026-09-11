@@ -1126,15 +1126,24 @@ discovery slug. No case folding or path normalization participates. Zero or
 multiple candidates refuse, and a tree response marked `truncated` refuses
 because an unread inventory is not evidence of absence.
 
-The instructions-only whitelist is scoped to the selected candidate root's
-subtree, so sibling skills and repository files outside that root do not leak
-into the payload decision. Within the subtree, exactly root `SKILL.md` is
-admitted. Every other path — including a directory, script, reference, asset, or
-package file — refuses the whole acquisition and is returned as sanitized, inert
-refusal metadata. Nothing is silently stripped: prose referring to a missing
-script would be a different and misleading skill. Only after this check does the
-host require root `SKILL.md` to be a regular Git tree file, stream at most 256
-KiB of pinned raw bytes, require non-empty UTF-8, and write them to a cell.
+The path whitelist is scoped to the selected candidate root's subtree, so
+sibling skills and repository files outside that root do not leak into the
+payload decision. Within the subtree, two things are admitted: root `SKILL.md`,
+and the regular files directly under `scripts/`. A skill is a directory, and the
+scripts its prose tells a model to run are part of it — prose referring to a
+missing script would be a different and misleading skill. Every other path — a
+reference, an asset, a package file, a directory nested below `scripts/`, a
+symlink or a submodule anywhere — refuses the whole acquisition and is returned
+as sanitized, inert refusal metadata. Nothing is silently stripped. A skill
+shipping more than sixteen scripts refuses on the inventory, before a single one
+is fetched: the size cap bounds a file and that bound is what keeps the number
+of requests one acquisition makes ours rather than the publisher's.
+
+Only after this check does the host require root `SKILL.md` to be a regular Git
+tree file, stream at most 256 KiB of pinned raw bytes per admitted file, require
+non-empty UTF-8, and write the instructions to a cell. The scripts stay
+host-side: nothing is written into the skills root, and whether one may run is
+the operator allowlist's decision rather than the acquisition's.
 
 The successful write carries the weaker `kind: "fetch"` `ExternalIngest`
 provenance variant. It records the exact pinned raw URL, commit SHA, fetch time,

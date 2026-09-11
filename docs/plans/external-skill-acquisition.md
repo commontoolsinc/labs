@@ -226,21 +226,33 @@ with optional `scripts/` (executable code), `references/`, and `assets/` — and
 the registry's download endpoint returns whatever files the snapshot holds. An
 unenforced assumption about what arrives is not a boundary.
 
-Enforcement lives in the host acquisition write step, at the single point
-where fetched bytes become a cell value, and it is a **whitelist on paths, not
-a blacklist on names**:
+Enforcement lives in the host acquisition step, at the single point where
+fetched bytes are admitted, and it is a **whitelist on paths, not a blacklist
+on names**:
 
-- Exactly one file is admitted: the `SKILL.md` at the skill root. Its text is
-  what the cell holds.
+- Two things are admitted: the `SKILL.md` at the skill root, whose text is what
+  the cell holds, and the regular files directly under the root's `scripts/`,
+  which stay host-side. A skill is a directory and its scripts are part of it —
+  a skill whose instructions reference `scripts/foo.py` is not the same skill
+  without it, and admitting the prose alone yields one that will instruct the
+  model to run something that is not there.
 - Any other path in the payload causes the acquisition to **refuse**, naming
   the count and the offending paths, rather than to succeed while quietly
-  dropping them. Silently discarding scripts would make "instructions-only"
-  true of the cell and invisible in the record, and the operator reading that
-  record could not tell a plain skill from one that arrived carrying code.
-- The refusal is the honest outcome because a skill whose instructions
-  reference `scripts/foo.py` is not the same skill without it. Admitting the
-  prose alone yields a skill that will instruct the model to run something
-  that is not there.
+  dropping them. Silently discarding a reference or an asset would make what
+  the cell holds true of the cell and invisible in the record, and the operator
+  reading that record could not tell a skill that arrived whole from one that
+  arrived in part. A directory nested below `scripts/`, a symlink and a
+  submodule are refusals of this kind: the first is a tree the whitelist never
+  judged, and the other two name bytes the inventory does not vouch for.
+- A skill shipping more scripts than one acquisition admits refuses on the
+  inventory, before a single one is fetched. The size cap bounds a file; this
+  bounds the number of requests, which would otherwise be the publisher's
+  number rather than ours.
+
+Admitting the scripts is not admitting them to the registry. The acquired tree
+is host-side, nothing is written into the skills root, and whether a script may
+run is decided by the same operator allowlist a registry skill's script answers
+to — the third of the three properties below, unchanged by this.
 
 For GitHub commit acquisition, the inventory is the recursive tree API at the
 pinned SHA. A response marked `truncated` refuses with its own reason: an unread
