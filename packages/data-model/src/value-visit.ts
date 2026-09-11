@@ -299,6 +299,7 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
    * and is called _after_ the element itself was directly visited.
    */
   visitedArrayElement(
+    array: FabricArray,
     index: number,
     value: DomainFor<DomainExtra>,
   ): BaselineVisitResult<ResultType>;
@@ -316,6 +317,7 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
    * visitor returning a `recurse` result for a visited array.
    */
   visitedArrayGap(
+    array: FabricArray,
     start: number,
     count: number,
   ): BaselineVisitResult<ResultType>;
@@ -326,6 +328,7 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
    * container and is called _after_ the mapping itself was directly visited.
    */
   visitedMapping(
+    container: FabricPlainObject | FabricInstance,
     key: DomainFor<DomainExtra>,
     value: DomainFor<DomainExtra>,
   ): BaselineVisitResult<ResultType>;
@@ -388,18 +391,21 @@ export abstract class BaseValueVisitor<
 
   /** @inheritDoc */
   abstract visitedArrayElement(
+    array: FabricArray,
     index: number,
     value: DomainFor<DomainExtra>,
   ): BaselineVisitResult<ResultType>;
 
   /** @inheritDoc */
   abstract visitedArrayGap(
+    array: FabricArray,
     start: number,
     count: number,
   ): BaselineVisitResult<ResultType>;
 
   /** @inheritDoc */
   abstract visitedMapping(
+    container: FabricPlainObject | FabricInstance,
     key: DomainFor<DomainExtra>,
     value: DomainFor<DomainExtra>,
   ): BaselineVisitResult<ResultType>;
@@ -485,6 +491,7 @@ export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
 
   /** @inheritDoc */
   visitedArrayElement(
+    _array: FabricArray,
     _index: number,
     _value: DomainFor<DomainExtra>,
   ): BaselineVisitResult<ResultType> {
@@ -493,6 +500,7 @@ export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
 
   /** @inheritDoc */
   visitedArrayGap(
+    _array: FabricArray,
     _start: number,
     _count: number,
   ): BaselineVisitResult<ResultType> {
@@ -501,6 +509,7 @@ export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
 
   /** @inheritDoc */
   visitedMapping(
+    _container: FabricPlainObject | FabricInstance,
     _key: DomainFor<DomainExtra>,
     _value: DomainFor<DomainExtra>,
   ): BaselineVisitResult<ResultType> {
@@ -851,6 +860,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         if (idxNumber !== (lastIdx + 1)) {
           // There's a gap just before this element.
           const result = vis.visitedArrayGap(
+            array,
             lastIdx + 1,
             idxNumber - lastIdx - 1,
           );
@@ -870,7 +880,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         // TODO(danfuzz): When we have a non-`mainResult` visit-result type,
         // we'll want to pass the result value from `elemResult` into
         // `visitedArrayElement()` and not the original `element`.
-        const result = vis.visitedArrayElement(idxNumber, element);
+        const result = vis.visitedArrayElement(array, idxNumber, element);
         if (result?.type === "mainResult") {
           return result;
         }
@@ -879,6 +889,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       if (array.length !== (lastIdx + 1)) {
         // There's a gap at the end of the array.
         const result = vis.visitedArrayGap(
+          array,
           lastIdx + 1,
           array.length - lastIdx - 1,
         );
@@ -941,7 +952,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         // TODO(danfuzz): When we have a non-`mainResult` visit-result type,
         // we'll want to pass the result value(s) from the visits immediately
         // above instead of the original `key` and `value`.
-        const result = vis.visitedMapping(key, value);
+        const result = vis.visitedMapping(container, key, value);
         if (result?.type === "mainResult") {
           return result;
         }
