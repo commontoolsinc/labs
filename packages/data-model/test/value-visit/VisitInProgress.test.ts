@@ -305,9 +305,10 @@ describe("VisitInProgress", () => {
           const object = { a: 1, b: 2 };
 
           expect(visit(object, rec)).toEqual(mainResult("first"));
-          expect(rec.events.filter((e) => e[0] === "visitedFabricPlainObject")).toEqual([
-            ["visitedFabricPlainObject", object, "a", 1],
-          ]);
+          expect(rec.events.filter((e) => e[0] === "visitedFabricPlainObject"))
+            .toEqual([
+              ["visitedFabricPlainObject", object, "a", 1],
+            ]);
           expect(rec.events.map((e) => e[1])).not.toContain(2);
         });
 
@@ -416,7 +417,9 @@ describe("VisitInProgress", () => {
             const object = { a: 1 };
 
             visit(object, rec);
-            expect(rec.events.filter((e) => e[0] === "visitedFabricPlainObject"))
+            expect(
+              rec.events.filter((e) => e[0] === "visitedFabricPlainObject"),
+            )
               .toEqual([
                 ["visitedFabricPlainObject", object, "a", 1],
               ]);

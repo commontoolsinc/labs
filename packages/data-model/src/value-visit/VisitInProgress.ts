@@ -180,7 +180,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
           }
 
           case VALUE_TAGS.Object: {
-            return this.#iterateMap(result);
+            return this.#iterateFabricPlainObject(result);
           }
 
           default: {
@@ -480,10 +480,12 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   }
 
   /**
-   * Iterates over all the elements in a map-like value, in response to a
+   * Iterates over all the entries in a `FabricPlainObject`, in response to a
    * `recurse` result.
    */
-  #iterateMap(result: RecurseOfForm): BaselineVisitResult<ResultType> {
+  #iterateFabricPlainObject(
+    result: RecurseOfForm,
+  ): BaselineVisitResult<ResultType> {
     const { container, doKeys, doValues } = result;
     const plainObj = container as FabricPlainObject;
     const vis = this.#visitor;
