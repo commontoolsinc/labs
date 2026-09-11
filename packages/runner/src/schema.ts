@@ -88,6 +88,7 @@ import { ignoreReadForScheduling } from "./scheduler.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
 import { canFollowScopedLink, isCellScope, narrowerScopeCap } from "./scope.ts";
 import {
+  excludeReadFromConflict,
   internalVerifierRead,
   linkResolutionProbe,
 } from "./storage/reactivity-log.ts";
@@ -143,10 +144,9 @@ export function linkWithRetainedScopeCaps(
   };
 }
 
-// Creation-only: stamp the asCell entry's declared scope onto a newly created
-// cell's link. Never use this on a link that was followed/resolved during a
-// read — there the link's own storage-resolved scope is authoritative and
-// schema scope acts only as a follow cap (see link-resolution.ts).
+// The `asCell` declaration chooses the scope of a new slot. Existing values
+// and references keep their storage-resolved scope; their schema scope only
+// constrains which links a read may follow.
 const linkWithAsCellScope = (
   link: NormalizedFullLink,
   entry:
@@ -1215,6 +1215,45 @@ export function validateAndTransform(
         ),
         schema: mergedSchema,
       };
+    }
+    const handleSchema = resolveSchema(link.schema);
+    const handleEntry = ContextualFlowControl.getAsCellValues(handleSchema)[0];
+    if (
+      isObjectOrArray(handleSchema) && handleSchema.default !== undefined &&
+      isCellScope(ContextualFlowControl.getAsCellScope(handleEntry))
+    ) {
+      // Inspect the addressed slot before following its leaf reference: an
+      // existing reference retains its target even when that target is absent.
+      // This handle-only probe remains reactive to the slot's arrival.
+      const absentSlot = tx.runWithAmbientReadMeta(
+        excludeReadFromConflict,
+        () => {
+          let blocked = false;
+          const sourceLink = isCellViewRef(sourceRef)
+            ? sourceRef.link
+            : sourceRef;
+          const slot = resolveLink(runtime, tx, sourceLink, "top", {
+            onScopeBlocked: () => {
+              blocked = true;
+            },
+          });
+          if (
+            blocked || slot.pendingHopDoc || slot.id.startsWith("data:") ||
+            tx.readValueOrThrow(slot, {
+                nonRecursive: true,
+                meta: linkResolutionProbe,
+              }) !== undefined
+          ) return false;
+          const address = toMemorySpaceAddress(slot);
+          const parent = tx.readOrThrow({
+            ...address,
+            path: address.path.slice(0, -1),
+          }, { nonRecursive: true, meta: linkResolutionProbe });
+          return !isObjectOrArray(parent) ||
+            !Object.hasOwn(parent, address.path.at(-1)!);
+        },
+      );
+      if (absentSlot) link = linkWithAsCellScope(link, handleEntry);
     }
     recordCfcReferenceObservation(tx, {
       binding: cfcReferenceBinding(link),
