@@ -44,7 +44,8 @@ import {
   effectTargetKey,
   markEffectCompletion,
 } from "../executor/effect-completion.ts";
-import { waveSettlementOf } from "../executor/wave.ts";
+import { requireWaveAcceptance, waveSettlementOf } from "../executor/wave.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -496,19 +497,16 @@ async function handleLLMError<T, P>(
    * (server-execution v2 stage G, serving-loop.md §4's error-shaped
    * results); inert everywhere else. */
   effectKey?: string,
-  /** Re-establishes the result binding discarded with a refused transaction.
-   * A newer request in the same live instance still uses this target. A
-   * retired instance no longer owns the parent binding and cannot announce. */
+  /** Restores a binding while this attempt owns its announcement. */
   announce?: (tx: IExtendedStorageTransaction) => void,
   requestGuard?: ServedLLMRequestGuard,
-  /** Whether a refused request's captured instance still owns its binding. */
+  /** Whether this refusal can replace the instance's request fields. */
   ownsRefusal?: () => boolean,
 ): Promise<void> {
-  if (ownsRefusal && !ownsRefusal()) return;
   if (thisRun !== getCurrentRun() && announce === undefined) return;
 
   const message = error instanceof Error ? error.message : String(error);
-  if (thisRun === getCurrentRun()) {
+  if (thisRun === getCurrentRun() && (!ownsRefusal || ownsRefusal())) {
     console.warn(`[LLM Error] ${message}`);
     logger.warn("llm", "Error in LLM request", { error });
   }
@@ -517,7 +515,6 @@ async function handleLLMError<T, P>(
 
   let wrote = false;
   const { error: writeError } = await runtime.editWithRetry((tx) => {
-    if (ownsRefusal && !ownsRefusal()) return;
     if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
     if (requestGuard) {
       // Refusal rolls back the selected-request marker with its transaction.
@@ -526,11 +523,12 @@ async function handleLLMError<T, P>(
       else if (!requestGuard.accept(tx, requestHash)) return;
     }
     announce?.(tx);
+    if (ownsRefusal && !ownsRefusal()) return;
     // Read at write time rather than from a decision taken before the wait
     // above: a newer request can start while this one waits for the
     // scheduler, and from then on the answer is that request's to give. The
-    // announcement still stands, because it says where the answer appears and
-    // is the same either way.
+    // announcement has its own binding guard: another actor can still need a
+    // link to a shared result that this request no longer owns.
     if (thisRun !== getCurrentRun()) return;
     wrote = true;
     pendingCell.withTx(tx).set(false);
@@ -625,8 +623,11 @@ type LLMRunState<T> = {
   /** Dispatched model and refusal work that still owns this instance. */
   activeWork: number;
 
-  /** Latest transaction whose request or binding has not settled. */
-  staging?: object;
+  /** Latest unsettled transaction for each resolved output binding. */
+  staging: Map<string, LLMStaging>;
+
+  /** Latest accepted action and its request, ordered by action issuance. */
+  accepted?: { sequence: number; requestId?: string };
 
   /** Most recently staged request. */
   previousCallHash?: string;
@@ -644,13 +645,37 @@ type LLMRunState<T> = {
   cellScope?: CellScope;
 };
 
+/** One binding's pending publication and optional request. */
+type LLMStaging = {
+  /** Symbolic result link published by this action. */
+  target: string;
+
+  /** Invocation order within this builtin closure. */
+  sequence: number;
+
+  /** Staged request identity, when this action makes a request. */
+  requestId?: string;
+
+  /** Removes this token and retires its result instance when idle. */
+  release: () => void;
+};
+
 /** Ownership of one staging attempt and its actual dispatched work. */
 type LLMRequestLifecycle = {
-  /** Whether this instance still owns the refused request's output binding. */
+  /** Whether this attempt still owns its output binding's announcement. */
+  ownsAnnouncement: () => boolean;
+
+  /** Supersedes older bindings once this publication's transaction accepts. */
+  recordPublication: (tx: IExtendedStorageTransaction) => void;
+
+  /** Whether this attempt owns the refused request's fields. */
   owns: () => boolean;
 
+  /** Records the request selected by a settled memo without staging work. */
+  selectRequest: (id: string) => void;
+
   /** Records that rejection must settle the staged request. */
-  stageRequest: () => void;
+  stageRequest: (id: string) => void;
 
   /** Retains state for actual work, including refusal writeback. */
   start: () => void;
@@ -658,6 +683,20 @@ type LLMRequestLifecycle = {
   /** Releases completed work and retires an idle instance. */
   finish: () => void;
 };
+
+/** Observes commit acceptance including a sealed contribution's wave verdict. */
+function onLLMTransactionAcceptance(
+  tx: IExtendedStorageTransaction,
+  onVerdict: (accepted: boolean) => void,
+): void {
+  requireWaveAcceptance(tx);
+  tx.addCommitCallback((committedTx, outcome) => {
+    if (outcome.error) return onVerdict(false);
+    const settlement = waveSettlementOf(committedTx) ?? waveSettlementOf(tx);
+    if (settlement) settlement.then((verdict) => onVerdict(!verdict.error));
+    else onVerdict(true);
+  });
+}
 
 /** Retains pending ownership while retiring settled historical instances. */
 function trackLLMRequestLifecycle<T>(
@@ -668,36 +707,67 @@ function trackLLMRequestLifecycle<T>(
   state: LLMRunState<T>,
   result: Cell<{ pending?: boolean }>,
   identity: ScopeKeyIdentity,
+  publicationBinding: NormalizedFullLink | undefined,
+  sequence: number,
 ): LLMRequestLifecycle {
-  const staging = {};
-  state.staging = staging;
-  let requestStaged = false;
+  const bindingKey = publicationBinding
+    ? resolveScopeKey(publicationBinding.scope ?? "space", identity)
+    : key;
   const retireIfIdle = () => {
     if (
-      states.get(key) !== state || state.staging || state.activeWork !== 0
+      states.get(key) !== state || state.staging.size || state.activeWork !== 0
     ) return;
     const read = runtime.readTx();
     read.tx.scopeKeyIdentity = identity;
     if (result.withTx(read).key("pending").get() !== true) states.delete(key);
   };
   const finishStaging = () => {
-    if (state.staging === staging) state.staging = undefined;
+    if (state.staging.get(bindingKey) === staging) {
+      state.staging.delete(bindingKey);
+    }
     retireIfIdle();
   };
-  tx.addCommitCallback((committedTx, outcome) => {
+  const staging: LLMStaging = {
+    target: effectTargetKey("publication", result),
+    sequence,
+    release: finishStaging,
+  };
+  let selectedRequestId: string | undefined;
+  state.staging.set(bindingKey, staging);
+  const recordPublication = (publicationTx: IExtendedStorageTransaction) => {
+    onLLMTransactionAcceptance(publicationTx, (accepted) => {
+      if (!accepted || !publicationBinding) return;
+      for (const other of states.values()) {
+        const previous = other.staging.get(bindingKey);
+        if (
+          previous && previous.sequence < sequence &&
+          previous.target !== staging.target
+        ) previous.release();
+      }
+    });
+  };
+  onLLMTransactionAcceptance(tx, (accepted) => {
     // Rejected requests retain ownership until their refusal is announced or
     // a later staging attempt takes over. Accepted waves can still withdraw.
-    if (outcome.error && requestStaged) return;
-    const settlement = waveSettlementOf(committedTx) ?? waveSettlementOf(tx);
-    if (settlement) {
-      settlement.then((verdict) => {
-        if (!verdict.error || !requestStaged) finishStaging();
-      });
-    } else finishStaging();
+    if (!accepted && staging.requestId) return;
+    if (accepted && sequence > (state.accepted?.sequence ?? 0)) {
+      state.accepted = { sequence, requestId: selectedRequestId };
+    }
+    finishStaging();
   });
+  const ownsAnnouncement = () =>
+    states.get(key) === state && state.staging.get(bindingKey) === staging;
   return {
-    owns: () => states.get(key) === state,
-    stageRequest: () => requestStaged = true,
+    ownsAnnouncement,
+    recordPublication,
+    owns: () =>
+      ownsAnnouncement() &&
+      state.accepted?.requestId !== staging.requestId,
+    selectRequest: (id) => selectedRequestId = id,
+    stageRequest: (id) => {
+      staging.requestId = id;
+      selectedRequestId = id;
+    },
     start: () => state.activeWork++,
     finish: () => {
       state.activeWork--;
@@ -714,7 +784,7 @@ type ServedLLMRequestGuard = {
   /** Reads whether the selected request still matches. */
   isCurrent: (hash: string) => boolean;
 
-  /** Binds completion reads and validates the selected request. */
+  /** Binds completion reads and validates unqueued request selection. */
   accept: (tx: IExtendedStorageTransaction, hash: string) => boolean;
 };
 
@@ -724,6 +794,7 @@ function servedLLMRequestGuard(
   inputs: Cell<any>,
   result: Cell<{ requestHash?: string }>,
   identity: ScopeKeyIdentity,
+  queued: boolean,
 ): ServedLLMRequestGuard {
   const bind = (tx: IExtendedStorageTransaction) => {
     tx.tx.scopeKeyIdentity = identity;
@@ -738,7 +809,9 @@ function servedLLMRequestGuard(
     },
     accept: (tx, hash) => {
       tx.tx.scopeKeyIdentity = identity;
-      if (result.withTx(tx).key("requestHash").get() !== hash) return false;
+      if (!queued && result.withTx(tx).key("requestHash").get() !== hash) {
+        return false;
+      }
       // Current request inputs contribute the completion's live label basis.
       snapshotQueryResult(inputs.withTx(tx).get());
       return true;
@@ -802,7 +875,7 @@ function enqueuePostCommitLLMWork(
       },
     },
   );
-  lifecycle?.stageRequest();
+  lifecycle?.stageRequest(id);
 }
 
 /**
@@ -873,10 +946,15 @@ export function llm(
   cause: any,
   parentCell: Cell<any>,
   runtime: Runtime, // Runtime will be injected by the registration function
+  _outputBinding?: NormalizedFullLink,
+  _awaitSync?: boolean,
+  publicationBinding?: NormalizedFullLink,
 ): Action {
   const inputs = inputsCell.asSchema(LLMParamsSchema);
 
   const states = new Map<string, LLMRunState<Schema<typeof LLMResultSchema>>>();
+
+  let requestSequence = 0;
 
   return (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
@@ -913,7 +991,12 @@ export function llm(
       : "local";
     let state = states.get(stateKey);
     if (!state) {
-      state = { currentRun: 0, activeWork: 0, lastRequestQueued: false };
+      state = {
+        currentRun: 0,
+        activeWork: 0,
+        lastRequestQueued: false,
+        staging: new Map(),
+      };
       states.set(stateKey, state);
     }
 
@@ -943,11 +1026,25 @@ export function llm(
         state,
         resultCell,
         identity,
+        publicationBinding,
+        ++requestSequence,
       )
       : undefined;
+    const announceResult = (announceTx: IExtendedStorageTransaction) => {
+      if (lifecycle && !lifecycle.ownsAnnouncement()) return;
+      sendResult(announceTx, resultCell);
+      lifecycle?.recordPublication(announceTx);
+    };
     sendResult(tx, resultCell);
+    lifecycle?.recordPublication(tx);
     const requestGuard = identity
-      ? servedLLMRequestGuard(runtime, inputs, resultCell, identity)
+      ? servedLLMRequestGuard(
+        runtime,
+        inputs,
+        resultCell,
+        identity,
+        !!inputs.key("queue").withTx(tx).get(),
+      )
       : undefined;
 
     const thisRun = ++state.currentRun;
@@ -1014,6 +1111,7 @@ export function llm(
         (resultWithLog.get() !== undefined ||
           errorWithLog.get() !== undefined)
       ) {
+        lifecycle?.selectRequest(`llm:${hash}`);
         runtime.effectMemoObserver?.({ kind: "hit", id: `llm:${hash}` });
       }
       return;
@@ -1024,10 +1122,12 @@ export function llm(
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(false);
-      if (served) requestHashWithLog.set(undefined);
+      if (served && !state.lastRequestQueued) requestHashWithLog.set(undefined);
       return;
     }
 
+    const previousRequestQueued = state.lastRequestQueued;
+    state.lastRequestQueued = !!queueName;
     markRequestHashPendingCommit(
       tx,
       hash,
@@ -1035,6 +1135,7 @@ export function llm(
       (next) => {
         state.previousCallHash = next;
       },
+      () => state.lastRequestQueued = previousRequestQueued,
     );
 
     resultWithLog.set(undefined);
@@ -1111,7 +1212,7 @@ export function llm(
           }
         },
         effectKey,
-        (announceTx) => sendResult(announceTx, requestResultCell),
+        announceResult,
         requestGuard,
         lifecycle?.owns,
       );
@@ -1156,7 +1257,9 @@ export function llm(
                 thisRun,
                 onComplete: async (llmResult) => {
                   // Skip if a newer request has already superseded this one.
-                  if (!served && hash !== state.previousCallHash) return;
+                  if (
+                    (!served || queueName) && hash !== state.previousCallHash
+                  ) return;
 
                   await runtime.idle();
                   const groundingSources = extractGroundingSources(llmResult);
@@ -1294,6 +1397,9 @@ export function generateText(
   cause: any,
   parentCell: Cell<any>,
   runtime: Runtime,
+  _outputBinding?: NormalizedFullLink,
+  _awaitSync?: boolean,
+  publicationBinding?: NormalizedFullLink,
 ): Action {
   const inputs = inputsCell.asSchema(GenerateTextParamsSchema);
 
@@ -1301,6 +1407,8 @@ export function generateText(
     string,
     LLMRunState<Schema<typeof GenerateTextResultSchema>>
   >();
+
+  let requestSequence = 0;
 
   return (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
@@ -1337,7 +1445,12 @@ export function generateText(
       : "local";
     let state = states.get(stateKey);
     if (!state) {
-      state = { currentRun: 0, activeWork: 0, lastRequestQueued: false };
+      state = {
+        currentRun: 0,
+        activeWork: 0,
+        lastRequestQueued: false,
+        staging: new Map(),
+      };
       states.set(stateKey, state);
     }
 
@@ -1367,11 +1480,25 @@ export function generateText(
         state,
         resultCell,
         identity,
+        publicationBinding,
+        ++requestSequence,
       )
       : undefined;
+    const announceResult = (announceTx: IExtendedStorageTransaction) => {
+      if (lifecycle && !lifecycle.ownsAnnouncement()) return;
+      sendResult(announceTx, resultCell);
+      lifecycle?.recordPublication(announceTx);
+    };
     sendResult(tx, resultCell);
+    lifecycle?.recordPublication(tx);
     const requestGuard = identity
-      ? servedLLMRequestGuard(runtime, inputs, resultCell, identity)
+      ? servedLLMRequestGuard(
+        runtime,
+        inputs,
+        resultCell,
+        identity,
+        !!inputs.key("queue").withTx(tx).get(),
+      )
       : undefined;
     const pendingWithLog = resultCell.key("pending").withTx(tx);
     const resultWithLog = resultCell.key("result").withTx(tx);
@@ -1398,7 +1525,7 @@ export function generateText(
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(false);
-      if (served) requestHashWithLog.set(undefined);
+      if (served && !state.lastRequestQueued) requestHashWithLog.set(undefined);
       return;
     }
 
@@ -1451,6 +1578,7 @@ export function generateText(
     ) {
       // The §4 memo hit (server-execution v2): stored key matches — the
       // stored result (or error-shaped result) is the value; no re-fire.
+      lifecycle?.selectRequest(`generateText:${hash}`);
       runtime.effectMemoObserver?.({ kind: "hit", id: `generateText:${hash}` });
       return;
     }
@@ -1561,7 +1689,7 @@ export function generateText(
           }
         },
         effectKey,
-        (announceTx) => sendResult(announceTx, requestResultCell),
+        announceResult,
         requestGuard,
         lifecycle?.owns,
       );
@@ -1682,6 +1810,9 @@ export function generateObject<T extends Record<string, unknown>>(
   cause: any,
   parentCell: Cell<any>,
   runtime: Runtime,
+  _outputBinding?: NormalizedFullLink,
+  _awaitSync?: boolean,
+  publicationBinding?: NormalizedFullLink,
 ): Action {
   const inputs = inputsCell.asSchema(GenerateObjectParamsSchema);
 
@@ -1689,6 +1820,8 @@ export function generateObject<T extends Record<string, unknown>>(
     string,
     LLMRunState<Schema<typeof GenerateObjectResultSchema>>
   >();
+
+  let requestSequence = 0;
 
   return (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
@@ -1736,7 +1869,12 @@ export function generateObject<T extends Record<string, unknown>>(
       : "local";
     let state = states.get(stateKey);
     if (!state) {
-      state = { currentRun: 0, activeWork: 0, lastRequestQueued: false };
+      state = {
+        currentRun: 0,
+        activeWork: 0,
+        lastRequestQueued: false,
+        staging: new Map(),
+      };
       states.set(stateKey, state);
     }
 
@@ -1766,11 +1904,25 @@ export function generateObject<T extends Record<string, unknown>>(
         state,
         resultCell,
         identity,
+        publicationBinding,
+        ++requestSequence,
       )
       : undefined;
+    const announceResult = (announceTx: IExtendedStorageTransaction) => {
+      if (lifecycle && !lifecycle.ownsAnnouncement()) return;
+      sendResult(announceTx, resultCell);
+      lifecycle?.recordPublication(announceTx);
+    };
     sendResult(tx, resultCell);
+    lifecycle?.recordPublication(tx);
     const requestGuard = identity
-      ? servedLLMRequestGuard(runtime, inputs, resultCell, identity)
+      ? servedLLMRequestGuard(
+        runtime,
+        inputs,
+        resultCell,
+        identity,
+        !!inputs.key("queue").withTx(tx).get(),
+      )
       : undefined;
     const pendingWithLog = resultCell.key("pending").withTx(tx);
     const resultWithLog = resultCell.key("result").withTx(tx);
@@ -1801,7 +1953,7 @@ export function generateObject<T extends Record<string, unknown>>(
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(false);
-      if (served) requestHashWithLog.set(undefined);
+      if (served && !state.lastRequestQueued) requestHashWithLog.set(undefined);
       return;
     }
 
@@ -1956,6 +2108,7 @@ export function generateObject<T extends Record<string, unknown>>(
         hash === currentRequestHash
       ) {
         // The §4 memo hit (server-execution v2): no re-fire.
+        lifecycle?.selectRequest(`generateObject:${hash}`);
         runtime.effectMemoObserver?.({
           kind: "hit",
           id: `generateObject:${hash}`,
@@ -2069,7 +2222,7 @@ export function generateObject<T extends Record<string, unknown>>(
             state.previousCallHash = undefined;
           },
           effectKey,
-          (announceTx) => sendResult(announceTx, requestResultCell),
+          announceResult,
           requestGuard,
           lifecycle?.owns,
         );
@@ -2372,6 +2525,7 @@ export function generateObject<T extends Record<string, unknown>>(
         hash === currentRequestHash
       ) {
         // The §4 memo hit (server-execution v2): no re-fire.
+        lifecycle?.selectRequest(`generateObject:${hash}`);
         runtime.effectMemoObserver?.({
           kind: "hit",
           id: `generateObject:${hash}`,
@@ -2479,7 +2633,7 @@ export function generateObject<T extends Record<string, unknown>>(
             state.previousCallHash = undefined;
           },
           effectKey,
-          (announceTx) => sendResult(announceTx, requestResultCell),
+          announceResult,
           requestGuard,
           lifecycle?.owns,
         );

@@ -69,18 +69,29 @@ reported rather than written into the conversation.
 Served `llm`, `generateText`, and `generateObject` bind lifecycle state and
 outbox identity to the resolved output instance. The pending request writes
 `requestHash` with `pending: true`; only a settled result or error constitutes a
-memo hit. Completion checks the selected hash under the issuing identity and
-reads the current input label basis before writing. An A→B→A selection can
+memo hit. Unqueued completion checks the selected hash under the issuing
+identity and reads the current input label basis before writing. An A→B→A selection can
 therefore reuse the original in-flight A while a stale B response leaves the
-current result alone. Refused dispatches use their instance's generation guard
-and re-announce the result, since the refused transaction's selection marker
-was rolled back. Work from a withdrawn contribution does not reach the model. Parent binding
-publication follows the selected result target separately from request state;
-a scope change can return to an existing target, and a refused or withdrawn
-publication does not suppress the next binding write. Settled in-memory
+current result alone. A refused staging attempt can restore its own output
+binding without replacing an accepted request's pending state or result. Each
+live result instance retains the latest staging attempt per resolved output
+binding; a retry replaces that binding's prior attempt. Binding ownership uses
+the raw node's physical publication coordinate, which can differ from its
+declared result or container scope. An accepted publication
+to a different target supersedes older attempts for the same binding, including
+memo hits that publish an unchanged link and terminal refusal announcements.
+Publication acceptance waits for the wave verdict. Work from a withdrawn
+contribution does not reach the model.
+Parent binding publication follows the selected target separately from request
+state, so a scope change can return to an existing target. Settled in-memory
 instance state retires once no staging or dispatched work owns it; durable
-result cells retain memoization. A retired refusal cannot replace a newer
-instance's binding.
+result cells retain memoization.
+
+Named queues retain their issued work when inputs are cleared. Queued
+`generateText` and `generateObject` publish each completion even when a later
+request is queued; `llm` publishes only its latest request's successful result.
+Queue completion writes remain bound to the issuing identity and read the live
+input label basis. This queue behavior applies with server execution on or off.
 
 `sqlite*` row clearance — RULED 2026-08-02: **per-reader
 materialization**, today's shape. The reader principal is part of

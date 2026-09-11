@@ -36,10 +36,10 @@ installFakeClock({
     // they arm — a semantics change, not a speedup. The test waits on
     // watermark/subscription edges with bounded timeouts.
     "executor-serving-loop",
+    "executor-llm-supersession",
     // The compiled-child suite runs the same live serving host. Its lease
     // renew interval must advance in real time while compiler work settles.
     "executor-compile-and-run",
-    "executor-llm-supersession",
     // Same wall-clock pacing, same machinery (the SpaceServer's renew
     // interval and flush deadline), one level down: the stage-G
     // recovery-seam tests drive a real SpaceServer directly.

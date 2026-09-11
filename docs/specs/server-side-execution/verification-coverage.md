@@ -2618,8 +2618,8 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   boundary is shared by OFF and the served compiler; closing it does not
   discharge OW28's serving port.
 - OW28-supersession-family — PARTIALLY CLOSED: served `llm`, `generateText`,
-  and direct `generateObject` accept completions by the selected request hash
-  in the resolved output instance. Returning from A to B to A while the original
+  and direct `generateObject` accept unqueued completions by the selected
+  request hash in the resolved output instance. Returning from A to B to A while the original
   A remains in flight attaches to that A through outbox deduplication; a local
   run generation does not discard its result. A pending request hash is a
   selection marker, not a settled memo hit.
@@ -2631,8 +2631,13 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   superseded dispatch refusals, including the result announcement. It also
   proves space→user→space result rebinding with serving both on and off,
   retirement of settled state, retention across uncommitted staging, and
-  delayed refusals after withdrawal or instance retirement. These are
-  no-network direct-provider controls; they do not establish tool-loop,
+  delayed refusals after withdrawal or instance retirement. It also covers
+  refusal of a duplicate accepted request, accepted memo/empty publication
+  superseding an older scope, per-binding announcement ownership for a shared
+  result, bounded retry ownership, and OFF/served queue completion parity.
+  The shared-result binding checks observe the raw publication callback;
+  the host suite separately proves durable user/session result isolation.
+  These are no-network direct-provider controls; they do not establish tool-loop,
   `llmDialog`, or other effect-family supersession. Those remain investigation
   obligations rather than claims that every caller has this failure.
 - OW28-instance-family — PARTIALLY CLOSED; reconcile remaining callers with
