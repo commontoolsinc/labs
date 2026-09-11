@@ -755,6 +755,12 @@ export const SOURCE_DOC_SCHEMA = {
   $ref: "#/$defs/sourceDoc",
 } as const satisfies JSONSchema;
 
+/** Read a source record's filename without following its source closure. */
+export const SOURCE_DOC_ENTRY_SCHEMA = {
+  type: "object",
+  properties: { filename: { type: "string" } },
+} as const satisfies JSONSchema;
+
 /**
  * Flat source-document write schema. Only delegation metadata receives the
  * runtime-minted compiler attestation: source code/imports remain
