@@ -575,6 +575,51 @@ added for it later would set up the same wave twice.
 follows the single line from the group-level `+1` down to the one artifact that
 covered it, and to the two arms neither run reached.
 
+### Branches reached only when the operating system got there first
+
+A sixth shape is the arm that copes with something outside the process having
+already gone: a signal sent to a child that has exited, a write to a pipe the
+far end has closed. The operation around it runs on every teardown. Whether the
+arm runs is decided by how the kernel's notification interleaved with the work
+the code was doing, which no test orders and no assertion mentions.
+
+Stopping a spawned child is the worked example. `Deno.ChildProcess` waits for
+its child from the moment it is spawned, and `kill()` throws
+`TypeError: Child process has already terminated` once that wait has resolved,
+whether or not anyone read `status`. So the `catch` beside a `kill()` runs when
+the child exited far enough ahead of the stop for the runtime to have reaped it,
+and a driver that asks its child to exit and then stops it produces that
+ordering on some runs and not on others.
+
+The state is constructible in isolation — spawn a child, await its status, and
+`kill()` throws every time — but not where the branch sits. A driver owns the
+child it spawned and takes it down itself, so a test driving the driver has no
+argument it can pass to ask for one order or the other. What it can construct is
+the thing the branch responds to, which is what `kill()` does when it is called.
+Give the signal a function of its own, taking only the part of the child it
+touches — `Pick<Deno.ChildProcess, "kill">` is the whole of it — and both arms
+are reached by passing an object whose `kill()` returns and one whose `kill()`
+throws. Prefer such a stand-in to a real reaped child even though one can be
+had, because it lets the case say which signal was sent, which a process that is
+already gone cannot show, and because it spawns nothing.
+`terminateChildProcess()` in
+`packages/connectors/agents/connector/src/child-process.ts` is that function,
+and the cases beside it in
+`packages/connectors/agents/connector/test/child-process.test.ts` assert that
+the running child was sent `SIGTERM` and that the reaped one was asked at all,
+so a version that stopped sending it fails rather than staying green on the
+line count.
+
+Extracting it settled where the branch lives, as it did for the list
+coordinators above. The same arm had been written out three times over, once at
+each place in that package that takes down a child it spawned, so one branch was
+three waiting to flap — and two of the three had never been covered on any run.
+Extract the signal alone rather than the whole teardown: what those three shared
+was the arm, and each of them waits for the process to go in a different way.
+[The investigation record](../history/development/coverage-flake-child-already-exited-2026-09-10.md)
+follows the single line from the group-level `+1` down to the one call in
+twenty-seven that covered it.
+
 ### Checks the layer below already makes
 
 Not every line that moves deserves a test. Sometimes a line decides nothing:
