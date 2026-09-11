@@ -162,6 +162,22 @@ import {
   isStorageTransactionInconsistent,
 } from "./storage/rejection.ts";
 
+// TEMP-INSTRUMENTATION (PR #7287): remove before merge. Traces the pre-sync
+// to the console: always in a browser, whose console the flag-on pattern job
+// pipes into its output, and in Deno only where CF_TEMP_PRESYNC_TRACE=1, so
+// command output stays clean.
+const tempPresyncTrace: (...args: unknown[]) => void = (() => {
+  let enabled = true;
+  if (typeof Deno !== "undefined") {
+    try {
+      enabled = Deno.env.get("CF_TEMP_PRESYNC_TRACE") === "1";
+    } catch {
+      enabled = false;
+    }
+  }
+  return enabled ? (...args: unknown[]) => console.log(...args) : () => {};
+})();
+
 import "./builtins/index.ts";
 
 import { runInActionExecution } from "./builder/action-context.ts";
@@ -7198,7 +7214,7 @@ export class Runner {
       const syncStart = performance.now();
       // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
       const tempId = resultCell.getAsNormalizedFullLink().id.slice(0, 20);
-      console.log(`TEMP-PRESYNC start ${tempId}`);
+      tempPresyncTrace(`TEMP-PRESYNC start ${tempId}`);
       try {
         return await this.#syncCellsForRunningPatternInner(
           resultCell,
@@ -7208,7 +7224,7 @@ export class Runner {
         );
       } finally {
         // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
-        console.log(`TEMP-PRESYNC end ${tempId}`);
+        tempPresyncTrace(`TEMP-PRESYNC end ${tempId}`);
         // Resume-boot decomposition: this is the dependency pre-sync a fresh
         // runtime pays before wiring a stored piece back up. Recorded under
         // the runner timing stats (they record even when the logger is
@@ -7514,7 +7530,7 @@ export class Runner {
         .map((address) => entityKey(address, this.#runtime.scopeKeyIdentity))
         .filter((key) => !awaited.has(key));
       // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
-      console.log(
+      tempPresyncTrace(
         `TEMP-PRESYNC cross-space round ${round}: ${keys.length} new pending`,
         keys.slice(0, 6),
       );
@@ -7527,7 +7543,7 @@ export class Runner {
         // A load that failed leaves its document absent; the next round
         // reads past it, and the run reads the same absence.
         // TEMP-INSTRUMENTATION (PR #7287): console, not debug; remove before merge.
-        console.log(
+        tempPresyncTrace(
           "TEMP-PRESYNC a load a cross-space read kicked did not land",
           error,
         );
