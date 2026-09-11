@@ -1140,8 +1140,8 @@ export function makeVisitFabricValueFunction<ResultType = FabricValue>(
  * Type checking can be performed either as a deep-validity check or a shallow
  * "shape of value" check:
  *
- * * The shallow check is a fast single-layer check and considers all arrays to
- *   be `FabricArray`s and all plain objects to be `FabricPlainObject`s.
+ * * The shallow check is a fast single-layer check based on
+ *   `isValidFabricValueLayer()`, see which for details.
  *
  * * The deep check performs a full-depth validity check anywhere an encountered
  *   value to be dispatched might turn out not to be a valid `FabricValue`,
