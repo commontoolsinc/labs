@@ -20,6 +20,11 @@ import { computeInputHashFromValue } from "../../src/builtins/fetch-utils.ts";
 import type { Cell } from "../../src/cell.ts";
 import { EngineWaveCommitSink } from "../../src/executor/engine-wave-sink.ts";
 import {
+  type SealedEffectBatch,
+  SpaceOutbox,
+} from "../../src/executor/outbox.ts";
+import { emptyServingLoopStats } from "../../src/executor/stats.ts";
+import {
   stampWaveRunContext,
   WaveAccumulator,
   waveRunContextOf,
@@ -188,7 +193,10 @@ describe("fetch-program-served-lifecycle", () => {
       scope: "session",
     });
     const cancels: Array<() => void> = [];
-    const dispatches: Array<() => void | Promise<void>> = [];
+    const dispatches: Array<
+      () => ReturnType<SealedEffectBatch["effects"][number]["flush"]>
+    > = [];
+    const effectBatches: SealedEffectBatch[] = [];
     const accepted: Array<() => void> = [];
     const publications: Array<{ scope?: string; session?: string }> = [];
     let resultCells: ResultCells;
@@ -241,6 +249,11 @@ describe("fetch-program-served-lifecycle", () => {
         const enqueue = tx.enqueuePostCommitEffect.bind(tx);
         tx.enqueuePostCommitEffect = (effect) => {
           dispatches.push(() => effect.flush(tx));
+          effectBatches.push({
+            tx,
+            effects: [effect],
+            context: waveRunContextOf(tx),
+          });
           enqueue({ ...effect, flush: () => {} });
         };
       }
@@ -281,6 +294,7 @@ describe("fetch-program-served-lifecycle", () => {
       binding,
       cancels,
       dispatches,
+      effectBatches,
       accepted,
       publications,
       get resultCells() {
@@ -486,6 +500,147 @@ describe("fetch-program-served-lifecycle", () => {
       expect(edits.calls).toHaveLength(0);
     });
   }
+
+  for (const rejected of [[0], [1], [0, 1]]) {
+    it(`settles real outbox attachments when release rejects ${rejected.map((index) => index + 1).join(" and ")}`, async () => {
+      const f = fixture();
+      const attachments = await acceptedAttachments(f);
+      using _first = rejected.includes(0)
+        ? rejectRelease(attachments[0])
+        : undefined;
+      using _second = rejected.includes(1)
+        ? rejectRelease(attachments[1])
+        : undefined;
+      using network = stub(globalThis, "fetch", () =>
+        Promise.resolve(
+          new Response('export default { result: "done" };', {
+            headers: { "content-type": "application/javascript" },
+          }),
+        ));
+      const gate = Promise.withResolvers<void>();
+      const started = Promise.withResolvers<void>();
+      const stats = emptyServingLoopStats();
+      const outbox = new SpaceOutbox({
+        stats,
+        server,
+        engine: await server.engineForSpace(space),
+        space,
+        sessionId: executionLeaseHolder(service.did()),
+        localSeqRef: { value: 0 },
+        budget: { maxOutstandingEffects: 1 },
+      });
+      const observer = runtime.asyncWorkObserver;
+      runtime.asyncWorkObserver = (work) => outbox.observeAsyncWork(work);
+      try {
+        outbox.admitSealedEffects([{
+          tx: attachments[0],
+          context: undefined,
+          effects: [{
+            id: "hold-program-dispatch",
+            kind: "fetch-start",
+            flush: () => {
+              started.resolve();
+              return gate.promise;
+            },
+          }],
+        }]);
+        await started.promise;
+        outbox.admitSealedEffects(f.effectBatches);
+        expect(outbox.inflightCount).toBe(2);
+        expect(network.calls).toHaveLength(0);
+        gate.resolve();
+        await outbox.settle();
+        await runtime.settled();
+        expect(outbox.inflightCount).toBe(0);
+        expect(network.calls).toHaveLength(rejected.length === 2 ? 0 : 1);
+        expect(f.cacheState(aliceOne, "user")).toBe(
+          rejected.length === 2 ? "idle" : "success",
+        );
+        using edits = spy(runtime, "edit");
+        f.cancels[0]();
+        expect(edits.calls).toHaveLength(0);
+      } finally {
+        gate.resolve();
+        outbox.close();
+        await outbox.settle();
+        runtime.asyncWorkObserver = observer;
+        f.cancels[0]();
+        await runtime.settled();
+      }
+    });
+  }
+
+  it("releases a refused claim observed by another binding and permits a fresh request", async () => {
+    const f = fixture("session");
+    await f.seed(aliceOne, "user");
+    const first = f.stage(aliceOne);
+    await commit(first);
+    expect(f.effectBatches).toHaveLength(1);
+    expect(f.cacheState(aliceOne, "user")).toBe("fetching");
+
+    const observation = f.stage(aliceTwo);
+    expect(observation.getCfcState().outbox).toHaveLength(0);
+    expect(
+      observation.getCfcState().writePolicyInputs.filter(
+        (input) => input.kind === "sink-request",
+      ),
+    ).toHaveLength(0);
+    await commit(observation);
+    expect(f.effectBatches).toHaveLength(1);
+    expect(f.read(f.binding, aliceTwo)?.selected).toBe("user");
+
+    using _first = rejectRelease(first);
+    using network = stub(globalThis, "fetch", () =>
+      Promise.resolve(
+        new Response('export default { result: "done" };', {
+          headers: { "content-type": "application/javascript" },
+        }),
+      ));
+    const outbox = new SpaceOutbox({
+      stats: emptyServingLoopStats(),
+      server,
+      engine: await server.engineForSpace(space),
+      space,
+      sessionId: executionLeaseHolder(service.did()),
+      localSeqRef: { value: 0 },
+    });
+    const observer = runtime.asyncWorkObserver;
+    runtime.asyncWorkObserver = (work) => outbox.observeAsyncWork(work);
+    try {
+      outbox.admitSealedEffects(f.effectBatches);
+      await outbox.settle();
+      await runtime.settled();
+      expect(network.calls).toHaveLength(0);
+      expect(outbox.inflightCount).toBe(0);
+      expect(f.cacheState(aliceTwo, "user")).toBe("idle");
+      expect(f.read(f.binding, aliceTwo)?.selected).toBe("user");
+
+      const fresh = f.stage(aliceTwo);
+      expect(fresh.getCfcState().outbox).toHaveLength(1);
+      expect(
+        fresh.getCfcState().writePolicyInputs.filter(
+          (input) => input.kind === "sink-request",
+        ),
+      ).toHaveLength(1);
+      await commit(fresh);
+      expect(f.effectBatches).toHaveLength(2);
+      outbox.admitSealedEffects(f.effectBatches.slice(1));
+      await outbox.settle();
+      await runtime.settled();
+      expect(network.calls).toHaveLength(1);
+      expect(f.cacheState(aliceTwo, "user")).toBe("success");
+      expect(outbox.inflightCount).toBe(0);
+      using edits = spy(runtime, "edit");
+      f.cancels[0]();
+      expect(edits.calls).toHaveLength(0);
+    } finally {
+      outbox.close();
+      await outbox.settle();
+      runtime.asyncWorkObserver = observer;
+      f.cancels[0]();
+      await runtime.settled();
+    }
+  });
 
   it("preserves earlier refusal ownership when a newer scope publication is withdrawn", async () => {
     const f = fixture();

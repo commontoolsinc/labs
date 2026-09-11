@@ -1201,6 +1201,11 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
 - **In-flight dedupe**: one outstanding effect per (key, result
   target) per space; the target includes its resolved user/session instance.
   A second miss on the same (key, target) attaches to the in-flight effect.
+  Before dispatch, each accepted attachment retains its own release check.
+  A synchronous release refusal selects the next attachment under that
+  attachment's captured run context. Once an attachment dispatches, the key
+  deduplicates until its work and readable completion retire; a thrown error
+  or rejected work promise does not select another attachment.
   Completion acceptance follows the currently selected request in that
   instance, so A→B→A may reuse the original A without accepting a stale B. Two DISTINCT result targets
   carrying byte-identical inputs are two distinct requests, and

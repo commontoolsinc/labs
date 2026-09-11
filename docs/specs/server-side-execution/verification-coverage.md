@@ -2681,6 +2681,13 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   result, and withdrawn publication. These controls exercise local program
   responses; cancellation of resolver network requests remains separate.
 
+  The program lifecycle controls also admit duplicate accepted contributions
+  through the real `SpaceOutbox` under a held dispatch budget. A release refusal
+  selects a surviving accepted attachment; refusing every attachment releases
+  the claim. `executor-outbox-budget.test.ts` covers the selected run context,
+  readable-completion deduplication, immediate re-admission after all refusals,
+  and the absence of fallback after a dispatched request fails.
+
   `memory-v2-wave-promotion.test.ts` covers the storage boundary those completion
   guards depend on: all accepted contributions to one document at the same wave
   sequence remain visible after settlement, across space, user, and session
