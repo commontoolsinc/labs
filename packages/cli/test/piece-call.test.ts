@@ -1721,6 +1721,7 @@ function createPieceCallableHarness(options: {
   };
 
   const defaultReceiptCell = {
+    asSchema: () => defaultReceiptCell,
     get: () => options.receiptValue,
     pull: () => Promise.resolve(options.receiptValue),
     // The stored form presence is decided on. Defaults to the materialized
@@ -3251,7 +3252,8 @@ function linkedReceiptCell(
   const resolvedRoot = root.doc
     ? build(root, root.doc, root.doc.path ?? [])
     : build(root, receiptDoc, receiptDoc.path ?? []);
-  return mockCell({
+  const receipt = mockCell({
+    asSchema: () => receipt,
     get: () => value,
     pull: () => Promise.resolve(value),
     // These receipts hold plain JSON, whose stored form is the value itself;
@@ -3261,6 +3263,7 @@ function linkedReceiptCell(
     resolveAsCell: () => resolvedRoot,
     getAsNormalizedFullLink: () => mockLink(receiptDoc),
   });
+  return receipt;
 }
 
 /**
@@ -3805,6 +3808,7 @@ describe("call selection", () => {
     // through, pointed at the cell the value was read from — so the shaped
     // answer carries the source's own links rather than a copy of a copy.
     const receiptCell = {
+      asSchema: () => receiptCell,
       get: () => topicResult,
       pull: () => Promise.resolve(topicResult),
       getRaw: () => topicResult,
