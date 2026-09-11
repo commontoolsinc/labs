@@ -1,16 +1,19 @@
 {
-  "updated": "2026-09-10T23:29:54.955157+00:00",
+  "updated": "2026-09-11T00:09:28.246813+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7257",
-  "activity": "Read-budget PR #7257 is mergeable and current-head CI is running. Integration with main ce3602b18a passes all 46 type-check groups and 50 focused event/accounting checks.",
-  "review": "Antagonistic review is clean. Cubic skipped the merge-only head; a fresh review of this checkpoint remains required before landing.",
+  "activity": "Published the captured-cell compiler repair in #7257 and integrated the merged dashboard and row fix. Fresh review and CI remain. Selector fix #7279 has a zero-issue Cubic review and is completing CI.",
+  "review": "Compiler repair and selector fix have clean antagonistic reviews. The merged dashboard passed all 69 CI gates and actual zero-issue Cubic review. Current budget-head CI/Cubic remain required.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
-    "#7257: integration with main c8a64af840 passed 1,417 runner tests / 8,843 steps. Latest main ce3602b18a integration passes all 46 type-check groups and 50 focused checks. Full CLI completed with 1,821 passed and two known baseline color failures.",
     "#7261 merged as c8a64af840: all CI gates passed; latest Cubic reported zero issues; antagonistic review clean. Browser recordings remain available below.",
-    "#7259: named incremental aggregates merged as d9b45371ef. Contracts and measured comparisons are linked from the implementation tracker."
+    "#7265: merged as 3aee034aff after all 69 CI gates, zero-issue latest Cubic review, and clean antagonistic review.",
+    "#7264: merged as 5d23bc5ba9 after all 69 CI gates and clean latest Cubic/antagonistic reviews.",
+    "#7279: full runner 1,422 tests / 8,866 steps, all 46 type-check groups, 599 docs blocks, format and lint passed. Awaiting CI and Cubic.",
+    "#7257 compiler repair 3b4c6e5959: full transformer 1,167 tests / 955 steps; CLI 1,821 tests / 2,921 steps with two NO_COLOR-environment failures, both passing when NO_COLOR is removed. All 13 budget CLI steps, 46 type-check groups, 599 docs blocks, fmt and lint pass.",
+    "#7259: named incremental aggregates merged as d9b45371ef; contracts and measurements are linked from the implementation tracker."
   ],
   "stages": [
     {
@@ -35,13 +38,13 @@
       "id": "A3",
       "title": "Read budgets and whole-step coverage",
       "status": "review",
-      "detail": "Implemented in #7257. Six initial code findings fixed; current-main integration passes type checking and 50 focused checks. CI and fresh Cubic review remain."
+      "detail": "Compiler collision repaired and pushed to #7257; full transformer suite and original budget regressions pass. Integration with the merged dashboard and row fix is being checked before fresh CI and Cubic review."
     },
     {
       "id": "A4",
       "title": "Read-side benchmark",
       "status": "active",
-      "detail": "Browser benchmark landed in #7261 with three recorded sizes. Remaining A4 work: assert read-count regression limits after A3 lands."
+      "detail": "Browser benchmark landed in #7261. Three headless render budget fixtures pass with a one-over failure probe. Publication depends on A3 and the isolated union-branch schema-scope fix."
     },
     {
       "id": "A5",
@@ -53,7 +56,7 @@
       "id": "C1",
       "title": "Multi-replica reproductions",
       "status": "active",
-      "detail": "Reproduced missing/stale nested swatches. Candidate fix records the mutable inline element used to derive snapshot identity; before/after unit, narrow invalidation, and remote browser updates pass. Initial #7265 probes are held for this fix; cross-space/removal/reconnect work remains."
+      "detail": "Four synthetic browser cases pass: nested filters and mapped swatches, with same-space and cross-space profiles, remote colors, profile-only edits, membership additions, and ranking. Cold-materialization verification, removal, and reconnect cases remain."
     },
     {
       "id": "B1",
@@ -71,7 +74,7 @@
       "id": "B3",
       "title": "Deterministic aggregates",
       "status": "done",
-      "detail": "Named incremental aggregates landed in #7259 with documented contracts and measured comparisons."
+      "detail": "Named aggregates landed in #7259 with numeric and identity contracts, cold-resume regressions, and measured comparisons. Index and keyed-lookup contracts are the next collection-operator work."
     },
     {
       "id": "B4",
@@ -89,7 +92,7 @@
       "id": "C3",
       "title": "Remote row invalidation",
       "status": "active",
-      "detail": "Mutable inline-element dependency fix passes the full runner suite and same-space remote browser updates. Cross-space fixture validation and PR gates remain."
+      "detail": "Inline-element dependency fix landed in #7265 with four browser cases and narrow invalidation tests. Remaining acceptance checks and production workaround removal stay open."
     },
     {
       "id": "C4",
@@ -203,8 +206,8 @@
     },
     {
       "title": "See remote updates",
-      "state": "Planned \u00b7 C1\u2013C4",
-      "detail": "Show two participants and the affected row updating correctly."
+      "state": "Available \u00b7 C1/C3",
+      "detail": "The row demo shows remote membership, colors, ranking, and cross-space profile updates; cold and reconnect acceptance checks remain."
     },
     {
       "title": "Compare optimized vote updates",
@@ -212,5 +215,5 @@
       "detail": "Compare the same interaction before and after migration, with read work and measured time."
     }
   ],
-  "validatedRevision": "5de859f2b420c747513aaa6cf9e3c174f67cad0c"
+  "validatedRevision": "3b4c6e5959"
 }

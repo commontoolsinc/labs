@@ -1,11 +1,14 @@
 # Pattern computation cost: implementation sequence
 
 Status: A1/A2 instrumentation shipped in #7246; worker control shipped in #7256.
-The controlled A0 fixture and accounting regressions shipped in #7241; A4's
-browser benchmark shipped in #7261. A3 budget enforcement is in
-[PR #7257](https://github.com/commontoolsinc/labs/pull/7257), with full runner
-validation, targeted CLI regressions, and antagonistic review complete. CI and
-Cubic review remain before landing.
+The controlled A0 fixture, accounting regressions, and dashboard shipped in
+#7241, with browser and remote-row demonstrations added in #7264. A3 budget
+enforcement is under review in #7257. Its captured-cell compiler regression
+repair passes the full transformer suite and targeted CLI tests; current-head
+CI and Cubic review remain. A4's browser benchmark shipped in #7261; count
+limits remain. C1's remote-row reproductions and the C3 inline-element
+dependency repair landed in #7265. Cold-materialization, removal, reconnect,
+and remaining row-invalidation acceptance checks stay open.
 
 B3's named aggregates are implemented and validated in
 [PR #7259](https://github.com/commontoolsinc/labs/pull/7259), with
@@ -200,6 +203,41 @@ alongside these fixtures. CI and clean latest reviews remain landing gates.
   - [ ] Establish failure before repair, or demonstrate that the current system
         already passes the faithful reproduction. Record the cause or evidence
         before deciding what C2/C3 need to change.
+
+  The
+  [independent-replica probes](../../packages/patterns/integration/reactive-vote-rows.test.ts)
+  assert nested-filter membership and derived tally updates. The
+  [browser tests](../../packages/patterns/integration/reactive-vote-rows-browser.test.ts)
+  cover same-space and cross-space profiles, remote colors, profile-only edits,
+  membership additions, ranking changes, and nested mapped swatches. The browser
+  subscribes before votes are created. Cross-space profiles are created in a
+  separate transaction and edited directly in their own space. Headless result
+  reads explicitly pull data, so browser rendering owns the passive-update
+  check. C1 remains open for cold-materialization verification, removals, and
+  reconnects. These synthetic probes do not authorize removing the lunch-poll
+  workaround or accessing the live poll.
+
+  C3's landed fix records the mutable inline element used when resolving a
+  nested array to a content-addressed snapshot. The
+  [cell callback regression](../../packages/runner/test/cell-callbacks.test.ts)
+  fails without the fix after initial demand settles, then passes with the fix;
+  it also verifies that changing a neighboring inline element causes no rerun.
+  Four browser cases and the full runner suite (1,411 tests / 8,764 steps) pass
+  before the current-main merge. After integrating main `ce3602b18a`, all 46
+  type-check groups and 142 focused runtime checks pass. The fix landed in #7265
+  with all 69 CI gates and clean Cubic and antagonistic reviews. C3 remains open
+  for its remaining acceptance checks.
+
+  To record synthetic browser evidence with a local test server, set `API_URL`
+  and `FRONTEND_URL`, then run:
+
+  ```sh
+  CF_ROW_REPRO_ARTIFACT_DIR=/tmp/reactive-row-artifacts deno test -A packages/patterns/integration/reactive-vote-rows-browser.test.ts
+  ```
+
+  The artifact directory receives screenshots and assertion metadata for all
+  four cases. Live poll access requires coordination with Mike.
+
 - [ ] **C2 — Repair partial materialization.** Verify complete inputs under cold
       reads, remote inserts/removals, and reconnect where relevant.
 - [ ] **C3 — Repair remote row invalidation.** Verify affected rows update,
@@ -322,11 +360,11 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 Complete A3's CI and fresh Cubic review after its six review fixes. Continue
 C1's nested-filter and remote-row reproductions from
-[PR #7265](https://github.com/commontoolsinc/labs/pull/7265), and validate C3's
-inline-element dependency repair while retaining the production workaround. A4's
-browser benchmark is available; count regression limits remain. A5 still needs
-cross-space and deployed measurements before product performance claims. Live
-poll access requires coordination with Mike.
+[PR #7265](https://github.com/commontoolsinc/labs/pull/7265), and complete
+C1/C3's remaining acceptance checks while retaining the production workaround.
+A4's browser benchmark is available; count regression limits remain. A5 still
+needs cross-space and deployed measurements before product performance claims.
+Live poll access requires coordination with Mike.
 
 For the pending collection operators, settle B1's index contracts before
 implementing `groupBy`/`keyBy`, then build B2's keyed lookup and join. Their
