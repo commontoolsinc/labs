@@ -20,6 +20,11 @@ const filteredItems = computed(() => {
 rendering or other simple conditional values in normal pattern code, use plain
 ternaries — see [Conditional Rendering](../../patterns/conditional.md).
 
+Every derivation also carries a generated input schema, and that schema is
+exactly what the runtime reads. Over a list of pieces the spelling of the body
+decides whether a derived value reads one field or every piece whole — see
+[What a Derivation Reads](./read-bounds.md).
+
 ## When NOT to Use computed()
 
 **Never inside JSX for interpolation or property access** — reactivity is
@@ -74,17 +79,22 @@ const goodValue = computed(() => 123 + doubled);
 
 ## Dynamic `[NAME]`
 
-Input props are reactive and can't be read at init time. Wrap derived names in
-`computed()` (static strings don't need it):
+A template literal that interpolates reactive values is a lowerable expression:
+the transformer auto-lifts it, so `[NAME]` tracks its inputs with no wrapper.
 
 ```tsx
-// Shown for illustration only.
-// ❌ Error: reactive reference outside context
-[NAME]: `Study: ${deck.name}`,
+// Shown at module scope.
+interface Deck { name: string }
 
-// ✅ computed() creates a reactive context
-[NAME]: computed(() => `Study: ${deck.name}`),
+export default pattern<{ deck: Deck }>(({ deck }) => ({
+  // Reactive with no wrapper — the transformer auto-lifts the literal.
+  [NAME]: `Study: ${deck.name}`,
+  [UI]: <div>{deck.name}</div>,
+}));
 ```
+
+Reach for `computed()` here when the name needs statements — a branch, a loop,
+a local — rather than a single expression.
 
 ## Side Effects in computed()
 
@@ -122,11 +132,10 @@ The scheduler re-runs computations when their dependencies change. If a computat
 
 Prefer using handlers for mutations instead of side effects in `computed()`.
 
-## Reusable Computations: lift()
+## lift(): a Declared Input Schema
 
-`lift()` defines a reusable reactive computation at module scope. `computed()`
-is almost always better — reach for `lift()` only when the same derivation is
-used in multiple patterns or called multiple times in one pattern:
+`lift()` defines a reactive computation at module scope, with an explicitly
+declared parameter type:
 
 ```typescript
 // Shown for illustration only.
@@ -141,6 +150,18 @@ const result = getByDate({ grouped, date });
 // For one-off use, prefer computed()
 const result = computed(() => grouped[date]);
 ```
+
+That declared parameter is the reason to reach for `lift()`. It is emitted
+verbatim as the derivation's input schema — the exact set of paths the runtime
+will read — and it holds even when the body calls a helper the transformer
+cannot see through. A `computed()` has no such declaration: its schema is
+inferred from the body, and an opaque call in that body widens it to everything
+the input's type describes. When a derivation reads a list of pieces, that
+difference is the difference between reading a field and reading the space.
+[What a Derivation Reads](./read-bounds.md) covers the rules and how to measure
+them.
+
+Reuse across patterns is the other reason, and the lesser one.
 
 Like `handler()`, `lift()` must be defined at module scope, never inside the
 pattern body — see [Module Scope Requirement](../handler.md#module-scope-requirement)
