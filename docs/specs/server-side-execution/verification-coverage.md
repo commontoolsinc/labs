@@ -25,7 +25,7 @@ The status corrections in this register are bounded to the rows below:
 | OW18 / OW45 source freshness | Tenure activation ensures root existence; explicit opens follow source, including served wish-sidecar opens. |
 | OW28 | Closed: accepted compile effects, child execution, restart, supersession, and independently reactive user/session program selection have direct coverage. |
 | OW28-createRef | Closed: the compile cache snapshots program content, separates compilation with and without a space, and persists shared compiles into each requested space when CFC is enforced. |
-| OW28-supersession-family / OW28-instance-family | Shared fetch user/session isolation and served `llm`, `generateText`, and direct `generateObject` supersession and isolation are covered. Other effect callers, provider reads, and later-user session initialization remain open. |
+| OW28-supersession-family / OW28-instance-family | Shared fetch user/session isolation; served `llm`, `generateText`, and direct `generateObject` supersession and isolation; and served `llmDialog` turn/transcript isolation, cancellation, refusal, and completion are covered. Other effect callers, dialog management tools, the provider/tool READ partition, and later-user session initialization remain open. |
 | OW30 | Stream sibling validation is fixed; the non-Stream counter/container observation remains unresolved. |
 | OW31 residual (vii) | Read-triggered remount is implemented; automatic replay of the entire watch set remains separate. |
 | OW55 | Open: serving pattern-source trust, with root creation and wish sidecars among its consumers. |
