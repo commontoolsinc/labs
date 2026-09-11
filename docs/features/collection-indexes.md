@@ -16,6 +16,39 @@ are empty arrays; missing unique entries are `undefined`. `keys()` separately
 observes occupied-key enumeration. Lookup does not read that enumeration or scan
 the source collection.
 
+## Authored lookup and joins
+
+Build an index outside the callbacks that consume it. Use an explicit Cell or
+Writable array receiver for `groupBy` and `keyBy`; ordinary array types do not
+expose these operators. Selectors take one element, and cannot depend on its
+array position. The compiler lowers authored `lookup` and `keys` calls into
+reactive computations.
+
+```ts
+import { pattern, Writable } from "commonfabric";
+
+export default pattern<{
+  donuts: Writable<{ code: string; glaze: string; price: number }[]>;
+  orders: Writable<{ donutCode: string; quantity: number }[]>;
+}>(({ donuts, orders }) => {
+  const byGlaze = donuts.groupBy((donut) => donut.glaze);
+  const byCode = donuts.keyBy((donut) => donut.code);
+  return {
+    chocolatePrices: byGlaze.lookup("chocolate").map((donut) => donut.price),
+    glazes: byGlaze.keys(),
+    ordersWithDonuts: orders.map((order) => ({
+      order,
+      donut: byCode.lookup(order.donutCode),
+    })),
+  };
+});
+```
+
+Each order remains present if its donut code has no match; its `donut` is
+`undefined`. A group lookup observes that group's members, while `glazes`
+requests the separate occupied-key enumeration. Duplicate codes follow the
+identity-based winner rule above, so `keyBy` is not a last-write-wins table.
+
 ## Keys
 
 Keys are strings, finite numbers, booleans, or Cell references. Primitive domains
@@ -33,7 +66,9 @@ Link retargeting remains reactive.
 Each index owns its bucket descriptor and maintenance records. Bucket values
 retain links to original source elements, so consumers can observe non-key
 fields directly. Removing the last member deletes the bucket and its occupied
-key; an existing lookup can observe subsequent reinsertion.
+key; an existing lookup can observe subsequent reinsertion. A confirmed absent
+source or selector collection clears membership and releases member children.
+Restoring both collections rebuilds membership from their current occurrences.
 
 Maintenance children declare materializer write envelopes covering possible
 bucket destinations. This keeps a source assigned to B demanded when only A is

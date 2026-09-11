@@ -152,6 +152,29 @@ describe("collection-index", () => {
           nextMode === "key" ? { title: "Changed" } : [{ title: "Changed" }],
         );
         expect(await result.key("index").key("keys").pull()).toEqual(["A"]);
+        for (const missing of [list, elements]) {
+          tx = runtime.edit();
+          missing.withTx(tx).asSchema(true).set(undefined);
+          expect((await tx.commit()).error).toBeUndefined();
+          await runtime.idle();
+          expect(observed.at(-1)).toBeUndefined();
+          expect(await result.key("index").key("keys").pull()).toEqual([]);
+          tx = runtime.edit();
+          firstKey.withTx(tx).key("value").set("B");
+          expect((await tx.commit()).error).toBeUndefined();
+          await runtime.idle();
+          expect(await result.key("index").key("keys").pull()).toEqual([]);
+          tx = runtime.edit();
+          firstKey.withTx(tx).key("value").set("A");
+          list.withTx(tx).set([firstKey]);
+          elements.withTx(tx).set([first]);
+          expect((await tx.commit()).error).toBeUndefined();
+          await runtime.idle();
+          expect(observed.at(-1)).toEqual(
+            nextMode === "key" ? { title: "Changed" } : [{ title: "Changed" }],
+          );
+          expect(await result.key("index").key("keys").pull()).toEqual(["A"]);
+        }
       }
     } finally {
       cancel?.();
