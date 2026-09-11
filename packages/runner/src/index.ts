@@ -90,6 +90,7 @@ export type {
 } from "./scheduler.ts";
 export type {
   ChangeGroup,
+  EventAppendDeliveryOutcome,
   IExtendedStorageTransaction,
   IOperationStorageCapability,
   MemorySpace,

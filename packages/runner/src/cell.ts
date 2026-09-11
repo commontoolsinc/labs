@@ -167,6 +167,7 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import type {
   ChangeGroup,
+  EventAppendDeliveryOutcome,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   IReadOptions,
@@ -365,6 +366,19 @@ export type StreamSendOptions = {
   eventId?: string;
   session?: string;
   runtimeInjectedEventKeys?: readonly string[];
+
+  /**
+   * Fires once the sender's own authored act is durable, ahead of the
+   * commit callback: under server execution that act is the event append
+   * (events.md §1), and the handling the server runs for it settles the
+   * commit callback later; otherwise the act is the handling's own
+   * commit, and the two fire together. A caller that only needs its event
+   * on the record waits here and not for the handling.
+   */
+  onAppended?: (
+    delivery: EventAppendDeliveryOutcome,
+    tx: IExtendedStorageTransaction,
+  ) => void;
 };
 
 // The mint registry backing `runtimeInjectedEventKeys` (see
@@ -1784,10 +1798,13 @@ export class CellImpl<T extends FabricValue>
           // present an error-status view of the tx; only a delivered
           // append whose handling consequenced (or a bare teardown,
           // reported as such) passes the tx through untouched.
-          if (onCommit !== undefined) {
+          const onAppended = sendOptions?.onAppended;
+          if (onCommit !== undefined || onAppended !== undefined) {
             const callerOnCommit = onCommit;
             onCommit = (echoTx: IExtendedStorageTransaction) => {
               void outcome.then(async (delivery) => {
+                onAppended?.(delivery, echoTx);
+                if (callerOnCommit === undefined) return;
                 if (!delivery.delivered) {
                   callerOnCommit(errorStatusTxView(
                     echoTx,
@@ -2080,11 +2097,34 @@ export class CellImpl<T extends FabricValue>
       // wave-stamped emission paths above intercept first and carry the
       // same actor explicitly, as the entry's `firedAt`; this carriage
       // covers the remaining in-process queueEvent shapes.)
+      // Off server execution the handling's commit is the sender's own
+      // authored act, so `onAppended` fires with the commit callback; a
+      // failed handling reports as an undelivered append. Under it the
+      // wrapper above already fires the hook off the append itself.
+      const appendedWithCommit = sendOptions?.onAppended;
+      const settleCallback = firedEventId === undefined &&
+          appendedWithCommit !== undefined
+        ? (tx: IExtendedStorageTransaction) => {
+          const status = tx.status();
+          appendedWithCommit(
+            status.status === "error"
+              ? {
+                delivered: false,
+                refused: status.error instanceof Error
+                  ? status.error.message
+                  : String(status.error),
+              }
+              : { delivered: true },
+            tx,
+          );
+          onCommit?.(tx);
+        }
+        : onCommit;
       this.runtime.scheduler.queueEvent(
         resolvedToValueLink,
         event,
         undefined,
-        onCommit,
+        settleCallback,
         false,
         {
           // Under events-down the COMMITTED append's id is the one the

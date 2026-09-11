@@ -1266,7 +1266,9 @@ Three cases follow from that:
   from a result that _does_ exist is a different fact, and it is refused rather
   than reported as an absent result.
 - **`--no-wait` refuses all three flags.** That mode exits once the commit is
-  acknowledged and skips the receipt readback, so there is no result to shape.
+  acknowledged — the handling's commit, or under server execution the event
+  append the server then handles — and skips the receipt readback, so there
+  is no result to shape.
   The refusal names the flags that need the readback, alongside `--show-links`
   for the same reason. What it still returns is the envelope's `receipt` — the
   address of the cell holding the outcome, known at commit — so the shaping
