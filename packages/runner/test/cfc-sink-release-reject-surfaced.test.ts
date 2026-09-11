@@ -30,6 +30,8 @@ describe("CFC sink-release reject surfacing", () => {
     } as unknown as IExtendedStorageTransaction;
 
     let flushed = false;
+    let released = 0;
+    let abandoned = false;
     enqueueSinkRequestPostCommitEffect(
       enqueueTx,
       "fetchJson",
@@ -38,6 +40,10 @@ describe("CFC sink-release reject surfacing", () => {
       "fetchJson-start",
       () => {
         flushed = true;
+      },
+      {
+        onReleaseRejected: () => released++,
+        onRejected: () => abandoned = true,
       },
     );
     expect(captured).toBeDefined();
@@ -71,6 +77,8 @@ describe("CFC sink-release reject surfacing", () => {
     await captured!.flush!(committedTx);
 
     expect(flushed).toBe(false); // fail-closed: send skipped
+    expect(released).toBe(1);
+    expect(abandoned).toBe(false);
     expect(noted.length).toBe(1);
     expect(noted[0].sink).toBe("fetchJson");
     expect(noted[0].effectId).toBe("fetchJson:release-reject");
