@@ -463,16 +463,6 @@ const WeeklyCalendar = pattern<Input, Output>(
       }
     });
 
-    // Color selection actions (for create modal)
-    const colorActions = COLORS.map((color) =>
-      action(() => newEventColor.set(color))
-    );
-
-    // Color selection actions (for edit modal)
-    const editColorActions = COLORS.map((color) =>
-      action(() => editEventColor.set(color))
-    );
-
     // Edit form helpers
     const onEditStartTimeChange = action((e: { detail: { value: string } }) => {
       const newStart = e?.detail?.value;
@@ -676,7 +666,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                 <div>
                   <label style={STYLES.label}>Color</label>
                   <div style={{ display: "flex", gap: "6px" }}>
-                    {COLORS.map((c, idx) => (
+                    {COLORS.map((c) => (
                       <div
                         style={{
                           ...STYLES.colorSwatch,
@@ -687,7 +677,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                               : "2px solid transparent"
                           ),
                         }}
-                        onClick={colorActions[idx]}
+                        onClick={() => newEventColor.set(c)}
                       />
                     ))}
                   </div>
@@ -811,7 +801,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                 <div>
                   <label style={STYLES.label}>Color</label>
                   <div style={{ display: "flex", gap: "6px" }}>
-                    {COLORS.map((c, idx) => (
+                    {COLORS.map((c) => (
                       <div
                         style={{
                           ...STYLES.colorSwatch,
@@ -822,7 +812,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                               : "2px solid transparent"
                           ),
                         }}
-                        onClick={editColorActions[idx]}
+                        onClick={() => editEventColor.set(c)}
                       />
                     ))}
                   </div>
@@ -999,22 +989,6 @@ const WeeklyCalendar = pattern<Input, Output>(
                       suppressNextClick.set(true);
                     });
 
-                    // Click handlers for creating events at specific hours (using action)
-                    const hourClickActions = hours.map((hour) =>
-                      action(() => {
-                        if (suppressNextClick.get()) {
-                          suppressNextClick.set(false);
-                          return;
-                        }
-                        newEventTitle.set("");
-                        newEventDate.set(columnDate);
-                        newEventStartTime.set(hour.startTime);
-                        newEventEndTime.set(addHoursToTime(hour.startTime, 1));
-                        newEventColor.set(COLORS[0]);
-                        showNewEventPrompt.set(true);
-                      })
-                    );
-
                     return (
                       <div
                         style={{
@@ -1063,7 +1037,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                           oncf-drop={handleDayDrop}
                           style={{ position: "relative", flex: "1" }}
                         >
-                          {hours.map((hour, hourIdx) => (
+                          {hours.map((hour) => (
                             <div
                               style={{
                                 position: "absolute",
@@ -1074,7 +1048,20 @@ const WeeklyCalendar = pattern<Input, Output>(
                                 borderTop: "1px solid #e5e7eb",
                                 cursor: "pointer",
                               }}
-                              onClick={hourClickActions[hourIdx]}
+                              onClick={() => {
+                                if (suppressNextClick.get()) {
+                                  suppressNextClick.set(false);
+                                  return;
+                                }
+                                newEventTitle.set("");
+                                newEventDate.set(columnDate);
+                                newEventStartTime.set(hour.startTime);
+                                newEventEndTime.set(
+                                  addHoursToTime(hour.startTime, 1),
+                                );
+                                newEventColor.set(COLORS[0]);
+                                showNewEventPrompt.set(true);
+                              }}
                             />
                           ))}
                         </cf-drop-zone>

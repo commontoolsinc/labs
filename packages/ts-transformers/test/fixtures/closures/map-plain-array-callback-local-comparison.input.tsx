@@ -8,8 +8,8 @@ interface Input {
 }
 
 // FIXTURE: map-plain-array-callback-local-comparison
-// Verifies: a callback-local binding inside a plain-array .map() lowers like the
-// same binding in the pattern body
+// Verifies: a callback-local binding inside a directly rendered synchronous
+// plain-array .map() lowers like the same binding in the pattern body
 //   COLUMN_INDICES.map(fn)                  -> plain .map() remains plain
 //   const isToday = weekDates?.[colIdx] === todayDate
 //                                           -> lift-applied binding capturing
