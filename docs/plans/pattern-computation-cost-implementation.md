@@ -152,7 +152,7 @@ durations are used as performance evidence.
 ## 3–4. Defend and calibrate measurements: A3–A5
 
 - [x] **A3 — Add opt-in pattern-test budgets.** The
-      [budget contract](read-cost-budgets.md) defines the surface, execution
+      [budget contract](../features/read-accounting.md#pattern-test-budgets) defines the surface, execution
       coverage, and pass/fail demo.
   - [x] Define the test declaration and diagnostics for per-action-run and
         per-step-through-settle limits, with separate initialization limits.
