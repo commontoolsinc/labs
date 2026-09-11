@@ -10072,9 +10072,13 @@ export class Runner {
     // runs once rather than per event.
     const causalInputs = causalFormOfBinding(inputs) as Record<string, any>;
 
-    const handlerResultCell = resultCell.withTx();
+    const handlerResultCell = schedulerRehydration.viewLocalOnly
+      ? resultCell.withTx()
+      : resultCell;
     const handler = (tx: IExtendedStorageTransaction, event: any) => {
-      const resultCell = handlerResultCell.withTx(tx);
+      const resultCell = schedulerRehydration.viewLocalOnly
+        ? handlerResultCell.withTx(tx)
+        : handlerResultCell;
       if (event?.preventDefault) event.preventDefault();
 
       // The dispatch-side closed-world gate (verb contract WS-C, C5). A
@@ -10441,11 +10445,15 @@ export class Runner {
       fn: fnSource,
     };
 
-    const actionResultCell = resultCell.withTx();
+    const actionResultCell = schedulerRehydration.viewLocalOnly
+      ? resultCell.withTx()
+      : resultCell;
     const action: Action & {
       ignoredSchedulingWrites?: NormalizedFullLink[];
     } = (tx: IExtendedStorageTransaction) => {
-      const resultCell = actionResultCell.withTx(tx);
+      const resultCell = schedulerRehydration.viewLocalOnly
+        ? actionResultCell.withTx(tx)
+        : actionResultCell;
       action.ignoredSchedulingWrites = [];
       if (schedulerRehydration.implementationSelection?.matches(tx) === false) {
         return;
