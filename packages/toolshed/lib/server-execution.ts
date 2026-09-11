@@ -269,6 +269,14 @@ export function startServerExecutionHost(options: {
   return host;
 }
 
+/**
+ * The serving loop's host while it runs, for the routes that hand it work
+ * — the pattern-lifecycle verbs among them; `undefined` off the flag.
+ */
+export function serverExecutionHost(): ExecutorHost | undefined {
+  return host;
+}
+
 export async function stopServerExecutionHost(): Promise<void> {
   await host?.close();
   host = undefined;

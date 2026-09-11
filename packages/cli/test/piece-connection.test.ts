@@ -453,7 +453,12 @@ describe("piece-connection", () => {
           },
         )
       );
-      expect(sent).toEqual([{ input: { title: "Milk" } }]);
+      // No invocation was named, so no id and no session ride the send;
+      // the appended hook always does.
+      expect(sent).toEqual([{
+        input: { title: "Milk" },
+        options: { onAppended: expect.any(Function) },
+      }]);
       expect(lines).toContain(`wrote to space ${SPACE}`);
     });
 
@@ -473,7 +478,11 @@ describe("piece-connection", () => {
       );
       expect(sent).toEqual([{
         input: { title: "Milk" },
-        options: { eventId: "inv-7", session: "sess-3" },
+        options: {
+          eventId: "inv-7",
+          session: "sess-3",
+          onAppended: expect.any(Function),
+        },
       }]);
     });
 

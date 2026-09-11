@@ -1,10 +1,18 @@
+---
+status: historical
+created: 2026-08-27
+archived: 2026-09-09
+reason: "Executed seed for upload-pattern and instantiate, which run on the serving runtime under EXPERIMENTAL_SERVER_EXECUTION with cf requesting them; setsrc stays client-side because a source update's module authority needs a transaction that commits to storage itself."
+superseded-by: docs/features/server-pattern-lifecycle.md
+---
+
 # Seed: pattern verbs as server calls
 
 A pending arc awaiting an implementation owner: move the pattern lifecycle
 verbs onto the serving runtime. This seed carries the ruled anchors the arc
 starts from (owner rulings, 2026-08-24, cited per point below) so it is not
 re-derived; the register
-(`docs/specs/server-side-execution/verification-coverage.md`) holds the
+(`../../specs/server-side-execution/verification-coverage.md`) holds the
 surrounding context. It is a seed, not a design — the open shape questions
 are listed at the end.
 

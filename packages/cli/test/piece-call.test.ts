@@ -1188,7 +1188,11 @@ describe("executePieceCallable", () => {
     );
 
     expect(harness.tracker.sendOptions).toEqual([
-      { eventId: "inv-123", session: callerSession },
+      {
+        eventId: "inv-123",
+        session: callerSession,
+        onAppended: expect.any(Function),
+      },
     ]);
     expect(result.invocation).toEqual({
       id: "inv-123",
@@ -1280,7 +1284,11 @@ describe("executePieceCallable", () => {
     // travels with it: they reach the send together or the id says nothing
     // about whose invocation it is.
     expect(harness.tracker.sendOptions).toEqual([
-      { eventId: "inv-123", session: "ses-abc" },
+      {
+        eventId: "inv-123",
+        session: "ses-abc",
+        onAppended: expect.any(Function),
+      },
     ]);
     // The outcome a caller reads is its own invocation's, and reports the id
     // the caller named rather than anything derived from the pair.
@@ -1292,7 +1300,7 @@ describe("executePieceCallable", () => {
     });
   });
 
-  it("sends no options at all for a call that names no invocation", async () => {
+  it("sends no invocation id or session for a call that names no invocation", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "addComment",
@@ -1324,7 +1332,10 @@ describe("executePieceCallable", () => {
     // Absent, not substituted: the runtime mints the delivery id for such a
     // call, and nothing downstream is handed a stand-in id or session it
     // would have to tell apart from a caller's own.
-    expect(harness.tracker.sendOptions).toEqual([undefined]);
+    // The appended hook rides every send; no id and no session do.
+    expect(harness.tracker.sendOptions).toEqual([
+      { onAppended: expect.any(Function) },
+    ]);
   });
 
   it("reclassifies a receipt-exists collision as the original settled outcome", async () => {
@@ -1521,7 +1532,7 @@ describe("executePieceCallable", () => {
     expect(result.invocation?.result).toBe(proxyLikeStub);
   });
 
-  it("sends without options and returns no invocation when no id is supplied", async () => {
+  it("sends no invocation id and returns no invocation when no id is supplied", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "refresh",
@@ -1545,7 +1556,10 @@ describe("executePieceCallable", () => {
       },
     );
 
-    expect(harness.tracker.sendOptions).toEqual([undefined]);
+    // The appended hook rides every send; no id and no session do.
+    expect(harness.tracker.sendOptions).toEqual([
+      { onAppended: expect.any(Function) },
+    ]);
     expect(result.invocation).toBeUndefined();
     expect(harness.tracker.receiptLinkRequested).toBeUndefined();
   });
@@ -2869,7 +2883,11 @@ describe("call wait control", () => {
     });
     expect(phases).toEqual(["dispatched", "committed"]);
     expect(harness.tracker.sendOptions).toEqual([
-      { eventId: "inv-no-readback", session: callerSession },
+      {
+        eventId: "inv-no-readback",
+        session: callerSession,
+        onAppended: expect.any(Function),
+      },
     ]);
     // The receipt was never opened — the readback (sync + read) is the whole
     // saving — and no quiescence drain crept in either.
