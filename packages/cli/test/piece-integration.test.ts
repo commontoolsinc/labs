@@ -96,6 +96,38 @@ async function waitForContent(
   }
 }
 
+/**
+ * Resolves once the serving loop has derived `piece`'s `value`. Under ON a
+ * served creation returns as soon as the piece is durable, and the loop
+ * derives it in the cycle after; a cold read in a fresh session expects
+ * that derivation, so the suite waits for it here rather than racing it.
+ */
+async function waitForServedValue(
+  identity: Identity,
+  spaceName: string,
+  piece: string,
+): Promise<void> {
+  const pieces = await PiecesController.initialize({
+    apiUrl: new URL(API_URL!),
+    identity,
+    space: spaceName,
+  });
+  try {
+    const controller = await pieces.get(piece);
+    const valueCell = (await controller.result.getCell())
+      .asSchema<{ value?: string }>()
+      .key("value");
+    await valueCell.pull();
+    await waitForCellValue<string>(
+      pieces.runtime,
+      valueCell,
+      (value) => value === "session-ready",
+    );
+  } finally {
+    await pieces.dispose();
+  }
+}
+
 describe("cf cell get (integration)", { ignore: !API_URL }, () => {
   beforeAll(async () => {
     serverExecutionOn = (await experimentalOptionsForDeployedClient({
@@ -135,6 +167,17 @@ describe("cf cell get (integration)", { ignore: !API_URL }, () => {
     // Deployed STARTED: the deploying session materializes `sessionEcho` in
     // its own session scope, which later fresh CLI sessions cannot read —
     // the lunch-poll deploy-gate shape.
+    if (serverExecutionOn) {
+      for (
+        const cold of [
+          sessionResultPieceId,
+          coldSessionResultPieceId,
+          coldSelectionResultPieceId,
+        ]
+      ) {
+        await waitForServedValue(identity, spaceName, cold);
+      }
+    }
     sessionScopedPieceId = await newPiece(spaceConfig, {
       mainPath: SESSION_SCOPED_PATTERN,
       rootPath: REPO_ROOT,
@@ -296,6 +339,25 @@ describe("cf cell get (integration)", { ignore: !API_URL }, () => {
     expect(JSON.parse(stdout.join(""))).toEqual({
       value: "selected-while-stopped",
     });
+  });
+
+  it("creates pieces through the serving loop under ON, and in the client under OFF", async () => {
+    // The pieces above came from `newPiece`. Under ON the serving loop ran
+    // each creation as a lifecycle verb and counts it; under OFF no serving
+    // loop exists, so the health stats carry no `servingLoop` block and
+    // each creation was the client's own setup transaction.
+    const response = await fetch(new URL("/api/health/stats", API_URL!));
+    expect(response.ok).toBe(true);
+    const stats = await response.json() as {
+      servingLoop?: { lifecycleVerbs?: { runs: number; failures: number } };
+    };
+    if (serverExecutionOn) {
+      expect(stats.servingLoop?.lifecycleVerbs?.runs).toBeGreaterThanOrEqual(
+        6,
+      );
+      return;
+    }
+    expect(stats.servingLoop).toBeUndefined();
   });
 
   it("list and inspect expose the running pattern reference", async () => {

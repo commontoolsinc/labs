@@ -1,3 +1,4 @@
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type { Logger } from "@commonfabric/utils/logger";
 
 import type { Cell } from "../cell.ts";
@@ -66,14 +67,17 @@ export function seedResultContainerWhenPullSettles(
   pull: Promise<unknown>,
   logger: Logger,
   seedActionId: string,
+  identity?: ScopeKeyIdentity,
 ): Promise<void> {
   const seedIfStillAbsent = (): Promise<void> => {
     if (!stillHeld()) return Promise.resolve();
     return runtime.editWithRetry((seedTx) => {
       if (!stillHeld()) return;
+      if (identity !== undefined) seedTx.tx.scopeKeyIdentity = identity;
       runtime.stampServerRun(seedTx, {
         actionId: seedActionId,
         kind: "bookkeeping",
+        scopeKeyIdentity: identity,
       });
       const scoped = container.withTx(seedTx);
       if (scoped.getRaw() === undefined) scoped.set([]);

@@ -13,6 +13,7 @@ import {
   waitForCondition,
 } from "@commonfabric/integration";
 import { login } from "@commonfabric/integration/shell-utils";
+import type { Cell } from "@commonfabric/runner";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import type { RuntimeClient } from "@commonfabric/runtime-client";
 import { join } from "@std/path";
@@ -26,6 +27,13 @@ import { waitForPieceView } from "./topics-navigation-helpers.ts";
 
 const SIZES = [74, 296, 1184];
 const OPTIONS = 14;
+const profileLocation = Deno.env.get("CF_READ_SCALE_PROFILE_LOCATION") ??
+  "same-space";
+if (profileLocation !== "same-space" && profileLocation !== "cross-space") {
+  throw new Error(
+    "`CF_READ_SCALE_PROFILE_LOCATION` must be `same-space` or `cross-space`",
+  );
+}
 const identity = await Identity.fromPassphrase(
   "lunch poll read scale benchmark",
   { implementation: "noble" },
@@ -102,7 +110,12 @@ async function verifyPosture(): Promise<void> {
 
 const fixtures = new Map<
   number,
-  Promise<{ spaceName: string; pieceId: string }>
+  Promise<{
+    spaceName: string;
+    pieceId: string;
+    profileLocation: string;
+    profileSpace: string;
+  }>
 >();
 /** Seeds one dedicated space per size and releases the seeding runtime. */
 function fixture(voteCount: number) {
@@ -110,7 +123,8 @@ function fixture(voteCount: number) {
   if (!created) {
     created = (async () => {
       await verifyPosture();
-      const spaceName = `${env.SPACE_NAME}-read-${voteCount}`;
+      const spaceName =
+        `${env.SPACE_NAME}-${profileLocation}-read-${voteCount}`;
       const cc = await initializePiecesController({
         space: spaceName,
         apiUrl: new URL(env.API_URL),
@@ -118,6 +132,37 @@ function fixture(voteCount: number) {
       });
       try {
         await cc.ensureDefaultPattern();
+        const voterCount = Math.ceil(voteCount / OPTIONS) + 2;
+        let profileSpace = cc.getSpace();
+        let input: { profiles: Cell<{ name: string }[]> } | undefined;
+        if (profileLocation === "cross-space") {
+          const profileController = await initializePiecesController({
+            space: `${spaceName}-profiles`,
+            apiUrl: new URL(env.API_URL),
+            identity,
+          });
+          try {
+            profileSpace = profileController.getSpace();
+            const profiles = cc.runtime.getCell<{ name: string }[]>(
+              profileSpace,
+              "benchmark-voter-profiles",
+            );
+            const initialized = await cc.runtime.editWithRetry((tx) => {
+              const writable = profiles.withTx(tx);
+              writable.set([]);
+              for (let index = 0; index < voterCount; index++) {
+                const profile = writable.elementById(String(index));
+                profile.set({ name: `Voter ${index}` });
+                writable.addUnique(profile);
+              }
+            });
+            if (initialized.error) throw new Error(initialized.error.message);
+            await cc.synced();
+            input = { profiles };
+          } finally {
+            await profileController.dispose();
+          }
+        }
         const root = join(import.meta.dirname!, "..");
         const program = await resolveLocalProgram(
           (resolver) => cc.runtime.harness.resolve(resolver),
@@ -137,42 +182,54 @@ function fixture(voteCount: number) {
         );
         const piece = await cc.create<
           {
+            votes: { voter: unknown }[];
             seed: {
               voteCount: number;
               voterCount: number;
               optionCount: number;
+              requireExistingProfiles?: boolean;
             };
           }
-        >(program, { start: true });
+        >(program, { start: true, input });
         const result = cc.getResult<
           {
+            votes: { voter: unknown }[];
             seed: {
               voteCount: number;
               voterCount: number;
               optionCount: number;
+              requireExistingProfiles?: boolean;
             };
           }
         >(piece.getCell());
         const stop = result.sink(() => {});
         try {
-          const voterCount = Math.ceil(voteCount / OPTIONS) + 2;
           const sent = await cc.runtime.editWithRetry((tx) =>
             result.key("seed").withTx(tx).send({
               voteCount,
               voterCount,
               optionCount: OPTIONS,
+              requireExistingProfiles: profileLocation === "cross-space",
             })
           );
           if (sent.error) throw new Error(sent.error.message);
           await cc.runtime.settled(Infinity);
           await cc.synced();
+          const voterSpace = result.key("votes").key(0).key("voter")
+            .resolveAsCell().space;
+          if (voterSpace !== profileSpace) {
+            throw new Error("Seeded vote does not reference the profile space");
+          }
+          note(
+            `[lunch-read-scale] verified ${profileLocation} voter links: ${profileSpace}`,
+          );
           note(
             `[lunch-read-scale] seeded ${voteCount} votes, ${voterCount} voters, ${OPTIONS} options`,
           );
         } finally {
           stop();
         }
-        return { spaceName, pieceId: piece.id };
+        return { spaceName, pieceId: piece.id, profileLocation, profileSpace };
       } finally {
         await cc.dispose();
       }
@@ -195,12 +252,18 @@ async function vote(page: Page, color: "green" | "yellow"): Promise<void> {
       probe.collect(
         `[data-option-title="Lunch 0"] cf-button[data-vote="${expected}"]`,
       ).some((button) => getComputedStyle(button).fontWeight === "700") &&
-      probe.collect('[data-vote-swatch-name="Voter 0"]').some((swatch) =>
-        getComputedStyle(swatch).backgroundColor ===
-          (expected === "green" ? "rgb(47, 138, 100)" : "rgb(212, 168, 47)") &&
-        swatch.parentElement?.parentElement?.firstElementChild?.textContent
-            ?.trim() === "Lunch 0"
-      ),
+      probe.collect('[data-vote-swatch-name="Voter 0"]').some((swatch) => {
+        if (
+          getComputedStyle(swatch).backgroundColor !==
+            (expected === "green" ? "rgb(47, 138, 100)" : "rgb(212, 168, 47)")
+        ) return false;
+        for (let row = swatch.parentElement; row; row = row.parentElement) {
+          if (row.firstElementChild?.textContent?.trim() === "Lunch 0") {
+            return true;
+          }
+        }
+        return false;
+      }),
     { args: [color] },
   );
   await settleView(page);

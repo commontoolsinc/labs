@@ -516,6 +516,15 @@ linked data:
    may roll `runtimeVersion` alone only after the fingerprint inputs distinguish
    it from executable semantics.
 
+A source or compiled document is written whole, and only when the stored
+document differs. Its `imports` elements are stored inline in the document,
+not in documents of their own, so a write of the same document from any
+session lands on that one document and touches no other. A stored document
+whose elements sit in documents of their own is rewritten whole, and those
+element documents are left behind. The pre-write sync loads each document the
+write-back writes, so the write reads it with its true version rather than
+claiming it absent, a claim the store refuses.
+
 Each new source document whose reachable graph contains an external dependency
 also records the runtime fingerprint used for its identity. A source document
 without such a dependency uses the canonical empty fingerprint, and writers
@@ -637,6 +646,20 @@ compiled-cache loads register lists from their root-authenticated documents.
 Loads in a transaction with writes still return the verified closure but do not
 publish its delegation metadata ahead of a commit verdict. Synchronous source
 verification within setup retains transaction reads without registering authority.
+
+A runtime can hold a successor module before another runtime's source update
+grants it a predecessor's authority, and resolving a pattern from memory loads
+no closure. A source update records the pattern it moves a piece to as the
+latest revision of the piece's source history. So when the runner starts a
+piece, or swaps a running one after its pattern pointer moves, and the latest
+revision names the pattern it is about to run, it checks that the runtime
+registers the new pattern's module as inheriting from every other pattern the
+history names. A grant registered for one of them settles nothing about the
+rest, since a later update onto the same successor extends its stored grants
+with that update's own predecessors. If any is missing, the runner first reads
+the new pattern's verified source closure in a transaction without writes,
+which registers whatever delegation that closure durably carries. The start or
+swap proceeds once the read settles, whether or not it added a grant.
 
 Registration and transitive closure are scoped by the space carrying that
 attestation. Each transaction snapshots the resulting per-space maps, and

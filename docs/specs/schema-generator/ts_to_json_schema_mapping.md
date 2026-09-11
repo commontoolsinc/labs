@@ -403,7 +403,10 @@ pre-cleanup schemas.
   formats member-wise, preserving `{ type: "undefined" }` / `{ type: "null" }`,
   skipping conditional/type-parameter members, deduping identical member
   schemas (`isWrapperUnion` / `formatWrapperUnion` / `maybeWrapInAnyOf`).
-  Mixed unions fall to `UnionFormatter`.
+  Mixed unions fall to `UnionFormatter`. Primitive alternatives merge only
+  when both schemas contain exclusively `type` and `enum`; metadata-bearing
+  alternatives, including Cell wrappers, remain separate even when their
+  underlying primitive types match.
 - `Cell<Stream<T>>` **throws** with a boxing suggestion, from both the node
   path and the type path; tested (cell-type.test.ts).
 - `FactoryInput<T>` (alias-name detection) formats the inner type

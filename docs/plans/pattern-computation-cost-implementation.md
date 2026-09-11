@@ -8,10 +8,14 @@ antagonistic reviews. A4's browser benchmark shipped in #7261; count limits
 landed in #7282. C1's remote-row reproductions and C3's inline-element dependency
 repair landed in #7265; removal/restoration acceptance landed in #7285 and
 first-browser-materialization acceptance landed in #7302. Reconnect repair
-landed in #7308; rendered acceptance is validated in #7312, pending merge gates.
-Remaining row-invalidation acceptance stays open. B1/B2's contract landed in
-#7294 and its typed lookup foundation landed in #7304. Producer lowering,
-bucket maintenance, and joins remain pending.
+landed in #7308 and rendered reconnect acceptance in #7312. C4's repository-only
+reactive row migration is implemented and validated on the scoped-child and
+bounded-render repairs in #7313 and #7315. Row-invalidation implementation and
+acceptance landed in #7329 and #7331. B1/B2's contract landed in #7294 and its
+typed lookup foundation landed in #7304. Producer lowering, optimized bucket
+maintenance, and local/cross-space join acceptance are implemented in #7323;
+tagged enumeration passes authored-consumer acceptance. Final integration and
+publication gates remain in progress.
 
 B3's named aggregates are implemented and validated in
 [PR #7259](https://github.com/commontoolsinc/labs/pull/7259), with
@@ -237,8 +241,8 @@ passed before merge, with clean Cubic and antagonistic reviews.
   profiles. Ordinary memory queries wait for session restoration before
   constructing their requests. This guards the handshake-to-session interval;
   a subsequent disconnect during request issue remains a separate boundary.
-  These synthetic probes do not authorize removing the lunch-poll workaround or
-  accessing the live poll.
+  These synthetic probes cover repository behavior. Live poll changes require
+  coordination with Mike.
 
   C3's landed fix records the mutable inline element used when resolving a
   nested array to a content-addressed snapshot. The
@@ -261,41 +265,79 @@ passed before merge, with clean Cubic and antagonistic reviews.
   The artifact directory receives screenshots and assertion metadata for all
   four cases. Live poll access requires coordination with Mike.
 
-- [ ] **C2 — Repair partial materialization.** Verify complete inputs under cold
-      reads, remote inserts/removals, and reconnect where relevant.
-- [ ] **C3 — Repair remote row invalidation.** Verify affected rows update,
-      stable element identities survive, and untouched rows do not rerun.
-- [ ] **C4 — Restore reactive lunch-poll rows.** Remove the workaround and its
-      explanatory comment only after both regressions pass. Re-run A4 and
-      coordinate with B5 to keep one coherent pattern migration.
+- [x] **C2 — Repair partial materialization.** Complete inputs are covered by
+      C1's cold-browser, remote insertion/removal, and reconnect acceptance.
+      The session-restoration query repair is merged in #7308; rendered
+      reconnect acceptance is merged in #7312. The same-space and cross-space
+      fixtures verify complete vote and profile inputs on first demand, after
+      membership changes, and after two reader outages. No additional
+      materialization change is required for these reproductions. Disconnects
+      during request issue remain the separate boundary stated above; C3's
+      producer-identity and rerun checks are tracked independently.
+- [x] **C3 — Repair remote row invalidation.** Client and serving-host
+      acceptance verify correct derived values, stable normalized output links
+      and producer identities, and no execution of the untouched row producer
+      after edits to each of two linked rows. The
+      [client case](../../packages/patterns/integration/reactive-vote-rows.test.ts)
+      uses independent worker replicas and merged in #7329. The
+      [serving-loop case](../../packages/runner/test/executor-serving-loop.test.ts)
+      observes the actual serving runtime and waits for the authored input
+      watermark; a client diagnostic graph does not contain those actions.
+      The dashboard records serving acceptance as in review until #7331 lands.
+- [x] **C4 — Restore reactive lunch-poll rows.** Direct reactive option and
+      voter maps use the scoped callback-child repair. Repository acceptance
+      includes 93 assertions, unchanged A4 budgets at all three sizes, and
+      concurrent two-browser voting. The
+      [acceptance record](../history/development/performance/2026-09-11-reactive-lunch-rows.md)
+      states measurement limits. B5's operator migration remains separate;
+      deployed poll updates require coordination with Mike.
 
 ## 6–9. Complete the collection algebra: B1–B4
 
-- [ ] **B1 contract — Specify `groupBy` and `keyBy` separately.** The
-      [proposed index contract](collection-index-contract.md) records semantic
-      decisions and acceptance tests. The typed index handle and lowering
-      prototype remain prerequisites to completing this contract.
-  - [ ] Key domain and equality, including resolved link identity and
+- [x] **B1 contract — Specify `groupBy` and `keyBy` separately.** The
+      [index contract](collection-index-contract.md) records semantic decisions
+      and acceptance tests, agreed in
+      [PR #7294](https://github.com/commontoolsinc/labs/pull/7294). Typed lookup
+      landed in [PR #7304](https://github.com/commontoolsinc/labs/pull/7304);
+      producers are under review in [PR #7323](https://github.com/commontoolsinc/labs/pull/7323);
+      initialization and maintenance counts are validated separately in
+      [PR #7362](https://github.com/commontoolsinc/labs/pull/7362), with 12 cases
+      and 96 phases. Source-size and affected-bucket costs remain explicit.
+  - [x] Key domain and equality, including resolved link identity and
         retargeting a key link without editing its containing element.
-  - [ ] Duplicate-key handling that remains deterministic for unordered input;
+  - [x] Duplicate-key handling that remains deterministic for unordered input;
         missing extracted keys and absent lookups.
-  - [ ] Group membership order, group enumeration order, output types, lookup
+  - [x] Group membership order, homogeneous-key enumeration order, lookup
         surface, and identity across removal/reinsertion.
-  - [ ] Bound invalidation to affected keys; state initialization, update,
+  - [x] Mixed primitive/Cell enumeration API decision (Q7): explicit tagged
+        entries, preserving homogeneous `keys()` usage. The
+        [decision record](../history/features/2026-09-11-index-key-enumeration-decision.md)
+        records consequences and alternatives.
+  - [x] Implement tagged enumeration and verify authored output acceptance,
+        lookup round trips, cross-space identities, and durable resume. The
+        [authored consumer tests](../../packages/runner/test/collection-index-key-entries.test.ts)
+        exercise both producer modes with equal-valued primitive and Cell keys;
+        stored-descriptor recovery preserves lookup-only demand behavior.
+  - [x] Bound invalidation to affected keys; state initialization, update,
         lookup, and storage complexity.
-- [ ] **B2 contract — Specify lookup and join.** Decide join cardinality,
-      unmatched rows, duplicate matches, output ordering/identity, link
-      retargeting, and cleanup before building the join.
-- [ ] **B1 implementation — Build grouping and unique-key indexing.**
-  - [ ] Reuse collection element-identity/reconciliation rules from existing
+- [x] **B2 contract — Specify lookup and join.** The index contract defines
+      a left lookup join, unmatched rows, deterministic duplicate matches,
+      left occurrence ordering, link retargeting, and owned cleanup.
+- [x] **B1 implementation — Build grouping and unique-key indexing.**
+      PR #7323 carries the implementation and runner acceptance; PR #7362
+      supplies the separate phase-count probe. Delivery gates remain pending.
+  - [x] Reuse collection element-identity/reconciliation rules from existing
         builtins; cover primitives, linked elements, and inline values.
-  - [ ] Wire builtin registration, replayability, `Cell` methods and reactive
+  - [x] Wire builtin registration, replayability, `Cell` methods and reactive
         operation list, author-facing types, and transformer lowering.
-  - [ ] Test inserts, edits, moves between keys, removals, reorder, duplicate
+  - [x] Test inserts, edits, moves between keys, removals, reorder, duplicate
         keys, link retargeting, replay, and teardown. Assert unaffected-key
         consumers do not rerun and measure maintenance work as size grows.
-- [ ] **B2 implementation — Build keyed lookup, then join.** Test lookup and
-      join contracts, both-side updates, and affected-row-only invalidation.
+- [x] **B2 implementation — Build keyed lookup, then join.** Lookup and join
+      contracts, both-side updates, unmatched rows, and affected-row-only
+      invalidation pass the local/cross-space and restart acceptance tests in
+      [PR #7323](https://github.com/commontoolsinc/labs/pull/7323). Publication
+      remains subject to its CI and review gates.
 - [x] **B3 contract — Specify deterministic aggregates.**
   - [x] Define combine order from the current collection, independent of edit
         history; define floating-point behavior explicitly.
@@ -308,11 +350,14 @@ passed before merge, with clean Cubic and antagonistic reviews.
         and edit histories. Test count bounds on single-element updates and
         initialization separately.
   - [x] Keep ordinary `reduce` as the full-rerun order-dependent operation.
-- [ ] **B4 — Publish contracts and complexity with each operator.** Update
+- [x] **B4 — Document contracts and complexity with each operator.** Update
       public doc comments, pattern-author documentation, and executable examples
       in the same slice that ships the API. The aggregate portion is documented
       in [collection aggregates](../features/collection-aggregates.md); index
-      and join documentation remains pending.
+      semantics and current costs are documented in
+      [collection indexes](../features/collection-indexes.md). Measured scale
+      acceptance is recorded in PR #7362; join documentation and acceptance tests
+      are in PR #7323. Repository publication remains gated by CI and review.
 
 **Deferred B3a:** Reconsider restricted append folds only after B1–B3 ship and a
 remaining use case justifies them. Requires a separate contract excluding
@@ -331,16 +376,28 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## 12–13. Guidance and related runtime work: D, E
 
-- [ ] **E1 — Measure identical `computed` and `lift` collection loops** under
-      current defaults and compare declared read width and access counts.
-- [ ] **E2 — Publish the measured advice** where pattern authors encounter
+- [x] **E1 — Measure identical `computed` and `lift` collection loops** under
+      current defaults and compare declared read width and access counts. The
+      [reproducible comparison](../history/development/performance/2026-09-11-computed-lift-collection-loops.md)
+      validates three forms at 32, 128, and 512 linked rows, including unread-field
+      edits. The dashboard tracks publication and review status.
+- [x] **E2 — Publish the measured advice** where pattern authors encounter
       collections, `computed`, and `lift`. Explain nested-scan cost and use only
-      available operators in replacement examples.
-- [ ] **E3 — Add a transformer warning** through the existing diagnostic
+      available operators in replacement examples. The
+      [computed/lift guide](../common/concepts/computed/computed.md#collection-loop-cost)
+      and [collection guide](../features/collection-aggregates.md#choosing-a-collection-computation)
+      explain lazy read width, repeated scans, explicit cell receivers, numeric
+      contract differences, and measurement limits. The author index links both;
+      dashboard publication status remains separate.
+- [x] **E3 — Add a transformer warning** through the existing diagnostic
       collector. Test recognizable nested reactive scans and negative cases
       involving plain arrays and unrelated scopes; inspect warning volume across
       authored patterns before shipping. Escalation to error requires separate
       evidence about false positives.
+      The [diagnostic acceptance report](../history/development/performance/2026-09-11-nested-collection-scan-diagnostic.md)
+      records the focused cases, full transformer suite, and all five distinct
+      findings across 413 pattern entries. Publication and review remain visible
+      in the dashboard.
 - [ ] **D1 — Follow the remaining lazy-materialization work** in its
       [own plan](lazy-cell-materialization.md), including handlers and flag
       removal. Keep implementation ownership there.
@@ -386,18 +443,11 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Complete merge review for C1's rendered reconnect acceptance in #7312. Complete
-C3's remaining acceptance checks while retaining the
-production workaround. The first-materialization cases in
-[PR #7302](https://github.com/commontoolsinc/labs/pull/7302) pass all four
-nested/mapped and same/cross-space browser combinations.
-A4's browser benchmark and count limits are available. A5 still
-needs cross-space and deployed measurements before product performance claims.
+Complete publication gates for the validated producers, tagged enumeration, and
+join composition in #7323, and the maintenance phase-count probe in #7362.
+Then publish the validated repository lunch-poll migration in #7336.
+The [512-row measurements](../history/development/performance/2026-09-11-demanded-index-enumeration.md)
+separate initialization, bucket maintenance, enumeration, and lookup costs.
+Local browser acceptance covers 74, 296, and 1,184 votes. A5 still needs a
+coordinated deployed comparison before product performance claims.
 Live poll access requires coordination with Mike.
-
-For the pending collection operators, build on the typed lookup foundation in
-[PR #7304](https://github.com/commontoolsinc/labs/pull/7304), implement
-`groupBy`/`keyBy` and bucket maintenance against the
-[agreed index contract](collection-index-contract.md), then build the left join. Their
-measurements use the shipped counters and the aggregate comparison method; A4/A5
-gate deployed-product claims rather than operator implementation.

@@ -830,6 +830,23 @@ followed by a push to the same collection, and reports:
   - the message text is produced per classification by `diagnosticMessage`;
     capability analysis feeds the findings via `mergeablePushMisuseSink`
 
+### 6.9a Nested collection scan validation
+
+`PatternContextValidationTransformer` reports **Warning**
+`collection:nested-scan` (`src/diagnostics/nested-collection-scan.ts`) for an
+inline reactive array-method callback scanning a captured reactive collection.
+It recognizes the array-method families classified by `classifyArrayMethodCallSite`
+and checks the receiver's array type and reactive provenance. Callback parameters
+and callback-local declarations as collection roots are excluded, so a row's
+own child array or a locally derived
+child list does not trigger this warning. The reported receiver must resolve to
+a captured root binding; complex receiver expressions are outside this check.
+Indexed receiver results, plain local arrays, sequential scans, lowered calls, and scans
+inside unrelated function boundaries are excluded. The warning does not change
+execution or claim that every update scans both collections; it asks the author
+to measure potentially multiplicative work and consider contract-compatible
+shared work, indexed lookups, or named aggregates.
+
 ### 6.10 Verb-return validation
 
 `VerbReturnValidationTransformer` (stage 6; verb contract WS-C/C2) inspects
@@ -1090,6 +1107,12 @@ narrower paths beside it. The lift is then applied to the whole object and
 re-runs for any field of it, where it could have been applied to the one field
 the body reads.
 
+Callback-local declarations are excluded from captures using parameter lineage
+and the owning function's authored range. Rebuilt callbacks carry that range in
+their source maps. Matching requires the same function kind and exact range;
+ancestor traversal stops at intervening function boundaries, keeping nested
+parameters out of an enclosing callback's capture object.
+
 The set has one deliberately narrow reader on the way out. When the rewriter
 synthesizes an `ifElse`/`when`/`unless` call, `unwrapParentheses` tidies the
 operands placed in the call, and the probe recognizing a zero-arg inline IIFE
@@ -1105,6 +1128,11 @@ Key rewrite rules:
 - `a || b`: lowers to `unless(condition, fallback)` only in pattern context
 - ternary `cond ? x : y`:
   - becomes `ifElse(cond, x, y)` with branch/predicate processing
+  - when rewriting a collection receiver establishes callback ownership, the
+    callback is registered before its body is visited, so discriminator
+    comparisons are evaluated reactively
+  - whole-branch wrappers exclude bindings declared inside nested callbacks
+    while retaining outer captures, including outer bindings with the same name
 - array-method family calls are never wrapped as a unit: the analysis marks
   them `skip-call-rewrite`, so only the receiver chain before the method is
   processed. Via §5's spelling fallback this equally covers an
@@ -1116,6 +1144,17 @@ Key rewrite rules:
     lowered to the lift-applied form)
 - compute contexts:
   - no computed wrappers; only child rewrites and logical conversions
+
+Collection index selectors (`groupBy` / `keyBy` on explicit array-valued cells)
+use the array callback pipeline and its `WithPattern` form. Each selector return
+is evaluated inside a computation that tags whether its result is a Cell before
+serialization. Primitive fields are read as values; Cell fields retain their
+identity without reading their contents. A nullish selected value omits that
+source occurrence. The pattern-owned expression pass skips synthetic computation
+callbacks, preserving ordinary JavaScript conditionals inside the key tagger.
+The computation carries the tagged selector output type into its lift schema.
+Bare terminal returns and fallthrough emit `void 0`, preserving omitted keys
+when a selector binds a local variable named `undefined`.
 
 Helper-owned compute branches introduced by ternary / conditional-helper
 rewriting are re-analyzed with synthetic compute ownership. This preserves

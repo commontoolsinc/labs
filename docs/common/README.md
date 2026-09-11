@@ -40,7 +40,8 @@ on the Common Fabric runtime.
 
 - [concepts/pattern.md](concepts/pattern.md) — what a pattern is; inputs, outputs, `[UI]`, `[NAME]`
 - [concepts/reactivity.md](concepts/reactivity.md) — the cell system, read/write access, reactive mental model
-- [concepts/computed/computed.md](concepts/computed/computed.md) — `computed()`, `lift()`, derived values
+- [concepts/computed/computed.md](concepts/computed/computed.md) — `computed()`, `lift()`, derived values, and measured collection-loop cost
+- [../features/collection-aggregates.md](../features/collection-aggregates.md) — named aggregates, numeric contracts, and collection computation costs
 - [concepts/action.md](concepts/action.md) — handling events with `action()`
 - [concepts/handler.md](concepts/handler.md) — reusable parameterized handlers with `handler()`
 - [concepts/identity.md](concepts/identity.md) — object identity, `equals()`, why `===` fails across cells
@@ -85,6 +86,7 @@ on the Common Fabric runtime.
 
 - [capabilities/llm.md](capabilities/llm.md) — `generateText` / `generateObject`; reactive results, no `await`
 - [capabilities/fetch.md](capabilities/fetch.md) — `fetchJson` / `fetchText` / `fetchJsonUnchecked` / `fetchBinary`; reactive results, no `await`
+- [capabilities/files.md](capabilities/files.md) — uploading files with `cf-file-input`, what a pattern keeps from the upload, downloading by link, and the blob store's limits
 - [capabilities/sqlite.md](capabilities/sqlite.md) — reading a `SqliteDb` a pattern was given as an input: `db.query`, one statement per database, bounding a query's rows, session-scoped results under a read ceiling
 
 ### workflows/ — CLI and testing mechanics

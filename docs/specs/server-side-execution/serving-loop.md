@@ -45,6 +45,14 @@ toolshed process
 A space is ACTIVE when it has ≥1 live client session or undelivered
 events; otherwise it MAY be parked (runtime disposed, lease released).
 Activation on: session open, event append, or explicit warm request.
+*(AMENDED 2026-09-09: a fourth trigger — a pattern-lifecycle verb
+request, which the host queues on the space's serving loop; the loop
+runs it ahead of a cycle's event drain, its seals joining that cycle's
+wave, and once the wave has committed re-announces the documents the
+verb staged to itself as a warm-marked notice — the same carrier as the
+provisioning path's — so the next cycle loads and derives the staged
+piece; the request settles at the verb's own wave commit —
+[docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).)*
 
 What activation LOADS (RULED 2026-08-02): there is NO piece-start
 policy in v2. The space is ONE lazy reactive graph, and activation
@@ -185,6 +193,41 @@ SpaceServer outbox ──(e)──► network; results re-enter via (a)
   rows, they are not pushed to any subscriber (protocol.md §3), and
   admission never reads them (protocol.md §7). "On the storage
   protocol" must not be read as "on the wire".
+  READS take this plane too by default: the serving runtime's home
+  session watches its roots under their selectors, and the memory
+  server's schema walk delivers the closure. Under the store
+  read-through posture (`SpaceServerPolicy.storeReadThrough`;
+  `SERVER_EXECUTION_STORE_READ_THROUGH=true` in the toolshed bootstrap,
+  default OFF) the home space's reads leave the session instead: a
+  document the replica does not hold is read synchronously from the
+  engine on first access and a `sync()` of that document resolves from
+  the engine with no watch registered, while a `sync()` of a held
+  document is answered from the replica, and the feed's admitted
+  commits (plane (d)) re-read the documents the replica holds — so the
+  runtime walks
+  the schema once, over what it actually reads, and the memory server
+  never walks it for the serving session at all. The one chase the read-through
+  keeps is the frame validator's delivery guarantee: the `cid:` schema
+  documents a read document's link positions and its `schema` metadata
+  member reference, and those a schema document's own refs name, are
+  read with it, to a fixpoint, exactly as a session's frame carries
+  them. Reads
+  run at the engine's head, as delivered frames do; writes and
+  foreign-space reads stay on the session. Two rules a session frame
+  follows hold here in the read-through's own form. Protocol.md §3's
+  lease-holder delivery rule — another principal's instance reaches
+  only the live holder of the space's lease — is applied per read: a
+  read of such an instance that finds the lease row lapsed runs the
+  renew arm first (the lost-then-reacquire step the renew timer takes,
+  taken at the moment the lapse is found) and is served under the
+  reacquired tenure, or withheld as the tenure parks; space-scoped
+  documents and the service's own instances are delivered to any
+  session, so they are read without consulting the row. And an address
+  the store holds nothing at leaves no record, as a pull that delivered
+  nothing leaves none: a transaction's read of it stays an unexamined
+  absence for commit to reconcile, and the store is asked again only
+  when the feed reports a write to it. Counted: `storeReads`,
+  `storeRefreshes` (§7).
 - **(b) memory server → ExecutorHost**, in-process: the
   admission-hook activation feed — an authored admission into a
   space with no live lease NOTIFIES the host, and activation then
@@ -918,7 +961,15 @@ the 2026-08-24 ruling; the owner may re-rule it).
 - The accumulator is a layered view: store snapshot at the wave's input
   seq + previously sealed writes. Actions run serially per space, so a
   later action reads earlier ones' sealed writes; intra-wave ordering is
-  the scheduler's ordering.
+  the scheduler's ordering. The input seq is the serverSeq the wave was
+  opened at, and any seal opens one when none is open. A wave nothing
+  sealed into is discarded at the next cycle's start and again ahead of
+  the cycle's own watermark write, so the wave a cycle commits was opened
+  at or after its predecessor's commit landed: a seal arriving while that
+  commit is in flight (a read probe against the serving runtime) would
+  otherwise leave a wave whose basis the loop's own commit has already
+  passed, and the next cycle's writes to the documents it touched — the
+  watermark advance among them — would be dropped against it.
 - Failure isolation is per action: an aborted tx discards only its own
   writes; the wave keeps the rest.
 - On a client (OFF arm, and speculation in the ON arm) seal == commit /
@@ -1112,10 +1163,11 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   activity). Canonicalization: sorted keys, no undefined, links by entity
   id + path.
 - **Storage**: the result is an ordinary cell commit; the memo key is
-  written alongside the result (same doc, `requestHash` field). No new
-  tables.
-- **Hit rule**: if the recomputed key equals the stored key, the stored
-  result IS the node's value — no effect fires. This is what makes
+  written alongside the result (same doc, `requestHash` field). A builtin
+  may also write this field with `pending: true` to select the current
+  request; that marker alone is not a stored result. No new tables.
+- **Hit rule**: if the recomputed key equals the stored key and a settled
+  result or error is present, the stored result IS the node's value — no effect fires. This is what makes
   restart-recovery safe: recompute pure nodes, re-derive keys, reuse
   results.
 - **Miss rule**: enqueue the effect on the outbox with the key AND
@@ -1146,8 +1198,10 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   completion commit and consumption is covered by recovery: the basis
   index shows the consumers stale against the result doc's head (§6).
 - **In-flight dedupe**: one outstanding effect per (key, result
-  target) per space; a second miss on the same (key, target)
-  attaches to the in-flight effect. Two DISTINCT result targets
+  target) per space; the target includes its resolved user/session instance.
+  A second miss on the same (key, target) attaches to the in-flight effect.
+  Completion acceptance follows the currently selected request in that
+  instance, so A→B→A may reuse the original A without accepting a stale B. Two DISTINCT result targets
   carrying byte-identical inputs are two distinct requests, and
   each egresses (RULED 2026-08-13; the earlier per-key-only
   wording promised a cross-target sharing that §4's own miss
@@ -1160,7 +1214,7 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   conventions) with the key, so retries are input-driven (inputs change →
   new key), never timer-driven loops.
 
-FORBIDDEN: re-firing an effect whose stored key matches; effect retry
+FORBIDDEN: re-firing an effect whose settled stored result has a matching key; effect retry
 timers inside the loop; a "pending effects" table (the EFFECT half of
 the outbox is
 process-local; on crash, missing results are re-missed from keys —
@@ -1298,7 +1352,7 @@ block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
 supersededWrites, authoredSeen, effectAcks, derivedCommits,
 structureLoadFailures, structureLoadDeferred, structureLoadStuck,
 structureLoadTerminal,
-structureLoadRearmed, watermarkClamped,
+structureLoadRearmed, watermarkClamped, storeReads, storeRefreshes,
 unstampedSealRefusals, foreignWriteRefusals, foreignEngineFailures,
 warmRequests,
 watermarkLag, demandArrivals, undemandedNarrowingRuns, earlyEmitRefusals,
@@ -1343,7 +1397,10 @@ across cycles), so a slow ensure throttles nothing; `watermarkClamped` counts wa
 advance was actually clamped below the input batch head by the
 Phase-2 settle input barrier — inbound foreign novelty still
 shadowed by a parked own write; the clamp is honesty, not failure,
-and lifts by itself; `unstampedSealRefusals` counts write-carrying
+and lifts by itself; `storeReads` counts the engine reads that the store
+read-through posture (§1 plane (a)) performs for serving replicas, and
+`storeRefreshes` counts the held documents it re-reads off the feed, both
+zero while the posture is off; `unstampedSealRefusals` counts write-carrying
 transactions refused at the seal by §3d's unstamped refusal —
 structurally ZERO when every server-side commit path declares its
 run context, so any non-zero count names an undeclared commit path,
