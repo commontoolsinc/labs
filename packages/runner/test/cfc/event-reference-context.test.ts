@@ -683,6 +683,25 @@ describe("event-reference-context", () => {
     tx.abort();
   });
 
+  it("authenticates an independently acquired public dispatch target", () => {
+    const tx = runtime.edit();
+    const target = runtime.getCell(space, "public-stream", undefined, tx)
+      .getAsNormalizedFullLink();
+    const event = serializeRuntimeEvent(3, tx, space, target);
+    const restored = restoreRuntimeEventDispatch(
+      roundtrip(event.payload),
+      event.runtimeReferenceContext,
+      { ...target },
+    );
+    expect(restored.payload).toBe(3);
+    expect(getCfcReferenceProvenance(restored.target)?.confidentiality).toEqual(
+      [],
+    );
+    expect(() => serializeRuntimeEvent(3, tx, space, { ...target }))
+      .toThrow("Invalid Runtime event reference context");
+    tx.abort();
+  });
+
   it("binds primitive dispatch context to its target and isolates same-address deliveries", async () => {
     const held = await selectedReference();
     const send = runtime.edit();

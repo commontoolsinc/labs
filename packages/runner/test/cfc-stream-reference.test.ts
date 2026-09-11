@@ -13,7 +13,9 @@ import {
   restoreRuntimeEventDispatch,
   serializeRuntimeEvent,
 } from "../src/cfc/event-reference-context.ts";
+import { immutableReferenceEntries } from "../src/cfc/immutable-reference.ts";
 import { deriveFlowJoin } from "../src/cfc/prepare.ts";
+import { getCfcReferenceView } from "../src/cfc/reference-provenance.ts";
 import { Runtime } from "../src/runtime.ts";
 import { MAX_EVENT_BACKLOG_PER_STREAM } from "../src/scheduler/constants.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -181,6 +183,41 @@ describe("CFC stream references", () => {
       observed.push(deriveFlowJoin(tx).confidentiality);
     }, stream.getAsNormalizedFullLink());
     stream.send(7);
+    await runtime.scheduler.idle();
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toContainEqual(secret);
+  });
+
+  it("carries a resolved immutable-container stream's selection through dispatch", async () => {
+    // The container's acquisition table proves the hop before serialization.
+    // Dispatch consumes the resolved stream's identity and sends only the
+    // event payload to the handler.
+
+    const { stream, selected } = await selectedStream(2);
+    const acquire = runtime.edit();
+    const box = runtime.getImmutableCell(
+      space,
+      {
+        stream: selected.withTx(acquire).resolveAsCell(),
+      },
+      undefined,
+      acquire,
+    );
+    const target = box.key("stream").resolveAsCell().getAsNormalizedFullLink();
+    expect(immutableReferenceEntries(getCfcReferenceView(target)).length)
+      .toBeGreaterThan(0);
+    const event = serializeRuntimeEvent(7, acquire, space, target);
+    acquire.abort();
+    const restored = restoreRuntimeEventDispatch(
+      fabricFromJsonValue(jsonFromFabricValue(event.payload)),
+      event.runtimeReferenceContext,
+      stream.getAsNormalizedFullLink(),
+    );
+    const observed: Array<readonly unknown[]> = [];
+    runtime.scheduler.addEventHandler((tx) => {
+      observed.push(deriveFlowJoin(tx).confidentiality);
+    }, stream.getAsNormalizedFullLink());
+    runtime.scheduler.queueEvent(restored.target, restored.payload);
     await runtime.scheduler.idle();
     expect(observed).toHaveLength(1);
     expect(observed[0]).toContainEqual(secret);

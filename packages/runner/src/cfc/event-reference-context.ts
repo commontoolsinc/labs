@@ -364,7 +364,12 @@ export function restoreRuntimeEventReferences(
   }
 }
 
-/** Restores an admitted dispatch without sharing its target's private state. */
+/**
+ * Restores an admitted dispatch without sharing its target's private state.
+ * The target is the resolved terminal stream: dispatch observes its identity
+ * and aggregate acquisition confidentiality, then passes the payload to the
+ * handler. Intermediate container proofs have already been consumed.
+ */
 export function restoreRuntimeEventDispatch(
   payload: FabricValue,
   runtimeReferenceContext: string | undefined,
