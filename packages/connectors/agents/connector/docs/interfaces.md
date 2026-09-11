@@ -159,19 +159,21 @@ initial synchronization.
 
 The target exposes these orchestration methods:
 
-| Method                                    | Behavior                                                                                                |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `beginSessionObservation()`               | Allocates the ordering value that a caller records before it begins a full provider collection.         |
-| `publish(collected, options?)`            | Publishes changed session graphs and replaces both indexes. Returns the number of non-deleted sessions. |
-| `publishHealth(value)`                    | Publishes a host-defined health record under the connector-owned health schema.                         |
-| `subscribeCommands(callback)`             | Subscribes after the exact queue has been bound to its owner and verified writer.                       |
-| `pollCommands()`                          | Pulls commands after the exact queue has been bound to its owner and verified writer.                   |
-| `bindCommandCell(cell, writer)`           | Verifies the exact owner-scoped command queue and applies its owner and verified-writer policy.         |
-| `publishReceipt(receipt)`                 | Publishes one durable receipt cell and updates the bounded receipt index.                               |
-| `readReceipt(commandId)`                  | Reads the deterministic individual receipt cell used as the shared command claim.                       |
-| `refreshSession(driver, nativeSessionId)` | Reads and publishes one session without changing untouched session statuses.                            |
-| `commandCellId()`                         | Returns the command cell ID without the `of:` link prefix.                                              |
-| `receiptCellId()`                         | Returns the receipt-index cell ID without the `of:` link prefix.                                        |
+| Method                                      | Behavior                                                                                                                                            |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `beginSessionObservation()`                 | Allocates the ordering value that a caller records before it begins a full provider collection.                                                     |
+| `publish(collected, options?)`              | Publishes changed session graphs and replaces both indexes. Returns the number of non-deleted sessions.                                             |
+| `publishHealth(value)`                      | Publishes a host-defined health record under the connector-owned health schema.                                                                     |
+| `subscribeCommands(callback)`               | Subscribes to every bound queue once at least one has been bound to its owner and verified writer.                                                  |
+| `pollCommands()`                            | Pulls commands from every bound queue once at least one has been bound to its owner and verified writer.                                            |
+| `bindCommandCell(cell, writer)`             | Verifies the exact owner-scoped command queue and applies its owner and verified-writer policy.                                                     |
+| `bindProducerCommandCell(producer, writer)` | Creates the deterministic queue for one producer pattern, applies the same policy with that producer's handler as the writer, and returns the cell. |
+| `producerCommandCellIds()`                  | Returns each bound producer queue's cell ID, keyed by producer ID.                                                                                  |
+| `publishReceipt(receipt)`                   | Publishes one durable receipt cell and updates the bounded receipt index.                                                                           |
+| `readReceipt(commandId)`                    | Reads the deterministic individual receipt cell used as the shared command claim.                                                                   |
+| `refreshSession(driver, nativeSessionId)`   | Reads and publishes one session without changing untouched session statuses.                                                                        |
+| `commandCellId()`                           | Returns the command cell ID without the `of:` link prefix.                                                                                          |
+| `receiptCellId()`                           | Returns the receipt-index cell ID without the `of:` link prefix.                                                                                    |
 
 The optional `publish()` setting `preserveUntouchedStatus` defaults to false.
 Normal full collections should use the default. A targeted refresh should set it
@@ -465,13 +467,14 @@ with an ACP prefix.
 All top-level causes include the destination `spaceDid` and `ownerDid`. The
 remaining fields are fixed:
 
-| Cell                   | Cause field                              |
-| ---------------------- | ---------------------------------------- |
-| Recent session index   | `agentConnector: "recent-session-index"` |
-| Complete session index | `agentConnector: "all-session-index"`    |
-| Health                 | `agentConnector: "health"`               |
-| Commands               | `agentConnector: "commands"`             |
-| Receipt index          | `agentConnector: "receipts"`             |
+| Cell                   | Cause field                                                |
+| ---------------------- | ---------------------------------------------------------- |
+| Recent session index   | `agentConnector: "recent-session-index"`                   |
+| Complete session index | `agentConnector: "all-session-index"`                      |
+| Health                 | `agentConnector: "health"`                                 |
+| Commands               | `agentConnector: "commands"`                               |
+| Producer commands      | `agentConnector: "commands"` and `producer: <producer ID>` |
+| Receipt index          | `agentConnector: "receipts"`                               |
 
 Session, chunk, and individual receipt causes add their durable identities:
 
@@ -821,6 +824,12 @@ the deterministic owner-scoped command cell. Binding rejects another cell and
 rejects a populated queue that does not already carry the configured owner's
 confidentiality and integrity labels. The debug pattern receives that protected
 cell as an input; the host never selects a queue from pattern output.
+
+A queue's write policy names exactly one verified handler, so a second pattern
+that sends commands gets a queue of its own: the host binds a producer queue
+under the producer's own cause with that pattern's declared handler as its
+writer, and the worker reads every bound queue. Command IDs stay unique across
+queues; a command already claimed under one ID is skipped wherever it appears.
 
 ### Receipt
 

@@ -23,8 +23,8 @@ import { fromFileUrl } from "@std/path";
 import type { RawDataProvenance } from "../../debug-view/main.tsx";
 import { createBuilder } from "../../../../runner/src/builder/factory.ts";
 import type { Cell } from "../../../../runner/src/builder/types.ts";
+import { commandWriterAuthorization } from "../src/command-authorization.ts";
 import {
-  debugCommandWriterAuthorization,
   defaultDebugPatternLocation,
   protectOwnerDebugResult,
 } from "../src/debug-view.ts";
@@ -410,14 +410,11 @@ export async function deployDebugPiece(
   const pattern = await compileAndSavePattern(manager.runtime, program, {
     space: manager.getSpace(),
   });
-  const commandWriterAuthorization = debugCommandWriterAuthorization(pattern);
-  if (commandWriterAuthorization === undefined) {
+  const writerAuthorization = commandWriterAuthorization(pattern);
+  if (writerAuthorization === undefined) {
     throw new Error("debug command writer authorization is missing");
   }
-  await target.bindCommandCell(
-    target.cells.commands,
-    commandWriterAuthorization,
-  );
+  await target.bindCommandCell(target.cells.commands, writerAuthorization);
   const piece = await manager.create(
     program,
     {
