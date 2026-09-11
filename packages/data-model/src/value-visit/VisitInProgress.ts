@@ -139,8 +139,8 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
     deepTypeCheck: boolean,
   ): BaselineVisitResult<ResultType> {
     if (this.#inProgress) {
-      // This is a defense-in-depth protection against bugs in this file, and
-      // also serves as documentation for the intended use of this class.
+      // This is a defense-in-depth protection against bugs in this submodule,
+      // and also serves as documentation for the intended use of this class.
       throw new Error(
         "Shouldn't happen: Cannot use `VisitInProgress` for multiple concurrent top-level visits.",
       );
