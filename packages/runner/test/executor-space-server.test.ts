@@ -792,6 +792,23 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(notices.length).toBe(1);
   });
 
+  it("resolves a second park only once the first has parked the space", async () => {
+    // A park the renew arm fires without awaiting is still running its
+    // dispose when the host closes; the host's own park must wait for it,
+    // or the engine closes under a tenure that still releases its lease
+    // through it.
+    const created = newSpaceServer();
+    expect(await created.activate()).toBe(true);
+    const first = created.park("first");
+    let parked = false;
+    created.whenParked.then(() => {
+      parked = true;
+    });
+    await created.park("second");
+    expect(parked).toBe(true);
+    await first;
+  });
+
   //
   // Stage P2-F: late-notice accounting (the sx2 unskip flake)
   //
