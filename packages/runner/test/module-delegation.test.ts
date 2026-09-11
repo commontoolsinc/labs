@@ -658,4 +658,96 @@ describe("module identity delegation", () => {
     expect(denied.error?.message).toContain("writeAuthorizedBy failed");
     expect(protectedCell.get()).toEqual({ value: "seed" });
   });
+
+  describe("Runtime.grantsModuleDelegation()", () => {
+    it("returns `true` for a direct or inherited predecessor in the registering space only", () => {
+      const otherSpace = "did:key:z6MkModuleDelegationGrantOtherSpace";
+      runtime.registerModuleDelegations(
+        space,
+        new Map([
+          ["successor", new Set(["predecessor"])],
+          ["predecessor", new Set(["ancestor", "successor"])],
+        ]),
+      );
+
+      expect(runtime.grantsModuleDelegation(space, "successor", "predecessor"))
+        .toBe(true);
+      expect(runtime.grantsModuleDelegation(space, "successor", "ancestor"))
+        .toBe(true);
+      expect(runtime.grantsModuleDelegation(space, "ancestor", "successor"))
+        .toBe(false);
+      expect(runtime.grantsModuleDelegation(space, "successor", "stranger"))
+        .toBe(false);
+      expect(
+        runtime.grantsModuleDelegation(otherSpace, "successor", "predecessor"),
+      ).toBe(false);
+    });
+  });
+
+  describe("PatternManager.readInheritedAuthority()", () => {
+    const oldIdentity = computeModuleHashes(moduleProgram("old")).get(
+      "/writer.ts",
+    )!;
+    const successor = moduleFor(moduleProgram("new"));
+
+    const storeSuccessorSource = async (): Promise<void> => {
+      const sourceTx = runtime.edit();
+      writeSourceDocs(
+        runtime,
+        space,
+        [successor],
+        successor.identity,
+        sourceTx,
+        new Map([[successor.identity, new Set([oldIdentity])]]),
+      );
+      runtime.prepareTxForCommit(sourceTx);
+      expect((await sourceTx.commit()).error).toBeUndefined();
+    };
+
+    it("returns `undefined` for one module, a keyless identity, or a predecessor already granted", () => {
+      const pm = runtime.patternManager;
+      expect(pm.readInheritedAuthority(space, oldIdentity, oldIdentity))
+        .toBeUndefined();
+      expect(pm.readInheritedAuthority(space, "keyless:session", oldIdentity))
+        .toBeUndefined();
+
+      runtime.registerModuleDelegations(
+        space,
+        new Map([[successor.identity, new Set([oldIdentity])]]),
+      );
+      expect(pm.readInheritedAuthority(space, successor.identity, oldIdentity))
+        .toBeUndefined();
+    });
+
+    it("registers the delegation the successor's stored source closure carries", async () => {
+      await storeSuccessorSource();
+      expect(
+        runtime.grantsModuleDelegation(space, successor.identity, oldIdentity),
+      ).toBe(false);
+
+      const read = runtime.patternManager.readInheritedAuthority(
+        space,
+        successor.identity,
+        oldIdentity,
+      );
+      expect(read).toBeInstanceOf(Promise);
+      await read;
+
+      expect(
+        runtime.grantsModuleDelegation(space, successor.identity, oldIdentity),
+      ).toBe(true);
+    });
+
+    it("grants nothing when the space holds no source closure for the successor", async () => {
+      await runtime.patternManager.readInheritedAuthority(
+        space,
+        successor.identity,
+        oldIdentity,
+      );
+
+      expect(
+        runtime.grantsModuleDelegation(space, successor.identity, oldIdentity),
+      ).toBe(false);
+    });
+  });
 });

@@ -4534,6 +4534,244 @@ export class Runner {
           this.#sessionPatternSwaps.delete(pieceKey);
         }
       });
+      // Follow a pointer the watcher saw move to `newRef`: swap to the
+      // pattern the runtime holds, or load it first.
+      const followPointer = (
+        newRef: { identity: string; symbol: string },
+        newKey: string,
+      ): void => {
+        // In-memory fast path: the module is usually live this session.
+        const live = this.#runtime.patternManager.artifactFromIdentitySync(
+          newRef.identity,
+          newRef.symbol,
+        ) as Pattern | undefined;
+        if (live) {
+          // A pointer moved here, by this runtime or by a transition it
+          // took part in, has what the incoming pattern reads in place
+          // and swaps at once, in the state the pointer moved in. One
+          // moved elsewhere may point at a pattern whose argument and
+          // owned cells another replica wrote: the store delivers none of
+          // them with the pointer, so they are named before the swap
+          // reads them.
+          const argumentLink = getMetaLink(resultCell, "argument");
+          if (
+            argumentLink === undefined ||
+            !this.#swapReadsAbsent(
+              this.#resolveToPattern(live),
+              argumentLink,
+              resultCell,
+            )
+          ) {
+            swapToPattern(live, newRef);
+            return;
+          }
+          const named = this.#syncCellsForRunningPattern(resultCell, live)
+            .then(() => {
+              // A pointer that moved again while the sync was in flight
+              // has its own swap on the way; this one is stale.
+              if (
+                !active || startLifecycleEpoch !== this.#lifecycleEpoch ||
+                currentPatternKey !== newKey
+              ) {
+                return;
+              }
+              swapToPattern(live, newRef);
+            })
+            .catch((err) => {
+              logger.error(
+                "pattern-swap-name-error",
+                `Naming swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
+                err,
+              );
+            });
+          this.#pendingWatcherPatternLoads.add(named);
+          named.finally(() => this.#pendingWatcherPatternLoads.delete(named));
+          return;
+        }
+        // Async load for a pattern change after initial start. Errors are
+        // logged here since there's no caller to propagate to. The whole
+        // chain (load attempt + any pointer roll-forward it decides on) is
+        // tracked so dispose() — and deterministic tests — can settle it
+        // without wall-clock waits (the runner suite runs under a frozen
+        // clock).
+        const watcherLoad = this.#runtime.patternManager
+          .loadPatternByIdentity(
+            newRef.identity,
+            newRef.symbol,
+            resultCell.space,
+          )
+          .then((loaded) => {
+            if (
+              !active ||
+              startLifecycleEpoch !== this.#lifecycleEpoch ||
+              currentPatternKey !== newKey
+            ) return;
+            if (!loaded) {
+              if (
+                PatternManager.isKeylessPatternIdentity(newRef.identity)
+              ) {
+                // A `keyless:` pointer READ from durable state is a
+                // pre-guard legacy orphan (the guard means nothing new
+                // mints one into a store): unloadable by construction for
+                // every session but its minter, and expected in aged
+                // spaces. Tolerated as the orphan it is — a debug record,
+                // not an error — and healed below when a producer identity
+                // is available to converge to.
+                logger.debug("legacy-keyless-pattern-pointer", () => [
+                  `durable patternIdentity carries a session-synthetic`,
+                  `identity ${newRef.identity}#${newRef.symbol} (pre-guard`,
+                  "legacy state); no session can load it",
+                ]);
+              } else {
+                logger.error(
+                  "pattern-load-error",
+                  `Failed to load pattern ${newRef.identity}#${newRef.symbol}`,
+                );
+              }
+              // CT-1923: an undefined result is a DEFINITIVE verdict — the
+              // load synced and found the identity's docs absent or
+              // uncompilable — while a pattern is still running here. Left
+              // alone, the durable pointer keeps naming an identity no
+              // session can load: every boot re-logs this error and any
+              // start-by-identity of this piece is dead (the stranded
+              // blank-section state). Roll the pointer back to the RUNNING
+              // pattern's identity, durably, with a superseded-check so a
+              // legitimate concurrent repoint wins. Thrown load errors
+              // (which may be transient) never trigger this. One verdict is
+              // NOT definitive and must never trigger it: with CFC
+              // enforcement disabled, loadPatternByIdentity returns
+              // undefined for anything outside the in-memory index (probe
+              // unsupported, not artifact dead).
+              //
+              // The ref written back must be durable-legal: a
+              // session-synthetic keyless ref never is (L3(a), RULED
+              // 2026-08-27 — a fresh runtime is guaranteed unable to load
+              // it). When the RUNNING ref is keyless or absent, converge to
+              // the running VALUE's module-addressed PRODUCER instead — the
+              // first real entry ref up its derivation chain (walking as
+              // many steps as recorded). A from-scratch runtime-built value
+              // has no such link; the piece then keeps running on its
+              // session value and the pointer is left alone (the tolerated
+              // orphan), because there is nothing durable-legal to write.
+              const revertTarget = runningRef !== undefined &&
+                  !PatternManager.isKeylessPatternIdentity(
+                    runningRef.identity,
+                  )
+                ? runningRef
+                : runningPattern !== undefined
+                ? resolveProducerEntryRef(runningPattern)
+                : undefined;
+              if (
+                this.#runtime.cfcEnforcementMode !== "disabled" &&
+                revertTarget === undefined &&
+                runningPattern !== undefined
+              ) {
+                logger.debug("keyless-running-no-producer", () => [
+                  "unloadable durable pointer over a running keyless",
+                  "pattern with no module-addressed producer link;",
+                  "nothing durable-legal to converge to — leaving the",
+                  "pointer as written",
+                ]);
+              }
+              if (
+                this.#runtime.cfcEnforcementMode !== "disabled" &&
+                revertTarget !== undefined &&
+                patternIdentityKey(revertTarget) !== newKey
+              ) {
+                const revertRef = revertTarget;
+                const rollForward = this.#runtime.editWithRetry((tx) => {
+                  // Async pointer repair from the meta watcher's load
+                  // promise — no scheduler run stamps it; bookkeeping
+                  // per serving-loop.md §3d.
+                  this.#runtime.stampServerRun(tx, {
+                    actionId:
+                      `pattern-pointer-rollforward/${resultCell.sourceURI}`,
+                    kind: "bookkeeping",
+                  });
+                  const cur = asPatternIdentityRef(
+                    resultCell.withTx(tx).getMetaRaw("patternIdentity", {
+                      meta: ignoreReadForScheduling,
+                    }),
+                  );
+                  if (!cur || patternIdentityKey(cur) !== newKey) {
+                    return false;
+                  }
+                  resultCell.withTx(tx).setMetaRaw("patternIdentity", {
+                    identity: revertRef.identity,
+                    symbol: revertRef.symbol,
+                  }, rawMetaWriteAuthorization);
+                  return true;
+                }).then((result) => {
+                  // Only reclaim the observed key while it is STILL the
+                  // failed one — a valid repoint that raced this rollback
+                  // has already advanced the watcher state, and clobbering
+                  // it would make the key guard discard that repoint's
+                  // in-flight load.
+                  if (result.ok && currentPatternKey === newKey) {
+                    currentPatternKey = patternIdentityKey(revertRef);
+                    logger.warn(
+                      "unloadable-pointer-rolled-forward",
+                      () => [
+                        "durable patternIdentity named an unloadable",
+                        `identity (${newRef.identity}#${newRef.symbol});`,
+                        revertRef === runningRef
+                          ? "rolled back to the running pattern"
+                          : "converged to the running pattern's producer",
+                        `${revertRef.identity}#${revertRef.symbol}`,
+                      ],
+                    );
+                  }
+                }).catch((error) => {
+                  logger.warn(
+                    "unloadable-pointer-roll-forward-failed",
+                    () => [
+                      "could not roll the unloadable pointer back to the",
+                      "running pattern",
+                      error,
+                    ],
+                  );
+                });
+                // Track so dispose() can settle it before storage teardown
+                // (same contract as PatternUpdater's pending checks).
+                this.#pendingPointerCommits.add(rollForward);
+                rollForward.finally(() =>
+                  this.#pendingPointerCommits.delete(rollForward)
+                );
+              }
+              return;
+            }
+            logger.info("pattern changed", {
+              to: { ref: newRef, pattern: loaded },
+            });
+            // Loaded from the store, so what it reads may be absent here
+            // too; named before the swap as on the live path.
+            return this.#syncCellsForRunningPattern(resultCell, loaded).then(
+              () => {
+                if (
+                  !active || startLifecycleEpoch !== this.#lifecycleEpoch ||
+                  currentPatternKey !== newKey
+                ) {
+                  return;
+                }
+                swapToPattern(loaded, newRef);
+              },
+            );
+          })
+          .catch((err) => {
+            if (!active || startLifecycleEpoch !== this.#lifecycleEpoch) {
+              return;
+            }
+            logger.error(
+              "pattern-load-error",
+              `Failed to load pattern ${newRef.identity}#${newRef.symbol}`,
+              err,
+            );
+          });
+        this.#pendingWatcherPatternLoads.add(watcherLoad);
+        watcherLoad.finally(() =>
+          this.#pendingWatcherPatternLoads.delete(watcherLoad)
+        );
+      };
       addCancel(
         resultCell.sinkMeta("patternIdentity", (newValue) => {
           if (!active || startLifecycleEpoch !== this.#lifecycleEpoch) return;
@@ -4543,236 +4781,28 @@ export class Runner {
           if (newKey === currentPatternKey) return; // No change
           currentPatternKey = newKey;
 
-          // In-memory fast path: the module is usually live this session.
-          const live = this.#runtime.patternManager.artifactFromIdentitySync(
-            newRef.identity,
-            newRef.symbol,
-          ) as Pattern | undefined;
-          if (live) {
-            // A pointer moved here, by this runtime or by a transition it
-            // took part in, has what the incoming pattern reads in place
-            // and swaps at once, in the state the pointer moved in. One
-            // moved elsewhere may point at a pattern whose argument and
-            // owned cells another replica wrote: the store delivers none of
-            // them with the pointer, so they are named before the swap
-            // reads them.
-            const argumentLink = getMetaLink(resultCell, "argument");
-            if (
-              argumentLink === undefined ||
-              !this.#swapReadsAbsent(
-                this.#resolveToPattern(live),
-                argumentLink,
-                resultCell,
-              )
-            ) {
-              swapToPattern(live, newRef);
-              return;
-            }
-            const named = this.#syncCellsForRunningPattern(resultCell, live)
-              .then(() => {
-                // A pointer that moved again while the sync was in flight
-                // has its own swap on the way; this one is stale.
-                if (
-                  !active || startLifecycleEpoch !== this.#lifecycleEpoch ||
-                  currentPatternKey !== newKey
-                ) {
-                  return;
-                }
-                swapToPattern(live, newRef);
-              })
-              .catch((err) => {
-                logger.error(
-                  "pattern-swap-name-error",
-                  `Naming swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
-                  err,
-                );
-              });
-            this.#pendingWatcherPatternLoads.add(named);
-            named.finally(() => this.#pendingWatcherPatternLoads.delete(named));
+          // A source update that moves the pointer grants the new pattern the
+          // writer authority of the one before it, and registers the grant
+          // only in the runtime that performed it. Without it, the new
+          // pattern's writes to fields bound to the old one are refused, so
+          // a runtime that does not hold it reads it before swapping.
+          const owed = this.#readInheritedAuthority(resultCell, newRef);
+          if (owed === undefined) {
+            followPointer(newRef, newKey);
             return;
           }
-          // Async load for a pattern change after initial start. Errors are
-          // logged here since there's no caller to propagate to. The whole
-          // chain (load attempt + any pointer roll-forward it decides on) is
-          // tracked so dispose() — and deterministic tests — can settle it
-          // without wall-clock waits (the runner suite runs under a frozen
-          // clock).
-          const watcherLoad = this.#runtime.patternManager
-            .loadPatternByIdentity(
-              newRef.identity,
-              newRef.symbol,
-              resultCell.space,
-            )
-            .then((loaded) => {
-              if (
-                !active ||
-                startLifecycleEpoch !== this.#lifecycleEpoch ||
-                currentPatternKey !== newKey
-              ) return;
-              if (!loaded) {
-                if (
-                  PatternManager.isKeylessPatternIdentity(newRef.identity)
-                ) {
-                  // A `keyless:` pointer READ from durable state is a
-                  // pre-guard legacy orphan (the guard means nothing new
-                  // mints one into a store): unloadable by construction for
-                  // every session but its minter, and expected in aged
-                  // spaces. Tolerated as the orphan it is — a debug record,
-                  // not an error — and healed below when a producer identity
-                  // is available to converge to.
-                  logger.debug("legacy-keyless-pattern-pointer", () => [
-                    `durable patternIdentity carries a session-synthetic`,
-                    `identity ${newRef.identity}#${newRef.symbol} (pre-guard`,
-                    "legacy state); no session can load it",
-                  ]);
-                } else {
-                  logger.error(
-                    "pattern-load-error",
-                    `Failed to load pattern ${newRef.identity}#${newRef.symbol}`,
-                  );
-                }
-                // CT-1923: an undefined result is a DEFINITIVE verdict — the
-                // load synced and found the identity's docs absent or
-                // uncompilable — while a pattern is still running here. Left
-                // alone, the durable pointer keeps naming an identity no
-                // session can load: every boot re-logs this error and any
-                // start-by-identity of this piece is dead (the stranded
-                // blank-section state). Roll the pointer back to the RUNNING
-                // pattern's identity, durably, with a superseded-check so a
-                // legitimate concurrent repoint wins. Thrown load errors
-                // (which may be transient) never trigger this. One verdict is
-                // NOT definitive and must never trigger it: with CFC
-                // enforcement disabled, loadPatternByIdentity returns
-                // undefined for anything outside the in-memory index (probe
-                // unsupported, not artifact dead).
-                //
-                // The ref written back must be durable-legal: a
-                // session-synthetic keyless ref never is (L3(a), RULED
-                // 2026-08-27 — a fresh runtime is guaranteed unable to load
-                // it). When the RUNNING ref is keyless or absent, converge to
-                // the running VALUE's module-addressed PRODUCER instead — the
-                // first real entry ref up its derivation chain (walking as
-                // many steps as recorded). A from-scratch runtime-built value
-                // has no such link; the piece then keeps running on its
-                // session value and the pointer is left alone (the tolerated
-                // orphan), because there is nothing durable-legal to write.
-                const revertTarget = runningRef !== undefined &&
-                    !PatternManager.isKeylessPatternIdentity(
-                      runningRef.identity,
-                    )
-                  ? runningRef
-                  : runningPattern !== undefined
-                  ? resolveProducerEntryRef(runningPattern)
-                  : undefined;
-                if (
-                  this.#runtime.cfcEnforcementMode !== "disabled" &&
-                  revertTarget === undefined &&
-                  runningPattern !== undefined
-                ) {
-                  logger.debug("keyless-running-no-producer", () => [
-                    "unloadable durable pointer over a running keyless",
-                    "pattern with no module-addressed producer link;",
-                    "nothing durable-legal to converge to — leaving the",
-                    "pointer as written",
-                  ]);
-                }
-                if (
-                  this.#runtime.cfcEnforcementMode !== "disabled" &&
-                  revertTarget !== undefined &&
-                  patternIdentityKey(revertTarget) !== newKey
-                ) {
-                  const revertRef = revertTarget;
-                  const rollForward = this.#runtime.editWithRetry((tx) => {
-                    // Async pointer repair from the meta watcher's load
-                    // promise — no scheduler run stamps it; bookkeeping
-                    // per serving-loop.md §3d.
-                    this.#runtime.stampServerRun(tx, {
-                      actionId:
-                        `pattern-pointer-rollforward/${resultCell.sourceURI}`,
-                      kind: "bookkeeping",
-                    });
-                    const cur = asPatternIdentityRef(
-                      resultCell.withTx(tx).getMetaRaw("patternIdentity", {
-                        meta: ignoreReadForScheduling,
-                      }),
-                    );
-                    if (!cur || patternIdentityKey(cur) !== newKey) {
-                      return false;
-                    }
-                    resultCell.withTx(tx).setMetaRaw("patternIdentity", {
-                      identity: revertRef.identity,
-                      symbol: revertRef.symbol,
-                    }, rawMetaWriteAuthorization);
-                    return true;
-                  }).then((result) => {
-                    // Only reclaim the observed key while it is STILL the
-                    // failed one — a valid repoint that raced this rollback
-                    // has already advanced the watcher state, and clobbering
-                    // it would make the key guard discard that repoint's
-                    // in-flight load.
-                    if (result.ok && currentPatternKey === newKey) {
-                      currentPatternKey = patternIdentityKey(revertRef);
-                      logger.warn(
-                        "unloadable-pointer-rolled-forward",
-                        () => [
-                          "durable patternIdentity named an unloadable",
-                          `identity (${newRef.identity}#${newRef.symbol});`,
-                          revertRef === runningRef
-                            ? "rolled back to the running pattern"
-                            : "converged to the running pattern's producer",
-                          `${revertRef.identity}#${revertRef.symbol}`,
-                        ],
-                      );
-                    }
-                  }).catch((error) => {
-                    logger.warn(
-                      "unloadable-pointer-roll-forward-failed",
-                      () => [
-                        "could not roll the unloadable pointer back to the",
-                        "running pattern",
-                        error,
-                      ],
-                    );
-                  });
-                  // Track so dispose() can settle it before storage teardown
-                  // (same contract as PatternUpdater's pending checks).
-                  this.#pendingPointerCommits.add(rollForward);
-                  rollForward.finally(() =>
-                    this.#pendingPointerCommits.delete(rollForward)
-                  );
-                }
-                return;
-              }
-              logger.info("pattern changed", {
-                to: { ref: newRef, pattern: loaded },
-              });
-              // Loaded from the store, so what it reads may be absent here
-              // too; named before the swap as on the live path.
-              return this.#syncCellsForRunningPattern(resultCell, loaded).then(
-                () => {
-                  if (
-                    !active || startLifecycleEpoch !== this.#lifecycleEpoch ||
-                    currentPatternKey !== newKey
-                  ) {
-                    return;
-                  }
-                  swapToPattern(loaded, newRef);
-                },
-              );
-            })
-            .catch((err) => {
-              if (!active || startLifecycleEpoch !== this.#lifecycleEpoch) {
-                return;
-              }
-              logger.error(
-                "pattern-load-error",
-                `Failed to load pattern ${newRef.identity}#${newRef.symbol}`,
-                err,
-              );
-            });
-          this.#pendingWatcherPatternLoads.add(watcherLoad);
-          watcherLoad.finally(() =>
-            this.#pendingWatcherPatternLoads.delete(watcherLoad)
+          const followed = owed.then(() => {
+            if (
+              !active || startLifecycleEpoch !== this.#lifecycleEpoch ||
+              currentPatternKey !== newKey
+            ) {
+              return;
+            }
+            followPointer(newRef, newKey);
+          });
+          this.#pendingWatcherPatternLoads.add(followed);
+          followed.finally(() =>
+            this.#pendingWatcherPatternLoads.delete(followed)
           );
         }),
       );
@@ -5087,14 +5117,55 @@ export class Runner {
     if (stoppedPatternKey !== undefined && !wasStoppedLocally) {
       this.#locallyStoppedResults.delete(setupKey);
     }
-    return this.#startAvailablePattern(
-      rootCell,
-      identityRef,
-      wasSyncedAtEntry,
-      wasPreparedLocally,
-      wasStoppedLocally,
-      seenCells,
-      attempt,
+    const start = () =>
+      this.#startAvailablePattern(
+        rootCell,
+        identityRef,
+        wasSyncedAtEntry,
+        wasPreparedLocally,
+        wasStoppedLocally,
+        seenCells,
+        attempt,
+      );
+    const owed = this.#readInheritedAuthority(rootCell, identityRef);
+    return owed === undefined ? start() : owed.then(start);
+  }
+
+  /**
+   * The read that gives this runtime the writer authority a piece's pattern
+   * `identityRef` inherited from the pattern the piece ran before it, when
+   * the runtime does not already hold it (see
+   * `PatternManager.readInheritedAuthority()`).
+   *
+   * A source update, the only grantor, records the pattern it moves a piece
+   * to as the latest revision of the piece's source history. So a read is
+   * owed only when that revision names `identityRef`, and the predecessor is
+   * the latest earlier revision naming another pattern. A pointer that moved
+   * without a revision, or a history naming no other pattern, owes none.
+   */
+  #readInheritedAuthority(
+    rootCell: Cell<unknown>,
+    identityRef: { identity: string; symbol: string },
+  ): Promise<void> | undefined {
+    let revisions: PieceSourceRevision[];
+    try {
+      revisions = getPieceSourceRevisions(rootCell);
+    } catch {
+      // An invalid history names no predecessor. Setup, which requires a
+      // valid one, reports it.
+      return undefined;
+    }
+    if (revisions.at(-1)?.pattern.identity !== identityRef.identity) {
+      return undefined;
+    }
+    const predecessor = revisions.findLast((revision) =>
+      revision.pattern.identity !== identityRef.identity
+    );
+    if (predecessor === undefined) return undefined;
+    return this.#runtime.patternManager.readInheritedAuthority(
+      rootCell.space,
+      identityRef.identity,
+      predecessor.pattern.identity,
     );
   }
 

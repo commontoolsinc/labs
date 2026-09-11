@@ -647,6 +647,18 @@ Loads in a transaction with writes still return the verified closure but do not
 publish its delegation metadata ahead of a commit verdict. Synchronous source
 verification within setup retains transaction reads without registering authority.
 
+A runtime can hold a successor module before another runtime's source update
+grants it a predecessor's authority, and resolving a pattern from memory loads
+no closure. A source update records the pattern it moves a piece to as the
+latest revision of the piece's source history. So when the runner starts a
+piece, or swaps a running one after its pattern pointer moves, and the latest
+revision names the pattern it is about to run, it looks up the latest earlier
+revision naming a different pattern. If the runtime does not register the new
+pattern's module as inheriting from that one, the runner first reads the new
+pattern's verified source closure in a transaction without writes, which
+registers whatever delegation that closure durably carries. The start or swap
+proceeds once the read settles, whether or not it added a grant.
+
 Registration and transitive closure are scoped by the space carrying that
 attestation. Each transaction snapshots the resulting per-space maps, and
 `writeAuthorizedBy` consults only the map for the target document's space. It may

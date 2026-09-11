@@ -247,6 +247,78 @@ export default pattern<{seed?: ${seedType}}>(() => {
     }
   });
 
+  describe("in a runtime that evaluated the successor before another runtime updated the source", () => {
+    // `runtime` performs the update. `observer` shares its store but
+    // evaluated the successor for a piece of its own first, so it resolves
+    // the updated piece's pattern from memory rather than from storage.
+    let observer: Runtime;
+    let observerPieces: PiecesController;
+
+    beforeEach(async () => {
+      observer = new Runtime({
+        apiUrl: new URL("http://toolshed.test"),
+        storageManager,
+      });
+      observerPieces = new PiecesController(
+        await createSession({
+          identity: signer,
+          spaceName: pieces.getSpaceName()!,
+        }),
+        observer,
+      );
+      await observerPieces.synced();
+      await observerPieces.create(authorizedWriterProgram("v2"), {
+        input: {},
+      });
+    });
+
+    afterEach(async () => {
+      // Disposing a runtime closes the storage manager it shares with
+      // `runtime`, which the outer `afterEach` disposes after this one.
+      await observer.dispose();
+    });
+
+    const invokeSetName = async (
+      piece: Awaited<ReturnType<PiecesController["get"]>>,
+      name: string,
+    ): Promise<unknown> => {
+      const result = await piece.result.getCell();
+      result.key("setName").send({ name });
+      await result.pull();
+      return await piece.result.get(["name"]);
+    };
+
+    it("authorizes the successor's writes to a piece it swaps over", async () => {
+      const piece = await pieces.create(authorizedWriterProgram("v1"), {
+        input: {},
+      });
+      const observed = await observerPieces.get(piece.id, true);
+      expect(await invokeSetName(observed, "before")).toBe("v1:before");
+
+      await piece.setPattern(authorizedWriterProgram("v2"));
+      await observer.idle();
+      // The swap waits on the read of the successor's authority, which the
+      // watcher tracks apart from the scheduler.
+      await observer.runner.idlePointerMaintenance();
+
+      expect(await invokeSetName(observed, "after")).toBe("v2:after");
+    });
+
+    it("authorizes the successor's writes to a piece it starts afterwards", async () => {
+      const piece = await pieces.create(authorizedWriterProgram("v1"), {
+        input: {},
+      });
+      const updater = await pieces.get(piece.id, true);
+      expect(await invokeSetName(updater, "before")).toBe("v1:before");
+      await piece.setPattern(authorizedWriterProgram("v2"));
+      await pieces.synced();
+
+      const observed = await observerPieces.get(piece.id, true);
+
+      expect(await invokeSetName(observed, "after")).toBe("v2:after");
+    });
+  });
+
   it("merges predecessor chains into an already-stored successor closure", async () => {
     const first = await pieces.create(authorizedWriterProgram("v1"), {
       input: {},
