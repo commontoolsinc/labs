@@ -214,6 +214,24 @@ describe("baselines", () => {
       expect(asked).toEqual([]);
     });
 
+    it("takes one commit's figures from the newest of its runs", async () => {
+      // A commit can carry more than one successful run. Two baselines
+      // at one commit would leave a comparison choosing between them by
+      // whichever was listed first.
+      const baselines = await collectCoverageBaselines(
+        source([
+          { id: 1, commit: "shared", createdAt: daysAgo(0.25) },
+          { id: 2, commit: "shared", createdAt: daysAgo(0.75) },
+        ], {
+          1: { [measuredSetCoverageMetric("workspace-unit/packages/a")]: 5 },
+          2: { [measuredSetCoverageMetric("workspace-unit/packages/a")]: 9 },
+        }),
+        NOW,
+      );
+      expect(baselines).toHaveLength(1);
+      expect(baselines[0]?.uncoveredLines).toBe(5);
+    });
+
     it("stops at a run whose report names no measured set", async () => {
       // Such a run measured a tree where nothing publishes one, and
       // every older run is such a tree too, so reading further costs an

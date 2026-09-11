@@ -102,6 +102,11 @@ export async function collectCoverageBaselines(
     // a tree where nothing measures one. Every older run is such a tree
     // too, so there is nothing further back to read.
     if (sets.length === 0) break;
+    // A commit can carry more than one successful run. Its figures are
+    // taken from the newest of them and the rest are passed over, so a
+    // set never holds two baselines at one commit for a comparison to
+    // choose between.
+    carried.add(run.commit);
     for (const [set, uncoveredLines] of sets) {
       baselines.push({
         suite: set.suite,

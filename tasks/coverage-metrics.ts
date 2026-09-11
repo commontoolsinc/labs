@@ -216,7 +216,11 @@ export async function collectMeasuredSetDebt(
   let uncoveredLines = 0;
   let files = 0;
   for (const source of sourceFiles) {
-    const coverage = lcovCoverage.get(source.absolutePath);
+    const record = lcovCoverage.get(source.absolutePath);
+    // A record naming a file and carrying no line says nothing about it,
+    // so it is read as the absence of a record rather than as a file
+    // every line of which ran.
+    const coverage = record?.lineHits.size ? record : undefined;
     if (coverage) files += 1;
     uncoveredLines += coverage
       ? countUncoveredProfileLines(coverage)

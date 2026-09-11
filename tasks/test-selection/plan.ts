@@ -190,6 +190,7 @@ function loneCost(
   manifest: Manifest,
   input: PlanInput,
   entry: ManifestEntry,
+  repeats = 1,
 ): number {
   return marginalCost(
     manifest,
@@ -203,7 +204,7 @@ function loneCost(
       load: 0,
     },
     entry,
-    1,
+    repeats,
   );
 }
 
@@ -470,7 +471,12 @@ export function plan(input: PlanInput): Plan {
       // chosen, edited, pulled in by the coverage gate, or required
       // because the run is the whole corpus.
       runs: entry.repeats,
-      cost: loneCost(manifest, input, entry),
+      // What an empty lane would pay for every one of those runs. The
+      // setup and overheads a lane opens are paid once however many
+      // times the item runs, so multiplying one run's whole figure
+      // would charge them again per repeat and order the pass by a cost
+      // no lane pays.
+      cost: loneCost(manifest, input, entry, entry.repeats),
     });
   }
 
@@ -482,8 +488,7 @@ export function plan(input: PlanInput): Plan {
   // decides only where the work lands. The key breaks ties, so two
   // identities costing the same are ordered the same way in every lane.
   required.sort((a, b) =>
-    b.cost * b.runs - a.cost * a.runs ||
-    (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+    b.cost - a.cost || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
   );
 
   for (const { key, reason, entry, runs } of required) {

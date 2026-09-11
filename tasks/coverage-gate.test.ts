@@ -5,6 +5,7 @@ import {
   collectSetReports,
   formatGateReport,
   type GateInput,
+  main,
   nearestBaseline,
   nearestOnBranch,
   parseGateArgs,
@@ -725,6 +726,214 @@ describe("coverage-gate", () => {
     it("names nothing when asked about no commits at all", async () => {
       const { root } = await repository();
       expect(await nearestOnBranch(root)([])).toBeUndefined();
+    });
+  });
+
+  describe("running the gate the way the job runs it", () => {
+    /**
+     * A repository holding one member whose source is `lines` statements,
+     * a commit on the branch, and a report covering `covered` of them.
+     */
+    async function job(lines: number, covered: number): Promise<
+      { root: string; commit: string; reports: string; suites: Suite[] }
+    > {
+      const root = await Deno.makeTempDir({ prefix: "coverage-gate-job-" });
+      const member = "packages/bakery";
+      await Deno.writeTextFile(
+        path.join(root, "deno.jsonc"),
+        JSON.stringify({ workspace: [`./${member}`] }),
+      );
+      const dir = path.join(root, member, "src");
+      await Deno.mkdir(dir, { recursive: true });
+      const file = path.join(dir, "main.ts");
+      const body = Array.from(
+        { length: lines },
+        (_, at) => `const v${at} = ${at};`,
+      );
+      await Deno.writeTextFile(file, `${body.join("\n")}\n`);
+      const git = async (...args: string[]) => {
+        const result = await new Deno.Command("git", {
+          args,
+          cwd: root,
+          stdout: "piped",
+          stderr: "piped",
+        }).output();
+        return new TextDecoder().decode(result.stdout).trim();
+      };
+      await git("init", "-q", "-b", "main");
+      await git("config", "user.email", "tests@example.com");
+      await git("config", "user.name", "Tests");
+      await git("add", "-A");
+      await git("commit", "-qm", "one");
+      const commit = await git("rev-parse", "HEAD");
+      // The change the gate measures: a second commit touching the
+      // member's tree, which is what reaches its set. A test file, so
+      // that what the member is scored over does not move with it.
+      await Deno.writeTextFile(
+        path.join(root, member, "one.test.ts"),
+        "// the change under test\n",
+      );
+      await git("add", "-A");
+      await git("commit", "-qm", "two");
+
+      const records = body.map((_, at) =>
+        `DA:${at + 1},${at < covered ? 1 : 0}`
+      );
+      const reports = path.join(root, "artifacts");
+      const at = path.join(
+        reports,
+        "lane-1/coverage/lcov/sets/workspace-unit/packages__bakery",
+      );
+      await Deno.mkdir(at, { recursive: true });
+      await Deno.writeTextFile(
+        path.join(at, "coverage.lcov"),
+        `SF:${file}\n${records.join("\n")}\nend_of_record\n`,
+      );
+      return {
+        root,
+        commit,
+        reports,
+        suites: [suite("workspace-unit", [{
+          member,
+          reachedBy: [`${member}/`],
+          units: [`${member}/one.test.ts`],
+        }])],
+      };
+    }
+
+    it("passes, and says what it compared", async () => {
+      const { root, commit, reports, suites } = await job(10, 6);
+      const lines: string[] = [];
+      const log = console.log;
+      console.log = (line: string) => lines.push(line);
+      let status: number;
+      try {
+        status = await main(
+          ["--base", "HEAD~1", "--reports", reports],
+          root,
+          {
+            topology: () => Promise.resolve(suites),
+            baselines: () =>
+              Promise.resolve([{
+                suite: "workspace-unit",
+                member: "packages/bakery",
+                commit,
+                createdAt: "2026-09-01T00:00:00.000Z",
+                uncoveredLines: 4,
+              }]),
+          },
+        );
+      } finally {
+        console.log = log;
+      }
+      expect(status).toBe(0);
+      const said = lines.join("\n");
+      expect(said).toContain("workspace-unit/packages/bakery");
+      expect(said).toContain("no rise");
+    });
+
+    it("fails a rise, and prints the marker that accepts it", async () => {
+      const { root, commit, reports, suites } = await job(10, 6);
+      const lines: string[] = [];
+      const log = console.log;
+      console.log = (line: string) => lines.push(line);
+      let status: number;
+      try {
+        status = await main(
+          ["--base", "HEAD~1", "--reports", reports],
+          root,
+          {
+            topology: () => Promise.resolve(suites),
+            baselines: () =>
+              Promise.resolve([{
+                suite: "workspace-unit",
+                member: "packages/bakery",
+                commit,
+                createdAt: "2026-09-01T00:00:00.000Z",
+                uncoveredLines: 1,
+              }]),
+          },
+        );
+      } finally {
+        console.log = log;
+      }
+      expect(status).toBe(1);
+      expect(lines.join("\n"))
+        .toContain("ACCEPT_COVERAGE_DEBT: packages/bakery +3 lines");
+    });
+
+    it("takes the acceptance from the description", async () => {
+      const { root, commit, reports, suites } = await job(10, 6);
+      const log = console.log;
+      console.log = () => {};
+      let status: number;
+      try {
+        status = await main(
+          [
+            "--base",
+            "HEAD~1",
+            "--reports",
+            reports,
+            "--body",
+            "ACCEPT_COVERAGE_DEBT: packages/bakery +3 lines",
+          ],
+          root,
+          {
+            topology: () => Promise.resolve(suites),
+            baselines: () =>
+              Promise.resolve([{
+                suite: "workspace-unit",
+                member: "packages/bakery",
+                commit,
+                createdAt: "2026-09-01T00:00:00.000Z",
+                uncoveredLines: 1,
+              }]),
+          },
+        );
+      } finally {
+        console.log = log;
+      }
+      expect(status).toBe(0);
+    });
+
+    it("stops on a marker it cannot read", async () => {
+      const { root, reports, suites } = await job(10, 6);
+      const lines: string[] = [];
+      const log = console.log;
+      console.log = (line: string) => lines.push(line);
+      let status: number;
+      try {
+        status = await main(
+          [
+            "--base",
+            "HEAD~1",
+            "--reports",
+            reports,
+            "--body",
+            "ACCEPT_COVERAGE_DEBT: packages/bakery 3 lines",
+          ],
+          root,
+          {
+            topology: () => Promise.resolve(suites),
+            baselines: () => Promise.resolve([]),
+          },
+        );
+      } finally {
+        console.log = log;
+      }
+      expect(status).toBe(1);
+      expect(lines.join("\n")).toContain("ACCEPT_COVERAGE_DEBT");
+    });
+
+    it("refuses a command line it cannot read", async () => {
+      const { root } = await job(10, 6);
+      const error = console.error;
+      console.error = () => {};
+      try {
+        expect(await main([], root, {})).toBe(2);
+      } finally {
+        console.error = error;
+      }
     });
   });
 

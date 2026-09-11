@@ -490,7 +490,7 @@ function parseBaseline(value: unknown): CoverageBaseline | undefined {
   if (
     !isNonEmptyString(value.suite) || !isNonEmptyString(value.member) ||
     !isNonEmptyString(value.commit) ||
-    !isNonEmptyString(value.createdAt) ||
+    !isTimestamp(value.createdAt) ||
     !isFiniteNumber(value.uncoveredLines) ||
     value.uncoveredLines < 0
   ) {

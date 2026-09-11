@@ -3257,11 +3257,12 @@ history back from the tip also costs only the distance to the answer,
 where asking about each commit in turn costs a question per commit and
 the window holds a week of them.
 
-Two cases report instead of failing here. A set with no baseline yet is
-reported, because the first pull request to reach a new package should not
-inherit the whole of that package's debt. And when the manifest holds no
-run the branch contains, the comparison would be against a tree the branch
-does not have, so a rise measured against it is not the branch's rise.
+Two of the cases that report instead of failing are about the baseline. A
+set with no baseline yet is reported, because the first pull request to
+reach a new package should not inherit the whole of that package's debt.
+And when the manifest holds no run the branch contains, the comparison
+would be against a tree the branch does not have, so a rise measured
+against it is not the branch's rise.
 
 A third is not about the baseline at all: a set whose joined reports name
 no line of its member measured nothing, rather than covering nothing.

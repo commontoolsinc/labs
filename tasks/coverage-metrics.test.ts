@@ -841,6 +841,21 @@ Deno.test("collectMeasuredSetDebt refuses a member with no tree", async () => {
   );
 });
 
+Deno.test("collectMeasuredSetDebt reads a record with no line as none at all", async () => {
+  // Such a record says nothing about the file, so counting it as
+  // measured would let the gate score a report that measured nothing.
+  const rootDir = await membersWithSource(["packages/bakery"]);
+  const bakery = path.join(rootDir, "packages/bakery/src/main.ts");
+  const measured = await collectMeasuredSetDebt({
+    rootDir,
+    lcov: `SF:${bakery}\nend_of_record\n`,
+    member: "packages/bakery",
+    members: ["packages/bakery"],
+  });
+  assertEquals(measured.files, 0);
+  assertEquals(measured.uncoveredLines, 4);
+});
+
 Deno.test("collectMeasuredSetDebt counts the files the report named", async () => {
   const rootDir = await membersWithSource(["packages/bakery"]);
   const bakery = path.join(rootDir, "packages/bakery/src/main.ts");
