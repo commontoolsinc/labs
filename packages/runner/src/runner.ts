@@ -7198,7 +7198,7 @@ export class Runner {
       const syncStart = performance.now();
       // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
       const tempId = resultCell.getAsNormalizedFullLink().id.slice(0, 20);
-      logger.warn("temp-pre-sync", () => [`TEMP pre-sync start ${tempId}`]);
+      console.log(`TEMP-PRESYNC start ${tempId}`);
       try {
         return await this.#syncCellsForRunningPatternInner(
           resultCell,
@@ -7208,7 +7208,7 @@ export class Runner {
         );
       } finally {
         // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
-        logger.warn("temp-pre-sync", () => [`TEMP pre-sync end ${tempId}`]);
+        console.log(`TEMP-PRESYNC end ${tempId}`);
         // Resume-boot decomposition: this is the dependency pre-sync a fresh
         // runtime pays before wiring a stored piece back up. Recorded under
         // the runner timing stats (they record even when the logger is
@@ -7514,10 +7514,10 @@ export class Runner {
         .map((address) => entityKey(address, this.#runtime.scopeKeyIdentity))
         .filter((key) => !awaited.has(key));
       // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
-      logger.warn("temp-pre-sync", () => [
-        `TEMP cross-space round ${round}: ${keys.length} new pending`,
+      console.log(
+        `TEMP-PRESYNC cross-space round ${round}: ${keys.length} new pending`,
         keys.slice(0, 6),
-      ]);
+      );
       if (keys.length === 0) return;
       for (const key of keys) awaited.add(key);
       const settleStart = performance.now();
@@ -7526,11 +7526,11 @@ export class Runner {
       } catch (error) {
         // A load that failed leaves its document absent; the next round
         // reads past it, and the run reads the same absence.
-        // TEMP-INSTRUMENTATION (PR #7287): warn, not debug; remove before merge.
-        logger.warn("temp-pre-sync", () => [
-          "a load a cross-space read kicked did not land",
+        // TEMP-INSTRUMENTATION (PR #7287): console, not debug; remove before merge.
+        console.log(
+          "TEMP-PRESYNC a load a cross-space read kicked did not land",
           error,
-        ]);
+        );
       }
       logger.time(settleStart, "start", "resumeCrossSpaceSettle");
     }
