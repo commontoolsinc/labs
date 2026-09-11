@@ -533,15 +533,15 @@ describe("engine-read-through", () => {
       type: "object",
       properties: { text: { type: "string" } },
     });
-    const store = new Map<string, FabricValue>(
+    const store = new Map<string, { value: FabricValue; schema?: JSONSchema }>(
       [...decomposed.documents].map((
         [hash, document],
-      ) => [`cid:${hash}`, { value: document } as FabricValue]),
+      ) => [`cid:${hash}`, { value: document as FabricValue }]),
     );
     const carrier = {
       value: { text: "held" },
       schema: { $ref: decomposed.rootRef },
-    } as FabricValue;
+    };
     store.set("of:meta-carrier", carrier);
     const reads: string[] = [];
     const manager = SharedServerStorageManager.connectTo(server, {
@@ -583,8 +583,11 @@ describe("engine-read-through", () => {
     // later sync of it is answered from the replica. The refresh is what
     // moves it: the store's newer version reaches a sync only through
     // `integrateStoreWrites()`.
-    const store = new Map<string, { seq: number; doc: FabricValue }>();
-    store.set("of:held", { seq: 1, doc: { value: { n: 1 } } as FabricValue });
+    const store = new Map<
+      string,
+      { seq: number; doc: { value: FabricValue } }
+    >();
+    store.set("of:held", { seq: 1, doc: { value: { n: 1 } } });
     const reads: string[] = [];
     const manager = SharedServerStorageManager.connectTo(server, {
       as: serviceSigner,
@@ -608,7 +611,7 @@ describe("engine-read-through", () => {
       expect(replica.getDocument("of:held" as URI)).toEqual({
         value: { n: 1 },
       });
-      store.set("of:held", { seq: 2, doc: { value: { n: 2 } } as FabricValue });
+      store.set("of:held", { seq: 2, doc: { value: { n: 2 } } });
       expect((await replica.sync("of:held" as URI)).ok).toBeDefined();
       expect(reads).toEqual(["of:held"]);
       expect(replica.getDocument("of:held" as URI)).toEqual({
