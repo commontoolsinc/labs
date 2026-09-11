@@ -348,9 +348,14 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
       [reproducible comparison](../history/development/performance/2026-09-11-computed-lift-collection-loops.md)
       validates three forms at 32, 128, and 512 linked rows, including unread-field
       edits. The dashboard tracks publication and review status.
-- [ ] **E2 — Publish the measured advice** where pattern authors encounter
+- [x] **E2 — Publish the measured advice** where pattern authors encounter
       collections, `computed`, and `lift`. Explain nested-scan cost and use only
-      available operators in replacement examples.
+      available operators in replacement examples. The
+      [computed/lift guide](../common/concepts/computed/computed.md#collection-loop-cost)
+      and [collection guide](../features/collection-aggregates.md#choosing-a-collection-computation)
+      explain lazy read width, repeated scans, explicit cell receivers, numeric
+      contract differences, and measurement limits. The author index links both;
+      dashboard publication status remains separate.
 - [x] **E3 — Add a transformer warning** through the existing diagnostic
       collector. Test recognizable nested reactive scans and negative cases
       involving plain arrays and unrelated scopes; inspect warning volume across

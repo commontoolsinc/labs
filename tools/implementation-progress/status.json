@@ -153,8 +153,8 @@
     {
       "id": "E2",
       "title": "Author guidance",
-      "status": "todo",
-      "detail": "Publish measured advice using shipped operators."
+      "status": "review",
+      "detail": "Measured advice is implemented in the computed/lift and collection guides, linked from the author index. Documentation validation and PR review govern landing."
     },
     {
       "id": "E3",
