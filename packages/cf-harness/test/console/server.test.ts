@@ -1698,6 +1698,127 @@ describe("console/server", () => {
     });
   });
 
+  describe("POST /api/index/feedback", () => {
+    /** Posts one verdict at a server that has an index. */
+    const vote = async (
+      indexed: { server: ConsoleServer },
+      body: unknown,
+    ): Promise<Response> =>
+      await indexed.server.handle(
+        jsonRequest("/api/index/feedback", body),
+      );
+
+    it("records an up verdict as a thumbs_up under the server's own identity", async () => {
+      const indexed = await indexServer([Response.json({ ok: true })]);
+
+      const response = await vote(indexed, {
+        patternId: "ss-2w4nQ8",
+        verdict: "up",
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        patternId: "ss-2w4nQ8",
+        eventType: "thumbs_up",
+        recordedBy: signer.did(),
+      });
+      expect(indexed.requests[0].url).toBe(
+        "https://index.test/api/recordEvent",
+      );
+      expect(JSON.parse(indexed.requests[0].body)).toEqual({
+        patternId: "ss-2w4nQ8",
+        eventType: "thumbs_up",
+      });
+    });
+
+    it("records a down verdict as a thumbs_down", async () => {
+      const indexed = await indexServer([Response.json({ ok: true })]);
+
+      const response = await vote(indexed, {
+        patternId: "ss-2w4nQ8",
+        verdict: "down",
+      });
+
+      expect(response.status).toBe(200);
+      expect((await response.json()).eventType).toBe("thumbs_down");
+      expect(JSON.parse(indexed.requests[0].body)).toEqual({
+        patternId: "ss-2w4nQ8",
+        eventType: "thumbs_down",
+      });
+    });
+
+    it("answers 400 for a verdict the index has no event for", async () => {
+      const indexed = await indexServer([]);
+
+      // `constructor` is the one that passes an unguarded lookup on the
+      // verdict map, so it stands beside the ordinary misspellings.
+      for (const verdict of ["sideways", "thumbs_up", "constructor", "", 1]) {
+        const response = await vote(indexed, {
+          patternId: "ss-2w4nQ8",
+          verdict,
+        });
+        expect(response.status).toBe(400);
+        expect((await response.json()).error).toBe(
+          'verdict must be "up" or "down"',
+        );
+      }
+      expect(indexed.requests).toEqual([]);
+    });
+
+    it("answers 400 for a body that names no pattern", async () => {
+      const indexed = await indexServer([]);
+
+      for (const patternId of [undefined, "", 7]) {
+        const response = await vote(indexed, { patternId, verdict: "up" });
+        expect(response.status).toBe(400);
+        expect((await response.json()).error).toBe("patternId is required");
+      }
+      expect(indexed.requests).toEqual([]);
+    });
+
+    it("answers 503 when the server was started without an index", async () => {
+      const response = await server.handle(
+        jsonRequest("/api/index/feedback", {
+          patternId: "ss-2w4nQ8",
+          verdict: "up",
+        }),
+      );
+
+      expect(response.status).toBe(503);
+      expect((await response.json()).error).toContain(
+        "started without a pattern index",
+      );
+    });
+
+    it("answers 502 when the index took the request and did not record it", async () => {
+      const indexed = await indexServer([Response.json({ ok: false })]);
+
+      const response = await vote(indexed, {
+        patternId: "ss-2w4nQ8",
+        verdict: "up",
+      });
+
+      expect(response.status).toBe(502);
+      expect((await response.json()).error).toContain("thumbs_up");
+    });
+
+    it("passes through the status the index gave a request it faulted", async () => {
+      const indexed = await indexServer([
+        Response.json({ error: "unknown pattern" }, { status: 404 }),
+      ]);
+
+      const response = await vote(indexed, {
+        patternId: "missing",
+        verdict: "up",
+      });
+
+      expect(response.status).toBe(404);
+      expect((await response.json()).error).toBe(
+        "pattern index recordEvent failed (404)",
+      );
+    });
+  });
+
   describe("the served page", () => {
     it("confines the page to this origin with a content security policy", async () => {
       const response = await server.handle(getRequest("/"));

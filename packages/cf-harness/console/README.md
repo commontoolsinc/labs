@@ -196,6 +196,7 @@ one.
 | `GET`  | `/api/runs`                  | Run summaries                                                                           |
 | `GET`  | `/api/runs/<runId>/...`      | Run detail, flow, graph, artifacts, and tool outputs                                    |
 | `POST` | `/api/index/call`            | One allowlisted pattern-index read                                                      |
+| `POST` | `/api/index/feedback`        | Records one up or down vote on a pattern in the index                                   |
 | `GET`  | `/live/<sessionId>`          | The live pane for one session; takes `?turn=<turnId>` and `?piecesBase=<url-prefix>`    |
 
 Health returns `ok`, `fabricApiUrl`, and `fabricSession`. The last field is
@@ -710,6 +711,9 @@ events, and a pattern's source is read through the CLI.
 
 The route sits under `/api/`, so it is behind the same `Host` gate as the rest.
 
+Voting is the console's one write to the index, and it has a route of its own
+rather than a name in that allowlist: `POST /api/index/feedback`, below.
+
 Three panes:
 
 - **Patterns** — everything the index holds, by score. A row carries the pattern
@@ -728,6 +732,42 @@ Three panes:
   rather than what it answered once. Each hit reads `matched/asked` on its text
   terms: matching is disjunctive and ranked, so the ratio is what says how close
   a hit is.
+
+## Voting on a pattern
+
+`POST /api/index/feedback` records one vote on a published pattern. The body is
+a pattern id and a verdict and nothing else:
+
+```json
+{ "patternId": "ss-2w4nQ8", "verdict": "up" }
+```
+
+An `up` is recorded as a `thumbs_up` and a `down` as a `thumbs_down`, through
+the same verdict mapping the `record_feedback` tool records through, so a vote
+cast here and a vote cast by a run are the same event. The server signs it with
+its fabric identity, so the index attributes the vote to the operator's own
+principal — the one it answers `recordedBy` with:
+
+```json
+{
+  "patternId": "ss-2w4nQ8",
+  "eventType": "thumbs_up",
+  "recordedBy": "did:key:z…"
+}
+```
+
+The index ranks on these votes, so a pattern that keeps disappointing stops
+being offered first and one that keeps working is offered sooner. That is why
+this is a route and not a page control: whoever is working with a pattern votes
+on it from wherever they are working, and Weaver's command pill is the first
+such caller.
+
+The route answers 400 for a body naming no pattern or a verdict that is neither
+`up` nor `down`, 503 when this server was started without `--pattern-index-url`,
+and the index's own status when the index faulted the call. Nothing is recorded
+in any of those cases. Like the read route, it is under `/api/` and behind the
+same `Host` gate, and takes one bare request with no cookie and no preceding
+one.
 
 ## How the configuration reaches the run
 
