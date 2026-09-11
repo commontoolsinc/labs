@@ -268,22 +268,17 @@ A `#/$defs/<name>` ref names a definition of the document root, as JSON
 Schema resolves it: `#` is the root of the schema resource, and the runtime
 supports no keyword that starts another resource below it (`$id`, `$anchor`,
 and the dynamic-ref keywords are refused). A `$defs` on a subschema below the
-root's map is therefore inert: a union arm that declares `$defs` of its own
-still resolves its `$ref` against the union's document, and `#/$defs/<name>`
-is the only local pointer form the runtime resolves, so nothing reaches a
-nested map by path either. A document whose root declares no `$defs` has no
-local definitions, and a `$defs` a subschema declares below such a root is
-not a scope the runtime keeps: the pruner drops it, decomposition refuses it,
-and no stored schema carries one, so a self-contained schema placed under
-such a wrapper needs its `$defs` hoisted to the wrapper's root. Following an
-embedded or `cid:` external ref enters another document, whose own map
-governs everything below it. The runtime attaches a document's map to
-fragments it evaluates apart from the document — a union arm, an element
-schema, a resolved definition body — so that the fragment resolves standalone;
-such a copy holds the enclosing document's definitions and opens no new scope.
-A member of a content-addressed cyclic group is read as a view whose refs
-into the group take the external `cid:<hash>#/$defs/<name>` form, so it
-resolves wherever a derived schema later embeds it.
+root is therefore inert: a union arm that declares `$defs` of its own still
+resolves its `$ref` against the union's document, and `#/$defs/<name>` is the
+only local pointer form the runtime resolves, so nothing reaches a nested map
+by path either. Following an embedded or `cid:` external ref enters another
+document, whose own map governs everything below it. A fragment the runtime
+evaluates apart from its document — a union arm, an element schema, a resolved
+definition body — carries a copy of the document's map so that it resolves
+standalone; the copy opens no new scope. A member of a content-addressed
+cyclic group is read as a view whose refs into the group take the external
+`cid:<hash>#/$defs/<name>` form, so it resolves wherever a derived schema
+later embeds it.
 
 ### Handling of `never`
 
