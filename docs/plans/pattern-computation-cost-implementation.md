@@ -239,8 +239,8 @@ passed before merge, with clean Cubic and antagonistic reviews.
   profiles. Ordinary memory queries wait for session restoration before
   constructing their requests. This guards the handshake-to-session interval;
   a subsequent disconnect during request issue remains a separate boundary.
-  These synthetic probes do not authorize removing the lunch-poll workaround or
-  accessing the live poll.
+  These synthetic probes cover repository behavior. Live poll changes require
+  coordination with Mike.
 
   C3's landed fix records the mutable inline element used when resolving a
   nested array to a content-addressed snapshot. The
@@ -263,8 +263,15 @@ passed before merge, with clean Cubic and antagonistic reviews.
   The artifact directory receives screenshots and assertion metadata for all
   four cases. Live poll access requires coordination with Mike.
 
-- [ ] **C2 — Repair partial materialization.** Verify complete inputs under cold
-      reads, remote inserts/removals, and reconnect where relevant.
+- [x] **C2 — Repair partial materialization.** Complete inputs are covered by
+      C1's cold-browser, remote insertion/removal, and reconnect acceptance.
+      The session-restoration query repair is merged in #7308; rendered
+      reconnect acceptance is merged in #7312. The same-space and cross-space
+      fixtures verify complete vote and profile inputs on first demand, after
+      membership changes, and after two reader outages. No additional
+      materialization change is required for these reproductions. Disconnects
+      during request issue remain the separate boundary stated above; C3's
+      producer-identity and rerun checks are tracked independently.
 - [ ] **C3 — Repair remote row invalidation.** Verify affected rows update,
       stable element identities survive, and untouched rows do not rerun.
 - [x] **C4 — Restore reactive lunch-poll rows.** Direct reactive option and

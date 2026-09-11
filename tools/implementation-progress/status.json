@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-11T11:41:56.081484+00:00",
+  "updated": "2026-09-11T12:26:09.201571+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7307",
@@ -23,7 +23,9 @@
     "#7282 main integration: all six functional assertions and declared budgets, 413 authoritative pattern checks, full pattern package including browser tests, and all 46 type groups pass.",
     "#7304 merged as c0454ab24e after all 69 exact-head checks, zero issues in the full nine-file Cubic rereview, and clean antagonistic review.",
     "D3 local validation: 1,431 runner tests / 8,923 steps; 46 type groups; 599 documentation blocks; history index, formatting, lint, and six exact reuse/control benchmark counts pass. Antagonistic review is clean.",
-    "#7282 merged as be92af0510 after all 69 exact-head checks, zero-issue Cubic review, and clean antagonistic review; all six scale assertions pass."
+    "#7282 merged as be92af0510 after all 69 exact-head checks, zero-issue Cubic review, and clean antagonistic review; all six scale assertions pass.",
+    "#7308 merged as e435590cf4c94c91a32260315efe1eedc5e66a7b: all 69 reviewed-head checks succeeded or were skipped, with clean Cubic and antagonistic review. C2 uses its session-restoration/reconnect acceptance evidence.",
+    "#7312 merged as c00a2581f13b3183986f4d30c6d4ad86e28a34ab: all 69 reviewed-head checks succeeded or were skipped, with clean Cubic and antagonistic review. C2 uses its session-restoration/reconnect acceptance evidence."
   ],
   "stages": [
     {
@@ -95,8 +97,8 @@
     {
       "id": "C2",
       "title": "Partial materialization correctness",
-      "status": "todo",
-      "detail": "Repair only after C1 establishes the failure."
+      "status": "review",
+      "detail": "Acceptance reconciliation: cold first-demand, remote insertion/removal, and reader reconnect cases are implemented and validated. Session-restoration repair #7308 and rendered reconnect acceptance #7312 are merged. The tracker closure is being reviewed; C3 producer checks remain separate."
     },
     {
       "id": "C3",
