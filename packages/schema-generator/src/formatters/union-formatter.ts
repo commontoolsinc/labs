@@ -1016,8 +1016,12 @@ export class UnionFormatter implements TypeFormatter {
     if (anyOf.some((option) => hashStringOf(option) === curHash)) {
       return false;
     }
-    // See if we can merge into one of the anyOf options
+    const isCurPrimitive = PRIMITIVE_SCHEMA_KEY_SET.isSupersetOf(
+      new Set(Object.keys(cur)),
+    );
+    // Merge only schemas whose complete meaning is a primitive type and enum.
     const matchingTypeIdx = anyOf.findIndex((option) =>
+      isCurPrimitive &&
       isObjectOrArray(option) &&
       PRIMITIVE_SCHEMA_KEY_SET.isSupersetOf(new Set(Object.keys(option))) &&
       "type" in option && option.type === cur.type
@@ -1025,9 +1029,6 @@ export class UnionFormatter implements TypeFormatter {
     const matchingType = matchingTypeIdx !== -1
       ? anyOf[matchingTypeIdx]
       : undefined;
-    const isCurPrimitive = PRIMITIVE_SCHEMA_KEY_SET.isSupersetOf(
-      new Set(Object.keys(cur)),
-    );
     if (
       isObjectOrArray(cur) && Array.isArray(cur.enum) &&
       isObjectOrArray(matchingType) &&
