@@ -929,14 +929,14 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
 
 /**
  * Whether `schema` selects a reference rather than the value it names: an
- * `asCell` or `asStream` wrapper, or `unknown`, at its root. A read under
- * such a schema hands back a handle or an opaque value rather than reading
- * through, so the document behind the link is what the reader holds, and it
- * is asked for root-only.
+ * `asCell` wrapper, or `unknown`, at its root. A read under such a schema
+ * hands back a handle or an opaque value rather than reading through, so the
+ * document behind the link is what the reader holds, and it is asked for
+ * root-only.
  */
 function selectsReferenceOnly(schema: JSONSchema | undefined): boolean {
   if (!isObjectOrArray(schema)) return false;
-  if (schema.asCell !== undefined || schema.asStream !== undefined) return true;
+  if (schema.asCell !== undefined) return true;
   return schema.type === "unknown" ||
     (Array.isArray(schema.type) && schema.type.includes("unknown"));
 }
