@@ -54,7 +54,7 @@ Deno.test("memory v2 selector normalization ignores unused definitions", () => {
   assertStrictEquals(left, right);
 });
 
-Deno.test("memory v2 selector normalization ignores nested unused definitions", () => {
+Deno.test("memory v2 selector normalization drops nested definitions and unused root ones", () => {
   const selectorWith = (
     unusedName: string,
     usedType: "string" | "number" = "string",
@@ -65,16 +65,17 @@ Deno.test("memory v2 selector normalization ignores nested unused definitions", 
       properties: {
         nested: {
           $ref: "#/$defs/Used",
-          $defs: {
-            Used: { type: usedType },
-            [unusedName]: { type: "boolean" },
-          },
+          $defs: { [unusedName]: { type: "boolean" } },
         },
         plain: {
           type: "object",
           properties: { value: { type: "string" } },
           $defs: { [`${unusedName}Plain`]: { type: "null" } },
         },
+      },
+      $defs: {
+        Used: { type: usedType },
+        [`${unusedName}Root`]: { type: "boolean" },
       },
     },
   });
@@ -88,16 +89,13 @@ Deno.test("memory v2 selector normalization ignores nested unused definitions", 
   assertEquals(left.schema, {
     type: "object",
     properties: {
-      nested: {
-        $ref: "#/$defs/Used",
-        $defs: { Used: { type: "string" } },
-      },
+      nested: { $ref: "#/$defs/Used" },
       plain: {
-        $defs: {},
         type: "object",
         properties: { value: { type: "string" } },
       },
     },
+    $defs: { Used: { type: "string" } },
   });
   assertStrictEquals(left, right);
   assertNotStrictEquals(left, different);

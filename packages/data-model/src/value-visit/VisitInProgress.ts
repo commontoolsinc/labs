@@ -266,8 +266,14 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
             throw new Error(
               `Encountered a non-\`FabricValue\` while doing an "assume valid" visit: ${desc}`,
             );
+          } else if (vis.isDomainExtra(value)) {
+            result = vis.visitNonFabricValue(value);
+          } else {
+            const desc = toCompactDebugString(value);
+            throw new Error(
+              `Encountered a value outside of the visitor's domain: ${desc}`,
+            );
           }
-          result = vis.visitNonFabricValue(value as DomainExtra);
           break;
         }
 

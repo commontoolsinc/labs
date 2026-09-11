@@ -32,6 +32,9 @@ export abstract class BaseValueVisitor<
   //
 
   /** @inheritDoc */
+  abstract isDomainExtra(value: DomainFor<DomainExtra>): value is DomainExtra;
+
+  /** @inheritDoc */
   abstract visitCycle(
     value: DomainFor<DomainExtra>,
     originalDepth: number,
