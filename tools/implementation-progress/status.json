@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-11T04:49:55.656447+00:00",
+  "updated": "2026-09-11T11:41:56.081484+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7307",
@@ -143,8 +143,8 @@
     {
       "id": "E1",
       "title": "Computed versus lift measurements",
-      "status": "todo",
-      "detail": "Measure current defaults and declared read width."
+      "status": "review",
+      "detail": "PR #7327 implements and validates the computed/broad-lift/narrow-lift comparison at 32/128/512 linked rows. The report and reproduction command are linked from the implementation tracker. CI and Cubic review govern landing."
     },
     {
       "id": "E2",
