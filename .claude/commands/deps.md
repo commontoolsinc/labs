@@ -1,6 +1,6 @@
 MUST HAVE:
 - deno 2, pinned in mise.toml — install via mise https://mise.jdx.dev/
-  (`mise trust && mise install` in the repo); a manually installed deno 2
+  (`mise install` in the repo); a manually installed deno 2
   within the `tasks/check.sh` range also works
 
 REALLY SHOULD HAVE:

@@ -5,10 +5,12 @@ import {
   check,
   checkStore,
   checkTree,
+  checkWorkflows,
   main,
   parseCheckArgs,
   readRecords,
   report,
+  workflowRecords,
 } from "./check-test-topology.ts";
 import type { Suite } from "./test-topology/suite.ts";
 
@@ -252,23 +254,310 @@ describe("what the tree half looks at", () => {
     }
   });
 
-  it("holds a listed exception to still being in the tree", () => {
+  it("holds a listed fixture to still being in the tree", () => {
     // A file that gets registered or deleted takes its line with it,
     // which is what stops the list describing a tree nobody has.
     const findings = checkTree([], [], {
-      unregistered: [{ path: "packages/gone.test.ts", reason: "moved away" }],
+      fixtures: [{ path: "packages/gone.test.ts", reason: "moved away" }],
     });
     expect(findings.map((finding) => finding.fails)).toEqual([true]);
     expect(findings[0]!.message).toContain("no longer holds it");
   });
 
-  it("holds a listed exception to still being unclaimed", () => {
+  it("holds a listed fixture to still being unclaimed", () => {
     const claimed = suite({ id: "workspace-unit", units: ["a.test.ts"] });
     const findings = checkTree([claimed], ["a.test.ts"], {
       fixtures: [{ path: "a.test.ts", reason: "a fixture a test drives" }],
     });
     expect(findings.map((finding) => finding.fails)).toEqual([true]);
-    expect(findings[0]!.message).toContain("still listed as unclaimed");
+    expect(findings[0]!.message).toContain("still listed as a fixture");
+  });
+});
+
+describe("the workflow half of the drift guard", () => {
+  const gates = suite({
+    id: "repo-checks",
+    units: ["check-icing"],
+    locate: (record) =>
+      record.test.k === "gate" && record.test.s === "repo" &&
+        record.test.n === "check-icing"
+        ? { level: "unit", unit: record.test.n }
+        : undefined,
+  });
+
+  /** One step, written the way a workflow writes it. */
+  function step(k: string, s: string, n: string) {
+    return { test: { k, s, n }, where: ".github/workflows/deno.yml" };
+  }
+
+  it("passes a step exactly one suite claims", () => {
+    const findings = checkWorkflows([gates], [
+      step("gate", "repo", "check-icing"),
+    ]);
+    expect(findings).toEqual([]);
+  });
+
+  it("fails a step no suite claims", () => {
+    // A gate wired into a job and into no suite runs while its step
+    // stands and stops when a lane takes over the job.
+    const findings = checkWorkflows([gates], [
+      step("gate", "repo", "check-glaze"),
+    ]);
+    expect(findings.map((finding) => finding.fails)).toEqual([true]);
+    expect(findings[0]!.message).toContain(
+      'no suite claims ["gate","repo","check-glaze"], which ' +
+        ".github/workflows/deno.yml records",
+    );
+  });
+
+  it("fails a step two suites claim", () => {
+    const findings = checkWorkflows(
+      [gates, { ...gates, id: "repo-gates" }],
+      [step("gate", "repo", "check-icing")],
+    );
+    expect(findings.map((finding) => finding.fails)).toEqual([true]);
+    expect(findings[0]!.message).toContain("both claim");
+  });
+
+  it("counts one identity once, however many steps write it", () => {
+    const findings = checkWorkflows([gates], [
+      step("gate", "repo", "check-glaze"),
+      step("gate", "repo", "check-glaze"),
+    ]);
+    expect(findings.length).toBe(1);
+  });
+});
+
+describe("what the workflow half looks at", () => {
+  /** A tree holding the step definitions a case names. */
+  async function workflows(files: Record<string, string>): Promise<string> {
+    const root = await Deno.makeTempDir({ prefix: "workflows-" });
+    for (const [at, body] of Object.entries(files)) {
+      const file = `${root}/.github/${at}`;
+      await Deno.mkdir(file.slice(0, file.lastIndexOf("/")), {
+        recursive: true,
+      });
+      await Deno.writeTextFile(file, body);
+    }
+    return root;
+  }
+
+  it("reads the identity out of a step, however the step is wrapped", async () => {
+    const root = await workflows({
+      "workflows/deno.yml": [
+        "      - run: deno task run-recorded gate repo check-icing -- deno task x",
+        "      - run: >-",
+        "          deno task run-recorded lint repo deno-lint --",
+        "          deno lint",
+        "      - run: |",
+        "          deno task run-recorded test oven bake -- \\",
+        "            deno test",
+      ].join("\n"),
+    });
+    try {
+      expect((await workflowRecords(root)).map((found) => found.test)).toEqual([
+        { k: "gate", s: "repo", n: "check-icing" },
+        { k: "lint", s: "repo", n: "deno-lint" },
+        { k: "test", s: "oven", n: "bake" },
+      ]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("reads no step out of a comment naming the wrapper", async () => {
+    // Both shapes a comment takes: a line of its own, and the tail of a
+    // line that carries something else. Each holds a whole invocation,
+    // so what keeps them out is that they are comments.
+    const root = await workflows({
+      "workflows/deno.yml": [
+        "      # deno task run-recorded gate repo ghost -- deno task ghost",
+        "      - run: deno task check # deno task run-recorded gate repo old --",
+      ].join("\n"),
+    });
+    try {
+      expect(await workflowRecords(root)).toEqual([]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("reads a step a quoted hash sits ahead of on its line", async () => {
+    // A `#` the shell is handed as a character does not end the command,
+    // so the step after it on that line still records and still counts.
+    const root = await workflows({
+      "workflows/deno.yml": [
+        "      - run: |",
+        '          echo "count # of things" && deno task run-recorded gate repo icing -- deno task x',
+      ].join("\n"),
+    });
+    try {
+      expect((await workflowRecords(root)).map((found) => found.test)).toEqual([
+        { k: "gate", s: "repo", n: "icing" },
+      ]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("reads a step a quoted hash with an escape in it sits ahead of", async () => {
+    // The backslash takes the quote with it, so the quoted run has not
+    // ended and the `#` inside it is still a character of the command.
+    const root = await workflows({
+      "workflows/deno.yml": [
+        "      - run: |",
+        '          echo "a \\" # b" && deno task run-recorded gate repo icing -- deno task x',
+      ].join("\n"),
+    });
+    try {
+      expect((await workflowRecords(root)).map((found) => found.test)).toEqual([
+        { k: "gate", s: "repo", n: "icing" },
+      ]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("reads an identity a workflow expression stands in the middle of", async () => {
+    // A lane cannot be asked for an identity that is not settled until
+    // the run resolves the expression, so the guard reads what is
+    // written and lets no suite claim it.
+    const root = await workflows({
+      "workflows/deno.yml":
+        "  run: deno task run-recorded unit ${{ matrix.scope }} test -- deno task test",
+    });
+    try {
+      expect((await workflowRecords(root)).map((found) => found.test)).toEqual([
+        { k: "unit", s: "${{ matrix.scope }}", n: "test" },
+      ]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("reads a step whose parts are quoted rather than passing over it", async () => {
+    const root = await workflows({
+      "workflows/deno.yml":
+        '  run: deno task run-recorded gate repo "check icing" -- deno task x',
+    });
+    try {
+      expect((await workflowRecords(root)).map((found) => found.test.n))
+        .toEqual(
+          ['"check'],
+        );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("names the workflow each step is written in", async () => {
+    const root = await workflows({
+      "workflows/nightly.yml":
+        "  run: deno task run-recorded gate repo audit -- deno task a",
+      "workflows/deno.yml":
+        "  run: deno task run-recorded gate repo check -- deno task b",
+    });
+    try {
+      expect((await workflowRecords(root)).map((found) => found.where)).toEqual(
+        [
+          ".github/workflows/deno.yml",
+          ".github/workflows/nightly.yml",
+        ],
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("reads a step across the line continuations that break it up", async () => {
+    const root = await workflows({
+      "workflows/deno.yml": [
+        "      - run: |",
+        "          deno task run-recorded gate \\",
+        "            repo check-icing -- \\",
+        "            deno task check-icing",
+      ].join("\n"),
+    });
+    try {
+      expect((await workflowRecords(root)).map((found) => found.test)).toEqual([
+        { k: "gate", s: "repo", n: "check-icing" },
+      ]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("reads a step a composite action runs as well as one a workflow runs", async () => {
+    const root = await workflows({
+      "actions/ship/action.yml":
+        "  run: deno task run-recorded gate repo ship -- deno task ship",
+      "workflows/deno.yml":
+        "  run: deno task run-recorded gate repo check -- deno task check",
+    });
+    try {
+      expect((await workflowRecords(root)).map((found) => found.where)).toEqual(
+        [
+          ".github/actions/ship/action.yml",
+          ".github/workflows/deno.yml",
+        ],
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("reads no step out of a file that is not a step definition", async () => {
+    // Only the YAML under `.github` defines steps. A document beside it
+    // quoting the wrapper is prose.
+    const root = await workflows({
+      "workflows/README.md":
+        "  run: deno task run-recorded gate repo prose -- deno task prose",
+      "workflows/deno.yml":
+        "  run: deno task run-recorded gate repo real -- deno task real",
+    });
+    try {
+      expect((await workflowRecords(root)).map((found) => found.test.n))
+        .toEqual(["real"]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("raises on a file ending in the middle of a recording step", async () => {
+    // Three words follow the wrapper or the identity is not there to
+    // read, and reading a shorter one would invent an identity.
+    const root = await workflows({
+      "workflows/deno.yml": "  run: deno task run-recorded gate repo",
+    });
+    try {
+      await expect(workflowRecords(root)).rejects.toThrow(
+        "ends in the middle of a recording step",
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("raises rather than reading a shorter list of definitions", async () => {
+    // A directory that cannot be read is not a directory that holds no
+    // steps. Treating the two alike would report success over whatever
+    // it managed to reach.
+    const root = await Deno.makeTempDir({ prefix: "obstructed-" });
+    try {
+      await Deno.writeTextFile(`${root}/.github`, "not a directory");
+      await expect(workflowRecords(root)).rejects.toThrow();
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("finds nothing in a tree that defines no steps", async () => {
+    const root = await Deno.makeTempDir({ prefix: "bare-" });
+    try {
+      expect(await workflowRecords(root)).toEqual([]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
   });
 });
 
@@ -324,16 +613,15 @@ describe("reading a run's records", () => {
 });
 
 describe("what the guard declines to fail on", () => {
-  it("accepts a declared fixture and reports a declared unrun test", () => {
+  it("accepts a declared fixture and fails on anything else", () => {
     const findings = checkTree([], ["fixture.test.ts", "unrun.test.ts"], {
       fixtures: [{ path: "fixture.test.ts", reason: "a test drives it" }],
-      unregistered: [{ path: "unrun.test.ts", reason: "no suite runs it" }],
     });
-    // A fixture is not a test surface and says nothing. A test nothing
-    // runs is a defect, reported so somebody can act on it, and not a
-    // failure, because registering one means deciding where it runs.
-    expect(findings.map((finding) => finding.fails)).toEqual([false]);
-    expect(findings[0]!.message).toContain("runs nowhere");
+    // A fixture is not a test surface and says nothing. Everything else
+    // is, so a suite has to account for it — a suite that runs it, or one
+    // that holds it and says why this configuration does not.
+    expect(findings.map((finding) => finding.fails)).toEqual([true]);
+    expect(findings[0]!.message).toBe("unrun.test.ts is claimed by no suite");
   });
 
   it("counts one recorded identity once, however often it was run", () => {

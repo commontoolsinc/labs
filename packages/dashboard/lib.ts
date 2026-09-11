@@ -13,20 +13,24 @@ import {
   performanceGitHubRateLimit,
 } from "./github-rate-limit.ts";
 import {
+  compactSpan,
   daysLabel,
   DURATION_LABEL_HEIGHT,
   durationTag,
   escapeHtml,
+  groupDigits,
   humanSpan,
   SPARKLINE_HEIGHT,
   STATUS_DOT,
 } from "./tile-render-values.ts";
 
 export {
+  compactSpan,
   daysLabel,
   DURATION_LABEL_HEIGHT,
   durationTag,
   escapeHtml,
+  groupDigits,
   humanSpan,
   SPARKLINE_HEIGHT,
   STATUS_DOT,

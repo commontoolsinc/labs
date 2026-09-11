@@ -11,6 +11,7 @@ import {
 import {
   clickTrustedActionAndWaitForText,
   waitForSettledText,
+  waitForTextAbsent,
 } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
@@ -140,6 +141,14 @@ describe("cfc spec gallery integration test", () => {
         pieceId: piece.id,
       },
       identity,
+      // The subject is what a `cf-cfc-label` shows for each of these three
+      // labels. Two of them sit outside the §8.10.6 display profile, so the
+      // render ceiling blocks their cards and takes those labels with them;
+      // this case runs the profile without the ceiling, and the case below
+      // runs the same page with it. `isCfcRenderCeilingEnabled` reads the key
+      // as `=== "true"`, so `false` selects the profile this page would take
+      // with no key at all until that reader changes.
+      renderCeiling: false,
     });
 
     await waitForCfcLabelText(page, [
@@ -147,6 +156,29 @@ describe("cfc spec gallery integration test", () => {
       "SourceProvenance",
       "fact-check-required",
     ]);
+  });
+
+  it("renders the admitted label and no other under the render ceiling", async () => {
+    const page = shell.page();
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: {
+        spaceName: SPACE_NAME,
+        pieceId: piece.id,
+      },
+      identity,
+      renderCeiling: true,
+    });
+
+    // The ceiling admits the acting user's own identity atoms and the
+    // influence-class caveat kinds, `prompt-influence` among them, so that
+    // card's label renders and a blocked placeholder stands where the other
+    // two cards were. The three strings below are the three the case above
+    // waits for, so the pair states the same page under each profile.
+    await waitForCfcLabelText(page, ["prompt-influence"]);
+    await waitForSettledText(page, "cf-screen", "Content hidden by policy");
+    await waitForTextAbsent(page, "cf-screen", "SourceProvenance");
+    await waitForTextAbsent(page, "cf-screen", "fact-check-required");
   });
 });
 

@@ -7,6 +7,10 @@
  *     issue phase fixes).
  *  2. Overlapping watch.adds through the REAL server all resolve, and later
  *     mutations on every watched root are delivered.
+ *  3. A removal's replacement set sees every earlier acquisition applied, and
+ *     later acquisitions stay behind it on the wire. Covered in
+ *     `test/v2/SpaceSession.test.ts`, which holds a response open to force
+ *     the interleaving.
  *
  * Event-driven (no wall-clock sleeps): a deterministic microtask drain settles
  * the loopback pipeline.

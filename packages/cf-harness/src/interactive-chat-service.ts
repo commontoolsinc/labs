@@ -1,3 +1,4 @@
+import { loomAuthoringForTurn } from "./loom-authoring.ts";
 import {
   isObjectNotArray,
   type ReadonlyRecord,
@@ -1171,7 +1172,11 @@ export class HarnessInteractiveChatService {
       loomLocalHostBinding: this.#loomLocalHostBinding,
       artifactRoot: params.artifactRoot,
       capabilities: params.capabilities,
-      policy: resolveHarnessChatPolicy(params.policy, params.context),
+      policy: resolveHarnessChatPolicy(
+        params.policy,
+        params.context,
+        this.#basePromptLoopOptions.loomAuthoring?.allowCommentThreads === true,
+      ),
       browserAccess: params.browserAccess,
       metadata: params.metadata,
     });
@@ -1197,6 +1202,16 @@ export class HarnessInteractiveChatService {
     requestId: string,
     params: HarnessChatStartTurnParams,
   ): Promise<HarnessChatResponse<HarnessChatTurnStatus>> {
+    if (
+      params.input.loomId !== undefined &&
+      (typeof params.input.loomId !== "string" ||
+        !/^loom-[a-f0-9]{16}$/.test(params.input.loomId))
+    ) {
+      return createHarnessChatErrorResponse(requestId, {
+        code: "invalid_request",
+        message: "loomId must be a canonical Loom identifier",
+      });
+    }
     const record = this.#sessions.get(params.sessionId);
     if (record === undefined) {
       return sessionNotFoundError(requestId, params.sessionId);
@@ -1270,6 +1285,7 @@ export class HarnessInteractiveChatService {
     const policy = resolveHarnessChatPolicy(
       params.policy ?? record.status.policy,
       context,
+      this.#basePromptLoopOptions.loomAuthoring?.allowCommentThreads === true,
     );
     const browserAccess = params.browserAccess ?? record.status.browserAccess;
     if (
@@ -1482,6 +1498,7 @@ export class HarnessInteractiveChatService {
           browserAccess,
           params.inputCells,
           params.patternRefs,
+          params.input.loomId,
         ),
       );
       // The context messages announce what this turn's own run holds — its
@@ -1491,6 +1508,12 @@ export class HarnessInteractiveChatService {
       const transcript: HarnessTranscriptMessage[] = [
         ...seededSystemPrompt,
         ...record.transcript,
+        ...(this.#basePromptLoopOptions.loomAuthoring === undefined ? [] : [{
+          role: "user" as const,
+          content: params.input.loomId === undefined
+            ? "Host Loom context: this turn has no originating Loom. Use loom_authoring_context to recover historical receipts; history does not select a target or count as new work."
+            : `Host Loom context: this turn originates in ${params.input.loomId}. Inspect that exact target before extending it. A request to create a separate Loom still creates one. Historical receipts are not new work.`,
+        }]),
         ...contextMessages.map((content) =>
           ({ role: "user", content }) as const
         ),
@@ -1655,9 +1678,16 @@ export class HarnessInteractiveChatService {
     browserAccess?: HarnessChatBrowserAccessLease,
     inputCells?: readonly HarnessInputCellSpec[],
     patternRefs?: readonly HarnessPatternRefSpec[],
+    loomId?: string,
   ): CreateHarnessPromptLoopOptions {
+    const loomAuthoring = loomAuthoringForTurn(
+      this.#basePromptLoopOptions.loomAuthoring,
+      session.sessionId,
+      loomId,
+    );
     return {
       ...this.#basePromptLoopOptions,
+      ...(loomAuthoring !== undefined ? { loomAuthoring } : {}),
       ...(inputCells !== undefined && inputCells.length > 0
         ? { inputCells }
         : {}),

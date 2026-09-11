@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  type Constructor,
   isBoolean,
   isFiniteNumber,
   isFunction,
@@ -10,6 +11,7 @@ import {
   isObjectOrArray,
   isPlainContainer,
   isPlainObject,
+  isPrimitive,
   isReadonlyObjectOrArray,
   isString,
   isUnsafeObjectKey,
@@ -67,6 +69,42 @@ describe("types", () => {
       const _: Mutable<null> = null;
       const __: Mutable<number> = 5;
       const ___: Mutable<string> = "hi";
+    });
+  });
+
+  describe("Constructor", () => {
+    class Donut {
+      readonly glaze = "plain";
+    }
+
+    abstract class Fryer {
+      abstract fry(): void;
+    }
+
+    it("admits a concrete class and an abstract one", () => {
+      const concrete: Constructor<Donut> = Donut;
+      const abstractOne: Constructor<Fryer> = Fryer;
+      expect(concrete).toBe(Donut);
+      expect(abstractOne).toBe(Fryer);
+    });
+
+    it("types `.prototype` as the instance type", () => {
+      const ctor: Constructor<Donut> = Donut;
+      const proto: Donut = ctor.prototype;
+      expect(proto).toBe(Donut.prototype);
+    });
+
+    it("types `.prototype` as `unknown` given no instance type", () => {
+      const ctor: Constructor = Donut;
+      // @ts-expect-error `unknown` is not assignable to `Donut`.
+      const proto: Donut = ctor.prototype;
+      expect(proto).toBe(Donut.prototype);
+    });
+
+    it("refuses a class whose instances are not `T`", () => {
+      // @ts-expect-error a `Fryer` is not a `Donut`.
+      const ctor: Constructor<Donut> = Fryer;
+      expect(ctor).toBe(Fryer);
     });
   });
 
@@ -383,6 +421,29 @@ describe("types", () => {
       expect(isBoolean("true")).toBe(false);
       expect(isBoolean(null)).toBe(false);
       expect(isBoolean(undefined)).toBe(false);
+    });
+  });
+
+  describe("isPrimitive()", () => {
+    it("returns `true` for each primitive kind", () => {
+      expect(isPrimitive(42n)).toBe(true);
+      expect(isPrimitive(true)).toBe(true);
+      expect(isPrimitive(null)).toBe(true);
+      expect(isPrimitive(42)).toBe(true);
+      expect(isPrimitive(NaN)).toBe(true);
+      expect(isPrimitive("")).toBe(true);
+      expect(isPrimitive(Symbol("s"))).toBe(true);
+      expect(isPrimitive(Symbol.for("s"))).toBe(true);
+      expect(isPrimitive(undefined)).toBe(true);
+    });
+
+    it("returns `false` for an object, an array, and a function", () => {
+      expect(isPrimitive({})).toBe(false);
+      expect(isPrimitive(Object.create(null))).toBe(false);
+      expect(isPrimitive([])).toBe(false);
+      expect(isPrimitive(new Date())).toBe(false);
+      expect(isPrimitive(() => {})).toBe(false);
+      expect(isPrimitive(class {})).toBe(false);
     });
   });
 

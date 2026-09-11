@@ -3,6 +3,7 @@ import { sha256 } from "@/lib/sha2.ts";
 import { runtime } from "@/index.ts";
 import { identity } from "@/lib/identity.ts";
 import {
+  type Cell,
   type IExtendedStorageTransaction,
   WebhookConfigSchema,
 } from "@commonfabric/runner";
@@ -183,23 +184,63 @@ export async function getServiceIndex(space: string): Promise<string[]> {
   return data ?? [];
 }
 
+/** The index of webhook IDs for `space`, as a synced cell. */
+async function serviceIndexCell(space: string): Promise<Cell<string[]>> {
+  const entityId = await spaceIndexEntityId(space);
+  const link = serviceCellLink(entityId);
+  const cell = runtime.getCellFromLink(link as any) as Cell<string[]>;
+  await cell.sync();
+  await runtime.storageManager.synced();
+  return cell;
+}
+
+/** The list held in `cell`, read through `tx`; an unwritten index is empty. */
+function indexIds(
+  cell: Cell<string[]>,
+  tx: IExtendedStorageTransaction,
+): string[] {
+  const current = cell.withTx(tx).get();
+  return Array.isArray(current) ? current : [];
+}
+
+/**
+ * Stage adding `webhookId` to the index held in `cell` on `tx`, unless the
+ * index already holds it. The list is read through `tx` so that the read
+ * joins the commit's read set: a commit racing a concurrent change to the
+ * index is rejected, and `editWithRetry` re-runs this against the list that
+ * change produced rather than overwriting it.
+ */
+export function addToIndex(
+  cell: Cell<string[]>,
+  tx: IExtendedStorageTransaction,
+  webhookId: string,
+): void {
+  const ids = indexIds(cell, tx);
+  if (!ids.includes(webhookId)) {
+    cell.withTx(tx).set([...ids, webhookId]);
+  }
+}
+
+/**
+ * Stage removing `webhookId` from the index held in `cell` on `tx`. The list
+ * is read through `tx` for the same reason as in `addToIndex()`.
+ */
+export function removeFromIndex(
+  cell: Cell<string[]>,
+  tx: IExtendedStorageTransaction,
+  webhookId: string,
+): void {
+  cell.withTx(tx).set(indexIds(cell, tx).filter((id) => id !== webhookId));
+}
+
 export async function addToServiceIndex(
   space: string,
   webhookId: string,
 ): Promise<void> {
-  const entityId = await spaceIndexEntityId(space);
-  const link = serviceCellLink(entityId);
-  const cell = runtime.getCellFromLink(link as any);
-  await cell.sync();
-  await runtime.storageManager.synced();
-
-  const { error } = await cell.runtime.editWithRetry((tx) => {
-    const current = cell.get();
-    const ids: string[] = Array.isArray(current) ? current : [];
-    if (!ids.includes(webhookId)) {
-      cell.withTx(tx).set([...ids, webhookId]);
-    }
-  });
+  const cell = await serviceIndexCell(space);
+  const { error } = await cell.runtime.editWithRetry((tx) =>
+    addToIndex(cell, tx, webhookId)
+  );
   if (error) throw error;
 }
 
@@ -207,17 +248,10 @@ export async function removeFromServiceIndex(
   space: string,
   webhookId: string,
 ): Promise<void> {
-  const entityId = await spaceIndexEntityId(space);
-  const link = serviceCellLink(entityId);
-  const cell = runtime.getCellFromLink(link as any);
-  await cell.sync();
-  await runtime.storageManager.synced();
-
-  const { error } = await cell.runtime.editWithRetry((tx) => {
-    const current = cell.get();
-    const ids: string[] = Array.isArray(current) ? current : [];
-    cell.withTx(tx).set(ids.filter((id) => id !== webhookId));
-  });
+  const cell = await serviceIndexCell(space);
+  const { error } = await cell.runtime.editWithRetry((tx) =>
+    removeFromIndex(cell, tx, webhookId)
+  );
   if (error) throw error;
 }
 

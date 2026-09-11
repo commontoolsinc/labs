@@ -9,6 +9,7 @@ import { newLoopbackServer } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { getMetaLink } from "../src/link-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   getPatternIdentityRef,
@@ -1099,6 +1100,13 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
         "tombstone-first-staging-clears",
       );
       await cell2.sync();
+      // The result document carries its argument link as data, and the run
+      // reads the argument document, so it is named here: a run that finds
+      // it absent is held for a name-sync, and the staging below is meant
+      // to happen in this turn.
+      const argumentLink = getMetaLink(cell2, "argument");
+      expect(argumentLink).toBeDefined();
+      await runtime.getCellFromLink(argumentLink!).sync();
       const tx2 = runtime.edit();
       // deno-lint-ignore no-explicit-any
       runtime.run(tx2, handBuiltPattern() as any, undefined, cell2);

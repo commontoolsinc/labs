@@ -231,6 +231,19 @@ LIVE_COMMENTS="$(
 )"
 [ "$LIVE_COMMENTS" = "2" ] && ok "both comments back" ||
   bad "comments: $LIVE_COMMENTS"
+# The mention universe is a derived board index. Recompute its owner before
+# checking the restored connection: a plain cell read returns stored output
+# and cannot establish whether a cold index reflects the restored content.
+$CF cell get -q --piece "$BOARD" --space "$SPACE" --api-url "$API_URL" \
+  --step mentionable --select title > "$WORK/mention-index.json" \
+  2> "$WORK/mention-index.err" &&
+  jq -e --slurpfile index "$WORK/mention-index.json" \
+    '($index[0] | length) == 1 and .topics[0].content.title == $index[0][0].title' \
+    "$WORK/export.json" > /dev/null &&
+  ok "board mention index reflects the restored title" || {
+  bad "board mention index did not reflect the restored content"
+  cat "$WORK/mention-index.err" >&2
+}
 MENTION_TITLES="$(
   $CF cell get -q --piece "$TOPIC" --space "$SPACE" --api-url "$API_URL" \
     --input mentionable --select title 2> /dev/null | jq 'length'

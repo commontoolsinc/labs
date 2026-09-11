@@ -438,6 +438,10 @@ Deno.test({
           runId: "run-loop-persisted",
           model: "gpt-5.4",
           skillsRoot: fixture.skillsRoot,
+          // The policy-snapshot comparison below reads this rung and its
+          // source back, and the run reads a file, which a rung above this
+          // one refuses without direct-command authorization.
+          cfcEnforcementMode: "enforce-explicit",
           now: (() => {
             const timestamps = [
               "2026-04-15T21:10:00.000Z",
@@ -547,7 +551,7 @@ Deno.test({
       );
       assertEquals(persistedPolicySnapshot.cfc, {
         enforcementMode: "enforce-explicit",
-        enforcementModeSource: "default",
+        enforcementModeSource: "explicit-config",
         absenceBehavior: "fail-closed-if-absent",
         substrateStatus: "not-attested",
       });
