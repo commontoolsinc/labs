@@ -1136,7 +1136,9 @@ What remains live here:
   still exists because of them. Self-suppressed changes (P5) never enter
   `invalidCauses` — a change that did not cause scheduling must not taint it.
 - **`attemptedWrites`** remain CFC prepare/digest evidence only — never
-  dependency or scheduling evidence. v2 removes the one v1 use that blurred
+  dependency or scheduling evidence. Reads marked as attempted writes retain
+  that evidence when they are ignored for scheduling, including no-op writes.
+  v2 removes the one v1 use that blurred
   this (dependency prefetch marking output reads as attempted writes).
 - **Event preflight transactions** commit as no-ops and stay out of CFC
   gating (unchanged).

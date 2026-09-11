@@ -41,6 +41,8 @@ import {
   formatExternalSchemaRef,
   parseExternalSchemaRef,
   recomposeSchema,
+  recomposeSchemaRefs,
+  SCHEMA_META_MEMBER,
   SchemaNotDecomposableError,
 } from "../schema-decompose.ts";
 import {
@@ -4905,6 +4907,15 @@ const rootLabelFromSchema = (
  * is computed by later actions), but this is the same author-declared shape a
  * pending schema input carries, so the link-label derivation below trusts it
  * the same way; stored CFC metadata still takes precedence when present.
+ *
+ * The meta is stored in the link spelling — inline, or a `{ "$ref": "cid:…" }`
+ * reference whose closure the writer installed with it — and is returned in
+ * the inline form every consumer walks, its members resolved through
+ * `loadSchemaDocument` exactly as an envelope root's are: space-first with
+ * content verification, the registry supplying what the space does not hold
+ * (a same-transaction setup registered the closure when it stamped the
+ * reference). A member that neither supplies is a broken closure, and the
+ * read fails loudly rather than deriving a label from a schema it cannot see.
  */
 const setupResultSchemaFor = (
   tx: IExtendedStorageTransaction,
@@ -4922,13 +4933,16 @@ const setupResultSchemaFor = (
     id: source.id as URI,
     scope: source.scope,
     type: "application/json",
-    path: ["schema"],
+    path: [SCHEMA_META_MEMBER],
   }, {
     meta: LINK_SOURCE_SCHEMA_META,
   });
-  return schema === undefined || schema === null
-    ? undefined
-    : schema as JSONSchema;
+  if (schema === undefined || schema === null) return undefined;
+  return recomposeSchemaRefs(schema as JSONSchema, (hash) => {
+    const document = loadSchemaDocument(tx, source.space, hash);
+    registerSchemaDocument(hash, document);
+    return document;
+  });
 };
 
 // `sourceMetadata` is returned alongside the derived label so the persist

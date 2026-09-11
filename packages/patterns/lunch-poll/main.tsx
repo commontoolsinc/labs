@@ -59,10 +59,9 @@
  * (`nowTick`): the runtime's shared per-space clock, coarsened to five
  * minutes, written immediately on subscribe (and refreshed on reload), then
  * advanced on aligned boundaries — so an open tab rolls to the new day at
- * midnight on its own. It reads null until the wish resolves (shown as an
- * empty vote view and a placeholder date) and stays null on pre-#4740
- * runtimes, where the vote and visit handlers no-op rather than read an
- * ambient clock the runtime may not provide. The day boundary is the
+ * midnight on its own. It remains unavailable until the wish resolves, so
+ * dependent computations and vote or visit handlers wait instead of reading
+ * an ambient clock the runtime may not provide. The day boundary is the
  * runtime's local timezone (the viewer's, in the browser); two viewers in
  * different timezones can see different vote sets around midnight.
  */
@@ -793,10 +792,9 @@ const castVote = handler<CastVoteEvent, {
   // the roster by profile cell, the same comparison joined-ness itself uses.
   if (!(users.get() ?? []).some((u) => equals(u.profile, voter))) return;
   // Stamp with the shared `#now/300` tick — fresh to five minutes, all a
-  // day-granularity stamp needs, and it keeps the deployed source compatible
-  // with Loom runtimes from before handler-scoped Date.now(). Null until the
-  // wish resolves (and always on pre-#4740 runtimes, which also show no
-  // votes): voting no-ops rather than reading an ambient clock.
+  // day-granularity stamp needs. Availability propagation keeps this handler
+  // from running until the wish has resolved; the guard also keeps a directly
+  // invoked handler from substituting an ambient clock for an absent tick.
   const now = nowTick;
   if (!now) return;
   // My vote for this option has a deterministic address, so this reads and
@@ -923,9 +921,9 @@ const logVisit = handler<LogVisitEvent, {
     // Only today's votes are "current opinion": stale votes are hidden from
     // the UI, so they stay out of the snapshot too. Same day source as the
     // UI's `todaysVotes` (the shared `#now/300` tick), so the snapshot
-    // captures exactly what the host is looking at, by construction. While
-    // the wish is still unresolved (null `nowTick`) the board shows no votes,
-    // so the snapshot stays empty for that window too.
+    // captures exactly what the host is looking at, by construction.
+    // Availability propagation keeps this handler from running while that
+    // tick is unresolved.
     const nowRef = nowTick;
     const nowDay = nowRef ? dayKeyOf(nowRef) : null;
     const titleById = new Map(options.get().map((o) => [o.id, o.title]));
@@ -1831,88 +1829,66 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           gap: "4px",
                         }}
                       >
-                        {
-                          /* Build every row's swatches in ONE top-level
-                            `computed` over the resolved `ranked` tally, with
-                            plain JS maps. Two reasons this shape, not a reactive
-                            `ranked.map(...)`/subpattern or an inline
-                            `votes.filter(...)`:
-                            1. Votes are links to separate entities; the
-                               top-level `tallyOptions` call resolves every
-                               voter's entity (including remote ones on another
-                               replica), so reading `ranked` here sees them,
-                               whereas a `votes.filter` in a nested map sees only
-                               the votes a replica has materialized locally.
-                            2. A reactive map / subpattern re-renders its per-item
-                               swatches unreliably when a remote vote updates a
-                               row's voters; a single `computed` re-runs as a
-                               whole when `ranked` changes (like the count above),
-                               so the swatches track cross-replica votes
-                               reliably. `ranked` is pre-sorted, so this also
-                               gives the row order with no `order` CSS hack. */
-                        }
-                        {computed(() =>
-                          ranked.map((tally) => (
+                        {ranked.map((tally) => (
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              padding: "6px 10px",
+                              backgroundColor: "white",
+                              border: "1px solid #e5e7eb",
+                              borderRadius: "6px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                flex: 1,
+                                fontSize: "13px",
+                                fontWeight: 500,
+                                color: "#111827",
+                              }}
+                            >
+                              {tally.option.title}
+                            </div>
                             <div
                               style={{
                                 display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                                padding: "6px 10px",
-                                backgroundColor: "white",
-                                border: "1px solid #e5e7eb",
-                                borderRadius: "6px",
+                                gap: "4px",
+                                flexWrap: "wrap",
+                                justifyContent: "flex-end",
                               }}
                             >
-                              <div
-                                style={{
-                                  flex: 1,
-                                  fontSize: "13px",
-                                  fontWeight: 500,
-                                  color: "#111827",
-                                }}
-                              >
-                                {tally.option.title}
-                              </div>
-                              <div
-                                style={{
-                                  display: "flex",
-                                  gap: "4px",
-                                  flexWrap: "wrap",
-                                  justifyContent: "flex-end",
-                                }}
-                              >
-                                {tally.voters.map((voter) => (
-                                  <span
-                                    title={voter.name}
-                                    role="img"
-                                    aria-label={`${voter.name}: ${voter.voteType} vote`}
-                                    data-vote-swatch-name={voter.name}
-                                    style={{
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      minWidth: "22px",
-                                      height: "22px",
-                                      padding: "0 6px",
-                                      borderRadius: "9999px",
-                                      backgroundColor:
-                                        VOTE_SWATCH[voter.voteType],
-                                      color: "white",
-                                      fontSize: "11px",
-                                      fontWeight: 700,
-                                      boxShadow: voter.isSelf
-                                        ? "0 0 0 2px white, 0 0 0 3px #111827"
-                                        : "none",
-                                    }}
-                                  >
-                                    {voter.initials}
-                                  </span>
-                                ))}
-                              </div>
+                              {tally.voters.map((voter) => (
+                                <span
+                                  title={voter.name}
+                                  role="img"
+                                  aria-label={`${voter.name}: ${voter.voteType} vote`}
+                                  data-vote-swatch-name={voter.name}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    minWidth: "22px",
+                                    height: "22px",
+                                    padding: "0 6px",
+                                    borderRadius: "9999px",
+                                    backgroundColor:
+                                      VOTE_SWATCH[voter.voteType],
+                                    color: "white",
+                                    fontSize: "11px",
+                                    fontWeight: 700,
+                                    boxShadow: voter.isSelf
+                                      ? "0 0 0 2px white, 0 0 0 3px #111827"
+                                      : "none",
+                                  }}
+                                >
+                                  {voter.initials}
+                                </span>
+                              ))}
                             </div>
-                          ))
-                        )}
+                          </div>
+                        ))}
                       </div>
                     </div>
                   )

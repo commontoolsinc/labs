@@ -180,8 +180,9 @@ export function listSlotResolutions(
 
 /**
  * The result cell of one per-element child run: deterministic in the
- * coordinator's container and the element's identity key, so a reload
- * resumes the same child and a pre-sync can name it before the reload's
+ * coordinator's container and the element's identity key, at the container's
+ * scope, so a reload resumes the same child and a pre-sync can name it before
+ * the reload's
  * reconcile runs it.
  */
 export function listElementResultCell(
@@ -196,5 +197,6 @@ export function listElementResultCell(
     { [op]: container, elementKey },
     undefined,
     tx,
+    container.getAsNormalizedFullLink().scope,
   );
 }

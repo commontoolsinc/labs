@@ -3,11 +3,12 @@ import {
   type DataUnavailableVariant,
   isDataUnavailable,
 } from "@commonfabric/data-model/fabric-instances";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { getLogger } from "@commonfabric/utils/logger";
 
 import type { Pattern } from "../builder/types.ts";
 import type { AddCancel } from "../cancel.ts";
-import type { Cell } from "../cell.ts";
+import { type Cell, syncCellForIdentity } from "../cell.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import type { RawBuiltinReturnType } from "../module.ts";
 import { setPatternCell } from "../result-utils.ts";
@@ -35,6 +36,7 @@ import {
   type SetupRecord,
   trackListSetupRollback,
 } from "./list-element-rollback.ts";
+import { listInstanceCoordinator } from "./list-instance-coordinator.ts";
 import { seedResultContainerWhenPullSettles } from "./list-result-container-seed.ts";
 import { issueResultContainerSetup } from "./list-result-container.ts";
 import { shouldAwaitResumedListInput } from "./list-resume-state.ts";
@@ -116,6 +118,36 @@ export function flatMap(
   outputBinding?: NormalizedFullLink,
   awaitSync?: boolean,
 ): RawBuiltinReturnType {
+  return listInstanceCoordinator((identity) =>
+    createFlatMapInstance(
+      inputsCell,
+      sendResult,
+      addCancel,
+      _cause,
+      parentCell,
+      runtime,
+      outputBinding,
+      awaitSync,
+      identity,
+    ), addCancel);
+}
+
+/** Creates bookkeeping and deferred work for one resolution identity. */
+function createFlatMapInstance(
+  inputsCell: Cell<{
+    list: any[];
+    op: Pattern;
+    params?: Record<string, any>;
+  }>,
+  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
+  addCancel: AddCancel,
+  _cause: any,
+  parentCell: Cell<any>,
+  runtime: Runtime,
+  outputBinding?: NormalizedFullLink,
+  awaitSync?: boolean,
+  identity?: ScopeKeyIdentity,
+): RawBuiltinReturnType {
   let result: Cell<any[]> | undefined;
   // The containing piece's root: every element sub-piece this coordinator
   // starts is that piece's structure, so its actions' demand roots carry
@@ -170,6 +202,7 @@ export function flatMap(
       isActive: () => active,
       getResult: () => result,
       inputsCell,
+      identity,
       inputSchema: FLATMAP_INPUT_SCHEMA,
       resultSchema: RESULT_PRESENCE_SCHEMA,
       elementRuns,
@@ -192,10 +225,11 @@ export function flatMap(
   // normal reconcile via its journaled read, so it converges either way.
   const awaitInputThenSettle = (inputListCell: Cell<any>): void => {
     runtime.storageManager.trackUntilSettled(
-      inputListCell.sync()
+      syncCellForIdentity(inputListCell, identity)
         .then(() =>
           !active ? undefined : runtime.editWithRetry((settleTx) => {
             if (!active || !result) return;
+            if (identity !== undefined) settleTx.tx.scopeKeyIdentity = identity;
             // Out-of-band recovery write; the kind decision (bookkeeping
             // on the serving posture, derivation on clients — the settle
             // writes DERIVED content) is shared across map/filter/flatMap
@@ -203,6 +237,7 @@ export function flatMap(
             runtime.stampServerRun(settleTx, {
               actionId: `flatMap/resume-settle/${parentCell.sourceURI}`,
               kind: resumeSettleRunKind(runtime),
+              scopeKeyIdentity: identity,
             });
             const { list } = inputsCell.asSchema(FLATMAP_INPUT_SCHEMA)
               .withTx(settleTx).get();
@@ -350,9 +385,10 @@ export function flatMap(
         runtime,
         container,
         () => active && result === container,
-        container.sync(),
+        syncCellForIdentity(container, identity),
         logger,
         `flatMap/resume-seed/${parentCell.sourceURI}`,
+        identity,
       );
       return;
     }
@@ -407,6 +443,7 @@ export function flatMap(
       runtime,
       elementRuns,
       new Set(elementKeys.values()),
+      outputScope,
     );
 
     if (list.length > 0) resumeBatchAwaitSync = false;

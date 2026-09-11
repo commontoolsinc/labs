@@ -83,6 +83,37 @@ export const checkConnectorGrantSpec = (
 };
 
 /**
+ * Holds a grant RECORDED in run state to the rule it was minted under.
+ *
+ * Run state is JSON this process may not have written — a resumed run reads a
+ * file — so a connector grant can arrive here having never passed the
+ * launcher's checks, and its name is interpolated into model-facing text.
+ * Checking it on the way out of the record is what keeps the resume path and
+ * the mint path under one rule.
+ *
+ * @throws Error naming the grant and the defect.
+ */
+export const checkRecordedWellKnownGrant = (
+  grant: HarnessWellKnownGrant,
+): void => {
+  if (grant.source === undefined) {
+    return;
+  }
+  checkConnectorGrantSpec({
+    name: grant.name,
+    ref: grant.ref,
+    source: grant.source,
+  });
+  if (
+    grant.source.connection.trim() === "" || grant.source.piece.trim() === ""
+  ) {
+    throw new Error(
+      `connector grant \`${grant.name}\` records no connection and piece`,
+    );
+  }
+};
+
+/**
  * One grant's name and address, before any token exists for it — the same
  * two kinds {@link HarnessWellKnownGrant} has, so the mint cannot lose track
  * of which it is holding.

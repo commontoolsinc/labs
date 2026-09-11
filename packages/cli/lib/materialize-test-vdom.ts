@@ -52,7 +52,10 @@ export async function mountTestVDOM(
   vdomCell: Cell<unknown>,
   onError: (error: Error) => void,
 ): Promise<() => void> {
-  const root = await vdomCell.pull();
+  // Demand the same bounded shape the renderer consumes. Root validation reads
+  // the original value so a schema mismatch still reports invalid VDOM.
+  await vdomCell.asSchema(rendererVDOMSchema).pull();
+  const root = vdomCell.get();
   if (!isRenderableRoot(root)) {
     throw new Error(
       `VDOM materialization failed: Invalid VDOM content: expected ` +

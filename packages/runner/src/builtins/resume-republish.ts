@@ -1,3 +1,4 @@
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type { Logger } from "@commonfabric/utils/logger";
 import {
   type DataUnavailableVariant,
@@ -5,7 +6,7 @@ import {
 } from "@commonfabric/data-model/fabric-instances";
 
 import type { JSONSchema } from "../builder/types.ts";
-import type { Cell } from "../cell.ts";
+import { type Cell, syncCellForIdentity } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import {
   preferDataUnavailable,
@@ -93,6 +94,9 @@ export interface ResumeRepublisherOptions {
    */
   getResult: () => Cell<any[]> | undefined;
 
+  /** Resolution identity shared by this coordinator's deferred work. */
+  identity?: ScopeKeyIdentity;
+
   inputsCell: Cell<any>;
   inputSchema: JSONSchema;
   resultSchema: JSONSchema;
@@ -145,6 +149,7 @@ export function createResumeRepublisher(
     getResult,
     inputsCell,
     inputSchema,
+    identity,
     resultSchema,
     elementRuns,
     contribute,
@@ -164,7 +169,7 @@ export function createResumeRepublisher(
     const id = cell.getAsNormalizedFullLink().id;
     const inFlight = waiting.get(id);
     if (inFlight) return inFlight;
-    const sync = cell.sync().finally(() => {
+    const sync = syncCellForIdentity(cell, identity).finally(() => {
       if (waiting.get(id) === sync) waiting.delete(id);
     });
     waiting.set(id, sync);
@@ -176,6 +181,7 @@ export function createResumeRepublisher(
 
   const republishFromConfirmed = (awaited: Set<string>): Promise<void> =>
     runtime.editWithRetry((tx): Cell<any>[] => {
+      if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
       const result = isActive() ? getResult() : undefined;
       if (!result) return [];
       // Out-of-band recovery write (serving-loop.md §3d, RULED
@@ -186,6 +192,7 @@ export function createResumeRepublisher(
       runtime.stampServerRun(tx, {
         actionId: `list-republish/${result.sourceURI}`,
         kind: "bookkeeping",
+        scopeKeyIdentity: identity,
       });
       const inputs = inputsCell.asSchema(inputSchema).withTx(tx).get() as {
         list?: unknown;

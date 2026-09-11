@@ -38,6 +38,7 @@ import {
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import {
+  type ScopeKeyIdentity,
   type SqliteDbRef,
   type SqliteParamsWire,
   streamEntriesDocId,
@@ -937,6 +938,18 @@ export function markCellDocumentSynced(cell: Cell<any>): void {
     throw new TypeError("Expected a runner CellImpl handle");
   }
   cell[markDocumentSynced]();
+}
+
+/** Loads a document for a captured resolution identity without retaining a transaction. */
+export function syncCellForIdentity<T>(
+  cell: Cell<T>,
+  identity: ScopeKeyIdentity | undefined,
+): Promise<Cell<T>> {
+  if (identity === undefined) return cell.sync();
+  markCellDocumentSynced(cell);
+  return cell.runtime.storageManager.syncCell(cell, {
+    scopeKeyIdentity: identity,
+  });
 }
 
 /**

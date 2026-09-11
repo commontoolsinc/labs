@@ -43,6 +43,11 @@ const label = computed(() =>
 The computation runs for the reasons it explicitly guards. Other unavailable
 states propagate without invoking its body.
 
+The compiler's [nested-scan warning](../../../features/read-accounting.md#compiler-hints-for-nested-scans)
+points out some repeated scans of captured collections. It is a hint to measure
+and examine the computation's structure, not a failing budget or a complete
+complexity analysis.
+
 ## When NOT to Use computed()
 
 **Never inside JSX for interpolation or property access** — reactivity is
@@ -171,11 +176,16 @@ for why.
 
 ### Reading a Value Narrowly and Handing It Back Whole
 
-A `lift()`'s declared parameter is what it reads, and reading is what it becomes
-reactive to — so declaring the few fields the body touches is how a derivation
-over a large collection stays cheap. Often the body then hands an element
-straight back, and the caller wants the whole element, not the sliver that was
-read.
+A `lift()`'s parameter schema describes the view its body can read. With lazy
+materialization enabled by default, accessing that view records dependencies
+on the paths the body touches. A narrower declaration documents the required
+input, but does not by itself make a collection scan incremental: the
+[measured collection loops](#collection-loop-cost) read the same amount under
+broad and narrow declarations. A body that visits every row still visits every
+row when a used field changes.
+
+A derivation can read a few fields and return the original element, preserving
+the caller's access to its other fields.
 
 Declare that with a type parameter. The result type is the element type, so the
 caller gets back exactly what it passed in:
@@ -195,7 +205,8 @@ const kept = nonEmpty({ rows });
 ```
 
 The schema generated for the lift comes from the constraint, argument and result
-alike, so `nonEmpty` reads `{ key: string }` and nothing more. The elements
+alike. Here the predicate accesses `key`; it does not inspect each element's
+payload. The elements
 survive because a value forwarded out of a derivation is written as a reference,
 and a reference resolves to its whole document however little the derivation
 declared.
@@ -311,3 +322,25 @@ const stats = computed(() => ({
 
 For the hierarchical summary string convention used by container patterns, see
 [Summary Convention](../../conventions/summary.md).
+
+## Collection-loop cost
+
+Choose `computed` for an inline derivation and a module-level `lift` for a
+reusable derivation. Changing that spelling alone does not make a collection
+scan incremental. With lazy argument materialization enabled by default, the
+callback reads the paths it touches; a broadly declared argument does not by
+itself imply that every declared payload field is read.
+
+The [collection-loop comparison](../../../history/development/performance/2026-09-11-computed-lift-collection-loops.md)
+measured identical reductions under computed, broad lift, and narrow lift at
+three sizes. All three ignored edits to an unread field, and all three scanned
+the collection when a summed field changed. The measurement covers action-body
+reads, not network traffic or elapsed-time equivalence.
+
+A scan inside another scan can still perform work proportional to both
+collection sizes. Measure the reads and update behavior of the demanded result.
+For supported operations, consider the
+[named incremental aggregates](../../../features/collection-aggregates.md),
+checking their numeric, ordering, and membership-update contracts first.
+Ordinary `reduce` remains appropriate when its order-dependent semantics are
+required.

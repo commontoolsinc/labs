@@ -68,6 +68,14 @@ with `hasError(request)` and read `request.error`; otherwise the unavailable
 error propagates and downstream computations do not run. Query errors include
 a statement the database refuses and a handle that does not read back as one.
 
+A read refused for labeling arrives the same way and is the case most easily
+mistaken for an empty source: where a table declares a per-row label rule, a
+query that does not project every column the rule reads is refused rather than
+returned unlabeled, and `error` names the column and says to select it.
+`result` is then absent, not empty — so a view that renders "none found" over
+it states a fact about the data that nobody established. Branch on `error`
+before branching on emptiness.
+
 The `<Row>` type argument names the columns the statement projects, and is what
 turns a result into something typed. Without it the rows come back as
 `Record<string, unknown>`, and a `_cf_link` column comes back as a raw link

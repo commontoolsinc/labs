@@ -168,6 +168,7 @@ function makeRepublisher(opts: {
   elementRuns: Map<string, ElementRun>;
   runtime: Runtime;
   contribute?: ElementContribution;
+  rearmReconcile?: () => void;
 }) {
   return createResumeRepublisher({
     runtime: opts.runtime,
@@ -181,10 +182,7 @@ function makeRepublisher(opts: {
     contribute: opts.contribute ?? filterContribution,
     aggregateNoun: "filtered list",
     elementNoun: "predicate",
-    // The owed-setup re-arm path is pinned by the integration suites
-    // (resume-append-exclusion*); these unit cases exercise the republish
-    // fold only.
-    rearmReconcile: () => {},
+    rearmReconcile: opts.rearmReconcile ?? (() => {}),
   });
 }
 
@@ -214,6 +212,38 @@ function runsFor(
 }
 
 describe("resume-republish unit", () => {
+  it("rearms owed setup after an absent predicate confirms without a membership change", async () => {
+    const held = Promise.withResolvers<void>();
+    const inputs = [new FakeCell("input", null)];
+    const predicate = new FakeCell("predicate", undefined, () => held.promise);
+    const result = new FakeCell("container", []);
+    const runs = runsFor(inputs, [predicate]);
+    for (const entry of runs.values()) entry.needsSetup = true;
+    const { runtime, tracked } = makeRuntime();
+    let rearms = 0;
+    const republisher = makeRepublisher({
+      result,
+      inputsList: inputs,
+      elementRuns: runs,
+      runtime,
+      rearmReconcile: () => rearms++,
+    });
+    republisher.awaitPendingThenRepublish(
+      [predicate] as unknown as Cell<any>[],
+    );
+    expect(rearms).toBe(0);
+    expect(republisher.awaitingResult(predicate as unknown as Cell<any>)).toBe(
+      true,
+    );
+    held.resolve();
+    await drain(tracked);
+    expect(result.setValues).toEqual([[]]);
+    expect(republisher.awaitingResult(predicate as unknown as Cell<any>)).toBe(
+      false,
+    );
+    expect(rearms).toBe(1);
+  });
+
   it("reports an element result as awaited only while its sync runs", async () => {
     const inputs = [new FakeCell("e0", null)];
     let arrive = () => {};

@@ -195,6 +195,9 @@ export const resolveConnectorGrants = (
     );
   }
 
+  // The space the receipt itself names, which is the instance's. A handle
+  // reference that carries a different one is not this instance's to grant.
+  const receiptSpace = asNonEmptyString(document.space);
   const sources = sourcesByHandle(records.piecesJson, records.piecesJsonPath);
   const grants: HarnessConnectorGrantSpec[] = [];
   const unnamed: UnnamedConnectorHandle[] = [];
@@ -211,13 +214,32 @@ export const resolveConnectorGrants = (
       skip("the receipt records no `handle_ref` for it");
       continue;
     }
+    let link;
     try {
-      parseHandleRef(ref);
+      link = parseHandleRef(ref);
     } catch (error) {
       skip(
         `its \`handle_ref\` does not parse: ${
           error instanceof Error ? error.message : String(error)
         }`,
+      );
+      continue;
+    }
+    // A reference may carry its own space, and a grant is minted into the
+    // session's. One naming another space would seed every session on this
+    // console with a reference outside the authority the console runs under —
+    // the boundary `--input-cell` is already held to, drawn here because the
+    // receipt is a file rather than something an operator typed.
+    if (link.space !== undefined && link.space !== receiptSpace) {
+      // Fails closed when the receipt names no space of its own: a reference
+      // that carries one is a claim about where it points, and with nothing to
+      // check it against there is no reading on which granting it is safe.
+      skip(
+        receiptSpace === undefined
+          ? `its \`handle_ref\` names space \`${link.space}\`, and the receipt ` +
+            `names no space to check it against`
+          : `its \`handle_ref\` names space \`${link.space}\`, which is not the ` +
+            `space the receipt was written for`,
       );
       continue;
     }
