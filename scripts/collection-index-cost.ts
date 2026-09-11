@@ -1,7 +1,9 @@
 /** Measures completed index action bodies across separate maintenance phases. */
 import { Identity } from "@commonfabric/identity";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import { expect } from "@std/expect";
 
+import { listElementKeys } from "../packages/runner/src/builtins/list-element-keys.ts";
 import type { Cell } from "../packages/runner/src/cell.ts";
 import { Runtime } from "../packages/runner/src/runtime.ts";
 import { EmulatedStorageManager } from "../packages/runner/src/storage/v2-emulate.ts";
@@ -123,14 +125,17 @@ async function main() {
         let previous: string | string[] | undefined;
         const record = (phase: string) => {
           measurements.push({ phase, ...counts });
-          const expected = members.filter((i) => model[i].label === selectedKey)
-            .map((i) => model[i].title);
+          const occurrences = listElementKeys(members.map((i) => cells[i]));
+          const expected = [...occurrences]
+            .filter(([position]) =>
+              model[members[position]].label === selectedKey
+            )
+            .sort((a, b) => utf8Compare(a[1], b[1]))
+            .map(([position]) => model[members[position]].title);
           const value = result.key("value").get();
           if (operator === "groupBy") {
-            expect(value).toEqual(expect.arrayContaining(expected));
-            expect(value).toHaveLength(expected.length);
-          } else if (expected.length === 0) expect(value).toBeUndefined();
-          else expect(expected).toContain(value);
+            expect(value).toEqual(expected);
+          } else expect(value).toBe(expected[0]);
           expect(counts.enumerationRuns).toBe(0);
           if (phase === "membership reorder") expect(value).toEqual(previous);
           previous = typeof value === "string" || value === undefined

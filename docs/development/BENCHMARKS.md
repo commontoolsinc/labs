@@ -460,12 +460,13 @@ Run `deno run -A scripts/collection-index-cost.ts` from the repository root to
 measure `groupBy` and `keyBy` at 32, 128, and 512 independently linked rows, with
 unique keys and four duplicate-key buckets. Each case measures initialization,
 unrelated and selected payload edits, a selected key edit, membership insertion,
-reordering and removal, and lookup retargeting as separate phases on one evolving fixture per case. Assertions
-check the resulting values after every phase, zero enumeration runs for these
+reordering and removal, and lookup retargeting as separate phases on one evolving
+fixture per case. Assertions check the resulting values after every phase, zero enumeration runs for these
 lookup-only consumers, and no action reruns for an unrelated payload edit. A
-complete run ends with `COLLECTION_INDEX_COST_COMPLETE`. Membership checks and
-reorder stability validate the measured operations; canonical duplicate-winner
-and identity-order contracts have separate runner tests.
+complete run ends with `COLLECTION_INDEX_COST_COMPLETE`. The probe uses the
+shared collection occurrence-identity helper and UTF-8 comparison to check the
+canonical winner and group order after every
+phase, including winner removal and lookup retargeting.
 
 The JSON records sum `scheduler.run.complete` action bodies and their proxy
 accesses and link resolutions. They exclude compilation, external transaction
