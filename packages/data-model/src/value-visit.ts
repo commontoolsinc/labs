@@ -2,6 +2,10 @@
  * Types and classes for visiting (a/k/a, iterating or walking over)
  * `FabricValue`s.
  *
+ * As with the `data-model` in general, the visitor engine uses `Object.is()`
+ * comparisons (or equivalent) to determine value-sameness. This means that `0`
+ * and `-0` are considered distinct, and that `NaN` is equal to itself.
+ *
  * **IMPORTANT NOTE:** This file is a work-in-progress and not meant to be used
  * outside of the `data-model`. This is why it is _not_ exposed via the
  * `data-model`'s export map.
@@ -1044,9 +1048,9 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       }
 
       case "visitSubtype": {
-        // On the use of `Object.is()`: As of this writing, the recursion stack only
-        // ever has objects, but that could theoretically change, and this
-        // comparison function will always remain the most correct option.
+        // On the use of `Object.is()`: The visitor engine does not merge `-0`
+        // into `+0`, and it treats `NaN` is being equal to itself, making this
+        // the correct comparison function.
         if (Object.is(origValue, finalValue)) {
           return result;
         } else {
