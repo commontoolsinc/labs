@@ -6805,6 +6805,14 @@ export class Runner {
     cell: Cell<any>;
     commit?: PatternSetupCommitReceipt;
   }> {
+    if (pattern === undefined) {
+      // TypeScript callers cannot omit this, but the runtime boundary is also
+      // used from JavaScript. A missing pattern is first read deep in the
+      // pre-sync, where it surfaces as a `TypeError` naming a property rather
+      // than the argument, so fail closed here, at the one point both public
+      // entry points pass through, before any work is done.
+      throw new Error("a synced run requires a pattern");
+    }
     await resultCell.sync();
 
     const synced = await this.#syncCellsForRunningPattern(
