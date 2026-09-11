@@ -24,7 +24,10 @@ import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
-import type { SpaceServerPolicy } from "../src/executor/space-server.ts";
+import {
+  type SpaceServerPolicy,
+  STORE_REFRESH_ATTEMPTS,
+} from "../src/executor/space-server.ts";
 import { readWatermarkSeq, waitForSettled } from "../src/executor/watermark.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { waitUntil } from "./support/wait-until.ts";
@@ -71,6 +74,12 @@ describe("engine-read-through", () => {
   let clientManager: SharedServerStorageManager;
   let clientRuntime: Runtime;
 
+  /** How the serving manager's feed refresh is made to fail, when it is:
+   * `once` throws on the first refresh and delegates from then on,
+   * `always` throws on every refresh. */
+  let failRefreshes: "once" | "always" | undefined;
+  let refreshCalls = 0;
+
   const newHost = (policy: SpaceServerPolicy): ExecutorHost =>
     new ExecutorHost({
       server,
@@ -79,6 +88,17 @@ describe("engine-read-through", () => {
         const manager = SharedServerStorageManager.connectTo(server, {
           as: serviceSigner,
         });
+        const integrate = manager.integrateStoreWrites.bind(manager);
+        manager.integrateStoreWrites = (writeSpace, writes) => {
+          refreshCalls += 1;
+          if (
+            failRefreshes === "always" ||
+            (failRefreshes === "once" && refreshCalls === 1)
+          ) {
+            throw new Error("induced store refresh failure");
+          }
+          return integrate(writeSpace, writes);
+        };
         const runtime = new Runtime({
           apiUrl: new URL(import.meta.url),
           storageManager: manager,
@@ -217,6 +237,8 @@ describe("engine-read-through", () => {
       },
       sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
     });
+    failRefreshes = undefined;
+    refreshCalls = 0;
     clientManager = SharedServerStorageManager.connectTo(server, {
       as: aliceSigner,
     });
@@ -274,5 +296,41 @@ describe("engine-read-through", () => {
       .toBe(true);
     expect(host.stats().storeReads).toBe(0);
     expect(host.stats().storeRefreshes).toBe(0);
+  });
+
+  it("holds a feed record whose refresh failed for the next cycle, and derives from it once the retry succeeds, in the same tenure", async () => {
+    failRefreshes = "once";
+    await instantiatePiece();
+    host = newHost({
+      flushDeadlineMs: 5_000,
+      idleParkMs: 600_000,
+      storeReadThrough: true,
+    });
+    const { clientResult, clientArg } = await demandFromClient();
+    const tenure = host.spaceServer(space);
+
+    await deriveFromClient(clientArg, clientResult, 41);
+    expect(refreshCalls).toBeGreaterThanOrEqual(2);
+    expect(host.spaceServer(space)).toBe(tenure);
+    expect(tenure?.active).toBe(true);
+  });
+
+  it("parks the space after a feed record's refresh has failed on consecutive cycles up to the bound", async () => {
+    failRefreshes = "always";
+    await instantiatePiece();
+    host = newHost({
+      flushDeadlineMs: 5_000,
+      idleParkMs: 600_000,
+      storeReadThrough: true,
+    });
+    const { clientArg } = await demandFromClient();
+    const tenure = host.spaceServer(space)!;
+
+    const tx = clientRuntime.edit();
+    clientArg.withTx(tx).set({ n: 41 });
+    expect((await tx.commit()).error).toBeUndefined();
+    await tenure.whenParked;
+    expect(tenure.active).toBe(false);
+    expect(refreshCalls).toBe(STORE_REFRESH_ATTEMPTS);
   });
 });

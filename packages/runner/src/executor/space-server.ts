@@ -166,6 +166,13 @@ const timing = getLogger("executor", { enabled: false });
  * and logged only at debug level). */
 export const STRUCTURE_LOAD_STUCK_AFTER = 8;
 
+/** Consecutive cycles a feed record's store refresh may fail before the
+ * loop gives the space up to a `loop-failed` park (see
+ * `SpaceServer.#refreshHeldDocuments`). Bounded so a permanently failing
+ * engine read parks rather than spins, and above one so a single failed
+ * read costs a retry rather than a tenure. */
+export const STORE_REFRESH_ATTEMPTS = 3;
+
 /** Consecutive pre-queue drain deferrals (the arrival-order barrier's
  * view-lag, sidecar-sync-failure, and queue-time-throw arms) after
  * which the blocking key counts as STUCK (`stats.events.preQueueDeferralStuck`, once per
@@ -453,6 +460,11 @@ export class SpaceServer implements TransactionSealDestination {
   #sealChain: Promise<unknown> = Promise.resolve();
   #feed: AdmittedCommitNotice[] = [];
   #feedArrived: PromiseWithResolvers<void> | undefined;
+
+  /** The feed record whose store refresh is failing and how many cycles in
+   * a row it has: the drain holds that record and everything behind it for
+   * the next cycle, and gives up at `STORE_REFRESH_ATTEMPTS`. */
+  #storeRefreshFailure: { seq: number; attempts: number } | undefined;
 
   /**
    * Whether a shadow flip fired while no input waiter was installed; consumed
@@ -2844,8 +2856,15 @@ export class SpaceServer implements TransactionSealDestination {
    * re-read into the replica here (`#refreshHeldDocuments()`) and the
    * same notifications follow. */
   #drainFeed(): { batchHead: number } {
-    for (const record of this.#feed) {
-      this.#refreshHeldDocuments(record);
+    for (let index = 0; index < this.#feed.length; index++) {
+      const record = this.#feed[index]!;
+      if (!this.#refreshHeldDocuments(record)) {
+        // The record's writes have not reached the replica: hold it and
+        // everything behind it for the next cycle, so the head this cycle
+        // covers stops short of it.
+        this.#feed = this.#feed.slice(index);
+        return { batchHead: this.#coverageHead };
+      }
       // LATE records (stage P2-F, the sx2 unskip's flake diagnosis):
       // the feed has two in-process producers — the admission hook's
       // notify (async, after the transact's engine apply) and the
@@ -2981,23 +3000,45 @@ export class SpaceServer implements TransactionSealDestination {
    * the serving replica holds, so its scheduler sees the change a session
    * watch would otherwise have delivered. The loop's own derived commits
    * are skipped: the replica confirmed those at its seal, and re-reading
-   * them would only cost the engine a read per written document. A read
-   * or integration that throws propagates: the drain must not consume a
-   * record whose writes never reached the replica, since the watermark
-   * would then cover an input nothing derived over. The loop's own catch
-   * parks the space `loop-failed`, and the re-activation's fresh runtime
-   * reads the engine's head.
+   * them would only cost the engine a read per written document. Returns
+   * whether the record's writes reached the replica. A read or
+   * integration that throws leaves the record to the next cycle, which
+   * retries it: the drain must not consume a record whose writes never
+   * reached the replica, since the watermark would then cover an input
+   * nothing derived over. After `STORE_REFRESH_ATTEMPTS` consecutive
+   * failures on one record the error propagates instead, the loop's own
+   * catch parks the space `loop-failed`, and the re-activation's fresh
+   * runtime reads the engine's head.
    */
-  #refreshHeldDocuments(record: AdmittedCommitNotice): void {
-    if (this.#options.policy?.storeReadThrough !== true) return;
+  #refreshHeldDocuments(record: AdmittedCommitNotice): boolean {
+    if (this.#options.policy?.storeReadThrough !== true) return true;
     const runtime = this.#runtime;
-    if (runtime === undefined) return;
-    if (record.class === "derived" && record.holder === this.#holder) return;
-    this.#options.stats.storeRefreshes +=
-      runtime.storageManager.integrateStoreWrites?.(
-        this.#options.space,
-        record.writes,
-      ) ?? 0;
+    if (runtime === undefined) return true;
+    if (record.class === "derived" && record.holder === this.#holder) {
+      return true;
+    }
+    try {
+      this.#options.stats.storeRefreshes +=
+        runtime.storageManager.integrateStoreWrites?.(
+          this.#options.space,
+          record.writes,
+        ) ?? 0;
+    } catch (error) {
+      const attempts = this.#storeRefreshFailure?.seq === record.seq
+        ? this.#storeRefreshFailure.attempts + 1
+        : 1;
+      this.#storeRefreshFailure = { seq: record.seq, attempts };
+      if (attempts >= STORE_REFRESH_ATTEMPTS) throw error;
+      logger.warn("store-refresh-failed", () => [
+        `space ${this.#options.space}: refreshing held documents for ` +
+        `commit ${record.seq} failed (attempt ${attempts} of ` +
+        `${STORE_REFRESH_ATTEMPTS}); the record waits for the next cycle`,
+        error,
+      ]);
+      return false;
+    }
+    this.#storeRefreshFailure = undefined;
+    return true;
   }
 
   /**

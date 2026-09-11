@@ -1367,10 +1367,10 @@ across cycles), so a slow ensure throttles nothing; `watermarkClamped` counts wa
 advance was actually clamped below the input batch head by the
 Phase-2 settle input barrier — inbound foreign novelty still
 shadowed by a parked own write; the clamp is honesty, not failure,
-and lifts by itself; `storeReads` counts the engine reads the store
-read-through posture (§1 plane (a)) performed for serving replicas and
-`storeRefreshes` the held documents it re-read off the feed, both zero
-while the posture is off; `unstampedSealRefusals` counts write-carrying
+and lifts by itself; `storeReads` counts the engine reads that the store
+read-through posture (§1 plane (a)) performs for serving replicas, and
+`storeRefreshes` counts the held documents it re-reads off the feed, both
+zero while the posture is off; `unstampedSealRefusals` counts write-carrying
 transactions refused at the seal by §3d's unstamped refusal —
 structurally ZERO when every server-side commit path declares its
 run context, so any non-zero count names an undeclared commit path,
