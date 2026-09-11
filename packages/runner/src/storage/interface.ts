@@ -9,6 +9,7 @@ import type {
   ClientCommit,
   CommitClass,
   CommitPrecondition,
+  DeliveryFailureClass,
   EntityDocument,
   EntityIdListOptions,
   EntityIdListResult,
@@ -25,7 +26,6 @@ import type {
   SqliteQueryResult,
   SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
-import type { DeliveryFailureClass } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import type { Cancel } from "../cancel.ts";
 import type { EntityId } from "../create-ref.ts";

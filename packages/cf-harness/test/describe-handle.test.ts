@@ -166,6 +166,9 @@ const SPENDING_PATTERN_SOURCE = [
  * and values a reduction has to drop; the `ifc` annotations are what a reader
  * has to be told.
  */
+/** One `COUNT("<column>") AS "<alias>"` clause of a count statement. */
+const COUNT_CLAUSE = /COUNT\("([^"]+)"\) AS "([^"]+)"/g;
+
 const MAIL_DB_HANDLE = {
   id: "db-mail",
   rev: 3,
@@ -1087,6 +1090,195 @@ describe("describe_handle", () => {
 
         expect(output.hasSchema).toBe(true);
         expect(output.database).toBeUndefined();
+      });
+
+      /**
+       * Replaces the query the session's storage provider offers for this
+       * space, and returns what to restore. The emulated provider offers
+       * none, so a test that wants counts supplies the one the count read
+       * calls.
+       */
+      const withProviderQuery = (
+        query:
+          | ((db: unknown, sql: string) => Promise<{ rows: unknown[] }>)
+          | undefined,
+      ): () => void => {
+        const provider = runtime.storageManager.open(
+          session.pieces.getSpace(),
+        ) as { sqliteQuery?: unknown };
+        const previous = provider.sqliteQuery;
+        // Installed as a method that reads its receiver, because the real one
+        // does: a count read that lifted the name off the provider and called
+        // it detached would arrive here with `this` undefined, and a fake
+        // arrow function would never notice.
+        provider.sqliteQuery = query === undefined ? undefined : function (
+          this: unknown,
+          db: unknown,
+          sql: string,
+        ) {
+          if (this === undefined) {
+            throw new Error("sqliteQuery was called without its provider");
+          }
+          return query(db, sql);
+        };
+        return () => {
+          provider.sqliteQuery = previous;
+        };
+      };
+
+      it("reports the rows a table holds and how many of them each column is non-NULL on", async () => {
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        // `received` NULL on every row is the finding the counts exist for: a
+        // query filtering on it matches nothing while the table is full. The
+        // fake reads the aliases out of the statement it is given, so what it
+        // returns is tied to the column each alias counts rather than to the
+        // order the disclosure happens to list them in.
+        const filled: Record<string, number> = {
+          sender: 1687,
+          body: 1600,
+          received: 0,
+        };
+        const statements: string[] = [];
+        const restore = withProviderQuery((_db, sql) => {
+          statements.push(sql);
+          const row: Record<string, number> = { n: 1687 };
+          for (const [, column, alias] of sql.matchAll(COUNT_CLAUSE)) {
+            row[alias] = filled[column] ?? -1;
+          }
+          return Promise.resolve({ rows: [row] });
+        });
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        expect(output.database?.fill).toEqual([{
+          table: "messages",
+          rows: 1687,
+          nonNull: { sender: 1687, body: 1600, received: 0 },
+        }]);
+        // One statement per table, over the table itself and no predicate.
+        expect(statements).toHaveLength(1);
+        expect(statements[0]).toContain('SELECT COUNT(*) AS "n"');
+        expect(statements[0]).toContain('FROM "messages"');
+        expect(statements[0]).not.toContain("WHERE");
+      });
+
+      it("reports a table it could not count as unread rather than as empty", async () => {
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery(() =>
+          Promise.reject(new Error("no such table: messages"))
+        );
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        expect(output.database?.fill).toEqual([{
+          table: "messages",
+          unread: "no such table: messages",
+        }]);
+        // The contract still discloses, so a database that cannot be counted
+        // is still one an agent can write a query against.
+        expect(output.database?.tables).toBeDefined();
+      });
+
+      it("reports a table whose count query refused with no error object as unread", async () => {
+        // What a provider throws is its own, and not every refusal arrives as
+        // an `Error`. The reason still has to reach the caller as text.
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery(() =>
+          Promise.reject("the store is closed")
+        );
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        expect(output.database?.fill).toEqual([{
+          table: "messages",
+          unread: "the store is closed",
+        }]);
+      });
+
+      it("reports a table whose count query returned no count as unread", async () => {
+        // The provider answered, so nothing threw, and what came back holds no
+        // row count. Zero is the one thing that must not be reported for it.
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery(() => Promise.resolve({ rows: [] }));
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        expect(output.database?.fill).toEqual([{
+          table: "messages",
+          unread: "the count query returned no row count",
+        }]);
+      });
+
+      it("reports no fill for a database whose storage provider runs no query", async () => {
+        // Nothing is claimed about how full the tables are, rather than every
+        // table reading as empty.
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery(undefined);
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        expect(output.database?.tables).toBeDefined();
+        expect(output.database?.fill).toBeUndefined();
       });
     });
   });

@@ -1,4 +1,4 @@
-import type { SchemaPathSelector } from "@commonfabric/api";
+import type { JSONSchemaObj, SchemaPathSelector } from "@commonfabric/api";
 import {
   hashSchema,
   internPathSelector,
@@ -11,8 +11,6 @@ import type {
   ScopeKey,
   ScopeKeyIdentity,
 } from "@commonfabric/memory/v2";
-
-import type { JSONSchemaObj } from "@commonfabric/api";
 
 import { pruneCfcSchemaDefinitions } from "../cfc/schema-refs.ts";
 import {
