@@ -3068,6 +3068,8 @@ type TestStepKey =
 type OnlyTestStep<Own extends TestStepKey, Fields> =
   & Fields
   & { skip?: boolean }
+  & (Own extends "label" | "await" ? { readBudget?: never }
+    : { readBudget?: { total?: number; perRun?: number } })
   & { [Other in Exclude<TestStepKey, Own>]?: never };
 
 /**
@@ -3089,7 +3091,10 @@ type OnlyTestStep<Own extends TestStepKey, Fields> =
  *   announces reaching `label`, and another participant blocks on `await`
  *   until that marker is announced. They are inert in a single-user test.
  *
- * `skip` omits the step.
+ * `skip` omits the step. Single-user tests with a module-level `readBudgets`
+ * export may set `readBudget` on executable steps. Its `total` ceiling limits
+ * completed transaction-attempt proxy accesses; `perRun` limits the largest
+ * reactive body. A step declaration replaces the module's default step limits.
  */
 export type TestStep =
   | OnlyTestStep<"assertion", { assertion: Reactive<AssertRecord> }>

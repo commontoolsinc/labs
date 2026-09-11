@@ -2703,6 +2703,7 @@ export class Runtime {
     });
     if (this.#tearingDownWrites) return Promise.resolve(teardownResult());
     const tx = this.edit(options);
+    this.scheduler.beginReadAttempt(tx, "editWithRetry");
     tx.tx.immediate = true;
     (tx.tx as { deferRunnerStartUntilCommit?: boolean })
       .deferRunnerStartUntilCommit = true;
@@ -2728,7 +2729,12 @@ export class Runtime {
         tx.abort("editWithRetry stopped because the runtime is disposing");
         return Promise.resolve(teardownResult());
       }
-      this.prepareTxForCommit(tx);
+      try {
+        this.prepareTxForCommit(tx);
+      } catch (error) {
+        if (tx.status().status === "ready") tx.abort(error);
+        throw error;
+      }
       return tx.commit().then(async ({ error }) => {
         if (error) {
           if (maxRetries > 0 && isRetryableCommitRejection(error)) {

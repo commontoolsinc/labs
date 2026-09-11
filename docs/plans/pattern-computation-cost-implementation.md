@@ -1,12 +1,17 @@
 # Pattern computation cost: implementation sequence
 
-Status: A1/A2 instrumentation shipped in #7246, and the controlled A0 fixture,
-accounting regressions, and dashboard shipped in #7241. A3 budgets are under
-review in #7257. A4's browser benchmark shipped in #7261; count limits remain.
-C1's remote-row reproductions and the C3 inline-element dependency repair landed
-in [PR #7265](https://github.com/commontoolsinc/labs/pull/7265).
-Reconnect and remaining row-invalidation
-acceptance checks stay open.
+Status: A1/A2 instrumentation shipped in #7246; worker control shipped in #7256.
+The controlled A0 fixture, accounting regressions, and dashboard shipped in
+#7241, with browser and remote-row demonstrations added in #7264. A3 budget
+repairs are under review in #7257. Full compiler, runner, CLI, generated-pattern,
+and vintage validation pass; current-head CI and Cubic review remain. A4's
+browser benchmark shipped in #7261; count limits remain in #7282. C1's remote-row
+reproductions and C3's inline-element dependency repair landed in #7265;
+removal/restoration acceptance landed in #7285 and first-browser-materialization
+acceptance landed in #7302, both with local demonstrations. Reconnect and
+remaining row-invalidation acceptance stay open. B1/B2's contract landed in
+#7294; typed handles and key resolution are being prototyped, with operator
+lowering and runtime integration pending.
 
 B3's named aggregates are implemented and validated in
 [PR #7259](https://github.com/commontoolsinc/labs/pull/7259), with
@@ -147,14 +152,14 @@ durations are used as performance evidence.
 ## 3–4. Defend and calibrate measurements: A3–A5
 
 - [ ] **A3 — Add opt-in pattern-test budgets.** The
-      [budget contract](read-cost-budgets.md) defines the pending surface,
-      execution coverage, and pass/fail demo.
-  - [ ] Define the test declaration and diagnostics for per-action-run and
+      [budget contract](read-cost-budgets.md) defines the surface, execution
+      coverage, and pass/fail demo.
+  - [x] Define the test declaration and diagnostics for per-action-run and
         per-step-through-settle limits, with separate initialization limits.
-  - [ ] Include every execution in a step, including builtins, coordinators,
+  - [x] Include every execution in a step, including builtins, coordinators,
         failed attempts, and short-lived actions according to A1a's contract. Do
         not depend solely on retained graph snapshots for enforcement.
-  - [ ] Test exact-boundary pass, one-over failure, one expensive run, and many
+  - [x] Test exact-boundary pass, one-over failure, one expensive run, and many
         individually cheap runs exceeding the step budget. Verify unbudgeted
         tests preserve their behavior.
 - [ ] **A4 — Add the read-side benchmark.**
@@ -173,6 +178,26 @@ durations are used as performance evidence.
   - [ ] Confirm the explanation against the deployed board's behavior. Keep
         access or environment requirements explicit if unavailable; do not
         substitute a synthetic result for deployed evidence.
+
+### Validation evidence for the A3 slice
+
+[PR #7257](https://github.com/commontoolsinc/labs/pull/7257) implements the
+checked A3 acceptance items.
+[Read-accounting tests](../../packages/runner/test/read-accounting.test.ts)
+cover transaction ownership, aborted attempts, queued preflight setup failures,
+fan-out, and asynchronous writebacks. The
+[budget collector tests](../../packages/cli/test/read-budgets.test.ts) cover
+exact boundaries, total/per-run separation, and action/attempt attribution.
+The [CLI budget fixtures](../../packages/cli/test/test-runner-read-budgets.test.ts)
+exercise declarations, functional-failure preservation, rejected initialization
+settlement without restarting it, render enforcement, many cheap runs, and one
+expensive run.
+
+Compiler acceptance also covers stored fields named after Cell methods,
+optional Cell handles, and whole-value reads passed to helpers. The generated
+call-center integration and pinned default-app vintage replay pass with complete
+stored shapes preserved. Full affected-package validation, CI, and clean latest
+reviews remain landing gates.
 
 ## 5, 10. Repair incremental correctness: C1–C4
 
