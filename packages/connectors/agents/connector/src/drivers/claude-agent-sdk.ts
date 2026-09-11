@@ -407,6 +407,10 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
         },
       };
     }
+    const modes: string[] = this.source.capabilities.modes ?? [];
+    if (input.mode !== undefined && !modes.includes(input.mode)) {
+      return unsupported(`unsupported Claude mode: ${input.mode}`);
+    }
     const cwd = input.cwd ?? this.#config.cwd;
     if (cwd === undefined) {
       return {
@@ -460,6 +464,9 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
             retryable: false,
           },
         };
+      }
+      if (input.mode !== undefined) {
+        this.#sessionModes.set(nativeSessionId, input.mode);
       }
       const outcome = await this.#runQuery(
         nativeSessionId,

@@ -95,6 +95,8 @@ export interface StartInput {
   cwd?: string;
   /** Title given to the session once it exists. */
   title?: string;
+  /** A mode the driver advertises, applied to the session's first turn. */
+  mode?: string;
 }
 
 export interface CommandExecutionOptions {

@@ -371,6 +371,9 @@ observable, and its first refresh runs, once the SDK has emitted its first
 message. A successful start records the directory for later prompts and then
 applies the requested title through `renameSession()`; a title the SDK refuses
 leaves the start succeeded with `titled` false and the refusal in `titleError`.
+A start's `mode` is one the driver advertises; it is applied to the first turn
+and kept for later connector-owned prompts, and a mode the driver does not
+advertise makes the start unsupported.
 
 Mode and model settings are kept in process memory per session. They apply to
 connector-owned prompts. `bypassPermissions` is advertised only when
@@ -791,14 +794,14 @@ not interpret `createdAt` as a date.
 
 Payloads are:
 
-| Type                | Payload                                                                                                |
-| ------------------- | ------------------------------------------------------------------------------------------------------ |
-| `prompt`            | `text` string, at most 128 KiB                                                                         |
-| `start`             | `text` string, at most 128 KiB; optional `cwd` string; optional `title` string, at most 512 characters |
-| `cancel`            | Empty object                                                                                           |
-| `rename`            | `title` string, at most 512 characters                                                                 |
-| `set-mode`          | `mode` string, at most 128 characters                                                                  |
-| `set-config-option` | `key` string, at most 256 characters, and arbitrary `value`                                            |
+| Type                | Payload                                                                                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `prompt`            | `text` string, at most 128 KiB                                                                                                                         |
+| `start`             | `text` string, at most 128 KiB; optional `cwd` string; optional `title` string, at most 512 characters; optional `mode` string, at most 128 characters |
+| `cancel`            | Empty object                                                                                                                                           |
+| `rename`            | `title` string, at most 512 characters                                                                                                                 |
+| `set-mode`          | `mode` string, at most 128 characters                                                                                                                  |
+| `set-config-option` | `key` string, at most 256 characters, and arbitrary `value`                                                                                            |
 
 A `start` names a session that does not exist yet: the sender mints its native
 session ID, and the receipt's `result` repeats that ID beside the directory the

@@ -1163,3 +1163,35 @@ Deno.test("Claude driver reports a start whose title could not be applied", asyn
   assertEquals(outcome.result?.titled, false);
   assertEquals(outcome.result?.titleError, "Error: rename refused");
 });
+
+Deno.test("Claude driver applies a start's mode to the first turn and refuses one it does not advertise", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const driver = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    sdkWithoutSessions(calls),
+  );
+  assertEquals(
+    (await driver.startSession(NEW_SESSION_ID, {
+      text: "Hi",
+      mode: "bypassPermissions",
+    })).status,
+    "unsupported",
+  );
+  assertEquals(calls.map((call) => call.method), []);
+
+  const outcome = await driver.startSession(NEW_SESSION_ID, {
+    text: "Hi",
+    mode: "acceptEdits",
+  });
+  assertEquals(outcome.status, "succeeded");
+  const query = calls.find((call) => call.method === "query")?.args[0] as {
+    options: Record<string, unknown>;
+  };
+  assertEquals(query.options.permissionMode, "acceptEdits");
+  assertEquals(query.options.allowDangerouslySkipPermissions, undefined);
+});

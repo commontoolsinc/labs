@@ -655,7 +655,10 @@ export class CommandWorker {
             onSessionActive,
           },
         );
-      case "start":
+      case "start": {
+        const cwd = optionalString(command.payload.cwd, "start cwd");
+        const title = optionalString(command.payload.title, "start title", 512);
+        const mode = optionalString(command.payload.mode, "start mode", 128);
         return driver.startSession(
           command.nativeSessionId,
           {
@@ -664,8 +667,9 @@ export class CommandWorker {
               "start text",
               128 * 1024,
             ),
-            cwd: optionalString(command.payload.cwd, "start cwd"),
-            title: optionalString(command.payload.title, "start title", 512),
+            ...(cwd !== undefined ? { cwd } : {}),
+            ...(title !== undefined ? { title } : {}),
+            ...(mode !== undefined ? { mode } : {}),
           },
           {
             force: command.force,
@@ -673,6 +677,7 @@ export class CommandWorker {
             onSessionActive,
           },
         );
+      }
       case "cancel":
         return driver.cancel(command.nativeSessionId);
       case "rename":
