@@ -527,11 +527,20 @@ timing: readback → settled 72.8ms
 `--await` and `--no-wait` control whether the call waits for settlement and
 readback or exits once the commit is acknowledged.
 
+What `committed` acknowledges is the caller's own durable act. Off server
+execution that is the handling's commit: the handler has run. Under server
+execution the caller's act is the event append — the serving loop runs the
+handler afterwards — so `committed` arrives as soon as the event is on the
+record, and the readback that follows is what waits for the served handling
+to land before it reads the receipt. A handling the server refuses, drops,
+or fails is reported there, as the readback's failure.
+
 ### Dispatching now, collecting later
 
-`--no-wait` returns at `"committed"`: the handler has run and its write is
-durable, and only the readback is skipped. The envelope still carries the
-`receipt`, so a detached call is a handle rather than a dead end —
+`--no-wait` returns at `"committed"`: the caller's act is durable — the
+handler has run, or under server execution the event is appended and the
+server will run it — and only the readback is skipped. The envelope still
+carries the `receipt`, so a detached call is a handle rather than a dead end —
 
 ```json
 {
