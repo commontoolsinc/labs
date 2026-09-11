@@ -3,14 +3,36 @@
 // contexts to visualize or log events inside the runtime.
 
 import type { CfcRefusalDetail } from "./cfc/refusal-detail.ts";
+import type { ReadAttemptCounts } from "./read-stats.ts";
 import type { FabricValue } from "@commonfabric/data-model";
 
 import { IMemoryChange } from "./storage/interface.ts";
+
+/** Read work performed by one action run, or summed across runs. */
+export type ActionReadStats = {
+  /** Reactive property and element reads, including cached reads. */
+  proxyAccesses: number;
+
+  /** Stored-link traversal attempts, including repeated fallback reads. */
+  linkResolutions: number;
+
+  /** Distinct replica documents read, counted separately in each run. */
+  distinctDocuments: number;
+
+  /** Compacted deep and shallow scheduling reads before commit preparation. */
+  registeredDependencies: number;
+};
 
 /**
  * Statistics tracked for each action's execution performance.
  */
 export type ActionStats = {
+  /** Read counts summed over measured runs only. */
+  reads?: ActionReadStats;
+
+  /** Read counts from the latest run, absent when accounting is disabled. */
+  lastRunReads?: ActionReadStats;
+
   runCount: number;
   totalTime: number;
   averageTime: number;
@@ -154,6 +176,17 @@ export type RuntimeTelemetryMarker = {
   actionInfo?: SchedulerActionInfo;
   error?: string;
 } | {
+  type: "scheduler.read-attempt";
+  kind:
+    | "reactive"
+    | "event"
+    | "presync"
+    | "preflight"
+    | "initialization"
+    | "editWithRetry";
+  actionId?: string;
+  reads: ReadAttemptCounts;
+} | {
   // Emitted when an action run finishes, next to the ActionStats recording —
   // the same wall-clock measurement, surfaced as a marker so consumers (OTel
   // bridge, debugger) get per-run durations without polling getActionStats().
@@ -161,6 +194,13 @@ export type RuntimeTelemetryMarker = {
   actionId: string;
   actionInfo?: SchedulerActionInfo;
   durationMs: number;
+
+  /** Read work for this run, when accounting is enabled. */
+  reads?: ActionReadStats;
+
+  /** Authored file, line, and column for the measured action. */
+  src?: string;
+
   error?: string;
 } | {
   // Emitted as the runner begins installing a piece's registration under

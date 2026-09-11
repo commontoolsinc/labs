@@ -1,4 +1,8 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
+
+import { createRef } from "../create-ref.ts";
+import { toURI } from "../uri-utils.ts";
 import { recordTrustedEventPolicyInputs } from "../cfc/ui-contract.ts";
 import type { Cancel } from "../cancel.ts";
 import {
@@ -11,7 +15,6 @@ import {
   type NormalizedFullLink,
 } from "../link-utils.ts";
 import type { Runtime } from "../runtime.ts";
-import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type {
   CommitError,
   IExtendedStorageTransaction,
@@ -59,6 +62,7 @@ import {
   type QueuedEvent,
   type ReactivityLog,
   type ServedEventFailureOutcome,
+  type TelemetryAnnotations,
 } from "./types.ts";
 
 const logger = getLogger("scheduler", {
@@ -66,6 +70,127 @@ const logger = getLogger("scheduler", {
   level: "warn",
 });
 const EVENT_COMMIT_TELEMETRY_WRITE_LIMIT = 25;
+
+const guardedImplementations = Symbol("guarded event implementations");
+
+type GuardedDispatcher = EventHandler & {
+  [guardedImplementations]: {
+    implementations: Map<string, { handler: EventHandler }>;
+    current(): EventHandler | undefined;
+  };
+};
+
+/** Whether a registered callback dispatches among guarded implementations. */
+function isGuardedDispatcher(
+  handler: EventHandler,
+): handler is GuardedDispatcher {
+  return guardedImplementations in handler;
+}
+
+/** Resolve exactly one implementation while recording every selector read. */
+function selectEventImplementation(
+  handler: EventHandler,
+  tx: IExtendedStorageTransaction,
+): EventHandler | undefined {
+  if (!isGuardedDispatcher(handler)) return handler;
+  const registration = handler[guardedImplementations];
+  const current = registration.current();
+  if (current !== handler) {
+    return current === undefined
+      ? undefined
+      : selectEventImplementation(current, tx);
+  }
+  let selected: EventHandler | undefined;
+  let ambiguous = false;
+  for (
+    const { handler: implementation } of registration.implementations.values()
+  ) {
+    if (implementation.implementationSelection!.matches(tx)) {
+      if (selected !== undefined) ambiguous = true;
+      selected = implementation;
+    }
+  }
+  return ambiguous ? undefined : selected;
+}
+
+/** Stable queued callback whose selection follows the live stream registry. */
+function createGuardedDispatcher(
+  ref: NormalizedFullLink,
+  eventHandlers: readonly [NormalizedFullLink, EventHandler][],
+): GuardedDispatcher {
+  const dispatcher: GuardedDispatcher = Object.assign(
+    (tx: IExtendedStorageTransaction, event: unknown) => {
+      const implementation = selectEventImplementation(dispatcher, tx);
+      if (implementation === undefined) {
+        tx.dispatchedHandlerNotRun = {
+          reason: "no unique event implementation matches the current program",
+        };
+        return;
+      }
+      return implementation(tx, event);
+    },
+    {
+      [guardedImplementations]: {
+        implementations: new Map<string, { handler: EventHandler }>(),
+        current: () => findEventHandler(eventHandlers, ref),
+      },
+    },
+  );
+  Object.defineProperty(dispatcher, "name", {
+    value: `event-dispatcher:${toURI(createRef(ref, "event dispatcher"))}`,
+  });
+  Object.defineProperty(dispatcher, "schedulerObservationIdentity", {
+    get: () => {
+      const registration = dispatcher[guardedImplementations];
+      const current = registration.current();
+      if (current !== dispatcher) {
+        return (current as Partial<TelemetryAnnotations> | undefined)
+          ?.schedulerObservationIdentity;
+      }
+      const identities = [...registration.implementations.values()].flatMap(
+        ({ handler }) => {
+          const identity = (handler as Partial<TelemetryAnnotations>)
+            .schedulerObservationIdentity;
+          return identity === undefined ? [] : [identity];
+        },
+      );
+      if (identities.length <= 1) return identities[0];
+      // A queued event supplies its actor to every candidate root before
+      // selection: the selector itself can need that actor's cold inputs.
+      // Dispatch and its diagnostics use the selected handler's own identity.
+      return {
+        ...identities[0],
+        demandRootIds: [
+          ...new Set(identities.flatMap((identity) =>
+            identity.demandRootIds ??
+              (identity.pieceRootId === undefined ? [] : [identity.pieceRootId])
+          )),
+        ],
+      };
+    },
+  });
+  dispatcher.populateDependencies = (tx, event) => {
+    selectEventImplementation(dispatcher, tx)?.populateDependencies?.(
+      tx,
+      event,
+    );
+  };
+  return dispatcher;
+}
+
+/** The actor used by both selection probes and the eventual stamped dispatch. */
+function eventScopeIdentity(event: QueuedEvent): ScopeKeyIdentity | undefined {
+  const firedAt = event.served?.firedAt;
+  if (firedAt !== undefined) {
+    return {
+      principal: firedAt.user,
+      sessionId: firedAt.session === "server" ? undefined : firedAt.session,
+    } as ScopeKeyIdentity;
+  }
+  return event.originTx !== undefined
+    ? waveRunContextOf(event.originTx)?.scopeKeyIdentity
+    : undefined;
+}
 
 type EventCommitError = {
   readonly name?: string;
@@ -728,7 +853,34 @@ export function addSchedulerEventHandler(state: {
   const existingIndex = state.eventHandlers.findIndex(([existing]) =>
     areNormalizedLinksSame(existing, args.ref)
   );
+  const existing = state.eventHandlers[existingIndex]?.[1];
+  if (args.handler.implementationSelection !== undefined) {
+    const dispatcher = existing && isGuardedDispatcher(existing)
+      ? existing
+      : createGuardedDispatcher(args.ref, state.eventHandlers);
+    if (dispatcher !== existing) {
+      if (existingIndex !== -1) state.eventHandlers.splice(existingIndex, 1);
+      state.eventHandlers.push([args.ref, dispatcher]);
+    }
+    const key = args.handler.implementationSelection.key;
+    const registration = { handler: args.handler };
+    dispatcher[guardedImplementations].implementations.set(key, registration);
+    return () => {
+      const { implementations } = dispatcher[guardedImplementations];
+      if (implementations.get(key) !== registration) return;
+      implementations.delete(key);
+      if (implementations.size === 0) {
+        const index = state.eventHandlers.findIndex(([, h]) =>
+          h === dispatcher
+        );
+        if (index !== -1) state.eventHandlers.splice(index, 1);
+      }
+    };
+  }
   if (existingIndex !== -1) {
+    if (existing && isGuardedDispatcher(existing)) {
+      existing[guardedImplementations].implementations.clear();
+    }
     state.eventHandlers.splice(existingIndex, 1);
     logger.warn("event-handler-replaced", () => [
       "Replacing existing event handler for link",
@@ -872,227 +1024,255 @@ export function preflightQueuedEventDependencies(state: {
 
   // Get the handler's dependencies (read-only, just capturing what will be read)
   const depTx = state.runtime.edit();
-  depTx.setReadOnly?.("scheduler.populateDependencies()");
-  // A SERVED event's dependency probe reads AS the event's server-stamped
-  // actor (server-execution v2 stage A — OW17's tx→replica identity seam,
-  // LD1): the handler run will read that actor's instances of every
-  // scoped input, so the probe must name the SAME instances — its absent
-  // reads then kick instance-named loads, and the pending-load park below
-  // holds the head event on exactly those loads (an at-most-once handler
-  // must not run against the service instance's empty draft — the R7
-  // wall). Absent on every client-side event, byte-identical there.
-  const firedAt = queuedEvent.served?.firedAt;
-  if (firedAt?.user !== undefined) {
-    depTx.tx.scopeKeyIdentity = {
-      principal: firedAt.user,
-      sessionId: firedAt.session === "server" ? undefined : firedAt.session,
-    } as never;
-  }
-  let stepStart = performance.now();
-  logger.timeStart(
-    "scheduler",
-    "execute",
-    "event",
-    "pullPopulateDependencies",
-  );
+  let failureReported = false;
+  const reportFailure = (error: unknown) => {
+    if (failureReported) return;
+    failureReported = true;
+    try {
+      state.handleError(
+        error instanceof Error ? error : new Error(String(error)),
+        queuedEvent.preflightImplementation ?? handler,
+      );
+    } catch {
+      throw error;
+    } finally {
+      state.dropEvent(
+        queuedEvent,
+        `Event dropped: dependency preflight failed for ${queuedEvent.eventLink.id}`,
+      );
+    }
+  };
   try {
-    handler.populateDependencies?.(depTx, eventValue);
-  } catch (error) {
-    state.handleError(error as Error, handler);
-    // Dropping the event here is its final outcome — settle the commit
-    // callback like the other drop paths instead of leaving callers that
-    // await it hanging.
-    state.dropEvent(
-      queuedEvent,
-      `Event dropped: populateDependencies threw during dependency ` +
-        `preflight for ${queuedEvent.eventLink.id}`,
-    );
-    shouldSkipEvent = true;
-  } finally {
-    logger.timeEnd(
+    state.runtime.scheduler.beginReadAttempt(depTx, "preflight");
+    depTx.setReadOnly?.("scheduler.populateDependencies()");
+    // Selection and input probes use the dispatch actor. Their scoped reads
+    // register that actor's instance loads before dispatch.
+    const probeIdentity = eventScopeIdentity(queuedEvent);
+    if (probeIdentity !== undefined) depTx.tx.scopeKeyIdentity = probeIdentity;
+    let stepStart = performance.now();
+    logger.timeStart(
       "scheduler",
       "execute",
       "event",
       "pullPopulateDependencies",
     );
-  }
-  populateMs = performance.now() - stepStart;
-
-  stepStart = performance.now();
-  logger.timeStart(
-    "scheduler",
-    "execute",
-    "event",
-    "pullTxToReactivityLog",
-  );
-  const deps: ReactivityLog = shouldSkipEvent
-    ? { reads: [], shallowReads: [], writes: [] }
-    : txToReactivityLog(depTx);
-  logger.timeEnd(
-    "scheduler",
-    "execute",
-    "event",
-    "pullTxToReactivityLog",
-  );
-  txToLogMs = performance.now() - stepStart;
-
-  // Commit the read-only inspection tx as a no-op so dependency discovery
-  // does not participate in CFC prepare or commit gating. Do this even
-  // after populateDependencies errors so the transaction is closed.
-  stepStart = performance.now();
-  logger.timeStart(
-    "scheduler",
-    "execute",
-    "event",
-    "pullDepCommitStart",
-  );
-  depTx.commit();
-  logger.timeEnd(
-    "scheduler",
-    "execute",
-    "event",
-    "pullDepCommitStart",
-  );
-  depCommitMs = performance.now() - stepStart;
-
-  const invalidDeps = new Set<Action>();
-  stepStart = performance.now();
-  logger.timeStart(
-    "scheduler",
-    "execute",
-    "event",
-    "pullCollectInvalidUpstream",
-  );
-  let hasInvalidDependencies = false;
-  state.setEventPreflightTraceContext(preflightStats);
-  try {
-    hasInvalidDependencies = state.collectInvalidUpstreamForLog(
-      deps,
-      invalidDeps,
-    );
-  } finally {
-    state.setEventPreflightTraceContext(undefined);
-    logger.timeEnd(
-      "scheduler",
-      "execute",
-      "event",
-      "pullCollectInvalidUpstream",
-    );
-  }
-  collectMs = performance.now() - stepStart;
-
-  if (!shouldSkipEvent && hasInvalidDependencies) {
-    stepStart = performance.now();
-    logger.timeStart(
-      "scheduler",
-      "execute",
-      "event",
-      "pullScheduleInvalidUpstream",
-    );
     try {
-      const eventDirtyPlan = planEventInvalidDependencyScheduling({
-        invalidDeps,
-        isDebouncedComputationWaiting: (dep) =>
-          state.isDebouncedComputationWaiting(dep),
-        getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),
-        getNextEligibleRunTime: (dep) => state.getNextEligibleRunTime(dep),
-      });
-      for (const dep of eventDirtyPlan.runnableDeps) {
-        state.pendingActions.add(dep);
-        state.eventBlockingDeps.add(dep);
-      }
-      if (eventDirtyPlan.runnableDeps.length > 0) {
-        shouldSkipEvent = true;
-      } else if (eventDirtyPlan.nextEligibleAt !== undefined) {
-        queuedEvent.notBefore = eventDirtyPlan.nextEligibleAt;
-        state.scheduleWake(eventDirtyPlan.nextEligibleAt);
-        shouldSkipEvent = true;
-      }
+      const implementation = selectEventImplementation(handler, depTx);
+      queuedEvent.preflightImplementation = implementation;
+      implementation?.populateDependencies?.(depTx, eventValue);
+    } catch (error) {
+      reportFailure(error);
+      shouldSkipEvent = true;
     } finally {
       logger.timeEnd(
         "scheduler",
         "execute",
         "event",
-        "pullScheduleInvalidUpstream",
+        "pullPopulateDependencies",
       );
     }
-    scheduleMs = performance.now() - stepStart;
-  }
+    populateMs = performance.now() - stepStart;
 
-  // The transient-demander preflight (server-execution v2 fan-out stage B,
-  // design §B5's motivating case; independent review F2). A SERVED event's
-  // actor whose handler reads a per-user DERIVATION she does not watch has
-  // no instance of that node — the node is node-level CLEAN (it ran for
-  // the watchers), so the invalid-upstream pass above found nothing, and
-  // the handler would read the actor's MISSING instance (its argument
-  // fails the schema and the run is skipped — which, until the
-  // mark/effects-atomicity fix below in `finalize`, sealed the entry
-  // consequenced with no error: silent event loss. The finalize now
-  // withdraws a skipped served dispatch, so the residual cost of a miss
-  // here is a deferral-and-re-drain cycle, not a lost event — this
-  // preflight remains what makes the FIRST delivery succeed). B7 made
-  // cleanliness
-  // per instance: re-arm the fanned-out nodes in the handler's closure
-  // whose instance for THIS actor is not current, materializing her own
-  // instance (as her transient demand) before the handler runs. The
-  // handler then reads a current instance instead of losing its event.
-  // Runs even when the node-level pass already skipped (a dirty input can
-  // coexist with a never-run actor instance — the review's dirty-input
-  // variant); the two schedule the same node, and the fan-out loop runs
-  // both the dirty watcher instance and the actor's uncomputed one. Off
-  // the serving posture `rearmNotCurrentFanOutForActor` is undefined and
-  // this is inert.
-  const actorFiredAt = queuedEvent.served?.firedAt;
-  if (
-    !shouldSkipEvent && actorFiredAt?.user !== undefined &&
-    state.rearmNotCurrentFanOutForActor !== undefined
-  ) {
-    const actor: ScopeKeyIdentity = {
-      principal: actorFiredAt.user,
-      ...(actorFiredAt.session !== undefined &&
-          actorFiredAt.session !== "server"
-        ? { sessionId: actorFiredAt.session as never }
-        : {}),
-    };
-    const rearmed = state.rearmNotCurrentFanOutForActor(deps, actor);
-    if (rearmed.length > 0) {
-      for (const dep of rearmed) {
-        state.pendingActions.add(dep);
-        state.eventBlockingDeps.add(dep);
+    stepStart = performance.now();
+    logger.timeStart(
+      "scheduler",
+      "execute",
+      "event",
+      "pullTxToReactivityLog",
+    );
+    const deps: ReactivityLog = shouldSkipEvent
+      ? { reads: [], shallowReads: [], writes: [] }
+      : txToReactivityLog(depTx);
+    logger.timeEnd(
+      "scheduler",
+      "execute",
+      "event",
+      "pullTxToReactivityLog",
+    );
+    txToLogMs = performance.now() - stepStart;
+
+    // Commit the read-only inspection tx as a no-op so dependency discovery
+    // does not participate in CFC prepare or commit gating. Do this even
+    // after populateDependencies errors so the transaction is closed.
+    stepStart = performance.now();
+    logger.timeStart(
+      "scheduler",
+      "execute",
+      "event",
+      "pullDepCommitStart",
+    );
+    depTx.commit();
+    logger.timeEnd(
+      "scheduler",
+      "execute",
+      "event",
+      "pullDepCommitStart",
+    );
+    depCommitMs = performance.now() - stepStart;
+
+    const invalidDeps = new Set<Action>();
+    stepStart = performance.now();
+    logger.timeStart(
+      "scheduler",
+      "execute",
+      "event",
+      "pullCollectInvalidUpstream",
+    );
+    let hasInvalidDependencies = false;
+    state.setEventPreflightTraceContext(preflightStats);
+    try {
+      hasInvalidDependencies = state.collectInvalidUpstreamForLog(
+        deps,
+        invalidDeps,
+      );
+    } finally {
+      state.setEventPreflightTraceContext(undefined);
+      logger.timeEnd(
+        "scheduler",
+        "execute",
+        "event",
+        "pullCollectInvalidUpstream",
+      );
+    }
+    collectMs = performance.now() - stepStart;
+
+    if (!shouldSkipEvent && hasInvalidDependencies) {
+      stepStart = performance.now();
+      logger.timeStart(
+        "scheduler",
+        "execute",
+        "event",
+        "pullScheduleInvalidUpstream",
+      );
+      try {
+        const eventDirtyPlan = planEventInvalidDependencyScheduling({
+          invalidDeps,
+          isDebouncedComputationWaiting: (dep) =>
+            state.isDebouncedComputationWaiting(dep),
+          getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),
+          getNextEligibleRunTime: (dep) => state.getNextEligibleRunTime(dep),
+        });
+        for (const dep of eventDirtyPlan.runnableDeps) {
+          state.pendingActions.add(dep);
+          state.eventBlockingDeps.add(dep);
+        }
+        if (eventDirtyPlan.runnableDeps.length > 0) {
+          shouldSkipEvent = true;
+        } else if (eventDirtyPlan.nextEligibleAt !== undefined) {
+          queuedEvent.notBefore = eventDirtyPlan.nextEligibleAt;
+          state.scheduleWake(eventDirtyPlan.nextEligibleAt);
+          shouldSkipEvent = true;
+        }
+      } finally {
+        logger.timeEnd(
+          "scheduler",
+          "execute",
+          "event",
+          "pullScheduleInvalidUpstream",
+        );
       }
-      shouldSkipEvent = true;
+      scheduleMs = performance.now() - stepStart;
     }
-  }
 
-  // Replica-staleness gate (CT-1795): with no invalid upstream left, an
-  // address the closure depends on may still have a load in flight — the
-  // wish shape, where a computation settles CLEAN on a provisional value
-  // while its fire-and-forget pull is outstanding. Handlers are at-most-once
-  // (D7), so park the head until those loads complete (absent counts as
-  // complete); load completion is the wake source, mirroring the lineage
-  // park.
-  if (!shouldSkipEvent && !hasInvalidDependencies) {
-    const parkKeys = state.collectPendingLoadParkKeys(queuedEvent, deps);
-    if (parkKeys.length > 0) {
-      state.parkHeadEventForLoads(queuedEvent, parkKeys);
-      shouldSkipEvent = true;
+    // The transient-demander preflight (server-execution v2 fan-out stage B,
+    // design §B5's motivating case; independent review F2). A SERVED event's
+    // actor whose handler reads a per-user DERIVATION she does not watch has
+    // no instance of that node — the node is node-level CLEAN (it ran for
+    // the watchers), so the invalid-upstream pass above found nothing, and
+    // the handler would read the actor's MISSING instance (its argument
+    // fails the schema and the run is skipped — which, until the
+    // mark/effects-atomicity fix below in `finalize`, sealed the entry
+    // consequenced with no error: silent event loss. The finalize now
+    // withdraws a skipped served dispatch, so the residual cost of a miss
+    // here is a deferral-and-re-drain cycle, not a lost event — this
+    // preflight remains what makes the FIRST delivery succeed). B7 made
+    // cleanliness
+    // per instance: re-arm the fanned-out nodes in the handler's closure
+    // whose instance for THIS actor is not current, materializing her own
+    // instance (as her transient demand) before the handler runs. The
+    // handler then reads a current instance instead of losing its event.
+    // Runs even when the node-level pass already skipped (a dirty input can
+    // coexist with a never-run actor instance — the review's dirty-input
+    // variant); the two schedule the same node, and the fan-out loop runs
+    // both the dirty watcher instance and the actor's uncomputed one. Off
+    // the serving posture `rearmNotCurrentFanOutForActor` is undefined and
+    // this is inert.
+    const actorFiredAt = queuedEvent.served?.firedAt;
+    if (
+      !shouldSkipEvent && actorFiredAt?.user !== undefined &&
+      state.rearmNotCurrentFanOutForActor !== undefined
+    ) {
+      const actor: ScopeKeyIdentity = {
+        principal: actorFiredAt.user,
+        ...(actorFiredAt.session !== undefined &&
+            actorFiredAt.session !== "server"
+          ? { sessionId: actorFiredAt.session as never }
+          : {}),
+      };
+      const rearmed = state.rearmNotCurrentFanOutForActor(deps, actor);
+      if (rearmed.length > 0) {
+        for (const dep of rearmed) {
+          state.pendingActions.add(dep);
+          state.eventBlockingDeps.add(dep);
+        }
+        shouldSkipEvent = true;
+      }
     }
-  }
 
-  return {
-    shouldSkipEvent,
-    deps,
-    invalidDeps,
-    hasInvalidDependencies,
-    dirtySizeBefore,
-    pendingSizeBefore,
-    populateMs,
-    txToLogMs,
-    depCommitMs,
-    collectMs,
-    scheduleMs,
-    preflightStats,
-  };
+    // Replica-staleness gate (CT-1795): with no invalid upstream left, an
+    // address the closure depends on may still have a load in flight — the
+    // wish shape, where a computation settles CLEAN on a provisional value
+    // while its fire-and-forget pull is outstanding. Handlers are at-most-once
+    // (D7), so park the head until those loads complete (absent counts as
+    // complete); load completion is the wake source, mirroring the lineage
+    // park.
+    if (!shouldSkipEvent && !hasInvalidDependencies) {
+      const parkKeys = state.collectPendingLoadParkKeys(queuedEvent, deps);
+      if (parkKeys.length > 0) {
+        state.parkHeadEventForLoads(queuedEvent, parkKeys);
+        shouldSkipEvent = true;
+      }
+    }
+
+    return {
+      shouldSkipEvent,
+      deps,
+      invalidDeps,
+      hasInvalidDependencies,
+      dirtySizeBefore,
+      pendingSizeBefore,
+      populateMs,
+      txToLogMs,
+      depCommitMs,
+      collectMs,
+      scheduleMs,
+      preflightStats,
+    };
+  } catch (error) {
+    if (depTx.status().status === "ready") {
+      depTx.clearReadOnly?.();
+      depTx.abort(error);
+    }
+    try {
+      reportFailure(error);
+    } catch {
+      // The event's failure notification and queue removal finalize the failure.
+    }
+    return {
+      shouldSkipEvent: true,
+      deps: { reads: [], shallowReads: [], writes: [] },
+      invalidDeps: new Set(),
+      hasInvalidDependencies: false,
+      dirtySizeBefore,
+      pendingSizeBefore,
+      populateMs,
+      txToLogMs,
+      depCommitMs,
+      collectMs,
+      scheduleMs,
+      preflightStats,
+    };
+  }
 }
 
 export async function processPullQueuedEventDuringExecute(
@@ -1145,7 +1325,6 @@ export async function processPullQueuedEventDuringExecute(
   delete queuedEvent.notBefore;
 
   const { handler } = queuedEvent;
-  const handlerId = state.getActionId(handler);
 
   let shouldSkipEvent = false;
   if (handler.populateDependencies) {
@@ -1214,8 +1393,12 @@ export async function processPullQueuedEventDuringExecute(
     if (state.eventPreflightTelemetryEnabled) {
       state.runtime.telemetry.submit({
         type: "scheduler.event.preflight",
-        handlerId,
-        handlerInfo: state.getActionTelemetryInfo(handler),
+        handlerId: state.getActionId(
+          queuedEvent.preflightImplementation ?? handler,
+        ),
+        handlerInfo: state.getActionTelemetryInfo(
+          queuedEvent.preflightImplementation ?? handler,
+        ),
         readCount: preflight.deps.reads.length,
         shallowReadCount: preflight.deps.shallowReads.length,
         dirtySizeBefore: preflight.dirtySizeBefore,
@@ -1298,33 +1481,35 @@ export async function dispatchQueuedEvent(state: {
   ) => void;
 }, queuedEvent: QueuedEvent): Promise<void> {
   const { action, handler, event: eventValue, retry, onCommit } = queuedEvent;
-  const handlerId = state.getActionId(handler);
+  // Presync follows the actor-scoped dependency probe. Dispatch rechecks the
+  // selection after the await so a replacement cannot run with stale inputs.
+  const presyncedImplementation = isGuardedDispatcher(handler)
+    ? queuedEvent.preflightImplementation
+    : handler;
+  const diagnosticHandler = presyncedImplementation ?? handler;
+  const handlerId = state.getActionId(diagnosticHandler);
 
   state.runtime.telemetry.submit({
     type: "scheduler.invocation",
     handlerId,
-    handlerInfo: state.getActionTelemetryInfo(handler),
+    handlerInfo: state.getActionTelemetryInfo(diagnosticHandler),
   });
 
   // Ensure the handler's input docs are locally available before the body
   // runs (see EventHandler.presyncInputs). Fail open: a presync error should
   // surface as the handler's own read failure, not silently drop the event.
-  if (typeof handler.presyncInputs === "function") {
+  if (typeof presyncedImplementation?.presyncInputs === "function") {
+    const presyncTx = state.runtime.edit();
     try {
-      // A served event's presync loads the event actor's instances (stage
-      // A — see EventHandler.presyncInputs); a client-side event passes
-      // nothing, byte-identical to before.
-      const firedAt = queuedEvent.served?.firedAt;
-      await handler.presyncInputs(
+      state.runtime.scheduler.beginReadAttempt(presyncTx, "presync", handlerId);
+      presyncTx.setReadOnly?.("scheduler.presyncInputs()");
+      const identity = eventScopeIdentity(queuedEvent);
+      if (identity !== undefined) presyncTx.tx.scopeKeyIdentity = identity;
+      // Materialization and synchronization use the same event actor.
+      await presyncedImplementation.presyncInputs(
         eventValue,
-        firedAt?.user !== undefined
-          ? {
-            principal: firedAt.user,
-            sessionId: firedAt.session === "server"
-              ? undefined
-              : firedAt.session,
-          } as never
-          : undefined,
+        identity,
+        presyncTx,
       );
     } catch (error) {
       logger.warn(
@@ -1332,6 +1517,9 @@ export async function dispatchQueuedEvent(state: {
         "handler input presync failed; dispatching anyway",
         { error, handlerId },
       );
+    } finally {
+      presyncTx.clearReadOnly?.();
+      if (presyncTx.status().status === "ready") presyncTx.abort();
     }
   }
 
@@ -1348,249 +1536,16 @@ export async function dispatchQueuedEvent(state: {
   state.eventQueue.shift();
 
   const tx = state.runtime.edit();
-  tx.dispatchedEventId = queuedEvent.id;
-  tx.dispatchedEventTime = queuedEvent.time;
-  tx.dispatchedRuntimeInjectedEventKeys = queuedEvent.runtimeInjectedEventKeys;
-  tx.tx.immediate = true;
-  tx.tx.sourceAction = action;
-  // Server-execution v2 stage F (serving-loop.md §3d): the event-dispatch
-  // choke point — a serving runtime's installed stamper attaches the wave
-  // run context (kind event-handler, the durable event id) before the
-  // handler runs. A no-op everywhere else. The action identity is the
-  // HANDLER's durable id (`handlerId`, computed above): the queued
-  // `action` is a per-event wrapper closure, and stamping IT hands the
-  // basis index a non-durable identity — the wrapper's inferred name
-  // collapses every handler onto one constant id (rows overwrite across
-  // handlers), while the requeue paths' anonymous wrappers split rows
-  // per event; scheduler_basis requires "durable ... restart-stable"
-  // (serving-loop.md §3b).
   const served = queuedEvent.served;
-  //
-  // Stage P2-F — the LT6 inheritance rule (events.md §2, RULED
-  // 2026-08-03: "an event emitted by ANY run carries that run's acting
-  // identity — events run as the session they originated from"): a
-  // server-side event whose ORIGIN transaction ran under a stamped
-  // per-run identity hands that identity to the handler run, so a
-  // cascade rooted in a demanded (user, session) derivation preserves
-  // the acting pair hop by hop instead of blanking to the userless
-  // service fallback. Off the serving posture `waveRunContextOf` finds
-  // no stamp and this is inert. Phase 3's events carry the
-  // server-stamped `firedAt` through their own carriage (`served`,
-  // below), and that explicit carriage WINS where it speaks: a drained
-  // entry's stamp is the event's own durable actor, while the origin
-  // inheritance covers the in-process queueEvent shapes that carry no
-  // served stamp.
-  const originContext = queuedEvent.originTx !== undefined
-    ? waveRunContextOf(queuedEvent.originTx)
-    : undefined;
-  state.runtime.stampServerRun(tx, {
-    actionId: handlerId,
-    kind: "event-handler",
-    eventId: queuedEvent.id,
-    // The same-wave cascade's fold key (C8d; review 2026-08-11 M2):
-    // the emitter's own eventId, threaded from the emission's
-    // dispatch carriage so the wave can roll a cascade child back
-    // with its requeued parent. The client-echo thread
-    // (QueuedEvent.parentEventId, independent review M1) carries the
-    // same fact on a flag-ON client's speculative cascade, where the
-    // navigate capture derives its ATTEMPT-MINTED tag from it
-    // (navigate-context.ts) — the speculation stamp is never a wave
-    // context, so the fold semantics stay server-only.
-    ...((served?.parentEventId ?? queuedEvent.parentEventId) !== undefined
-      ? {
-        parentEventId: served?.parentEventId ?? queuedEvent.parentEventId,
-      }
-      : {}),
-    ...(served?.firedAt !== undefined
-      ? {
-        // LD1 (protocol.md §2, scopes.md §5): the handler runs AS the
-        // event's server-stamped actor — its scoped reads and writes
-        // resolve against the acting identity, and the attribution
-        // annotations carry it. A run with NO acting user carries no
-        // attribution at all (protocol.md §1); a sessionless chain
-        // supplies no session component, so a session-scoped write
-        // fails closed in resolveScopeKey (events.md §2's
-        // sessionless-actor error).
-        ...(served.firedAt.user !== undefined
-          ? {
-            acting: {
-              user: served.firedAt.user,
-              ...(served.firedAt.session !== undefined &&
-                  served.firedAt.session !== "server"
-                ? { session: served.firedAt.session }
-                : {}),
-            },
-          }
-          : {}),
-        scopeKeyIdentity: {
-          principal: served.firedAt.user,
-          sessionId: served.firedAt.session === "server"
-            ? undefined
-            : served.firedAt.session,
-        } as never,
-      }
-      : originContext?.scopeKeyIdentity !== undefined
-      ? { scopeKeyIdentity: originContext.scopeKeyIdentity }
-      : {}),
-    ...(originContext?.actionScopeKey !== undefined
-      ? { actionScopeKey: originContext.actionScopeKey }
-      : {}),
-    ...(served?.streamEntry !== undefined
-      ? { streamEntry: served.streamEntry }
-      : {}),
-    // The LT1 in-process copy's appending-wave identity (stage C build
-    // W3, (α)): the emitter's transaction, resolved by the SpaceServer's
-    // stamper to the wave that carries this event's durable entry.
-    ...(served?.lt1 !== undefined ? { lt1: served.lt1 } : {}),
-  });
-  if (queuedEvent.originTx !== undefined) {
-    const originLocalSeq = state.getOriginLocalSeq(
-      queuedEvent.originTx,
-      queuedEvent.eventLink.space,
-    );
-    if (
-      originLocalSeq !== undefined &&
-      state.lineageStatus(queuedEvent.originTx) === "pending" &&
-      state.runtime.experimental.commitPreconditions === true &&
-      // Events-down (runtime-mapping N26): the receipt/precondition
-      // exactly-once machinery is SUBSUMED by the stream's
-      // `eventWatermark` (events.md §4) and the two mechanisms MUST NOT
-      // be active for the same event. Under the flag the handler run is
-      // a diverted echo (client) or a wave-sealed run (server) — its
-      // tx never carries wire preconditions.
-      state.runtime.experimental.serverExecution !== true
-    ) {
-      tx.addCommitPrecondition?.(queuedEvent.eventLink.space, {
-        kind: "origin-committed",
-        originLocalSeq,
-      });
-    }
+  let lineageReleased = false;
+  const releaseLineage = () => {
+    if (lineageReleased || queuedEvent.originTx === undefined) return;
+    lineageReleased = true;
     state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
-  }
-  const actionId = state.getActionId(action);
-
-  // Re-queue this event for an immediate re-run. This is the inSpace-name
-  // resolution path (RetryImmediately): the run referenced a pattern space by
-  // name that has now been resolved, so re-running resolves it synchronously from
-  // the cache. No count guards this loop — name resolution is monotonic (each
-  // re-run resolves at least one previously-unresolved name, and a resolved name
-  // never becomes pending again), so a handler with finitely many distinct
-  // inSpace names terminates. Dispatch released the lineage registration above,
-  // so the fresh QueuedEvent must be re-recorded: otherwise an origin that fails
-  // while the retry is queued cannot remove it, and the post-settlement
-  // originStatus() fallback ("confirmed") would let a descendant of a failed
-  // origin run.
-  const requeueForNameResolution = () => {
-    // A served name-resolution retry re-enters this scheduler settle. If it
-    // runs before the flush deadline, the installed destination seals its
-    // warmed-cache run into the current wave; a cut instead leaves the
-    // existing LT1-purge/durable-drain cadence in charge. The retry keeps the
-    // served carriage: acting identity, stream-entry consequence mark, LT1
-    // ownership, and failure hook. This does not opt the event into commit
-    // retries; `retry` remains false and a failed commit still belongs to the
-    // wave/drain cadence.
-    const requeued: QueuedEvent = {
-      id: queuedEvent.id,
-      // The flag rides every requeue with the id it describes: dropping it
-      // would let a later same-origin send select this entry as a collapse
-      // survivor and rewrite the payload its receipt is about to witness.
-      callerSuppliedId: queuedEvent.callerSuppliedId,
-      enqueueSeq: queuedEvent.enqueueSeq,
-      time: queuedEvent.time,
-      originTx: queuedEvent.originTx,
-      action,
-      eventLink: queuedEvent.eventLink,
-      handler,
-      event: eventValue,
-      runtimeInjectedEventKeys: queuedEvent.runtimeInjectedEventKeys,
-      retry,
-      onCommit,
-      ...(queuedEvent.served !== undefined
-        ? { served: queuedEvent.served }
-        : {}),
-      ...(queuedEvent.parentEventId !== undefined
-        ? { parentEventId: queuedEvent.parentEventId }
-        : {}),
-      // The intent's retry budget rides along: a name resolution in the
-      // middle of a retry sequence is settlement, not a fresh start.
-      ...(queuedEvent.retryAttempts !== undefined
-        ? { retryAttempts: queuedEvent.retryAttempts }
-        : {}),
-      ...(queuedEvent.retryDeadline !== undefined
-        ? { retryDeadline: queuedEvent.retryDeadline }
-        : {}),
-      ...(queuedEvent.notRunBackoffs !== undefined
-        ? { notRunBackoffs: queuedEvent.notRunBackoffs }
-        : {}),
-    };
-    insertInEnqueueOrder(state.eventQueue, requeued);
-    if (requeued.originTx !== undefined) {
-      state.recordLineageEvent(requeued.originTx, requeued);
-    }
-    state.queueExecution();
   };
-
-  // Re-queue a transient outcome for a later retry. With `runAt` the retry is
-  // parked via notBefore so the scheduler backs off (capped exponential delay)
-  // instead of busy-looping; without it the caller parks the requeued head on
-  // something else, such as a load. idle()/settled() wait for a parked head
-  // either way, so a converging write still completes within a settle. The
-  // retry attempt count and deadline are carried forward; `retry` is preserved
-  // untouched (it gates whether this event retries at all, which a windowed
-  // re-queue does not change).
-  const requeueForRetry = (
-    attempts: number,
-    deadline: number,
-    runAt: number | undefined,
-    notRunBackoffs: number | undefined = queuedEvent.notRunBackoffs,
-  ): QueuedEvent => {
-    // Same served-absence assert as the name-resolution requeue above:
-    // served copies queue with retries: false, so a stale-basis failure
-    // classifies give-up "opt-out" and never reaches the backoff window —
-    // the wave is a served copy's retry cadence. A served entry rebuilt
-    // here would silently shed the acting identity and the failure hook;
-    // served retry semantics are undecided, so fail loudly instead.
-    if (queuedEvent.served !== undefined) {
-      throw new Error(
-        "requeueForBackoff reached with a served event; served retry " +
-          "semantics are undecided (see the comment at this assert)",
-      );
-    }
-    const requeued: QueuedEvent = {
-      id: queuedEvent.id,
-      // Same as the name-resolution requeue above: the flag travels with the
-      // id, or the collapse-survivor exclusion silently ends at the first
-      // retry.
-      callerSuppliedId: queuedEvent.callerSuppliedId,
-      enqueueSeq: queuedEvent.enqueueSeq,
-      time: queuedEvent.time,
-      originTx: queuedEvent.originTx,
-      action,
-      eventLink: queuedEvent.eventLink,
-      handler,
-      event: eventValue,
-      runtimeInjectedEventKeys: queuedEvent.runtimeInjectedEventKeys,
-      retry,
-      onCommit,
-      retryAttempts: attempts,
-      retryDeadline: deadline,
-      ...(runAt !== undefined ? { notBefore: runAt } : {}),
-      ...(notRunBackoffs !== undefined ? { notRunBackoffs } : {}),
-      // A cascade child stays one: the dispatch stamp reads the emitting
-      // run's id off the requeued entry as it did off the first.
-      ...(queuedEvent.parentEventId !== undefined
-        ? { parentEventId: queuedEvent.parentEventId }
-        : {}),
-    };
-    insertInEnqueueOrder(state.eventQueue, requeued);
-    if (requeued.originTx !== undefined) {
-      state.recordLineageEvent(requeued.originTx, requeued);
-    }
-    state.queueExecution();
-    return requeued;
-  };
-
   const runFinalCommitCallback = () => {
+    if (queuedEvent.finalOutcomeNotified) return;
+    queuedEvent.finalOutcomeNotified = true;
     if (!onCommit) {
       return;
     }
@@ -1605,537 +1560,826 @@ export async function dispatchQueuedEvent(state: {
     }
   };
 
-  const finalize = (error?: unknown): void => {
-    // A RetryImmediately signal means the handler referenced an inSpace("name")
-    // target that has now been resolved into the runtime cache. Abort this run's
-    // transaction and re-queue the event so the handler re-runs and resolves the
-    // name synchronously.
-    if (error instanceof RetryImmediately) {
-      if (tx.status().status === "ready") {
-        tx.abort(error);
-      }
-      if (retry || served !== undefined) {
-        requeueForNameResolution();
-      } else {
-        // An unserved retries:false event is a one-shot; it does not re-run to
-        // resolve names. Served events take the same-wave arm above because
-        // the server, not a later client speculation, owns their result.
-        logger.warn(
-          "scheduler",
-          "Event handler needed inSpace-name resolution but opted out of " +
-            "retry (retries: false); dropping",
-          { handlerId },
-        );
-        runFinalCommitCallback();
-        tx.abandonStagedWork(eventAbandonError("retry opted out"));
-      }
-      return;
-    }
-
-    if (error) {
-      const handlerError = error instanceof Error
-        ? error
-        : new Error(String(error));
-      try {
-        state.handleError(handlerError, action);
-      } finally {
-        if (tx.status().status === "ready") {
-          tx.abort(handlerError);
-        }
-        // The serving drain's ERROR arm (events.md §5): the handler
-        // threw server-side — the error IS the consequence. The
-        // handler tx (with its consequenced mark) aborted above; the
-        // drain seals the error consequence in its own transaction.
-        reportServedEventFailure(served, {
-          kind: "error",
-          message: handlerError.message,
-        });
-        // A throwing handler is a final outcome for this event — settle the
-        // commit callback (with the aborted tx) instead of leaving callers
-        // that await it hanging.
-        runFinalCommitCallback();
-        tx.abandonStagedWork(eventAbandonError("handler threw"));
-      }
-      return;
-    }
-
-    // A dispatch whose handler body DID NOT RUN seals nothing (events.md
-    // §5). The runner records the skip when the handler's argument reads
-    // as `undefined`, and on a replica that is still loading what the
-    // argument reaches that is a cold read, not a schema mismatch: a
-    // computation that reads a document the replica does not hold yet
-    // publishes `undefined` until the load lands, so a handler reading
-    // through it finds its argument unresolved in exactly that window.
-    // Both arms below withdraw the transaction and run the handler again
-    // once the replica has moved; what differs is who re-delivers. Under
-    // events-down (server-execution v2 Phase 3) a dispatch without a served
-    // carriage is the client's speculative echo of an entry the server
-    // handles authoritatively and re-drains itself, so it takes neither arm:
-    // its skip seals as an empty speculative commit the authoritative
-    // consequence replaces.
-    if (
-      tx.dispatchedHandlerNotRun !== undefined &&
-      (served !== undefined ||
-        state.runtime.experimental.serverExecution !== true)
-    ) {
-      const reason = tx.dispatchedHandlerNotRun.reason;
-      // Taken before the abort, since the read set is what the client arm
-      // parks on.
-      const runLog = txToReactivityLog(tx);
-      if (tx.status().status === "ready") {
-        tx.abort(new Error(`handler did not run: ${reason}`));
-      }
-      if (served !== undefined) {
-        // Mark/effects atomicity (events.md §4, RULED 2026-08-27 — the
-        // a04 write-side member). The dispatch stamper wrote the entry's
-        // `consequenced` mark into this tx BEFORE the body ran
-        // (space-server.ts), so sealing the skipped run would commit a
-        // 1-op mark-only consequence — the entry permanently consumed
-        // with zero effects and no error (a04's seqs 53/56: two Create
-        // clicks lost to a transient argument-resolution failure). The
-        // withdrawal leaves the entry pending-unconsequenced, the drain
-        // re-delivers it (a drain copy's plain-deferral arm releases the
-        // in-flight guard and arms the rescan; the 8-deferral threshold
-        // hardens a permanently unresolvable argument into the visible
-        // §5 DROP notice), and the retried handler's cause-derived
-        // idempotent writes converge. An LT1 in-process copy carries no
-        // onFailure — its abort alone leaves the durable entry unmarked
-        // and the next wave's drain delivers it once, WITH a streamEntry
-        // (C8b).
-        reportServedEventFailure(served, {
-          kind: "deferred",
-          cause: "handler-not-run",
-          message: reason,
-        });
-        // The withdrawal is a deferral, and a deferral carries the
-        // drain's arrival-order BARRIER (events.md §2; review-6459 F1):
-        // the drain queues a pass's pending entries together, so
-        // same-space followers already sit behind this head and would
-        // dispatch — and SEAL — next, landing a later arrival's
-        // consequence ahead of the withdrawn entry's re-drain (the b01
-        // overtake: durable log ["B","A"] against arrival [a1, b1]).
-        deferLaterSameSpaceServedEvents(
-          state,
-          queuedEvent,
-          `whose served handler did not run (${reason})`,
-        );
-        runFinalCommitCallback();
-        return;
-      }
-      // A client dispatch has no durable entry, so the scheduler is its
-      // only re-deliverer. Sealing the skip would fire the commit callback
-      // on a transaction that wrote nothing, which a caller reads as the
-      // handling having completed. A one-shot (retries: false) is not
-      // re-run, and its callback sees the aborted transaction instead.
-      if (!retry) {
-        logger.warn(
-          "scheduler",
-          "Event handler did not run and the caller opted out of retry " +
-            "(retries: false); dropping",
-          { handlerId, reason },
-        );
-        runFinalCommitCallback();
-        tx.abandonStagedWork(eventAbandonError("retry opted out"));
-        return;
-      }
-      // Re-run within the same window a stale-basis rejection gets. The
-      // requeued head goes through the dependency preflight again, which
-      // waits for an invalid upstream computation; a computation that
-      // already settled clean on `undefined` is what the load park is
-      // for. Parked on the loads the run's own reads registered when any
-      // are in flight, since their landing is what re-invalidates that
-      // computation; otherwise after the backoff step, so a replica with
-      // nothing in flight neither busy-loops nor waits on a load that is
-      // not coming. The requeued event holds the head, so a re-run with
-      // nothing to park on is also counted against
-      // `HANDLER_NOT_RUN_BACKOFF_LIMIT`: an argument nothing in flight
-      // will resolve fails after those few short steps rather than
-      // holding every later event for the window. Either bound fails the
-      // handling loudly.
-      const failHandlerNotRun = (attempts: number, elapsedMs: number) => {
-        runFinalCommitCallback();
-        tx.abandonStagedWork(eventAbandonError(reason));
-        state.handleError(
-          new EventHandlerNotRunError({
-            handlerId,
-            reason,
-            attempts,
-            elapsedMs,
-          }),
-          action,
-        );
-      };
-      const parkKeys = state.collectPendingLoadParkKeys(queuedEvent, runLog);
-      const step = nextRetryStep(queuedEvent, state.backpressure);
-      if (step.kind === "convergence-failed") {
-        failHandlerNotRun(step.attempts, step.elapsedMs);
-        return;
-      }
-      const notRunBackoffs = (queuedEvent.notRunBackoffs ?? 0) +
-        (parkKeys.length === 0 ? 1 : 0);
-      if (notRunBackoffs > HANDLER_NOT_RUN_BACKOFF_LIMIT) {
-        failHandlerNotRun(
-          step.attempts,
-          state.backpressure.retryWindowMs -
-            (step.deadline - performance.now()),
-        );
-        return;
-      }
-      const wait = parkKeys.length > 0
-        ? `parked on ${parkKeys.length} load(s)`
-        : `after ${Math.round(step.delayMs)}ms`;
-      logger.debug(
-        "scheduler",
-        `Event handler did not run (${reason}); re-running ` +
-          `(attempt ${step.attempts}, ${wait})`,
-        { handlerId },
-      );
-      const requeued = requeueForRetry(
-        step.attempts,
-        step.deadline,
-        parkKeys.length > 0 ? undefined : step.runAt,
-        notRunBackoffs,
-      );
-      if (parkKeys.length > 0) {
-        state.parkHeadEventForLoads(requeued, parkKeys);
-      }
-      return;
-    }
-
-    state.runtime.prepareTxForCommit(tx);
-    const log = txToReactivityLog(tx);
-    const telemetryWrites = log.writes
-      .slice(0, EVENT_COMMIT_TELEMETRY_WRITE_LIMIT)
-      .map(formatEventCommitAddress);
-    // Do not await event commits here. commit() applies the transaction
-    // locally before returning, and the scheduler must let later client work
-    // continue against that speculative state while server confirmation is in
-    // flight. Downstream dirtying below is based on those locally applied
-    // changed writes, not server-confirmed durability. If the server rejects
-    // the commit, dependent speculative transactions are rejected as well and
-    // the normal retry path reruns the event. Durability is still observable:
-    // commit() registers itself with the storage manager's pending-commit
-    // barrier, which the client-facing idle (Scheduler.idleWithPendingCommits)
-    // waits on without blocking the scheduler loop here.
-    const handleCommitResult = (error: EventCommitError | undefined): void => {
-      if (
-        served !== undefined && error !== undefined &&
-        isLt1LateSealRefusal(error)
-      ) {
-        // The serving loop REFUSED this LT1 in-process copy's seal
-        // because it completed outside its appending wave (stage C
-        // build W3, (α); events.md §4's one-entry-one-completed-run
-        // sentence): the invariant working, not a failed commit — the
-        // durable entry is the truth and the drain delivers it with a
-        // streamEntry. Settle the copy quietly (no retry, no warn; the
-        // SpaceServer counted it — `events.lt1LateSealsRefused`). This
-        // early return also SKIPS the `scheduler.event.commit` telemetry
-        // submit below for the refused copy (deliberate: the copy is
-        // not a commit outcome; the drain's copy of the same entry
-        // reports its own).
-        logger.debug("lt1-late-seal-refused", () => [
-          `LT1 in-process copy of ${queuedEvent.id} sealed outside its ` +
-          "appending wave and was refused; the drain delivers the entry",
-        ]);
-        // No abandonment: the durable entry is still the truth and the drain
-        // delivers it, so a further attempt at this event is coming and work
-        // staged on it is waiting for something rather than nothing.
-        runFinalCommitCallback();
-        return;
-      }
-      if (served !== undefined && error !== undefined) {
-        logger.warn("served-event-commit-failed", () => [
-          `served event ${queuedEvent.id} commit failed`,
-          error,
-        ]);
-      }
-      const permanentRejection = error && isPermanentRejection(error)
-        ? error.precondition
-        : undefined;
-      // Classify the commit outcome. A committed write that represents user
-      // intent must converge or fail loudly: a stale-basis rejection backs off
-      // and retries within a bounded window rather than being dropped; a
-      // permanent or non-stale-basis rejection is not retried; an unconverged
-      // write surfaces a terminal error.
-      const disposition = classifyCommitDisposition(
-        error,
-        queuedEvent,
-        state.backpressure,
-      );
-
-      let telemetryFailure: { readonly error: unknown } | undefined;
-      try {
-        state.runtime.telemetry.submit({
-          type: "scheduler.event.commit",
-          handlerId,
-          handlerInfo: state.getActionTelemetryInfo(handler),
-          readCount: log.reads.length + log.shallowReads.length,
-          writeCount: log.writes.length,
-          changedWriteCount: log.writes.length,
-          writes: telemetryWrites,
-          ...(log.writes.length > EVENT_COMMIT_TELEMETRY_WRITE_LIMIT
-            ? { writesTruncated: true }
-            : {}),
-          ...(error ? { error: error.message } : {}),
-          ...(permanentRejection !== undefined ? { permanentRejection } : {}),
-          ...(disposition.kind === "backoff"
-            ? {
-              retryAttempt: disposition.attempts,
-              backoffMs: disposition.delayMs,
-            }
-            : {}),
-          ...(disposition.kind === "convergence-failed"
-            ? { retryAttempt: disposition.attempts, terminal: "convergence" }
-            : {}),
-          ...(disposition.kind === "permanent"
-            ? { terminal: "permanent" }
-            : {}),
-          ...(disposition.kind === "terminal" ? { terminal: "rule" } : {}),
-        });
-      } catch (error) {
-        telemetryFailure = { error };
-      }
-
-      // A served event's DETERMINISTIC CFC pre-storage refusal seals an
-      // error consequence (events.md §5: the error IS the consequence — the
-      // same honesty as the throw arm in `finalize` above). Without one the
-      // durable entry stays unconsequenced and every wave re-drains it into
-      // the identical refusal. Scoped to exactly the class
-      // `reportDroppedCfcRejectedWrite` reports: every other non-retried
-      // outcome has its own explicit routing below: typed delivery failures
-      // checkpoint, proven-no-commit failures terminalize, and a handler abort
-      // seals a safe error consequence. Called before the commit callback on
-      // both paths that carry a refusal, so the drain's in-flight guard sees
-      // the staged notice ("marked") rather than releasing the still-"queued"
-      // copy.
-      const sealCfcRefusalConsequence = (): void => {
-        if (served === undefined || !isCfcRejectedCommitError(error)) return;
-        reportServedEventFailure(served, {
-          kind: "error",
-          message: error.message,
-        });
-      };
-      const deferCommitPreparationFailure = (): void => {
-        if (served === undefined || error?.name !== "CommitPreparationError") {
-          return;
-        }
-        reportServedEventFailure(served, {
-          kind: "deferred",
-          cause: "delivery-failure",
-          role: "failed-head",
-          phase: "commit-preparation",
-          failure: {
-            failureClass: "unknown",
-            recoveryEpoch: "commit-preparation",
-            permanentEvidence: false,
-          },
-        });
-      };
-      const routeProvenNoCommitFailure = (): void => {
-        if (served === undefined || error === undefined) return;
-        const rowLabelRefusal = error.name === "RowLabelCommitError";
-        const aclRevision = (error as { aclRevision?: unknown }).aclRevision;
-        const authorizationRefusal = error.name === "AuthorizationError" &&
-          (error as { permanentEvidence?: unknown }).permanentEvidence ===
-            true &&
-          typeof aclRevision === "number";
-        if (!rowLabelRefusal && !authorizationRefusal) return;
-        reportServedEventFailure(served, {
-          kind: "deferred",
-          cause: "delivery-failure",
-          role: "failed-head",
-          phase: "commit-finalization",
-          failure: {
-            failureClass: rowLabelRefusal ? "protocol" : "authorization",
-            recoveryEpoch: rowLabelRefusal
-              ? "row-label-verdict"
-              : `acl:${aclRevision}`,
-            permanentEvidence: true,
-          },
-        });
-      };
-      const sealExplicitHandlerAbort = (): void => {
-        if (served === undefined || !isExplicitTransactionAbort(error)) return;
-        reportServedEventFailure(served, {
-          kind: "error",
-          message: "Event handler aborted its transaction",
-        });
-      };
-
-      switch (disposition.kind) {
-        case "success":
-          runFinalCommitCallback();
-          break;
-        case "give-up":
-          deferCommitPreparationFailure();
-          routeProvenNoCommitFailure();
-          sealExplicitHandlerAbort();
-          sealCfcRefusalConsequence();
-          runFinalCommitCallback();
-          reportDroppedCfcRejectedWrite(error, handlerId);
-          // No further attempt at this event is coming, so anything staged on
-          // the transaction and waiting for it to commit is waiting for
-          // nothing.
-          tx.abandonStagedWork(error as CommitError);
-          logger.warn(
-            "scheduler",
-            disposition.reason === "non-retryable"
-              ? "Event handler commit failed with a non-stale-basis rejection " +
-                "that re-running cannot resolve; dropping the write without retry"
-              : "Event handler commit failed and the caller opted out of " +
-                "retry (retries: false); dropping the write",
-            { error, handlerId },
-          );
-          break;
-        case "backoff":
-          logger.debug(
-            "scheduler",
-            `Event handler commit failed transiently; backing off ` +
-              `${Math.round(disposition.delayMs)}ms ` +
-              `(attempt ${disposition.attempts})`,
-            { handlerId },
-          );
-          requeueForRetry(
-            disposition.attempts,
-            disposition.deadline,
-            disposition.runAt,
-          );
-          break;
-        case "terminal":
-          // A deterministic commit-rule refusal: run the final callback and
-          // stop. No retry (would recompute the identical refused write) and no
-          // handleError — the rejection is observable via the commit telemetry
-          // marker (`terminal: "rule"`), mirroring the permanent path; surfacing
-          // a scheduler error here is reserved for non-deterministic failures.
-          // A CFC boundary refusal is classified terminal rather than
-          // give-up, so both of the give-up path's CFC obligations have to
-          // hold here too: seal the served entry's error consequence, and
-          // report the dropped write. Neither is optional — see
-          // `sealCfcRefusalConsequence` for what an unconsequenced entry
-          // costs, and `reportDroppedCfcRejectedWrite` for why the
-          // `logger.warn` below is not enough on its own.
-          deferCommitPreparationFailure();
-          routeProvenNoCommitFailure();
-          sealCfcRefusalConsequence();
-          runFinalCommitCallback();
-          reportDroppedCfcRejectedWrite(error, handlerId);
-          tx.abandonStagedWork(error as CommitError);
-          logger.warn(
-            "scheduler",
-            "Event handler commit terminally rejected (deterministic refusal); " +
-              "not retrying",
-            { error, handlerId },
-          );
-          break;
-        case "permanent":
-          runFinalCommitCallback();
-          tx.abandonStagedWork(error as CommitError);
-          if (permanentRejection === "receipt-exists") {
-            logger.warn(
-              "event-lost-race",
-              () => [
-                "Event handling lost the receipt race",
-                { eventId: queuedEvent.id, handlerId },
-              ],
-            );
+  let failureFinalized = false;
+  // A failed setup or handler completes every owner notification once, even
+  // when one observer throws. The original failure remains the event outcome.
+  const finalizeFailure = (error: unknown) => {
+    if (failureFinalized) return;
+    failureFinalized = true;
+    const handlerError = error instanceof Error
+      ? error
+      : new Error(String(error));
+    for (
+      const complete of [
+        () => {
+          if (tx.status().status === "ready") {
+            tx.clearReadOnly?.();
+            tx.abort(handlerError);
           }
-          logger.warn(
-            "scheduler",
-            "Event handler commit permanently rejected; not retrying",
-            { error, handlerId, permanentRejection },
-          );
-          break;
-        case "convergence-failed": {
-          runFinalCommitCallback();
-          tx.abandonStagedWork(error as CommitError);
-          logger.error(
-            "commit-convergence-failed",
-            () => [
-              "Committed write did not converge within the retry window",
-              { handlerId, attempts: disposition.attempts },
-            ],
-          );
-          state.handleError(
-            new CommitConvergenceError({
-              handlerId,
-              attempts: disposition.attempts,
-              elapsedMs: disposition.elapsedMs,
-              cause: error,
-            }),
-            action,
-          );
-          break;
-        }
+        },
+        releaseLineage,
+        () => state.handleError(handlerError, action),
+        () =>
+          reportServedEventFailure(served, {
+            kind: "error",
+            message: handlerError.message,
+          }),
+        runFinalCommitCallback,
+        () => tx.abandonStagedWork(eventAbandonError("event execution failed")),
+      ]
+    ) {
+      try {
+        complete();
+      } catch (notificationError) {
+        logger.error(
+          "schedule-error",
+          "Error completing failed event:",
+          notificationError,
+        );
       }
-      if (telemetryFailure !== undefined) {
-        throw telemetryFailure.error;
-      }
-    };
-    const handled = tx.commit().then(
-      ({ error }) => handleCommitResult(error),
-      (reason) => handleCommitResult(normalizeEventCommitRejection(reason)),
-    ).catch((error) => {
-      logger.error(
-        "schedule-error",
-        "Event handler commit result handling failed:",
-        error,
-      );
-    });
-    // The barrier entry commit() registered settles with the commit
-    // promise, but the disposition above — a conflict's backoff requeue in
-    // particular — runs a few microtasks later. Register the handled chain
-    // too, so the pending-commit barrier cannot release in the gap between
-    // a rejection settling and its retry being requeued.
-    state.runtime.storageManager.trackPendingCommit(handled);
+    }
   };
 
   try {
-    if (hasAnnotatedWrites(handler)) {
-      recordTrustedEventPolicyInputs(tx, handler.writes, eventValue);
-    }
-    const actionStartTime = performance.now();
-    logger.timeStart(
-      "scheduler",
-      "execute",
-      "event",
-      "handlerAction",
-    );
-    try {
-      const runningPromise = Promise.resolve(
-        state.runtime.harness.invoke(() => action(tx)),
-      ).then(() => {
-        const trustedEventCandidates =
-          trustedEventWriteCandidatesFromTransaction(tx, handler, [
-            queuedEvent.eventLink.space,
-          ]);
-        recordTrustedEventPolicyInputs(
-          tx,
-          trustedEventCandidates,
-          eventValue,
-        );
-        const duration = (performance.now() - actionStartTime) / 1000;
-        if (duration > 10) {
-          console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
+    tx.dispatchedEventId = queuedEvent.id;
+    state.runtime.scheduler.beginReadAttempt(tx, "event", handlerId);
+    tx.dispatchedEventTime = queuedEvent.time;
+    tx.dispatchedRuntimeInjectedEventKeys =
+      queuedEvent.runtimeInjectedEventKeys;
+    tx.tx.immediate = true;
+    tx.tx.sourceAction = action;
+    // Server-execution v2 stage F (serving-loop.md §3d): the event-dispatch
+    // choke point — a serving runtime's installed stamper attaches the wave
+    // run context (kind event-handler, the durable event id) before the
+    // handler runs. A no-op everywhere else. The action identity is the
+    // HANDLER's durable id (`handlerId`, computed above): the queued
+    // `action` is a per-event wrapper closure, and stamping IT hands the
+    // basis index a non-durable identity — the wrapper's inferred name
+    // collapses every handler onto one constant id (rows overwrite across
+    // handlers), while the requeue paths' anonymous wrappers split rows
+    // per event; scheduler_basis requires "durable ... restart-stable"
+    // (serving-loop.md §3b).
+    //
+    // Stage P2-F — the LT6 inheritance rule (events.md §2, RULED
+    // 2026-08-03: "an event emitted by ANY run carries that run's acting
+    // identity — events run as the session they originated from"): a
+    // server-side event whose ORIGIN transaction ran under a stamped
+    // per-run identity hands that identity to the handler run, so a
+    // cascade rooted in a demanded (user, session) derivation preserves
+    // the acting pair hop by hop instead of blanking to the userless
+    // service fallback. Off the serving posture `waveRunContextOf` finds
+    // no stamp and this is inert. Phase 3's events carry the
+    // server-stamped `firedAt` through their own carriage (`served`,
+    // below), and that explicit carriage WINS where it speaks: a drained
+    // entry's stamp is the event's own durable actor, while the origin
+    // inheritance covers the in-process queueEvent shapes that carry no
+    // served stamp.
+    const originContext = queuedEvent.originTx !== undefined
+      ? waveRunContextOf(queuedEvent.originTx)
+      : undefined;
+    state.runtime.stampServerRun(tx, {
+      actionId: handlerId,
+      kind: "event-handler",
+      eventId: queuedEvent.id,
+      // The same-wave cascade's fold key (C8d; review 2026-08-11 M2):
+      // the emitter's own eventId, threaded from the emission's
+      // dispatch carriage so the wave can roll a cascade child back
+      // with its requeued parent. The client-echo thread
+      // (QueuedEvent.parentEventId, independent review M1) carries the
+      // same fact on a flag-ON client's speculative cascade, where the
+      // navigate capture derives its ATTEMPT-MINTED tag from it
+      // (navigate-context.ts) — the speculation stamp is never a wave
+      // context, so the fold semantics stay server-only.
+      ...((served?.parentEventId ?? queuedEvent.parentEventId) !== undefined
+        ? {
+          parentEventId: served?.parentEventId ?? queuedEvent.parentEventId,
         }
-        logger.debug("action-timing", () => {
-          return [
-            `Action ${actionId} completed in ${duration.toFixed(3)}s`,
-          ];
+        : {}),
+      ...(served?.firedAt !== undefined
+        ? {
+          // LD1 (protocol.md §2, scopes.md §5): the handler runs AS the
+          // event's server-stamped actor — its scoped reads and writes
+          // resolve against the acting identity, and the attribution
+          // annotations carry it. A run with NO acting user carries no
+          // attribution at all (protocol.md §1); a sessionless chain
+          // supplies no session component, so a session-scoped write
+          // fails closed in resolveScopeKey (events.md §2's
+          // sessionless-actor error).
+          ...(served.firedAt.user !== undefined
+            ? {
+              acting: {
+                user: served.firedAt.user,
+                ...(served.firedAt.session !== undefined &&
+                    served.firedAt.session !== "server"
+                  ? { session: served.firedAt.session }
+                  : {}),
+              },
+            }
+            : {}),
+          scopeKeyIdentity: {
+            principal: served.firedAt.user,
+            sessionId: served.firedAt.session === "server"
+              ? undefined
+              : served.firedAt.session,
+          } as never,
+        }
+        : originContext?.scopeKeyIdentity !== undefined
+        ? { scopeKeyIdentity: originContext.scopeKeyIdentity }
+        : {}),
+      ...(originContext?.actionScopeKey !== undefined
+        ? { actionScopeKey: originContext.actionScopeKey }
+        : {}),
+      ...(served?.streamEntry !== undefined
+        ? { streamEntry: served.streamEntry }
+        : {}),
+      // The LT1 in-process copy's appending-wave identity (stage C build
+      // W3, (α)): the emitter's transaction, resolved by the SpaceServer's
+      // stamper to the wave that carries this event's durable entry.
+      ...(served?.lt1 !== undefined ? { lt1: served.lt1 } : {}),
+    });
+    if (queuedEvent.originTx !== undefined) {
+      const originLocalSeq = state.getOriginLocalSeq(
+        queuedEvent.originTx,
+        queuedEvent.eventLink.space,
+      );
+      if (
+        originLocalSeq !== undefined &&
+        state.lineageStatus(queuedEvent.originTx) === "pending" &&
+        state.runtime.experimental.commitPreconditions === true &&
+        // Events-down (runtime-mapping N26): the receipt/precondition
+        // exactly-once machinery is SUBSUMED by the stream's
+        // `eventWatermark` (events.md §4) and the two mechanisms MUST NOT
+        // be active for the same event. Under the flag the handler run is
+        // a diverted echo (client) or a wave-sealed run (server) — its
+        // tx never carries wire preconditions.
+        state.runtime.experimental.serverExecution !== true
+      ) {
+        tx.addCommitPrecondition?.(queuedEvent.eventLink.space, {
+          kind: "origin-committed",
+          originLocalSeq,
         });
-        finalize();
-      }).catch((error) => finalize(error));
-      state.setRunningPromise(runningPromise);
-      await runningPromise;
-    } finally {
-      logger.timeEnd(
+      }
+      releaseLineage();
+    }
+    const actionId = state.getActionId(action);
+
+    // Re-queue this event for an immediate re-run. This is the inSpace-name
+    // resolution path (RetryImmediately): the run referenced a pattern space by
+    // name that has now been resolved, so re-running resolves it synchronously from
+    // the cache. No count guards this loop — name resolution is monotonic (each
+    // re-run resolves at least one previously-unresolved name, and a resolved name
+    // never becomes pending again), so a handler with finitely many distinct
+    // inSpace names terminates. Dispatch released the lineage registration above,
+    // so the fresh QueuedEvent must be re-recorded: otherwise an origin that fails
+    // while the retry is queued cannot remove it, and the post-settlement
+    // originStatus() fallback ("confirmed") would let a descendant of a failed
+    // origin run.
+    const requeueForNameResolution = () => {
+      // A served name-resolution retry re-enters this scheduler settle. If it
+      // runs before the flush deadline, the installed destination seals its
+      // warmed-cache run into the current wave; a cut instead leaves the
+      // existing LT1-purge/durable-drain cadence in charge. The retry keeps the
+      // served carriage: acting identity, stream-entry consequence mark, LT1
+      // ownership, and failure hook. This does not opt the event into commit
+      // retries; `retry` remains false and a failed commit still belongs to the
+      // wave/drain cadence.
+      const requeued: QueuedEvent = {
+        id: queuedEvent.id,
+        // The flag rides every requeue with the id it describes: dropping it
+        // would let a later same-origin send select this entry as a collapse
+        // survivor and rewrite the payload its receipt is about to witness.
+        callerSuppliedId: queuedEvent.callerSuppliedId,
+        enqueueSeq: queuedEvent.enqueueSeq,
+        time: queuedEvent.time,
+        originTx: queuedEvent.originTx,
+        action,
+        eventLink: queuedEvent.eventLink,
+        handler,
+        event: eventValue,
+        runtimeInjectedEventKeys: queuedEvent.runtimeInjectedEventKeys,
+        retry,
+        onCommit,
+        ...(queuedEvent.served !== undefined
+          ? { served: queuedEvent.served }
+          : {}),
+        ...(queuedEvent.parentEventId !== undefined
+          ? { parentEventId: queuedEvent.parentEventId }
+          : {}),
+        // The intent's retry budget rides along: a name resolution in the
+        // middle of a retry sequence is settlement, not a fresh start.
+        ...(queuedEvent.retryAttempts !== undefined
+          ? { retryAttempts: queuedEvent.retryAttempts }
+          : {}),
+        ...(queuedEvent.retryDeadline !== undefined
+          ? { retryDeadline: queuedEvent.retryDeadline }
+          : {}),
+        ...(queuedEvent.notRunBackoffs !== undefined
+          ? { notRunBackoffs: queuedEvent.notRunBackoffs }
+          : {}),
+      };
+      insertInEnqueueOrder(state.eventQueue, requeued);
+      if (requeued.originTx !== undefined) {
+        state.recordLineageEvent(requeued.originTx, requeued);
+      }
+      state.queueExecution();
+    };
+
+    // Re-queue a transient outcome for a later retry. With `runAt` the retry is
+    // parked via notBefore so the scheduler backs off (capped exponential delay)
+    // instead of busy-looping; without it the caller parks the requeued head on
+    // something else, such as a load. idle()/settled() wait for a parked head
+    // either way, so a converging write still completes within a settle. The
+    // retry attempt count and deadline are carried forward; `retry` is preserved
+    // untouched (it gates whether this event retries at all, which a windowed
+    // re-queue does not change).
+    const requeueForRetry = (
+      attempts: number,
+      deadline: number,
+      runAt: number | undefined,
+      notRunBackoffs: number | undefined = queuedEvent.notRunBackoffs,
+    ): QueuedEvent => {
+      // Same served-absence assert as the name-resolution requeue above:
+      // served copies queue with retries: false, so a stale-basis failure
+      // classifies give-up "opt-out" and never reaches the backoff window —
+      // the wave is a served copy's retry cadence. A served entry rebuilt
+      // here would silently shed the acting identity and the failure hook;
+      // served retry semantics are undecided, so fail loudly instead.
+      if (queuedEvent.served !== undefined) {
+        throw new Error(
+          "requeueForBackoff reached with a served event; served retry " +
+            "semantics are undecided (see the comment at this assert)",
+        );
+      }
+      const requeued: QueuedEvent = {
+        id: queuedEvent.id,
+        // Same as the name-resolution requeue above: the flag travels with the
+        // id, or the collapse-survivor exclusion silently ends at the first
+        // retry.
+        callerSuppliedId: queuedEvent.callerSuppliedId,
+        enqueueSeq: queuedEvent.enqueueSeq,
+        time: queuedEvent.time,
+        originTx: queuedEvent.originTx,
+        action,
+        eventLink: queuedEvent.eventLink,
+        handler,
+        event: eventValue,
+        runtimeInjectedEventKeys: queuedEvent.runtimeInjectedEventKeys,
+        retry,
+        onCommit,
+        retryAttempts: attempts,
+        retryDeadline: deadline,
+        ...(runAt !== undefined ? { notBefore: runAt } : {}),
+        ...(notRunBackoffs !== undefined ? { notRunBackoffs } : {}),
+        // A cascade child stays one: the dispatch stamp reads the emitting
+        // run's id off the requeued entry as it did off the first.
+        ...(queuedEvent.parentEventId !== undefined
+          ? { parentEventId: queuedEvent.parentEventId }
+          : {}),
+      };
+      insertInEnqueueOrder(state.eventQueue, requeued);
+      if (requeued.originTx !== undefined) {
+        state.recordLineageEvent(requeued.originTx, requeued);
+      }
+      state.queueExecution();
+      return requeued;
+    };
+
+    const finalize = (error?: unknown): void => {
+      // A RetryImmediately signal means the handler referenced an inSpace("name")
+      // target that has now been resolved into the runtime cache. Abort this run's
+      // transaction and re-queue the event so the handler re-runs and resolves the
+      // name synchronously.
+      if (error instanceof RetryImmediately) {
+        if (tx.status().status === "ready") {
+          tx.abort(error);
+        }
+        if (retry || served !== undefined) {
+          requeueForNameResolution();
+        } else {
+          // An unserved retries:false event is a one-shot; it does not re-run to
+          // resolve names. Served events take the same-wave arm above because
+          // the server, not a later client speculation, owns their result.
+          logger.warn(
+            "scheduler",
+            "Event handler needed inSpace-name resolution but opted out of " +
+              "retry (retries: false); dropping",
+            { handlerId },
+          );
+          runFinalCommitCallback();
+          tx.abandonStagedWork(eventAbandonError("retry opted out"));
+        }
+        return;
+      }
+
+      if (error) {
+        finalizeFailure(error);
+        return;
+      }
+
+      // A dispatch whose handler body DID NOT RUN seals nothing (events.md
+      // §5). The runner records the skip when the handler's argument reads
+      // as `undefined`, and on a replica that is still loading what the
+      // argument reaches that is a cold read, not a schema mismatch: a
+      // computation that reads a document the replica does not hold yet
+      // publishes `undefined` until the load lands, so a handler reading
+      // through it finds its argument unresolved in exactly that window.
+      // Both arms below withdraw the transaction and run the handler again
+      // once the replica has moved; what differs is who re-delivers. Under
+      // events-down (server-execution v2 Phase 3) a dispatch without a served
+      // carriage is the client's speculative echo of an entry the server
+      // handles authoritatively and re-drains itself, so it takes neither arm:
+      // its skip seals as an empty speculative commit the authoritative
+      // consequence replaces.
+      if (
+        tx.dispatchedHandlerNotRun !== undefined &&
+        (served !== undefined ||
+          state.runtime.experimental.serverExecution !== true)
+      ) {
+        const reason = tx.dispatchedHandlerNotRun.reason;
+        // Taken before the abort, since the read set is what the client arm
+        // parks on.
+        const runLog = txToReactivityLog(tx);
+        if (tx.status().status === "ready") {
+          tx.abort(new Error(`handler did not run: ${reason}`));
+        }
+        if (served !== undefined) {
+          // Mark/effects atomicity (events.md §4, RULED 2026-08-27 — the
+          // a04 write-side member). The dispatch stamper wrote the entry's
+          // `consequenced` mark into this tx BEFORE the body ran
+          // (space-server.ts), so sealing the skipped run would commit a
+          // 1-op mark-only consequence — the entry permanently consumed
+          // with zero effects and no error (a04's seqs 53/56: two Create
+          // clicks lost to a transient argument-resolution failure). The
+          // withdrawal leaves the entry pending-unconsequenced, the drain
+          // re-delivers it (a drain copy's plain-deferral arm releases the
+          // in-flight guard and arms the rescan; the 8-deferral threshold
+          // hardens a permanently unresolvable argument into the visible
+          // §5 DROP notice), and the retried handler's cause-derived
+          // idempotent writes converge. An LT1 in-process copy carries no
+          // onFailure — its abort alone leaves the durable entry unmarked
+          // and the next wave's drain delivers it once, WITH a streamEntry
+          // (C8b).
+          reportServedEventFailure(served, {
+            kind: "deferred",
+            cause: "handler-not-run",
+            message: reason,
+          });
+          // The withdrawal is a deferral, and a deferral carries the
+          // drain's arrival-order BARRIER (events.md §2; review-6459 F1):
+          // the drain queues a pass's pending entries together, so
+          // same-space followers already sit behind this head and would
+          // dispatch — and SEAL — next, landing a later arrival's
+          // consequence ahead of the withdrawn entry's re-drain (the b01
+          // overtake: durable log ["B","A"] against arrival [a1, b1]).
+          deferLaterSameSpaceServedEvents(
+            state,
+            queuedEvent,
+            `whose served handler did not run (${reason})`,
+          );
+          runFinalCommitCallback();
+          return;
+        }
+        // A client dispatch has no durable entry, so the scheduler is its
+        // only re-deliverer. Sealing the skip would fire the commit callback
+        // on a transaction that wrote nothing, which a caller reads as the
+        // handling having completed. A one-shot (retries: false) is not
+        // re-run, and its callback sees the aborted transaction instead.
+        if (!retry) {
+          logger.warn(
+            "scheduler",
+            "Event handler did not run and the caller opted out of retry " +
+              "(retries: false); dropping",
+            { handlerId, reason },
+          );
+          runFinalCommitCallback();
+          tx.abandonStagedWork(eventAbandonError("retry opted out"));
+          return;
+        }
+        // Re-run within the same window a stale-basis rejection gets. The
+        // requeued head goes through the dependency preflight again, which
+        // waits for an invalid upstream computation; a computation that
+        // already settled clean on `undefined` is what the load park is
+        // for. Parked on the loads the run's own reads registered when any
+        // are in flight, since their landing is what re-invalidates that
+        // computation; otherwise after the backoff step, so a replica with
+        // nothing in flight neither busy-loops nor waits on a load that is
+        // not coming. The requeued event holds the head, so a re-run with
+        // nothing to park on is also counted against
+        // `HANDLER_NOT_RUN_BACKOFF_LIMIT`: an argument nothing in flight
+        // will resolve fails after those few short steps rather than
+        // holding every later event for the window. Either bound fails the
+        // handling loudly.
+        const failHandlerNotRun = (attempts: number, elapsedMs: number) => {
+          runFinalCommitCallback();
+          tx.abandonStagedWork(eventAbandonError(reason));
+          state.handleError(
+            new EventHandlerNotRunError({
+              handlerId,
+              reason,
+              attempts,
+              elapsedMs,
+            }),
+            action,
+          );
+        };
+        const parkKeys = state.collectPendingLoadParkKeys(queuedEvent, runLog);
+        const step = nextRetryStep(queuedEvent, state.backpressure);
+        if (step.kind === "convergence-failed") {
+          failHandlerNotRun(step.attempts, step.elapsedMs);
+          return;
+        }
+        const notRunBackoffs = (queuedEvent.notRunBackoffs ?? 0) +
+          (parkKeys.length === 0 ? 1 : 0);
+        if (notRunBackoffs > HANDLER_NOT_RUN_BACKOFF_LIMIT) {
+          failHandlerNotRun(
+            step.attempts,
+            state.backpressure.retryWindowMs -
+              (step.deadline - performance.now()),
+          );
+          return;
+        }
+        const wait = parkKeys.length > 0
+          ? `parked on ${parkKeys.length} load(s)`
+          : `after ${Math.round(step.delayMs)}ms`;
+        logger.debug(
+          "scheduler",
+          `Event handler did not run (${reason}); re-running ` +
+            `(attempt ${step.attempts}, ${wait})`,
+          { handlerId },
+        );
+        const requeued = requeueForRetry(
+          step.attempts,
+          step.deadline,
+          parkKeys.length > 0 ? undefined : step.runAt,
+          notRunBackoffs,
+        );
+        if (parkKeys.length > 0) {
+          state.parkHeadEventForLoads(requeued, parkKeys);
+        }
+        return;
+      }
+
+      state.runtime.prepareTxForCommit(tx);
+      const log = txToReactivityLog(tx);
+      const telemetryWrites = log.writes
+        .slice(0, EVENT_COMMIT_TELEMETRY_WRITE_LIMIT)
+        .map(formatEventCommitAddress);
+      // Do not await event commits here. commit() applies the transaction
+      // locally before returning, and the scheduler must let later client work
+      // continue against that speculative state while server confirmation is in
+      // flight. Downstream dirtying below is based on those locally applied
+      // changed writes, not server-confirmed durability. If the server rejects
+      // the commit, dependent speculative transactions are rejected as well and
+      // the normal retry path reruns the event. Durability is still observable:
+      // commit() registers itself with the storage manager's pending-commit
+      // barrier, which the client-facing idle (Scheduler.idleWithPendingCommits)
+      // waits on without blocking the scheduler loop here.
+      const handleCommitResult = (
+        error: EventCommitError | undefined,
+      ): void => {
+        if (
+          served !== undefined && error !== undefined &&
+          isLt1LateSealRefusal(error)
+        ) {
+          // The serving loop REFUSED this LT1 in-process copy's seal
+          // because it completed outside its appending wave (stage C
+          // build W3, (α); events.md §4's one-entry-one-completed-run
+          // sentence): the invariant working, not a failed commit — the
+          // durable entry is the truth and the drain delivers it with a
+          // streamEntry. Settle the copy quietly (no retry, no warn; the
+          // SpaceServer counted it — `events.lt1LateSealsRefused`). This
+          // early return also SKIPS the `scheduler.event.commit` telemetry
+          // submit below for the refused copy (deliberate: the copy is
+          // not a commit outcome; the drain's copy of the same entry
+          // reports its own).
+          logger.debug("lt1-late-seal-refused", () => [
+            `LT1 in-process copy of ${queuedEvent.id} sealed outside its ` +
+            "appending wave and was refused; the drain delivers the entry",
+          ]);
+          // No abandonment: the durable entry is still the truth and the drain
+          // delivers it, so a further attempt at this event is coming and work
+          // staged on it is waiting for something rather than nothing.
+          runFinalCommitCallback();
+          return;
+        }
+        if (served !== undefined && error !== undefined) {
+          logger.warn("served-event-commit-failed", () => [
+            `served event ${queuedEvent.id} commit failed`,
+            error,
+          ]);
+        }
+        const permanentRejection = error && isPermanentRejection(error)
+          ? error.precondition
+          : undefined;
+        // Classify the commit outcome. A committed write that represents user
+        // intent must converge or fail loudly: a stale-basis rejection backs off
+        // and retries within a bounded window rather than being dropped; a
+        // permanent or non-stale-basis rejection is not retried; an unconverged
+        // write surfaces a terminal error.
+        const disposition = classifyCommitDisposition(
+          error,
+          queuedEvent,
+          state.backpressure,
+        );
+
+        let telemetryFailure: { readonly error: unknown } | undefined;
+        try {
+          state.runtime.telemetry.submit({
+            type: "scheduler.event.commit",
+            handlerId,
+            handlerInfo: state.getActionTelemetryInfo(diagnosticHandler),
+            readCount: log.reads.length + log.shallowReads.length,
+            writeCount: log.writes.length,
+            changedWriteCount: log.writes.length,
+            writes: telemetryWrites,
+            ...(log.writes.length > EVENT_COMMIT_TELEMETRY_WRITE_LIMIT
+              ? { writesTruncated: true }
+              : {}),
+            ...(error ? { error: error.message } : {}),
+            ...(permanentRejection !== undefined ? { permanentRejection } : {}),
+            ...(disposition.kind === "backoff"
+              ? {
+                retryAttempt: disposition.attempts,
+                backoffMs: disposition.delayMs,
+              }
+              : {}),
+            ...(disposition.kind === "convergence-failed"
+              ? { retryAttempt: disposition.attempts, terminal: "convergence" }
+              : {}),
+            ...(disposition.kind === "permanent"
+              ? { terminal: "permanent" }
+              : {}),
+            ...(disposition.kind === "terminal" ? { terminal: "rule" } : {}),
+          });
+        } catch (error) {
+          telemetryFailure = { error };
+        }
+
+        // A served event's DETERMINISTIC CFC pre-storage refusal seals an
+        // error consequence (events.md §5: the error IS the consequence — the
+        // same honesty as the throw arm in `finalize` above). Without one the
+        // durable entry stays unconsequenced and every wave re-drains it into
+        // the identical refusal. Scoped to exactly the class
+        // `reportDroppedCfcRejectedWrite` reports: every other non-retried
+        // outcome has its own explicit routing below: typed delivery failures
+        // checkpoint, proven-no-commit failures terminalize, and a handler abort
+        // seals a safe error consequence. Called before the commit callback on
+        // both paths that carry a refusal, so the drain's in-flight guard sees
+        // the staged notice ("marked") rather than releasing the still-"queued"
+        // copy.
+        const sealCfcRefusalConsequence = (): void => {
+          if (served === undefined || !isCfcRejectedCommitError(error)) return;
+          reportServedEventFailure(served, {
+            kind: "error",
+            message: error.message,
+          });
+        };
+        const deferCommitPreparationFailure = (): void => {
+          if (
+            served === undefined || error?.name !== "CommitPreparationError"
+          ) {
+            return;
+          }
+          reportServedEventFailure(served, {
+            kind: "deferred",
+            cause: "delivery-failure",
+            role: "failed-head",
+            phase: "commit-preparation",
+            failure: {
+              failureClass: "unknown",
+              recoveryEpoch: "commit-preparation",
+              permanentEvidence: false,
+            },
+          });
+        };
+        const routeProvenNoCommitFailure = (): void => {
+          if (served === undefined || error === undefined) return;
+          const rowLabelRefusal = error.name === "RowLabelCommitError";
+          const aclRevision = (error as { aclRevision?: unknown }).aclRevision;
+          const authorizationRefusal = error.name === "AuthorizationError" &&
+            (error as { permanentEvidence?: unknown }).permanentEvidence ===
+              true &&
+            typeof aclRevision === "number";
+          if (!rowLabelRefusal && !authorizationRefusal) return;
+          reportServedEventFailure(served, {
+            kind: "deferred",
+            cause: "delivery-failure",
+            role: "failed-head",
+            phase: "commit-finalization",
+            failure: {
+              failureClass: rowLabelRefusal ? "protocol" : "authorization",
+              recoveryEpoch: rowLabelRefusal
+                ? "row-label-verdict"
+                : `acl:${aclRevision}`,
+              permanentEvidence: true,
+            },
+          });
+        };
+        const sealExplicitHandlerAbort = (): void => {
+          if (served === undefined || !isExplicitTransactionAbort(error)) {
+            return;
+          }
+          reportServedEventFailure(served, {
+            kind: "error",
+            message: "Event handler aborted its transaction",
+          });
+        };
+
+        switch (disposition.kind) {
+          case "success":
+            runFinalCommitCallback();
+            break;
+          case "give-up":
+            deferCommitPreparationFailure();
+            routeProvenNoCommitFailure();
+            sealExplicitHandlerAbort();
+            sealCfcRefusalConsequence();
+            runFinalCommitCallback();
+            reportDroppedCfcRejectedWrite(error, handlerId);
+            // No further attempt at this event is coming, so anything staged on
+            // the transaction and waiting for it to commit is waiting for
+            // nothing.
+            tx.abandonStagedWork(error as CommitError);
+            logger.warn(
+              "scheduler",
+              disposition.reason === "non-retryable"
+                ? "Event handler commit failed with a non-stale-basis rejection " +
+                  "that re-running cannot resolve; dropping the write without retry"
+                : "Event handler commit failed and the caller opted out of " +
+                  "retry (retries: false); dropping the write",
+              { error, handlerId },
+            );
+            break;
+          case "backoff":
+            logger.debug(
+              "scheduler",
+              `Event handler commit failed transiently; backing off ` +
+                `${Math.round(disposition.delayMs)}ms ` +
+                `(attempt ${disposition.attempts})`,
+              { handlerId },
+            );
+            requeueForRetry(
+              disposition.attempts,
+              disposition.deadline,
+              disposition.runAt,
+            );
+            break;
+          case "terminal":
+            // A deterministic commit-rule refusal: run the final callback and
+            // stop. No retry (would recompute the identical refused write) and no
+            // handleError — the rejection is observable via the commit telemetry
+            // marker (`terminal: "rule"`), mirroring the permanent path; surfacing
+            // a scheduler error here is reserved for non-deterministic failures.
+            // A CFC boundary refusal is classified terminal rather than
+            // give-up, so both of the give-up path's CFC obligations have to
+            // hold here too: seal the served entry's error consequence, and
+            // report the dropped write. Neither is optional — see
+            // `sealCfcRefusalConsequence` for what an unconsequenced entry
+            // costs, and `reportDroppedCfcRejectedWrite` for why the
+            // `logger.warn` below is not enough on its own.
+            deferCommitPreparationFailure();
+            routeProvenNoCommitFailure();
+            sealCfcRefusalConsequence();
+            runFinalCommitCallback();
+            reportDroppedCfcRejectedWrite(error, handlerId);
+            tx.abandonStagedWork(error as CommitError);
+            logger.warn(
+              "scheduler",
+              "Event handler commit terminally rejected (deterministic refusal); " +
+                "not retrying",
+              { error, handlerId },
+            );
+            break;
+          case "permanent":
+            runFinalCommitCallback();
+            tx.abandonStagedWork(error as CommitError);
+            if (permanentRejection === "receipt-exists") {
+              logger.warn(
+                "event-lost-race",
+                () => [
+                  "Event handling lost the receipt race",
+                  { eventId: queuedEvent.id, handlerId },
+                ],
+              );
+            }
+            logger.warn(
+              "scheduler",
+              "Event handler commit permanently rejected; not retrying",
+              { error, handlerId, permanentRejection },
+            );
+            break;
+          case "convergence-failed": {
+            runFinalCommitCallback();
+            tx.abandonStagedWork(error as CommitError);
+            logger.error(
+              "commit-convergence-failed",
+              () => [
+                "Committed write did not converge within the retry window",
+                { handlerId, attempts: disposition.attempts },
+              ],
+            );
+            state.handleError(
+              new CommitConvergenceError({
+                handlerId,
+                attempts: disposition.attempts,
+                elapsedMs: disposition.elapsedMs,
+                cause: error,
+              }),
+              action,
+            );
+            break;
+          }
+        }
+        if (telemetryFailure !== undefined) {
+          throw telemetryFailure.error;
+        }
+      };
+      const handled = tx.commit().then(
+        ({ error }) => handleCommitResult(error),
+        (reason) => handleCommitResult(normalizeEventCommitRejection(reason)),
+      ).catch((error) => {
+        logger.error(
+          "schedule-error",
+          "Event handler commit result handling failed:",
+          error,
+        );
+      });
+      // The barrier entry commit() registered settles with the commit
+      // promise, but the disposition above — a conflict's backoff requeue in
+      // particular — runs a few microtasks later. Register the handled chain
+      // too, so the pending-commit barrier cannot release in the gap between
+      // a rejection settling and its retry being requeued.
+      state.runtime.storageManager.trackPendingCommit(handled);
+    };
+
+    try {
+      let implementation = handler;
+      if (isGuardedDispatcher(handler)) {
+        const selected = selectEventImplementation(handler, tx);
+        if (selected === undefined || selected !== presyncedImplementation) {
+          tx.dispatchedHandlerNotRun = {
+            reason:
+              "event implementation changed or is unavailable after presync",
+          };
+        } else {
+          implementation = selected;
+        }
+      }
+      if (hasAnnotatedWrites(implementation)) {
+        recordTrustedEventPolicyInputs(tx, implementation.writes, eventValue);
+      }
+      const actionStartTime = performance.now();
+      logger.timeStart(
         "scheduler",
         "execute",
         "event",
         "handlerAction",
       );
+      try {
+        const runningPromise = Promise.resolve(
+          state.runtime.harness.invoke(() =>
+            tx.dispatchedHandlerNotRun !== undefined
+              ? undefined
+              : isGuardedDispatcher(handler)
+              ? implementation(tx, eventValue)
+              : action(tx)
+          ),
+        ).then(() => {
+          const trustedEventCandidates =
+            trustedEventWriteCandidatesFromTransaction(tx, implementation, [
+              queuedEvent.eventLink.space,
+            ]);
+          recordTrustedEventPolicyInputs(
+            tx,
+            trustedEventCandidates,
+            eventValue,
+          );
+          const duration = (performance.now() - actionStartTime) / 1000;
+          if (duration > 10) {
+            console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
+          }
+          logger.debug("action-timing", () => {
+            return [
+              `Action ${actionId} completed in ${duration.toFixed(3)}s`,
+            ];
+          });
+          finalize();
+        }).catch((error) => finalize(error));
+        state.setRunningPromise(runningPromise);
+        await runningPromise;
+      } finally {
+        logger.timeEnd(
+          "scheduler",
+          "execute",
+          "event",
+          "handlerAction",
+        );
+      }
+    } catch (error) {
+      finalize(error);
     }
   } catch (error) {
-    finalize(error);
+    finalizeFailure(error);
   }
 }
 

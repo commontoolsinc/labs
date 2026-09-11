@@ -215,6 +215,16 @@ const READER_METHODS = new Set(["get"]);
 const OPAQUE_DERIVATION_METHODS = new Set([
   "map",
   "mapWithPattern",
+  "count",
+  "countWithPattern",
+  "sum",
+  "min",
+  "max",
+  "minBy",
+  "minByWithPattern",
+  "maxBy",
+  "maxByWithPattern",
+
   "flatMap",
   "flatMapWithPattern",
   "filter",
@@ -227,6 +237,16 @@ const FALLBACK_OPERATORS = new Set<ts.SyntaxKind>([
 const PRECISE_CHAIN_METHODS = new Set([
   "map",
   "mapWithPattern",
+  "count",
+  "countWithPattern",
+  "sum",
+  "min",
+  "max",
+  "minBy",
+  "minByWithPattern",
+  "maxBy",
+  "maxByWithPattern",
+
   "filter",
   "filterWithPattern",
   "flatMap",
@@ -3157,6 +3177,9 @@ export function analyzeFunctionCapabilities(
               // itself retain the receiver Cell in every synthesized closure
               // shape, so record the receiver read explicitly without
               // widening the root to wildcard.
+              if (!resolvedGetCalls.has(node)) {
+                trackFullShapeReadRef(receiver);
+              }
               if (ts.isCallChain(node) || !resolvedGetCalls.has(node)) {
                 trackReadRef(receiver);
                 recordMergeableReadSite(receiver, node);

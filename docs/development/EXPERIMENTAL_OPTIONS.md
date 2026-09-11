@@ -21,7 +21,7 @@ in the same change.
 flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-09-09. Each flag's section carries the date its status
+**Last reviewed:** 2026-09-10. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -35,7 +35,7 @@ was last checked against the code.
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
 | [`readerSchemaPrecedence`](#readerschemaprecedence)                         | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` env, or `RuntimeOptions.experimental`                                                                   | on                                                                                   | Robin McCollum (#6338)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
-| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **off** (`SERVER_EXECUTION_DEFAULT_ENABLED = false`; explicit `true` selects the other arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main at the ON default, then delete the flag and OFF path | Serving stack landed; OW28 served compilation remains open; the section's dated entries carry each flip; stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
+| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **off** (`SERVER_EXECUTION_DEFAULT_ENABLED = false`; explicit `true` selects the other arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main at the ON default, then delete the flag and OFF path | Serving stack and OW28 scoped compilation have direct coverage; Phase-7 gate dispositions govern a renewed rollout; the section's dated entries carry each flip; stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-explicit`                                                                   | Bernhard Seefeld (#3263)                              | tighten default toward `enforce-strict`                                                                                                                                                                                           | active; ladder is permanent                                                     |
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4479)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
@@ -52,6 +52,7 @@ was last checked against the code.
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off                                                                                  | Ben Follington (#4937; shell toggle #4974)            | graduate to always-on after live measurement, or remove if superseded                                                                                                                                                             | off by default; acquisition/removal ordering tested; real-latency measurement pending |
 | [`cfcRenderCeiling`](#cfcrenderceiling)                                     | `commonfabric.cfcRenderCeiling()` in the browser (localStorage)                                                                                 | off                                                                                  | Bernhard Seefeld (#4550)                              | graduate to an unconditional ceiling                                                                                                                                                                                           | implemented, off by default, dogfood only                                       |
 | [`INGEST_SELF_SERVE_ENABLED`](#ingest_self_serve_enabled) | `INGEST_SELF_SERVE_ENABLED` env on toolshed | off | Alex Komoroske (self-serve ingest channels) | graduate on once named-space keys stop deriving from a public passphrase | implemented, off by default |
+| [`SERVER_EXECUTION_STORE_READ_THROUGH`](#server_execution_store_read_through) | `SERVER_EXECUTION_STORE_READ_THROUGH` env on toolshed, or `SpaceServerPolicy.storeReadThrough` | off | Bernhard Seefeld (store read-through) | soak with the posture forced on, flip on, then delete the knob and the home-space session read path | implemented, off by default |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning)                                 | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache`                                                             | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts                          | Ian Hickson                                           | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked                                                                                                                                      | implemented, on by default for FUSE-T, soak-validated                           |
 
 Removed or never-shipped flags that documentation elsewhere still references are
@@ -145,7 +146,10 @@ server](#clients-that-are-not-built-alongside-their-server).
   deploy together: link writers replace inline schemas with
   `{ "$ref": "cid:<hash>" }` references to content-addressed schema
   documents, whose closure is installed into the destination space in the
-  same transaction as the reference; `$alias` bindings stamp the same
+  same transaction as the reference, and a result document's `schema`
+  metadata (the result schema a piece's setup writes, a receipt's shape)
+  takes the same reference form through the same staging; `$alias`
+  bindings stamp the same
   references at pattern serialization, resolving through the realm
   registry (an alias is a binding only by context — the storage layer
   treats `$alias`-shaped records as plain data); and watch/sync selectors
@@ -159,7 +163,11 @@ server](#clients-that-are-not-built-alongside-their-server).
   keeps reading throughout the rollout, and the server answers an
   unresolvable selector reference with a loud QueryError, which a
   compliant client never provokes; a schema decomposition refuses stays
-  inline exactly as with the flag off. The rollout is one-way: the flag
+  inline exactly as with the flag off. A reference in `schema` metadata
+  is delivered like a link's: the server ships its closure with the
+  document, and a client validates the member on arrival, so a server
+  deploys this behavior before the clients that write the reference. The
+  rollout is one-way: the flag
   turns on only once every deployed client is a reader, and references
   written under it persist, so turning it back off stops emission without
   un-writing anything.
@@ -182,6 +190,9 @@ server](#clients-that-are-not-built-alongside-their-server).
 - **Status on 2026-08-19.** Phases 1 and 2 implemented (#5878, #6011), on
   by default. The flag-off behaviors stay pinned by runner tests that pass
   `false` explicitly, which is also the rollback override.
+- **Status on 2026-09-11.** A result document's `schema` metadata takes the
+  reference form under the flag (#7299), delivered and validated like a
+  link position; the flag-off path keeps it inline.
 
 ### `plainResultReceipts`
 
@@ -369,8 +380,9 @@ server](#clients-that-are-not-built-alongside-their-server).
   (a test pins the cell to the constant); the dated status entries below
   carry its history (landed flip-ready dark at `false` 2026-08-16; flipped
   ON 2026-08-28; each later flip has its own entry). OW28's served
-  `compileAndRun` port remains an unmet Phase-7 ordered gate, so the flip
-  record is not evidence that every planned surface is implemented. The default
+  `compileAndRun` lifecycle has direct acceptance coverage. The Phase-7
+  ordered gates still apply; a flip record does not establish their
+  current verdicts. The default
   is read by every deployed-topology entry point — the `productionServer` / `remoteClient` construction presets
   (toolshed's operator runtime, the background piece service, the CLI,
   every pieces controller and integration harness against a toolshed),
@@ -414,12 +426,10 @@ server](#clients-that-are-not-built-alongside-their-server).
   OFF code path is removed — a separate post-soak
   PR (the plan's Phase 7 task 2; it also removes the opposite guard lanes and
   `build-toolshed-opposite`).
-- **Status on 2026-09-09 (coverage reconciliation).** The first-party
-  default remains OFF and the ON soak is paused. OW28's served `compileAndRun`
-  outbox/completion port is missing on main and remains an unmet Phase-7
-  ordered gate. Restore and verify that port before a renewed ON rollout;
-  the preserved sibling implementation is an input to that work, not proof
-  of a landed capability. The
+- **Status on 2026-09-10.** The first-party default remains OFF and
+  the ON soak is paused. OW28's served `compileAndRun` outbox/completion and
+  scoped child selection have direct lifecycle coverage. The Phase-7 gate
+  dispositions govern a renewed ON rollout. The
   [coverage register](../specs/server-side-execution/verification-coverage.md#current-status)
   carries the current scope and the audit's evidence boundaries.
 - **Status on 2026-09-03 (the ROLLBACK).** The rollback PR (#6840)
@@ -1300,6 +1310,49 @@ the per-epic implementation notes).
 - **Path to removal.** Fix named-space key derivation, run the retirement
   sweep, turn the flag on by default, then delete the gate and mount the router
   unconditionally.
+
+### `SERVER_EXECUTION_STORE_READ_THROUGH`
+
+- **Toggle via.** The `SERVER_EXECUTION_STORE_READ_THROUGH` environment
+  variable on toolshed, read by the serving-host bootstrap
+  ([`packages/toolshed/lib/server-execution.ts`](../../packages/toolshed/lib/server-execution.ts))
+  into `SpaceServerPolicy.storeReadThrough`; a harness constructing an
+  `ExecutorHost` sets the policy field directly. Only the literal `true` turns
+  it on; `false` and unset leave it off, and anything else warns and leaves it
+  off. Meaningful only with the serving loop running
+  ([`serverExecution`](#serverexecution) on).
+- **Added by.** Bernhard Seefeld, in the store read-through change.
+- **Purpose.** The serving runtime reads its HOME space straight from the
+  space's engine instead of over its loopback session: a document its replica
+  does not hold is read synchronously on first access, a `sync()` resolves
+  from the engine with no session watch, and the feed's admitted commits
+  re-read the documents the replica holds. The memory server then never walks
+  a selector's schema closure for the serving session, and the loopback
+  transport carries no frames for it. Writes and foreign-space reads stay on
+  the session. [`serving-loop.md`](../specs/server-side-execution/serving-loop.md)
+  §1 plane (a) states the posture and what it does not do.
+- **Current default and planned end state.** Off by default. The read-through
+  follows session delivery's rules in its own form: another principal's
+  instance is read only under a live tenure of the space's lease (a read that
+  finds the row lapsed runs the renew arm first, and is withheld when the
+  lease is not regained), and an address the store holds nothing at leaves no
+  record. What stands between it and a default is soak with the posture forced
+  on. The end state is on by default, then the session read path for the home
+  space goes.
+- **Status on 2026-09-11.** Implemented, off by default. With the posture
+  forced on, the runner's executor suites pass except two steps whose
+  expectations are session-specific: a precondition probe that reads the
+  serving replica to check what it holds (under the posture the probe itself
+  loads the instance), and the lease-lapse pin's withheld-then-re-delivered
+  shape (under the posture the read reacquires and is served at once). The
+  fan-out RAGGED case is pinned under the posture in
+  `packages/runner/test/executor-fan-out.test.ts`: the run that discovers
+  session depth serves the session instance at the moved ratchet, and a later
+  session-scoped write re-runs it under the session key. The toolshed-backed
+  integration lanes pass. Measured on the topic-board navigation benchmark:
+  the served journey runs in roughly a third of the time.
+- **Path to removal.** Soak with the posture forced on, flip the default, then
+  delete the knob and the home-space session read path it replaces.
 
 ## Flag-gated tripwires
 

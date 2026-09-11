@@ -17,6 +17,10 @@ Add a line for each new document to the index below.
 
 ## Writes, storage, and sync
 
+- [`collection-aggregates.md`](collection-aggregates.md) — named incremental
+  aggregates, their numeric contracts, public type surface, and update costs
+- [`read-accounting.md`](read-accounting.md) — opt-in reactive action read
+  counters, execution boundaries, and per-step pattern-test reports
 - [`collaborative-fields.md`](collaborative-fields.md) — operation-based fields,
   CodeMirror's opt-in editor path, retained cursors and reset behavior, and
   offline inspection

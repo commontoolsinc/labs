@@ -41,7 +41,6 @@ import {
 import {
   Cell,
   type ConsoleHandler,
-  decodeJsonPointer,
   decomposeSchema,
   deepEqual,
   encodeJsonPointer,
@@ -78,6 +77,7 @@ import {
   getCarriedCfcLabelView,
   type IFCLabel,
   mergeCfcLabelViews,
+  pruneCfcSchemaDefinitions,
   redactCaveatSourcesForDisplay,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
@@ -109,6 +109,7 @@ import {
   type CallableExecutionDeps,
   type CallableResolution,
   type CallableResultRef,
+  canonicalAddress,
   CF_RUNTIME_ERROR_LOG,
   type CliRuntimeErrorRecord,
   cloneWithoutBoundToolKeys,
@@ -2026,19 +2027,13 @@ async function tryResolvePieceCallableAt(
   };
 }
 
-/** The forced-stream cast: assert `name` on `cell` is a stream, then ask the
- * runtime whether it answers as one. The third and last resolution path of
- * `cf piece call` (tryResolvePieceHandler), where a handler whose stored
- * schema lost the stream marker still answers.
- *
- * It proves nothing, and belongs ONLY here. The cast's stream schema survives
- * link resolution for an inline value, so `Cell.isStream`'s schema branch
- * answers from the assertion the caller just made and every name passes.
- * That is acceptable as a dispatcher's last resort — the caller named this
- * verb, and a wrong cast fails harmlessly against a value with no handler
- * behind it. It is not acceptable anywhere that describes what a piece has:
- * the listing and the read-path guard both classify on definite stored
- * signals instead. Returns the cast cell, or null. */
+/**
+ * Helper for `tryResolvePieceHandler()`, which casts `name` to a stream when
+ * its stored schema has lost the stream marker. Returns the cast cell, or
+ * `null` when the cell cannot be cast. The cast establishes no evidence of a
+ * handler: `resolvePieceCallable()` checks the pattern's vocabulary first
+ * when that metadata is available.
+ */
 function probeForcedStreamCell(cell: any, name: string): any | null {
   if (
     typeof cell !== "object" || cell === null ||
@@ -2046,6 +2041,8 @@ function probeForcedStreamCell(cell: any, name: string): any | null {
   ) {
     return null;
   }
+  // For inline values, the cast's stream schema survives link resolution,
+  // so isStream() can answer true solely from the caller's assertion.
   const streamRoot = cell.asSchema({
     type: "object",
     properties: {
@@ -2204,6 +2201,52 @@ async function loadPieceForCallables(
   return { pieces, piece, space, resolvedConfig };
 }
 
+/**
+ * A requested verb absent from the piece's available pattern catalog and
+ * stored callable surface. Carries the public vocabulary and read commands
+ * so callers can recover without treating a verb listing as a data listing.
+ */
+export class UnknownPieceVerbError extends Error {
+  /** Constructs an instance with discovery commands for the resolved target. */
+  constructor(
+    callableName: string,
+    config: PieceConfig,
+    verbs: readonly PieceCallableListing[],
+  ) {
+    const address = canonicalAddress({
+      id: config.piece,
+      space: config.space,
+      scope: config.pieceScope ?? "space",
+    });
+    const names = verbs.map((verb) => {
+      const marks = [
+        ...(verb.tier === "wrapper" ? ["wrapper"] : []),
+        ...(verb.deprecated ? ["deprecated"] : []),
+      ];
+      return `\`${verb.name}\`${marks.length ? ` (${marks.join(", ")})` : ""}`;
+    }).join(", ");
+    super(
+      `Unknown verb \`${callableName}\` on piece \`${config.piece}\`.\n` +
+        `Available verbs (including wrappers and deprecated verbs): ${
+          names || "none"
+        }.\n` +
+        "Verbs are callable operations; readable data is discovered separately.\n" +
+        `Discover fields: ${
+          cliCommand(["piece", "describe", "--cell", address])
+        }\n` +
+        `Read a field: ${
+          cliCommand(["cell", "get", "--cell", address, "<field>"])
+        }`,
+    );
+  }
+
+  /** Error category used by CLI failure reports. */
+  override get name(): string {
+    return "UnknownPieceVerbError";
+  }
+}
+
+/** Resolves a stored callable, consulting the catalog before a stream cast. */
 async function resolvePieceCallable(
   config: PieceConfig,
   callableName: string,
@@ -2233,6 +2276,22 @@ async function resolvePieceCallable(
     callableName,
     "input",
   );
+  let discovery:
+    | Awaited<ReturnType<typeof listCallablesForLoadedPiece>>
+    | undefined;
+  if (!onResultCell && !onInputCell) {
+    discovery = await listCallablesForLoadedPiece(piece);
+    if (
+      !discovery.listing.incomplete &&
+      !discovery.listing.verbs.some((verb) => verb.name === callableName)
+    ) {
+      throw new UnknownPieceVerbError(
+        callableName,
+        { ...resolvedConfig, space },
+        discovery.listing.verbs,
+      );
+    }
+  }
   const resolved = onResultCell ?? onInputCell ??
     (await tryResolvePieceHandler(piece, pieces, space, callableName));
   if (!resolved) {
@@ -2251,11 +2310,12 @@ async function resolvePieceCallable(
     // which is the honest statement — the absence says this resolution cannot
     // describe a result, rather than promising an answer that is always none.
     //
-    // Both thunks read ONE load. They answer from the same compiled pattern
-    // and a help page pulls both, so a loader per thunk would double what a
-    // page costs — and the reason the result is a thunk at all is that the
-    // load is the expensive part.
-    let patternOnce: Promise<any> | undefined;
+    // The thunks share the catalog's compiled pattern when fallback resolution
+    // read it. A stored callable defers that load until documentation or
+    // reference validation needs it.
+    let patternOnce: Promise<any> | undefined = discovery === undefined
+      ? undefined
+      : Promise.resolve(discovery.compiled);
     const loadPattern = () => (patternOnce ??= piece.getPattern());
     return {
       ...resolved,
@@ -2296,11 +2356,13 @@ export interface PieceCallablesListing {
    * none (e.g. harness doubles). */
   pattern: PiecePatternRef | null;
 
-  /** Present when the compiled pattern could not be consulted, which
+  /**
+   * Present when the compiled pattern could not be consulted, which
    * leaves the listing with no source of names at all: `verbs` is then
    * empty, and that emptiness says nothing about what the piece can be asked
-   * to do. Every verb the piece stores still dispatches by name, because
-   * resolution never consults the pattern. */
+   * to do. Stored callables and the stream fallback remain reachable when
+   * the catalog is unavailable.
+   */
   incomplete?: "pattern-unavailable";
 
   verbs: PieceCallableListing[];
@@ -2430,76 +2492,16 @@ const VERB_PROPERTY_KEYS: readonly string[] = [
 ];
 
 /**
- * The `$defs` key a reference into the document's own definitions names, or
- * `undefined` for anything else — a reference elsewhere, or deeper than one
- * definition. A reference is a JSON Pointer, so the key is its second
- * segment decoded: `Topic~1Author` names the definition `Topic/Author`.
- */
-function localDefinitionName(ref: unknown): string | undefined {
-  if (typeof ref !== "string" || !ref.startsWith("#/")) return undefined;
-  const [, root, name, ...rest] = decodeJsonPointer(ref.slice(1));
-  return root === "$defs" && name !== undefined && rest.length === 0
-    ? name
-    : undefined;
-}
-
-/**
- * The names of the local definitions `schema` references at any depth,
- * `$defs` bodies excepted: what a document's own `$defs` must carry for the
- * document to stand alone.
- */
-function localDefinitionRefs(
-  schema: JSONSchema,
-  into: Set<string> = new Set(),
-): Set<string> {
-  if (!isObjectOrArray(schema)) return into;
-  const name = localDefinitionName(schema.$ref);
-  if (name !== undefined) into.add(name);
-  mapSubschemas(
-    schema as Parameters<typeof mapSubschemas>[0],
-    (child) => {
-      localDefinitionRefs(child, into);
-      return child;
-    },
-    { includeUnused: true },
-  );
-  return into;
-}
-
-/**
- * `schema` carrying only the `$defs` entries its body reaches, transitively,
- * and no `$defs` key at all when it reaches none. A resolved reference
- * arrives with its whole document's definitions attached, most of which
- * describe other positions; a served schema carries what makes it stand
- * alone and nothing more.
- */
-function withReachableDefinitions(schema: JSONSchema & object): JSONSchema {
-  const { $defs, ...body } = schema as Record<string, unknown>;
-  if (!isObjectOrArray($defs)) return body as JSONSchema;
-  const kept: Record<string, unknown> = {};
-  const pending = [...localDefinitionRefs(body as JSONSchema)];
-  while (pending.length > 0) {
-    const name = pending.pop()!;
-    if (Object.hasOwn(kept, name) || !Object.hasOwn($defs, name)) continue;
-    const definition = ($defs as Record<string, unknown>)[name];
-    kept[name] = definition;
-    pending.push(...localDefinitionRefs(definition as JSONSchema));
-  }
-  return Object.keys(kept).length > 0
-    ? { ...body, $defs: kept } as JSONSchema
-    : body as JSONSchema;
-}
-
-/**
  * The input schema a declared verb serves: the property's event type, made
  * self-contained. A property written as a reference resolves to its
  * definition, with the property's own keys merged over it; the keys that
- * describe the verb rather than its event are then dropped, and the
- * definitions carried along are cut to the ones the event reaches. So a
- * `Stream<void>` verb serves an empty object schema rather than a stream
- * marker with the verb's prose hung on it, and a referenced event serves its
- * definition alone. A reference that does not resolve serves `true`: the
- * surface cannot invent structure.
+ * describe the verb rather than its event are then dropped. The event's active
+ * definition scope is attached and cut to the definitions the event reaches
+ * within it. Nested scopes retain `$defs: {}` when pruning removes all their
+ * definitions, preserving the scope boundary. A `Stream<void>` verb serves an
+ * empty object schema rather than a stream marker with the verb's prose hung
+ * on it, and a referenced event serves its definition alone. A reference that
+ * does not resolve serves `true`: the surface cannot invent structure.
  */
 function declaredVerbInput(
   property: Record<string, unknown>,
@@ -2514,7 +2516,15 @@ function declaredVerbInput(
       !VERB_PROPERTY_KEYS.includes(key)
     ),
   ) as JSONSchema & object;
-  return withReachableDefinitions(event);
+  // `resolveCfcSchemaRefs` already carries the target's effective `$defs` onto
+  // the resolved view; `root` supplies the inherited scope for inline events.
+  const eventRoot = cfcSchemaChildRoot(event, root);
+  return pruneCfcSchemaDefinitions({
+    ...event,
+    ...(isObjectOrArray(eventRoot) && isObjectOrArray(eventRoot.$defs)
+      ? { $defs: eventRoot.$defs }
+      : {}),
+  });
 }
 
 /** The listing marks and prose a declared property carries. */
@@ -3617,8 +3627,8 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
   // above, it is not advisory, and the listing says so when it is missing.
   // `getPattern` throws on a piece carrying no pattern identity and on one
   // whose pattern source will not load in this space — both states in which
-  // every stored verb still DISPATCHES, because resolution never consults the
-  // pattern. So the listing must not fail: it would refuse to describe a
+  // stored callables and the stream fallback remain reachable. So the listing
+  // must not fail: it would refuse to describe a
   // piece it can still drive, to tab-completion and to an agent that could
   // have acted on the answer. What it must not do either is present an empty
   // list as the surface, which is what `incomplete` prevents.
@@ -3752,13 +3762,10 @@ export async function executePieceCallable(
     deps,
     sectionPrefix: commandPrefix,
     renderHelp: async (commandSpec, parsed) => {
-      // The pattern is consulted HERE and nowhere earlier: the parse has
-      // established that a page is being rendered, so the load it costs is
-      // spent on a caller who asked what the verb hands back and what it is
-      // for. Both spellings of the page take it — `--help --json` serves the
-      // declared result as `outputSchema` and the prose as `description`, the
-      // text page enumerates the result's fields and prints the prose as its
-      // summary line.
+      // Help pulls the declared documentation through the resolver's shared
+      // pattern load. `--help --json` serves the declared result as
+      // `outputSchema` and the prose as `description`; the text page lists
+      // the result's fields and prints the prose as its summary line.
       const spec = await withDeclaredPatternDocs(commandSpec, resolved);
       return parsed.showHelpJson
         ? renderExecHelpJson(spec)

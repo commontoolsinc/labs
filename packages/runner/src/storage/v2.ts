@@ -3,6 +3,7 @@ import {
   cloneIfNecessary,
   hashStringOf,
   isKeyableObjectOrArray,
+  taggedHashStringOf,
 } from "@commonfabric/data-model";
 import {
   hasDataUriScheme,
@@ -38,6 +39,7 @@ import {
   type EventAttentionResolveResult,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
+  isScopeKey,
   type OperationFieldQuery,
   type OperationFieldSnapshot,
   type PatchOp,
@@ -47,6 +49,7 @@ import {
   type ScopeKeyIdentity,
   type SessionHolding,
   type SessionSync,
+  type SessionSyncUpsert,
   type SqliteDbRef,
   type SqliteOperation,
   type SqliteParamsWire,
@@ -69,7 +72,11 @@ import type { JSONSchema } from "../builder/types.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
-import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
+import {
+  classifySchemaMeta,
+  collectExternalSchemaRefHashes,
+  schemaMetaRefHashes,
+} from "../schema-decompose.ts";
 import {
   acquireSchemaRegistryLease,
   lookupSchemaDocument,
@@ -84,7 +91,7 @@ import {
 } from "../link-types.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { entityKey } from "../scheduler/keys.ts";
-import { normalizeCellScope } from "../scope.ts";
+import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
@@ -113,6 +120,7 @@ import {
   State,
   StorageNotification,
   StorageTransactionRejected,
+  StoreReadThrough,
   toReplicaLoadFailureError,
   TransactionCommitOptions,
   UnexaminedAbsence,
@@ -303,7 +311,7 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
 
 /**
  * Identity of one data-URI pull: the URI, the schema it was read against, the
- * path into it, and where it lives.
+ * path into it, where it lives, and the identity resolving its linked cells.
  *
  * The result is a hash rather than those parts joined together. A data URI
  * carries its whole value in its id, so the id is the one part that varies
@@ -316,6 +324,7 @@ export function dataURISyncKey(identity: {
   path: readonly string[];
   space: MemorySpace;
   scope: CellScope | undefined;
+  scopeKeyIdentity?: ScopeKeyIdentity;
 }): string {
   return hashStringOf([
     identity.id,
@@ -323,6 +332,7 @@ export function dataURISyncKey(identity: {
     [...identity.path],
     identity.space,
     normalizeCellScope(identity.scope),
+    identity.scopeKeyIdentity,
   ]);
 }
 
@@ -749,6 +759,15 @@ const compactCommitReads = <
   space: MemorySpace,
   reads: Read[],
 ): Read[] => {
+  const dependencyKeys = new Map<number | number[], string>();
+  const dependencyKeyFor = (localSeq: number | number[]): string => {
+    let key = dependencyKeys.get(localSeq);
+    if (key === undefined) {
+      key = localSeqKey(localSeq);
+      dependencyKeys.set(localSeq, key);
+    }
+    return key;
+  };
   const sorted = [...reads].sort((left, right) => {
     const leftScope = normalizeCellScope(left.scope);
     const rightScope = normalizeCellScope(right.scope);
@@ -765,8 +784,8 @@ const compactCommitReads = <
     }
 
     if ("localSeq" in left && "localSeq" in right) {
-      const leftKey = localSeqKey(left.localSeq);
-      const rightKey = localSeqKey(right.localSeq);
+      const leftKey = dependencyKeyFor(left.localSeq);
+      const rightKey = dependencyKeyFor(right.localSeq);
       if (leftKey !== rightKey) {
         return leftKey < rightKey ? -1 : 1;
       }
@@ -794,7 +813,7 @@ const compactCommitReads = <
         normalizeCellScope(candidate.scope)
       }:${candidate.id}:${candidate.seq}`
       : `pending:${normalizeCellScope(candidate.scope)}:${candidate.id}:${
-        localSeqKey(candidate.localSeq)
+        dependencyKeyFor(candidate.localSeq)
       }:${candidate.basisSeq}`;
     let group = grouped.get(dependencyKey);
     if (!group) {
@@ -852,8 +871,8 @@ const compactCommitReads = <
     }
 
     if ("localSeq" in left && "localSeq" in right) {
-      const leftKey = localSeqKey(left.localSeq);
-      const rightKey = localSeqKey(right.localSeq);
+      const leftKey = dependencyKeyFor(left.localSeq);
+      const rightKey = dependencyKeyFor(right.localSeq);
       if (leftKey !== rightKey) {
         return leftKey < rightKey ? -1 : 1;
       }
@@ -922,6 +941,12 @@ export class StorageManager implements IStorageManager {
   #providers = new Map<MemorySpace, Provider>();
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
+
+  /** The store read-throughs installed per space (see
+   * IStorageManager.installStoreReadThrough); a provider resolves its
+   * replica's through this map, so a replica built after the install and
+   * a replacement replica both see it. */
+  readonly #storeReadThroughs = new Map<MemorySpace, StoreReadThrough>();
 
   /**
    * Schema-registry retention lease: held for the manager's open lifetime,
@@ -1448,12 +1473,30 @@ export class StorageManager implements IStorageManager {
     this.#providers.get(space)?.noteAclChanged();
   }
 
-  isSchemaDocPersisted(space: MemorySpace, hash: string): boolean {
+  isContentAddressedDocPersisted(space: MemorySpace, hash: string): boolean {
     // Already-open replicas only: creating a provider is a session-level
     // side effect no elision probe should carry. A space this manager has
     // not opened answers false, and false stages.
-    return this.#providers.get(space)?.replica.isSchemaDocPersisted(hash) ??
+    return this.#providers.get(space)?.replica.isContentAddressedDocPersisted(
+      hash,
+    ) ??
       false;
+  }
+
+  /** @inheritDoc */
+  installStoreReadThrough(space: MemorySpace, read: StoreReadThrough): void {
+    this.#storeReadThroughs.set(space, read);
+  }
+
+  /** @inheritDoc */
+  integrateStoreWrites(
+    space: MemorySpace,
+    writes: readonly { id: string; scopeKey: ScopeKey }[],
+  ): number {
+    // Already-open replicas only, like isContentAddressedDocPersisted: a
+    // space this manager has not opened holds nothing to refresh.
+    return this.#providers.get(space)?.replica.integrateStoreWrites(writes) ??
+      0;
   }
 
   open(space: MemorySpace): IStorageProvider {
@@ -1479,6 +1522,7 @@ export class StorageManager implements IStorageManager {
         // providers refuse (see Options.servingHomeSpace).
         refuseForeignScopedReads: this.#servingHomeSpace !== undefined &&
           this.#servingHomeSpace !== space,
+        storeReadThrough: () => this.#storeReadThroughs.get(space),
         routeState,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
           ? (routeGeneration, routeSignal) =>
@@ -2227,7 +2271,14 @@ export class StorageManager implements IStorageManager {
     }
 
     if (hasDataUriScheme(id)) {
-      return this.#syncDataURICell(cell, space, id, schema, scope);
+      return this.#syncDataURICell(
+        cell,
+        space,
+        id,
+        schema,
+        scope,
+        { ...(options?.scopeKeyIdentity ?? this.scopeKeyIdentity()) },
+      );
     }
 
     const provider = this.open(space);
@@ -2356,7 +2407,12 @@ export class StorageManager implements IStorageManager {
    * resolved error counted as the load's failure and logged.
    */
   #trackPendingProviderSync(
-    address: { space: MemorySpace; scope: CellScope; id: URI },
+    address: {
+      space: MemorySpace;
+      scope: CellScope;
+      id: URI;
+      scopeKey?: ScopeKey;
+    },
     start: () => Promise<Result<Unit, Error>>,
   ): Promise<Result<Unit, Error>> {
     const releaseLoad = this.#registerPendingLoad(address);
@@ -2407,6 +2463,7 @@ export class StorageManager implements IStorageManager {
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
+    identity: ScopeKeyIdentity,
   ): Promise<Cell<T>> {
     const cacheKey = dataURISyncKey({
       id,
@@ -2414,10 +2471,18 @@ export class StorageManager implements IStorageManager {
       path: cell.path.map(String),
       space,
       scope,
+      scopeKeyIdentity: identity,
     });
     let work = this.#dataURISyncs.get(cacheKey);
     if (work === undefined) {
-      work = this.#syncDataURILinkTargets(cell, space, id, schema, scope);
+      work = this.#syncDataURILinkTargets(
+        cell,
+        space,
+        id,
+        schema,
+        scope,
+        identity,
+      );
       this.#dataURISyncs.set(cacheKey, work);
     }
     await work;
@@ -2430,6 +2495,7 @@ export class StorageManager implements IStorageManager {
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
+    identity: ScopeKeyIdentity,
   ): Promise<void> {
     let value: unknown = valueFromDataUri(id);
     for (const segment of [...cell.path.map(String)]) {
@@ -2452,6 +2518,7 @@ export class StorageManager implements IStorageManager {
       schema,
       promises,
       new Set(),
+      identity,
     );
     if (promises.length > 0) {
       await Promise.all(promises);
@@ -2469,6 +2536,7 @@ export class StorageManager implements IStorageManager {
     schema: JSONSchema | undefined,
     promises: Promise<unknown>[],
     seen: Set<unknown>,
+    identity?: ScopeKeyIdentity,
   ): void {
     if (value === null || value === undefined || seen.has(value)) {
       return;
@@ -2485,14 +2553,25 @@ export class StorageManager implements IStorageManager {
         const scope = normalizeCellScope(
           link.scope as CellScope | undefined,
         );
+        const instance = this.#foreignInstanceKey(scope, identity);
         promises.push(
           this.#trackPendingProviderSync(
-            { space, scope, id: link.id },
+            {
+              space,
+              scope,
+              id: link.id,
+              ...(instance !== undefined ? { scopeKey: instance } : {}),
+            },
             () =>
-              this.open(space).sync(link.id!, {
-                path: link.path.map((segment) => segment.toString()),
-                schema: link.schema ?? schema ?? false,
-              }, scope),
+              this.open(space).sync(
+                link.id!,
+                {
+                  path: link.path.map((segment) => segment.toString()),
+                  schema: link.schema ?? schema ?? false,
+                },
+                scope,
+                instance,
+              ),
           ),
         );
       }
@@ -2511,6 +2590,7 @@ export class StorageManager implements IStorageManager {
           itemSchema,
           promises,
           seen,
+          identity,
         );
       }
       return;
@@ -2538,6 +2618,7 @@ export class StorageManager implements IStorageManager {
           childSchema,
           promises,
           seen,
+          identity,
         );
       }
     }
@@ -2616,6 +2697,12 @@ type ProviderOptions = {
    * the silent-empty-instance trap. Space-scope foreign reads (the
    * §2b free-read row) are unaffected. */
   refuseForeignScopedReads?: boolean;
+
+  /** The manager's store read-through for this space, resolved at each
+   * use so an install after the replica was built still takes effect
+   * (see IStorageManager.installStoreReadThrough). Absent or resolving
+   * to `undefined`: every load goes over the session. */
+  storeReadThrough?: () => StoreReadThrough | undefined;
 };
 
 type SpaceReplicaOptions = Omit<ProviderOptions, "createSession"> & {
@@ -2702,7 +2789,7 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
     // ids, and session-resume replay all see one selector form.
     const normalizedSelector = externalizeSyncSelector(
       normalizeSyncSelector(selector),
-      (hash) => this.replica.isSchemaDocPersisted(hash),
+      (hash) => this.replica.isContentAddressedDocPersisted(hash),
     );
     // Replay requests are per (doc, instance): an instance-named load
     // (stage A) must replay as that instance on a replacement replica.
@@ -3257,6 +3344,30 @@ export class SpaceReplica
   );
   #watchedIds = new Set<string>();
 
+  /** The store read-through this replica serves misses from (see
+   * ProviderOptions.storeReadThrough). */
+  readonly #storeReadThrough: () => StoreReadThrough | undefined;
+
+  /**
+   * Depth of frame integrations in progress (`#applySessionSync()`). A
+   * read made while a frame integrates — the differential checkout's
+   * snapshot through `get()`, the arrived-cfc hydration's `getDocument()`
+   * — must not start a store read-through, which would integrate a
+   * second frame from inside the first; a nonzero depth turns the
+   * read-through off for that read.
+   */
+  #frameApplyDepth = 0;
+
+  /**
+   * The instances (doc keys) the store read-through has read and found
+   * nothing at. No record stands for such an instance — a session's pull
+   * that delivered nothing leaves none either, and a transaction's read
+   * of it stays an unexamined absence for commit to reconcile — but the
+   * store is not asked again until the feed reports a write to it
+   * (`integrateStoreWrites()`), which reads it once more.
+   */
+  readonly #storeAbsences = new Set<string>();
+
   /**
    * The last `SessionSync` snapshot _absorbed_ for each watched key — its
    * address as the frame named it and the seq and deletedness it carried — kept
@@ -3466,6 +3577,7 @@ export class SpaceReplica
     this.#eventAppendQueueStore = options.eventAppendQueueStore;
     this.#eventAppendPacing = options.eventAppendPacing;
     this.#refuseForeignScopedReads = options.refuseForeignScopedReads === true;
+    this.#storeReadThrough = options.storeReadThrough ?? (() => undefined);
     // Eager queue init (LT9; verdict blocker, 2026-08-12): a dead
     // predecessor replica's intents in the manager-shared store must
     // discharge WITHOUT waiting for a fresh fire. The constructor's
@@ -3655,12 +3767,44 @@ export class SpaceReplica
   }
 
   get(entry: IMemoryAddress): Revision<State> | undefined {
+    this.#readThroughOnMiss(
+      entry.id as URI,
+      entry.scope,
+      undefined,
+      entry.scopeKey,
+    );
     return this.#getState(
       entry.id as URI,
       entry.scope,
       undefined,
       entry.scopeKey,
     );
+  }
+
+  /**
+   * Re-reads every listed instance this replica holds a record for
+   * through the installed store read-through and integrates the results
+   * as one inbound frame (see IStorageManager.integrateStoreWrites).
+   * Returns how many were refreshed. An instance the replica has never
+   * read is left alone: nothing depends on it, and its first read serves
+   * it from the store anyway.
+   */
+  integrateStoreWrites(
+    writes: readonly { id: string; scopeKey: ScopeKey }[],
+  ): number {
+    const read = this.#storeReadThrough();
+    if (read === undefined || writes.length === 0) return 0;
+    const upserts: SessionSyncUpsert[] = [];
+    for (const write of writes) {
+      const id = write.id as URI;
+      const key = docKey(id, write.scopeKey);
+      if (!this.#docs.has(key) && !this.#storeAbsences.has(key)) continue;
+      const upsert = read({ id, scopeKey: write.scopeKey });
+      if (upsert !== undefined) upserts.push(upsert);
+    }
+    if (upserts.length === 0) return 0;
+    this.#integrateReadThrough(upserts, "integrate");
+    return upserts.length;
   }
 
   async sync(
@@ -4208,6 +4352,7 @@ export class SpaceReplica
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined {
+    this.#readThroughOnMiss(uri, scope, identity);
     return this.#visibleDocument(uri, scope, identity);
   }
 
@@ -4222,6 +4367,7 @@ export class SpaceReplica
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined {
+    this.#readThroughOnMiss(uri, scope, identity);
     const record = this.#docs.get(
       docKey(uri, this.instanceKey(scope, identity)),
     );
@@ -4648,6 +4794,16 @@ export class SpaceReplica
     entries: [WatchAddress, SchemaPathSelector | undefined][],
   ): Promise<Result<Unit, PullError>> {
     if (entries.length === 0) {
+      return { ok: {} };
+    }
+    // A store read-through answers the pull in place: the roots are read
+    // from the store, and no watch reaches the session — the documents a
+    // selector's schema would have crossed to are read on first access
+    // instead, and a later commit touching a held document reaches the
+    // replica through `integrateStoreWrites()`.
+    const readThrough = this.#storeReadThrough();
+    if (readThrough !== undefined) {
+      this.#pullFromStore(readThrough, entries);
       return { ok: {} };
     }
     // The owed session remount, consumed BEFORE the watch-selector tracker
@@ -6497,6 +6653,13 @@ export class SpaceReplica
     // nonRecursive read at this parent (emitted after the loop).
     const structuralTarget = getBlindStructuralTarget(source);
 
+    // Pending bases belong to a document instance and the speculative-layer
+    // policy. Every path read in this synchronous build shares that same stack.
+    const pendingLayersByDocument = [
+      new Map<string, number[]>(),
+      new Map<string, number[]>(),
+    ];
+
     // Emit one commit read for `id`, baselined against the most recent in-flight
     // local version of that doc below this commit's localSeq if one exists, else
     // the confirmed seq (or an explicit `confirmedSeq` override, e.g. a read that
@@ -6555,9 +6718,8 @@ export class SpaceReplica
       confirmedSeq?: number,
       excludeSpeculativeLayers = false,
     ) => {
-      const record = this.#docs.get(
-        docKey(id, this.instanceKey(scope, identity)),
-      );
+      const recordKey = docKey(id, this.instanceKey(scope, identity));
+      const record = this.#docs.get(recordKey);
       // The read's materialized view sat on EVERY lower pending layer, not
       // just the nearest one: name them ALL (ascending; the last element is
       // the doc's top-of-stack below this commit) so a dropped deeper layer
@@ -6569,17 +6731,24 @@ export class SpaceReplica
       // servers base staleness at the highest element only — a lower-layer
       // basis WITHOUT that exclusion would false-conflict with the
       // session's own later stacked writes (CT-1872 1c).
-      const layers = [
-        ...new Set(
-          record?.pending
-            .filter((version) => version.localSeq < localSeq)
-            .filter((version) =>
-              !excludeSpeculativeLayers ||
-              !this.#speculativeLocalSeqs.has(version.localSeq)
-            )
-            .map((version) => version.localSeq) ?? [],
-        ),
-      ].sort((left, right) => left - right);
+      const layersByDocument = pendingLayersByDocument[
+        excludeSpeculativeLayers ? 1 : 0
+      ];
+      let layers = layersByDocument.get(recordKey);
+      if (layers === undefined) {
+        layers = [
+          ...new Set(
+            record?.pending
+              .filter((version) => version.localSeq < localSeq)
+              .filter((version) =>
+                !excludeSpeculativeLayers ||
+                !this.#speculativeLocalSeqs.has(version.localSeq)
+              )
+              .map((version) => version.localSeq) ?? [],
+          ),
+        ].sort((left, right) => left - right);
+        layersByDocument.set(recordKey, layers);
+      }
       const shape = nonRecursive ? { nonRecursive: true } : {};
       if (layers.length > 0) {
         pending.push({
@@ -6667,10 +6836,15 @@ export class SpaceReplica
    * Validates the read-side delivery guarantee over a whole frame BEFORE
    * any of it is applied (`docs/specs/content-addressed-schemas.md`), and
    * registers the frame's schema documents: every schema ref a delivered
-   * document embeds — a registered schema document's own refs, or a link
-   * schema anywhere in an ordinary document's value — must reach a
+   * document embeds — a registered schema document's own refs, a link
+   * schema anywhere in an ordinary document's value, or the reserved
+   * `schema` metadata member any document carries (`cid:` documents
+   * included; content addressing hashes `.value` alone) — must reach a
    * VERIFIED schema document delivered by this frame (the prospective
-   * overlay) or already stored.
+   * overlay) or already stored. A `schema` member in the malformed form
+   * — a `cid:` reference outside a single root `$ref` — quarantines its
+   * document outright: the commit boundary refuses that form, so it can
+   * only predate the enforcement or come from out-of-band writing.
    *
    * A violated guarantee QUARANTINES the offending document — the caller
    * applies the frame without it, and this replica keeps whatever it
@@ -6740,6 +6914,26 @@ export class SpaceReplica
     for (const remove of sync.removes) {
       if (typeof remove.id === "string") deletedInFrame.add(remove.id);
     }
+    // The `schema` metadata member, read the same way on every document.
+    // Returns whether the document survives; a malformed member is
+    // quarantined here, before any obligation of its own is recorded.
+    const embedSchemaMeta = (id: string, doc: unknown): boolean => {
+      const form = classifySchemaMeta(doc);
+      if (form.kind === "malformed") {
+        quarantined.add(id);
+        overlay.delete(id);
+        logger.error("schema-doc-quarantine", () => [
+          `Document ${id} was delivered with malformed schema metadata ` +
+          `(${form.reason}). The commit boundary refuses this form, so ` +
+          `the stored document predates that enforcement or was written ` +
+          `out of band. The document is quarantined; this replica keeps ` +
+          `its previous state for it.`,
+        ]);
+        return false;
+      }
+      for (const hash of schemaMetaRefHashes(form)) embed(hash, id);
+      return true;
+    };
     for (const upsert of sync.upserts) {
       const id = upsert.id;
       if (typeof id !== "string") continue;
@@ -6751,6 +6945,7 @@ export class SpaceReplica
       if (!isObjectNotArray(doc)) continue;
       overlay.set(id, doc);
       deletedInFrame.delete(id);
+      if (!embedSchemaMeta(id, doc)) continue;
       if (id.startsWith("cid:")) {
         const value = (doc as { value?: unknown }).value;
         const hash = id.slice("cid:".length);
@@ -6786,8 +6981,9 @@ export class SpaceReplica
           continue;
         }
       }
-      // Link positions only — an `$alias`-shaped record in an arriving
-      // document is plain data, never a delivery obligation.
+      // Link positions — the `schema` metadata member was embedded above.
+      // An `$alias`-shaped record in an arriving document is plain data,
+      // never a delivery obligation.
       mapLinkSchemas(doc as FabricValue, (schema) => {
         for (
           const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
@@ -6844,7 +7040,8 @@ export class SpaceReplica
 
   /**
    * Whether this replica holds SERVER-CONFIRMED verified content for
-   * `cid:<hash>` — the emission gate for selector references: a confirmed
+   * `cid:<hash>` — the emission gate for selector references and the
+   * elision seam for staged content-addressed documents: a confirmed
    * document arrived by delivery or by an acknowledged commit, so the
    * space's server holds it, and content addressing means it can never
    * change. The confirmed layer specifically: a pending local write is
@@ -6854,13 +7051,13 @@ export class SpaceReplica
    * relies on the provisional route not changing after observable reads
    * (CT-2046 tracks enforcing that broadly).
    */
-  isSchemaDocPersisted(hash: string): boolean {
+  isContentAddressedDocPersisted(hash: string): boolean {
     const record = this.#docs.get(docKey(`cid:${hash}` as URI, "space"));
     const doc = record?.confirmed.value;
     if (!isObjectNotArray(doc)) return false;
-    const value = (doc as { value?: unknown }).value;
-    return isSubschema(value) &&
-      internSchemaAsTaggedHashString(value as JSONSchema) === hash;
+    const value = doc.value;
+    // A content-addressed document's value must hash to the id it sits under.
+    return taggedHashStringOf(value) === hash;
   }
 
   /**
@@ -6887,6 +7084,23 @@ export class SpaceReplica
    * a frame that is not the shape the wire promises.
    */
   #applySessionSync(
+    sync: SessionSync,
+    type: "pull" | "integrate",
+  ): void {
+    // No read during a frame's integration — the differential checkout's
+    // snapshot, the arrived-cfc hydration — starts a store read-through:
+    // that would integrate a second frame from inside this one.
+    this.#frameApplyDepth += 1;
+    try {
+      this.#applySessionSyncFrame(sync, type);
+    } finally {
+      this.#frameApplyDepth -= 1;
+    }
+  }
+
+  /** Helper for `#applySessionSync()`, which carries the integration
+   * itself. */
+  #applySessionSyncFrame(
     sync: SessionSync,
     type: "pull" | "integrate",
   ): void {
@@ -7940,6 +8154,158 @@ export class SpaceReplica
     return transactionValueForVersion(visible.version);
   }
 
+  /**
+   * Helper for the read entry points, which serves an instance this
+   * replica holds no record for from the store read-through, when one is
+   * installed. A record already present — confirmed content or a pending
+   * own write — is left as it is, and so is an absence the store reported
+   * earlier: `integrateStoreWrites()` is what moves either. A scope the
+   * identity cannot resolve keys by name, which no store address
+   * matches, so it is not served here either.
+   */
+  #readThroughOnMiss(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+    explicit?: ScopeKey,
+  ): void {
+    if (this.#frameApplyDepth > 0) return;
+    const read = this.#storeReadThrough();
+    if (read === undefined) return;
+    const instance = this.instanceKey(scope, identity, explicit);
+    if (!isScopeKey(instance)) return;
+    const key = docKey(id, instance);
+    if (this.#docs.has(key) || this.#storeAbsences.has(key)) return;
+    const upsert = read({ id, scopeKey: instance });
+    if (upsert === undefined) return;
+    this.#integrateReadThrough([upsert], "integrate");
+  }
+
+  /**
+   * Helper for `pull()`, which reads every entry's root from the store
+   * read-through and integrates the results as one frame. The frame is
+   * a `pull` when any root was not held before, the notification a first
+   * load owes its subscribers; otherwise an `integrate`, which notifies
+   * only what changed, as a covered selector's re-sync does.
+   */
+  #pullFromStore(
+    read: StoreReadThrough,
+    entries: [WatchAddress, SchemaPathSelector | undefined][],
+  ): void {
+    const upserts: SessionSyncUpsert[] = [];
+    let firstLoad = false;
+    for (const [address] of entries) {
+      const id = address.id as URI;
+      // A scope the identity cannot resolve keys by its name, which names
+      // no store row: the store would read the name as the space scope and
+      // hand back the wrong document, so such an entry is not read.
+      const instance = this.instanceKey(
+        address.scope,
+        undefined,
+        address.scopeKey,
+      );
+      if (!isScopeKey(instance)) continue;
+      if (!this.#docs.has(docKey(id, instance))) firstLoad = true;
+      const upsert = read({ id, scopeKey: instance });
+      if (upsert !== undefined) upserts.push(upsert);
+    }
+    if (upserts.length === 0) return;
+    this.#integrateReadThrough(upserts, firstLoad ? "pull" : "integrate");
+  }
+
+  /**
+   * Helper for the read-through paths, which integrates store reads as an
+   * inbound frame through the ordinary session-sync apply step, so the
+   * confirmed records, the delivered set, the shadow bookkeeping, and the
+   * change notifications all take exactly the shape a pushed frame gives
+   * them. An address the store holds nothing at — a `deleted` entry at
+   * seq 0, which no session frame ever carries — is kept out of the
+   * frame and remembered in `#storeAbsences` instead; a document read
+   * present clears that memory.
+   */
+  #integrateReadThrough(
+    upserts: SessionSyncUpsert[],
+    type: "pull" | "integrate",
+  ): void {
+    const read = this.#storeReadThrough();
+    const frame: SessionSyncUpsert[] = [];
+    for (
+      const upsert of read === undefined
+        ? upserts
+        : this.#withSchemaDependencies(read, upserts)
+    ) {
+      const key = docKey(
+        upsert.id as URI,
+        this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
+      );
+      if (upsert.deleted === true && upsert.seq === 0) {
+        this.#storeAbsences.add(key);
+        continue;
+      }
+      this.#storeAbsences.delete(key);
+      frame.push(upsert);
+    }
+    if (frame.length === 0) return;
+    const seqs = frame.map((upsert) => upsert.seq);
+    this.#applySessionSync({
+      type: "sync",
+      fromSeq: Math.min(...seqs),
+      toSeq: Math.max(...seqs),
+      upserts: frame,
+      removes: [],
+    }, type);
+  }
+
+  /**
+   * Helper for `#integrateReadThrough()`, which completes a frame of store
+   * reads with the schema documents they reference: every `cid:` hash in a
+   * document's link positions, and in a schema document's own refs, that
+   * this replica does not already hold verified is read from the store
+   * and added to the frame, to a fixpoint. The delivery guarantee the
+   * frame validator enforces is that a document's refs resolve within
+   * the delivered set; a session's server walks those references for
+   * it, and this is the same chase for a frame read directly.
+   */
+  #withSchemaDependencies(
+    read: StoreReadThrough,
+    upserts: SessionSyncUpsert[],
+  ): SessionSyncUpsert[] {
+    const frame = [...upserts];
+    const inFrame = new Set(frame.map((upsert) => upsert.id));
+    for (let index = 0; index < frame.length; index++) {
+      const upsert = frame[index]!;
+      if (upsert.deleted === true || !isObjectNotArray(upsert.doc)) continue;
+      const hashes = new Set<string>();
+      if (upsert.id.startsWith("cid:")) {
+        const value = (upsert.doc as { value?: unknown }).value;
+        if (isSubschema(value)) {
+          for (const hash of collectExternalSchemaRefHashes(value)) {
+            hashes.add(hash);
+          }
+        }
+      } else {
+        mapLinkSchemas(upsert.doc as FabricValue, (schema) => {
+          for (
+            const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
+          ) {
+            hashes.add(hash);
+          }
+          return schema;
+        });
+      }
+      for (const hash of hashes) {
+        const id = `cid:${hash}` as URI;
+        if (inFrame.has(id) || this.isContentAddressedDocPersisted(hash)) {
+          continue;
+        }
+        inFrame.add(id);
+        const dependency = read({ id, scopeKey: "space" as ScopeKey });
+        if (dependency !== undefined) frame.push(dependency);
+      }
+    }
+    return frame;
+  }
+
   #getState(
     id: URI,
     scope?: CellScope,
@@ -8194,12 +8560,38 @@ const toRejectedError = (
   ) {
     const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
     const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
-    // The conflicted entity: structured field when the error is in-process;
-    // parsed from the message when it crossed the wire (Error fields do not
-    // survive serialization, the message does — its format is owned by
-    // memory/v2/engine.ts's ConflictError construction).
-    const staleReadOf = (error as { of?: unknown })?.of ??
-      message.match(/stale confirmed read: (\S+) at seq/)?.[1];
+    // Scoped descriptors cross current protocol boundaries structurally.
+    // Message-only errors retain default-scope recovery for every named read.
+    const toConflicts = (details: unknown): IConflictError["conflict"][] => {
+      const { of, scope } = (details ?? {}) as {
+        of?: unknown;
+        scope?: unknown;
+      };
+      return typeof of === "string"
+        ? [{
+          space,
+          the: DOCUMENT_MIME,
+          of: of as Entity,
+          ...(isCellScope(scope) ? { scope } : {}),
+        }]
+        : [];
+    };
+    const structuredConflicts = (error as { conflicts?: unknown })?.conflicts;
+    let conflicts = Array.isArray(structuredConflicts)
+      ? structuredConflicts.flatMap(toConflicts)
+      : [];
+    if (conflicts.length === 0) {
+      conflicts = toConflicts((error as { conflict?: unknown })?.conflict);
+    }
+    if (conflicts.length === 0) {
+      conflicts = toConflicts(error);
+    }
+    if (conflicts.length === 0) {
+      conflicts = Array.from(
+        message.matchAll(/stale confirmed read: (\S+) at seq/g),
+        (match) => toConflicts({ of: match[1] })[0],
+      );
+    }
     const firstOperation = commit.operations?.[0];
     const firstOperationId = firstOperation && "id" in firstOperation
       ? firstOperation.id
@@ -8208,16 +8600,14 @@ const toRejectedError = (
       name: "ConflictError",
       message,
       transaction: commit,
-      // Conflict descriptor: for stale-read conflicts `of` is authoritative
-      // (the memory engine names the conflicted entity structurally), so a
-      // retrier can pull exactly that doc before re-running. `the` remains a
-      // placeholder.
-      conflict: {
+      // The singular descriptor remains the first conflict for consumers of
+      // the legacy interface. `the` remains a placeholder.
+      conflict: conflicts[0] ?? {
         space,
         the: DOCUMENT_MIME,
-        of: ((typeof staleReadOf === "string" ? staleReadOf : undefined) ??
-          firstOperationId ?? "of:unknown") as Entity,
+        of: (firstOperationId ?? "of:unknown") as Entity,
       },
+      ...(conflicts.length > 0 ? { conflicts } : {}),
     };
     // retryAfterSeq is carried for diagnostics; retry gating is by caughtUpLocalSeq
     // (readyToRetry), and downstream only uses retryAfterSeq's presence to mark

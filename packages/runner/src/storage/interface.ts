@@ -9,6 +9,7 @@ import type {
   ClientCommit,
   CommitClass,
   CommitPrecondition,
+  DeliveryFailureClass,
   EntityDocument,
   EntityIdListOptions,
   EntityIdListResult,
@@ -19,13 +20,13 @@ import type {
   ReleaseOpFieldOperation,
   ScopeKey,
   ScopeKeyIdentity,
+  SessionSyncUpsert,
   SqliteDbRef,
   SqliteOperation,
   SqliteParamsWire,
   SqliteQueryResult,
   SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
-import type { DeliveryFailureClass } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import type { Cancel } from "../cancel.ts";
 import type { EntityId } from "../create-ref.ts";
@@ -201,6 +202,22 @@ export type OptStorageValue<T extends FabricValue = FabricValue> =
   | StorageValue<T>
   | undefined;
 
+/**
+ * A synchronous read of one document instance straight from the space's
+ * durable store, in the shape a session frame would deliver it: the
+ * document at its current head, or a `deleted` entry at seq 0 when the
+ * store holds nothing at that address. A replica with one installed
+ * serves a miss from it instead of pulling over its session, and
+ * `IStorageManager.integrateStoreWrites` re-reads held documents through
+ * it when the store admits a commit touching them. Only a caller
+ * co-hosted with the store can supply one; the store's own admission
+ * rules are not consulted, so the read runs with whatever authority the
+ * caller holds.
+ */
+export type StoreReadThrough = (
+  address: { id: URI; scopeKey: ScopeKey },
+) => SessionSyncUpsert | undefined;
+
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
 
@@ -230,13 +247,36 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
 
   /**
    * Whether SPACE's replica holds server-confirmed verified content for
-   * `cid:<hash>` — the write-side elision seam for schema-document
-   * staging. Confirmed only: a pending local write is not evidence the
+   * `cid:<hash>` — the write-side elision seam for content-addressed
+   * document staging, schema and code documents alike. Confirmed only: a
+   * pending local write is not evidence the
    * server holds the document. Consults an already-open replica and
    * answers false otherwise; false stages, which is always the safe
    * direction.
    */
-  isSchemaDocPersisted?(space: MemorySpace, hash: string): boolean;
+  isContentAddressedDocPersisted?(space: MemorySpace, hash: string): boolean;
+
+  /**
+   * Install a store read-through for SPACE's replica: from then on a
+   * document the replica does not hold is read synchronously from the
+   * store on first access, and a `sync()` against the space resolves
+   * from the store without registering a watch. Optional: only a manager
+   * co-hosted with the store can serve one.
+   */
+  installStoreReadThrough?(space: MemorySpace, read: StoreReadThrough): void;
+
+  /**
+   * Re-read every listed document instance that SPACE's replica holds
+   * through its installed read-through and integrate the result as an
+   * inbound frame, so a store commit the replica has no watch for still
+   * reaches its subscribers. Returns how many documents were refreshed;
+   * zero when no read-through is installed or the replica holds none of
+   * them.
+   */
+  integrateStoreWrites?(
+    space: MemorySpace,
+    writes: readonly { id: string; scopeKey: ScopeKey }[],
+  ): number;
 
   /**
    * Observer of FIRST opens per space (server-execution v2 Phase 4): the
@@ -1355,11 +1395,11 @@ export interface IStorageTransaction {
   getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
 
   /**
-   * The manager's `isSchemaDocPersisted`, reachable from the transaction
-   * (the staging scan runs inside one). Optional the same way; absent
-   * means never elide.
+   * The manager's `isContentAddressedDocPersisted`, reachable from the
+   * transaction (the staging scan runs inside one). Optional the same
+   * way; absent means never elide.
    */
-  isSchemaDocPersisted?(space: MemorySpace, hash: string): boolean;
+  isContentAddressedDocPersisted?(space: MemorySpace, hash: string): boolean;
 
   /**
    * Optional read details for the given space: the values this transaction
@@ -1636,6 +1676,18 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * a caller writing documents itself.
    */
   stageSchemaDocClosure(space: MemorySpace, rootHash: string): void;
+
+  /**
+   * Stages the content-addressed document holding `value` into this
+   * transaction and returns its id: `cid:` plus the general content hash
+   * of the value. The document is the value and nothing else, so no
+   * closure follows it; the write is blind and idempotent, deduped per
+   * transaction, and elided when the space's server already holds the
+   * document. Required for the same reason as `stageSchemaDocClosure`:
+   * the dedupe and the elision cannot be bypassed by a caller writing
+   * the document itself.
+   */
+  stageContentAddressedDocument(space: MemorySpace, value: FabricValue): URI;
 
   tx: IStorageTransaction;
 
@@ -1982,6 +2034,16 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
     input: WritePolicyInput,
     authorization?: RuntimeWritePolicyAuthorization,
   ): void;
+
+  /**
+   * Returns read-only schema inputs recorded for the document across scopes.
+   * Each query includes inputs appended since earlier queries, including a
+   * query that found none. Path and IFC relevance remain the caller's checks.
+   */
+  getCfcSchemaPolicyInputs(
+    space: MemorySpace,
+    id: string,
+  ): readonly Extract<WritePolicyInput, { kind: "schema" }>[];
 
   /**
    * Whether `input` was recorded by the runtime, under

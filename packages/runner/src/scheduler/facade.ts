@@ -15,6 +15,7 @@ import type {
   ErrorWithContext,
   Runtime,
 } from "../runtime.ts";
+import { startReadStats } from "../read-stats.ts";
 import { getCommitLocalSeq } from "../storage/commit-identity.ts";
 import type {
   ChangeGroup,
@@ -312,6 +313,9 @@ export class Scheduler {
   readonly #actionStats = new BoundedKeyMap<string, ActionStats>(
     MAX_ACTION_STATS,
   );
+
+  #collectReadStats = false;
+  #readAttemptAccountingEnabled = false;
 
   #actionTimingState: ActionTimingState = {
     actionStats: this.#actionStats,
@@ -1851,6 +1855,37 @@ export class Scheduler {
     this.#filterStats.executed = 0;
   }
 
+  /** Enables or disables per-action read accounting for subsequent runs. */
+  setReadStatsEnabled(
+    enabled: boolean,
+    options: { attempts?: boolean } = {},
+  ): void {
+    this.#collectReadStats = enabled;
+    this.#readAttemptAccountingEnabled = enabled && options.attempts === true;
+  }
+
+  /** Starts opt-in accounting for a transaction outside a reactive body. */
+  beginReadAttempt(
+    tx: IExtendedStorageTransaction,
+    kind:
+      | "event"
+      | "presync"
+      | "preflight"
+      | "initialization"
+      | "editWithRetry",
+    actionId?: string,
+  ): void {
+    if (!this.#readAttemptAccountingEnabled) return;
+    startReadStats(tx, (reads) => {
+      this.runtime.telemetry.submit({
+        type: "scheduler.read-attempt",
+        kind,
+        actionId,
+        reads,
+      });
+    });
+  }
+
   /**
    * Enables collection of per-iteration settle stats during `#execute()`.
    * Call this once before running patterns to opt in to the overhead.
@@ -2764,6 +2799,8 @@ export class Scheduler {
       runtime: this.runtime,
       actionChangeGroups: this.#actionChangeGroups,
       actionTimingState: this.#actionTimingState,
+      getReadStatsEnabled: () => this.#collectReadStats,
+      getReadAttemptAccountingEnabled: () => this.#readAttemptAccountingEnabled,
       retries: this.#retries,
       offBudgetRetries: this.#offBudgetRetries,
       pending: this.#pending,

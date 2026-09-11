@@ -361,6 +361,10 @@ export class Client {
         (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
           result.error.retryAfterSeq;
       }
+      if (result.error.conflicts !== undefined) {
+        (error as Error & { conflicts?: unknown }).conflicts =
+          result.error.conflicts;
+      }
       if (result.error.retriable !== undefined) {
         (error as Error & { retriable?: boolean }).retriable =
           result.error.retriable;
@@ -472,8 +476,10 @@ export class Client {
     this.#sessionOpenAuthContext = requireSessionOpenAuthMetadata(sessionOpen);
   }
 
+  /** Waits for the transport handshake and restoration of existing sessions. */
   async restoreConnection(): Promise<void> {
     await this.#ensureConnected();
+    await this.#reconnecting;
   }
 
   async #hello(): Promise<void> {
@@ -894,6 +900,13 @@ export class SpaceSession {
     }
   }
 
+  /** Waits for restored session identity before constructing an ordinary request. */
+  async #ensureSessionRestored(): Promise<void> {
+    this.#assertOpen();
+    await this.#client.restoreConnection();
+    this.#assertOpen();
+  }
+
   /**
    * `beforeIssue` runs after the open-session check and before this mutation
    * enters the session's outstanding request state. Throwing prevents issue.
@@ -938,7 +951,7 @@ export class SpaceSession {
   }
 
   async queryGraph(query: GraphQuery): Promise<GraphQueryResult> {
-    this.#assertOpen();
+    await this.#ensureSessionRestored();
     const result = await this.#client.request<GraphQueryResult>({
       type: "graph.query",
       requestId: crypto.randomUUID(),
@@ -954,7 +967,7 @@ export class SpaceSession {
   async queryOperationField(
     query: Omit<OperationFieldQuery, "principal" | "sessionId">,
   ): Promise<OperationFieldQueryResult> {
-    this.#assertOpen();
+    await this.#ensureSessionRestored();
     if (this.#client.serverFlags?.applyOp !== true) {
       throw protocolError("memory server does not support apply-op");
     }
@@ -975,7 +988,7 @@ export class SpaceSession {
     sidecarId: string,
     action: "retry" | "dismiss",
   ): Promise<EventAttentionResolveResult> {
-    this.#assertOpen();
+    await this.#ensureSessionRestored();
     const result = await this.#client.request<EventAttentionResolveResult>({
       type: "event.attention.resolve",
       requestId: crypto.randomUUID(),
@@ -993,7 +1006,7 @@ export class SpaceSession {
   async listEntityIds(
     options: EntityIdListOptions = {},
   ): Promise<EntityIdListResult | undefined> {
-    this.#assertOpen();
+    await this.#ensureSessionRestored();
     if (this.#client.serverFlags?.entityIdListing !== true) {
       return undefined;
     }
@@ -1018,7 +1031,7 @@ export class SpaceSession {
   async entityIdExists(
     id: EntityId,
   ): Promise<EntityIdLookupResult | undefined> {
-    this.#assertOpen();
+    await this.#ensureSessionRestored();
     if (this.#client.serverFlags?.entityIdLookup !== true) {
       return undefined;
     }
@@ -1040,7 +1053,7 @@ export class SpaceSession {
     sql: string,
     params?: SqliteParamsWire,
   ): Promise<SqliteQueryResult> {
-    this.#assertOpen();
+    await this.#ensureSessionRestored();
     const paramFields = params === undefined
       ? {}
       : !Array.isArray(params) && unsafeObjectKeyIn(params) !== undefined
@@ -1075,7 +1088,7 @@ export class SpaceSession {
     path: string,
     beforeIssue?: () => void,
   ): Promise<SqliteRegisterDiskSourceResult> {
-    this.#assertOpen();
+    await this.#ensureSessionRestored();
     const requestId = crypto.randomUUID();
     beforeIssue?.();
     return await this.#client.request<SqliteRegisterDiskSourceResult>({

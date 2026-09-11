@@ -2,11 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import * as policy from "./policy.ts";
-import { DIALS } from "./policy.ts";
 
 // A dial nobody documented is a number that decides what runs and cannot
 // be found, so the two halves of this module are held to each other.
-const NAMED_IN_TABLE = new Set(DIALS.map((dial) => dial.name));
+const NAMED_IN_TABLE = new Set(policy.DIALS.map((dial) => dial.name));
 const EXPORTED_DIALS = Object.keys(policy).filter((name) =>
   /^[A-Z][A-Z0-9_]*$/.test(name) && name !== "DIALS"
 );
@@ -78,21 +77,21 @@ describe("policy", () => {
 
     it("names nothing this module does not export", () => {
       const exported = new Set(EXPORTED_DIALS);
-      const strays = DIALS.map((dial) => dial.name).filter((name) =>
+      const strays = policy.DIALS.map((dial) => dial.name).filter((name) =>
         !exported.has(name)
       );
       expect(strays).toEqual([]);
     });
 
     it("gives every dial a unit and a reason to move it", () => {
-      for (const dial of DIALS) {
+      for (const dial of policy.DIALS) {
         expect(dial.unit.length).toBeGreaterThan(0);
         expect(dial.why.length).toBeGreaterThan(0);
       }
     });
 
     it("lists each dial once", () => {
-      expect(NAMED_IN_TABLE.size).toBe(DIALS.length);
+      expect(NAMED_IN_TABLE.size).toBe(policy.DIALS.length);
     });
   });
 
@@ -104,13 +103,13 @@ describe("policy", () => {
 
     it("holds one row per dial and no row without one", () => {
       expect(dialTable().map((row) => unquoted(row[0]!)))
-        .toEqual(DIALS.map((dial) => dial.name));
+        .toEqual(policy.DIALS.map((dial) => dial.name));
     });
 
     it("gives every dial the value, unit, source, and reason `policy.ts` gives it", () => {
       const rows = dialTable();
       const disagreements: string[] = [];
-      for (const dial of DIALS) {
+      for (const dial of policy.DIALS) {
         const row = rows.find((cells) => unquoted(cells[0]!) === dial.name);
         if (row === undefined) {
           disagreements.push(

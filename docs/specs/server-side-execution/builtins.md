@@ -60,11 +60,57 @@ reported rather than written into the conversation.
 
 | built-in | request inputs (memo key basis) | result cell | authority | notes |
 | --- | --- | --- | --- | --- |
-| `fetch` (`fetchData`) | url, method, headers (allowlisted), body, response schema | `{ result?, error?, pending, requestHash }` — today the hash lives in an internal cell `{requestId, lastActivity, inputHash}` (`fetch.ts:427-472`); the "migrate it onto the result doc" move was DEFERRED at stage G (deliberate): the internal-cell hash is functionally equivalent committed state (T10.Q1 — §4's memo rule reads it the same), and the migration is an OFF-arm cell-shape change, so it waits for an OFF-arm ruling batch that wants it (plausibly never) | capability handle bound at wiring (README §3.8) | redirects/deadlines per existing `fetch-request-deadlines` doc; today's outbox id `` `${kind.name}:${inputHash}` `` is the memo+outbox-dedupe precedent |
+| `fetch` (`fetchData`) | url, method, headers (allowlisted), body, response schema | `{ result?, error?, pending }`; the memo hash is committed in the internal cell `{requestId, lastActivity, inputHash}` (`fetch.ts`) | capability handle bound at wiring (README §3.8) | redirects/deadlines per existing `fetch-request-deadlines` doc; the memo base is `` `${kind.name}:${inputHash}` ``; the served outbox key also names the target document and its resolved user or session instance |
 | `fetch-program` | program source ref + integrity | compiled program ref | same | feeds `compile-and-run` |
-| `llm` (`generateText` / `generateObject`) | model, messages/prompt, schema, params | settled result only (protocol.md §6 — no partial commits in v2); `requestHash` already sits on the result cell today (`llm.ts:716-822`) — the precedent §4 generalizes | broker-held provider keys; grant from handle | temperature etc. are inputs, so nondeterminism is memo-stable by construction |
+| `llm` (`generateText` / `generateObject`) | model, messages/prompt, schema, params | settled result only (protocol.md §6 — no partial commits in v2); `requestHash` on the result cell selects the pending request and accompanies its settled result or error | broker-held provider keys; grant from handle | temperature etc. are inputs, so nondeterminism is memo-stable by construction |
 | `llm-dialog` | dialog state + params | settled turns | same | multi-turn = new key per turn |
 | `sqlite*` | database link, statement, params, reader principal | one cleared result cell per (query, reader) | read served under the reader's clearance | clearance = per-reader materialization (RULED 2026-08-02) — see below |
+
+The shared `fetch.ts` builtins retain independent request lifecycles for each
+served result instance. The requesting run's identity resolves the outbox key
+and every asynchronous claim, completion, error, abandonment, and teardown
+transaction before its first cell read. A served mutex claim commits the
+validated input hash with its claim id and activity timestamp, so a subsequent
+unchanged-input run recognizes that in-flight request. Each issuance captures
+its own run identity, including when a shared scope changes representatives.
+One graph-level cancellation callback visits retained instances; completed or
+idle instances retire after their accepted outbox requests, active work, and
+pending publications settle.
+Late refusal callbacks cannot mutate a replacement instance. Each result
+instance retains one latest pending publication per physical output-binding
+instance; declared result-container scope does not determine that address.
+Accepted publication, including memo and empty results, supersedes older
+requests selecting another target for the same binding. Distinct bindings can
+announce a shared result independently without changing another request's
+result fields. Unstamped client runs use the runtime's own identity and keep
+one local lifecycle.
+
+Served `llm`, `generateText`, and `generateObject` bind lifecycle state and
+outbox identity to the resolved output instance. The pending request writes
+`requestHash` with `pending: true`; only a settled result or error constitutes a
+memo hit. Unqueued completion checks the selected hash under the issuing
+identity and reads the current input label basis before writing. An A→B→A selection can
+therefore reuse the original in-flight A while a stale B response leaves the
+current result alone. A refused staging attempt can restore its own output
+binding without replacing an accepted request's pending state or result. Each
+live result instance retains the latest staging attempt per resolved output
+binding; a retry replaces that binding's prior attempt. Binding ownership uses
+the raw node's physical publication coordinate, which can differ from its
+declared result or container scope. An accepted publication
+to a different target supersedes older attempts for the same binding, including
+memo hits that publish an unchanged link and terminal refusal announcements.
+Publication acceptance waits for the wave verdict. Work from a withdrawn
+contribution does not reach the model.
+Parent binding publication follows the selected target separately from request
+state, so a scope change can return to an existing target. Settled in-memory
+instance state retires once no staging or dispatched work owns it; durable
+result cells retain memoization.
+
+Named queues retain their issued work when inputs are cleared. Queued
+`generateText` and `generateObject` publish each completion even when a later
+request is queued; `llm` publishes only its latest request's successful result.
+Queue completion writes remain bound to the issuing identity and read the live
+input label basis. This queue behavior applies with server execution on or off.
 
 `sqlite*` row clearance — RULED 2026-08-02: **per-reader
 materialization**, today's shape. The reader principal is part of
@@ -95,6 +141,46 @@ SpaceServer's runtime; compilation itself already happens server-side in
 toolshed — reuse that path. Async work stays on the post-commit outbox
 (the v1 lesson that ported: never block the loop on compilation).
 Instantiated pieces join the space's graph and are served like any other.
+
+The request snapshots the resolved program, including attached data files,
+and passes the `compileAndRun` sink ceiling before the outbox releases the
+compiler. Dispatch also waits for the issuing contribution's acceptance;
+a selectively withdrawn contribution launches no compile. Completion carries
+the issuing instance's identity and checks the request hash in its memo cell.
+The memo keeps a fixed shape: the request hash and a `pending`, `compiled`, or
+`resolved` phase. Each transition updates that state without deleting fields
+that a concurrently accepted completion may already have replaced.
+Completion reads current source inputs for CFC labels without using those
+values to select the request. A superseded completion writes no result and
+releases its process-local issuance marker, so a withdrawn replacement can
+reissue. A successful compilation records readiness; the derivation stages
+child setup and resolves the request together. After restart, an unresolved
+request reissues through the compile cache in the child's space before consuming a
+process-cached artifact.
+
+An empty main name and empty source-file list clear the request even when an
+attachment list is present. Incomplete source hydration preserves the accepted
+request. The full program, including attachments, remains the memo-key basis.
+
+A deterministic scoped child may select different programs in different
+instances. Its piece registration owns one node group per canonical program
+identity; instances selecting the same program share that group. Each group
+reads the current instance's program selection before executing. These reads
+participate in dependency tracking and the commit basis. Static child setup
+and passthrough bindings initialize separately in each instance's transaction;
+the parent group retains each child once. A pointer coordinator observes
+selection changes and restores the required groups on
+resume. Clearing one instance clears its selection, and replacing it retires
+the old group only after accepted replacement and only when no other
+instance or pending setup selects it. Handler streams select the actor's
+implementation during dependency preflight and again at dispatch.
+
+Keyless pointer publication and program-group retirement wait for both the
+transaction's acceptance and its deferred local callback. A local state change
+with no storage writes still contributes its read dependencies to the wave, so
+withdrawing a dependency also withdraws that change. These callbacks consume
+neither network budgets nor builtin request metrics. Publishing a keyless
+pointer wakes its coordinator and the installed guarded actions.
 
 Result-as-pattern instantiation — a lift or handler RETURNING a
 pattern, instantiated into a deterministic result cell — is a RUNNER

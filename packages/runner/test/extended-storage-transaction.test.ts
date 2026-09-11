@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
@@ -15,6 +16,7 @@ import {
   createNonReactiveTransaction,
   type ExtendedStorageTransaction,
 } from "../src/storage/extended-storage-transaction.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { RuntimeOwnedStores } from "../src/cfc/runtime-owned-stores.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
@@ -51,6 +53,60 @@ describe("extended-storage-transaction", () => {
     tx.markLazyMaterialize(true);
     return { tx, cell: runtime.getCell(space, cause, SCHEMA, tx) };
   };
+
+  describe("content-addressed document staging", () => {
+    const code = "export const staged = 1;";
+    const codeId = `cid:${taggedHashStringOf(code)}`;
+    const stagedIds = (tx: IExtendedStorageTransaction): string[] =>
+      [...(tx.getWriteDetails?.(space) ?? [])].map((write) => write.address.id);
+
+    it("stages a document once however often a transaction asks", () => {
+      const tx = runtime.edit();
+      expect(tx.stageContentAddressedDocument(space, code)).toBe(codeId);
+      expect(tx.stageContentAddressedDocument(space, code)).toBe(codeId);
+      expect(stagedIds(tx).filter((id) => id === codeId)).toHaveLength(1);
+      tx.abort?.();
+    });
+
+    it("names a document by the general content hash of any value", () => {
+      const value = { kind: "blob", bytes: [1, 2, 3] };
+      const tx = runtime.edit();
+      expect(tx.stageContentAddressedDocument(space, value)).toBe(
+        `cid:${taggedHashStringOf(value)}`,
+      );
+      tx.abort?.();
+    });
+
+    it("elides a document the server already holds, whatever its value", async () => {
+      // A string, an array, and a number: the elision re-hashes the confirmed
+      // value, so it must recognize every kind of value the seam stages.
+      const values = [code, [1, "two", { three: 3 }], 42];
+      const ids = values.map((value) => `cid:${taggedHashStringOf(value)}`);
+      const install = runtime.edit();
+      for (const value of values) {
+        install.stageContentAddressedDocument(space, value);
+      }
+      expect((await install.commit()).error).toBeUndefined();
+      await storageManager.synced();
+
+      const tx = runtime.edit();
+      values.forEach((value, index) => {
+        expect(tx.stageContentAddressedDocument(space, value)).toBe(
+          ids[index],
+        );
+      });
+      for (const id of ids) expect(stagedIds(tx)).not.toContain(id);
+      tx.abort?.();
+    });
+
+    it("stages through a wrapping transaction into the one it wraps", () => {
+      const tx = runtime.edit();
+      const wrapped = createNonReactiveTransaction(tx);
+      expect(wrapped.stageContentAddressedDocument(space, code)).toBe(codeId);
+      expect(stagedIds(tx)).toContain(codeId);
+      tx.abort?.();
+    });
+  });
 
   describe("the read-result cache across a batch write", () => {
     it("keeps its entries across a batch holding no writes", () => {
@@ -260,6 +316,79 @@ describe("extended-storage-transaction", () => {
       } finally {
         await tx.commit();
       }
+    });
+  });
+
+  describe("document schema-policy inputs", () => {
+    it("includes later inputs across scopes while excluding other documents", async () => {
+      const otherSpace = (await Identity.fromPassphrase("policy-input-other"))
+        .did();
+      const tx = runtime.edit();
+      const wrapped = createNonReactiveTransaction(tx);
+      const target = {
+        space,
+        id: "of:policy",
+        scope: "space",
+        path: [],
+      } as const;
+      expect(wrapped.getCfcSchemaPolicyInputs(space, target.id)).toEqual([]);
+      const first = { kind: "schema", target, schema: SCHEMA } as const;
+      tx.recordCfcWritePolicyInput(first);
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: { ...target, id: "of:other" },
+        schema: SCHEMA,
+      });
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: { ...target, space: otherSpace },
+        schema: SCHEMA,
+      });
+      tx.recordCfcWritePolicyInput({
+        kind: "custom",
+        target,
+        name: "other-kind",
+        value: null,
+      });
+      const second = {
+        kind: "schema",
+        target: { ...target, scope: "user", path: ["title"] },
+        schema: { type: "string" },
+      } as const;
+      wrapped.recordCfcWritePolicyInput(second);
+      expect(tx.getCfcSchemaPolicyInputs(space, target.id)).toEqual([
+        first,
+        second,
+      ]);
+      expect(wrapped.getCfcSchemaPolicyInputs(space, target.id)).toEqual([
+        first,
+        second,
+      ]);
+      expect(tx.getCfcState().writePolicyInputs).toHaveLength(5);
+      tx.abort();
+      const fresh = runtime.edit();
+      expect(fresh.getCfcSchemaPolicyInputs(space, target.id)).toEqual([]);
+      fresh.abort();
+    });
+
+    it("protects the indexed inputs and their nested schema from mutation", () => {
+      const tx = runtime.edit();
+      const target = {
+        space,
+        id: "of:immutable-policy",
+        scope: "space",
+        path: [],
+      } as const;
+      tx.recordCfcWritePolicyInput({ kind: "schema", target, schema: SCHEMA });
+      const inputs = tx.getCfcSchemaPolicyInputs(space, target.id);
+      expect(() => Reflect.set(inputs, "length", 0)).toThrow("read-only");
+      expect(Reflect.set(inputs[0].target, "id", "of:corrupted")).toBe(false);
+      expect(Reflect.set(SCHEMA.properties.title, "type", "number")).toBe(
+        false,
+      );
+      expect(tx.getCfcSchemaPolicyInputs(space, target.id)).toHaveLength(1);
+      expect(tx.getCfcState().writePolicyInputs).toHaveLength(1);
+      tx.abort();
     });
   });
 

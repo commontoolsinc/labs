@@ -422,10 +422,14 @@ Three questions, each asked only where there is one to ask:
   straight back, `isPieceHandle` being a length rule — so the space's own
   identifier index is asked whether it holds that piece (`entityIdExists`,
   `PiecesController`, which tests one identifier without selecting a
-  stored value). A value read cannot stand in for it: a piece the space
-  does not hold reads as nothing, and so does an empty one. A slug needs
-  no such lookup, its resolution having reached the document to take an id
-  from it, and neither does the piece a move already stands on.
+  stored value). The lookup reads either spelling of an unkinded entity —
+  the bare tagged hash a piece reports as its own id, which is what
+  `pieces/` lists, and the `of:` id the index keys on — so a handle typed
+  back off a listing is one it answers about. A value read cannot stand in
+  for it: a piece the space does not hold reads as nothing, and so does an
+  empty one. A slug needs no such lookup, its resolution having reached the
+  document to take an id from it, and neither does the piece a move already
+  stands on.
 - **The path.** One read of the cell at the deepest level already stood
   at, walked segment by segment through the value it returned. The first
   segment that is not a key of the level above it is refused by name, with
@@ -470,7 +474,7 @@ A space root lists **facets**, never pieces directly — a populated space is
 too large for a flat root. The starting facet set:
 
 - `slugs/` — the slug index: named pieces, the primary human view.
-- `pieces/` — pieces by id.
+- `pieces/` — pieces by id, each showing what it calls itself.
 
 A `fuse/` facet mirroring the FUSE layout is designed and deferred past v1
 ([`futures.md`](futures.md)); shuttle leverages `packages/fuse`'s naming
@@ -572,6 +576,12 @@ the whole line: an error written after a name is text the fabric produced,
 and an odd quote in it leaves the line as a whole refusing to split. The
 handle column is the other half of the same claim — a numbered handle is a
 reference too, so both columns of a listed line are things to type.
+
+A piece carries what it calls itself as well, where the read found it a
+name, and that is written after the name column rather than in it: it is
+what the fabric holds rather than an address, so the name column stays the
+one thing on the line a reader copies to reach the row. A piece the read
+found no name for shows its handle and nothing else.
 
 A row that is one of the piece's callables is annotated as one, and no other
 kind is annotated. That is the promise the facets section makes: a callable

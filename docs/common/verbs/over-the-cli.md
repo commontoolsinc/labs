@@ -247,9 +247,14 @@ cf piece call --cell <topic> addComment '{"body":"first","agentName":"Sol"}' \
 }
 ```
 
-This shapes a result that already exists rather than deciding what travels: the
-readback has the whole receipt in hand before the selection runs. So a
-value-less verb keeps reporting no `result` at all — there is nothing for a
+A selection over a schemaless handler receipt first loads the receipt without
+following its children. If it holds an object or array, the selection reads from
+that container and can avoid fetching unselected linked content. Root links,
+instances, scalars, and receipts read through an explicit schema are materialized
+before selection, as are tool results. A root link can resolve to an absent
+value, so its stored existence alone does not establish a result.
+
+A value-less verb keeps reporting no `result` at all — there is nothing for a
 selection to be about — and `--no-wait`, which never reads the receipt back,
 refuses all three flags. `--show-links` composes with a projection, because a
 projection leaves every surviving path where it was; it does not compose with

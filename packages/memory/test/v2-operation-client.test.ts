@@ -153,6 +153,7 @@ describe("v2-operation-client", () => {
     const client = {
       serverFlags: { applyOp: false },
       isConnected: () => true,
+      restoreConnection: () => Promise.resolve(),
       request: () => Promise.reject(new Error("request should not be sent")),
     };
     const session = new SpaceSession(

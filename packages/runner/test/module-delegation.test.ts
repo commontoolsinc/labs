@@ -3,15 +3,20 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { PreparedSourceUpdate } from "../src/pattern-manager.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
 import { computeModuleHashes } from "../src/harness/module-identity.ts";
 import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
 import {
+  compiledDocKey,
   deriveModuleDelegations,
+  loadCompiledClosure,
   loadVerifiedSourceClosure,
   type SourceDoc,
   sourceDocKey,
+  stageModuleDelegations,
+  writeCompiledDocs,
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
 
@@ -125,15 +130,228 @@ describe("module identity delegation", () => {
   });
 
   it("rejects an update when the predecessor source closure is unavailable", async () => {
-    const manager = runtime.patternManager.accessForTestingOnly;
-
     await expect(
-      manager.loadPreviousSourceClosure(space, "missing-predecessor"),
+      runtime.patternManager.prepareSourceUpdate(
+        space,
+        "missing-predecessor",
+        "candidate",
+      ),
     ).rejects.toThrow(
-      "cannot authorize module update from missing-predecessor: " +
-        "verified source closure is unavailable",
+      "cannot authorize source update without verified source closures",
     );
   });
+
+  it("refuses forged and mismatched source update preparations", async () => {
+    const manager = runtime.patternManager;
+    const forged = {} as PreparedSourceUpdate;
+    expect(() => manager.sourceUpdateDelegations(forged))
+      .toThrow("unrecognized source update preparation");
+    const previous = moduleFor(moduleProgram("old"));
+    const candidate = moduleFor(moduleProgram("new"));
+    expect(
+      (await runtime.editWithRetry((tx) => {
+        writeSourceDocs(runtime, space, [previous], previous.identity, tx);
+        writeSourceDocs(runtime, space, [candidate], candidate.identity, tx);
+      })).error,
+    ).toBeUndefined();
+    const prepared = await manager.prepareSourceUpdate(
+      space,
+      previous.identity,
+      candidate.identity,
+    );
+    const tx = runtime.edit({ sourceUpdate: prepared });
+    try {
+      for (
+        const [proposal, targetSpace, predecessor, successor] of [
+          [forged, space, previous.identity, candidate.identity],
+          [prepared, signer.did(), candidate.identity, previous.identity],
+          [
+            prepared,
+            "did:key:another-space",
+            previous.identity,
+            candidate.identity,
+          ],
+        ] as const
+      ) {
+        expect(() =>
+          manager.stageSourceUpdate(
+            proposal,
+            targetSpace,
+            predecessor,
+            successor,
+            tx,
+          )
+        )
+          .toThrow("source update preparation does not match the transition");
+      }
+    } finally {
+      tx.abort();
+    }
+    const storedTx = runtime.edit();
+    try {
+      const closure = await loadVerifiedSourceClosure(
+        runtime,
+        space,
+        candidate.identity,
+        storedTx,
+      );
+      expect(closure?.get(candidate.identity)?.delegatedModuleIdentities)
+        .toBeUndefined();
+      expect(
+        storedTx.getCfcState().moduleDelegations.get(space)?.get(
+          candidate.identity,
+        ),
+      ).toBeUndefined();
+    } finally {
+      storedTx.abort();
+    }
+  });
+
+  for (const artifact of ["missing source", "untrusted compiled record"]) {
+    it(`refuses a delegation update with ${artifact} without publishing staged authority`, async () => {
+      const previous = moduleFor(moduleProgram("old"));
+      const candidate = moduleFor(moduleProgram("new"));
+      const version = "delegation-corrupt-cache";
+      if (artifact === "untrusted compiled record") {
+        expect(
+          (await runtime.editWithRetry((tx) => {
+            writeSourceDocs(
+              runtime,
+              space,
+              [candidate],
+              candidate.identity,
+              tx,
+            );
+            runtime.getCell(
+              space,
+              compiledDocKey(version, candidate.identity),
+              undefined,
+              tx,
+            )
+              .set({
+                identity: candidate.identity,
+                kind: "compiled",
+                code: "untrusted",
+              });
+          })).error,
+        ).toBeUndefined();
+      }
+      const result = await runtime.editWithRetry((tx) => {
+        stageModuleDelegations(
+          runtime,
+          space,
+          new Map([[candidate.identity, new Set([previous.identity])]]),
+          version,
+          tx,
+        );
+      });
+      expect(result.error?.message).toContain(
+        artifact === "missing source" ? "is unavailable" : "is untrusted",
+      );
+      const tx = runtime.edit();
+      try {
+        const source = runtime.getCell<
+          { delegatedModuleIdentities?: string[] }
+        >(space, sourceDocKey(candidate.identity), undefined, tx).get();
+        expect(source?.delegatedModuleIdentities).toBeUndefined();
+        expect(
+          tx.getCfcState().moduleDelegations.get(space)?.get(
+            candidate.identity,
+          ),
+        ).toBeUndefined();
+      } finally {
+        tx.abort();
+      }
+    });
+  }
+
+  for (const artifact of ["source", "compiled"]) {
+    it(`returns staged ${artifact} grants without publishing them after an abort`, async () => {
+      const previous = moduleFor(moduleProgram("old"));
+      const intermediate = moduleFor(moduleProgram("intermediate"));
+      const candidate = moduleFor(moduleProgram("new"));
+      const version = "delegation-staged-read";
+      const committed = new Map([
+        [candidate.identity, new Set([previous.identity])],
+      ]);
+      expect(
+        (await runtime.editWithRetry((tx) => {
+          writeSourceDocs(
+            runtime,
+            space,
+            [candidate],
+            candidate.identity,
+            tx,
+            committed,
+          );
+          writeCompiledDocs(runtime, space, [candidate], candidate.identity, {
+            runtimeVersion: version,
+            moduleDelegations: committed,
+          }, tx);
+        })).error,
+      ).toBeUndefined();
+      const staged = runtime.edit();
+      try {
+        stageModuleDelegations(
+          runtime,
+          space,
+          new Map([[candidate.identity, new Set([intermediate.identity])]]),
+          version,
+          staged,
+        );
+        const closure = artifact === "source"
+          ? await loadVerifiedSourceClosure(
+            runtime,
+            space,
+            candidate.identity,
+            staged,
+          )
+          : await loadCompiledClosure(runtime, space, candidate.identity, {
+            runtimeVersion: version,
+          }, staged);
+        expect(closure?.get(candidate.identity)?.delegatedModuleIdentities)
+          .toEqual(
+            expect.arrayContaining([previous.identity, intermediate.identity]),
+          );
+      } finally {
+        staged.abort();
+      }
+      const read = runtime.edit();
+      try {
+        expect(
+          read.getCfcState().moduleDelegations.get(space)?.get(
+            candidate.identity,
+          ),
+        )
+          .toBeUndefined();
+        const closure = artifact === "source"
+          ? await loadVerifiedSourceClosure(
+            runtime,
+            space,
+            candidate.identity,
+            read,
+          )
+          : await loadCompiledClosure(runtime, space, candidate.identity, {
+            runtimeVersion: version,
+          }, read);
+        expect(closure?.get(candidate.identity)?.delegatedModuleIdentities)
+          .toEqual([previous.identity]);
+      } finally {
+        read.abort();
+      }
+      const reloaded = runtime.edit();
+      try {
+        expect(
+          reloaded.getCfcState().moduleDelegations.get(space)?.get(
+            candidate.identity,
+          ),
+        )
+          .toEqual([previous.identity]);
+      } finally {
+        reloaded.abort();
+      }
+    });
+  }
 
   it("matches canonical full paths and carries the predecessor chain", () => {
     const previous = new Map<string, SourceDoc>([

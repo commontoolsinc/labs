@@ -10,6 +10,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Collection indexes and keyed lookup](collection-index-contract.md) defines
+  proposed B1/B2 semantics and acceptance tests before implementation.
+
+- [Pattern computation cost: implementation sequence](pattern-computation-cost-implementation.md)
+  executes the design in PR #7155 with checkable measurement, collection
+  operator, multi-replica correctness, and authoring-guidance stages.
 - [Cast-free patterns](cast-free-patterns.md) sequences shared type and API
   repairs, migration of authored patterns and their tests, and enforcement
   through lint and new-source admission.

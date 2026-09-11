@@ -1,9 +1,18 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
-import { hashStringOf, valueEqual } from "@commonfabric/data-model";
+import {
+  hashStringOf,
+  taggedHashStringOf,
+  valueEqual,
+} from "@commonfabric/data-model";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
-import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
+import {
+  classifySchemaMeta,
+  collectExternalSchemaRefHashes,
+  SCHEMA_META_MEMBER,
+  schemaMetaRefHashes,
+} from "../../runner/src/schema-decompose.ts";
 import { isSubschema } from "../../runner/src/schema-walk.ts";
 import { mapLinkSchemas } from "./schema-table-links.ts";
 import {
@@ -1024,22 +1033,40 @@ export type Engine = {
   stagedDocumentCache?: Map<string, DocumentCacheEntry>;
 };
 
+/** The first stale confirmed read of an entity on a branch in a declared scope. */
+export type ConfirmedReadConflict = {
+  of: string;
+  scope: CellScope;
+  /** Absent for the default branch. */
+  branch?: BranchName;
+  seq: number;
+  conflictSeq: number;
+};
+
 export class ConflictError extends Error {
   /** Entity whose confirmed read went stale (stale-read conflicts only). */
   readonly of?: string;
 
+  /** Scope of the entity whose confirmed read went stale, when one is named. */
+  readonly scope?: CellScope;
+  readonly branch?: BranchName;
+
   readonly seq?: number;
   readonly conflictSeq?: number;
+  readonly conflicts?: readonly ConfirmedReadConflict[];
   constructor(
     message: string,
-    details?: { of: string; seq: number; conflictSeq: number },
+    conflicts?: readonly ConfirmedReadConflict[],
   ) {
     super(message);
     this.name = "ConflictError";
-    if (details !== undefined) {
-      this.of = details.of;
-      this.seq = details.seq;
-      this.conflictSeq = details.conflictSeq;
+    if (conflicts !== undefined && conflicts.length > 0) {
+      this.conflicts = [...conflicts];
+      this.of = conflicts[0].of;
+      this.scope = conflicts[0].scope;
+      this.branch = conflicts[0].branch;
+      this.seq = conflicts[0].seq;
+      this.conflictSeq = conflicts[0].conflictSeq;
     }
   }
 }
@@ -5208,15 +5235,16 @@ const applyCommitTransaction = (
   //
   // The same pass collects every schema reference the commit's content
   // introduces — a link schema anywhere in a set's document, a patch's
-  // own values, and an installed schema document's own refs — for the
-  // closure validation below. Known gap: a patch that edits INSIDE an
-  // existing link's schema (replacing a `$ref` string at a sub-path, say)
-  // introduces a reference no patch value carries as a whole link, so
-  // only a scan of the post-patch document would see it — a cost this
-  // validation deliberately does not pay. The gap closes when links
-  // become opaque FabricPrimitive Link objects instead of patchable
-  // plain JSON; until then such a reference escapes commit-time
-  // validation and read-side assembly catches it. The scan is also
+  // own values, a document's reserved `schema` metadata member, and an
+  // installed schema document's own refs — for the closure validation
+  // below. Known gap: a patch that edits INSIDE an existing link's schema
+  // (replacing a `$ref` string at a sub-path, say) introduces a reference
+  // no patch value carries as a whole link, so only a scan of the
+  // post-patch document would see it — a cost this validation
+  // deliberately does not pay. The gap closes when links become opaque
+  // FabricPrimitive Link objects instead of patchable plain JSON; until
+  // then such a reference escapes commit-time validation and read-side
+  // assembly catches it. The scan is also
   // conservative the other way: a reference in an operand that does not
   // survive to the final document (a remove-by-value operand, an
   // add-then-remove within one commit) is still validated.
@@ -5226,8 +5254,10 @@ const applyCommitTransaction = (
   // advance the head and fan the unchanged document out to every watcher —
   // the cost that makes blind closure re-installs expensive. The commit
   // still records (the space log advances; a client basis at its seq is
-  // legal and truthful), only the per-document machinery goes quiet.
-  const elidedCidSetOpIndexes = new Set<number>();
+  // legal and truthful), only the per-document machinery goes quiet. The
+  // set holds the content-addressed elisions this pass proves and, below
+  // it, every operation of an identity commit.
+  const elidedOpIndexes = new Set<number>();
   const elidableCidIds = new Set<string>();
   const requiredSchemaRefs = new Set<string>();
   // `$alias` records are NOT scanned: they are Pattern-binding vocabulary
@@ -5264,25 +5294,50 @@ const applyCommitTransaction = (
     if (typeof schemaHash !== "string" || schemaHash.length === 0) return;
     requiredSchemaRefs.add(schemaHash);
   };
-  // The envelope position a patch sequence can land metadata at —
-  // directly (`/cfc`, `/cfc/schemaHash`), through a root-level value, or
-  // by MOVING document content into the reserved member. The forms
-  // compose in sequence AND across a commit's operations, so the only
-  // complete answer is the post-patch document at the operation's own
-  // address: replayed over what earlier operations in this commit left
-  // (a set can stage the base a later patch rewrites), else over the
+  // A document's reserved `schema` metadata member is a schema position
+  // in the link spelling — a self-contained inline schema, or a single
+  // `{ "$ref": "cid:…" }` root — and its refs are collected exactly as a
+  // link schema's are. The member's grammar has no third form: a `cid:`
+  // reference nested inside an inline schema, or a root reference with
+  // sibling keywords, is refused here, so no reader ever has to merge
+  // two schema-resource scopes. Every document class carries the member
+  // the same way, `cid:` documents included: content addressing hashes
+  // `.value` alone, so the member is immutable and first-writer-wins
+  // under the `cid:` rule below without being hash-bound, and nothing
+  // distinguishes a schema document from a blob whose value happens to
+  // be schema-shaped — so nothing here treats one differently.
+  const collectSchemaMetaRefs = (id: string, document: unknown): void => {
+    const form = classifySchemaMeta(document);
+    if (form.kind === "malformed") {
+      throw new ProtocolError(
+        `memory v2 commit writes document ${id} with malformed schema metadata: ${form.reason}`,
+      );
+    }
+    for (const hash of schemaMetaRefHashes(form)) requiredSchemaRefs.add(hash);
+  };
+  // The metadata positions a patch sequence can land a reference at —
+  // directly (`/cfc`, `/cfc/schemaHash`, `/schema`), through a root-level
+  // value, or by MOVING document content into a reserved member. The
+  // forms compose in sequence AND across a commit's operations, so the
+  // only complete answer is the post-patch document at the operation's
+  // own address: replayed over what earlier operations in this commit
+  // left (a set can stage the base a later patch rewrites), else over the
   // STORED document at the operation's own scope — a scoped patch never
   // lands on the space-scoped instance. Only documents some patch can
-  // reach `cfc` on carry staged state, so a commit without such patches
-  // pays nothing. A sequence that cannot apply is skipped here — the
-  // commit's own application refuses it.
-  const cfcPointer = (pointer: string | undefined): boolean =>
+  // reach a metadata member on carry staged state, so a commit without
+  // such patches pays nothing. A sequence that cannot apply is skipped
+  // here — the commit's own application refuses it. A pointer BELOW
+  // `/schema` edits inside a stored schema, the same shape as the
+  // inside-a-link gap above, and is left to read-side assembly the same
+  // way.
+  const metadataPointer = (pointer: string | undefined): boolean =>
     pointer !== undefined &&
-    (pointer === "" || pointer === "/cfc" || pointer.startsWith("/cfc/"));
-  const patchTouchesCfc = (patches: PatchOp[] | undefined): boolean =>
+    (pointer === "" || pointer === "/cfc" || pointer.startsWith("/cfc/") ||
+      pointer === `/${SCHEMA_META_MEMBER}`);
+  const patchTouchesMetadata = (patches: PatchOp[] | undefined): boolean =>
     (patches ?? []).some((patch) =>
-      cfcPointer(patch.path) ||
-      cfcPointer("from" in patch ? patch.from : undefined)
+      metadataPointer(patch.path) ||
+      metadataPointer("from" in patch ? patch.from : undefined)
     );
   // Scoped rows key exactly as the write loop below keys them: a
   // delegated commit's scoped writes carry the validated acting identity,
@@ -5303,14 +5358,14 @@ const applyCommitTransaction = (
           },
         )
     }`;
-  const cfcPatchDocKeys = new Set<string>();
+  const metadataPatchDocKeys = new Set<string>();
   for (const [opIndex, operation] of commit.operations.entries()) {
     if (operation.op !== "patch" || operation.id.startsWith("cid:")) continue;
-    if (patchTouchesCfc(operation.patches)) {
-      cfcPatchDocKeys.add(opDocKey(opIndex, operation));
+    if (patchTouchesMetadata(operation.patches)) {
+      metadataPatchDocKeys.add(opDocKey(opIndex, operation));
     }
   }
-  const stagedCfcDocs = new Map<string, unknown>();
+  const stagedMetadataDocs = new Map<string, unknown>();
   for (const [opIndex, operation] of commit.operations.entries()) {
     if (operation.op === "sqlite") continue;
     if (operation.op === "patch") {
@@ -5319,11 +5374,11 @@ const applyCommitTransaction = (
         if ("add" in patch) collectLinkSchemaRefs(patch.add);
         if ("values" in patch) collectLinkSchemaRefs(patch.values);
       }
-      if (cfcPatchDocKeys.size > 0) {
+      if (metadataPatchDocKeys.size > 0) {
         const docKey = opDocKey(opIndex, operation);
-        if (cfcPatchDocKeys.has(docKey)) {
-          const base = stagedCfcDocs.has(docKey)
-            ? stagedCfcDocs.get(docKey)
+        if (metadataPatchDocKeys.has(docKey)) {
+          const base = stagedMetadataDocs.has(docKey)
+            ? stagedMetadataDocs.get(docKey)
             : readState(engine, {
               id: operation.id,
               branch,
@@ -5339,9 +5394,10 @@ const applyCommitTransaction = (
               base as Parameters<typeof applyPatchToDocument>[0] | undefined,
               operation.patches ?? [],
             );
-            stagedCfcDocs.set(docKey, patched);
-            if (patchTouchesCfc(operation.patches)) {
+            stagedMetadataDocs.set(docKey, patched);
+            if (patchTouchesMetadata(operation.patches)) {
               collectCfcEnvelopeRef((patched as { cfc?: unknown }).cfc);
+              collectSchemaMetaRefs(operation.id, patched);
             }
           } catch (error) {
             if (!(error instanceof PatchApplyError)) throw error;
@@ -5355,17 +5411,18 @@ const applyCommitTransaction = (
         collectCfcEnvelopeRef(
           (operation.value as { cfc?: unknown } | null)?.cfc,
         );
-        if (cfcPatchDocKeys.size > 0) {
+        collectSchemaMetaRefs(operation.id, operation.value);
+        if (metadataPatchDocKeys.size > 0) {
           const docKey = opDocKey(opIndex, operation);
-          if (cfcPatchDocKeys.has(docKey)) {
-            stagedCfcDocs.set(docKey, operation.value);
+          if (metadataPatchDocKeys.has(docKey)) {
+            stagedMetadataDocs.set(docKey, operation.value);
           }
         }
       }
-      if (operation.op === "delete" && cfcPatchDocKeys.size > 0) {
+      if (operation.op === "delete" && metadataPatchDocKeys.size > 0) {
         const docKey = opDocKey(opIndex, operation);
-        if (cfcPatchDocKeys.has(docKey)) {
-          stagedCfcDocs.set(docKey, undefined);
+        if (metadataPatchDocKeys.has(docKey)) {
+          stagedMetadataDocs.set(docKey, undefined);
         }
       }
       continue;
@@ -5386,22 +5443,34 @@ const applyCommitTransaction = (
         `memory v2 commit cannot write content-addressed document ${operation.id} at ${operation.scope} scope`,
       );
     }
-    // A `cid:` set that IS a schema document (by content-addressed
-    // identity — `cid:` also holds blobs) contributes its own refs;
-    // anything else is scanned like an ordinary document. Schema content
-    // is never link-scanned: keywords such as `default` may carry
-    // link-shaped DATA.
+    // A `cid:` set must be the content its id names: the general content
+    // hash of its value, which is the identity of a code document's
+    // string, of any other content, and of a schema document alike (a
+    // schema's interned hash is this same hash over the deep-frozen
+    // schema, so nothing is interned here). Content that does not hash to
+    // its id is refused below, after the two comparisons that name a more
+    // specific fault, so the namespace holds nothing a reader cannot
+    // verify. A schema-shaped document contributes its own refs and is
+    // never link-scanned, since keywords such as `default` may carry
+    // link-shaped DATA; other content is scanned like an ordinary
+    // document.
     const installedInner = (operation.value as { value?: unknown })?.value;
-    if (
-      isSubschema(installedInner) &&
-      internSchemaAsTaggedHashString(installedInner as JSONSchema) ===
-        operation.id.slice("cid:".length)
-    ) {
+    const installedHash = operation.id.slice("cid:".length);
+    const installsSchemaShape = isSubschema(installedInner);
+    const installsVerifiedContent =
+      taggedHashStringOf(installedInner) === installedHash;
+    if (installsVerifiedContent && installsSchemaShape) {
       for (const hash of collectExternalSchemaRefHashes(installedInner)) {
         requiredSchemaRefs.add(hash);
       }
-    } else {
+    } else if (installsVerifiedContent) {
       collectLinkSchemaRefs(operation.value);
+    }
+    // The envelope's `schema` metadata member is validated for every
+    // `cid:` document alike (see collectSchemaMetaRefs): the identity
+    // check above covers `.value` and nothing beside it.
+    if (installsVerifiedContent) {
+      collectSchemaMetaRefs(operation.id, operation.value);
     }
     // `has()`, not a `get() !== undefined` check: a malformed set can carry
     // an omitted value, and treating it as absent would let a later set of
@@ -5420,7 +5489,7 @@ const applyCommitTransaction = (
       // A duplicate of a stored-identical set elides with it; a duplicate
       // within a first install keeps today's write-both behavior.
       if (elidableCidIds.has(operation.id)) {
-        elidedCidSetOpIndexes.add(opIndex);
+        elidedOpIndexes.add(opIndex);
       }
       continue;
     }
@@ -5437,8 +5506,13 @@ const applyCommitTransaction = (
           `memory v2 commit cannot change content-addressed document ${operation.id}`,
         );
       }
-      elidedCidSetOpIndexes.add(opIndex);
+      elidedOpIndexes.add(opIndex);
       elidableCidIds.add(operation.id);
+    }
+    if (!installsVerifiedContent) {
+      throw new ProtocolError(
+        `memory v2 commit installs content-addressed document ${operation.id} whose content does not hash to its id`,
+      );
     }
     (cidSetsInCommit ??= new Map()).set(operation.id, operation.value);
   }
@@ -5464,10 +5538,10 @@ const applyCommitTransaction = (
         ? (cidSetsInCommit.get(id) as { value?: unknown })?.value
         : undefined;
       if (included !== undefined) {
-        if (
-          !isSubschema(included) ||
-          internSchemaAsTaggedHashString(included as JSONSchema) !== hash
-        ) {
+        // The set already verified its content against its id; what a
+        // schema reference additionally requires is that the content be a
+        // schema at all — a code document's string, say, is not.
+        if (!isSubschema(included)) {
           throw new ProtocolError(
             `memory v2 commit references schema document ${id} whose included content does not verify`,
           );
@@ -5509,15 +5583,219 @@ const applyCommitTransaction = (
     }
   }
 
-  validateConfirmedReads(engine, branch, commit, { principal, sessionId });
-  const resolvedPendingReads = resolvePendingReads(
-    engine,
-    sessionKey,
-    sessionId,
-    principal,
-    branch,
-    commit,
-  );
+  // An identity commit leaves every document it writes as the space
+  // already holds it, so applying the commit changes nothing. A commit that
+  // changes nothing cannot have observed anything wrongly in a way that
+  // matters, so its reads' staleness is not checked (03-commit-model.md
+  // §3.6.1) and every operation elides like a content-addressed re-set.
+  // Only the staleness scan is waived: a pending read naming an unresolved
+  // or rejected layer still refuses the commit, which is what keeps the
+  // client's cascade and the server's verdict in agreement (09-invariants.md,
+  // INV-4 and INV-6). Every comparison reads the stored document under the
+  // same identity the write would apply under, so a scoped instance
+  // compares against its own partition.
+  //
+  // The proof is per document, over the commit's `set` and `patch`
+  // operations on it in order: replayed on the document as the commit's
+  // read of it saw it, the sequence yields the stored document, and
+  // replayed on the stored document it leaves that unchanged. The second
+  // condition is for the writer's own replica, which re-folds the
+  // operations over whatever confirmed base it holds when the accept
+  // arrives: a sequence idempotent on the durable value lands on that value
+  // from any base between the read and the head, where a positional splice
+  // replayed over a base already carrying its elements would duplicate
+  // them.
+  type DocumentOps = Array<
+    Extract<typeof commit.operations[number], { op: "set" | "patch" }>
+  >;
+  const replay = (
+    base: EntityDocument | undefined,
+    operations: DocumentOps,
+  ): EntityDocument | undefined => {
+    let document = base;
+    for (const operation of operations) {
+      document = operation.op === "set"
+        ? operation.value as EntityDocument
+        : applyPatchToDocument(document, operation.patches);
+    }
+    return document;
+  };
+  // The document as the commit's read of it saw it, on the commit's branch
+  // under the write's scope. A pending read is the view the value came
+  // through: the document at the read's declared confirmed basis with
+  // exactly the own layers the read names replayed on it in local order.
+  // The layers' resolution seqs would not do: the durable document at the
+  // highest one carries every foreign write on other paths that landed
+  // before it, which the reader had not integrated, so a patch judged from
+  // there could pass as an identity while the reader's own view would not
+  // have produced the stored document. A pending read that declares no
+  // basis (a legacy client) leaves the view unreconstructable, and such a
+  // commit gets no exemption. Where a commit also carries a confirmed read
+  // of the same document (a shape-only read that names the non-speculative
+  // stack), the pending read decides. A confirmed read's view is the
+  // document at its seq. A read names its branch only when that differs
+  // from the commit's, exactly as the staleness check reads it; a read
+  // that names another branch says nothing about this one and is passed
+  // over. A basis below the branch's creation seq is not a state of this
+  // branch (06-branching.md §6.10.1), so such a read leaves the view
+  // unreconstructable as well. With no read of the document at all the
+  // sequence is an identity only where it is idempotent, so the stored
+  // document is the basis.
+  type Basis =
+    | { known: true; document: EntityDocument | undefined }
+    | { known: false };
+  const REPLAYABLE_LAYER_OPS = new Set(["set", "patch", "delete"]);
+  const branchCreatedSeq = branch === DEFAULT_BRANCH
+    ? 0
+    : getBranch(engine, branch)?.createdSeq ?? Number.POSITIVE_INFINITY;
+  const basisOf = (
+    first: DocumentOps[number],
+    stored: EntityDocument,
+    at: (seq: number) => EntityDocument | null,
+  ): Basis => {
+    const sameDocument = (candidate: { id: string; scope?: unknown }) =>
+      candidate.id === first.id &&
+      normalizeScope(
+          candidate.scope as Parameters<typeof normalizeScope>[0],
+        ) ===
+        normalizeScope(first.scope);
+    const documentAt = (seq: number): EntityDocument | undefined =>
+      seq === 0 ? undefined : at(seq) ?? undefined;
+    const pending = commit.reads.pending.find(sameDocument);
+    if (pending !== undefined) {
+      if (
+        pending.basisSeq === undefined || pending.basisSeq < branchCreatedSeq
+      ) {
+        return { known: false };
+      }
+      let document = documentAt(pending.basisSeq);
+      const layers = [...pendingReadLayers(pending)].sort((a, b) => a - b);
+      for (const localSeq of layers) {
+        const row = engine.statements.selectExistingCommit.get({
+          session_id: sessionKey,
+          local_seq: localSeq,
+        }) as CommitRow | undefined;
+        if (row === undefined || (row.branch || DEFAULT_BRANCH) !== branch) {
+          return { known: false };
+        }
+        const layer = decodeMemoryBoundary(row.original) as ClientCommit;
+        for (const operation of layer.operations) {
+          if (operation.op === "sqlite" || !sameDocument(operation)) continue;
+          // An op-field operation on the document is not replayable here.
+          if (!REPLAYABLE_LAYER_OPS.has(operation.op)) return { known: false };
+          document = operation.op === "delete"
+            ? undefined
+            : replay(document, [operation as DocumentOps[number]]);
+        }
+      }
+      return { known: true, document };
+    }
+    const confirmed = commit.reads.confirmed.find((candidate) =>
+      sameDocument(candidate) && (candidate.branch ?? branch) === branch
+    );
+    if (confirmed === undefined) return { known: true, document: stored };
+    if (confirmed.seq < branchCreatedSeq) return { known: false };
+    return { known: true, document: documentAt(confirmed.seq) };
+  };
+  // Proving the identity reads the stored document and, for a patch, the
+  // document at the reader's basis, so it runs only once a staleness check
+  // has refused the commit: the cost lands on the refusal path alone, and
+  // a commit that validates never materializes a revision it did not need.
+  // The proof is per document, over every operation the commit applies to
+  // it in order: a commit that creates a document with a `set` and then
+  // patches it is one write of the final value, and only the replay of the
+  // whole sequence can compare with what is stored.
+  const isIdentityCommit = (): boolean => {
+    if (commit.operations.length === 0) return false;
+    type DocOps = { opIndex: number; operations: DocumentOps };
+    const byDocument = new Map<string, DocOps>();
+    for (const [opIndex, operation] of commit.operations.entries()) {
+      if (operation.op !== "set" && operation.op !== "patch") return false;
+      // A space's ACL document, the one entity named by a DID, has its own
+      // admission (09-invariants.md, INV-12 and INV-13): a genesis that
+      // loses its race is refused so that one commit is the genesis, and an
+      // identical re-seal recorded as a no-op would be a second.
+      if (operation.id.startsWith("of:did:")) return false;
+      if (operation.id.startsWith("cid:")) {
+        if (!elidedOpIndexes.has(opIndex)) return false;
+        continue;
+      }
+      const key = opDocKey(opIndex, operation);
+      const group = byDocument.get(key);
+      if (group === undefined) {
+        byDocument.set(key, { opIndex, operations: [operation] });
+      } else {
+        group.operations.push(operation);
+      }
+    }
+    for (const { opIndex, operations } of byDocument.values()) {
+      const first = operations[0];
+      const at = (seq?: number) =>
+        read(engine, {
+          id: first.id,
+          branch,
+          seq,
+          scope: first.scope,
+          principal: scanPrincipal,
+          sessionId: scanSession,
+          scopeKey: scopeKeyByOpIndex.get(opIndex),
+        });
+      const stored = at();
+      if (stored === null) return false;
+      // A view that cannot be reconstructed, or a patch that cannot be
+      // applied to one of the two bases, proves no identity, and the
+      // staleness refusal the commit arrived with stands; the ordinary
+      // apply path reports a patch's own failure on the retry.
+      try {
+        const basis = basisOf(first, stored, at);
+        if (!basis.known) return false;
+        const fromBasis = replay(basis.document, operations);
+        const onStored = replay(stored, operations);
+        if (
+          !valueEqual(fromBasis as FabricValue, stored as FabricValue) ||
+          !valueEqual(onStored as FabricValue, stored as FabricValue)
+        ) {
+          return false;
+        }
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  };
+  let resolvedPendingReads: Array<{ localSeq: number; seq: number }>;
+  try {
+    validateConfirmedReads(engine, branch, commit, { principal, sessionId });
+    resolvedPendingReads = resolvePendingReads(
+      engine,
+      sessionKey,
+      sessionId,
+      principal,
+      branch,
+      commit,
+    );
+  } catch (error) {
+    // Only a staleness refusal has an identity escape. A refusal for an
+    // unresolved or rejected dependency carries no conflict seq and stands.
+    if (
+      !(error instanceof ConflictError) || error.conflictSeq === undefined ||
+      !isIdentityCommit()
+    ) {
+      throw error;
+    }
+    for (const opIndex of commit.operations.keys()) {
+      elidedOpIndexes.add(opIndex);
+    }
+    resolvedPendingReads = resolvePendingReads(
+      engine,
+      sessionKey,
+      sessionId,
+      principal,
+      branch,
+      commit,
+      { checkStaleness: false },
+    );
+  }
 
   // Event-append admission (Phase 3, events.md §1/§4): the dedupe-horizon
   // CAS, the firedAt validation-or-stamp, and the sidecar write guard.
@@ -5659,7 +5937,7 @@ const applyCommitTransaction = (
         scopeKeyOverride: scopeKeyByOpIndex.get(opIndex),
       });
     }
-    if (elidedCidSetOpIndexes.has(opIndex)) continue;
+    if (elidedOpIndexes.has(opIndex)) continue;
     // Event-append stamping (Phase 3): a declared append's entry gets its
     // stream `seq` (this commit's) and admission-resolved `firedAt`
     // written into a CLONE of the op — the caller's operation objects are
@@ -5745,9 +6023,9 @@ const applyCommitTransaction = (
     branch,
     revisions,
     ...(operationResolutions.length > 0 ? { operationResolutions } : {}),
-    ...(elidedCidSetOpIndexes.size > 0
+    ...(elidedOpIndexes.size > 0
       ? {
-        elidedOpIndexes: [...elidedCidSetOpIndexes].toSorted((a, b) => a - b),
+        elidedOpIndexes: [...elidedOpIndexes].toSorted((a, b) => a - b),
       }
       : {}),
   };
@@ -6156,10 +6434,19 @@ const validateConfirmedReads = (
   // Every confirmed read in the commit resolves declared user/session scope
   // against that writer identity, even when the read points at another branch.
   // Cross-branch reads inherit this same principal context.
+  const conflicts: ConfirmedReadConflict[] = [];
+  const staleInstances = new Map<BranchName, Map<ScopeKey, Set<EntityId>>>();
   for (const read of commit.reads.confirmed) {
     const readBranch = read.branch ?? branch;
     ensureReadableBranch(engine, readBranch);
     const scopeKey = resolveScopeKey(read.scope, scopeContext);
+    const scope = read.scope ?? DEFAULT_SCOPE;
+    let staleScopes = staleInstances.get(readBranch);
+    let staleIds = staleScopes?.get(scopeKey);
+    // Further path scans cannot change a known-stale entity's recovery address.
+    // Every read still validates its branch and scope before skipping the scan,
+    // so invalid addresses take precedence over stale-read conflicts.
+    if (staleIds?.has(read.id)) continue;
     const conflictSeq = findConflictSeq(
       engine,
       readBranch,
@@ -6170,11 +6457,43 @@ const validateConfirmedReads = (
       read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
-      throw new ConflictError(
-        `stale confirmed read: ${read.id} at seq ${read.seq} conflicted with seq ${conflictSeq}`,
-        { of: read.id, seq: read.seq, conflictSeq },
-      );
+      if (staleScopes === undefined) {
+        staleScopes = new Map();
+        staleInstances.set(readBranch, staleScopes);
+      }
+      if (staleIds === undefined) {
+        staleIds = new Set();
+        staleScopes.set(scopeKey, staleIds);
+      }
+      staleIds.add(read.id);
+      conflicts.push({
+        of: read.id,
+        scope,
+        ...(readBranch === DEFAULT_BRANCH ? {} : { branch: readBranch }),
+        seq: read.seq,
+        conflictSeq,
+      });
     }
+  }
+  if (conflicts.length > 0) {
+    // Message-only clients recover by entity ID. Multiple scopes or branches
+    // of one entity must not crowd other entities out of the bounded preview.
+    // The array carries every stale instance and its diagnostic sequences.
+    const messages = new Map<EntityId, string>();
+    for (const { of, seq, conflictSeq } of conflicts) {
+      if (!messages.has(of)) {
+        messages.set(
+          of,
+          `stale confirmed read: ${of} at seq ${seq} conflicted with seq ${conflictSeq}`,
+        );
+      }
+    }
+    const preview = [...messages.values()].slice(0, 3);
+    if (messages.size > preview.length) {
+      const remaining = messages.size - preview.length;
+      preview.push(`${remaining} more conflict${remaining === 1 ? "" : "s"}`);
+    }
+    throw new ConflictError(preview.join("; "), conflicts);
   }
 };
 
@@ -6237,6 +6556,9 @@ const resolvePendingReads = (
   principal: string | undefined,
   branch: BranchName,
   commit: ClientCommit,
+  // An identity commit resolves its dependencies but skips the staleness
+  // scan: it changes nothing, so a stale basis decides nothing.
+  options: { checkStaleness: boolean } = { checkStaleness: true },
 ): Array<{ localSeq: number; seq: number }> => {
   const resolutions = new Map<number, { localSeq: number; seq: number }>();
 
@@ -6280,7 +6602,11 @@ const resolvePendingReads = (
     // basisSeq) keeps the max-dependency basis, so the over-advance
     // deviation persists for it alone
     // (docs/specs/memory-v2/09-invariants.md, INV-1).
+    // The declared basis is validated whether or not the scan runs: an
+    // identity commit's reads are exempt from staleness, not from the
+    // protocol.
     const trueBasis = pendingReadBasisSeq(engine, read);
+    if (!options.checkStaleness) continue;
     const conflictSeq = trueBasis !== undefined
       ? findConflictSeq(
         engine,
@@ -6306,6 +6632,13 @@ const resolvePendingReads = (
         `stale pending read: ${read.id} via localSeq ${
           basis!.localSeq
         } conflicted with seq ${conflictSeq}`,
+        [{
+          of: read.id,
+          scope: normalizeScope(read.scope),
+          ...(branch === DEFAULT_BRANCH ? {} : { branch }),
+          seq: trueBasis ?? basis!.seq,
+          conflictSeq,
+        }],
       );
     }
   }

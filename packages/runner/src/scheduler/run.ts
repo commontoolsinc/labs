@@ -1,5 +1,7 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { resolveScopeKey, type ScopeKey } from "@commonfabric/memory/v2";
+import { getAuthoredDebugSource } from "../harness/authored-debug-source.ts";
+import { startReadStats } from "../read-stats.ts";
 import type { CfcRefusalDetail } from "../cfc/refusal-detail.ts";
 import type { Runtime } from "../runtime.ts";
 import { normalizeCellScope } from "../scope.ts";
@@ -61,7 +63,11 @@ import type {
   ReactivityLog,
   TelemetryAnnotations,
 } from "./types.ts";
-import type { NonIdempotentReport, SchedulerActionInfo } from "../telemetry.ts";
+import type {
+  ActionReadStats,
+  NonIdempotentReport,
+  SchedulerActionInfo,
+} from "../telemetry.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
@@ -430,6 +436,8 @@ export interface SchedulerActionRunState {
   readonly runtime: Runtime;
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly actionTimingState: ActionTimingState;
+  readonly getReadStatsEnabled: () => boolean;
+  readonly getReadAttemptAccountingEnabled: () => boolean;
   readonly retries: WeakMap<Action, number>;
   readonly offBudgetRetries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
@@ -471,6 +479,8 @@ export async function runSchedulerAction(
   state: SchedulerActionRunState,
   action: Action,
 ): Promise<any> {
+  const readStatsEnabled = state.getReadStatsEnabled();
+  const readAttemptsEnabled = state.getReadAttemptAccountingEnabled();
   logger.timeStart("scheduler", "run");
   const actionId = state.getActionId(action);
   state.runtime.telemetry.submit({
@@ -590,6 +600,20 @@ export async function runSchedulerAction(
         }
         : {}),
     });
+    const finishReads = readStatsEnabled
+      ? startReadStats(
+        tx,
+        readAttemptsEnabled
+          ? (reads) =>
+            state.runtime.telemetry.submit({
+              type: "scheduler.read-attempt",
+              kind: "reactive",
+              actionId,
+              reads,
+            })
+          : undefined,
+      )
+      : undefined;
     const actionStartTime = performance.now();
 
     let result: any;
@@ -597,11 +621,25 @@ export async function runSchedulerAction(
       let committedLog: ReactivityLog | undefined;
       let retryImmediately = false;
       const finalizeAction = (error?: unknown) => {
+        const actionEndTime = performance.now();
+        let reads: ActionReadStats | undefined;
+        if (finishReads) {
+          let dependencies = 0;
+          try {
+            const log = txToReactivityLog(tx);
+            dependencies = sortAndCompactPaths(log.reads).length +
+              sortAndCompactPaths(log.shallowReads, false).length;
+          } finally {
+            reads = finishReads(dependencies);
+          }
+        }
         finalizeSchedulerAction(state, {
           action,
           actionId,
           tx,
           actionStartTime,
+          actionEndTime,
+          reads,
           invalidCauses: causes,
           result,
           error,
@@ -780,6 +818,8 @@ function finalizeSchedulerAction(
     readonly actionId: string;
     readonly tx: IExtendedStorageTransaction;
     readonly actionStartTime: number;
+    readonly actionEndTime: number;
+    readonly reads?: ActionReadStats;
     readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
     readonly result: unknown;
     readonly error?: unknown;
@@ -788,13 +828,27 @@ function finalizeSchedulerAction(
   },
 ): void {
   // Record action execution time for cycle-aware scheduling
-  const elapsed = performance.now() - args.actionStartTime;
-  recordActionTime(state.actionTimingState, args.action, elapsed);
+  const elapsed = args.actionEndTime - args.actionStartTime;
+  recordActionTime(
+    state.actionTimingState,
+    args.action,
+    elapsed,
+    args.actionEndTime,
+    args.reads,
+  );
   state.runtime.telemetry.submit({
     type: "scheduler.run.complete",
     actionId: args.actionId,
     actionInfo: state.getActionTelemetryInfo(args.action),
     durationMs: elapsed,
+    ...(args.reads
+      ? {
+        reads: args.reads,
+        src: getAuthoredDebugSource(
+          (args.action as Partial<TelemetryAnnotations>).module?.implementation,
+        )?.src,
+      }
+      : {}),
     ...(args.error !== undefined
       ? { error: args.error instanceof Error ? args.error.message : "error" }
       : {}),

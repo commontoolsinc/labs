@@ -117,6 +117,18 @@ export type ServingLoopStats = {
    * a count that grows without settling flags a wedged marker channel. */
   watermarkClamped: number;
 
+  /** Engine reads the store read-through performed for serving
+   * replicas (`SpaceServerPolicy.storeReadThrough`): misses served on
+   * first access, roots read for a `sync()`, and the re-reads
+   * `storeRefreshes` counts. Zero while the posture is off. */
+  storeReads: number;
+
+  /** Held documents re-read from the engine because an admitted commit
+   * on the feed wrote them (`IStorageManager.integrateStoreWrites`), the
+   * read-through posture's replacement for a session watch's delivery.
+   * Counted per document, not per commit. */
+  storeRefreshes: number;
+
   /** Write-carrying transactions REFUSED at the wave's seal because no
    * run context was stamped (serving-loop.md §3d, RULED 2026-08-05).
    * Structurally zero when every server-side commit path declares its
@@ -503,6 +515,9 @@ export type ServingLoopStats = {
      * cap or an egress-rate token. Growth under load is the budget
      * WORKING (the runaway degrades its own space), not a failure. */
     budgetDeferrals: number;
+
+    /** Completions that wrote nothing because their request was superseded. */
+    superseded: number;
   };
   lease: { held: number; lost: number };
 
@@ -557,6 +572,8 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   structureLoadTerminal: 0,
   structureLoadRearmed: 0,
   watermarkClamped: 0,
+  storeReads: 0,
+  storeRefreshes: 0,
   unstampedSealRefusals: 0,
   servedIntentSealFailures: 0,
   parkDisposeTimeouts: 0,
@@ -616,7 +633,13 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     dropped: 0,
   },
   memo: { hits: 0, misses: 0, inflight: 0 },
-  outbox: { queued: 0, completed: 0, failed: 0, budgetDeferrals: 0 },
+  outbox: {
+    queued: 0,
+    completed: 0,
+    failed: 0,
+    budgetDeferrals: 0,
+    superseded: 0,
+  },
   lease: { held: 0, lost: 0 },
   rootEnsure: {
     runs: 0,

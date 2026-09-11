@@ -18,6 +18,7 @@ import type { RuntimeProgram } from "./harness/types.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { isSigilLink, linkPathSegmentToCellPathSegment } from "./link-types.ts";
 import { parseLink } from "./link-utils.ts";
+import { readResultSchemaMeta } from "./result-schema-meta.ts";
 import type { Runtime } from "./runtime.ts";
 import { DEFAULT_CELL_SCOPE, scopeRank } from "./scope.ts";
 import type {
@@ -311,12 +312,18 @@ export function cellWithScopedLinkRequiredsRelaxed<T>(
   return relaxed === schema ? cell : cell.asSchema<T>(relaxed);
 }
 
+/**
+ * `cell` typed by its document's durable `schema` metadata (the result
+ * schema its piece's setup wrote, in the inline form
+ * `readResultSchemaMeta` supplies), narrowed to the cell's path. A cell
+ * that already carries a schema keeps it.
+ */
 export function getResultCellWithSourceSchema<T = unknown>(
   cell: Cell<T>,
 ): Cell<T> {
   const link = cell.getAsNormalizedFullLink();
   if (link.schema === undefined) {
-    const resultSchema = cell.getMetaRaw("schema") as JSONSchema | undefined;
+    const resultSchema = readResultSchemaMeta(cell);
     if (resultSchema !== undefined) {
       const schema = ContextualFlowControl.schemaAtPath(
         resultSchema,
@@ -340,7 +347,6 @@ export async function compileAndSavePattern(
   patternSrc: string | RuntimeProgram,
   options: {
     space: MemorySpace;
-    previousEntryIdentity?: string;
   },
 ): Promise<Pattern> {
   if (typeof patternSrc === "string") {
@@ -354,9 +360,6 @@ export async function compileAndSavePattern(
   // subsequent loads (CT-1623).
   const pattern = await runtime.patternManager.compilePattern(patternSrc, {
     space: options.space,
-    ...(options.previousEntryIdentity === undefined
-      ? {}
-      : { previousEntryIdentity: options.previousEntryIdentity }),
   });
   if (!pattern) {
     throw new Error("No default pattern found in the compiled exports.");

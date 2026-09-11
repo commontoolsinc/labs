@@ -132,8 +132,7 @@ describe("write-back pre-sync materializes edge element docs (CT-1848)", () => {
     // `imports[i]` into) are client-known BEFORE the re-write. A schema-less
     // pre-sync normalizes to the rejecting selector and delivers only the root
     // doc; in the browser the re-write then touches the element docs blind and
-    // the engine reveals the conflicts one per attempt (the CT-1824 loop,
-    // converged only by the retry budget). NOTE: the blind-conflict itself does
+    // needs a rejected commit plus conflict repair. NOTE: the blind-conflict does
     // not reproduce in-process (this fixture's flows warm the element docs some
     // other way — same limitation as the healing test above); the conflict-free
     // attempt-1 property is verified live on the browser rig. What IS pinned
@@ -304,32 +303,24 @@ describe("editWithRetry conflict catch-up", () => {
   });
 });
 
-describe("editWithRetry sequential conflict discovery", () => {
-  // The browser cold-boot shape of CT-1824 (live-traced on the rig): the
-  // write-back's derived docs are discovered ONE per attempt — the engine
-  // rejects on the first stale read, the retry pulls exactly that doc, and
-  // only then does the next attempt's diff reach the following one.
-  // editWithRetry must (a) pull the doc each conflict names so each round
-  // makes progress, and (b) survive a pull or catch-up failure without giving
-  // up the round (the retry's commit is the definitive outcome). Convergence
-  // takes one round per pre-existing derived doc, which is why
-  // `#writeBackCompileCache` passes a budget sized to its write set instead of
-  // DEFAULT_MAX_RETRIES.
-
-  it("pulls each named doc and converges one doc per round", async () => {
+describe("editWithRetry conflict repair", () => {
+  it("pulls every named document before one retry", async () => {
     const server = newSharedServer();
     const sm = EmulatedStorageManager.connectTo(server, { as: signer });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm,
     });
-    const CONFLICTS = 8;
+    const conflicts = Array.from({ length: 8 }, (_, index) => ({
+      space,
+      the: "application/json",
+      of: `of:doc-${index + 1}`,
+    }));
     const pulls: string[] = [];
     const provider = sm.open(space);
     // deno-lint-ignore no-explicit-any
     (provider as any).sync = (uri: string) => {
       pulls.push(uri);
-      // Round 3's pull fails; the round must still proceed to its retry.
       if (uri === "of:doc-3") {
         return Promise.reject(new Error("pull failed"));
       }
@@ -341,26 +332,14 @@ describe("editWithRetry sequential conflict discovery", () => {
       abort: () => {},
       commit: () => {
         commits++;
-        if (commits <= CONFLICTS) {
-          const k = commits;
+        if (commits === 1) {
           return Promise.resolve({
             error: {
               name: "ConflictError",
-              message:
-                `stale confirmed read: of:doc-${k} at seq 0 conflicted with seq ${
-                  10 + k
-                }`,
-              // Round 5's catch-up gate rejects (session churn); the retry
-              // must run anyway.
-              readyToRetry: () =>
-                k === 5
-                  ? Promise.reject(new Error("session replaced"))
-                  : Promise.resolve(),
-              conflict: {
-                space,
-                the: "application/json",
-                of: `of:doc-${k}`,
-              },
+              message: "stale confirmed reads",
+              readyToRetry: () => Promise.reject(new Error("session replaced")),
+              conflict: conflicts[0],
+              conflicts: [...conflicts, conflicts[0]],
             },
           });
         }
@@ -372,13 +351,11 @@ describe("editWithRetry sequential conflict discovery", () => {
     // deno-lint-ignore no-explicit-any
     (runtime as any).prepareTxForCommit = () => {};
     try {
-      const result = await runtime.editWithRetry(() => {}, 64);
+      const result = await runtime.editWithRetry(() => {});
       expect(result.error).toBeUndefined();
-      // One commit per conflict round plus the converging attempt.
-      expect(commits).toBe(CONFLICTS + 1);
-      // Every round pulled exactly the doc its conflict named, in order.
+      expect(commits).toBe(2);
       expect(pulls).toEqual(
-        Array.from({ length: CONFLICTS }, (_, i) => `of:doc-${i + 1}`),
+        conflicts.map(({ of }) => of),
       );
     } finally {
       await runtime.dispose();
@@ -387,7 +364,7 @@ describe("editWithRetry sequential conflict discovery", () => {
     }
   });
 
-  it("exhausts the default budget when discovery outlasts it", async () => {
+  it("pulls a singular conflict from an older rejection", async () => {
     const server = newSharedServer();
     const sm = EmulatedStorageManager.connectTo(server, { as: signer });
     const runtime = new Runtime({
@@ -395,27 +372,34 @@ describe("editWithRetry sequential conflict discovery", () => {
       storageManager: sm,
     });
     const provider = sm.open(space);
+    const pulls: string[] = [];
     // deno-lint-ignore no-explicit-any
-    (provider as any).sync = () => Promise.resolve({ ok: {} });
+    (provider as any).sync = (uri: string) => {
+      pulls.push(uri);
+      return Promise.resolve({ ok: {} });
+    };
     let commits = 0;
     const fakeTx = () => ({
       tx: {},
       abort: () => {},
       commit: () => {
         commits++;
-        return Promise.resolve({
-          error: {
-            name: "ConflictError",
-            message: `stale confirmed read: of:doc-${commits} at seq 0 ` +
-              `conflicted with seq ${10 + commits}`,
-            readyToRetry: () => Promise.resolve(),
-            conflict: {
-              space,
-              the: "application/json",
-              of: `of:doc-${commits}`,
-            },
-          },
-        });
+        return Promise.resolve(
+          commits === 1
+            ? {
+              error: {
+                name: "ConflictError",
+                message: "stale confirmed read",
+                readyToRetry: () => Promise.resolve(),
+                conflict: {
+                  space,
+                  the: "application/json",
+                  of: "of:legacy-doc",
+                },
+              },
+            }
+            : {},
+        );
       },
     });
     // deno-lint-ignore no-explicit-any
@@ -423,13 +407,10 @@ describe("editWithRetry sequential conflict discovery", () => {
     // deno-lint-ignore no-explicit-any
     (runtime as any).prepareTxForCommit = () => {};
     try {
-      // With the general default (5 retries = 6 attempts), a write set with
-      // more never-read derived docs than that cannot converge — the CT-1824
-      // cold-boot loop. This is the behavior `#writeBackCompileCache`'s larger
-      // budget exists to clear.
       const result = await runtime.editWithRetry(() => {});
-      expect(result.error).toBeDefined();
-      expect(commits).toBe(6);
+      expect(result.error).toBeUndefined();
+      expect(commits).toBe(2);
+      expect(pulls).toEqual(["of:legacy-doc"]);
     } finally {
       await runtime.dispose();
       await sm.close();

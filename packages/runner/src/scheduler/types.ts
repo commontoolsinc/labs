@@ -6,8 +6,8 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   MediaType,
+  ReplicaLoadFailure,
 } from "../storage/interface.ts";
-import type { ReplicaLoadFailure } from "../storage/interface.ts";
 import type {
   SchedulerEventPreflightActionSummary,
   SchedulerEventPreflightStats,
@@ -71,6 +71,16 @@ export type EventHandler =
   & ((tx: IExtendedStorageTransaction, event: any) => any)
   & {
     /**
+     * Alternative implementation at a shared stream address. Implementations
+     * coexist by key; `matches()` reads the selector through the event actor's
+     * transaction so dependency preflight and dispatch track the same inputs.
+     */
+    implementationSelection?: {
+      key: string;
+      matches(tx: IExtendedStorageTransaction): boolean;
+    };
+
+    /**
      * Optional callback to populate a transaction with the handler's read dependencies.
      * Called by the scheduler to discover what cells the handler will read.
      * The callback should read all cells (using .get({ traverseCells: true })) that
@@ -95,11 +105,14 @@ export type EventHandler =
      * reads that actor's instances of its scoped inputs, so the presync
      * loads THOSE instances — the served save handler must find the
      * actor's own draft, not the service instance's empty one (the R7
-     * wall). Absent on every client-side event.
+     * wall). Absent on every client-side event. Materialization reads use
+     * `tx`, whose lifetime covers this callback and whose actor matches
+     * `identity`; the scheduler closes it before opening the event transaction.
      */
     presyncInputs?: (
       event: any,
-      identity?: ScopeKeyIdentity,
+      identity: ScopeKeyIdentity | undefined,
+      tx: IExtendedStorageTransaction,
     ) => Promise<void>;
   };
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
@@ -364,6 +377,9 @@ export type QueuedEvent = {
   action: Action;
   handler: EventHandler;
   event: any;
+
+  /** Guarded implementation whose input dependencies passed preflight. */
+  preflightImplementation?: EventHandler;
 
   /**
    * Payload keys the RUNTIME itself injected into `event`'s value (send's

@@ -18,6 +18,7 @@ import {
   isNontrivialSchema,
   schemaWithProperties,
 } from "@commonfabric/data-model-schema";
+import { readStatsActive, recordLinkResolution } from "./read-stats.ts";
 import {
   readMaybeLink,
   resolveLink,
@@ -55,6 +56,7 @@ import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
 } from "./cfc.ts";
+import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForDereference,
@@ -69,7 +71,11 @@ import type { CfcAddress } from "./cfc/types.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
 import { canFollowScopedLink, isCellScope } from "./scope.ts";
-import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import {
+  excludeReadFromConflict,
+  internalVerifierRead,
+  linkResolutionProbe,
+} from "./storage/reactivity-log.ts";
 import {
   canBranchMatch,
   combineOptionalSchema,
@@ -93,10 +99,9 @@ const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   path: [...link.path],
 });
 
-// Creation-only: stamp the asCell entry's declared scope onto a newly created
-// cell's link. Never use this on a link that was followed/resolved during a
-// read — there the link's own storage-resolved scope is authoritative and
-// schema scope acts only as a follow cap (see link-resolution.ts).
+// The `asCell` declaration chooses the scope of a new slot. Existing values
+// and references keep their storage-resolved scope; their schema scope only
+// constrains which links a read may follow.
 const linkWithAsCellScope = (
   link: NormalizedFullLink,
   entry:
@@ -143,7 +148,7 @@ const asCellCompoundCandidates = (
   if (branches.length > 0) {
     const { anyOf: _anyOf, oneOf: _oneOf, ...baseSchema } = schema;
     for (const branch of branches) {
-      const branchWithDefs = branchWithParentDefs(schema, branch);
+      const branchWithDefs = cfcSchemaWithInheritedDefs(branch, schema.$defs);
       const resolved = resolveSchema(branchWithDefs) ?? branchWithDefs;
       const merged = combineSchema(baseSchema as JSONSchemaObj, resolved);
       if (
@@ -229,46 +234,6 @@ const labelViewForLink = (
   return rebaseCfcLabelView(baseView, link.path);
 };
 
-const containsLocalRef = (
-  schema: JSONSchema,
-  seen: Set<JSONSchema> = new Set(),
-): boolean => {
-  if (!isObjectOrArray(schema) || seen.has(schema)) {
-    return false;
-  }
-  seen.add(schema);
-  if (typeof schema.$ref === "string" && schema.$ref.startsWith("#/")) {
-    return true;
-  }
-  return Object.entries(schema).some(([key, value]) => {
-    if (key === "$defs" || key === "definitions") {
-      return false;
-    }
-    if (Array.isArray(value)) {
-      return value.some((item) => containsLocalRef(item as JSONSchema, seen));
-    }
-    return containsLocalRef(value as JSONSchema, seen);
-  });
-};
-
-const branchWithParentDefs = (
-  parent: JSONSchemaObj,
-  branch: JSONSchema,
-): JSONSchema => {
-  if (
-    !isObjectOrArray(branch) ||
-    branch.$defs !== undefined ||
-    !isObjectOrArray(parent.$defs) ||
-    !containsLocalRef(branch)
-  ) {
-    return branch;
-  }
-  return {
-    ...branch,
-    $defs: parent.$defs,
-  } satisfies JSONSchemaObj;
-};
-
 const matchesConcreteValue = (
   schema: JSONSchema,
   value: unknown,
@@ -304,8 +269,8 @@ const matchesConcreteValue = (
       matchesConcreteValue(
         combineSchema(
           rest as JSONSchemaObj,
-          resolveSchema(branchWithParentDefs(resolved, branch)) ??
-            branchWithParentDefs(resolved, branch),
+          resolveSchema(cfcSchemaWithInheritedDefs(branch, resolved.$defs)) ??
+            cfcSchemaWithInheritedDefs(branch, resolved.$defs),
         ),
         value,
       )
@@ -317,8 +282,8 @@ const matchesConcreteValue = (
       matchesConcreteValue(
         combineSchema(
           rest as JSONSchemaObj,
-          resolveSchema(branchWithParentDefs(resolved, branch)) ??
-            branchWithParentDefs(resolved, branch),
+          resolveSchema(cfcSchemaWithInheritedDefs(branch, resolved.$defs)) ??
+            cfcSchemaWithInheritedDefs(branch, resolved.$defs),
         ),
         value,
       )
@@ -329,7 +294,7 @@ const matchesConcreteValue = (
     return Object.entries(resolved.properties).every(([key, childSchema]) =>
       value[key] === undefined ||
       matchesConcreteValue(
-        branchWithParentDefs(resolved, childSchema),
+        cfcSchemaWithInheritedDefs(childSchema, resolved.$defs),
         value[key],
       )
     );
@@ -346,7 +311,7 @@ const matchesConcreteValue = (
       value,
       (childSchema, childValue) =>
         matchesConcreteValue(
-          branchWithParentDefs(resolved, childSchema),
+          cfcSchemaWithInheritedDefs(childSchema, resolved.$defs),
           childValue,
         ),
     );
@@ -466,8 +431,8 @@ const selectMatchingCompoundBranch = (
   const baseSchema = rest as JSONSchemaObj;
   const matches = branches.flatMap((branch) => {
     const resolvedBranch =
-      resolveSchema(branchWithParentDefs(schema, branch)) ??
-        branchWithParentDefs(schema, branch);
+      resolveSchema(cfcSchemaWithInheritedDefs(branch, schema.$defs)) ??
+        cfcSchemaWithInheritedDefs(branch, schema.$defs);
     const merged = combineSchema(baseSchema, resolvedBranch);
     return matchesConcreteValue(merged, value) ? [merged] : [];
   });
@@ -511,7 +476,7 @@ export function resolveSchemaForValue(
   for (const [key, childSchema] of Object.entries(narrowed.properties)) {
     const childValue = value[key];
     const resolvedChild = resolveSchemaForValue(
-      branchWithParentDefs(narrowed, childSchema),
+      cfcSchemaWithInheritedDefs(childSchema, narrowed.$defs),
       childValue,
     );
     if (resolvedChild !== undefined && resolvedChild !== childSchema) {
@@ -812,7 +777,10 @@ export function processDefaultValue(
       }
       // Thread the array schema's $defs so a $ref slot resolves during
       // recursive default processing (PR #4969 review).
-      return branchWithParentDefs(resolvedSchema, covering as JSONSchema);
+      return cfcSchemaWithInheritedDefs(
+        covering as JSONSchema,
+        resolvedSchema.$defs,
+      );
     };
 
     const result = defaultValue.map((item, i) =>
@@ -1176,6 +1144,7 @@ export function validateAndTransform(
     // We've already followed all the writeRedirect links above.
     const next = readMaybeLink(tx, link);
     if (next !== undefined) {
+      if (readStatsActive) recordLinkResolution(tx);
       // This one-step hop bypasses resolveLink and the traversal, so it
       // carries the crossing seam itself (the schema.ts twin of
       // getNextCellLink).
@@ -1217,6 +1186,45 @@ export function validateAndTransform(
       link.schema = SchemaObjectTraverser.hasAsCell(combined)
         ? combined
         : effectiveSchema!;
+    }
+    const handleSchema = resolveSchema(link.schema);
+    const handleEntry = ContextualFlowControl.getAsCellValues(handleSchema)[0];
+    if (
+      isObjectOrArray(handleSchema) && handleSchema.default !== undefined &&
+      isCellScope(ContextualFlowControl.getAsCellScope(handleEntry))
+    ) {
+      // Inspect the addressed slot before following its leaf reference: an
+      // existing reference retains its target even when that target is absent.
+      // This handle-only probe remains reactive to the slot's arrival.
+      const absentSlot = tx.runWithAmbientReadMeta(
+        excludeReadFromConflict,
+        () => {
+          let blocked = false;
+          const sourceLink = isCellViewRef(sourceRef)
+            ? sourceRef.link
+            : sourceRef;
+          const slot = resolveLink(runtime, tx, sourceLink, "top", {
+            onScopeBlocked: () => {
+              blocked = true;
+            },
+          });
+          if (
+            blocked || slot.pendingHopDoc || slot.id.startsWith("data:") ||
+            tx.readValueOrThrow(slot, {
+                nonRecursive: true,
+                meta: linkResolutionProbe,
+              }) !== undefined
+          ) return false;
+          const address = toMemorySpaceAddress(slot);
+          const parent = tx.readOrThrow({
+            ...address,
+            path: address.path.slice(0, -1),
+          }, { nonRecursive: true, meta: linkResolutionProbe });
+          return !isObjectOrArray(parent) ||
+            !Object.hasOwn(parent, address.path.at(-1)!);
+        },
+      );
+      if (absentSlot) link = linkWithAsCellScope(link, handleEntry);
     }
     objectCreator.setBase(link, cfcLabelView);
     return objectCreator.createObject(link, undefined);
