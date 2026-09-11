@@ -40,7 +40,7 @@ import {
 import { uniqueCfcAtoms } from "./observation.ts";
 import { buildCfcPolicySnapshot } from "./policy.ts";
 import {
-  cfcSchemaChildRoot,
+  cfcSchemaResolvedRoot,
   isEmbeddedCfcSchemaRef,
   resolveCfcSchemaRef,
   resolveCfcSchemaRefRoot,
@@ -453,7 +453,7 @@ const annotateSchema = (
     return { schema, instructionInert: false };
   }
 
-  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
+  const schemaRoot = fullSchema;
   const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
 
   // $ref cycle guard: resolveSchemaRefs only detects cycles within a single
@@ -481,7 +481,7 @@ const annotateSchema = (
 
   const resolved = resolveSchemaForValidation(schema, schemaRoot);
   if (resolved !== schema) {
-    const resolvedRoot = cfcSchemaChildRoot(
+    const resolvedRoot = cfcSchemaResolvedRoot(
       resolved,
       resolveCfcSchemaRefRoot(schema, schemaRoot),
     );
@@ -867,9 +867,10 @@ interface SchemaDefinitionContext {
   /**
    * Definition maps whose bodies this call already walks under a given root.
    * `resolveCfcSchemaRef()` re-attaches the owning `$defs` object to every
-   * resolved view, so without this the same map is re-walked once per distinct
-   * path that reaches a `$ref` — the definition graph then expands as a tree
-   * instead of a DAG and node visits grow as (definition count)^(ref depth).
+   * resolved definition body, so without this the same map is re-walked once
+   * per distinct path that reaches a `$ref` — the definition graph then
+   * expands as a tree instead of a DAG and node visits grow as
+   * (definition count)^(ref depth).
    */
   walkedDefinitionsByRoot: WeakMap<object, WeakSet<object>>;
 
@@ -994,7 +995,7 @@ const validateSchemaDefinitionInternal = (
   }
   if (typeof schema === "boolean") return undefined;
 
-  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
+  const schemaRoot = fullSchema;
   const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
   if (context.provenByRoot.get(rootKey)?.has(schema)) return undefined;
   let active = context.activeByRoot.get(rootKey);
@@ -1032,7 +1033,7 @@ const validateSchemaDefinitionInternal = (
         activeRefs.delete(schema.$ref);
         return `${path}: cannot resolve schema reference ${schema.$ref}`;
       }
-      const resolvedRoot = cfcSchemaChildRoot(
+      const resolvedRoot = cfcSchemaResolvedRoot(
         resolved,
         resolveCfcSchemaRefRoot(schema, schemaRoot),
       );
@@ -1509,12 +1510,9 @@ const isSchemaObject = (
  * still seen. Resolution is the canonical resolver's, not a private pointer
  * parser: each hop goes through `resolveCfcSchemaRef` (which decodes JSON
  * Pointer escapes, so `#/$defs/A~1B` names the `"A/B"` definition, and
- * resolves the embedded-schema URIs) against the scope `cfcSchemaChildRoot`
- * assigns — a subtree with its own `$defs` opens a new scope, exactly the
- * root tracking `resolveCfcSchemaRefRoot` applies. A hand-rolled regex here
- * previously disagreed with that resolver on escaped names and nested
- * scopes, so this gate refused payloads the runtime's own materialization
- * accepts.
+ * resolves the embedded-schema URIs) against the document root, with each
+ * hop's root tracked the way `resolveCfcSchemaRefRoot` tracks it, so this
+ * gate resolves a ref exactly as the runtime's own materialization does.
  *
  * Chains are followed to their end; anything the canonical resolver does not
  * resolve (a remote non-embedded ref, a `definitions` pointer — hoisting
@@ -1528,7 +1526,7 @@ export function localRefTarget(
   root: JSONSchema,
 ): JSONSchema {
   let current = schema;
-  let currentRoot = cfcSchemaChildRoot(schema, root);
+  let currentRoot = root;
   const seenRefs = new Map<JSONSchema, Set<string>>();
   while (isSchemaObject(current) && typeof current.$ref === "string") {
     const ref = current.$ref;
@@ -1541,7 +1539,7 @@ export function localRefTarget(
     refsForRoot.add(ref);
     const next = resolveCfcSchemaRef(currentRoot, ref);
     if (next === undefined) return current;
-    currentRoot = cfcSchemaChildRoot(
+    currentRoot = cfcSchemaResolvedRoot(
       next,
       isEmbeddedCfcSchemaRef(ref) ? next : currentRoot,
     );
@@ -1584,19 +1582,16 @@ export function localRefTarget(
  * registered before its children are filled in, so a schema that reaches
  * itself resolves to the copy already under construction. The memo is keyed
  * by schema object identity alone — cycle-breaking requires registering
- * before the scope of every reaching path is known — so a schema OBJECT
- * shared verbatim across two different definition scopes relaxes in the
- * scope that reaches it first. Generated schemas do not share fragment
- * objects across scopes, so this stays theoretical.
+ * before the document of every reaching path is known — so a schema OBJECT
+ * shared verbatim across two different documents relaxes in the document
+ * that reaches it first. Generated schemas do not share fragment objects
+ * across documents, so this stays theoretical.
  *
- * Scope discipline: a subtree that declares its own `$defs` opens a new
- * local-ref scope (`cfcSchemaChildRoot`) — the same per-hop root tracking
- * `localRefTarget` applies. Every ref consulted for a `default` and every
- * recursion below resolves in the CURRENT schema's scope, so a property
- * `$ref` beneath a nested object's own `$defs` finds that pool, not the
- * document root's (which may not name the definition — or worse, name a
- * decoy without the default, leaving the property required and refusing a
- * payload the runtime materializes).
+ * The document is threaded rather than assumed: every ref consulted for a
+ * `default` and every recursion below resolves against the document root,
+ * with the per-hop tracking `localRefTarget` applies, so a property `$ref`
+ * resolves to the definition the runtime materializes from rather than to a
+ * same-named decoy elsewhere.
  */
 export function relaxDefaultedRequired(
   schema: JSONSchema,
@@ -1610,7 +1605,7 @@ export function relaxDefaultedRequired(
   const relaxed: Record<string, unknown> = { ...schema };
   seen.set(schema, relaxed as JSONSchema);
 
-  const scopeRoot = cfcSchemaChildRoot(schema, root);
+  const scopeRoot = root;
 
   const properties = schema.properties;
   if (isSchemaObject(properties)) {
@@ -1759,7 +1754,7 @@ const validateAgainstSchemaInternal = (
 ): SchemaValidationFailure | undefined => {
   let successful: WeakSet<object> | undefined;
   if (isObjectNotArray(schema) && typeof value === "object" && value !== null) {
-    const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
+    const schemaRoot = fullSchema;
     const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
     let byRoot = context.successful.get(options);
     if (byRoot === undefined) {
@@ -1807,7 +1802,7 @@ const validateAgainstSchemaUncached = (
   if (!isObjectNotArray(schema)) {
     return indeterminate("schema must be an object or boolean");
   }
-  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
+  const schemaRoot = fullSchema;
   const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
   if (!markSchemaValueActive(rootKey, schema, value, context)) {
     context.cycleVersion++;
@@ -1824,9 +1819,13 @@ const validateAgainstSchemaUncached = (
     if (resolved !== schema) {
       // Keep the original root as `fullSchema` so nested $refs in the resolved
       // branch can still find sibling $defs entries, except when an embedded
-      // external ref deliberately changes the owning root.
+      // or external ref changes the owning document, or resolution merged
+      // ref-site siblings into a view that is a document of its own.
       const resolvedRoot = typeof resolved === "object" && resolved !== null
-        ? resolveCfcSchemaRefRoot(schema, schemaRoot)
+        ? cfcSchemaResolvedRoot(
+          resolved,
+          resolveCfcSchemaRefRoot(schema, schemaRoot),
+        )
         : schemaRoot;
       return validateAgainstSchemaInternal(
         resolved,

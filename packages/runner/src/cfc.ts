@@ -13,12 +13,13 @@ import type {
 import type { CfcConfClause } from "./cfc/clause.ts";
 import { uniqueCfcAtoms } from "./cfc/observation.ts";
 import {
-  cfcSchemaChildRoot,
   cfcSchemaIsFalse,
   cfcSchemaIsInternalKey,
   cfcSchemaIsTrue,
+  cfcSchemaResolvedRoot,
   cfcSchemaToObject,
   findCfcSchemaRefs,
+  hoistCfcSchemaDefs,
   resolveCfcSchemaRef,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
@@ -90,7 +91,7 @@ const buildSymbolicSchemaAtPathClassifier = (
   active?: RootedSchemaVisit,
 ): SymbolicSchemaAtPathClassifier | undefined => {
   if (typeof schema === "boolean") return () => "boolean";
-  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
+  const schemaRoot = fullSchema;
   const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
   if (rootedSchemaVisitIsActive(active, rootKey, schema)) return undefined;
   const nextActive = { root: rootKey, schema, parent: active };
@@ -98,7 +99,7 @@ const buildSymbolicSchemaAtPathClassifier = (
     if (schema.$ref !== undefined) {
       const resolved = resolveCfcSchemaRefs(schema, schemaRoot);
       if (resolved === undefined) return undefined;
-      const nextFullSchema = cfcSchemaChildRoot(
+      const nextFullSchema = cfcSchemaResolvedRoot(
         resolved,
         resolveCfcSchemaRefRoot(schema, schemaRoot),
       );
@@ -130,7 +131,7 @@ const buildSymbolicSchemaAtPathClassifier = (
       for (const option of options) {
         const classifier = buildSymbolicSchemaAtPathClassifier(
           option,
-          cfcSchemaChildRoot(option, schemaRoot),
+          schemaRoot,
           nextActive,
         );
         if (classifier === undefined) return undefined;
@@ -324,7 +325,7 @@ export class ContextualFlowControl {
     // `FabricEpochNsec`, `FabricBytes`, `FabricHash`) that may appear in
     // schema `default` fields; plain `JSON.stringify` would silently
     // mis-encode them.
-    const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
+    const schemaRoot = fullSchema;
     const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
     const canonical = internSchema(schema) as JSONSchemaObj;
     if (rootedSchemaVisitIsActive(active, rootKey, canonical)) {
@@ -347,12 +348,7 @@ export class ContextualFlowControl {
     // re-selects values that DO match the inner subschema, so skipping `not`
     // could under-taint.
     forEachSubschema(schema, (child) => {
-      ContextualFlowControl.joinSchema(
-        joined,
-        child,
-        cfcSchemaChildRoot(child, schemaRoot),
-        nextActive,
-      );
+      ContextualFlowControl.joinSchema(joined, child, schemaRoot, nextActive);
     });
     if (schema.$ref) {
       // Follow the references
@@ -360,7 +356,7 @@ export class ContextualFlowControl {
         schema,
         schemaRoot,
       );
-      const resolvedRoot = cfcSchemaChildRoot(
+      const resolvedRoot = cfcSchemaResolvedRoot(
         resolvedSchema,
         resolveCfcSchemaRefRoot(schema, schemaRoot),
       );
@@ -624,12 +620,6 @@ export class ContextualFlowControl {
     defaultEmptyProperties: JSONSchema,
     defaultMissingProperty: JSONSchema,
   ): JSONSchema {
-    // Recursive anyOf/oneOf branches can establish their own local definition
-    // scope even when an outer pruning pass removed the now-redundant root
-    // $defs. Adopt that scope before consuming the first path segment.
-    if (isObjectNotArray(schema) && schema.$defs !== undefined) {
-      defs = schema.$defs;
-    }
     const joined = (extraConfidentiality !== undefined)
       ? new Set<unknown>(extraConfidentiality)
       : new Set<unknown>();
@@ -656,7 +646,7 @@ export class ContextualFlowControl {
         isObjectOrArray(cursor) &&
         (Array.isArray(cursor.type) || "anyOf" in cursor || "oneOf" in cursor)
       ) {
-        const subSchemas = new Set<JSONSchema>();
+        const armSchemas: JSONSchema[] = [];
         const cursorObject = cursor;
         const options = Array.isArray(cursorObject.type)
           ? cursorObject.type.map((type) => ({ ...cursorObject, type }))
@@ -664,13 +654,12 @@ export class ContextualFlowControl {
           ? [...cursorObject.anyOf, ...cursorObject.oneOf]
           : cursorObject.anyOf ?? cursorObject.oneOf ?? [];
         for (const entry of options) {
-          const entryDefs = isObjectOrArray(entry) && entry.$defs !== undefined
-            ? entry.$defs as Record<string, JSONSchema>
-            : defs;
+          // An arm sits in the union's document, so its refs resolve against
+          // the map in effect, whatever `$defs` the arm declares of its own.
           const optSchema = ContextualFlowControl.#schemaAtPathInternal(
             entry,
             path.slice(index),
-            entryDefs,
+            defs,
             extraConfidentiality,
             defaultEmptyProperties,
             defaultMissingProperty,
@@ -685,19 +674,27 @@ export class ContextualFlowControl {
             cursor = true;
             break;
           } else {
-            // `internSchema()` returns the canonical (identity-unique)
-            // schema object, so structurally-equal schemas collapse to
-            // the same reference. That gives identity-based dedup via
-            // `Set<JSONSchema>`, and correctly handles non-JSON-compatible
-            // `FabricValue`s (e.g. `FabricEpochNsec`, `FabricBytes`,
-            // `FabricHash`) that may appear in schema `default` fields.
-            subSchemas.add(internSchema(subSchema));
+            armSchemas.push(subSchema);
           }
         }
-        // Only update cursor from subSchemas if the isTrueSchema branch
+        // Only update cursor from the arms if the isTrueSchema branch
         // didn't already set cursor = true and break out of the loop.
         if (cursor !== true) {
-          const subSchemaArr = [...subSchemas];
+          // Each arm came back as a document of its own, carrying the closure
+          // its refs reach. The union is one document, so the arms' maps
+          // merge into the map the result is selected from, and an arm that
+          // resolved into another document is renamed apart.
+          const { fragments, definitions } = hoistCfcSchemaDefs(armSchemas);
+          if (definitions !== undefined) defs = definitions;
+          // `internSchema()` returns the canonical (identity-unique)
+          // schema object, so structurally-equal schemas collapse to
+          // the same reference. That gives identity-based dedup via
+          // `Set<JSONSchema>`, and correctly handles non-JSON-compatible
+          // `FabricValue`s (e.g. `FabricEpochNsec`, `FabricBytes`,
+          // `FabricHash`) that may appear in schema `default` fields.
+          const subSchemaArr = [
+            ...new Set(fragments.map((arm) => internSchema(arm))),
+          ];
           if (subSchemaArr.length === 0) {
             cursor = false;
           } else if (subSchemaArr.length === 1) {
@@ -766,9 +763,6 @@ export class ContextualFlowControl {
       } else {
         // we can only descend into objects and arrays or unknown
         return false;
-      }
-      if (isObjectOrArray(cursor) && cursor.$defs) {
-        defs = cursor.$defs;
       }
     }
     if (isObjectOrArray(cursor) && cursor.ifc !== undefined) {
@@ -924,13 +918,12 @@ export function resolveExternalRootRefForStructure(
   if (typeof ref !== "string" || !isExternalSchemaRef(ref)) return schema;
   const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
   if (!isObjectNotArray(resolved)) return schema;
-  // Resolution can mint a member view with the group's `$defs` attached; a
-  // view whose group contributed nothing carries an empty one. Drop it so
-  // consumers compare and combine these structurally as the writer's
-  // sanitized input — but only when nothing in the body names a local
-  // definition, so the strip can never orphan a `#/...` reference. (With an
-  // empty `$defs` such a reference already dangles; the guard states the
-  // invariant instead of inferring it from emptiness.)
+  // A resolved document can carry an empty `$defs`. Drop it so consumers
+  // compare and combine these structurally as the writer's sanitized input —
+  // but only when nothing in the body names a local definition, so the strip
+  // can never orphan a `#/...` reference. (With an empty `$defs` such a
+  // reference already dangles; the guard states the invariant instead of
+  // inferring it from emptiness.)
   if (
     isObjectNotArray(resolved.$defs) &&
     Object.keys(resolved.$defs).length === 0 &&

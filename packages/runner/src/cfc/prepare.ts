@@ -136,6 +136,11 @@ import { CFC_POLICY_MANIFEST_ID_PREFIX } from "./policy.ts";
 import { createTxCfcModulePolicyResolver } from "./policy-resolver.ts";
 import { cfcSchemaEntries } from "./schema-label-view.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
+import {
+  cfcSchemaResolvedRoot,
+  hoistCfcSchemaDefs,
+  resolveCfcSchemaRefRoot,
+} from "./schema-refs.ts";
 import { createTrustResolver } from "./trust.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
@@ -1723,12 +1728,18 @@ const rebindWriteAuthorizedByClaimsInner = (
   return changed ? next : value;
 };
 
+// The schema placed below the path segments is a document of its own, so its
+// `$defs` move to the envelope's root, which is where its `#/$defs/<name>`
+// refs point once it sits below another root.
 const schemaEnvelopeForTargetPath = (
   schema: JSONSchema,
   path: readonly string[],
 ): JSONSchema => {
-  let envelope = schema;
-  for (const segment of [...canonicalizeLogicalPath(path)].reverse()) {
+  const segments = canonicalizeLogicalPath(path);
+  if (segments.length === 0) return schema;
+  const { fragments: [body], definitions } = hoistCfcSchemaDefs([schema]);
+  let envelope = body;
+  for (const segment of [...segments].reverse()) {
     envelope = segment === "*"
       ? {
         type: "array",
@@ -1741,7 +1752,10 @@ const schemaEnvelopeForTargetPath = (
         },
       };
   }
-  return envelope;
+  return definitions === undefined ? envelope : {
+    ...(envelope as Record<string, unknown>),
+    $defs: definitions,
+  } as JSONSchema;
 };
 
 // The reserved CFC document namespaces: the durable policy manifests a
@@ -3387,7 +3401,7 @@ const policySchemaMatchesValue = (
   if (typeof schema === "boolean") {
     return schema;
   }
-  const schemaRoot = schema.$defs !== undefined ? schema : root;
+  const schemaRoot = root;
   if (typeof schema.$ref === "string") {
     const resolved = ContextualFlowControl.resolveSchemaRefs(
       schema,
@@ -3402,7 +3416,14 @@ const policySchemaMatchesValue = (
     if (resolved === undefined || resolved === schema) {
       throw new UnevaluablePolicyRefError(schema.$ref);
     }
-    return policySchemaMatchesValue(resolved, value, schemaRoot);
+    return policySchemaMatchesValue(
+      resolved,
+      value,
+      cfcSchemaResolvedRoot(
+        resolved,
+        resolveCfcSchemaRefRoot(schema, schemaRoot),
+      ),
+    );
   }
   if (
     schema.const !== undefined && !fabricAwareEqual(schema.const, value)
@@ -4391,7 +4412,13 @@ const verifyTrustedEventRequirements = (
 ): string | undefined => {
   for (const entry of uiContractsFromSchema(schema)) {
     if (
-      !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
+      !ifcEntryAppliesToAttemptedWrite(
+        tx,
+        target,
+        entry.path,
+        entry.schema,
+        entry.root,
+      )
     ) {
       continue;
     }

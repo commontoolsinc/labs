@@ -10,6 +10,7 @@ import { forEachSubschema } from "../schema-walk.ts";
 import type { CfcConfClause } from "./clause.ts";
 import { normalizeClause } from "./clause.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
+import { hoistCfcSchemaDefs } from "./schema-refs.ts";
 import { writerClaimFilesCorrespond } from "./writer-claim-correspondence.ts";
 
 /** Every `ifc` key the runtime understands. {@link IfcKey} names one of them. */
@@ -663,13 +664,9 @@ const mergeSchemaNode = (
     mergedPrefixItems = slots;
   }
 
-  // `$defs` is not merged: `{...left, ...right}` lets a `right` envelope that
-  // declares its own `$defs` replace `left`'s wholesale, which can leave a
-  // surviving `items`/`properties` `$ref` (e.g. `#/$defs/Element`) pointing at
-  // a dropped def. The merged envelope's ifc (incl. writeAuthorizedBy) still
-  // rides on the node, so the policy matcher must not let the now-unresolvable
-  // value-condition ref exclude the entry — `policySchemaMatchesValue` in
-  // prepare.ts fails closed on unevaluable refs for exactly this reason.
+  // `$defs` is settled by `mergeCfcSchemaEnvelopes()` at the root, where both
+  // documents' maps are hoisted into one before the walk; below the root a
+  // `$defs` is inert, and the spread carries it as it does any other key.
   return {
     ...left,
     ...right,
@@ -702,7 +699,21 @@ export const mergeCfcSchemaEnvelopes = (
 ): JSONSchema => {
   assertNoDivergentIfcBranches(existing);
   assertNoDivergentIfcBranches(candidate);
-  return internSchema(mergeSchemaNode(existing, candidate, "", [], options));
+  // The merged envelope is one document, so the two maps become one: a name
+  // both define alike is shared, and a name they define differently is
+  // renamed apart on the candidate's side, refs included, so every
+  // `#/$defs/<name>` below the merged root still names the definition its
+  // own document declared.
+  const { fragments: [left, right], definitions } = hoistCfcSchemaDefs([
+    existing,
+    candidate,
+  ]);
+  const merged = mergeSchemaNode(left, right, "", [], options);
+  return internSchema(
+    definitions !== undefined && isObjectOrArray(merged)
+      ? { ...merged, $defs: definitions }
+      : merged,
+  );
 };
 
 /** Why a stored envelope and a candidate envelope cannot be merged. */

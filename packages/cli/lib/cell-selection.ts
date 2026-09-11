@@ -24,9 +24,11 @@ import {
   sanitizeSchemaForLinks,
 } from "@commonfabric/runner";
 import {
-  cfcSchemaChildRoot,
+  cfcSchemaResolvedRoot,
+  hoistCfcSchemaDefs,
   isEmbeddedCfcSchemaRef,
   resolveCfcSchemaRef,
+  resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
 } from "@commonfabric/runner/cfc/schema-refs";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
@@ -1299,19 +1301,20 @@ const DERIVED_DROPPED: DerivedPosition = { cut: false };
  * result, written as the projection position it derives.
  *
  * `following` holds the references the walk is already inside, each paired
- * with the scope root it was followed under: the same spelling in two `$defs`
- * scopes names two definitions, so only a reference repeated in ITS OWN scope
- * is the cut — the declared type re-enters itself there, and following it
- * once more is what closes the circle. Under `"recursion"` every other
+ * with the document root it was followed under: the same spelling in two
+ * documents names two definitions, so only a reference repeated in ITS OWN
+ * document is the cut — the declared type re-enters itself there, and
+ * following it once more is what closes the circle. Under `"recursion"` every
+ * other
  * position is left as wide as it was declared; under `"shape"` an object
  * position is additionally held to the fields it declares.
  *
  * Reference resolution is the canonical resolver's, one hop per recursion —
- * never a private pointer parser, whose recorded divergence class (escaped
- * names, nested `$defs` scopes) is exactly what `localRefTarget`'s history
- * warns about. A reference the resolver does not resolve leaves the position
- * unbounded, and a readback that still closes a circle then refuses with the
- * legible message rather than corrupting.
+ * never a private pointer parser, which diverges from it on escaped names.
+ * An embedded or external target is a document of its own, and its root
+ * is threaded below it. A reference the resolver does not resolve leaves the
+ * position unbounded, and a readback that still closes a circle then refuses
+ * with the legible message rather than corrupting.
  */
 function derivePosition(
   schema: JSONSchema | undefined,
@@ -1320,9 +1323,6 @@ function derivePosition(
   bound: DeclaredBound,
 ): DerivedPosition {
   if (schema === undefined || typeof schema === "boolean") return DERIVED_WHOLE;
-  // A subtree carrying its own `$defs` opens a new local-ref scope; every
-  // descent below threads the scope this node establishes.
-  root = cfcSchemaChildRoot(schema, root);
   // A stream carries no value: it renders as the empty object and reading it
   // says nothing. `asCell` otherwise says how a position is held rather than
   // what shape it has, and the shape beside it is what decides the cut.
@@ -1337,7 +1337,10 @@ function derivePosition(
     if (target === undefined) return DERIVED_WHOLE;
     return derivePosition(
       target,
-      isEmbeddedCfcSchemaRef(ref) ? target : root,
+      cfcSchemaResolvedRoot(
+        target,
+        isEmbeddedCfcSchemaRef(ref) ? target : root,
+      ),
       [...following, { root, ref }],
       bound,
     );
@@ -1524,20 +1527,24 @@ function walkSchemaRoot<T>(
     return behavior.unknown;
   }
   ancestors.add(schema);
-  const documentRoot = schema.$defs !== undefined ? schema : root;
   try {
     // A reference is the source shape for this heuristic. Resolve it before
     // inspecting sibling keywords so a broken reference cannot lend false
-    // shape authority through, for example, a sibling `type`.
+    // shape authority through, for example, a sibling `type`. The root
+    // moves only where the reference chain enters another document.
     if (schema.$ref !== undefined) {
       try {
+        const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
+          schema,
+          root,
+        );
         return walkSchemaRoot(
-          ContextualFlowControl.resolveSchemaRefsOrThrow(
-            schema,
-            documentRoot,
-          ),
+          resolved,
           behavior,
-          documentRoot,
+          cfcSchemaResolvedRoot(
+            resolved,
+            resolveCfcSchemaRefRoot(schema, root),
+          ),
           ancestors,
         );
       } catch (error) {
@@ -1555,7 +1562,7 @@ function walkSchemaRoot<T>(
     if (alternatives.length > 0) {
       return behavior.fromAlternatives(
         alternatives.map((option) =>
-          walkSchemaRoot(option, behavior, documentRoot, ancestors)
+          walkSchemaRoot(option, behavior, root, ancestors)
         ),
       );
     }
@@ -1563,7 +1570,7 @@ function walkSchemaRoot<T>(
     if (schema.allOf !== undefined) {
       return behavior.fromAllOf(
         schema.allOf.map((option) =>
-          walkSchemaRoot(option, behavior, documentRoot, ancestors)
+          walkSchemaRoot(option, behavior, root, ancestors)
         ),
       );
     }
@@ -1958,7 +1965,7 @@ function firstUnheldSelectionField(
   ) {
     return undefined;
   }
-  const scopeRoot = cfcSchemaChildRoot(source, root);
+  const scopeRoot = root;
   // A reference is followed the way the validator follows it, so a named
   // interface declares what it names.
   const target = resolveCfcSchemaRefs(source, scopeRoot);
@@ -1971,7 +1978,9 @@ function firstUnheldSelectionField(
   if (target.anyOf !== undefined || target.oneOf !== undefined) {
     return undefined;
   }
-  const targetRoot = cfcSchemaChildRoot(target, scopeRoot);
+  const targetRoot = target !== source
+    ? cfcSchemaResolvedRoot(target, scopeRoot)
+    : scopeRoot;
 
   // A field list names a field wherever the value holds one rather than at a
   // fixed depth, so an array position is crossed and the same names are asked
@@ -2261,11 +2270,24 @@ export function mergeMasks(
   return objectProjectionMask(properties);
 }
 
-/** @internal Exported for focused source-schema selection tests. */
+/**
+ * `source` narrowed to the positions `mask` selects.
+ *
+ * `root` is the document `source` sits in, which is `source` itself when a
+ * caller hands in a whole document. A reference resolves against that root,
+ * and the root moves only where resolution enters another document: an
+ * embedded or external target, or a resolved view flattened with its ref-site
+ * siblings. A `$defs` an arm or a property declares of its own is inert, so
+ * the recursion below carries `root` through unchanged rather than treating
+ * each subschema as a document of its own.
+ *
+ * @internal Exported for focused source-schema selection tests.
+ */
 export function selectSourceSchema(
   source: JSONSchema | undefined,
   mask: ProjectionMask,
   purpose: "source-read" | "projected-output" = "source-read",
+  root: JSONSchema = source ?? true,
 ): JSONSchema {
   // A rejecting mask is the whole answer wherever it appears: nothing is read
   // at this position, whatever the source declares there.
@@ -2278,14 +2300,16 @@ export function selectSourceSchema(
     return source;
   }
   if (source.$ref !== undefined) {
-    if (source.$ref.startsWith("#/") && source.$defs === undefined) {
-      return source;
-    }
     try {
+      const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
+        source,
+        root,
+      );
       return selectSourceSchema(
-        ContextualFlowControl.resolveSchemaRefsOrThrow(source, source),
+        resolved,
         mask,
         purpose,
+        cfcSchemaResolvedRoot(resolved, resolveCfcSchemaRefRoot(source, root)),
       );
     } catch {
       // A malformed or unsupported source reference is not projection's job
@@ -2312,7 +2336,7 @@ export function selectSourceSchema(
       return source;
     }
     const projectOptions = (options: readonly JSONSchema[] | undefined) =>
-      options?.map((option) => selectSourceSchema(option, mask, purpose));
+      options?.map((option) => selectSourceSchema(option, mask, purpose, root));
     const projectedAnyOf = projectOptions(anyOf);
     const projectedOneOf = projectOptions(oneOf);
     const projectedAllOf = projectOptions(allOf);
@@ -2333,7 +2357,7 @@ export function selectSourceSchema(
     const { items: _items, prefixItems: _prefixItems, ...metadata } = source;
     return {
       ...metadata,
-      items: selectSourceSchema(sourceItem, mask.items, purpose),
+      items: selectSourceSchema(sourceItem, mask.items, purpose, root),
     };
   }
 
@@ -2357,6 +2381,7 @@ export function selectSourceSchema(
       child === false ? undefined : child,
       childMask,
       purpose,
+      root,
     );
   }
   // A rejected position holds nothing to require. Keeping it required makes
@@ -2382,19 +2407,19 @@ export function selectSourceSchema(
 }
 
 /**
- * `source` with its `$ref` chain followed, paired with the local-ref scope the
- * result sits in — or `undefined` where the chain does not resolve or closes
- * on itself.
+ * `source` with its `$ref` chain followed, paired with the document root the
+ * result resolves in — or `undefined` where the chain does not resolve or
+ * closes on itself.
  *
  * A named interface is ordinarily spelled as a reference, so a reader that
  * declined to follow one would prove a container only for sources written
- * inline. The scope travels beside the schema because a subtree carrying its
- * own `$defs` opens a new `#/...` scope while everything else keeps resolving
- * against the document root — which is exactly what a walk that re-roots on
- * each descent would otherwise lose.
+ * inline. The root travels beside the schema because following an embedded
+ * reference enters another document, and a resolved view can be a document
+ * of its own — which is exactly what a walk that re-roots on each descent
+ * would otherwise lose.
  *
  * Resolution is the canonical resolver's, one hop per iteration, never a
- * private pointer parser. A reference repeated in its own scope closes a
+ * private pointer parser. A reference repeated in its own document closes a
  * circle and resolves to nothing, which fails closed: `undefined` here proves
  * no container and so requires nothing.
  */
@@ -2404,9 +2429,8 @@ function resolvedSourceNode(
 ): { schema: Exclude<JSONSchema, boolean>; root: JSONSchema } | undefined {
   const followed: Array<{ root: JSONSchema; ref: string }> = [];
   let node = source;
-  let scope = root;
+  let scope = source === undefined ? root : root;
   while (isObjectOrArray(node)) {
-    scope = cfcSchemaChildRoot(node, scope);
     const ref = node.$ref;
     if (typeof ref !== "string") return { schema: node, root: scope };
     if (followed.some((step) => step.ref === ref && step.root === scope)) {
@@ -2415,7 +2439,10 @@ function resolvedSourceNode(
     const target = resolveCfcSchemaRef(scope, ref);
     if (target === undefined) return undefined;
     followed.push({ root: scope, ref });
-    if (isEmbeddedCfcSchemaRef(ref)) scope = target;
+    scope = cfcSchemaResolvedRoot(
+      target,
+      isEmbeddedCfcSchemaRef(ref) ? target : scope,
+    );
     node = target;
   }
   return undefined;
@@ -2718,6 +2745,7 @@ function resolveProjection(
         dereferencedElementSchema(source),
         mask,
         "projected-output",
+        sourceSchema ?? true,
       ),
       KeepAsCell.OnlyStream,
     );
@@ -3252,15 +3280,35 @@ export async function deriveSelectedValue(
     sourceMask = projectionMaskSchema;
   }
   const sourceReadSchema = selectSourceSchema(sourceSchema, sourceMask);
+
+  // Documents placed under the properties of one wrapper: their `$defs` move
+  // to the wrapper's root, which is where their `#/$defs/<name>` refs point
+  // once they sit below another root, with a name two documents define
+  // differently renamed apart.
+  const wrapProperties = (
+    documents: Readonly<Record<string, JSONSchema>>,
+  ): JSONSchema => {
+    const keys = Object.keys(documents);
+    const { fragments, definitions } = hoistCfcSchemaDefs(
+      keys.map((key) => documents[key]),
+    );
+    return {
+      type: "object",
+      properties: Object.fromEntries(
+        keys.map((key, index) => [key, fragments[index]]),
+      ),
+      required: keys,
+      additionalProperties: false,
+      ...(definitions !== undefined && { $defs: definitions }),
+    };
+  };
+  const wrapUnder = (key: string, document: JSONSchema): JSONSchema =>
+    wrapProperties({ [key]: document });
+
   const outputSchema: JSONSchema = projection?.outputSchema ??
     filteredOutputSchema(sourceSchema, sourceItemSchema);
-  const mainResultSchema: JSONSchema = {
-    type: "object",
-    properties: { value: outputSchema },
-    required: ["value"],
-    additionalProperties: false,
-  };
-
+  const mainArgumentSchema = wrapUnder("value", sourceReadSchema);
+  const mainResultSchema = wrapUnder("value", outputSchema);
   const mainPattern = (() => {
     const frame = pushFrame({ runtime });
     try {
@@ -3280,19 +3328,16 @@ export async function deriveSelectedValue(
         const elementSchema = selectSourceSchema(
           sourceItemSchema,
           predicateItemMask!,
+          "source-read",
+          sourceSchema ?? true,
         );
-        const argumentSchema: JSONSchema = {
-          type: "object",
-          properties: {
-            element: sanitizeSchemaForLinks(
-              dereferencedElementSchema(elementSchema),
-              KeepAsCell.OnlyStream,
-            ),
-            params: paramsSchema,
-          },
-          required: ["element", "params"],
-          additionalProperties: false,
-        };
+        const argumentSchema = wrapProperties({
+          element: sanitizeSchemaForLinks(
+            dereferencedElementSchema(elementSchema),
+            KeepAsCell.OnlyStream,
+          ),
+          params: paramsSchema,
+        });
         const predicateModule = lift(
           ({ element, params }: {
             element: unknown;
@@ -3315,18 +3360,16 @@ export async function deriveSelectedValue(
         const elementSchema = selectSourceSchema(
           sourceItemSchema,
           projectionItemMask!,
+          "source-read",
+          sourceSchema ?? true,
         );
-        const argumentSchema: JSONSchema = {
-          type: "object",
-          properties: {
-            element: sanitizeSchemaForLinks(
-              dereferencedElementSchema(elementSchema),
-              KeepAsCell.OnlyStream,
-            ),
-          },
-          required: ["element"],
-          additionalProperties: false,
-        };
+        const argumentSchema = wrapUnder(
+          "element",
+          sanitizeSchemaForLinks(
+            dereferencedElementSchema(elementSchema),
+            KeepAsCell.OnlyStream,
+          ),
+        );
         const projectionModule = lift(
           ({ element }: { element: unknown }) =>
             projectValue(
@@ -3344,17 +3387,10 @@ export async function deriveSelectedValue(
         );
       }
 
-      const directProjectionArgumentSchema: JSONSchema = {
-        type: "object",
-        properties: {
-          value: sanitizeSchemaForLinks(
-            sourceReadSchema,
-            KeepAsCell.OnlyStream,
-          ),
-        },
-        required: ["value"],
-        additionalProperties: false,
-      };
+      const directProjectionArgumentSchema = wrapUnder(
+        "value",
+        sanitizeSchemaForLinks(sourceReadSchema, KeepAsCell.OnlyStream),
+      );
       const directProjectionModule = projection !== undefined &&
           !projection.projectsArrayItems
         ? lift(
@@ -3369,12 +3405,6 @@ export async function deriveSelectedValue(
         )
         : undefined;
 
-      const mainArgumentSchema: JSONSchema = {
-        type: "object",
-        properties: { value: sourceReadSchema },
-        required: ["value"],
-        additionalProperties: false,
-      };
       return pattern(
         ({ value }: any) => {
           let result: any = value;

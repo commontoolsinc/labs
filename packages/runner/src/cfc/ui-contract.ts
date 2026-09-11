@@ -10,6 +10,10 @@ import { findAndInlineDataUriLinks } from "../data-uri.ts";
 import { isNormalizedFullLink } from "../link-types.ts";
 import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import {
+  cfcSchemaResolvedRoot,
+  resolveCfcSchemaRefRoot,
+} from "./schema-refs.ts";
 import type { CfcAddress } from "./types.ts";
 
 type UiContractTrustRequirements = {
@@ -42,17 +46,27 @@ export type UiContractEntry = {
   path: string[];
   contract: UiContract;
   schema?: JSONSchema;
+
+  /** The schema document that resolves local references inside `.schema`. */
+  root?: JSONSchema;
 };
 
 const uiContractEntry = (
   path: string[],
   contract: UiContract,
   schema?: JSONSchema,
+  root?: JSONSchema,
 ): UiContractEntry => {
   const entry: UiContractEntry = { path, contract };
   if (schema !== undefined) {
     Object.defineProperty(entry, "schema", {
       value: schema,
+      enumerable: false,
+    });
+  }
+  if (root !== undefined) {
+    Object.defineProperty(entry, "root", {
+      value: root,
       enumerable: false,
     });
   }
@@ -166,14 +180,31 @@ const resolveLocalSchemaRef = (
   return ContextualFlowControl.resolveSchemaRefs(schema, root) ?? schema;
 };
 
+// The root a resolved ref's target resolves against: its own document where
+// the ref's chain ended in another one — a definition body that is an
+// external ref — and otherwise the document the ref site belongs to.
+const resolvedRootFor = (
+  schema: JSONSchema,
+  resolved: JSONSchema,
+  root: JSONSchema | undefined,
+): JSONSchema =>
+  cfcSchemaResolvedRoot(
+    resolved,
+    resolveCfcSchemaRefRoot(schema, root ?? schema),
+  );
+
 const uiContractFromSchemaInternal = (
   schema: JSONSchema | undefined,
   root: JSONSchema | undefined,
   seenRefs: Set<string>,
 ): UiContract | undefined => {
   const resolvedSchema = resolveLocalSchemaRef(schema, root, seenRefs);
-  if (resolvedSchema !== schema) {
-    return uiContractFromSchemaInternal(resolvedSchema, root, seenRefs);
+  if (resolvedSchema !== schema && schema !== undefined) {
+    return uiContractFromSchemaInternal(
+      resolvedSchema,
+      resolvedRootFor(schema, resolvedSchema ?? schema, root),
+      seenRefs,
+    );
   }
   if (
     !isObjectOrArray(resolvedSchema) || !isObjectOrArray(resolvedSchema.ifc) ||
@@ -219,10 +250,10 @@ const uiContractsFromSchemaInternal = (
 ): UiContractEntry[] => {
   const branchRefs = new Set(seenRefs);
   const resolvedSchema = resolveLocalSchemaRef(schema, root, branchRefs);
-  if (resolvedSchema !== schema) {
+  if (resolvedSchema !== schema && schema !== undefined) {
     return uiContractsFromSchemaInternal(
       resolvedSchema,
-      root,
+      resolvedRootFor(schema, resolvedSchema ?? schema, root),
       path,
       branchRefs,
     );
@@ -231,9 +262,7 @@ const uiContractsFromSchemaInternal = (
     return [];
   }
 
-  const childRoot = isObjectOrArray(resolvedSchema.$defs)
-    ? resolvedSchema
-    : root;
+  const childRoot = root ?? resolvedSchema;
   const entries: UiContractEntry[] = [];
   const contract = uiContractFromSchemaInternal(
     resolvedSchema,
@@ -241,7 +270,9 @@ const uiContractsFromSchemaInternal = (
     new Set(),
   );
   if (contract !== undefined) {
-    entries.push(uiContractEntry([...path], contract, resolvedSchema));
+    entries.push(
+      uiContractEntry([...path], contract, resolvedSchema, childRoot),
+    );
   }
 
   const hasProperties = isObjectOrArray(resolvedSchema.properties);

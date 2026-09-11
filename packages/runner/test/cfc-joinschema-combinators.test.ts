@@ -87,7 +87,10 @@ describe("ContextualFlowControl.lubSchema combinator descent", () => {
     } as JSONSchema)).toEqual(["nn"]);
   });
 
-  it("does not mistake identical refs in different definition roots for a cycle", () => {
+  it("resolves a ref under a subschema's own `$defs` against the root's map", () => {
+    // `#/$defs/V` names the root's definition wherever it sits; the nested
+    // map is inert below the root's, so the ref re-enters `V` and the cycle
+    // guard stops the descent with the root's atoms.
     const shared = { $ref: "#/$defs/V" } as const;
     expect(atomsOf({
       type: "object",
@@ -99,17 +102,12 @@ describe("ContextualFlowControl.lubSchema combinator descent", () => {
           properties: {
             nested: {
               type: "object",
-              $defs: {
-                V: {
-                  type: "string",
-                  ifc: { confidentiality: ["b"] },
-                },
-              },
+              $defs: { V: { type: "string", ifc: { confidentiality: ["b"] } } },
               properties: { value: shared },
             },
           },
         },
       },
-    })).toEqual(["a", "b"]);
+    })).toEqual(["a"]);
   });
 });
