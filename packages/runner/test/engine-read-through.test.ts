@@ -195,6 +195,18 @@ describe("engine-read-through", () => {
     }
   };
 
+  /**
+   * The seq of the latest authored commit in the space: the seq a client's
+   * commit landed at, read after that commit resolved. The serving loop's
+   * own derived commits can land between the client's commit and this
+   * read, so the server's head seq is not it, and the loop's watermark
+   * covers authored input only.
+   */
+  const latestAuthoredSeq = (engine: Engine.Engine): number =>
+    (engine.database.prepare(
+      `SELECT MAX(seq) AS seq FROM "commit" WHERE class = 'authored'`,
+    ).get() as { seq: number }).seq;
+
   /** The service principal's live sessions on the space. */
   const serviceSessions = () =>
     server.accessForTestingOnly.sessionsForSpace(space).filter((session) =>
@@ -241,10 +253,12 @@ describe("engine-read-through", () => {
     const tx = clientRuntime.edit();
     clientArg.withTx(tx).set({ n });
     expect((await tx.commit()).error).toBeUndefined();
-    const authoredSeq = Engine.serverSeq(engine);
+    const authoredSeq = latestAuthoredSeq(engine);
     await waitUntil(
       () => readWatermarkSeq(engine) >= authoredSeq,
-      "watermark to reach the authored commit",
+      () =>
+        `the watermark (${readWatermarkSeq(engine)}) to reach the authored ` +
+        `commit (${authoredSeq})`,
     );
     const settled = await waitForSettled(clientRuntime, space, authoredSeq, {
       timeoutMs: 10_000,
@@ -666,6 +680,9 @@ describe("engine-read-through", () => {
     await tx.commit();
 
     // A commit creating the document reaches the replica through the feed.
+    // The refresh baseline is read ahead of the commit: the loop can have
+    // refreshed the record before the commit's own promise resolves.
+    const refreshesBefore = host.stats().storeRefreshes;
     const cell = clientRuntime.getCellFromLink<{ made: boolean }>({
       id,
       space,
@@ -674,11 +691,12 @@ describe("engine-read-through", () => {
     const creating = clientRuntime.edit();
     cell.withTx(creating).set({ made: true });
     expect((await creating.commit()).error).toBeUndefined();
-    const authoredSeq = Engine.serverSeq(engine);
-    const refreshesBefore = host.stats().storeRefreshes;
+    const authoredSeq = latestAuthoredSeq(engine);
     await waitUntil(
       () => readWatermarkSeq(engine) >= authoredSeq,
-      "the watermark to cover the creating commit",
+      () =>
+        `the watermark (${readWatermarkSeq(engine)}) to cover the creating ` +
+        `commit (${authoredSeq})`,
     );
     expect(host.stats().storeRefreshes).toBeGreaterThan(refreshesBefore);
     // Held by the refresh: this read costs the engine nothing.
