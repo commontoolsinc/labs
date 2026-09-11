@@ -57,7 +57,12 @@ const __cfLift_1 = __cfHelpers.lift<{
             type: "boolean"
         },
         value: {
-            type: "string"
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "string",
+                    asCell: ["cell"]
+                }]
         }
     },
     required: ["isCell", "value"]
@@ -102,7 +107,12 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
             type: "boolean"
         },
         value: {
-            type: "string"
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "string",
+                    asCell: ["cell"]
+                }]
         }
     },
     required: ["isCell", "value"]
@@ -234,7 +244,12 @@ export default pattern((__cf_pattern_input) => {
                 keys: {
                     type: "array",
                     items: {
-                        type: "string"
+                        anyOf: [{
+                                type: "string"
+                            }, {
+                                type: "string",
+                                asCell: ["cell"]
+                            }]
                     }
                 },
                 buckets: {

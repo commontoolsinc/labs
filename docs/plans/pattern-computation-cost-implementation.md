@@ -10,10 +10,11 @@ repair landed in #7265; removal/restoration acceptance landed in #7285 and
 first-browser-materialization acceptance landed in #7302. Reconnect repair
 landed in #7308 and rendered reconnect acceptance in #7312. C4's repository-only
 reactive row migration is implemented and validated on the scoped-child and
-bounded-render repairs in #7313 and #7315. Remaining row-invalidation acceptance
-stays open. B1/B2's contract landed in
-#7294 and its typed lookup foundation landed in #7304. Producer lowering and bucket maintenance are implemented locally;
-publication and the remaining key-enumeration contract are pending coordination.
+bounded-render repairs in #7313 and #7315. Row-invalidation implementation and
+acceptance landed in #7329 and #7331. B1/B2's contract landed in #7294 and its
+typed lookup foundation landed in #7304. Producer lowering, optimized bucket
+maintenance, and local/cross-space join acceptance are implemented in #7323;
+final validation and mixed-key enumeration acceptance remain in progress.
 
 B3's named aggregates are implemented and validated in
 [PR #7259](https://github.com/commontoolsinc/labs/pull/7259), with
@@ -239,8 +240,8 @@ passed before merge, with clean Cubic and antagonistic reviews.
   profiles. Ordinary memory queries wait for session restoration before
   constructing their requests. This guards the handshake-to-session interval;
   a subsequent disconnect during request issue remains a separate boundary.
-  These synthetic probes do not authorize removing the lunch-poll workaround or
-  accessing the live poll.
+  These synthetic probes cover repository behavior. Live poll changes require
+  coordination with Mike.
 
   C3's landed fix records the mutable inline element used when resolving a
   nested array to a content-addressed snapshot. The
@@ -263,16 +264,25 @@ passed before merge, with clean Cubic and antagonistic reviews.
   The artifact directory receives screenshots and assertion metadata for all
   four cases. Live poll access requires coordination with Mike.
 
-- [ ] **C2 — Repair partial materialization.** Verify complete inputs under cold
-      reads, remote inserts/removals, and reconnect where relevant.
-- [ ] **C3 — Repair remote row invalidation.** Verify affected rows update,
-      stable element identities survive, and untouched rows do not rerun. The
-      client-execution acceptance in
-      [reactive vote rows](../../packages/patterns/integration/reactive-vote-rows.test.ts)
-      edits each of two rows from another replica, checks stable normalized
-      output links and producer identities, and verifies that only the edited
-      row producer runs. Serving-host producer counts remain separate acceptance
-      work because a client diagnostic graph does not contain those actions.
+- [x] **C2 — Repair partial materialization.** Complete inputs are covered by
+      C1's cold-browser, remote insertion/removal, and reconnect acceptance.
+      The session-restoration query repair is merged in #7308; rendered
+      reconnect acceptance is merged in #7312. The same-space and cross-space
+      fixtures verify complete vote and profile inputs on first demand, after
+      membership changes, and after two reader outages. No additional
+      materialization change is required for these reproductions. Disconnects
+      during request issue remain the separate boundary stated above; C3's
+      producer-identity and rerun checks are tracked independently.
+- [x] **C3 — Repair remote row invalidation.** Client and serving-host
+      acceptance verify correct derived values, stable normalized output links
+      and producer identities, and no execution of the untouched row producer
+      after edits to each of two linked rows. The
+      [client case](../../packages/patterns/integration/reactive-vote-rows.test.ts)
+      uses independent worker replicas and merged in #7329. The
+      [serving-loop case](../../packages/runner/test/executor-serving-loop.test.ts)
+      observes the actual serving runtime and waits for the authored input
+      watermark; a client diagnostic graph does not contain those actions.
+      The dashboard records serving acceptance as in review until #7331 lands.
 - [x] **C4 — Restore reactive lunch-poll rows.** Direct reactive option and
       voter maps use the scoped callback-child repair. Repository acceptance
       includes 93 assertions, unchanged A4 budgets at all three sizes, and
@@ -353,14 +363,23 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
       [reproducible comparison](../history/development/performance/2026-09-11-computed-lift-collection-loops.md)
       validates three forms at 32, 128, and 512 linked rows, including unread-field
       edits. The dashboard tracks publication and review status.
-- [ ] **E2 — Publish the measured advice** where pattern authors encounter
+- [x] **E2 — Publish the measured advice** where pattern authors encounter
       collections, `computed`, and `lift`. Explain nested-scan cost and use only
-      available operators in replacement examples.
-- [ ] **E3 — Add a transformer warning** through the existing diagnostic
+      available operators in replacement examples. The
+      [computed/lift guide](../common/concepts/computed/computed.md#collection-loop-cost)
+      and [collection guide](../features/collection-aggregates.md#choosing-a-collection-computation)
+      explain lazy read width, repeated scans, explicit cell receivers, numeric
+      contract differences, and measurement limits. The author index links both;
+      dashboard publication status remains separate.
+- [x] **E3 — Add a transformer warning** through the existing diagnostic
       collector. Test recognizable nested reactive scans and negative cases
       involving plain arrays and unrelated scopes; inspect warning volume across
       authored patterns before shipping. Escalation to error requires separate
       evidence about false positives.
+      The [diagnostic acceptance report](../history/development/performance/2026-09-11-nested-collection-scan-diagnostic.md)
+      records the focused cases, full transformer suite, and all five distinct
+      findings across 413 pattern entries. Publication and review remain visible
+      in the dashboard.
 - [ ] **D1 — Follow the remaining lazy-materialization work** in its
       [own plan](lazy-cell-materialization.md), including handlers and flag
       removal. Keep implementation ownership there.
@@ -406,11 +425,11 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Measure the local producer implementation against current-main runtime and
-compiler fixes. Producer PR #7323 is closed; publication awaits coordination
-with Mike. The [512-row measurements](../history/development/performance/2026-09-11-demanded-index-enumeration.md)
-separate initialization, bucket maintenance, key enumeration, and lookup costs.
-Mixed primitive/Cell key enumeration remains an API/runtime decision. Local
-left-lookup join acceptance is being measured independently. A5 still needs
-cross-space and deployed measurements before product performance claims.
+Complete mixed primitive/Cell key enumeration acceptance and publish the
+validated producer optimizations and join composition through #7323. Follow
+with the local lunch-poll operator migration and its measured acceptance.
+The [512-row measurements](../history/development/performance/2026-09-11-demanded-index-enumeration.md)
+separate initialization, bucket maintenance, enumeration, and lookup costs.
+Local browser acceptance covers 74, 296, and 1,184 votes. A5 still needs a
+coordinated deployed comparison before product performance claims.
 Live poll access requires coordination with Mike.
