@@ -324,7 +324,23 @@ invisible, the prompt renders the whole ambient record — place and scope
     separate feature and is deferred ([`futures.md`](futures.md)). The
     traversal runs over those lines and the line being typed, one position
     each, so an edit is held wherever it was made and everything that ends
-    the line returns the traversal to it. `tab` completes the token the line
+    the line returns the traversal to it. A line is recorded with each `%n`
+    replaced by what it bound to when it ran: `%n` is a reference only until
+    the next listing (decision 17) and recall outlives listings, so a
+    recalled handle would otherwise act on whichever row that number names
+    now — the wrong thing, silently and successfully, which is the one
+    failure a shell must not have. What is recorded resolves from
+    anywhere the session can stand: a piece row records the id the listing
+    resolved it to — a slug is repointable, so recording one would name
+    whichever piece it comes to mean — and a row inside a piece records
+    the reference naming
+    the cell — the piece and the path, which is what a callable row
+    already records for its receiver. A bare name would not do, two pieces
+    being free to hold a key of the same name, so a recalled name could
+    still reach a different cell without saying so. What the prompt shows
+    is what was typed; what recall replays is what it meant, and the
+    listing knows the difference already at mint time (decision 27). `tab`
+    completes the token the line
     ends in: a verb where the line names none, and otherwise whatever the
     verb declares its next operand completes, which the two arms of the arity
     that take an operand require and the arm that takes none cannot express.
