@@ -389,6 +389,12 @@ export interface PreparedSlugClaim {
 
   /** The document that records the name it holds, when one is to. */
   metadataTarget: Cell<unknown> | undefined;
+
+  /** The name's own cell, synced so the claim reads what the space holds. */
+  slugCell: Cell<unknown>;
+
+  /** The slug index, synced for the same reason. */
+  indexCell: Cell<Record<string, boolean>>;
 }
 
 /**
@@ -413,9 +419,11 @@ export async function prepareSlugClaim(
     ? target.resolveAsCell()
     : undefined;
   await metadataTarget?.sync();
-  await slugIndexCell(pieces).sync();
-  await slugCellFor(pieces, validSlug).sync();
-  return { validSlug, target, metadataTarget };
+  const indexCell = slugIndexCell(pieces);
+  await indexCell.sync();
+  const slugCell = slugCellFor(pieces, validSlug);
+  await slugCell.sync();
+  return { validSlug, target, metadataTarget, slugCell, indexCell };
 }
 
 /**
@@ -431,10 +439,10 @@ export function claimSlugInTx(
   tx: IExtendedStorageTransaction,
   options?: { force?: boolean; takeFrom?: string | null },
 ): { held: string | null } | undefined {
-  const { validSlug, target, metadataTarget } = claim;
+  const { validSlug, target, metadataTarget, slugCell, indexCell } = claim;
   const takeFrom = options?.takeFrom ?? null;
   const targetWithTx = target.withTx(tx);
-  const slugWithTx = slugCellFor(pieces, validSlug).withTx(tx);
+  const slugWithTx = slugCell.withTx(tx);
   const metadataTargetWithTx = metadataTarget?.withTx(tx);
 
   // The claim, ahead of every write so that declining stages nothing: the
@@ -474,7 +482,7 @@ export function claimSlugInTx(
   );
   // The index entry rides the slug's own transaction, so a listing can
   // never see a name without its slug or a slug without its name.
-  slugIndexCell(pieces).withTx(tx).key(validSlug).set(true);
+  indexCell.withTx(tx).key(validSlug).set(true);
   return undefined;
 }
 

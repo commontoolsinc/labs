@@ -1662,9 +1662,11 @@ async function createOnServer(
  * Creates a new piece from source code and optional input.
  *
  * A `slug` that already points somewhere is refused the way `set-slug`
- * refuses one, and `force` takes it. The refusal arrives after the piece
- * exists, so it names the piece as well as the flag: an operator who meant to
- * repoint has an id to name, and one who did not has a piece to find.
+ * refuses one, and `force` takes it. Against a serving deployment the name
+ * rides the creation transaction, so the refusal leaves nothing behind.
+ * Otherwise the refusal arrives after the piece exists, so it names the
+ * piece as well as the flag: an operator who meant to repoint has an id to
+ * name, and one who did not has a piece to find.
  */
 export async function newPiece(
   config: SpaceConfig,

@@ -419,6 +419,12 @@ server](#clients-that-are-not-built-alongside-their-server).
   OFF code path is removed — a separate post-soak
   PR (the plan's Phase 7 task 2; it also removes the opposite guard lanes and
   `build-toolshed-opposite`).
+- **Status on 2026-09-10 (the lifecycle verbs).** Under ON, `upload` and
+  `instantiate` run on the space's serving runtime as steps of a wave cycle
+  and `cf piece new` requests them
+  ([`server-pattern-lifecycle.md`](../features/server-pattern-lifecycle.md));
+  `setsrc` stays client-side, since a source update's module authority
+  needs a transaction that commits to storage itself. OFF is unchanged.
 - **Status on 2026-09-10.** The first-party default remains OFF and
   the ON soak is paused. OW28's served `compileAndRun` outbox/completion and
   scoped child selection have direct lifecycle coverage. The Phase-7 gate

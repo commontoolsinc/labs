@@ -160,7 +160,11 @@ export const instantiate = createRoute({
                 "commits (the default); `false` leaves it set up and not " +
                 "run until something demands it.",
             ),
-          }),
+          }).refine(
+            (body) =>
+              (body.program === undefined) !== (body.pattern === undefined),
+            { message: "Supply exactly one of `program` and `pattern`." },
+          ),
         },
       },
     },

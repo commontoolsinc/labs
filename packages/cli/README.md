@@ -551,20 +551,21 @@ selects `EXPERIMENTAL_SERVER_EXECUTION`, which the connection adopts —
 program from disk, pins its fabric imports, and sends it to the deployment's
 pattern-lifecycle route, signed with the identity the command connects as; the
 space's serving runtime compiles it, creates the piece, and answers with the
-receipt the command prints. The identity must hold WRITE or OWNER on the space.
-The registry entry and the slug travel with the creation, so a taken name
-refuses it before anything is created, and the space root is the serving loop's
-to ensure rather than this command's. What stays in this process after the
-receipt is what opening a piece does anyway: the start, which `--no-start`
-skips; `--no-start` also asks the serving loop not to derive the piece until
-something demands it. The receipt returns once the piece is durable; the serving
-loop derives it in the cycle after, so a reader that needs the derived value
-pulls it. Against any other deployment, and under `cf test`, the command
-performs every step itself, as before. `cf piece setsrc` and
-`cf piece setsrc --check` perform every step in this process on every
-deployment: a source update publishes module update authority, which requires an
-owned setup transaction that commits to storage, and a serving wave cannot
-supply one. The contract, including the refusals and their codes, is
+receipt the command prints. Where the deployment enforces ACLs, the identity
+must hold WRITE or OWNER on the space; a deployment with enforcement off admits
+any signed caller, as its memory server does. The registry entry and the slug
+travel with the creation, so a taken name refuses it before anything is created,
+and the space root is the serving loop's to ensure rather than this command's.
+What stays in this process after the receipt is what opening a piece does
+anyway: the start, which `--no-start` skips; `--no-start` also asks the serving
+loop not to derive the piece until something demands it. The receipt returns
+once the piece is durable; the serving loop derives it in the cycle after, so a
+reader that needs the derived value pulls it. Against any other deployment, and
+under `cf test`, the command performs every step itself, as before.
+`cf piece setsrc` and `cf piece setsrc --check` perform every step in this
+process on every deployment: a source update publishes module update authority,
+which requires an owned setup transaction that commits to storage, and a serving
+wave cannot supply one. The contract, including the refusals and their codes, is
 [`server-pattern-lifecycle.md`](../../docs/features/server-pattern-lifecycle.md).
 
 ## Piece discovery

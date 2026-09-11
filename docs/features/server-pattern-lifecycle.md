@@ -28,32 +28,34 @@ Two POST endpoints under `/api/pattern-lifecycle`, mounted by
 `packages/toolshed/routes/pattern-lifecycle/`. Every body carries `space`,
 the DID of the space acted in. A verb that takes a pattern takes it one of
 two ways, and exactly one: `program` — the program as the client resolved
-it, every file by name, with `main`, an optional `mainExport`, and optional
-`sourceRoots` — or `pattern`, a `{ identity, symbol }` pointer to a closure
-the space already holds.
+it, every file by name, with `main`, an optional `mainExport`, optional
+`sourceRoots`, and optional `dataFiles` — or `pattern`, a
+`{ identity, symbol }` pointer to a closure the space already holds. A body
+naming both or neither fails validation.
 
 | verb          | body                                                                                              | receipt                                                                            |
 | ------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | `upload`      | `program`                                                                                         | `{ pattern }` — the pointer the space now holds the program under                  |
-| `instantiate` | `program` or `pattern`; optional `argument`, `repository`, `slug`, `force`, `register`            | `{ pieceId, pattern, slug? }`                                                      |
+| `instantiate` | `program` or `pattern`; optional `argument`, `repository`, `slug`, `force`, `register`, `start`   | `{ pieceId, pattern, slug? }`                                                      |
 
 A refusal is a JSON body `{ error, code }`. `code` is stable and is what a
 client branches on; `error` is prose for a person.
 
 | status | code                                   | meaning                                                                      |
 | ------ | -------------------------------------- | ---------------------------------------------------------------------------- |
-| 400    | `invalid-source`                       | both `program` and `pattern`, or neither                                     |
 | 401    | `unauthorized`                         | no valid first-party request proof                                           |
 | 403    | `forbidden`                            | the caller is not a writer of the space, or there is no such space           |
 | 404    | `pattern-not-found`                    | the named pattern is not in the space                                        |
 | 409    | `slug-taken`                           | the slug names something and `force` was not set                             |
 | 413    | `payload-too-large`                    | the body exceeds the limit, checked before authentication                    |
 | 422    | `compile-failed`, `setup-failed`, `no-space-root` | the program did not compile; setup refused the pattern or the argument; nothing to register the piece with |
+| 429    | `rate-limited`                         | the caller's request budget is spent, checked before authentication         |
 | 500    | `internal`                             | the serving side failed for a reason it does not name                        |
 | 503    | `server-execution-off`, `space-not-served` | no serving loop on this deployment; the space's lease is held elsewhere |
 
 Body validation runs after authentication and answers 422 with the
-validator's own body, so a client that sends what the schema describes never
+validator's own body — a body naming both `program` and `pattern`, or
+neither, fails there — so a client that sends what the schema describes never
 sees it.
 
 ## Authority

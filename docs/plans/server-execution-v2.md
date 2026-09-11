@@ -47,8 +47,9 @@ and `instantiate`. Under ON, `cf piece new` sends the resolved program to
 `/api/pattern-lifecycle/*`, and the space's serving runtime compiles,
 materializes, and commits inside a wave cycle
 (`docs/features/server-pattern-lifecycle.md`), the registry entry and the
-slug in the creation's own transaction; the receipt returns at the wave
-commit. The client keeps only its start; the shell and the background piece
+slug in the creation's own transaction; the receipt returns once that wave
+has committed and the verb's durability read has passed, ahead of the
+piece's first derivation. The client keeps only its start; the shell and the background piece
 service keep the client-side shape until their own migration. `setsrc`
 stays client-side: a source update publishes module update authority, which
 `docs/specs/module-loading.md` requires from an owned setup transaction that

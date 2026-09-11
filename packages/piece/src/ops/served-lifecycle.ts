@@ -165,11 +165,20 @@ async function resolveServedPattern(
     return await servedUploadPattern(pieces, source.program, options);
   }
   const ref = source.pattern;
-  const pattern = await pieces.runtime.patternManager.loadPatternByIdentity(
-    ref.identity,
-    ref.symbol,
-    pieces.getSpace(),
-  );
+  let pattern: Pattern | undefined;
+  try {
+    pattern = await pieces.runtime.patternManager.loadPatternByIdentity(
+      ref.identity,
+      ref.symbol,
+      pieces.getSpace(),
+    );
+  } catch (error) {
+    // A closure the space holds but cannot load is, to the caller, one it
+    // does not hold: the same refusal, with the loader's reason attached.
+    throw new ServedLifecycleRefusal("pattern-not-found", messageOf(error), {
+      cause: error,
+    });
+  }
   if (!pattern) {
     throw new ServedLifecycleRefusal(
       "pattern-not-found",

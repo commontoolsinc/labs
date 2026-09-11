@@ -233,6 +233,7 @@ export class ExecutorHost {
       memo: { ...this.#stats.memo },
       outbox: { ...this.#stats.outbox },
       lease: { ...this.#stats.lease },
+      lifecycleVerbs: { ...this.#stats.lifecycleVerbs },
       activeSpaces,
       watermarkLag,
     };

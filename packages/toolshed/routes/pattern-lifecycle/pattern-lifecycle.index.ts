@@ -31,7 +31,10 @@ router.use(
 // verification. Each verb compiles on the serving side, which is real work,
 // so the bucket is sized for a deploy loop rather than a burst.
 const verbLimiter = createRateLimiter({ capacity: 30, refillPerSecond: 1 });
-router.use(`${routes.BASE}/*`, rateLimit(verbLimiter));
+router.use(
+  `${routes.BASE}/*`,
+  rateLimit(verbLimiter, { code: "rate-limited" }),
+);
 
 // No cors(): a credentialed control plane; the app-wide policy allows only
 // GET/OPTIONS cross-origin, so a signed POST from another origin fails its
