@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-11T11:58:48.810157+00:00",
+  "updated": "2026-09-11T12:06:03.522064+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7307",
@@ -102,7 +102,7 @@
       "id": "C3",
       "title": "Remote row invalidation",
       "status": "active",
-      "detail": "Remote client-execution acceptance passes: editing either of two rows preserves normalized output links and producer identities, reruns the edited producer, and leaves the untouched producer idle. Serving-host producer counts remain open. Live poll changes require coordination."
+      "detail": "Client identity and narrow-invalidation acceptance is in PR #7329: edits to either row preserve both normalized output links and producer IDs, rerun the edited producer, and leave the untouched producer idle. Serving-host producer counts remain separate acceptance work."
     },
     {
       "id": "C4",
@@ -143,8 +143,8 @@
     {
       "id": "E1",
       "title": "Computed versus lift measurements",
-      "status": "todo",
-      "detail": "Measure current defaults and declared read width."
+      "status": "done",
+      "detail": "Merged #7327: validated computed/broad-lift/narrow-lift measurements at 32/128/512 linked rows, with unread-field edits and a reproducible command."
     },
     {
       "id": "E2",

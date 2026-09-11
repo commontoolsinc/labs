@@ -343,8 +343,11 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## 12–13. Guidance and related runtime work: D, E
 
-- [ ] **E1 — Measure identical `computed` and `lift` collection loops** under
-      current defaults and compare declared read width and access counts.
+- [x] **E1 — Measure identical `computed` and `lift` collection loops** under
+      current defaults and compare declared read width and access counts. The
+      [reproducible comparison](../history/development/performance/2026-09-11-computed-lift-collection-loops.md)
+      validates three forms at 32, 128, and 512 linked rows, including unread-field
+      edits. The dashboard tracks publication and review status.
 - [ ] **E2 — Publish the measured advice** where pattern authors encounter
       collections, `computed`, and `lift`. Explain nested-scan cost and use only
       available operators in replacement examples.
