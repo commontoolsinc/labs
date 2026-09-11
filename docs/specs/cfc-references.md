@@ -235,6 +235,10 @@ query result, introspection returns the common unavailable result.
 
 ## Format and rollout
 
+The [precise reference rollout plan](../plans/cfc-precise-reference-rollout.md)
+requires a state-preserving Home migration and complete reference provenance
+throughout each activation cohort before precise operation begins.
+
 CFC envelope version 2 supports precise reference entries. Each stored reference
 slot requires its own complete entry; upgrading one slot does not authenticate
 untouched legacy references. `origin: "link"` with `observes: "followRef"`
