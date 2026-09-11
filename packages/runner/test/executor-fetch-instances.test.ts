@@ -66,8 +66,11 @@ async function fixture(scope: "space" | "user" | "session") {
       for (const client of clients) client.cancel?.();
       await closeHost?.();
       for (const client of clients) {
-        await client.runtime.dispose();
-        await client.manager.close();
+        try {
+          await client.runtime.dispose({ closeStorage: false });
+        } finally {
+          await client.manager.close();
+        }
       }
       await server.close();
     } finally {
@@ -130,8 +133,9 @@ async function fixture(scope: "space" | "user" | "session") {
           dispose: async () => {
             try {
               await runtime.dispose();
-            } finally {
+            } catch (error) {
               await manager.close();
+              throw error;
             }
           },
         };

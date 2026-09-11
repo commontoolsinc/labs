@@ -14,10 +14,13 @@ describe("Raw builtin publication binding", () => {
   let runtime: Runtime | undefined;
 
   afterEach(async () => {
-    await runtime?.dispose();
-    await storageManager?.close();
-    runtime = undefined;
-    storageManager = undefined;
+    try {
+      await runtime?.dispose({ closeStorage: false });
+    } finally {
+      await storageManager?.close();
+      runtime = undefined;
+      storageManager = undefined;
+    }
   });
 
   for (const scope of ["user", "session"] as const) {
