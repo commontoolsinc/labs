@@ -45,6 +45,14 @@ toolshed process
 A space is ACTIVE when it has ≥1 live client session or undelivered
 events; otherwise it MAY be parked (runtime disposed, lease released).
 Activation on: session open, event append, or explicit warm request.
+*(AMENDED 2026-09-09: a fourth trigger — a pattern-lifecycle verb
+request, which the host queues on the space's serving loop; the loop
+runs it ahead of a cycle's event drain, its seals joining that cycle's
+wave, and once the wave has committed re-announces the documents the
+verb staged to itself as a warm-marked notice — the same carrier as the
+provisioning path's — so the next cycle loads and derives the staged
+piece; the request settles at the verb's own wave commit —
+[docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).)*
 
 What activation LOADS (RULED 2026-08-02): there is NO piece-start
 policy in v2. The space is ONE lazy reactive graph, and activation
@@ -953,7 +961,15 @@ the 2026-08-24 ruling; the owner may re-rule it).
 - The accumulator is a layered view: store snapshot at the wave's input
   seq + previously sealed writes. Actions run serially per space, so a
   later action reads earlier ones' sealed writes; intra-wave ordering is
-  the scheduler's ordering.
+  the scheduler's ordering. The input seq is the serverSeq the wave was
+  opened at, and any seal opens one when none is open. A wave nothing
+  sealed into is discarded at the next cycle's start and again ahead of
+  the cycle's own watermark write, so the wave a cycle commits was opened
+  at or after its predecessor's commit landed: a seal arriving while that
+  commit is in flight (a read probe against the serving runtime) would
+  otherwise leave a wave whose basis the loop's own commit has already
+  passed, and the next cycle's writes to the documents it touched — the
+  watermark advance among them — would be dropped against it.
 - Failure isolation is per action: an aborted tx discards only its own
   writes; the wave keeps the rest.
 - On a client (OFF arm, and speculation in the ON arm) seal == commit /
