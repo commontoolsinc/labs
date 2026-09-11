@@ -159,6 +159,10 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Investigations, journals, and working notes
 
+- [Browser process-group teardown follow-up, 2026-09-11](development/browser-process-group-teardown-2026-09-11.md) — Orphan renderers retaining browser pipes, explicit process-group ownership, and cleanup regression validation.
+
+- [Browser teardown investigation, 2026-09-11](development/browser-teardown-investigation-2026-09-11.md) — Current Chrome, detached Crashpad/updater pipe holders, controlled descriptor reproduction, and ON/OFF prototype validation.
+
 - [Scoped snapshot memo verification](development/performance/2026-09-10-scoped-snapshot-memo.md) — D3 metadata/epoch isolation regressions and exact label-view reuse counts at three sizes.
 
 - [Pattern read accounting: first-batch baseline](development/performance/2026-09-pattern-read-accounting.md) — 2026-09-10: transaction-scoped read counters, generic reduction update costs, headless lunch-poll attribution, and instrumentation overhead measurements.
