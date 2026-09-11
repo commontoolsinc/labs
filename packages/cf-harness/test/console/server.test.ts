@@ -1776,6 +1776,32 @@ describe("console/server", () => {
       expect(indexed.requests).toEqual([]);
     });
 
+    it("answers 400 for a body that is not JSON", async () => {
+      const indexed = await indexServer([]);
+
+      const response = await indexed.server.handle(
+        new Request("http://127.0.0.1:8100/api/index/feedback", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "not json",
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe("request body is not JSON");
+      expect(indexed.requests).toEqual([]);
+    });
+
+    it("answers 400 for a JSON body that is not an object", async () => {
+      const indexed = await indexServer([]);
+
+      const response = await vote(indexed, "ss-2w4nQ8");
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe("patternId is required");
+      expect(indexed.requests).toEqual([]);
+    });
+
     it("answers 503 when the server was started without an index", async () => {
       const response = await server.handle(
         jsonRequest("/api/index/feedback", {
