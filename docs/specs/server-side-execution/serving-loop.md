@@ -192,10 +192,11 @@ SpaceServer outbox ──(e)──► network; results re-enter via (a)
   `SERVER_EXECUTION_STORE_READ_THROUGH=true` in the toolshed bootstrap,
   default OFF) the home space's reads leave the session instead: a
   document the replica does not hold is read synchronously from the
-  engine on first access, a `sync()` of one resolves from the engine
-  with no watch registered while a `sync()` of a held document is
-  answered from the replica, and the feed's admitted commits (plane
-  (d)) re-read the documents the replica holds — so the runtime walks
+  engine on first access and a `sync()` of that document resolves from
+  the engine with no watch registered, while a `sync()` of a held
+  document is answered from the replica, and the feed's admitted
+  commits (plane (d)) re-read the documents the replica holds — so the
+  runtime walks
   the schema once, over what it actually reads, and the memory server
   never walks it for the serving session at all. The one chase the read-through
   keeps is the frame validator's delivery guarantee: the `cid:` schema
