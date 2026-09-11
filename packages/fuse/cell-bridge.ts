@@ -12,8 +12,9 @@ import {
   type PiecePatternRef,
   PiecesController,
 } from "@commonfabric/piece/ops";
-import type { Cell } from "@commonfabric/runner";
 import {
+  type Cell,
+  isCell,
   lookupSchemaDocument,
   parseExternalSchemaRef,
   recomposeSchema,
@@ -3930,8 +3931,10 @@ export class CellBridge {
     for (const key of Object.keys(properties)) {
       const childCell = rootCell.key(key).asSchemaFromLinks();
       let childValue: unknown;
+      let childReadSucceeded = false;
       try {
         childValue = childCell.get?.();
+        childReadSucceeded = true;
         // Override with the raw link reference only for sigil links, which
         // is what enables FUSE symlinks.
         const rawValue = childCell.getRaw?.();
@@ -3953,8 +3956,14 @@ export class CellBridge {
         continue;
       }
 
-      if (childValue !== undefined && !(key in materialized)) {
+      if (
+        childReadSucceeded &&
+        (childValue !== undefined || !(key in materialized) ||
+          isCell(materialized[key]))
+      ) {
         materialized[key] = childValue;
+      } else if (!childReadSucceeded && isCell(materialized[key])) {
+        delete materialized[key];
       }
     }
 

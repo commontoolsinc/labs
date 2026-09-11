@@ -1459,7 +1459,7 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     },
     result: {
       getCell: () => Promise.resolve(resultCell),
-      get: () => Promise.resolve({ title: "hello" }),
+      get: () => Promise.resolve({ title: titleCell }),
     },
   };
 
