@@ -497,12 +497,12 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       return undefined;
     }
 
-    const mappings = Object.entries(plainObj);
+    const entries = Object.entries(plainObj);
 
     this.#stack.push(plainObj);
 
     try {
-      for (const [key, value] of mappings) {
+      for (const [key, value] of entries) {
         if (doKeys) {
           const keyResult = this.#visitValue(key);
           if (keyResult?.type === "mainResult") {
