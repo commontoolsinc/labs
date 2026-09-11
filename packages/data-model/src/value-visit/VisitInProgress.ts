@@ -2,6 +2,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 import { type Primitive } from "@commonfabric/utils/types";
 
+import { codecOf, NULL_LIVE_ENVIRONMENT } from "@/codec-common/index.ts";
 import { isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import {
   type FabricArray,
@@ -169,9 +170,25 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       }
 
       case "recurseOf": {
-        return (result.containerTag === VALUE_TAGS.Array)
-          ? this.#iterateArray(result)
-          : this.#iterateMap(result);
+        switch (result.containerTag) {
+          case VALUE_TAGS.Array: {
+            return this.#iterateArray(result);
+          }
+
+          case VALUE_TAGS.FabricInstance: {
+            return this.#iterateFabricInstance(result);
+          }
+
+          case VALUE_TAGS.Object: {
+            return this.#iterateMap(result);
+          }
+
+          default: {
+            throw new Error(
+              `Shouldn't happen: Got unrecognized \`containerTag\`: \`${result.containerTag}\``,
+            );
+          }
+        }
       }
 
       default: {
@@ -421,14 +438,54 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   }
 
   /**
+   * Recurses on a `FabricInstance`, in response to a `recurse` result. The
+   * recursion consists of a single sub-value visit, of the instance's state,
+   * per its normal codec.
+   */
+  #iterateFabricInstance(
+    result: RecurseOfForm,
+  ): BaselineVisitResult<ResultType> {
+    const { container, doValues } = result;
+    const instance = container as FabricInstance;
+    const vis = this.#visitor;
+
+    if (!doValues) {
+      // `result` represents a no-op `recurse`. Though pointless, nothing
+      // prevents a client from returning it as a visit result, so just handle
+      // it gracefully here.
+      return undefined;
+    }
+
+    const state = codecOf(instance).encode(instance, NULL_LIVE_ENVIRONMENT);
+    this.#stack.push(instance);
+
+    try {
+      const stateResult = this.#visitValue(state);
+      if (stateResult?.type === "mainResult") {
+        return stateResult;
+      }
+
+      // TODO(danfuzz): When we have a non-`mainResult` visit-result type, we'll
+      // want to pass the result value from the visits immediately above instead
+      // of the original `state`.
+      const result = vis.visitedFabricInstance(instance, state);
+      if (result?.type === "mainResult") {
+        return result;
+      }
+
+      return undefined;
+    } finally {
+      this.#stack.popExpect(instance);
+    }
+  }
+
+  /**
    * Iterates over all the elements in a map-like value, in response to a
    * `recurse` result.
    */
   #iterateMap(result: RecurseOfForm): BaselineVisitResult<ResultType> {
-    const { container: looseTypedContainer, containerTag, doKeys, doValues } =
-      result;
-    const container =
-      looseTypedContainer as (FabricInstance | FabricPlainObject);
+    const { container, doKeys, doValues } = result;
+    const plainObj = container as FabricPlainObject;
     const vis = this.#visitor;
 
     if (!(doKeys || doValues)) {
@@ -438,15 +495,9 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       return undefined;
     }
 
-    const mappings = (containerTag === VALUE_TAGS.Object)
-      ? Object.entries(container)
-      : (() => {
-        // TODO(danfuzz): This is where we finally need to sort out
-        // `FabricInstance` iteration.
-        throw new Error("`FabricInstance` not yet visitable");
-      })();
+    const mappings = Object.entries(plainObj);
 
-    this.#stack.push(container);
+    this.#stack.push(plainObj);
 
     try {
       for (const [key, value] of mappings) {
@@ -475,7 +526,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
       return undefined;
     } finally {
-      this.#stack.popExpect(container);
+      this.#stack.popExpect(plainObj);
     }
   }
 
