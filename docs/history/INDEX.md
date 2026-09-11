@@ -4,6 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [2026-09-11-pending-schema-policy-index.md](development/performance/2026-09-11-pending-schema-policy-index.md) — document-indexed pending schema-policy lookup CPU attribution and 1,184-vote fixture acceptance with unchanged read budgets.
+
 - [2026-09-10-lunch-poll-read-baseline.md](development/performance/2026-09-10-lunch-poll-read-baseline.md) — controlled A0 baseline with 14 options, eight same-space voters, 74 keyed votes, continuous headless UI demand, and per-action read counts.
 - [2026-09-10-read-accounting-probes.md](development/performance/2026-09-10-read-accounting-probes.md) — disabled-probe comparison for initial reactive action read accounting: five alternating control/candidate windows over 1,000 lazy-view elements, and the limits of the lunch-poll functional smoke check.
 - [coverage-status-audit-2026-09-09.md](plans/server-execution-v2/optimize/coverage-status-audit-2026-09-09.md) — OW28 landing-provenance and coverage-status audit at `16de7e0c87`: the preserved compile-and-run port and its end-to-end test were omitted from #6096 despite the completion claim; current writeback refusal and an OFF-path program-proxy cache collision reproduced, with OW18, OW30, OW31, OW55, OW56, OW58, OW60, and rollout statements reconciled against current source and focused suites.
