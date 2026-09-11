@@ -103,7 +103,15 @@ metadata and container path. See
 
 ## Non-Goals
 
-- Installing skills from remote registries.
+- Installing skills from remote registries into the skills root. Discovery on
+  the external skills.sh registry and pinned acquisition — a `SKILL.md` into a
+  capability-typed handle a child consumes, and the skill's `scripts/` held
+  host-side beside it — are a separate surface (`search_skills`,
+  `acquire_skill`, `delegate_task.skillHandle`), specified in
+  `docs/plans/external-skill-acquisition.md` and described in the package
+  README; nothing acquired that way enters the registry this document defines,
+  and an acquired script answers to the same operator allowlist a registry
+  skill's script does.
 - Managing user-global skill directories outside an explicitly configured root.
 - Running skill scripts automatically or without an exact operator allowlist.
 - Treating `allowed-tools` as a permission grant.
@@ -338,7 +346,9 @@ The current CLI flags are:
 
 Current v1 behavior:
 
-- If `--skills-root` is absent, skills are disabled.
+- If `--skills-root` is absent, the run uses the checkout's own `skills/` tree
+  when the harness runs out of a checkout, and records that source in run state;
+  with no checkout either, skills are disabled.
 - `--skills-root` must resolve within `--workspace` unless a future trusted
   external mount policy explicitly allows otherwise.
 - `--skill` requires `--skills-root`.
@@ -603,8 +613,8 @@ Current rule:
   registry. It exposes `read_skill_resource` and `run_skill_script` in the child
   and allowlists the non-credentialed bundled `agent-browser` browser workflow
   scripts.
-- The `pattern-author` profile activates `pattern-dev` and `pattern-schema` and
-  exposes `read_skill_resource` in the child.
+- The `pattern-author` profile activates `pattern-dev`, `pattern-schema` and
+  `pattern-ui` and exposes `read_skill_resource` in the child.
 - Profile-scoped skill preload is best-effort against the run's registry. A
   profile names the skills its child works best with, while the skills root is
   configured per run; the child preloads whichever of them the registry carries
@@ -673,7 +683,8 @@ This avoids ambiguity between host paths and sandbox paths.
 | Pattern Factory phase-specific skills                                               | implemented                                                |
 | Explicit child-profile skill policy and summary-only parent return                  | implemented                                                |
 | Model-driven dynamic `load_skill` activation                                        | not implemented; future design above                       |
-| User/global/remote skill installation                                               | not planned without a product requirement and trust design |
+| User/global/remote skill installation into the skills root                          | not planned without a product requirement and trust design |
+| External registry discovery and pinned acquisition by handle (skills.sh)            | implemented outside this contract; see the package README  |
 
 ## Open Questions
 

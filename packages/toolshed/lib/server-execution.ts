@@ -47,6 +47,7 @@ export type ServerExecutionEnvPolicy = {
   flushDeadlineMs?: number;
   maxOutstandingEffects?: number;
   egressRatePerSecond?: number;
+  storeReadThrough?: boolean;
 };
 
 /**
@@ -60,14 +61,17 @@ export type ServerExecutionEnvPolicy = {
  *   `DEFAULT_MAX_OUTSTANDING_EFFECTS` per space; the LITERAL `0` is the
  *   operator's explicit opt-out (unbounded);
  * - egress pacing defaults OFF (the cap alone bounds concurrency; a rate
- *   value is a deliberate operator choice).
+ *   value is a deliberate operator choice);
+ * - the store read-through (`SpaceServerPolicy.storeReadThrough`,
+ *   SERVER_EXECUTION_STORE_READ_THROUGH) defaults OFF; only the literal
+ *   `true` turns it on.
  *
  * Parsing is FAIL-CLOSED for the cap: an unparseable or negative value
  * ("abc", "-1", "1.5") falls back to the default and warns, instead of
  * being silently indistinguishable from the explicit `0` opt-out (a
- * typo must never disable the production bound). The other two knobs
- * have no dangerous "absent" meaning — absent = the built-in default —
- * so garbage there simply reads as unset (also warned).
+ * typo must never disable the production bound). The other knobs have
+ * no dangerous "absent" meaning — absent = the built-in default — so
+ * garbage there simply reads as unset (also warned).
  */
 export function serverExecutionPolicyFromEnv(
   envGet: EnvReader,
@@ -126,10 +130,22 @@ export function serverExecutionPolicyFromEnv(
       maxOutstandingEffects = value;
     }
   }
+  const readThroughRaw = readRaw("SERVER_EXECUTION_STORE_READ_THROUGH");
+  let storeReadThrough: boolean | undefined;
+  if (readThroughRaw === "true") {
+    storeReadThrough = true;
+  } else if (readThroughRaw !== undefined && readThroughRaw !== "false") {
+    warn(
+      "Server-execution v2: ignoring SERVER_EXECUTION_STORE_READ_THROUGH=" +
+        `${JSON.stringify(readThroughRaw)} (expected "true" or "false"); ` +
+        "the store read-through stays OFF",
+    );
+  }
   return {
     ...(flushDeadlineMs !== undefined ? { flushDeadlineMs } : {}),
     ...(maxOutstandingEffects !== undefined ? { maxOutstandingEffects } : {}),
     ...(egressRatePerSecond !== undefined ? { egressRatePerSecond } : {}),
+    ...(storeReadThrough !== undefined ? { storeReadThrough } : {}),
   };
 }
 
@@ -194,12 +210,20 @@ export function startServerExecutionHost(options: {
         "production default is ON)",
     );
   }
+  const policy = serverExecutionPolicyFromEnv(envGet);
+  if (policy.storeReadThrough === true) {
+    console.log(
+      "Server-execution v2: store read-through ON by " +
+        "SERVER_EXECUTION_STORE_READ_THROUGH=true (serving runtimes read " +
+        "their home space from the engine; default is OFF)",
+    );
+  }
   host = new ExecutorHost({
-    policy: serverExecutionPolicyFromEnv(envGet),
+    policy,
     ensureSpaceRoots,
     server: options.server,
     serviceIdentity: options.identity.did(),
-    createRuntime: (space) => {
+    createRuntime: (space, context) => {
       const storageManager = LoopbackStorageManager.connect(options.server, {
         as: options.identity,
         // Phase 5 (protocol.md §2's grant-scoped read design): the
@@ -208,6 +232,14 @@ export function startServerExecutionHost(options: {
         // delegated-scoped-read precondition.
         servingHomeSpace: space,
       });
+      // Installed ahead of the runtime, so no read this factory could ever
+      // perform reaches the session.
+      if (context.storeReadThrough !== undefined) {
+        storageManager.installStoreReadThrough(
+          space,
+          context.storeReadThrough,
+        );
+      }
       const runtime = new Runtime({
         apiUrl: options.apiUrl,
         storageManager,

@@ -14,8 +14,7 @@
  * 1. Static fetchJson at top level (control - should work)
  * 2. fetchJson inside .map() with expression callback (claimed to fail)
  */
-import { computed, Default, NAME, pattern, UI } from "commonfabric";
-import { fetchJson } from "commonfabric";
+import { computed, Default, fetchJson, NAME, pattern, UI } from "commonfabric";
 
 interface Repo {
   id: string;

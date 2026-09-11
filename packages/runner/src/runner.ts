@@ -69,11 +69,13 @@ import {
   createCell,
   isCell,
   markCellDocumentSynced,
+  syncCellForIdentity,
 } from "./cell.ts";
 import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
 } from "./cfc.ts";
+import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import type { EntityKind } from "./entity-kind.ts";
 import { MAX_PATH_RESOLUTION_LENGTH, resolveLink } from "./link-resolution.ts";
@@ -106,6 +108,7 @@ import {
   type RawNodeCause,
 } from "./module.ts";
 import { runtimeOwnedStoreOwnerKey } from "./cfc/runtime-owned-stores.ts";
+import { writeResultSchemaMeta } from "./result-schema-meta.ts";
 import {
   resolveScopeKey,
   type ScopeKey,
@@ -201,7 +204,10 @@ import {
   readVerifiedSourceClosure,
 } from "./compilation-cache/cell-cache.ts";
 import { createRef } from "./create-ref.ts";
-import { diffAndUpdate } from "./data-updating.ts";
+import {
+  diffAndUpdate,
+  initializeScopedArgumentSlots,
+} from "./data-updating.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import { setResultCell } from "./result-utils.ts";
 import {
@@ -355,7 +361,9 @@ function narrowChildSchema(schema: JSONSchema, key: string): JSONSchema {
 // picks the `asCell` branch and hands back a cell handle, so `Cell<T> |
 // undefined` is a handle rather than something read through. The depth bound
 // terminates a declaration that refers to itself, which resolves to itself
-// however many times it is followed.
+// however many times it is followed. A union's arms carry no `$defs` of their
+// own, so each is checked carrying the union's, where a `$ref` inside it
+// resolves.
 function isReferenceOnlySchema(
   schema: JSONSchema | undefined,
   depth: number = 4,
@@ -387,7 +395,12 @@ function isReferenceOnlySchema(
     ? [...anyOf, ...oneOf]
     : anyOf ?? oneOf;
   if (arms !== undefined && arms.length > 0) {
-    return arms.some((arm) => isReferenceOnlySchema(arm, depth - 1));
+    return arms.some((arm) =>
+      isReferenceOnlySchema(
+        cfcSchemaWithInheritedDefs(arm, schema.$defs),
+        depth - 1,
+      )
+    );
   }
   return false;
 }
@@ -2693,6 +2706,12 @@ export class Runner {
       storable,
       argumentLink,
     );
+    initializeScopedArgumentSlots(
+      this.#runtime,
+      tx,
+      argumentLink,
+      argumentSchema,
+    );
   }
 
   /** Stage an argument write, materialize aliases in the same transaction, and
@@ -2743,13 +2762,7 @@ export class Runner {
     resultSchema: JSONSchema | undefined,
   ): void {
     if (resultSchema === undefined) return;
-    const cell = resultCell.withTx(tx);
-    const previous = cell.getMetaRaw("schema", {
-      meta: ignoreReadForScheduling,
-    });
-    if (!deepEqual(previous, resultSchema)) {
-      cell.setMetaRaw("schema", resultSchema, rawMetaWriteAuthorization);
-    }
+    writeResultSchemaMeta(resultCell.withTx(tx), resultSchema);
   }
 
   /**
@@ -5514,11 +5527,7 @@ export class Runner {
     cell: Cell<T>,
     identity: ScopeKeyIdentity | undefined,
   ): Promise<Cell<T>> {
-    if (identity === undefined) return cell.sync();
-    markCellDocumentSynced(cell);
-    return this.#runtime.storageManager.syncCell(cell, {
-      scopeKeyIdentity: identity,
-    });
+    return syncCellForIdentity(cell, identity);
   }
 
   /**
@@ -8579,14 +8588,10 @@ export class Runner {
       return;
     }
 
-    const eventDependencySchema: JSONSchema = {
-      type: "object",
-      properties: { $event: eventSchema as JSONSchema },
-      ...(argumentSchema.$defs !== undefined &&
-        { $defs: argumentSchema.$defs }),
-      ...(argumentSchema.definitions !== undefined &&
-        { definitions: argumentSchema.definitions }),
-    };
+    const eventDependencySchema = cfcSchemaWithInheritedDefs(
+      { type: "object", properties: { $event: eventSchema as JSONSchema } },
+      argumentSchema.$defs,
+    );
     const inputsCell = this.#runtime.getImmutableCell(
       resultCell.space,
       { $event: event },
@@ -8753,23 +8758,9 @@ export class Runner {
   ): NormalizedFullLink[] {
     const links: NormalizedFullLink[] = [];
     const seen = new WeakMap<object, Set<unknown>>();
-    const rootSchema = argumentSchema;
-
-    const schemaWithRootDefinitions = (
-      schema: JSONSchema | undefined,
-    ): JSONSchema | undefined => {
-      if (!isObjectOrArray(schema) || !isObjectOrArray(rootSchema)) {
-        return schema;
-      }
-      return {
-        ...schema,
-        ...(schema.$defs === undefined && rootSchema.$defs !== undefined &&
-          { $defs: rootSchema.$defs }),
-        ...(schema.definitions === undefined &&
-          rootSchema.definitions !== undefined &&
-          { definitions: rootSchema.definitions }),
-      };
-    };
+    const rootDefinitions = isObjectOrArray(argumentSchema)
+      ? argumentSchema.$defs
+      : undefined;
 
     const visit = (schema: unknown, currentValue: unknown): void => {
       // Sigil-only: the value is post-unwrap, where the only `$alias`
@@ -8780,9 +8771,11 @@ export class Runner {
         const link = parseLink(currentValue, resultCell);
         links.push({
           ...link,
-          schema: link.schema ?? schemaWithRootDefinitions(
-            schema as JSONSchema | undefined,
-          ),
+          schema: link.schema ??
+            (schema === undefined ? undefined : cfcSchemaWithInheritedDefs(
+              schema as JSONSchema,
+              rootDefinitions,
+            )),
         });
         return;
       }
@@ -9253,9 +9246,7 @@ export class Runner {
         // transaction, which the create-only mark below gates, so the schema
         // and the value it describes commit together or not at all.
         const shape = receiptShapeSchema(receiptValue);
-        if (shape !== undefined) {
-          receipt.setMetaRaw("schema", shape, rawMetaWriteAuthorization);
-        }
+        if (shape !== undefined) writeResultSchemaMeta(receipt, shape);
         tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
       } else if (servedReceiptWrite) {
         // The ruled serving-side receipt write (owner, 2026-08-29): the
@@ -9300,9 +9291,7 @@ export class Runner {
           const receipt = receiptCell.withTx(tx);
           receipt.set(receiptValue);
           const shape = receiptShapeSchema(receiptValue);
-          if (shape !== undefined) {
-            receipt.setMetaRaw("schema", shape, rawMetaWriteAuthorization);
-          }
+          if (shape !== undefined) writeResultSchemaMeta(receipt, shape);
         }
       }
       return result;
@@ -10002,7 +9991,11 @@ export class Runner {
     // behind link VALUES like a builtin's result handle. Steady-state this is
     // ~free: covered selectors resolve without a server round trip.
     const presyncInputs = module.argumentSchema !== undefined
-      ? async (event: any, identity?: ScopeKeyIdentity): Promise<void> => {
+      ? async (
+        event: any,
+        identity: ScopeKeyIdentity | undefined,
+        tx: IExtendedStorageTransaction,
+      ): Promise<void> => {
         const eventInputs = {
           ...(inputs as Record<string, any>),
           $event: event,
@@ -10011,6 +10004,7 @@ export class Runner {
           resultCell.space,
           eventInputs,
           undefined,
+          tx,
         );
         const argument = inputsCell.asSchema(module.argumentSchema!).get();
         const promises: Promise<unknown>[] = [];
@@ -10977,6 +10971,7 @@ export class Runner {
         // storm. Container-minting builtins (map/filter/flatMap) read it to
         // defer their per-element sub-pattern runs until sync completes too.
         defersInitialRunUntilSynced(schedulerRehydration),
+        resolvedOutputSpot,
       );
     } finally {
       popFrame(builtinFrame);
