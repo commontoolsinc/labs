@@ -4,6 +4,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Demand-driven index enumeration](development/performance/2026-09-11-demanded-index-enumeration.md) — 2026-09-11: 512-row lookup and enumeration measurements, skewed-bucket costs, and the unresolved mixed-key representation boundary.
 - [Lazy scalar read width](development/performance/2026-09-11-lazy-scalar-read-width.md) — D2 eager/lazy one-scalar and all-row baseline at 74, 296, and 1,184 inline rows, with journal counts and timing limits.
 
 - [2026-09-11-nested-collection-scan-diagnostic.md](development/performance/2026-09-11-nested-collection-scan-diagnostic.md) — E3 warning acceptance across 413 pattern entries and 1,731 modules: seven occurrences at five source sites, guarded-UI limits, and callback-local exclusions.
@@ -114,6 +115,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [topics-board-migration-2026-08-28.md](topics-board-migration-2026-08-28.md) — the Stage B migration of the Estuary Topics board and its 125 topics: why the board moved FIRST and the children-first rule inverts when the parent's demand is what changed, that reversal through the source log is refused in both directions so recovery means restoring content, and the failures only the live run produced — every laptop run dying 4-6 minutes in on a different entity, per-row cost rising and never recovering after each transport error, and a partial apply reporting success.
 
 ## Shipped or superseded designs and decision records
+
+- [Mixed index key enumeration decision](features/2026-09-11-index-key-enumeration-decision.md) — 2026-09-11: approved Q7 tagged enumeration contract, caller consequences, alternatives, and pending acceptance requirements.
 
 - [APRIME-LINEAGE-HANDOFF.md](packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md) — the authored-source lineage investigation, per-channel hazards, probes, and execution record for the CT-1868/1869/1870 arc, completed August 2026.
 - [agent-connector-owner-identity-break.md](agent-connector-owner-identity-break.md) — decision record for the agent connector debug pattern's pre-deployment cutover to explicit owner identity and one protected writable command cell, August 2026.
