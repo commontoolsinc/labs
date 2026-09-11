@@ -35,9 +35,20 @@ export interface SchemaHint {
 
 export type SchemaHints = WeakMap<ts.Node, SchemaHint>;
 
+/** A recoverable schema-generation problem at its authored node, if known. */
+export interface SchemaGenerationDiagnostic {
+  readonly severity: "warning";
+  readonly type: "schema-default:unresolved";
+  readonly message: string;
+  readonly node?: ts.Node;
+}
+
 /** Options that affect schema generation without changing the authored type. */
 export interface SchemaGenerationOptions {
   readonly widenLiterals?: boolean;
+
+  /** Receives warnings; without a callback the generator logs them. */
+  readonly onDiagnostic?: (diagnostic: SchemaGenerationDiagnostic) => void;
 
   /**
    * Resolves a TypeScript source-file name to the writer identity that should
@@ -97,6 +108,9 @@ export interface GenerationContext {
 
   /** Widen literal types to base types during schema generation */
   widenLiterals?: boolean;
+
+  /** Receives recoverable schema-generation problems. */
+  onDiagnostic?: (diagnostic: SchemaGenerationDiagnostic) => void;
 
   /** Resolve writer-claim file spelling and optional mint-time identity. */
   writerIdentityForSourceFile?: (

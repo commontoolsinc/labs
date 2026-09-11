@@ -1,5 +1,37 @@
 # @commonfabric/cli
 
+## Pattern test read costs
+
+`cf test <file.test.tsx> --verbose --stats-threshold 0` reports read costs for
+each step of a single-runtime test, including assertions, explicit renders, and
+settles. Initialization is reported separately. Each report groups actions by
+authored file, line, and column, then sorts those sources by total proxy
+accesses. Actions without an authored source are grouped by builtin name, or by
+action ID when no name is available.
+
+The counters measure reactive data property and element reads (including array
+method materialization and cached reads), stored-link traversal attempts on
+cache misses, distinct storage documents per action run, and compacted
+scheduling read dependencies at action completion. The last two columns sum
+per-run counts; they are not a union of documents or subscriptions across the
+step. Link hops can exceed proxy accesses because schema traversal and runtime
+code also follow links. Missing-target reads count; a fast-path target read
+followed by a fallback counts twice, since both attempts perform work. These
+counters exclude plain JavaScript arithmetic, event-handler transactions, commit
+preparation, and the idempotency verification replay.
+
+The total includes every measured scheduler run, including builtin and
+coordinator actions and actions removed before the step ends.
+`--stats-action-limit` limits displayed rows only. `max/run` identifies the
+largest individual run without hiding the accumulated cost of repeated runs. An
+assertion can demand work that the preceding action left lazy, so compare
+corresponding steps and keep test-harness reads in view.
+
+For timing experiments, `--no-idempotency-check` disables verification replay in
+both single-runtime and multi-user tests. Verification stays enabled by default;
+a measurement with it disabled does not establish idempotency. Read-cost tables
+currently cover the single-runtime runner.
+
 ## View pager
 
 `cf view [file]` is an interactive pager for transformed TypeScript, source
@@ -137,22 +169,22 @@ differently from the rest of `cf`, which takes those two as ordinary slugs;
 [#6992](https://github.com/commontoolsinc/labs/issues/6992) retires the
 difference by refusing them as slug values.
 
-| Verb                         | What it does                                                                                                                                                                                                                                                                   |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `cd <ref>`                   | Moves the place, once the fabric says it is there. Takes relative segments, `..`, `-`, `/`, `.` for where you stand, `./<ref>` for a member and `.@scope` for the scope, rooted and complete references, slugs, and `#name` entry points.                                      |
-| `ls`                         | Lists what stands where you are: a space root's facets, the slugs the index records, the space's pieces, or the keys under a cell. Rows are numbered, a row that is one of the piece's callables says so, and one screenful is written. `--limit <rows>` overrides the height. |
-| `pwd`                        | The complete address of the place, both dimensions.                                                                                                                                                                                                                            |
-| `get [<ref>]`                | Reads the value at a cell, defaulting to where you stand. A trailing `#argument` reads the piece's arguments cell. Takes `cf cell get`'s read options — `--filter`, `--select`, `--schema`, `--json` — and writes one screenful of JSON, or the whole value under `--json`.    |
-| `set <ref> <value>`          | Writes a value at a cell, which copies rather than links. The value is JSON, and a bare word is the string it spells. `-` is refused, standard input being the keyboard.                                                                                                       |
-| `edit [<ref>]`               | Opens a cell's value in `$EDITOR` and writes back what you save. A value JSON cannot carry is refused before the editor opens, and text that will not parse is refused with the file it is still in.                                                                           |
-| `link <ref> <ref>`           | Writes a reference at the second cell naming the first, `ln -s`'s order. The one spelling that makes a cell read another cell.                                                                                                                                                 |
-| `call <ref> <name> [input…]` | Invokes a piece's verb. The verb name opens the callable's own section, so its schema-derived flags follow bare and `--` closes it. A callable handle off `verbs` carries the name already, as in `call %4`.                                                                   |
-| `verbs [<ref>]`              | Lists a piece's callables, numbering each so `call %n` invokes it. `--all` shows the rows the marks hide.                                                                                                                                                                      |
-| `describe [<ref>]`           | The page `cf piece describe` writes: what the piece is, what it holds, and what it takes. `--all` as above.                                                                                                                                                                    |
-| `wish <#name>`               | Resolves a named entry point, exactly as `cf wish` does.                                                                                                                                                                                                                       |
-| `more`                       | Writes the next page of a listing or a value that did not fit, a listing continuing under the numbers it already gave its rows.                                                                                                                                                |
-| `where`                      | The whole ambient record: the connection, and the place `pwd` prints.                                                                                                                                                                                                          |
-| `help [<verb>]`              | Lists the verbs, or writes one verb's page. `<verb> --help` writes the same page.                                                                                                                                                                                              |
+| Verb                         | What it does                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cd <ref>`                   | Moves the place, once the fabric says it is there. Takes relative segments, `..`, `-`, `/`, `.` for where you stand, `./<ref>` for a member and `.@scope` for the scope, rooted and complete references, slugs, and `#name` entry points.                                                                                                           |
+| `ls`                         | Lists what stands where you are: a space root's facets, the slugs the index records, the space's pieces, or the keys under a cell. Rows are numbered, a row that is one of the piece's callables says so, a piece shows the name it carries beside the handle that reaches it, and one screenful is written. `--limit <rows>` overrides the height. |
+| `pwd`                        | The complete address of the place, both dimensions.                                                                                                                                                                                                                                                                                                 |
+| `get [<ref>]`                | Reads the value at a cell, defaulting to where you stand. A trailing `#argument` reads the piece's arguments cell. Takes `cf cell get`'s read options — `--filter`, `--select`, `--schema`, `--json` — and writes one screenful of JSON, or the whole value under `--json`.                                                                         |
+| `set <ref> <value>`          | Writes a value at a cell, which copies rather than links. The value is JSON, and a bare word is the string it spells. `-` is refused, standard input being the keyboard.                                                                                                                                                                            |
+| `edit [<ref>]`               | Opens a cell's value in `$EDITOR` and writes back what you save. A value JSON cannot carry is refused before the editor opens, and text that will not parse is refused with the file it is still in.                                                                                                                                                |
+| `link <ref> <ref>`           | Writes a reference at the second cell naming the first, `ln -s`'s order. The one spelling that makes a cell read another cell.                                                                                                                                                                                                                      |
+| `call <ref> <name> [input…]` | Invokes a piece's verb. The verb name opens the callable's own section, so its schema-derived flags follow bare and `--` closes it. A callable handle off `verbs` carries the name already, as in `call %4`.                                                                                                                                        |
+| `verbs [<ref>]`              | Lists a piece's callables, numbering each so `call %n` invokes it. `--all` shows the rows the marks hide.                                                                                                                                                                                                                                           |
+| `describe [<ref>]`           | The page `cf piece describe` writes: what the piece is, what it holds, and what it takes. `--all` as above.                                                                                                                                                                                                                                         |
+| `wish <#name>`               | Resolves a named entry point, exactly as `cf wish` does.                                                                                                                                                                                                                                                                                            |
+| `more`                       | Writes the next page of a listing or a value that did not fit, a listing continuing under the numbers it already gave its rows.                                                                                                                                                                                                                     |
+| `where`                      | The whole ambient record: the connection, and the place `pwd` prints.                                                                                                                                                                                                                                                                               |
+| `help [<verb>]`              | Lists the verbs, or writes one verb's page. `<verb> --help` writes the same page.                                                                                                                                                                                                                                                                   |
 
 A listing numbers its rows, and `%n` names a row until the next listing replaces
 the numbering — `more` continues the current one rather than starting another.
@@ -440,16 +472,61 @@ because the serialized link has no durable source contract. The superseded
 `cf set` spelling mounts this same command and has identical validation
 behavior.
 
+## Linking piece inputs
+
+`cf piece link <source>/<path> <target>/<path>` stores a live connection in the
+target piece's argument. Rebinding a terminal path replaces that connection; it
+does not write through the previous producer. Binding a Stream stores its handle
+without sending an event.
+
+After the binding commits, linking starts the target piece and materializes its
+result. `--no-start` stores the binding without starting the target. A rejected
+binding leaves a stopped target stopped.
+
+The Piece API checks the binding before committing it. A producer with durable
+schema metadata must supply values the consumer can read. A writable consumer
+must also restrict its writes to values the producer accepts. Capability and
+scope constraints apply, and a rejected binding leaves the previous argument
+unchanged. `--allow-non-existing` only overrides the CLI's path-existence check;
+it does not waive contract validation.
+
+Ordinary cells and externally injected handles, including SQLite sources, can
+lack durable producer schema metadata. These remain supported as dynamic
+bindings, with destination scope checks but without a static producer payload or
+capability proof. A known Piece document whose producer contract cannot be
+recovered is refused. A piece without an argument schema imposes no consumer
+schema constraints, and plain-cell targets retain their ordinary binding
+behavior. Successful linking does not establish compatibility with a future
+producer schema; producer enforcement still applies when values are accessed or
+written.
+
 ## Updating piece source
 
 Run `cf piece setsrc --check` before every source update to a piece whose state
 matters. It compiles the complete candidate package, compares it with the exact
-piece named on the command line, leaves that piece unchanged, and exits nonzero
-on refusal. Candidate compilation does persist unattached, content-addressed
-module and source documents in the space; it does not move the piece's source
-pointer, restage its arguments, or create a source revision. The target, entry,
-root, export, test, data-file, and repository flags on the check must match the
-apply.
+piece named on the command line, and exits nonzero on refusal. The check issues
+no storage writes: candidate compilation and current-source recovery reuse
+verified caches without persisting artifacts or repairs. It creates no module
+update delegation. The target, entry, root, export, test, data-file, and
+repository flags on the check must match the apply.
+
+Reads still use the normal storage synchronization path. On a deployment with
+server execution, those reads can demand server-side materialization; other
+clients and background work can also change the space while a check runs.
+Preflight does not provide a frozen storage snapshot.
+
+Apply persists compilation artifacts before setup. It commits new module update
+authority atomically with the source pointer and revision; a refused setup
+publishes no proposed authority. Successful source updates require an owned,
+durable setup transaction.
+
+Preflight uses setup's stored-argument validation: optional fields holding
+`undefined` count as absent, and unreadable linked values defer to reactive
+reads. A compatible verdict therefore does not prove that every linked value has
+loaded. A committed direct handle retained under an unchanged input contract
+keeps its producer's policy; the check does not require the consumer to
+redeclare that policy. New links and changed handle contracts require the full
+producer-contract proof. A successful render after apply is required.
 
 ```bash
 cf piece setsrc --cell fid1:piece --root packages/patterns \
@@ -747,8 +824,7 @@ memo, which names a space once for the life of the process.
   callable's section — directly after the verb, before any `--`.
 - A `cf cell get` path that doesn't resolve prints a one-line error on stderr
   and exits 1 — it is a data error, not a usage error. A `piece link` that fails
-  validation (a source/target piece or path that doesn't exist) reports the same
-  way.
+  endpoint or contract validation reports the same way.
 - The launcher spawns the child CLI with `deno run --quiet` so Deno's own
   warnings (npm "Ignored build scripts" banner) never reach users.
 
@@ -886,14 +962,14 @@ about:
 
 See [what a selection means for a call](#what-a-selection-means-for-a-call) for
 the cases where the call's difference shows. `exec` is the same invocation
-reached through a mount, so it meets the value-less verb and the
-graph-quiescence coupling described there; it has neither `--no-wait` nor
-`--show-links`, so the two cases about those flags do not arise. `wish` adds one
-of its own: a query that matched nothing is an ordinary outcome rather than an
-error, so the selection is never reached and the empty result comes back as it
-always did. A selection that keeps nothing over a target that DID resolve is
-refused, because "the wish matched nothing" and "your projection kept nothing"
-are different facts.
+reached through a mount, so it meets the value-less verb and the readiness
+coupling described there; it has neither `--no-wait` nor `--show-links`, so the
+two cases about those flags do not arise. `wish` adds one of its own: a query
+that matched nothing is an ordinary outcome rather than an error, so the
+selection is never reached and the empty result comes back as it always did. A
+selection that keeps nothing over a target that DID resolve is refused, because
+"the wish matched nothing" and "your projection kept nothing" are different
+facts.
 
 `--filter` is jq-inspired rather than a full jq interpreter. It applies only to
 arrays and accepts value paths (`.status`, `.author.name`, `.["display-name"]`,
@@ -1144,13 +1220,16 @@ has happened before the selection applies.) The same holds for a tool, whose
 result is read off the cell the tool wrote. Use a selection to control what
 reaches stdout, not to control what travels.
 
-A selection also couples the call to graph quiescence. The shaped readback runs
-through the same shared read step as `cf cell get`, and that step awaits the CLI
-runtime's global idle plus storage sync before answering — while the plain call
-acknowledges at its own handling's commit. On a piece with heavy derived state,
-a shaped call can therefore wait on unrelated recomputation the handler
-triggered elsewhere in the graph. When that wait matters, shape the collect
-instead: call plain (or `--no-wait`), then
+A selection also adds a computed read after the call. The shaped readback runs
+through the same shared read step as `cf cell get`, and waits for its output
+with one `Cell.pull()`. That pull drives the output's transitive computation and
+linked-document loads through the runtime scheduler and its manager-wide
+convergence pool, so work already active in that runtime can still share the
+wait. Declared object keys are then ordered locally from the projection before
+rendering, and the keys an open projection retains beyond its declaration follow
+them in the value's own order; that step starts no graph or storage work. When
+isolating the read matters, shape the collect instead. Call plain (or
+`--no-wait`), then collect from the receipt with
 `cf cell get --cell <receipt id> --select …`.
 
 Three cases follow from that:
@@ -1481,15 +1560,19 @@ itself, and local runs of those same scripts set `CF_CLI_INTEGRATION_USE_LOCAL`
 to force the source CLI.)
 
 `bin/cf` is the install, with `bin/cfsh` beside it for the interactive shell.
-Both run from source, so neither goes stale against the checkout:
+Both run from source, so neither goes stale against the checkout. One route,
+once per machine, mise or not:
 
 ```bash
-# mise users: nothing to do. mise.toml puts this checkout's bin/ on PATH.
-mise trust    # only if this checkout has not been trusted yet
-
-# everyone else (mise is recommended in README.md but not required):
 deno task install-cf              # --dry-run to see what it would do
 ```
+
+It is a real file in a directory on PATH, so every shell sees it: a login shell,
+an agent's non-interactive one, `make`, an editor's task runner. The repo's
+`mise.toml` pins Deno and declares no PATH entry, since a per-directory entry
+reaches only shells whose mise hook ran for that directory and needs
+`mise trust` in every new worktree. Where `cf` is not on PATH at all,
+`deno task cf` runs the same CLI and needs nothing.
 
 `install-cf` copies `bin/cf` and `bin/cfsh` to a directory already on your PATH
 — refusing to guess if there isn't one, since installing somewhere unreachable
@@ -1509,7 +1592,7 @@ does not strand it.
 
 Several checkouts coexisting is normal — worktrees, and a vendored labs inside
 another repo (a supported, tested layout: see `test/launcher.test.ts`). So the
-symlink above does **not** pin `cf` to the checkout you installed it from. It
+copy above does **not** pin `cf` to the checkout you installed it from. It
 selects, in order:
 
 1. **`$CF_LABS_ROOT`**, when set — the explicit override for when your cwd
@@ -1547,11 +1630,10 @@ is always `packages/cli/mod.ts`, which _is_ the CLI (it ends in
 `if (import.meta.main)` and nothing outside `packages/cli/` imports it as a
 library).
 
-Rule 2 is what mise already does for its route (`_.path` resolves relative to
-the `mise.toml` declaring it), so both install routes agree on which checkout
-you get. The consequence worth knowing: `cf` inside checkout B runs B's code
-even though you installed the link from A. That is the point, but it means a
-stack trace is the quickest way to confirm which checkout answered.
+Rule 2 is what lets one installed copy serve every checkout. The consequence
+worth knowing: `cf` inside checkout B runs B's code even though you installed
+the copy from A. That is the point, but it means a stack trace is the quickest
+way to confirm which checkout answered.
 
 ### Why not `dist/cf`
 

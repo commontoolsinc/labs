@@ -45,7 +45,6 @@ import {
   isCfcEnforcing,
   metadataFieldsForSetattrFlags,
   normalizeCfcWritebackXattrName,
-  parseCfcMode,
   resolveCfcMode,
   safeReconcileCfcWritebacks,
   shouldEnableCfcAnnotations,
@@ -469,54 +468,6 @@ export async function main(argv: string[] = Deno.args) {
     };
   }
 
-  // CF_FUSE_DEBUG=1 enables debug logging even when --debug isn't passed.
-  // --debug is forwarded through every spawn layer (mount -> supervisor ->
-  // daemon child), and env vars are inherited too, so either switch works.
-  const debug = args.debug || Deno.env.get("CF_FUSE_DEBUG") === "1";
-  const dangerouslyAllowIncompatibleSchema = Boolean(
-    args["dangerously-allow-incompatible-schema"],
-  );
-  const requestedCfcMode = String(args["cfc-mode"] ?? "");
-  if (requestedCfcMode && !parseCfcMode(requestedCfcMode)) {
-    console.warn(
-      `[FUSE] Unknown --cfc-mode=${requestedCfcMode}; using runner default`,
-    );
-  }
-  const cfcMode: CfcEnforcementMode = resolveCfcMode({
-    cliMode: requestedCfcMode || undefined,
-    envMode: Deno.env.get("CF_CFC_MODE") ?? undefined,
-  });
-  const cfcAnnotationsEnabled = shouldEnableCfcAnnotations({
-    annotationsRequested: Boolean(args["cfc-annotations"]),
-    mode: cfcMode,
-  });
-  const cfcWritebackXattrs = Boolean(args["cfc-writeback-xattrs"]);
-  const cfcXattrNamespace = parseCfcXattrNamespace(
-    String(args["cfc-xattr-namespace"] ?? DEFAULT_CFC_XATTR_NAMESPACE),
-  );
-  if (!cfcXattrNamespace) {
-    console.error(
-      `[FUSE] Unknown --cfc-xattr-namespace=${
-        args["cfc-xattr-namespace"]
-      }; expected trusted, compat, or both`,
-    );
-    Deno.exit(1);
-  }
-
-  let cacheOptions: MountCacheOptions;
-  try {
-    cacheOptions = resolveMountCacheOptions({
-      noattrcache: Boolean(args.noattrcache),
-      attrcacheTimeout: String(args["attrcache-timeout"] ?? ""),
-      attrcacheTimeoutGiven: argv.some((arg) =>
-        arg === "--attrcache-timeout" || arg.startsWith("--attrcache-timeout=")
-      ),
-    });
-  } catch (e) {
-    console.error(`[FUSE] ${e instanceof Error ? e.message : e}`);
-    return Deno.exit(1);
-  }
-
   const mountpoint = args._[0] as string;
   if (!mountpoint) {
     console.error(
@@ -579,6 +530,67 @@ export async function main(argv: string[] = Deno.args) {
       state,
       extra,
     );
+
+  /**
+   * Report a startup failure and stop.
+   *
+   * The message goes to stderr and to the supervisor status channel. A
+   * background mount's stderr goes nowhere its parent reads, and the channel
+   * is what `cf fuse mount` blocks on.
+   */
+  const failStartup = async (message: string): Promise<never> => {
+    await writeFailedSupervisorStartupStatus(
+      `[FUSE] ${message}`,
+      reportSupervisorState,
+    );
+    return Deno.exit(1);
+  };
+
+  // CF_FUSE_DEBUG=1 enables debug logging even when --debug isn't passed.
+  // --debug is forwarded through every spawn layer (mount -> supervisor ->
+  // daemon child), and env vars are inherited too, so either switch works.
+  const debug = args.debug || Deno.env.get("CF_FUSE_DEBUG") === "1";
+  const dangerouslyAllowIncompatibleSchema = Boolean(
+    args["dangerously-allow-incompatible-schema"],
+  );
+  let cfcMode: CfcEnforcementMode;
+  try {
+    cfcMode = resolveCfcMode({
+      cliMode: String(args["cfc-mode"] ?? ""),
+      envMode: Deno.env.get("CF_CFC_MODE") ?? undefined,
+    });
+  } catch (e) {
+    return await failStartup(e instanceof Error ? e.message : String(e));
+  }
+  const cfcAnnotationsEnabled = shouldEnableCfcAnnotations({
+    annotationsRequested: Boolean(args["cfc-annotations"]),
+    mode: cfcMode,
+  });
+  const cfcWritebackXattrs = Boolean(args["cfc-writeback-xattrs"]);
+  const cfcXattrNamespace = parseCfcXattrNamespace(
+    String(args["cfc-xattr-namespace"] ?? DEFAULT_CFC_XATTR_NAMESPACE),
+  );
+  if (!cfcXattrNamespace) {
+    return await failStartup(
+      `Unknown --cfc-xattr-namespace=${
+        args["cfc-xattr-namespace"]
+      }; expected trusted, compat, or both`,
+    );
+  }
+
+  let cacheOptions: MountCacheOptions;
+  try {
+    cacheOptions = resolveMountCacheOptions({
+      noattrcache: Boolean(args.noattrcache),
+      attrcacheTimeout: String(args["attrcache-timeout"] ?? ""),
+      attrcacheTimeoutGiven: argv.some((arg) =>
+        arg === "--attrcache-timeout" || arg.startsWith("--attrcache-timeout=")
+      ),
+    });
+  } catch (e) {
+    return await failStartup(e instanceof Error ? e.message : String(e));
+  }
+
   try {
     await writeSupervisorStatus("starting");
   } catch (error) {

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Put `cf` on PATH.
 #
-# Only needed without mise — mise.toml already adds each checkout's bin/ to
-# PATH. Shell completion is what makes this matter: the installed completion
+# The one route to a `cf` on PATH, for mise users and everyone else; mise.toml
+# pins Deno and declares no PATH entry. Shell completion is what makes this
+# matter: the installed completion
 # function calls `cf` by name on every Tab and swallows its errors, so with no
 # `cf` on PATH completion silently yields nothing.
 #

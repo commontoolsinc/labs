@@ -1892,8 +1892,6 @@ jobs:
     if: (github.event_name == 'pull_request') || (github.ref_name == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: *job-timeout
-    env:
-      CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
     needs:
       - check
       - test
@@ -1935,6 +1933,9 @@ jobs:
           skip-decompress: false
           digest-mismatch: error
 
+      # The gate reads the coverage artifacts of every test job in this run, so
+      # no lane can be asked to run it and this job writes no test records.
+      # `docs/specs/test-records.md` under "Recording" holds the criterion.
       - name: 📊 Run coverage check
         timeout-minutes: *work-timeout
         env:
@@ -1943,7 +1944,6 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: >-
-          deno task run-recorded gate repo coverage-check --
           deno run --allow-net --allow-env --allow-read --allow-run
           --allow-write tasks/coverage-check.ts
 
@@ -1968,13 +1968,6 @@ jobs:
           path: perf-metrics.json
           retention-days: 90
           if-no-files-found: ignore
-
-      - name: 📤 Ship test records
-        if: always()
-        uses: ./.github/actions/test-records-ship
-        with:
-          artifact: coverage-check
-          job: Coverage Check
 
   status:
     name: "Status"

@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { cfcAtom } from "@commonfabric/api/cfc";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
@@ -89,17 +90,18 @@ describe("CFC trigger reads: cid: exclusion", () => {
           },
         },
       });
-      // A cid: doc carrying a labelMap — writable by any same-space
-      // principal, so its label is attacker-controlled and must stay out of
-      // flow joins.
-      const cidId = "cid:trigger-read-poison" as typeof sourceId;
+      // A cid: doc carrying a labelMap — the commit boundary verifies its
+      // VALUE against its id, never its envelope, so its label is
+      // attacker-controlled and must stay out of flow joins.
+      const poisoned = { secret: "poisoned" };
+      const cidId = `cid:${taggedHashStringOf(poisoned)}` as typeof sourceId;
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
         id: cidId,
         path: [],
       }, {
-        value: { secret: "poisoned" },
+        value: poisoned,
         cfc: {
           version: 1,
           schemaHash: "poison-schema",

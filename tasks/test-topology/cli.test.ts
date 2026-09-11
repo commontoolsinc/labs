@@ -10,7 +10,7 @@ import type { Suite } from "./suite.ts";
 const root = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 const suites = await loadCliSuites(root);
 const byId = (id: string): Suite => suites.find((s) => s.id === id)!;
-const context = { root, outputDir: "/out" };
+const context = { root, outputDir: "/out", spoolDir: "/spool" };
 
 describe("the command-line suites", () => {
   it("names a unit for the record its step writes", () => {

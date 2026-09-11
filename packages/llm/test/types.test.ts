@@ -1,11 +1,16 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { BuiltInLLMContent, BuiltInLLMMessage } from "@commonfabric/api";
+import type {
+  BuiltInLLMContent,
+  BuiltInLLMMessage,
+  JSONSchema,
+} from "@commonfabric/api";
 import {
   DEFAULT_GENERATE_OBJECT_MODEL,
   DEFAULT_MODEL_NAME,
   GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
   isLLMTool,
+  llmGenerateObjectRequestProblem,
   llmRequestProblem,
   type LLMTool,
 } from "../src/types.ts";
@@ -21,8 +26,14 @@ const TOOL: LLMTool = {
 
 /** A well-formed request, with `input` written over it. */
 const request = (input: object) => ({
-  cache: true,
   model: DEFAULT_MODEL_NAME,
+  messages: [{ role: "user", content: "Hi" }] satisfies BuiltInLLMMessage[],
+  ...input,
+});
+
+/** A well-formed generateObject request, with `input` written over it. */
+const objectRequest = (input: object) => ({
+  schema: { type: "object" } satisfies JSONSchema,
   messages: [{ role: "user", content: "Hi" }] satisfies BuiltInLLMMessage[],
   ...input,
 });
@@ -56,6 +67,12 @@ describe("types", () => {
       }))).toBeUndefined();
     });
 
+    it("returns `undefined` for a request that leaves `cache` out, turns caching on, or turns it off", () => {
+      expect(llmRequestProblem(request({}))).toBeUndefined();
+      expect(llmRequestProblem(request({ cache: true }))).toBeUndefined();
+      expect(llmRequestProblem(request({ cache: false }))).toBeUndefined();
+    });
+
     it("returns `undefined` for any metadata value JSON carries faithfully", () => {
       expect(llmRequestProblem(request({
         metadata: {
@@ -71,13 +88,10 @@ describe("types", () => {
 
     it("returns text naming each required field a request leaves out", () => {
       const messages: BuiltInLLMMessage[] = [{ role: "user", content: "Hi" }];
-      expect(llmRequestProblem({ messages, cache: true })).toContain("'model'");
-      expect(
-        llmRequestProblem({ model: DEFAULT_MODEL_NAME, cache: true }),
-      ).toContain("'messages'");
-      expect(
-        llmRequestProblem({ model: DEFAULT_MODEL_NAME, messages }),
-      ).toContain("'cache'");
+      expect(llmRequestProblem({ messages })).toContain("'model'");
+      expect(llmRequestProblem({ model: DEFAULT_MODEL_NAME })).toContain(
+        "'messages'",
+      );
     });
 
     it("returns text naming `messages` for an empty conversation", () => {
@@ -90,6 +104,8 @@ describe("types", () => {
     it("returns text naming the field whose value is of the wrong type", () => {
       const named = (input: object, field: string) =>
         expect(llmRequestProblem(request(input))).toContain(field);
+      named({ cache: "yes" }, "'cache'");
+      named({ cache: null }, "'cache'");
       named({ maxTokens: "4096 " }, "'maxTokens'");
       named({ system: {} }, "'system'");
       named({ stop: {} }, "'stop'");
@@ -181,6 +197,70 @@ describe("types", () => {
       // gateway's models wherever the gateway answers, where a name qualified
       // by a direct provider registers only where that provider's key is set.
       expect(DEFAULT_GENERATE_OBJECT_MODEL.startsWith("gateway:")).toBe(true);
+    });
+  });
+
+  describe("llmGenerateObjectRequestProblem()", () => {
+    // The route this guards accepts a body of any content type, and only an
+    // `application/json` one meets the route validator first. So every case
+    // here is one a caller can reach with the guard as the sole check. The
+    // conversation walk the two checkers share is covered above; one case
+    // here pins that this checker reaches it.
+
+    it("returns `undefined` for the requests it accepts", () => {
+      // The fixture names no model, which is a request this accepts: the
+      // route picks a default for one that names none.
+      expect(llmGenerateObjectRequestProblem(objectRequest({})))
+        .toBeUndefined();
+      expect(llmGenerateObjectRequestProblem(objectRequest({
+        model: DEFAULT_MODEL_NAME,
+        system: "System prompt",
+        maxTokens: 4096,
+        cache: false,
+        metadata: { context: "piece" },
+      }))).toBeUndefined();
+    });
+
+    it("returns text naming `schema` or `messages` when a request omits one", () => {
+      const messages: BuiltInLLMMessage[] = [{ role: "user", content: "Hi" }];
+      expect(llmGenerateObjectRequestProblem({ messages })).toContain(
+        "'schema'",
+      );
+      expect(llmGenerateObjectRequestProblem({ schema: { type: "object" } }))
+        .toContain("'messages'");
+    });
+
+    it("returns text naming `schema` for a schema given as a boolean", () => {
+      // JSON Schema admits `true` and `false` as schemas. The route declares
+      // an object, and this holds the guard to the same shape.
+      expect(llmGenerateObjectRequestProblem(objectRequest({ schema: true })))
+        .toContain("'schema'");
+    });
+
+    it("returns text naming the request for input that is not an object", () => {
+      expect(llmGenerateObjectRequestProblem(null)).toContain("an object");
+      expect(llmGenerateObjectRequestProblem([])).toContain("an object");
+    });
+
+    it("returns text naming the field whose value is of the wrong type", () => {
+      // Every scalar field this checker states, which is all of them but the
+      // conversation: the two checkers share only the walk over `messages`.
+      const named = (input: object, field: string) =>
+        expect(llmGenerateObjectRequestProblem(objectRequest(input)))
+          .toContain(field);
+      named({ model: 7 }, "'model'");
+      named({ cache: "yes" }, "'cache'");
+      named({ system: {} }, "'system'");
+      named({ maxTokens: "4096" }, "'maxTokens'");
+      named({ metadata: "via piece" }, "'metadata'");
+    });
+
+    it("returns text naming the `system` field for a system-role message", () => {
+      const problem = llmGenerateObjectRequestProblem(objectRequest({
+        messages: [{ role: "system", content: "Be brief" }],
+      }));
+      expect(problem).toContain("Message 0");
+      expect(problem).toContain("'system' field");
     });
   });
 

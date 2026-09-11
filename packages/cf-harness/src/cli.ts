@@ -1,3 +1,4 @@
+import { readLoomAuthoringConfig } from "./loom-authoring.ts";
 import { parseArgs } from "@std/cli/parse-args";
 import {
   basename,
@@ -9,10 +10,8 @@ import {
 } from "@std/path";
 import { normalize as normalizeSandboxPath } from "@std/path/posix";
 import type { JSONSchema } from "@commonfabric/api";
-import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import {
   DEFAULT_GATEWAY_BASE_URL,
-  type HarnessFabricSessionConfig,
   type HarnessGatewayAuthMode,
   type HarnessModelProviderId,
   type HarnessPatternIndexConfig,
@@ -32,6 +31,7 @@ import {
   HARNESS_BROWSER_ACCESS_LEASE_TYPE,
   HARNESS_BROWSER_ACCESS_PROFILE_MODES,
   type HarnessBrowserAccessLease,
+  normalizeCdpOrigin,
   parseBrowserAccessExpiresAt,
 } from "./contracts/browser-access.ts";
 import {
@@ -51,7 +51,6 @@ import {
   type HarnessRunManifest,
   type LoomLocalHostBinding,
   parseLoomRunManifestJson,
-  readCeilingFromInput,
 } from "./contracts/run-manifest.ts";
 import type { HarnessFetch } from "./contracts/http-fetch.ts";
 import {
@@ -72,6 +71,7 @@ import type {
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
 import { CfHarnessEngine } from "./engine.ts";
+import { resolveHarnessFabricSessionConfig } from "./fabric-session-options.ts";
 import type { HarnessFabricSessionFactory } from "./fabric-session.ts";
 import {
   establishHarnessSessionContext,
@@ -117,7 +117,6 @@ import {
   validateStructuredResultValue,
 } from "./structured-result.ts";
 import { BUILTIN_TOOLS } from "./tools/registry.ts";
-import { normalizeCdpOrigin } from "./contracts/browser-access.ts";
 import {
   defaultHarnessCredentialStorePath,
   FileHarnessCredentialStore,
@@ -154,6 +153,7 @@ import { parseInputCellArgument } from "./input-cells.ts";
 import {
   HarnessControlError,
   type HarnessControlErrorCode,
+  harnessResumeRefusal,
 } from "./control-errors.ts";
 
 const DEFAULT_MODEL = "gpt-5.6-sol";
@@ -201,6 +201,7 @@ const CLI_STRING_FLAGS = [
   "sandbox-docker-runtime",
   "max-model-turns",
   "fabric-mount",
+  "loom-authoring-config",
   "fabric-api-url",
   "fabric-identity",
   "fabric-space",
@@ -486,11 +487,12 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills | acquire_skill | query_docs);
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills | acquire_skill | query_docs | loom_compose | loom_inspect | loom_authoring_context);
                                 run_pattern, assign_slug, and acquire_skill additionally require the three --fabric-* session flags,
                                 search_patterns and record_feedback require --pattern-index-url,
                                 search_skills and acquire_skill require --skills-registry-url,
-                                and query_docs requires a resolved documentation corpus
+                                query_docs requires a resolved documentation corpus,
+                                and the three loom_* tools require --loom-authoring-config (or CF_HARNESS_LOOM_AUTHORING_CONFIG)
   --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
@@ -539,6 +541,7 @@ Options:
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
   --sandbox-docker-runtime <n>  Docker runtime for the sandbox (default: runsc-cfc)
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
+  --loom-authoring-config <path> Absolute host-owned JSON file backing Loom tools
   --fabric-api-url <url>        Deployed Fabric API URL for the fabric-session tools (run_pattern, assign_slug)
   --fabric-identity <path>      PKCS#8 identity keyfile for the fabric session
   --fabric-space <space>        Target space (name or did:key) for the fabric-session tools;
@@ -585,6 +588,7 @@ Environment:
   CF_HARNESS_HOME               Local cf-harness credential/config directory
   CF_HARNESS_SKILLS_REGISTRY_URL Default value for --skills-registry-url
   CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
+  CF_HARNESS_LOOM_AUTHORING_CONFIG Default host authoring configuration file
   CF_HARNESS_FABRIC_API_URL     Default value for --fabric-api-url
   CF_HARNESS_FABRIC_IDENTITY    Default value for --fabric-identity
   CF_HARNESS_FABRIC_SPACE       Default value for --fabric-space
@@ -652,6 +656,9 @@ const CLI_PARENT_TOOL_IDS = [
   "write_file",
   "delegate_task",
   "describe_handle",
+  "loom_compose",
+  "loom_inspect",
+  "loom_authoring_context",
   "run_pattern",
   "assign_slug",
   "search_patterns",
@@ -1557,6 +1564,12 @@ export const parseCfHarnessCliArgs = async (
     );
   }
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
+  const loomAuthoring = await readLoomAuthoringConfig(
+    typeof args["loom-authoring-config"] === "string"
+      ? args["loom-authoring-config"]
+      : env.CF_HARNESS_LOOM_AUTHORING_CONFIG,
+    readTextFile,
+  );
   const inputCells = parseInputCells(
     args["input-cell"] as string | readonly string[] | undefined,
   );
@@ -1651,148 +1664,7 @@ export const parseCfHarnessCliArgs = async (
   const fabricMount = rawFabricMount !== undefined
     ? resolve(cwd, rawFabricMount)
     : undefined;
-  const fabricSessionFlagValue = (
-    flag:
-      | "fabric-api-url"
-      | "fabric-identity"
-      | "fabric-space"
-      | "fabric-cfc-enforcement-mode"
-      | "fabric-cfc-flow-labels"
-      | "fabric-cfc-posture",
-    envValue: string | undefined,
-  ): string | undefined => {
-    const raw = typeof args[flag] === "string"
-      ? args[flag].trim()
-      : nonEmptyEnvValue(envValue);
-    if (raw === "") {
-      throw new Error(`--${flag} requires a non-empty value`);
-    }
-    return raw;
-  };
-  const fabricApiUrl = fabricSessionFlagValue(
-    "fabric-api-url",
-    env.CF_HARNESS_FABRIC_API_URL,
-  );
-  const fabricIdentity = fabricSessionFlagValue(
-    "fabric-identity",
-    env.CF_HARNESS_FABRIC_IDENTITY,
-  );
-  const fabricSpace = fabricSessionFlagValue(
-    "fabric-space",
-    env.CF_HARNESS_FABRIC_SPACE,
-  );
-  const fabricCfcEnforcementMode = fabricSessionFlagValue(
-    "fabric-cfc-enforcement-mode",
-    env.CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE,
-  );
-  if (
-    fabricCfcEnforcementMode !== undefined &&
-    fabricCfcEnforcementMode !== "enforce-explicit" &&
-    fabricCfcEnforcementMode !== "enforce-strict"
-  ) {
-    // Raise-only: the fabric session's preset already pins enforce-explicit,
-    // so the dial admits that pin or a raise to strict, never a relaxation.
-    throw new Error(
-      `--fabric-cfc-enforcement-mode must be enforce-explicit or enforce-strict: ${fabricCfcEnforcementMode}`,
-    );
-  }
-  const fabricCfcFlowLabels = fabricSessionFlagValue(
-    "fabric-cfc-flow-labels",
-    env.CF_HARNESS_FABRIC_CFC_FLOW_LABELS,
-  );
-  if (
-    fabricCfcFlowLabels !== undefined && fabricCfcFlowLabels !== "off" &&
-    fabricCfcFlowLabels !== "observe" && fabricCfcFlowLabels !== "persist"
-  ) {
-    throw new Error(
-      `--fabric-cfc-flow-labels must be off, observe, or persist: ${fabricCfcFlowLabels}`,
-    );
-  }
-  const fabricCfcPosture = fabricSessionFlagValue(
-    "fabric-cfc-posture",
-    env.CF_HARNESS_FABRIC_CFC_POSTURE,
-  );
-  if (
-    fabricCfcPosture !== undefined && fabricCfcPosture !== "max-enforcement"
-  ) {
-    throw new Error(
-      `--fabric-cfc-posture must be max-enforcement: ${fabricCfcPosture}`,
-    );
-  }
-  const rawMaxConfidentiality = typeof args["max-confidentiality"] === "string"
-    ? args["max-confidentiality"].trim()
-    : undefined;
-  let maxConfidentiality: readonly CfcConfClause[] | undefined;
-  if (rawMaxConfidentiality !== undefined) {
-    let parsedCeiling: unknown;
-    try {
-      parsedCeiling = JSON.parse(rawMaxConfidentiality);
-    } catch (error) {
-      throw new Error(
-        `--max-confidentiality must be JSON: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-    maxConfidentiality = readCeilingFromInput(
-      parsedCeiling,
-      undefined,
-      { ceiling: "--max-confidentiality", onExceed: "--max-confidentiality" },
-    ).maxConfidentiality;
-  }
-  let fabricSession: HarnessFabricSessionConfig | undefined;
-  if (
-    fabricApiUrl !== undefined || fabricIdentity !== undefined ||
-    fabricSpace !== undefined
-  ) {
-    const missing = [
-      ...(fabricApiUrl === undefined ? ["--fabric-api-url"] : []),
-      ...(fabricIdentity === undefined ? ["--fabric-identity"] : []),
-      ...(fabricSpace === undefined ? ["--fabric-space"] : []),
-    ];
-    if (missing.length > 0) {
-      throw new Error(
-        `--fabric-api-url, --fabric-identity, and --fabric-space configure one fabric session and go together; missing ${
-          missing.join(", ")
-        }`,
-      );
-    }
-    try {
-      new URL(fabricApiUrl!);
-    } catch {
-      throw new Error(`--fabric-api-url must be a valid URL: ${fabricApiUrl}`);
-    }
-    fabricSession = {
-      apiUrl: fabricApiUrl!,
-      identityKeyPath: resolve(cwd, fabricIdentity!),
-      space: fabricSpace!,
-      ...(fabricCfcEnforcementMode !== undefined
-        ? { cfcEnforcementMode: fabricCfcEnforcementMode }
-        : {}),
-      ...(fabricCfcFlowLabels !== undefined
-        ? { cfcFlowLabels: fabricCfcFlowLabels }
-        : {}),
-      ...(fabricCfcPosture !== undefined
-        ? { cfcPosture: fabricCfcPosture }
-        : {}),
-      ...(maxConfidentiality !== undefined
-        ? { cfcReadMaxConfidentiality: maxConfidentiality }
-        : {}),
-    };
-  } else if (
-    fabricCfcEnforcementMode !== undefined ||
-    fabricCfcFlowLabels !== undefined || fabricCfcPosture !== undefined
-  ) {
-    throw new Error(
-      "--fabric-cfc-enforcement-mode, --fabric-cfc-flow-labels, and --fabric-cfc-posture configure the fabric session's runtime and need --fabric-api-url, --fabric-identity, and --fabric-space",
-    );
-  } else if (maxConfidentiality !== undefined) {
-    // A ceiling with no session bounds nothing, and one accepted here would
-    // read as working all run.
-    throw new Error(
-      "--max-confidentiality bounds the fabric session's reads and needs --fabric-api-url, --fabric-identity, and --fabric-space",
-    );
-  }
+  const fabricSession = resolveHarnessFabricSessionConfig(args, env, cwd);
   const rawSpaceDb = typeof args["space-db"] === "string"
     ? args["space-db"].trim()
     : nonEmptyEnvValue(env.CF_HARNESS_SPACE_DB);
@@ -1973,6 +1845,7 @@ export const parseCfHarnessCliArgs = async (
     ...(fabricMount !== undefined ? { fabricMount } : {}),
     ...(fabricSession !== undefined ? { fabricSession } : {}),
     ...(spaceDbPath !== undefined ? { spaceDbPath } : {}),
+    ...(loomAuthoring !== undefined ? { loomAuthoring } : {}),
     ...(patternIndex !== undefined ? { patternIndex } : {}),
     ...(skillsSh !== undefined ? { skillsSh } : {}),
     hostMounts,
@@ -3218,6 +3091,7 @@ export const runCfHarnessCli = async (
         new CfHarnessPromptLoop(options));
     const writeTextFile = deps.writeTextFile ?? Deno.writeTextFile;
     const readTextFile = deps.readTextFile ?? Deno.readTextFile;
+
     const startedAt = Date.now();
     let result: HarnessPromptLoopResult;
     let runManifest = await readRunManifest(
@@ -3283,7 +3157,7 @@ export const runCfHarnessCli = async (
         },
       );
       if (artifacts.runState.lineage?.role === "subagent") {
-        throw new Error(
+        throw harnessResumeRefusal(
           `Cannot resume subagent run ${artifacts.runState.runId} as a top-level run; resume root run ${artifacts.runState.lineage.rootRunId} instead.`,
         );
       }
@@ -3295,8 +3169,7 @@ export const runCfHarnessCli = async (
         requestedProvider !== undefined &&
         requestedProvider !== recordedProvider
       ) {
-        throw new HarnessControlError(
-          "provider-mismatch",
+        throw harnessResumeRefusal(
           `resume provider mismatch: run uses ${recordedProvider}, requested ${requestedProvider}`,
         );
       }
@@ -3304,8 +3177,8 @@ export const runCfHarnessCli = async (
       if (
         modelProvider === "openai-codex" && parsed.gatewayConfigurationExplicit
       ) {
-        throw new Error(
-          "gateway URL/auth options cannot be used with openai-codex",
+        throw harnessResumeRefusal(
+          "gateway URL/auth options cannot be used with openai-codex, which is the provider this run recorded",
         );
       }
       if (
@@ -3325,8 +3198,7 @@ export const runCfHarnessCli = async (
         parsed.docsCorpus !== undefined && recordedDocsCorpus !== undefined &&
         !harnessDocsCorpusRecordsEqual(parsed.docsCorpus, recordedDocsCorpus)
       ) {
-        throw new HarnessControlError(
-          "provider-mismatch",
+        throw harnessResumeRefusal(
           `resume docs corpus mismatch: run uses ${
             describeHarnessDocsCorpus(recordedDocsCorpus)
           }, requested ${describeHarnessDocsCorpus(parsed.docsCorpus)}`,
@@ -3338,8 +3210,7 @@ export const runCfHarnessCli = async (
         artifacts.runState.model !== undefined &&
         runManifest.model !== artifacts.runState.model
       ) {
-        throw new HarnessControlError(
-          "provider-mismatch",
+        throw harnessResumeRefusal(
           `resume model mismatch: run uses ${artifacts.runState.model}, requested manifest uses ${runManifest.model}`,
         );
       }
@@ -3352,8 +3223,7 @@ export const runCfHarnessCli = async (
           credentialOwner,
         )
       ) {
-        throw new HarnessControlError(
-          "provider-mismatch",
+        throw harnessResumeRefusal(
           "resume credential owner mismatch: requested owner does not match the recorded run",
         );
       }

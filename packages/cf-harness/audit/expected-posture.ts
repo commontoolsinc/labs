@@ -10,13 +10,22 @@
  * to remove must not be reachable by writing an emptier file.
  */
 
-import type { CfcPostureReport } from "@commonfabric/runner/cfc";
+import {
+  CFC_DIAL_LADDERS,
+  type CfcPostureReport,
+} from "@commonfabric/runner/cfc";
 
 /** What a spec may assert about a posture record. */
 export interface ExpectedPosture {
   /** A name for the profile, which asserts nothing. */
   label?: string;
 
+  /**
+   * The rung fields, each a floor: a record satisfies one by being at the
+   * rung named or at a stricter one. A deployment stricter than its spec is
+   * conformant, and a spec naming the rung its deployment sits at today goes
+   * on holding when that rung is raised under it.
+   */
   enforcementMode?: string;
   flowLabels?: string;
   writeFloor?: string;
@@ -55,6 +64,23 @@ const RUNG_FIELDS = [
   "labelMetadataProtection",
   "declaredMonotonicity",
 ] as const;
+
+/** The runtime dial each of those fields reports. */
+const RUNG_FIELD_DIALS = {
+  enforcementMode: "cfcEnforcementMode",
+  flowLabels: "cfcFlowLabels",
+  writeFloor: "cfcWriteFloor",
+  policyEvaluation: "cfcPolicyEvaluation",
+  labelMetadataProtection: "cfcLabelMetadataProtection",
+  declaredMonotonicity: "cfcDeclaredMonotonicity",
+} as const satisfies Record<
+  typeof RUNG_FIELDS[number],
+  keyof typeof CFC_DIAL_LADDERS
+>;
+
+/** The rungs a field's dial admits, weakest first. */
+const rungLadder = (field: typeof RUNG_FIELDS[number]): readonly string[] =>
+  Object.keys(CFC_DIAL_LADDERS[RUNG_FIELD_DIALS[field]]);
 
 const BOOLEAN_FIELDS = ["triggerReadGating", "decomposedEnvelopes"] as const;
 
@@ -119,13 +145,25 @@ export const parseExpectedPosture = (input: unknown): ExpectedPosture => {
     spec.label = raw.label;
   }
   for (const field of RUNG_FIELDS) {
-    if (raw[field] === undefined) continue;
-    if (typeof raw[field] !== "string" || raw[field].trim() === "") {
+    const stated = raw[field];
+    if (stated === undefined) continue;
+    if (typeof stated !== "string" || stated.trim() === "") {
       throw new Error(
         `an expected-posture spec's ${field} must be a non-empty string`,
       );
     }
-    spec[field] = raw[field];
+    const rungs = rungLadder(field);
+    if (!rungs.includes(stated)) {
+      // A rung off the ladder satisfies no record and is satisfied by none,
+      // so it would read as a deployment permanently at fault or permanently
+      // conformant depending on which way the comparison fell.
+      throw new Error(
+        `an expected-posture spec's ${field} is ${
+          JSON.stringify(stated)
+        }, not one of ${rungs.join(", ")}`,
+      );
+    }
+    spec[field] = stated;
   }
   for (const field of BOOLEAN_FIELDS) {
     if (raw[field] === undefined) continue;
@@ -214,9 +252,10 @@ export const postureMismatches = (
   for (const field of RUNG_FIELDS) {
     const expected = spec[field];
     if (expected === undefined) continue;
+    const rungs = rungLadder(field);
     const found = record[field].rung;
-    if (found !== expected) {
-      mismatches.push({ field, expected, found });
+    if (rungs.indexOf(found) < rungs.indexOf(expected)) {
+      mismatches.push({ field, expected: `${expected} or stricter`, found });
     }
   }
   for (const field of BOOLEAN_FIELDS) {

@@ -193,7 +193,10 @@ describe("handler dependency pulling", () => {
     );
     eventStream.set(0);
 
-    await tx.commit();
+    // The labeled schema makes this seed CFC-relevant, so it lands only when
+    // it is prepared the way the runtime's own commit paths prepare.
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
     tx = runtime.edit();
     await labeledSource.pull();
 
@@ -204,7 +207,14 @@ describe("handler dependency pulling", () => {
       void event;
     };
 
+    let discoveryWasReadOnly: boolean | undefined;
     const populateDependencies = (depTx: IExtendedStorageTransaction) => {
+      // The read-only mark is what keeps this labeled read out of CFC gating:
+      // the commit boundary runs no CFC arm at all for a read-only
+      // transaction, so discovery neither prepares nor is refused for
+      // arriving unprepared. This callback is the only handle the case has on
+      // the transaction the scheduler built.
+      discoveryWasReadOnly = depTx.isReadOnly?.();
       labeledSource.withTx(depTx).get();
     };
 
@@ -219,6 +229,7 @@ describe("handler dependency pulling", () => {
     await runtime.storageManager.synced();
 
     expect(handlerRuns).toBe(1);
+    expect(discoveryWasReadOnly).toBe(true);
   });
 
   it("should not pull dirty computations when handler reads a different path", async () => {

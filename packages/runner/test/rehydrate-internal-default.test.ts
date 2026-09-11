@@ -152,7 +152,14 @@ describe("rehydrate internal default (CT-1666)", () => {
     }
   });
 
-  it("materializes internal manifest cells from a cold-cache result query", async () => {
+  it("names the argument document and the manifest cells when a cold cache starts the piece", async () => {
+    // The result document carries its `argument` link and its `internal`
+    // manifest as data, and a query naming the result delivers that data and
+    // nothing the links point at. Starting the piece is what names the
+    // targets: the run's dependency pre-sync syncs the argument document and
+    // each cell the pattern's descriptors derive before the piece runs, so a
+    // cold replica reads their persisted values rather than absent documents.
+
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm1,
@@ -206,6 +213,14 @@ describe("rehydrate internal default (CT-1666)", () => {
       expect(resultDoc).toBeDefined();
       expect(resultDoc?.internal).toBeDefined();
       expect(resultDoc?.argument).toBeDefined();
+      expect(provider2.get(internalLink.id, internalLink.scope))
+        .toBeUndefined();
+      expect(provider2.get(argumentLink!.id, argumentLink!.scope))
+        .toBeUndefined();
+
+      // No argument given: the run replays the stored one, so the argument
+      // document below is here because the pre-sync named it.
+      await rt2.runSynced(rc2, trustExecutable(rt2, pattern));
 
       const internalDoc = provider2.get(internalLink.id, internalLink.scope);
       expect(internalDoc).toBeDefined();

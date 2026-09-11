@@ -13,8 +13,13 @@
  * appears in the report as skipped instead of vanishing.
  */
 
-import { dirname, join, resolve } from "@std/path";
-import { type Environment, readEnv, recordsDir } from "./paths.ts";
+import { dirname, join, relative, resolve } from "@std/path";
+import {
+  type Environment,
+  readEnv,
+  recordsDir,
+  repositoryRoot,
+} from "./paths.ts";
 
 /** What a name-map file's name starts with, inside the spool. */
 export const NAME_MAP_PREFIX = "names-";
@@ -25,19 +30,31 @@ export const NAME_MAP_SUFFIX = ".json";
 /** Variable naming the file holding this invocation's skip list. */
 export const SKIP_LIST_VARIABLE = "CF_TEST_SKIP_LIST";
 
+/** The tail of the bdd re-export's path, wherever the tree is checked out. */
+const BDD_MODULE_SUFFIX = "src/records/bdd.ts";
+
 /**
- * The tails of the test machinery's own paths. Deno names a JUnit case's
- * class after the module that registered the test, so a case registered
- * through one of these names that module rather than the test file:
- * `registration.ts` while the `Deno.test` wrapper is installed, and
- * `bdd.ts` for anything registered through the `describe` and `it` this
- * repository's import map resolves to. Ingestion rejects a classname
- * ending in either rather than reading it as a test file, and the
- * preload's name map is what supplies the file instead.
+ * The tails of the paths of modules that register a test on another
+ * file's behalf. Deno names a JUnit case's class after the module that
+ * registered the test, so a case registered through one of these names
+ * that module rather than the test file: `registration.ts` is the
+ * `Deno.test` wrapper the preload installs, `bdd.ts` the `describe` and
+ * `it` this repository's import map resolves to, `fixture-runner.ts`
+ * builds a suite over a directory of fixtures, and `clock-preload.ts`
+ * replaces `Deno.test` to give each test a clock. Ingestion rejects a
+ * classname ending in one of these rather than reading it as a test
+ * file, and the preload's name map supplies the file instead.
+ *
+ * Every module named here calls `registerFrameworkModule`, so that the
+ * map names the file that asked for the test rather than the module
+ * that registered it. The two lists cover one thing from two sides, and
+ * a module missing from either loses a file its own way.
  */
 export const MACHINERY_MODULE_SUFFIXES: readonly string[] = [
   "src/records/registration.ts",
-  "src/records/bdd.ts",
+  BDD_MODULE_SUFFIX,
+  "src/fixture-runner.ts",
+  "test/clock-preload.ts",
 ];
 
 /**
@@ -48,10 +65,62 @@ export const MACHINERY_MODULE_SUFFIXES: readonly string[] = [
 export const NAME_SEPARATOR = " > ";
 
 /**
- * A name map as it travels: the name each `Deno.test` was registered
- * under, against the repository-relative file that registered it.
+ * A name map as it travels: where the test process ran, and a registered
+ * name against the repository-relative file it came from. The names are
+ * what `Deno.test` was called with, and, for a file written with
+ * `describe` and `it`, the whole chain of each leaf as well — a title two
+ * files share says nothing about either, where a leaf's whole chain
+ * usually does.
  */
-export type NameMap = Record<string, string>;
+export interface NameMap {
+  /**
+   * The repository-relative directory the process ran in, which for a
+   * workspace member's test task is the member's own directory and for a
+   * process running at the repository root is the empty string. Absent
+   * where no repository encloses it, and the reader then has only the
+   * files to go on.
+   */
+  dir?: string;
+
+  /** Each registered name against the file it came from. */
+  names: Record<string, string>;
+}
+
+/** A name map as it comes back off disk, its values still unread. */
+interface ParsedNameMap {
+  dir?: string;
+  names: Record<string, unknown>;
+}
+
+/** One map off disk, or undefined for anything that is not one. */
+function asNameMap(parsed: unknown): ParsedNameMap | undefined {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return undefined;
+  }
+  const { dir, names } = parsed as { dir?: unknown; names?: unknown };
+  // An array is an object, and its entries are index keys against the
+  // values, so names written as one would register a test named "0".
+  if (typeof names !== "object" || names === null || Array.isArray(names)) {
+    return undefined;
+  }
+  return {
+    ...(typeof dir === "string" ? { dir } : {}),
+    names: names as Record<string, unknown>,
+  };
+}
+
+/**
+ * The repository-relative directory this process is running in, which is
+ * the empty string at the repository root. Undefined outside any
+ * repository, and undefined when the climb is not permitted to read the
+ * filesystem.
+ */
+export function runDirectory(): string | undefined {
+  const cwd = Deno.cwd();
+  const root = repositoryRoot(cwd);
+  return root === undefined ? undefined : relative(root, cwd)
+    .replaceAll("\\", "/");
+}
 
 /**
  * A skip list: the names this invocation is not to run, under the
@@ -125,18 +194,7 @@ export function relativeToRoot(url: string, root: string): string {
  * undefined when the climb is not permitted to read the filesystem.
  */
 export function repositoryRootOf(path: string): string | undefined {
-  let dir = dirname(resolve(path));
-  for (;;) {
-    try {
-      Deno.statSync(join(dir, ".git"));
-      return dir;
-    } catch (error) {
-      if (error instanceof Deno.errors.NotCapable) return undefined;
-      const parent = dirname(dir);
-      if (parent === dir) return undefined;
-      dir = parent;
-    }
-  }
+  return repositoryRoot(dirname(resolve(path)));
 }
 
 /** The repository root of this process's tree, resolved once. */
@@ -185,6 +243,17 @@ export function fileForName(
   return best;
 }
 
+/** Whether an entry of a map is one a read scoped to `ranIn` takes. */
+function inScope(
+  dir: string | undefined,
+  file: string,
+  ranIn: string | undefined,
+): boolean {
+  if (ranIn === undefined) return true;
+  if (dir !== undefined) return dir === ranIn;
+  return ranIn.length === 0 || file.startsWith(`${ranIn}/`);
+}
+
 /**
  * Merges the name maps a spool holds into one lookup. A name two files
  * both registered is dropped rather than attributed to either: the two
@@ -193,23 +262,24 @@ export function fileForName(
  * and its absence costs only the file field.
  *
  * Every package of a workspace run writes into one spool, so a caller
- * ingesting one package's report passes `within` — the path its files sit
- * under. Names outside it are dropped before the ambiguity is judged
- * rather than after, or a name two packages happen to share would cost
- * both of them a file each had unambiguously.
+ * ingesting one package's report passes `ranIn`: the directory that
+ * package's test process ran in. A map naming the directory it was
+ * written in belongs to that directory and to no other, whatever files
+ * it names. A map naming none is judged by its files, and contributes
+ * only those under `ranIn`. Either way the scope is applied before the
+ * ambiguity is judged rather than after, or a name two packages happen
+ * to share would cost both of them a file each had unambiguously.
  */
 export async function readNameMaps(
-  dir: string,
-  options: { within?: string } = {},
+  spool: string,
+  options: { ranIn?: string } = {},
 ): Promise<Map<string, string>> {
-  const within = options.within === undefined
-    ? undefined
-    : `${options.within.replace(/\/$/, "")}/`;
+  const ranIn = options.ranIn?.replace(/\/$/, "");
   const names = new Map<string, string>();
   const ambiguous = new Set<string>();
   let entries: string[] = [];
   try {
-    for await (const entry of Deno.readDir(dir)) {
+    for await (const entry of Deno.readDir(spool)) {
       if (
         entry.isFile && entry.name.startsWith(NAME_MAP_PREFIX) &&
         entry.name.endsWith(NAME_MAP_SUFFIX)
@@ -224,20 +294,15 @@ export async function readNameMaps(
   for (const entry of entries) {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(await Deno.readTextFile(join(dir, entry)));
+      parsed = JSON.parse(await Deno.readTextFile(join(spool, entry)));
     } catch {
       continue;
     }
-    // An array is an object, and its entries are index keys against the
-    // values, so a map written as one would register a test named "0".
-    if (
-      typeof parsed !== "object" || parsed === null || Array.isArray(parsed)
-    ) {
-      continue;
-    }
-    for (const [name, file] of Object.entries(parsed)) {
+    const map = asNameMap(parsed);
+    if (map === undefined) continue;
+    for (const [name, file] of Object.entries(map.names)) {
       if (typeof file !== "string" || file.length === 0) continue;
-      if (within !== undefined && !file.startsWith(within)) continue;
+      if (!inScope(map.dir, file, ranIn)) continue;
       const known = names.get(name);
       if (known === undefined) {
         names.set(name, file);
@@ -327,9 +392,26 @@ export function installRegistrationCapture(
   // write the replacement map into. With neither, the report is the
   // better source and nothing is wrapped.
   if (skips === undefined && !writableSpool(spool)) return undefined;
+  // The bdd re-export decides whether to wrap as it is evaluated, and
+  // declares itself machinery in the same breath. Finding it declared
+  // here means it decided before this ran and handed back the real
+  // `describe` and `it`, so nothing of ours sits inside a describe chain
+  // any more: no leaf reaches the name map, and no leaf is checked
+  // against the skip list. A skip list says what this invocation is not
+  // to run, so an invocation that cannot apply one stops rather than
+  // running what it was told to leave alone. A name map is metadata, and
+  // losing it is said out loud and carried.
+  if ([...frameworkModules].some((url) => url.endsWith(BDD_MODULE_SUFFIX))) {
+    const detail = "the bdd re-export loaded before this preload, so no " +
+      "leaf reaches the name map or the skip list";
+    if (skips !== undefined) throw new Error(`test records: ${detail}`);
+    console.warn(`test records: ${detail}`);
+  }
 
+  const dir = runDirectory();
   const built = buildCapture({
     registrar: Deno.test,
+    ...(dir === undefined ? {} : { dir }),
     ...(skips === undefined ? {} : { skips }),
     ...(spool === undefined ? {} : { spool }),
   });
@@ -349,6 +431,13 @@ export interface CaptureOptions {
 
   /** Where `flush` writes the name map. Nothing is written without one. */
   spool?: string;
+
+  /**
+   * The repository-relative directory the map says it was written in, as
+   * it stood when the capture was built. `flush` runs at process unload,
+   * by which time a test may have changed the working directory.
+   */
+  dir?: string;
 }
 
 /**
@@ -360,7 +449,7 @@ export interface CaptureOptions {
 export function buildCapture(
   options: CaptureOptions,
 ): { capture: RegistrationCapture; registrar: (...args: unknown[]) => void } {
-  const { skips, spool } = options;
+  const { dir, skips, spool } = options;
   const names = new Map<string, string>();
 
   const capture: RegistrationCapture = {
@@ -371,8 +460,10 @@ export function buildCapture(
     },
     flush: () => {
       if (spool === undefined || names.size === 0) return;
-      const map: NameMap = {};
-      for (const [name, file] of names) map[name] = file;
+      const map: NameMap = {
+        ...(dir === undefined ? {} : { dir }),
+        names: Object.fromEntries(names),
+      };
       try {
         Deno.mkdirSync(spool, { recursive: true });
         // A random name rather than a sortable one: nothing orders these,

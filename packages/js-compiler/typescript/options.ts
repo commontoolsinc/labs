@@ -83,7 +83,8 @@ export const getCompilerOptions = (): CompilerOptions => {
     //
 
     jsx: JsxEmit.React,
-    jsxFactory: "h",
+    // The reserved helper binding keeps authored locals out of JSX dispatch.
+    jsxFactory: "__cfHelpers.h",
     jsxFragmentFactory: "__cfHelpers.h.fragment",
     target: TARGET,
     // `lib` should autoapply, but we need to manage default libraries since

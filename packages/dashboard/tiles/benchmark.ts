@@ -12,10 +12,12 @@
  * Orange means at least one of those processors trends up. Green means every
  * eligible established processor stays flat or falls. Red means the most recent
  * run failed, or finished successfully without readable benchmark data.
- * A tile in the failed state drops its benchmark count and window span and
- * names the failure in their place: how long ago the benchmarks last worked,
- * and how many runs have failed since. A run under way puts a "running" badge
- * in the header.
+ * A tile in the failed state reads `failed (was <trend>)` in its headline when
+ * cached measurements are available, including measurements older than twelve
+ * hours. Without measurements it reads `failed`. It drops its benchmark count
+ * and window span and names the failure in their place: how long ago the
+ * benchmarks last worked, and how many runs have failed since.
+ * A run under way puts a "running" badge in the header.
  *
  * A benchmark added or removed is absent from one side of an adjacent
  * comparison, so it does not move the index. A processor change starts another
@@ -1016,7 +1018,7 @@ export function benchmarkRerunHandoff(
     ? {
       href: `https://github.com/${REPO}/actions/runs/${latest.id}`,
       label: "rerun the failed benchmark run ↗",
-      hint: "Re-run all jobs on GitHub repeats it.",
+      hint: "Select \"Re-run all jobs\" on GitHub to repeat the run.",
     }
     : {
       href: `https://github.com/${REPO}/actions/workflows/${WORKFLOW}`,
@@ -1040,10 +1042,11 @@ const RUNNING_BADGE =
 // never become benchmark changes. The headline shows the largest established
 // trend among processors measured in the last twelve hours. Orange means any
 // eligible processor trends up. Red means the most recent run failed or
-// produced no readable data. The line under the headline then dates the outage
-// instead of counting the benchmarks measured. `offline` names a fetch failure.
-// The tile then keeps its last-known trends gray, or shows a gray dash when no
-// history is cached.
+// produced no readable data. Its headline reads `failed (was <trend>)` when a
+// cached trend is available, and `failed` otherwise. The line below dates the
+// outage instead of counting the benchmarks measured. `offline` names a fetch
+// failure. The tile then keeps its last-known trends gray, or shows a gray dash
+// when no history is cached.
 function benchmarkIndexView(
   runs: Run[],
   now: number,
@@ -1076,7 +1079,10 @@ function benchmarkIndexView(
       run.at >= cutoff && run.cpu !== undefined && productMetricCount(run) > 0
     )
     .sort((a, b) => a.at - b.at);
-  const indices = benchmarkCpuIndices(cached, now);
+  // A failed headline uses the latest measurements to date its trend window
+  // and determine which processors are eligible.
+  const trendAt = failed && !offline ? cached.at(-1)?.at ?? now : now;
+  const indices = benchmarkCpuIndices(cached, trendAt);
   if (!indices.length) {
     // A fetch failure with nothing cached to stand on: a gray dash and the reason.
     if (offline) return benchmarkUnavailable(offline, aside);
@@ -1085,7 +1091,7 @@ function benchmarkIndexView(
         ...benchmarkDrill,
         label: "benchmarks",
         status: "bad",
-        value: "—",
+        value: "failed",
         sub: failSub,
         aside,
       };
@@ -1097,18 +1103,8 @@ function benchmarkIndexView(
       aside,
     );
   }
-  const headlineCandidates = benchmarkHeadlineCandidates(indices, now);
-  if (!headlineCandidates.length && !offline) {
-    if (failed) {
-      return {
-        ...benchmarkDrill,
-        label: "benchmarks",
-        status: "bad",
-        value: "—",
-        sub: failSub,
-        aside,
-      };
-    }
+  const headlineCandidates = benchmarkHeadlineCandidates(indices, trendAt);
+  if (!headlineCandidates.length && !offline && !failed) {
     return benchmarkUnavailable("no recent benchmark data", aside);
   }
   const displayCandidates = headlineCandidates.length
@@ -1134,8 +1130,10 @@ function benchmarkIndexView(
     : rising
     ? "warn"
     : "good";
-  // Headline: the window's trend.
-  const value = escapeHtml(headline.trend.label);
+  const trendLabel = escapeHtml(headline.trend.label);
+  const value = status === "bad"
+    ? `failed <span style="font-size:14px">(was ${trendLabel})</span>`
+    : trendLabel;
   const latest = cached[cached.length - 1];
   const count = productMetricCount(latest);
   // Name the highlighted window's span beside the count, like CI duration names its
@@ -1173,6 +1171,9 @@ function benchmarkIndexView(
     label: "benchmarks",
     status,
     value,
+    valueLabel: status === "bad"
+      ? `failed (was ${headline.trend.label})`
+      : undefined,
     sub: offline ?? (failed ? failSub : undefined),
     extra: `${countLine}${chart}`,
     duration: chartSpan,

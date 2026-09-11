@@ -8,6 +8,7 @@ import type { LoomLocalHostBinding } from "./run-manifest.ts";
 import {
   type BuiltinToolId,
   DEFAULT_PARENT_TOOL_IDS,
+  LOOM_AUTHORING_TOOL_IDS,
 } from "./tool-descriptor.ts";
 import {
   DEFAULT_SUBAGENT_PROFILE,
@@ -136,10 +137,21 @@ const READONLY_INTERACTIVE_CHAT_TOOL_ID_SET = new Set<BuiltinToolId>(
 export const resolveHarnessChatPolicy = (
   policy: HarnessChatPolicy = DEFAULT_HARNESS_CHAT_POLICY,
   context?: HarnessChatContext,
+  allowCommentLoomAuthoring = false,
 ): HarnessChatPolicy => {
   if (context?.type === "comment-thread") {
     return {
       ...COMMENT_THREAD_HARNESS_CHAT_POLICY,
+      ...(allowCommentLoomAuthoring
+        ? {
+          allowedToolIds: [
+            ...READONLY_INTERACTIVE_CHAT_TOOL_IDS,
+            ...policy.allowedToolIds.filter((id) =>
+              LOOM_AUTHORING_TOOL_IDS.has(id)
+            ),
+          ],
+        }
+        : {}),
       ...(policy.cfcEnforcementMode !== undefined
         ? { cfcEnforcementMode: policy.cfcEnforcementMode }
         : {}),
@@ -163,6 +175,9 @@ export const resolveHarnessChatPolicy = (
 
 export interface HarnessChatTurnInput {
   text: string;
+
+  /** Originating Loom supplied by the caller, persisted with this turn only. */
+  loomId?: string;
   imageAttachments?: readonly HarnessImageAttachment[];
 }
 

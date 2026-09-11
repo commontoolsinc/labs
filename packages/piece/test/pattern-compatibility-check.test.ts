@@ -1,7 +1,17 @@
+/**
+ * Compatibility preflight collects issues without moving the source pointer,
+ * restaging inputs, or saving candidate artifacts. Stored-value validation is
+ * shared with setup, while enforcement runs inside the apply transaction. These
+ * cases compare the verdicts and check that a refused preflight leaves the piece
+ * intact.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { spy } from "@std/testing/mock";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
+  type Cell,
   getPatternIdentityRef,
   Runtime,
   type RuntimeProgram,
@@ -19,32 +29,25 @@ import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { readStoredCfcMetadata } from "@commonfabric/runner/cfc";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
-// `cf piece setsrc <main>` replaces the source of a LIVE piece. Until now the
-// only way to learn whether a source could be applied was to attempt it, and
-// what came back was whichever low-level rejection happened to surface first —
-// a schema-subset assertion, a retained-link proof, or an argument validation
-// failure at the setup-commit boundary. Fix one, meet the next.
-//
-// `checkPattern()` answers the question up front without changing the piece.
-// (It is not a pure read — compiling the candidate writes content-addressed
-// artifacts into the space — but it moves no pointer and re-stages nothing.)
-// It runs the SAME review the apply path runs
-// (`pieceSourceCompatibilityReview`), which is the property worth pinning: a
-// preflight that reimplements the rules drifts
-// from enforcement and becomes a liar. So these cases assert the two verdicts
-// agree, not merely that each is individually plausible.
-
 const signer = await Identity.fromPassphrase("pattern compatibility check");
 
 /** The piece's current source: one optional input, one output. */
-function baseProgram(): RuntimeProgram {
+function baseProgram(includeRetainedGraph = false): RuntimeProgram {
+  const argumentsType = includeRetainedGraph
+    ? "{ seed?: string; extra?: RetainedNode }"
+    : "{ seed?: string }";
   return {
     main: "/main.tsx",
     files: [{
       name: "/main.tsx",
       contents: [
         "import { NAME, pattern } from 'commonfabric';",
-        "export default pattern<{ seed?: string }, { label: string }>(",
+        ...(includeRetainedGraph
+          ? [
+            "type RetainedNode = { left?: RetainedNode; right?: RetainedNode; label?: string };",
+          ]
+          : []),
+        `export default pattern<${argumentsType}, { label: string }>(`,
         "  ({ seed }) => ({",
         "    [NAME]: 'Compatibility check',",
         "    label: seed ?? 'unset',",
@@ -272,6 +275,73 @@ describe("setsrc compatibility preflight", () => {
     expect(report.candidate.identity).toBeDefined();
   });
 
+  for (const modeled of [false, true]) {
+    it(`checks a piece with a ${modeled ? "modeled" : "unmodeled"} shared graph without expanding every path`, async () => {
+      const program = baseProgram(modeled);
+      const piece = await pieces.create(program, { input: { seed: "hello" } });
+      const graphIds = new Set<string>();
+      const depth = 12;
+      const tx = runtime.edit();
+      try {
+        let next: Cell<unknown> = runtime.getCell(
+          pieces.getSpace(),
+          "retained-leaf",
+          undefined,
+          tx,
+        );
+        next.set({ label: "leaf" });
+        graphIds.add(next.getAsNormalizedFullLink().id);
+        for (let index = 0; index < depth; index++) {
+          const node = runtime.getCell(
+            pieces.getSpace(),
+            `retained-node-${index}`,
+            undefined,
+            tx,
+          );
+          node.set({ left: next, right: next });
+          graphIds.add(node.getAsNormalizedFullLink().id);
+          next = node;
+        }
+        pieces.getArgument(piece.getCell()).withTx(tx).asSchema(undefined)
+          .set({ seed: "hello", extra: next });
+        const committed = await tx.commit();
+        expect(committed.error).toBeUndefined();
+      } finally {
+        if (tx.status().status === "ready") tx.abort();
+      }
+      await runtime.idle();
+      const argumentBefore = pieces.getArgument(piece.getCell()).getRaw();
+      const identityBefore = getPatternIdentityRef(piece.getCell());
+
+      using reads = spy(runtime, "readTx");
+      const compatible = await piece.checkPattern(program);
+      const incompatible = await piece.checkPattern(incompatibleProgram());
+
+      expect(compatible.compatible).toBe(true);
+      expect(compatible.issues).toEqual({});
+      expect(incompatible.compatible).toBe(false);
+      expect(incompatible.issues.argument).toContain("required");
+      expect(pieces.getArgument(piece.getCell()).getRaw()).toEqual(
+        argumentBefore,
+      );
+      expect(getPatternIdentityRef(piece.getCell())).toEqual(identityBefore);
+
+      const transactions = new Set(reads.calls.map((call) => call.returned));
+      let totalReads = 0;
+      let graphReads = 0;
+      for (const transaction of transactions) {
+        for (const read of transaction?.getReadActivities?.() ?? []) {
+          totalReads++;
+          if (graphIds.has(read.id)) graphReads++;
+        }
+      }
+      // Bound actual storage reads, independent of CPU speed or heap limits.
+      // The fixture stays small enough for a regression to fail without OOM.
+      expect(totalReads).toBeGreaterThan(0);
+      expect(graphReads).toBeLessThan(100 * graphIds.size);
+    });
+  }
+
   it("refuses a source whose contract the stored argument cannot satisfy", async () => {
     const piece = await livePiece();
     const report = await piece.checkPattern(incompatibleProgram());
@@ -291,11 +361,8 @@ describe("setsrc compatibility preflight", () => {
     await piece.checkPattern(incompatibleProgram());
     await runtime.idle();
 
-    // The piece is what must be untouched. (The check is not a pure read: it
-    // compiles the candidate, which writes content-addressed artifacts into
-    // the space. Those are attached to nothing — the POINTER is the thing a
-    // caller cares about, so assert it directly rather than inferring it from
-    // the rendered result.)
+    // The source pointer is the caller's invariant, so assert it directly
+    // rather than inferring it from the rendered result.
     expect(getPatternIdentityRef(piece.getCell())).toEqual(refBefore);
     expect(JSON.stringify(piece.getCell().getAsQueryResult())).toBe(before);
 
@@ -313,12 +380,9 @@ describe("setsrc compatibility preflight", () => {
     // The contract that keeps the preflight honest: a source the check refuses
     // is refused by `setPattern`, for the same underlying reason.
     //
-    // Agreement is on the VERDICT and the CAUSE, deliberately not on identical
-    // prose. Enforcement lives on the apply path and reports in its own words;
-    // the check reports the review's. An earlier revision of this PR made the
-    // strings identical by running the review ahead of the swap, and that
-    // silently changed what `setPattern` accepts (see
-    // setsrc-cold-argument.test.ts). Message equality is not worth that.
+    // Preflight reports its read-time snapshot; apply enforces the rules in
+    // the setup transaction. Compare the verdict and cause rather than the
+    // formatting of the two error reports.
     const piece = await livePiece();
     const report = await piece.checkPattern(incompatibleProgram());
     expect(report.compatible).toBe(false);
@@ -449,11 +513,8 @@ describe("setsrc compatibility preflight", () => {
     expect(forced).toContain("CFC enforcement rejected commit");
     expect(forced).toContain("confidentiality cannot be weakened at /seed");
 
-    // And without the override, the apply path refuses too — naming the same
-    // cause in enforcement's own words. Agreement is on the verdict and the
-    // cause, not on identical prose: making the strings match would mean
-    // running the review ahead of the swap, which changes what `setPattern`
-    // accepts (see setsrc-cold-argument.test.ts).
+    // Apply enforces the same rule in its setup transaction. Its refusal and
+    // preflight's report must name the same cause, regardless of formatting.
     const applied = await piece.setPattern(labelledNext()).then(
       () => undefined,
       (error: unknown) =>

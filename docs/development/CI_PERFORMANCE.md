@@ -286,6 +286,12 @@ so the root jobs skip it. Each shard collects workspace coverage for its
 packages with `DENO_COVERAGE_DIR` and uploads it as
 `coverage-profile-workspace-<shard>`.
 
+The runner jobs use `tasks/select-runner-test-files.ts` to discover `.test.ts`
+and `.test.tsx` files recursively under `packages/runner/test`, matching the
+package's test task. Each file is assigned to one weighted shard. Timing keys
+are relative to that directory; shard output prefixes those paths with
+`./test/`.
+
 The root task is `tasks/test.ts`. It reads the workspace list from
 `deno.jsonc`, assigns package test units to shards by observed test cost
 (`selectShardMembers`), and runs `deno task test` in every selected package.

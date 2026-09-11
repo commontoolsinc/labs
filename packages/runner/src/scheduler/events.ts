@@ -1,4 +1,8 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
+
+import { createRef } from "../create-ref.ts";
+import { toURI } from "../uri-utils.ts";
 import { recordTrustedEventPolicyInputs } from "../cfc/ui-contract.ts";
 import type { Cancel } from "../cancel.ts";
 import {
@@ -11,7 +15,6 @@ import {
   type NormalizedFullLink,
 } from "../link-utils.ts";
 import type { Runtime } from "../runtime.ts";
-import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type {
   CommitError,
   IExtendedStorageTransaction,
@@ -28,6 +31,8 @@ import {
   type CommitBackpressurePolicy,
   CommitConvergenceError,
   computeBackoffDelayMs,
+  EventHandlerNotRunError,
+  HANDLER_NOT_RUN_BACKOFF_LIMIT,
 } from "./backpressure.ts";
 import type {
   SchedulerActionInfo,
@@ -57,6 +62,7 @@ import {
   type QueuedEvent,
   type ReactivityLog,
   type ServedEventFailureOutcome,
+  type TelemetryAnnotations,
 } from "./types.ts";
 
 const logger = getLogger("scheduler", {
@@ -64,6 +70,127 @@ const logger = getLogger("scheduler", {
   level: "warn",
 });
 const EVENT_COMMIT_TELEMETRY_WRITE_LIMIT = 25;
+
+const guardedImplementations = Symbol("guarded event implementations");
+
+type GuardedDispatcher = EventHandler & {
+  [guardedImplementations]: {
+    implementations: Map<string, { handler: EventHandler }>;
+    current(): EventHandler | undefined;
+  };
+};
+
+/** Whether a registered callback dispatches among guarded implementations. */
+function isGuardedDispatcher(
+  handler: EventHandler,
+): handler is GuardedDispatcher {
+  return guardedImplementations in handler;
+}
+
+/** Resolve exactly one implementation while recording every selector read. */
+function selectEventImplementation(
+  handler: EventHandler,
+  tx: IExtendedStorageTransaction,
+): EventHandler | undefined {
+  if (!isGuardedDispatcher(handler)) return handler;
+  const registration = handler[guardedImplementations];
+  const current = registration.current();
+  if (current !== handler) {
+    return current === undefined
+      ? undefined
+      : selectEventImplementation(current, tx);
+  }
+  let selected: EventHandler | undefined;
+  let ambiguous = false;
+  for (
+    const { handler: implementation } of registration.implementations.values()
+  ) {
+    if (implementation.implementationSelection!.matches(tx)) {
+      if (selected !== undefined) ambiguous = true;
+      selected = implementation;
+    }
+  }
+  return ambiguous ? undefined : selected;
+}
+
+/** Stable queued callback whose selection follows the live stream registry. */
+function createGuardedDispatcher(
+  ref: NormalizedFullLink,
+  eventHandlers: readonly [NormalizedFullLink, EventHandler][],
+): GuardedDispatcher {
+  const dispatcher: GuardedDispatcher = Object.assign(
+    (tx: IExtendedStorageTransaction, event: unknown) => {
+      const implementation = selectEventImplementation(dispatcher, tx);
+      if (implementation === undefined) {
+        tx.dispatchedHandlerNotRun = {
+          reason: "no unique event implementation matches the current program",
+        };
+        return;
+      }
+      return implementation(tx, event);
+    },
+    {
+      [guardedImplementations]: {
+        implementations: new Map<string, { handler: EventHandler }>(),
+        current: () => findEventHandler(eventHandlers, ref),
+      },
+    },
+  );
+  Object.defineProperty(dispatcher, "name", {
+    value: `event-dispatcher:${toURI(createRef(ref, "event dispatcher"))}`,
+  });
+  Object.defineProperty(dispatcher, "schedulerObservationIdentity", {
+    get: () => {
+      const registration = dispatcher[guardedImplementations];
+      const current = registration.current();
+      if (current !== dispatcher) {
+        return (current as Partial<TelemetryAnnotations> | undefined)
+          ?.schedulerObservationIdentity;
+      }
+      const identities = [...registration.implementations.values()].flatMap(
+        ({ handler }) => {
+          const identity = (handler as Partial<TelemetryAnnotations>)
+            .schedulerObservationIdentity;
+          return identity === undefined ? [] : [identity];
+        },
+      );
+      if (identities.length <= 1) return identities[0];
+      // A queued event supplies its actor to every candidate root before
+      // selection: the selector itself can need that actor's cold inputs.
+      // Dispatch and its diagnostics use the selected handler's own identity.
+      return {
+        ...identities[0],
+        demandRootIds: [
+          ...new Set(identities.flatMap((identity) =>
+            identity.demandRootIds ??
+              (identity.pieceRootId === undefined ? [] : [identity.pieceRootId])
+          )),
+        ],
+      };
+    },
+  });
+  dispatcher.populateDependencies = (tx, event) => {
+    selectEventImplementation(dispatcher, tx)?.populateDependencies?.(
+      tx,
+      event,
+    );
+  };
+  return dispatcher;
+}
+
+/** The actor used by both selection probes and the eventual stamped dispatch. */
+function eventScopeIdentity(event: QueuedEvent): ScopeKeyIdentity | undefined {
+  const firedAt = event.served?.firedAt;
+  if (firedAt !== undefined) {
+    return {
+      principal: firedAt.user,
+      sessionId: firedAt.session === "server" ? undefined : firedAt.session,
+    } as ScopeKeyIdentity;
+  }
+  return event.originTx !== undefined
+    ? waveRunContextOf(event.originTx)?.scopeKeyIdentity
+    : undefined;
+}
 
 type EventCommitError = {
   readonly name?: string;
@@ -726,7 +853,34 @@ export function addSchedulerEventHandler(state: {
   const existingIndex = state.eventHandlers.findIndex(([existing]) =>
     areNormalizedLinksSame(existing, args.ref)
   );
+  const existing = state.eventHandlers[existingIndex]?.[1];
+  if (args.handler.implementationSelection !== undefined) {
+    const dispatcher = existing && isGuardedDispatcher(existing)
+      ? existing
+      : createGuardedDispatcher(args.ref, state.eventHandlers);
+    if (dispatcher !== existing) {
+      if (existingIndex !== -1) state.eventHandlers.splice(existingIndex, 1);
+      state.eventHandlers.push([args.ref, dispatcher]);
+    }
+    const key = args.handler.implementationSelection.key;
+    const registration = { handler: args.handler };
+    dispatcher[guardedImplementations].implementations.set(key, registration);
+    return () => {
+      const { implementations } = dispatcher[guardedImplementations];
+      if (implementations.get(key) !== registration) return;
+      implementations.delete(key);
+      if (implementations.size === 0) {
+        const index = state.eventHandlers.findIndex(([, h]) =>
+          h === dispatcher
+        );
+        if (index !== -1) state.eventHandlers.splice(index, 1);
+      }
+    };
+  }
   if (existingIndex !== -1) {
+    if (existing && isGuardedDispatcher(existing)) {
+      existing[guardedImplementations].implementations.clear();
+    }
     state.eventHandlers.splice(existingIndex, 1);
     logger.warn("event-handler-replaced", () => [
       "Replacing existing event handler for link",
@@ -871,21 +1025,11 @@ export function preflightQueuedEventDependencies(state: {
   // Get the handler's dependencies (read-only, just capturing what will be read)
   const depTx = state.runtime.edit();
   depTx.setReadOnly?.("scheduler.populateDependencies()");
-  // A SERVED event's dependency probe reads AS the event's server-stamped
-  // actor (server-execution v2 stage A — OW17's tx→replica identity seam,
-  // LD1): the handler run will read that actor's instances of every
-  // scoped input, so the probe must name the SAME instances — its absent
-  // reads then kick instance-named loads, and the pending-load park below
-  // holds the head event on exactly those loads (an at-most-once handler
-  // must not run against the service instance's empty draft — the R7
-  // wall). Absent on every client-side event, byte-identical there.
-  const firedAt = queuedEvent.served?.firedAt;
-  if (firedAt?.user !== undefined) {
-    depTx.tx.scopeKeyIdentity = {
-      principal: firedAt.user,
-      sessionId: firedAt.session === "server" ? undefined : firedAt.session,
-    } as never;
-  }
+  // Selection and input probes use the dispatch actor. Their scoped reads
+  // register that actor's instance loads, which park the head event until its
+  // program and inputs are available.
+  const probeIdentity = eventScopeIdentity(queuedEvent);
+  if (probeIdentity !== undefined) depTx.tx.scopeKeyIdentity = probeIdentity;
   let stepStart = performance.now();
   logger.timeStart(
     "scheduler",
@@ -894,9 +1038,14 @@ export function preflightQueuedEventDependencies(state: {
     "pullPopulateDependencies",
   );
   try {
-    handler.populateDependencies?.(depTx, eventValue);
+    const implementation = selectEventImplementation(handler, depTx);
+    queuedEvent.preflightImplementation = implementation;
+    implementation?.populateDependencies?.(depTx, eventValue);
   } catch (error) {
-    state.handleError(error as Error, handler);
+    state.handleError(
+      error as Error,
+      queuedEvent.preflightImplementation ?? handler,
+    );
     // Dropping the event here is its final outcome — settle the commit
     // callback like the other drop paths instead of leaving callers that
     // await it hanging.
@@ -1143,7 +1292,6 @@ export async function processPullQueuedEventDuringExecute(
   delete queuedEvent.notBefore;
 
   const { handler } = queuedEvent;
-  const handlerId = state.getActionId(handler);
 
   let shouldSkipEvent = false;
   if (handler.populateDependencies) {
@@ -1212,8 +1360,12 @@ export async function processPullQueuedEventDuringExecute(
     if (state.eventPreflightTelemetryEnabled) {
       state.runtime.telemetry.submit({
         type: "scheduler.event.preflight",
-        handlerId,
-        handlerInfo: state.getActionTelemetryInfo(handler),
+        handlerId: state.getActionId(
+          queuedEvent.preflightImplementation ?? handler,
+        ),
+        handlerInfo: state.getActionTelemetryInfo(
+          queuedEvent.preflightImplementation ?? handler,
+        ),
         readCount: preflight.deps.reads.length,
         shallowReadCount: preflight.deps.shallowReads.length,
         dirtySizeBefore: preflight.dirtySizeBefore,
@@ -1253,6 +1405,10 @@ export async function processPullQueuedEventDuringExecute(
       state.recordLineageEvent(originTx, event),
     getOriginLocalSeq: (originTx, space) =>
       state.getOriginLocalSeq(originTx, space),
+    collectPendingLoadParkKeys: (event, log) =>
+      state.collectPendingLoadParkKeys(event, log),
+    parkHeadEventForLoads: (event, keys) =>
+      state.parkHeadEventForLoads(event, keys),
   }, queuedEvent);
 }
 
@@ -1282,35 +1438,41 @@ export async function dispatchQueuedEvent(state: {
     originTx: IExtendedStorageTransaction,
     space: MemorySpace,
   ) => number | undefined;
+  readonly collectPendingLoadParkKeys: (
+    event: QueuedEvent,
+    log: ReactivityLog,
+  ) => string[];
+  readonly parkHeadEventForLoads: (
+    event: QueuedEvent,
+    keys: readonly string[],
+  ) => void;
 }, queuedEvent: QueuedEvent): Promise<void> {
   const { action, handler, event: eventValue, retry, onCommit } = queuedEvent;
-  const handlerId = state.getActionId(handler);
+  // Presync follows the actor-scoped dependency probe. Dispatch rechecks the
+  // selection after the await so a replacement cannot run with stale inputs.
+  const presyncedImplementation = isGuardedDispatcher(handler)
+    ? queuedEvent.preflightImplementation
+    : handler;
+  const diagnosticHandler = presyncedImplementation ?? handler;
+  const handlerId = state.getActionId(diagnosticHandler);
 
   state.runtime.telemetry.submit({
     type: "scheduler.invocation",
     handlerId,
-    handlerInfo: state.getActionTelemetryInfo(handler),
+    handlerInfo: state.getActionTelemetryInfo(diagnosticHandler),
   });
 
   // Ensure the handler's input docs are locally available before the body
   // runs (see EventHandler.presyncInputs). Fail open: a presync error should
   // surface as the handler's own read failure, not silently drop the event.
-  if (typeof handler.presyncInputs === "function") {
+  if (typeof presyncedImplementation?.presyncInputs === "function") {
     try {
       // A served event's presync loads the event actor's instances (stage
       // A — see EventHandler.presyncInputs); a client-side event passes
       // nothing, byte-identical to before.
-      const firedAt = queuedEvent.served?.firedAt;
-      await handler.presyncInputs(
+      await presyncedImplementation.presyncInputs(
         eventValue,
-        firedAt?.user !== undefined
-          ? {
-            principal: firedAt.user,
-            sessionId: firedAt.session === "server"
-              ? undefined
-              : firedAt.session,
-          } as never
-          : undefined,
+        eventScopeIdentity(queuedEvent),
       );
     } catch (error) {
       logger.warn(
@@ -1494,6 +1656,20 @@ export async function dispatchQueuedEvent(state: {
       ...(queuedEvent.served !== undefined
         ? { served: queuedEvent.served }
         : {}),
+      ...(queuedEvent.parentEventId !== undefined
+        ? { parentEventId: queuedEvent.parentEventId }
+        : {}),
+      // The intent's retry budget rides along: a name resolution in the
+      // middle of a retry sequence is settlement, not a fresh start.
+      ...(queuedEvent.retryAttempts !== undefined
+        ? { retryAttempts: queuedEvent.retryAttempts }
+        : {}),
+      ...(queuedEvent.retryDeadline !== undefined
+        ? { retryDeadline: queuedEvent.retryDeadline }
+        : {}),
+      ...(queuedEvent.notRunBackoffs !== undefined
+        ? { notRunBackoffs: queuedEvent.notRunBackoffs }
+        : {}),
     };
     insertInEnqueueOrder(state.eventQueue, requeued);
     if (requeued.originTx !== undefined) {
@@ -1502,17 +1678,20 @@ export async function dispatchQueuedEvent(state: {
     state.queueExecution();
   };
 
-  // Re-queue a transient commit failure for a later retry. The retry is parked
-  // via notBefore so the scheduler backs off (capped exponential delay) instead
-  // of busy-looping; idle()/settled() wait for the parked head, so a converging
-  // write still completes within a settle. The retry attempt count and deadline
-  // are carried forward; `retry` is preserved untouched (it gates whether this
-  // event retries at all, which a windowed re-queue does not change).
-  const requeueForBackoff = (
+  // Re-queue a transient outcome for a later retry. With `runAt` the retry is
+  // parked via notBefore so the scheduler backs off (capped exponential delay)
+  // instead of busy-looping; without it the caller parks the requeued head on
+  // something else, such as a load. idle()/settled() wait for a parked head
+  // either way, so a converging write still completes within a settle. The
+  // retry attempt count and deadline are carried forward; `retry` is preserved
+  // untouched (it gates whether this event retries at all, which a windowed
+  // re-queue does not change).
+  const requeueForRetry = (
     attempts: number,
     deadline: number,
-    runAt: number,
-  ) => {
+    runAt: number | undefined,
+    notRunBackoffs: number | undefined = queuedEvent.notRunBackoffs,
+  ): QueuedEvent => {
     // Same served-absence assert as the name-resolution requeue above:
     // served copies queue with retries: false, so a stale-basis failure
     // classifies give-up "opt-out" and never reaches the backoff window —
@@ -1543,13 +1722,20 @@ export async function dispatchQueuedEvent(state: {
       onCommit,
       retryAttempts: attempts,
       retryDeadline: deadline,
-      notBefore: runAt,
+      ...(runAt !== undefined ? { notBefore: runAt } : {}),
+      ...(notRunBackoffs !== undefined ? { notRunBackoffs } : {}),
+      // A cascade child stays one: the dispatch stamp reads the emitting
+      // run's id off the requeued entry as it did off the first.
+      ...(queuedEvent.parentEventId !== undefined
+        ? { parentEventId: queuedEvent.parentEventId }
+        : {}),
     };
     insertInEnqueueOrder(state.eventQueue, requeued);
     if (requeued.originTx !== undefined) {
       state.recordLineageEvent(requeued.originTx, requeued);
     }
     state.queueExecution();
+    return requeued;
   };
 
   const runFinalCommitCallback = () => {
@@ -1621,48 +1807,146 @@ export async function dispatchQueuedEvent(state: {
       return;
     }
 
-    // Mark/effects atomicity (events.md §4, RULED 2026-08-27 — the a04
-    // write-side member): a SERVED dispatch whose handler body DID NOT
-    // RUN must not seal. The dispatch stamper wrote the entry's
-    // `consequenced` mark into this tx BEFORE the body ran
-    // (space-server.ts), so sealing the skipped run would commit a 1-op
-    // mark-only consequence — the entry permanently consumed with zero
-    // effects and no error (a04's seqs 53/56: two Create clicks lost to
-    // a transient argument-resolution failure). Withdraw the whole tx
-    // instead: the entry stays pending-unconsequenced, the drain
-    // re-delivers it (a drain copy's plain-deferral arm releases the
-    // in-flight guard and arms the rescan; the 8-deferral threshold
-    // hardens a permanently unresolvable argument into the visible §5
-    // DROP notice), and the retried handler's cause-derived idempotent
-    // writes converge. An LT1 in-process copy carries no onFailure —
-    // its abort alone leaves the durable entry unmarked and the next
-    // wave's drain delivers it once, WITH a streamEntry (C8b).
-    // Client/OFF dispatches carry no mark and keep the silent skip.
-    if (served !== undefined && tx.dispatchedHandlerNotRun !== undefined) {
+    // A dispatch whose handler body DID NOT RUN seals nothing (events.md
+    // §5). The runner records the skip when the handler's argument reads
+    // as `undefined`, and on a replica that is still loading what the
+    // argument reaches that is a cold read, not a schema mismatch: a
+    // computation that reads a document the replica does not hold yet
+    // publishes `undefined` until the load lands, so a handler reading
+    // through it finds its argument unresolved in exactly that window.
+    // Both arms below withdraw the transaction and run the handler again
+    // once the replica has moved; what differs is who re-delivers. Under
+    // events-down (server-execution v2 Phase 3) a dispatch without a served
+    // carriage is the client's speculative echo of an entry the server
+    // handles authoritatively and re-drains itself, so it takes neither arm:
+    // its skip seals as an empty speculative commit the authoritative
+    // consequence replaces.
+    if (
+      tx.dispatchedHandlerNotRun !== undefined &&
+      (served !== undefined ||
+        state.runtime.experimental.serverExecution !== true)
+    ) {
       const reason = tx.dispatchedHandlerNotRun.reason;
+      // Taken before the abort, since the read set is what the client arm
+      // parks on.
+      const runLog = txToReactivityLog(tx);
       if (tx.status().status === "ready") {
-        tx.abort(
-          new Error(`served handler did not run: ${reason}`),
-        );
+        tx.abort(new Error(`handler did not run: ${reason}`));
       }
-      reportServedEventFailure(served, {
-        kind: "deferred",
-        cause: "handler-not-run",
-        message: reason,
-      });
-      // The withdrawal is a deferral, and a deferral carries the
-      // drain's arrival-order BARRIER (events.md §2; review-6459 F1):
-      // the drain queues a pass's pending entries together, so
-      // same-space followers already sit behind this head and would
-      // dispatch — and SEAL — next, landing a later arrival's
-      // consequence ahead of the withdrawn entry's re-drain (the b01
-      // overtake: durable log ["B","A"] against arrival [a1, b1]).
-      deferLaterSameSpaceServedEvents(
-        state,
-        queuedEvent,
-        `whose served handler did not run (${reason})`,
+      if (served !== undefined) {
+        // Mark/effects atomicity (events.md §4, RULED 2026-08-27 — the
+        // a04 write-side member). The dispatch stamper wrote the entry's
+        // `consequenced` mark into this tx BEFORE the body ran
+        // (space-server.ts), so sealing the skipped run would commit a
+        // 1-op mark-only consequence — the entry permanently consumed
+        // with zero effects and no error (a04's seqs 53/56: two Create
+        // clicks lost to a transient argument-resolution failure). The
+        // withdrawal leaves the entry pending-unconsequenced, the drain
+        // re-delivers it (a drain copy's plain-deferral arm releases the
+        // in-flight guard and arms the rescan; the 8-deferral threshold
+        // hardens a permanently unresolvable argument into the visible
+        // §5 DROP notice), and the retried handler's cause-derived
+        // idempotent writes converge. An LT1 in-process copy carries no
+        // onFailure — its abort alone leaves the durable entry unmarked
+        // and the next wave's drain delivers it once, WITH a streamEntry
+        // (C8b).
+        reportServedEventFailure(served, {
+          kind: "deferred",
+          cause: "handler-not-run",
+          message: reason,
+        });
+        // The withdrawal is a deferral, and a deferral carries the
+        // drain's arrival-order BARRIER (events.md §2; review-6459 F1):
+        // the drain queues a pass's pending entries together, so
+        // same-space followers already sit behind this head and would
+        // dispatch — and SEAL — next, landing a later arrival's
+        // consequence ahead of the withdrawn entry's re-drain (the b01
+        // overtake: durable log ["B","A"] against arrival [a1, b1]).
+        deferLaterSameSpaceServedEvents(
+          state,
+          queuedEvent,
+          `whose served handler did not run (${reason})`,
+        );
+        runFinalCommitCallback();
+        return;
+      }
+      // A client dispatch has no durable entry, so the scheduler is its
+      // only re-deliverer. Sealing the skip would fire the commit callback
+      // on a transaction that wrote nothing, which a caller reads as the
+      // handling having completed. A one-shot (retries: false) is not
+      // re-run, and its callback sees the aborted transaction instead.
+      if (!retry) {
+        logger.warn(
+          "scheduler",
+          "Event handler did not run and the caller opted out of retry " +
+            "(retries: false); dropping",
+          { handlerId, reason },
+        );
+        runFinalCommitCallback();
+        tx.abandonStagedWork(eventAbandonError("retry opted out"));
+        return;
+      }
+      // Re-run within the same window a stale-basis rejection gets. The
+      // requeued head goes through the dependency preflight again, which
+      // waits for an invalid upstream computation; a computation that
+      // already settled clean on `undefined` is what the load park is
+      // for. Parked on the loads the run's own reads registered when any
+      // are in flight, since their landing is what re-invalidates that
+      // computation; otherwise after the backoff step, so a replica with
+      // nothing in flight neither busy-loops nor waits on a load that is
+      // not coming. The requeued event holds the head, so a re-run with
+      // nothing to park on is also counted against
+      // `HANDLER_NOT_RUN_BACKOFF_LIMIT`: an argument nothing in flight
+      // will resolve fails after those few short steps rather than
+      // holding every later event for the window. Either bound fails the
+      // handling loudly.
+      const failHandlerNotRun = (attempts: number, elapsedMs: number) => {
+        runFinalCommitCallback();
+        tx.abandonStagedWork(eventAbandonError(reason));
+        state.handleError(
+          new EventHandlerNotRunError({
+            handlerId,
+            reason,
+            attempts,
+            elapsedMs,
+          }),
+          action,
+        );
+      };
+      const parkKeys = state.collectPendingLoadParkKeys(queuedEvent, runLog);
+      const step = nextRetryStep(queuedEvent, state.backpressure);
+      if (step.kind === "convergence-failed") {
+        failHandlerNotRun(step.attempts, step.elapsedMs);
+        return;
+      }
+      const notRunBackoffs = (queuedEvent.notRunBackoffs ?? 0) +
+        (parkKeys.length === 0 ? 1 : 0);
+      if (notRunBackoffs > HANDLER_NOT_RUN_BACKOFF_LIMIT) {
+        failHandlerNotRun(
+          step.attempts,
+          state.backpressure.retryWindowMs -
+            (step.deadline - performance.now()),
+        );
+        return;
+      }
+      const wait = parkKeys.length > 0
+        ? `parked on ${parkKeys.length} load(s)`
+        : `after ${Math.round(step.delayMs)}ms`;
+      logger.debug(
+        "scheduler",
+        `Event handler did not run (${reason}); re-running ` +
+          `(attempt ${step.attempts}, ${wait})`,
+        { handlerId },
       );
-      runFinalCommitCallback();
+      const requeued = requeueForRetry(
+        step.attempts,
+        step.deadline,
+        parkKeys.length > 0 ? undefined : step.runAt,
+        notRunBackoffs,
+      );
+      if (parkKeys.length > 0) {
+        state.parkHeadEventForLoads(requeued, parkKeys);
+      }
       return;
     }
 
@@ -1732,7 +2016,7 @@ export async function dispatchQueuedEvent(state: {
         state.runtime.telemetry.submit({
           type: "scheduler.event.commit",
           handlerId,
-          handlerInfo: state.getActionTelemetryInfo(handler),
+          handlerInfo: state.getActionTelemetryInfo(diagnosticHandler),
           readCount: log.reads.length + log.shallowReads.length,
           writeCount: log.writes.length,
           changedWriteCount: log.writes.length,
@@ -1859,7 +2143,7 @@ export async function dispatchQueuedEvent(state: {
               `(attempt ${disposition.attempts})`,
             { handlerId },
           );
-          requeueForBackoff(
+          requeueForRetry(
             disposition.attempts,
             disposition.deadline,
             disposition.runAt,
@@ -1954,8 +2238,22 @@ export async function dispatchQueuedEvent(state: {
   };
 
   try {
-    if (hasAnnotatedWrites(handler)) {
-      recordTrustedEventPolicyInputs(tx, handler.writes, eventValue);
+    let implementation = handler;
+    if (isGuardedDispatcher(handler)) {
+      const selected = selectEventImplementation(handler, tx);
+      if (
+        selected === undefined || selected !== presyncedImplementation
+      ) {
+        tx.dispatchedHandlerNotRun = {
+          reason:
+            "event implementation changed or is unavailable after presync",
+        };
+      } else {
+        implementation = selected;
+      }
+    }
+    if (hasAnnotatedWrites(implementation)) {
+      recordTrustedEventPolicyInputs(tx, implementation.writes, eventValue);
     }
     const actionStartTime = performance.now();
     logger.timeStart(
@@ -1966,10 +2264,16 @@ export async function dispatchQueuedEvent(state: {
     );
     try {
       const runningPromise = Promise.resolve(
-        state.runtime.harness.invoke(() => action(tx)),
+        state.runtime.harness.invoke(() =>
+          tx.dispatchedHandlerNotRun !== undefined
+            ? undefined
+            : isGuardedDispatcher(handler)
+            ? implementation(tx, eventValue)
+            : action(tx)
+        ),
       ).then(() => {
         const trustedEventCandidates =
-          trustedEventWriteCandidatesFromTransaction(tx, handler, [
+          trustedEventWriteCandidatesFromTransaction(tx, implementation, [
             queuedEvent.eventLink.space,
           ]);
         recordTrustedEventPolicyInputs(
@@ -2115,6 +2419,20 @@ function classifyCommitDisposition(
   if (!queuedEvent.retry) {
     return { kind: "give-up", reason: "opt-out" };
   }
+  return nextRetryStep(queuedEvent, policy);
+}
+
+/**
+ * Where a client event that has to run again stands in its retry window: the
+ * next backoff step, or the window spent. The window opens at the first
+ * transient outcome and rides the requeued event, so every such outcome of one
+ * intent — a stale-basis rejection, a dispatch whose handler body did not run
+ * — draws on the same budget.
+ */
+function nextRetryStep(
+  queuedEvent: QueuedEvent,
+  policy: CommitBackpressurePolicy,
+): Extract<CommitDisposition, { kind: "backoff" | "convergence-failed" }> {
   const attempts = (queuedEvent.retryAttempts ?? 0) + 1;
   const now = performance.now();
   const deadline = queuedEvent.retryDeadline ?? (now + policy.retryWindowMs);

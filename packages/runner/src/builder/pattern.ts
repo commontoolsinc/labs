@@ -1,5 +1,9 @@
 import type { JSONSchemaObj } from "@commonfabric/api";
-import { hashStringOf, toCompactDebugString } from "@commonfabric/data-model";
+import {
+  hashStringOf,
+  isWalkableObjectOrArray,
+  toCompactDebugString,
+} from "@commonfabric/data-model";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
@@ -39,11 +43,7 @@ import {
 } from "./builtin-replayability.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
 import { toJSONMethod } from "./json-member.ts";
-import {
-  applyArgumentIfcToResult,
-  applyInputIfcToOutput,
-  connectInputAndOutputs,
-} from "./node-utils.ts";
+import { applyInputIfcToOutput, connectInputAndOutputs } from "./node-utils.ts";
 import { brandTrustedPattern, noteDerivedCopy } from "./pattern-metadata.ts";
 import { reactive } from "./reactive.ts";
 import {
@@ -565,8 +565,14 @@ function factoryFromPattern<T, R>(
 
   const argumentSchema: JSONSchema = argumentSchemaArg ?? true;
 
-  const resultSchema =
-    applyArgumentIfcToResult(argumentSchema, resultSchemaArg) ?? {};
+  // The schema the author declared, as declared. A pattern's result carries
+  // its argument's confidentiality edge by edge: a result field aliasing an
+  // argument cell carries that cell's own label through the link machinery,
+  // and a field fed by a lift or a handler carries the join that module makes
+  // onto its own result. A join at this schema's root persists as a label
+  // covering the whole result document, `$UI` among its fields, which denies a
+  // piece's entire view at the display ceiling.
+  const resultSchema = resultSchemaArg ?? {};
 
   const serializedNodes = Array.from(allNodes).map((node) => {
     const module = withAliasBindings(
@@ -935,14 +941,12 @@ function assignComputedCellKinds(
       }
       return;
     }
-    // TODO(danfuzz): `isObjectOrArray` admits a `FabricInstance`, whose
-    // `Object.entries` are empty, so it takes this branch and collects
-    // nothing instead of falling to the fail-safe `collectAll()` below. A
-    // cell root reachable only through the instance's codec contents is
-    // then never disqualified from the `computed` tag — the ack-and-drop
-    // this function exists to prevent. (A `FabricPrimitive` passes the same
-    // gate, harmlessly: it holds no cell roots.)
-    if (isObjectOrArray(target) && !isReactive(target)) {
+    // A `FabricPrimitive` falls to the fail-safe `collectAll()` below: its
+    // contents are not reachable by property name, so walking one here would
+    // collect nothing and leave a cell root inside it undisqualified from the
+    // `computed` tag -- the ack-and-drop this function exists to prevent. A
+    // `FabricInstance` is refused here.
+    if (isWalkableObjectOrArray(target) && !isReactive(target)) {
       const properties = isObjectNotArray(schema.properties)
         ? schema.properties
         : undefined;
