@@ -22,11 +22,13 @@ loud server error for a selector reference nothing backs. The
 connection-scoped
 transport experiment (`syncSchemaCasV1`, unmerged) is not being pursued;
 this design is the storage-side successor for link positions, and a
-reference at rest never needs transport compression.
+reference at rest never needs transport compression. Code documents
+(§ Code documents) share the namespace and its rules: the compile cache
+stores each module's text as one, and its records link to them.
 
 ## Last Updated
 
-2026-08-15
+2026-09-09
 
 ## Motivation
 
@@ -105,6 +107,56 @@ A schema document is a `cid:` document whose value is a JSON Schema:
   store — delivery, traversal, and commit validation — resolve `cid:`
   documents at space scope. (Direct-registry reuse across spaces is
   hash-verified, so a divergent copy could never enter it.)
+
+### Code documents
+
+A code document is a `cid:` document whose value is a string: the authored
+source of one module, or its compiled output. It is the second kind of
+content the `cid:` namespace holds, and the larger.
+
+- **Id**: `cid:<taggedHash>` where the hash is `taggedHashStringOf(code)`,
+  the general `fid1` content hash of the string itself. Nothing but the
+  string enters the hash, so two modules with identical text share one
+  document however many records name it.
+- **Content**: `{ "value": "<code>" }` and nothing else. No filename,
+  identity, imports, or source map travels inside it; those stay on the
+  record that links to it, and the document says nothing about where its
+  text came from.
+- **Write**: the same idempotent blind write as a schema document, through
+  the transaction's `stageContentAddressedDocument`, which derives the id from the
+  content it is handed, so a code document can never be installed under a
+  hash its content does not produce. The record that links to it is written
+  in the same transaction.
+- **Verification**: the commit boundary re-hashes every `cid:` set's
+  content against its id and refuses a mismatch, so nothing lands in the
+  namespace that a reader cannot verify; a schema document's interned hash
+  is the same value, so one rule covers both kinds. A reader re-hashes the
+  string it resolves against the id the record's link names, so a document
+  that reached a replica by another route holding other content is refused
+  at load.
+- **Per space, by the writer**: the compile cache installs a code document
+  into the space of every record that links to it, in the same transaction
+  as the record, so a piece's code loads from the space the piece lives in
+  and no other space has to be reachable for it. That is a writer's
+  practice, not a reader's rule: a link that names a code document in
+  another space is a valid link, and a reader that follows one verifies
+  the resolved string against the linked id exactly as it does within a
+  space. No same-space guard applies on the read side.
+- **No envelope**: a code document carries no `cfc` metadata. It is a
+  runtime surface outside labeling, like a schema document: immutable,
+  named by its content, and excluded from schema write policy and the flow
+  join. Under precise reference semantics, a link to that document still
+  carries its own acquisition confidentiality and scope restrictions. The
+  receiving record stores that reference provenance without reading labels
+  from the CID target. The compile cache acquires its code references through
+  the Runtime; its runtime-minted integrity atom labels the record, whose
+  link and map it covers, while the hash covers the bytes.
+- **Retention**: permanent, as for every `cid:` document. Every code
+  version ever compiled into a space stays there.
+
+A record written before code documents existed holds its code inline as a
+string, and readers accept both forms. Nothing rewrites an existing record;
+only new writes use a code document.
 
 ### Decomposition
 
@@ -637,15 +689,14 @@ playbook:
    measure, and only then consider an inline-below-N-bytes rule — a
    threshold changes document identity, so it must be part of the
    decomposition's versioned contract, not a tuning knob.
-2. **Server-side integrity enforcement.** Partially resolved: the commit
-   boundary rejects mutations of `cid:` documents and validates the
-   referenced schema closure (presence and content identity, transitively)
-   for every commit, one documented patch shape excepted. What remains
-   open is generic first-install
-   verification for `cid:` documents nothing references — the boundary
-   cannot name an unreferenced document's class, so a forged blob-or-other
-   install is still confined to its space and fails closed when first
-   referenced.
+2. **Server-side integrity enforcement.** Resolved for content: the commit
+   boundary rejects mutations of `cid:` documents, refuses every `cid:` set
+   whose content does not hash to its id — a first installation nothing
+   references included — and validates the referenced schema closure
+   (presence, transitively) for every commit. What remains is the one
+   documented patch shape: a reference introduced by a patch that edits
+   inside an existing link's schema escapes commit-time collection, and
+   read-side assembly is what catches it.
 3. **Fetch-once for immutable documents.** Every pull is a watch add, so
    schema documents permanently grow the session watch set even though they
    can never change. Quiet but not free; a fetch-without-subscribe

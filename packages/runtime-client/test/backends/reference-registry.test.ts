@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { cfcAtom } from "@commonfabric/api/cfc";
 import type { FabricValue } from "@commonfabric/data-model";
+import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { WorkerReconciler } from "@commonfabric/html/worker";
 import type { VDomOp } from "@commonfabric/html/vdom-ops";
-import { Identity } from "@commonfabric/identity";
+import { createSession, Identity } from "@commonfabric/identity";
+import { PiecesController } from "@commonfabric/piece/ops";
 import {
   convertCellsToLinks,
   lookupSchemaDocument,
@@ -184,6 +186,137 @@ describe("reference-registry", () => {
     expect(child.withTx(tx).get()).toBe("visible");
     expect(deriveFlowJoin(tx).confidentiality).toContainEqual(selection);
     tx.abort();
+  });
+
+  for (const kind of ["piece root", "piece subpath", "document"] as const) {
+    it(`retains a slug's private selection through a ${kind} and worker forwarding`, async () => {
+      const piece = await seed("piece-get-private", { slot: "visible" });
+      if (kind !== "document") {
+        const metadata = runtime.edit();
+        piece.withTx(metadata).setMetaRaw(
+          "patternIdentity",
+          { identity: "piece-get-private", symbol: "default" },
+          rawMetaWriteAuthorization,
+        );
+        expect((await metadata.commit()).error).toBeUndefined();
+      }
+      const target = kind === "piece subpath" ? piece.key("slot") : piece;
+      const slug = await seed(
+        "piece-get-private-slug",
+        target.getAsWriteRedirectLink(),
+        [{
+          path: [],
+          origin: "link",
+          observes: "followRef",
+          label: { confidentiality: [selection] },
+        }],
+      );
+      const output = await seed("piece-get-private-output", null);
+      const pieces = new PiecesController(
+        await createSession({ identity: signer, spaceDid: space }),
+        runtime,
+        { deferSpaceCellSync: true },
+      );
+      const processor = buildProcessor({
+        runtime,
+        identity: signer,
+        space,
+        cc: pieces,
+      });
+      const response = await processor.handlePieceGet({
+        type: RequestType.PieceGet,
+        space,
+        pieceId: entityRefToString(slug.entityId),
+        runIt: false,
+      });
+      expect(response.piece.cell.cfcReferenceToken).toBeDefined();
+      expect(response.piece.cell).toMatchObject({
+        id: target.getAsNormalizedFullLink().id,
+        path: target.getAsNormalizedFullLink().path,
+      });
+      const issuedOutput = processor.handleAcquireCell({
+        type: RequestType.AcquireCell,
+        address: wireCopy(output.getAsNormalizedFullLink()),
+      });
+      const result = await processor.applyCellSet({
+        type: RequestType.CellSet,
+        cell: wireCopy(issuedOutput.cell),
+        value: wireCopy(response.piece.cell),
+      });
+      expect(result.error).toBeUndefined();
+      const labels = readStoredCfcMetadata(
+        runtime.readTx(),
+        output.getAsNormalizedFullLink(),
+      );
+      expect(
+        labels?.labelMap.entries.flatMap((entry) =>
+          entry.observes === "followRef"
+            ? entry.label.confidentiality ?? []
+            : []
+        ),
+      ).toContainEqual(selection);
+      expect(piece.key("slot").get()).toBe("visible");
+    });
+  }
+
+  it("retains a piece subpath's scope restriction through its issued reference", async () => {
+    const tx = runtime.edit();
+    const secret = runtime.getCellFromLink(
+      {
+        space,
+        id: "of:piece-get-session-target",
+        path: [],
+        scope: "session",
+      },
+      { type: "string" },
+      tx,
+    );
+    secret.set("private session");
+    expect((await tx.commit()).error).toBeUndefined();
+    const piece = await seed("piece-get-scope", {
+      slot: secret.withTx(undefined).getAsLink({ includeSchema: true }),
+    }, [{
+      path: ["slot"],
+      origin: "link",
+      observes: "followRef",
+      label: {},
+    }]);
+    const metadata = runtime.edit();
+    piece.withTx(metadata).setMetaRaw(
+      "patternIdentity",
+      { identity: "piece-get-scope", symbol: "default" },
+      rawMetaWriteAuthorization,
+    );
+    expect((await metadata.commit()).error).toBeUndefined();
+    const capped = piece.key("slot").asSchema({
+      type: "string",
+      scope: "space",
+    });
+    const slug = await seed(
+      "piece-get-scope-slug",
+      capped.getAsWriteRedirectLink({ includeSchema: true }),
+      [{ path: [], origin: "link", observes: "followRef", label: {} }],
+    );
+    const processor = buildProcessor({
+      runtime,
+      identity: signer,
+      space,
+      cc: { getSpace: () => space },
+    });
+    const response = await processor.handlePieceGet({
+      type: RequestType.PieceGet,
+      space,
+      pieceId: entityRefToString(slug.entityId),
+      runIt: false,
+    });
+    expect(response.piece.cell.cfcReferenceToken).toBeDefined();
+    expect(
+      processor.handleCellGet({
+        type: RequestType.CellGet,
+        cell: wireCopy(response.piece.cell),
+      }).value,
+    ).toBeUndefined();
+    expect(secret.withTx(undefined).get()).toBe("private session");
   });
 
   it("retains selected identity when forwarding a sigil through the canonical converter", async () => {

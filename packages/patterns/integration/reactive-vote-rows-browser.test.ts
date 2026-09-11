@@ -1,7 +1,7 @@
 /** Verifies rendered nested filters and mapped rows after writes from another replica. */
 
 import { Identity } from "@commonfabric/identity";
-import { Browser, env } from "@commonfabric/integration";
+import { Browser, env, type Page } from "@commonfabric/integration";
 import { login } from "@commonfabric/integration/shell-utils";
 import type { Cell } from "@commonfabric/runner";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
@@ -18,6 +18,31 @@ const fixtureRoot = join(import.meta.dirname!, "fixtures/reactive-vote-rows");
 interface FixtureOutput {
   cast: { key: string; optionId: string; color: string };
   rename: { key: string; name: string };
+  retract: { key: string };
+}
+
+/** Reads row order and nested swatches across the shell's shadow roots. */
+async function renderedRows(page: Page) {
+  return await page.evaluate(() => {
+    function collect(root: Document | ShadowRoot): {
+      id: string;
+      text: string;
+      swatches: string[];
+    }[] {
+      const rows = [...root.querySelectorAll("[data-row]")].map((element) => ({
+        id: element.getAttribute("data-row")!,
+        text: (element.textContent ?? "").replace(/\s+/g, " ").trim(),
+        swatches: [...element.querySelectorAll("[data-swatch]")].map((swatch) =>
+          swatch.textContent ?? ""
+        ),
+      }));
+      for (const element of root.querySelectorAll("*")) {
+        if (element.shadowRoot) rows.push(...collect(element.shadowRoot));
+      }
+      return rows;
+    }
+    return collect(document);
+  });
 }
 
 describe("rendered vote rows across replicas", () => {
@@ -179,19 +204,7 @@ describe("rendered vote rows across replicas", () => {
             "yellow",
           );
           await settleView(page);
-          const rowOrder = await page.evaluate(() => {
-            function collect(root: Document | ShadowRoot): string[] {
-              const rows = [...root.querySelectorAll("[data-row]")]
-                .map((element) => element.getAttribute("data-row")!);
-              for (const element of root.querySelectorAll("*")) {
-                if (element.shadowRoot) {
-                  rows.push(...collect(element.shadowRoot));
-                }
-              }
-              return rows;
-            }
-            return collect(document);
-          });
+          const rowOrder = (await renderedRows(page)).map((row) => row.id);
           expect(rowOrder).toEqual(["two", "one"]);
         }
         if (errors.length) throw new Error(errors.join("; "));
@@ -221,6 +234,62 @@ describe("rendered vote rows across replicas", () => {
             ),
           );
         }
+        for (const key of ["bob", "carol"]) {
+          const removed = await cc.runtime.editWithRetry((tx) =>
+            output.key("retract").withTx(tx).send({ key })
+          );
+          if (removed.error) throw new Error(removed.error.message);
+          await cc.runtime.settled(Infinity);
+          await cc.synced();
+          await waitForSettledText(
+            page,
+            `[data-row="two"][title="${key === "bob" ? "carol" : ""}"]`,
+            key === "bob" ? "two: green" : "two:",
+          );
+          await settleView(page);
+          expect(
+            (await renderedRows(page)).find((row) => row.id === "two")?.text,
+          )
+            .toBe(key === "bob" ? "two: green" : "two:");
+        }
+        await settleView(page);
+        if (variant === "mapped") {
+          expect(await renderedRows(page)).toEqual([
+            { id: "one", text: "one: yellow", swatches: ["yellow"] },
+            { id: "two", text: "two:", swatches: [] },
+          ]);
+        }
+        if (artifactDir) {
+          const artifactName = crossSpace ? `${variant}-cross-space` : variant;
+          await page.screenshot(
+            join(artifactDir, `${artifactName}-removed.png`),
+          );
+        }
+        const restored = await cc.runtime.editWithRetry((tx) =>
+          output.key("cast").withTx(tx).send({
+            key: "bob",
+            optionId: "two",
+            color: "green",
+          })
+        );
+        if (restored.error) throw new Error(restored.error.message);
+        await cc.runtime.settled(Infinity);
+        await cc.synced();
+        await waitForSettledText(
+          page,
+          '[data-row="two"][title="bob"]',
+          "two: green",
+        );
+        await settleView(page);
+        if (variant === "mapped") {
+          expect(await renderedRows(page)).toEqual([
+            { id: "one", text: "one: yellow", swatches: ["yellow"] },
+            { id: "two", text: "two: green", swatches: ["green"] },
+          ]);
+        }
+        expect((await renderedRows(page)).find((row) => row.id === "two")?.text)
+          .toBe("two: green");
+        expect(errors).toEqual([]);
       } finally {
         try {
           await browser?.close();

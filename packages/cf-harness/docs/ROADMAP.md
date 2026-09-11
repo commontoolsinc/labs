@@ -86,8 +86,12 @@ permanently growing implementation plan.
   path.
 - Add model-driven `load_skill` activation only when a product needs it and the
   catalog, policy, digest, resume, and subagent semantics are agreed.
-- Do not add remote/global skill installation before provenance and trust policy
-  are explicit.
+- Do not add remote/global skill installation into the skills root. External
+  discovery and acquisition exist only as the pinned, handle-only path in
+  `docs/plans/external-skill-acquisition.md`; its remaining stages (the mirror,
+  the no-secrets discovery child) are sequenced on CT-2148, and a release
+  boundary that reads the `ExternalIngest` stamp the acquisition mints is not
+  built.
 
 ## Exit discipline
 

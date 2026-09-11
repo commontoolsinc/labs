@@ -3,8 +3,10 @@
 Status: A1/A2 instrumentation shipped in #7246, and the controlled A0 fixture,
 accounting regressions, and dashboard shipped in #7241. A3 budgets are under
 review in #7257. A4's browser benchmark shipped in #7261; count limits remain.
-C1's remote-row reproductions and the C3 inline-element dependency repair are
-under review in [PR #7265](https://github.com/commontoolsinc/labs/pull/7265).
+C1's remote-row reproductions and the C3 inline-element dependency repair landed
+in [PR #7265](https://github.com/commontoolsinc/labs/pull/7265).
+Cold-materialization, reconnect, and remaining row-invalidation
+acceptance checks stay open.
 
 B3's named aggregates are implemented and validated in
 [PR #7259](https://github.com/commontoolsinc/labs/pull/7259), with
@@ -156,11 +158,13 @@ durations are used as performance evidence.
         individually cheap runs exceeding the step budget. Verify unbudgeted
         tests preserve their behavior.
 - [ ] **A4 — Add the read-side benchmark.**
-  - [ ] Follow [BENCHMARKS.md](../development/BENCHMARKS.md); measure one vote
+  - [x] Follow [BENCHMARKS.md](../development/BENCHMARKS.md); measure one vote
         settling with its tally on screen across declared collection sizes.
-  - [ ] Preserve the existing write-burst benchmark as a separate workload.
-        Record reads, runs, commits, and timing; assert counts in regression
-        tests and report timing as benchmark trends.
+  - [x] Preserve the existing write-burst benchmark as a separate workload.
+        Record reads, runs, commits, and timing in
+        [PR #7261](https://github.com/commontoolsinc/labs/pull/7261).
+  - [ ] Add read-count regression limits after A3 lands; benchmark timing is
+        reported as a trend.
 - [ ] **A5 — Explain probe/product differences.**
   - [ ] Compare matched inputs in the headless probe and browser, varying worker
         boundary and single-space/cross-space voter links separately.
@@ -186,23 +190,25 @@ durations are used as performance evidence.
   assert nested-filter membership and derived tally updates. The
   [browser tests](../../packages/patterns/integration/reactive-vote-rows-browser.test.ts)
   cover same-space and cross-space profiles, remote colors, profile-only edits,
-  membership additions, ranking changes, and nested mapped swatches. The browser
+  membership additions, removal/restoration, ranking changes, and nested mapped
+  swatches. Removal checks pin the empty row, absence of nested swatches,
+  reordering, and exactly one swatch after restoring the same keyed vote. The browser
   subscribes before votes are created. Cross-space profiles are created in a
   separate transaction and edited directly in their own space. Headless result
   reads explicitly pull data, so browser rendering owns the passive-update
-  check. C1 remains open for cold-materialization verification, removals, and
-  reconnects. These synthetic probes do not authorize removing the lunch-poll
+  check. C1 remains open for cold-materialization verification and reconnects. These synthetic probes do not authorize removing the lunch-poll
   workaround or accessing the live poll.
 
-  C3's candidate fix records the mutable inline element used when resolving a
+  C3's landed fix records the mutable inline element used when resolving a
   nested array to a content-addressed snapshot. The
   [cell callback regression](../../packages/runner/test/cell-callbacks.test.ts)
   fails without the fix after initial demand settles, then passes with the fix;
   it also verifies that changing a neighboring inline element causes no rerun.
   Four browser cases and the full runner suite (1,411 tests / 8,764 steps) pass
   before the current-main merge. After integrating main `ce3602b18a`, all 46
-  type-check groups and 142 focused runtime checks pass. C3 remains open pending
-  review and its remaining acceptance checks.
+  type-check groups and 142 focused runtime checks pass. The fix landed in #7265
+  with all 69 CI gates and clean Cubic and antagonistic reviews. C3 remains open
+  for its remaining acceptance checks.
 
   To record synthetic browser evidence with a local test server, set `API_URL`
   and `FRONTEND_URL`, then run:
@@ -224,7 +230,10 @@ durations are used as performance evidence.
 
 ## 6–9. Complete the collection algebra: B1–B4
 
-- [ ] **B1 contract — Specify `groupBy` and `keyBy` separately.**
+- [ ] **B1 contract — Specify `groupBy` and `keyBy` separately.** The
+      [proposed index contract](collection-index-contract.md) records semantic
+      decisions and acceptance tests. The typed index handle and lowering
+      prototype remain prerequisites to completing this contract.
   - [ ] Key domain and equality, including resolved link identity and
         retargeting a key link without editing its containing element.
   - [ ] Duplicate-key handling that remains deterministic for unordered input;
@@ -334,12 +343,15 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Define A3's budget declaration and extend measurement to event dispatch and
-commit work before enforcing whole-step budgets. Preserve separate
-initialization limits and include short-lived actions and failed attempts. The
-controlled A0 fixture is available for count comparisons; A4/A5 still need
-browser and cross-space measurements before product performance claims. For the
-pending collection operators, settle B1's index contracts before implementing
-`groupBy`/`keyBy`, then build B2's keyed lookup and join. Their measurements use
-the shipped counters and the aggregate comparison method; A4/A5 gate
-deployed-product claims rather than operator implementation.
+Complete A3's CI and fresh Cubic review after its six review fixes. Continue
+C1's nested-filter and remote-row reproductions from
+[PR #7265](https://github.com/commontoolsinc/labs/pull/7265), and complete
+C1/C3's remaining acceptance checks while retaining the production workaround.
+A4's browser benchmark is available; count regression limits remain. A5 still
+needs cross-space and deployed measurements before product performance claims.
+Live poll access requires coordination with Mike.
+
+For the pending collection operators, settle B1's index contracts before
+implementing `groupBy`/`keyBy`, then build B2's keyed lookup and join. Their
+measurements use the shipped counters and the aggregate comparison method; A4/A5
+gate deployed-product claims rather than operator implementation.

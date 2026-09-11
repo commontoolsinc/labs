@@ -1057,12 +1057,17 @@ describe("runtime-processor", () => {
       "space"
     ];
 
+    /**
+     * A cell over `ref`. `resultSchema` is the `schema` meta of its document
+     * and `linkedSchema` the schema the links along its path carry, which
+     * `asSchemaFromLinks()` adopts; a cell reached through `key()` keeps both.
+     */
     function mockCell(ref: CellRef, options: {
       raw?: unknown;
-      schemaCell?: unknown;
-      onPull?: () => void;
       patternLink?: unknown;
       patternIdentity?: unknown;
+      resultSchema?: unknown;
+      linkedSchema?: CellRef["schema"];
       onSync?: () => void;
     } = {}) {
       return {
@@ -1070,20 +1075,28 @@ describe("runtime-processor", () => {
           options.onSync?.();
           return Promise.resolve();
         },
-        pull: () => {
-          options.onPull?.();
-          return Promise.resolve(options.raw);
-        },
         getRaw: () => options.raw,
         getMetaRaw: (metaField: string) =>
           metaField === "patternIdentity"
             ? options.patternIdentity
             : metaField === "pattern"
             ? options.patternLink
+            : metaField === "schema"
+            ? options.resultSchema
             : undefined,
         getAsLink: () => cellRefToSigilLink(ref),
         getAsNormalizedFullLink: () => ref,
-        asSchemaFromLinks: () => options.schemaCell,
+        key: (...keys: string[]) =>
+          mockCell({ ...ref, path: [...ref.path, ...keys] }, options),
+        asSchemaFromLinks: () =>
+          mockCell(
+            options.linkedSchema === undefined
+              ? ref
+              : { ...ref, schema: options.linkedSchema },
+            options,
+          ),
+        asSchema: (schema: CellRef["schema"]) =>
+          mockCell({ ...ref, schema }, options),
       };
     }
 
@@ -1151,19 +1164,45 @@ describe("runtime-processor", () => {
       expect(managerCalls.map(([, runIt]) => runIt)).toEqual([true, true]);
     });
 
-    it("renders slug redirects to output cells directly", async () => {
+    /**
+     * A runtime resolving a redirect into a document: `landing` for the
+     * document's root, `target` for the cell the redirect names inside it.
+     * Which of the two the handler syncs is what the cases below pin.
+     */
+    function runtimeLandingIn(
+      slugCell: unknown,
+      landing: { ref: CellRef; cell: unknown },
+      target: unknown,
+    ) {
+      return {
+        getCellFromEntityId: () => slugCell,
+        getCellFromLink: (link: CellRef) =>
+          link.path.length === 0 && link.id === landing.ref.id
+            ? landing.cell
+            : target,
+      };
+    }
+
+    it("returns a cell inside a document that is no piece, syncing that document's root alone", async () => {
       const targetRef: CellRef = {
         id: "of:fid1-sub-piece" as CellRef["id"],
         space,
         scope: "space",
         path: ["capture"],
       };
+      const landingRef: CellRef = { ...targetRef, path: [] };
       const slugRef: CellRef = {
         id: "of:fid1-slug-doc" as CellRef["id"],
         space,
         scope: "space",
         path: [],
       };
+      let landingSynced = false;
+      const landingCell = mockCell(landingRef, {
+        onSync: () => {
+          landingSynced = true;
+        },
+      });
       let targetSynced = false;
       const targetCell = mockCell(targetRef, {
         onSync: () => {
@@ -1180,10 +1219,11 @@ describe("runtime-processor", () => {
         },
       };
       const processor = buildProcessor({
-        runtime: {
-          getCellFromEntityId: () => slugCell,
-          getCellFromLink: () => targetCell,
-        },
+        runtime: runtimeLandingIn(
+          slugCell,
+          { ref: landingRef, cell: landingCell },
+          targetCell,
+        ),
         cc: pieces,
         space,
       });
@@ -1195,82 +1235,10 @@ describe("runtime-processor", () => {
         runIt: true,
       });
 
-      expect(targetSynced).toBe(true);
+      expect(landingSynced).toBe(true);
+      expect(targetSynced).toBe(false);
       expect(result.piece.cell).toMatchObject(targetRef);
-    });
-
-    it("renders slug redirects to nested output cells directly", async () => {
-      const targetRef: CellRef = {
-        id: "of:fid1-parent-piece" as CellRef["id"],
-        space,
-        scope: "space",
-        path: ["activityTab"],
-      };
-      const slugRef: CellRef = {
-        id: "of:fid1-slug-doc" as CellRef["id"],
-        space,
-        scope: "space",
-        path: [],
-      };
-      const schemaRef: CellRef = {
-        ...targetRef,
-        schema: {
-          type: "object",
-          properties: {
-            "$NAME": { type: "string" },
-            "$UI": { type: "object" },
-          },
-          required: ["$NAME", "$UI"],
-        },
-      };
-      // If we don't have a pattern identity, the processor won't pull the cell and
-      // thus won't pull the schema, so include the current piece marker.
-      const patternIdentity = {
-        identity: "pattern-identity",
-        symbol: "default",
-      };
-      let schemaPulled = false;
-      const schemaCell = mockCell(schemaRef, {
-        onPull: () => {
-          schemaPulled = true;
-        },
-      });
-      let targetSynced = false;
-      const targetCell = mockCell(targetRef, {
-        schemaCell,
-        patternIdentity,
-        onSync: () => {
-          targetSynced = true;
-        },
-      });
-      const slugCell = mockCell(slugRef, { raw: redirectRaw(targetRef) });
-      const pieces = {
-        getSpace: () => space,
-        getPieceCell: () => {
-          throw new Error(
-            "nested output-cell slug redirects should not load as pieces",
-          );
-        },
-      };
-      const processor = buildProcessor({
-        runtime: {
-          getCellFromEntityId: () => slugCell,
-          getCellFromLink: () => targetCell,
-        },
-        cc: pieces,
-        space,
-      });
-
-      const result = await processor.handlePieceGet({
-        type: RequestType.PieceGet,
-        pieceId: fid("slug-doc"),
-        space,
-        runIt: true,
-      });
-
-      expect(targetSynced).toBe(true);
-      expect(schemaPulled).toBe(true);
-      expect(result.piece.cell).toMatchObject(schemaRef);
+      expect(result.piece.cell.schema).toBeUndefined();
     });
 
     it("loads slug redirects to piece cells through the pieces controller", async () => {

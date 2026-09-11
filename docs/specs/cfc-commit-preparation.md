@@ -108,6 +108,15 @@ consults no `cid:` document on any of its three channels:
 - a trigger read naming one is skipped by `forEachFlowObservation`, on top of
   the same filter applied when trigger reads are recorded.
 
+References to these documents retain their own acquisition history. With
+`cfcFlowLabels: "persist"`, `recordLinkWritePolicyInput` records a CID reference
+at its receiving slot, including selection confidentiality and scope caps,
+without consulting target metadata. The compile cache acquires its links to
+[code documents](content-addressed-schemas.md#code-documents) through the
+Runtime after staging the bytes, so a public code reference has complete
+provenance. Legacy link labeling skips CID sources because it derives labels
+from target metadata instead.
+
 That exclusion is deliberate. A `cid:` document sits on an unverified write
 path that any principal who can write to the space can reach, so a label map
 stored on one is attacker-controlled, and joining it into a flow derivation

@@ -1,3 +1,4 @@
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { toFileUrl } from "@std/path";
@@ -1185,10 +1186,12 @@ describe("applyCommit() with an identity commit", () => {
 
   it("accepts an identical content-addressed re-set beside an identical set over a stale read", () => {
     const installSeq = installThenRewrite();
+    const content = { type: "string" };
+    const contentId = `cid:${taggedHashStringOf(content)}`;
     applyCommit(engine, {
       sessionId: "s:a",
       commit: commit(2, {
-        operations: [setOp("cid:fid1:closure", { type: "string" })],
+        operations: [setOp(contentId, content)],
       }),
     });
 
@@ -1200,7 +1203,7 @@ describe("applyCommit() with an identity commit", () => {
           pending: [],
         },
         operations: [
-          setOp("cid:fid1:closure", { type: "string" }),
+          setOp(contentId, content),
           setOp("of:doc", { n: 2 }),
         ],
       }),
@@ -1212,6 +1215,8 @@ describe("applyCommit() with an identity commit", () => {
 
   it("refuses a content-addressed set of new content over a stale read", () => {
     const installSeq = installThenRewrite();
+    const content = { type: "number" };
+    const contentId = `cid:${taggedHashStringOf(content)}`;
 
     expect(() =>
       applyCommit(engine, {
@@ -1222,7 +1227,7 @@ describe("applyCommit() with an identity commit", () => {
             pending: [],
           },
           operations: [
-            setOp("cid:fid1:fresh", { type: "number" }),
+            setOp(contentId, content),
             setOp("of:doc", { n: 2 }),
           ],
         }),

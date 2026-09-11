@@ -78,6 +78,7 @@ without constructing a value snapshot. It retains the handle's acquisition
 history but does not acquire unrelated history from other cells inspected in
 the same render transaction. Unavailable label evidence blocks rendering.
 
+
 `factoryFromPattern` stores the author's declared result schema without adding
 a blanket join of the pattern's argument schemas. Explicit result `ifc`
 declarations still classify their own paths. In particular,
@@ -86,12 +87,19 @@ ceiling may hide the entire card rather than just a confidential value inside
 it. A public card that displays confidential contents keeps the classification
 on those contents and lets the render boundary govern their observation.
 
-Lifts and handlers also apply argument-schema policy to their result schemas
-through `applyArgumentIfcToResult` in
-`packages/runner/src/builder/module.ts`, unless a builtin selects
-`propagateInputIfc: false` and resolves label views at runtime. Persistent flow
-labels separately record the transaction's measured dependencies as `derived`
-components; flow-observe mode diagnoses that join without persisting it.
+Lifts and handlers apply argument-schema policy to their result schemas through
+`applyArgumentIfcToResult` in `packages/runner/src/builder/module.ts`. Every
+module's output cells also carry the join of its input cells' schema labels
+through `connectInputAndOutputs` in `packages/runner/src/builder/node-utils.ts`,
+including LLM builtins whose results are written at runtime. This static join
+creates a `declared` floor at every flow-label setting. A later measured
+`derived` component can add restrictions but cannot narrow that floor. A label
+below the conservative join requires the flow-precision authority of §8.9.1;
+the graph construction step has no acting user under whom to evaluate it.
+
+Persistent flow labels separately record the transaction's measured dependencies
+as `derived` components; flow-observe mode diagnoses that join without
+persisting it.
 Forwarding a held private reference or consuming private data can contribute to
 that join even when the surrounding markup is literal. Public layout does not
 justify dropping those dependencies.
@@ -112,7 +120,9 @@ path rather than one raised by an unrelated root entry.
 
 `packages/runner/test/cfc-argument-ifc-propagation.test.ts` checks the builder
 schema behavior, and `packages/runner/test/pattern.test.ts` checks result-label
-placement. The `cfc-render-policy-demo` integration test requires public cards
+placement. `packages/runner/test/cfc-builtin-output-ifc.test.ts` checks the LLM
+builtins' static input join with flow persistence both enabled and disabled.
+The `cfc-render-policy-demo` integration test requires public cards
 and controls to remain visible while the protected content is blocked; under
 the render ceiling, the trusted surface's authored declassification cannot
 release that content.

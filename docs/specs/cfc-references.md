@@ -137,6 +137,12 @@ projection that cannot encode the acquisition's retained scope caps. Stripped,
 stale, or foreign tokens cannot recreate trusted acquisition through arbitrary
 CellRef operations.
 
+Resolving a slug for `piece:get` retains the stored reference's acquisition
+history. When the slug names a path inside a piece, the returned handle keeps
+the redirect's scope restrictions while adopting the schema along that path.
+The piece document's root sync covers this lookup without loading the returned
+value's descendants.
+
 Durable events carry an optional opaque `runtimeReferenceContext` outside the
 application payload. The sending Runtime captures authenticated acquisitions at
 exact payload slots, binds the context to the canonical payload hash and full

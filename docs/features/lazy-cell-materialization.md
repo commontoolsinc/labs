@@ -78,7 +78,9 @@ wrong. Six rules exist only to hold that:
 - **A union's own keywords ride onto the branch it narrows to.** Its
   `properties`, `required` and `default` apply to whichever branch matches, so a
   branch alone accepts values the schema rejects. Its `$defs` ride along too: a
-  branch is routinely a `$ref` into them.
+  branch is routinely a `$ref` into them. A branch with its own `$defs` keeps
+  that scope. Subscription-selector matching resolves a union branch in that
+  same scope, inheriting parent definitions only when the branch has none.
 - **A default comes from the schema's own top level**, never out of a branch of
   a union — a branch is reached by evaluating it against a value, and an absent
   value gets no branch evaluated.

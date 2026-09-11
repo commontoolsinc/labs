@@ -19,6 +19,7 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { cfcSchemaChildRoot } from "../cfc/schema-refs.ts";
 import {
   externalResolutionMissCount,
   onSchemaRegistryClear,
@@ -292,7 +293,8 @@ export class SelectorTracker<T = Result<Unit, Error>> {
 
   /**
    * The standardized hashes an anyOf item can match under: its plain form,
-   * its `$defs`-grafted form, and its `$ref`-resolved form. Computing these
+   * its inherited-`$defs` form, and its `$ref`-resolved form. Branch-local
+   * definitions keep their own scope. Computing these
    * builds fresh schema objects and re-hashes them, so cache the resulting
    * hash strings per (parent schema, item) identity when the parent is
    * deep-frozen (its items then are too).
@@ -328,7 +330,9 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     const missesBefore = externalResolutionMissCount();
     let current = SelectorTracker.getStandardSchema(item);
     hashes.push(hashSchema(current));
-    if (schema.$defs !== undefined) {
+    if (
+      schema.$defs !== undefined && cfcSchemaChildRoot(item, schema) === schema
+    ) {
       current = SelectorTracker.getStandardSchema(
         schemaWithProperties(current, { $defs: schema.$defs }),
       );
@@ -341,7 +345,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       // miss counter.
       const resolved = ContextualFlowControl.resolveSchemaRefs(
         current,
-        schema,
+        cfcSchemaChildRoot(current, schema),
       );
       if (resolved !== undefined) {
         hashes.push(

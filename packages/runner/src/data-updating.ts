@@ -255,6 +255,10 @@ const recordLinkWritePolicyInput = (
   }
   const carriedCfcLabelView = cloneCfcLabelView(cfcLabelView);
   if (tx.getCfcState().flowLabelsMode !== "persist") {
+    // Legacy link labeling consults target metadata, which CID documents do
+    // not carry. Precise references retain acquisition history independently
+    // of target metadata, including private selection of public code bytes.
+    if (source.id.startsWith("cid:")) return;
     let sourceRelevant = false;
     try {
       sourceRelevant = readStoredCfcMetadata(tx, source, {

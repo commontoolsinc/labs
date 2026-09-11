@@ -10,6 +10,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Collection indexes and keyed lookup](collection-index-contract.md) defines
+  proposed B1/B2 semantics and acceptance tests before implementation.
+
 - [Pattern-test read budgets](read-cost-budgets.md) specifies opt-in limits,
   execution coverage, failure diagnostics, and the A3 demonstration.
 

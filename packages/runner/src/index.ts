@@ -113,6 +113,7 @@ export {
   isCell,
   isReadableCell,
   isStream,
+  markCellDocumentSynced,
 } from "./cell.ts";
 export {
   getCellOrThrow,
