@@ -6,7 +6,6 @@ import {
 } from "@commonfabric/runner";
 import {
   cfcSchemaResolvedRoot,
-  hoistNestedCfcSchemaDefs,
   type IfcKey,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
@@ -598,14 +597,13 @@ export function assertPatternSchemasBackwardCompatible(
   previous: Pattern,
   candidate: Pattern,
 ): void {
-  // A schema an earlier runtime stored may declare `$defs` below its root,
-  // which resolves nothing today. The previous side is read with those
-  // lifted onto the root, so a replacement is judged against what the stored
-  // schema described rather than refused for the layout it was stored in.
-  const previousArgumentSchema = hoistNestedCfcSchemaDefs(
-    previous.argumentSchema,
-  );
-  const previousResultSchema = hoistNestedCfcSchemaDefs(previous.resultSchema);
+  // Both sides are validated as stored. A previous schema that fails here —
+  // one whose `#/$defs/<name>` refs only a `$defs` below the root could
+  // satisfy, for instance — refuses every replacement, and the override is
+  // the way past it: the stored schema is broken, and the update is taken
+  // knowing that.
+  const previousArgumentSchema = previous.argumentSchema;
+  const previousResultSchema = previous.resultSchema;
   const issues: string[] = [];
   for (
     const [label, schema] of [

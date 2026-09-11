@@ -1904,29 +1904,31 @@ describe("piece schema compatibility", () => {
       .toThrow(/candidate argument has an invalid schema/);
   });
 
-  it("judges a replacement against a stored schema laid out with a nested `$defs` as that layout described", () => {
-    // A stored schema laid out by an earlier runtime resolved the nested
-    // ref against the nested map. The previous side is read with that map
-    // lifted onto the root, so the candidate is held to the type the stored
-    // schema declared there.
+  it("refuses every replacement of a stored schema whose ref only a nested `$defs` could satisfy", () => {
+    // The stored root declares no `$defs`, so its `#/$defs/Value` names
+    // nothing whatever the nested map defines. The previous side is invalid
+    // as stored, and a replacement laid out properly is refused the same as
+    // any other; the override is the path past a stored schema known to be
+    // broken.
     const previous = argumentWithNestedValue({
       type: ["number", "string"],
     });
-    const narrowed = argumentWithRootValue({ type: "number" });
+    const same = argumentWithRootValue({ type: ["number", "string"] });
     const widened = argumentWithRootValue({
       type: ["number", "string", "undefined"],
     });
 
-    expect(() => assertPatternSchemasBackwardCompatible(previous, narrowed))
-      .toThrow(/argument\.nested\.value/);
+    expect(() => assertPatternSchemasBackwardCompatible(previous, same))
+      .toThrow(/previous argument has an invalid schema/);
     expect(() => assertPatternSchemasBackwardCompatible(previous, widened))
-      .not.toThrow();
+      .toThrow(/previous argument has an invalid schema/);
   });
 
-  it("reads a stored nested `$defs` as the layout it was stored in, and ignores a candidate's", () => {
-    // The stored side is read with its nested map lifted, so its nested ref
-    // named the string-or-number definition. The candidate's nested map is
-    // inert: its ref names the root's definition.
+  it("reads a stored nested `$defs` as inert beside the root's definition", () => {
+    // The stored root declares `Value` as a number, so the nested ref names
+    // that number and the nested map beside it says nothing. A candidate
+    // widening the root's definition is accepted; one replacing it with a
+    // type the number does not fit is refused.
     const rootDefinitions: Record<string, JSONSchema> = {
       Value: { type: "number" },
     };
@@ -1934,21 +1936,13 @@ describe("piece schema compatibility", () => {
       { type: ["number", "string"] },
       rootDefinitions,
     );
-    const narrowedByRoot = argumentWithNestedValue(
-      { type: ["number", "string"] },
-      rootDefinitions,
-    );
-    const widenedByRoot = argumentWithNestedValue(
-      { type: "number" },
-      { Value: { type: ["number", "string", "undefined"] } },
-    );
+    const widened = argumentWithRootValue({ type: ["number", "string"] });
+    const replaced = argumentWithRootValue({ type: "string" });
 
-    expect(() =>
-      assertPatternSchemasBackwardCompatible(previous, narrowedByRoot)
-    ).toThrow(/argument\.nested\.value/);
-    expect(() =>
-      assertPatternSchemasBackwardCompatible(previous, widenedByRoot)
-    ).not.toThrow();
+    expect(() => assertPatternSchemasBackwardCompatible(previous, widened))
+      .not.toThrow();
+    expect(() => assertPatternSchemasBackwardCompatible(previous, replaced))
+      .toThrow(/argument\.nested\.value/);
   });
 
   it("reads a referenced definition body's refs against the document's map, default included", () => {

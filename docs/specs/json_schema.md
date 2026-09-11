@@ -285,14 +285,6 @@ A member of a content-addressed cyclic group is read as a view whose refs
 into the group take the external `cid:<hash>#/$defs/<name>` form, so it
 resolves wherever a derived schema later embeds it.
 
-A schema an earlier runtime stored may declare `$defs` below its root, laid
-out so that a subtree's map resolved the refs under it. The piece update
-check reads such a stored schema with each nested map lifted onto the root
-under renamed names (`hoistNestedCfcSchemaDefs` in
-`packages/runner/src/cfc/schema-refs.ts`), so every ref resolves to the
-definition that layout described and a replacement whose schema is laid out
-properly can be judged against it. Nothing else reads a nested map.
-
 ### Handling of `never`
 
 The `never` type is commonly used in scenarios like rejecting invalid

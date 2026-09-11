@@ -354,7 +354,6 @@ export {
   cfcSchemaWithInheritedDefs,
   findCfcSchemaRefs,
   hoistCfcSchemaDefs,
-  hoistNestedCfcSchemaDefs,
   isEmbeddedCfcSchemaRef,
   pruneCfcSchemaDefinitions,
   resolveCfcSchemaRef,
