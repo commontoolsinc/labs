@@ -38,12 +38,14 @@ const localDefinitionName = (ref: string): string | undefined => {
     : undefined;
 };
 
-// `document` and each of its definitions, with every ref into the
-// document's `$defs` rewritten to the `<url>#/$defs/<name>` form, keyed the
-// way a ref names them. The `$id` stays off the entries: the URL the table
-// is keyed by is the document's identity, and a resolved body carrying an
-// `$id` would keep a schema built around it from decomposing.
-const externalized = (
+/**
+ * `document` and each of its definitions, with every ref into the
+ * document's `$defs` rewritten to the `<url>#/$defs/<name>` form, keyed the
+ * way a ref names them. The `$id` stays off the entries: the URL the table
+ * is keyed by is the document's identity, and a resolved body carrying an
+ * `$id` would keep a schema built around it from decomposing.
+ */
+export const externalized = (
   url: string,
   document: JSONSchema,
 ): Record<string, JSONSchema> => {

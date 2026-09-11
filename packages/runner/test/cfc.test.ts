@@ -22,6 +22,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import type { JSONSchemaObj } from "@commonfabric/api";
 import { deepFreeze } from "@commonfabric/data-model";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 
 import type { JSONSchema } from "../src/builder/types.ts";
 import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
@@ -33,6 +34,7 @@ import {
   pruneCfcSchemaDefinitions,
   resolveCfcSchemaRef,
   resolveCfcSchemaRefs,
+  resolveExternalCfcSchemaRefAsDocument,
   selectReferencedCfcSchemaDefs,
 } from "../src/cfc/schema-refs.ts";
 import { validateSchemaValue } from "../src/cfc/schema-sanitization.ts";
@@ -785,6 +787,35 @@ describe("CFC schema reference discovery", () => {
     );
   });
 
+  it("removes a `$defs` below a root definition it keeps", () => {
+    const schema: JSONSchema = {
+      $ref: "#/$defs/Outer",
+      $defs: {
+        Outer: {
+          type: "object",
+          properties: {
+            inner: {
+              $ref: "#/$defs/Inner",
+              $defs: { Stale: { type: "boolean" } },
+            },
+          },
+        },
+        Inner: { type: "string" },
+      },
+    };
+
+    expect(pruneCfcSchemaDefinitions(schema)).toEqual({
+      $ref: "#/$defs/Outer",
+      $defs: {
+        Outer: {
+          type: "object",
+          properties: { inner: { $ref: "#/$defs/Inner" } },
+        },
+        Inner: { type: "string" },
+      },
+    });
+  });
+
   it("removes a `$defs` below a root that declares none while pruning", () => {
     const schema: JSONSchema = {
       type: "object",
@@ -1021,6 +1052,55 @@ describe("resolveCfcSchemaRef() on a cyclic-group member", () => {
   });
 });
 
+describe("resolveCfcSchemaRef() on an external ref", () => {
+  it("drops a `$defs` the member itself declares from its view", () => {
+    // A member's own map is inert in the group document, and the view's refs
+    // name the group externally, so nothing in the view can reach it.
+    const release = acquireSchemaRegistryLease();
+    try {
+      const group = {
+        $defs: {
+          Node: {
+            type: "object",
+            properties: { next: { $ref: "#/$defs/Node" } },
+            $defs: { Stale: { type: "null" } },
+          },
+        },
+      } as unknown as JSONSchema;
+      const hash = internSchemaAsTaggedHashString(group);
+      registerSchemaDocument(hash, group);
+      const memberRef = formatExternalSchemaRef(hash, "Node");
+      expect(resolveCfcSchemaRef({}, memberRef)).toEqual({
+        type: "object",
+        properties: { next: { $ref: memberRef } },
+      });
+    } finally {
+      release();
+    }
+  });
+
+  it("resolves nothing for a fragment ref into an unregistered document", () => {
+    const release = acquireSchemaRegistryLease();
+    try {
+      const hash = internSchemaAsTaggedHashString({ type: "null" });
+      expect(resolveCfcSchemaRef({}, formatExternalSchemaRef(hash, "Node")))
+        .toBeUndefined();
+      expect(
+        resolveExternalCfcSchemaRefAsDocument(
+          formatExternalSchemaRef(hash, "Node"),
+        ),
+      ).toBeUndefined();
+    } finally {
+      release();
+    }
+  });
+
+  it("reads no document from a ref that is not external", () => {
+    expect(resolveExternalCfcSchemaRefAsDocument("#/$defs/Node"))
+      .toBeUndefined();
+  });
+});
+
 describe("hoistCfcSchemaDefs()", () => {
   it("merges the maps of fragments that carry the same definitions", () => {
     const leaf = { type: "string" } as const;
@@ -1116,6 +1196,32 @@ describe("hoistNestedCfcSchemaDefs()", () => {
     expect(hoistNestedCfcSchemaDefs(schema)).toEqual({
       type: "object",
       properties: {
+        nested: { $ref: "#/$defs/__cfc_legacy_scope_0_Inner" },
+      },
+      $defs: { __cfc_legacy_scope_0_Inner: { type: "string" } },
+    });
+  });
+
+  it("returns a boolean schema as it is", () => {
+    expect(hoistNestedCfcSchemaDefs(true)).toBe(true);
+  });
+
+  it("carries a boolean subschema through the lift", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        anything: true,
+        nested: {
+          $ref: "#/$defs/Inner",
+          $defs: { Inner: { type: "string" } },
+        },
+      },
+    };
+
+    expect(hoistNestedCfcSchemaDefs(schema)).toEqual({
+      type: "object",
+      properties: {
+        anything: true,
         nested: { $ref: "#/$defs/__cfc_legacy_scope_0_Inner" },
       },
       $defs: { __cfc_legacy_scope_0_Inner: { type: "string" } },
