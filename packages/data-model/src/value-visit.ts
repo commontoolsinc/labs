@@ -24,7 +24,6 @@ import {
   FabricPrimitive,
   FabricValue,
 } from "./interface.ts";
-import { isFabricArray, isFabricPlainObject } from "./type-check.ts";
 import {
   isValidFabricValue,
   isValidFabricValueLayer,
@@ -619,7 +618,10 @@ type VisitSubtypeOfForm<DomainExtra> = {
  */
 type RecurseOfForm = {
   type: "recurseOf";
-  containerTag: "Array" | "FabricInstance" | "Object";
+  containerTag:
+    | typeof VALUE_TAGS.Array
+    | typeof VALUE_TAGS.FabricInstance
+    | typeof VALUE_TAGS.Object;
   container: FabricContainerValue;
   doKeys: boolean;
   doValues: boolean;
@@ -721,7 +723,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       }
 
       case "recurseOf": {
-        return isFabricArray(result.container)
+        return (result.containerTag === VALUE_TAGS.Array)
           ? this.#iterateArray(result)
           : this.#iterateMap(result);
       }
@@ -971,7 +973,10 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * `recurse` result.
    */
   #iterateMap(result: RecurseOfForm): BaselineVisitResult<ResultType> {
-    const { container, doKeys, doValues } = result;
+    const { container: looseTypedContainer, containerTag, doKeys, doValues } =
+      result;
+    const container =
+      looseTypedContainer as (FabricInstance | FabricPlainObject);
     const vis = this.#visitor;
 
     if (!(doKeys || doValues)) {
@@ -981,7 +986,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       return undefined;
     }
 
-    const mappings = isFabricPlainObject(container)
+    const mappings = (containerTag === VALUE_TAGS.Object)
       ? Object.entries(container)
       : (() => {
         // TODO(danfuzz): This is where we finally need to sort out
@@ -1032,7 +1037,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   #adjustRecurseForm(
     result: RecurseForm,
     finalValue: DomainFor<DomainExtra>,
-    finalValueTagIfKnown?: FabricValueTag | null | undefined,
+    finalValueTagIfKnown?: FabricValueTag | null,
   ): RecurseOfForm {
     const tag = (finalValueTagIfKnown === undefined)
       ? this.#tagFromValueElseNull(finalValue)
