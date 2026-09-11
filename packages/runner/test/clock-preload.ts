@@ -36,6 +36,9 @@ installFakeClock({
     // they arm — a semantics change, not a speedup. The test waits on
     // watermark/subscription edges with bounded timeouts.
     "executor-serving-loop",
+    // The engine read-through suite drives the same live ExecutorHost
+    // under the same wall-clock policies.
+    "engine-read-through",
     // The compiled-child suite runs the same live serving host. Its lease
     // renew interval must advance in real time while compiler work settles.
     "executor-compile-and-run",
