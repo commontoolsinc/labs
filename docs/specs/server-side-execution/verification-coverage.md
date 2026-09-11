@@ -2638,9 +2638,23 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   result, bounded retry ownership, and OFF/served queue completion parity.
   The shared-result binding checks observe the raw publication callback;
   the host suite separately proves durable user/session result isolation.
-  These are no-network direct-provider controls; they do not establish tool-loop,
-  `llmDialog`, or other effect-family supersession. Those remain investigation
-  obligations rather than claims that every caller has this failure.
+  These direct-provider controls do not establish shared tool-loop or other
+  effect-family supersession.
+
+  `executor-llm-dialog.test.ts` separately covers served dialog turns in space,
+  user, and session instances, including two users and two sessions, isolated
+  cancellation/replacement, stale replies, model errors, and a `presentResult`
+  roundtrip whose next model request includes the committed tool messages.
+  `llm-dialog-served.test.ts` covers initial refusal, refusal after a scope
+  change, physical binding ownership across actors, distinct bindings sharing
+  a result, withdrawn cancellation/publication, scope return with execution on
+  and off, accepted outbox ownership, release rejection, teardown failure
+  isolation, and error-write lifetime. The raw actor cases assert publication
+  callbacks; the host suite establishes durable actor isolation. Dialog
+  cancellation waits for commit and wave acceptance. Those controls establish
+  turn lifecycle; they do not establish actor isolation for every management
+  tool or the shared direct-LLM tool loop. The remaining surfaces are
+  investigation obligations, not claims that every caller has the same failure.
 - OW28-instance-family — PARTIALLY CLOSED. Served `compileAndRun`, the
   shared `fetch.ts` builtins (`fetchText`, `fetchBinary`, `fetchJson`, and
   `fetchJsonUnchecked`), `llm`, `generateText`, and `generateObject` pass the
@@ -2669,9 +2683,17 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   concurrent responses landing in distinct user and session instances, with
   no service-instance result.
 
+  `llmDialog` captures the issuing handler identity for postcommit transcript
+  reads, claim guards, and completion writes. Its active turns are partitioned
+  by resolved result instance, with finite cell bundles per symbolic scope;
+  completed turn records retire. `executor-llm-dialog.test.ts` proves one- and
+  two-demander turns and absence of a service-instance result. It does not
+  exercise management-tool read partitioning or the integrity gate's acting
+  principal.
+
   Remaining investigation obligations: `fetchProgram`, tool-loop LLM requests,
-  `llmDialog`, non-clearance SQLite instance keys, and the provider READ
-  partition. `fetchProgram` can retire an effect with its requesting instance's
+  dialog management tools, non-clearance SQLite instance keys, and the provider
+  READ partition. `fetchProgram` can retire an effect with its requesting instance's
   cache still pending; its user/session completion path remains open. The
   direct LLM response controls do not discharge the provider/tool READ
   partition. OW53's SQLite acting-identity, owner, and clearance fixes remain
@@ -9122,18 +9144,16 @@ supply; OW29/OW32/OW34 closed):
     close below — run 4/4 under the same gate topology); BOTH ON
     skips LIFTED (this row's minted trigger). Residuals, recorded
     not closed: llm-dialog's direct provider read
-    (`llm-dialog.ts:2426` — same family, named untouched by OW34 §7
-    and by this close; no ON surface pins it yet); NOTE-6 below
+    (`executeToolCalls` in `llm-dialog.ts` — same family, named untouched by
+    OW34 §7 and by this close; no ON surface pins it yet); NOTE-6 below
     (delegated read sessions' demand under the process DID —
-    label-inert, unchanged); the remaining effect kinds' UNSTAMPED
-    writebacks — `fetchProgram`, the `generate*` family, `llm`, and llm-dialog (which
-    additionally marks completions at 4 sites with bare
-    `llmDialog:`-prefixed keys never widened by `effectTargetKey` —
-    a separate pre-existing quirk) — whose hash-guard reads still
-    resolve the service's instances (the OW17 stage-A flag's
-    remaining scope after the SQLite and shared fetch fixes; the
-    space-server.ts `#commitEffectCompletion` comment names the
-    split); the acting≠demanded split: every context the stamper
+    label-inert, unchanged); non-SQLite effect callers not covered by the
+    OW28 family controls still need explicit identity-bound guard and writeback
+    evidence. Those controls cover direct LLM and dialog turn-completion
+    reads; they do not cover every tool operation. Dialog management tools
+    still use bare lifecycle completion keys for pin/unpin, and their
+    asynchronous reads require separate actor-partition evidence. The
+    acting≠demanded split: every context the stamper
     produces derives `acting` FROM the demanded pair where both
     exist, so a run whose two halves disagree is an identity-model
     question no ruling has decided — `sqliteRunActingPrincipal`

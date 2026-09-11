@@ -40,6 +40,7 @@ installFakeClock({
     // The engine read-through suite drives the same live ExecutorHost
     // under the same wall-clock policies.
     "engine-read-through",
+    "executor-llm-dialog",
     // The compiled-child suite runs the same live serving host. Its lease
     // renew interval must advance in real time while compiler work settles.
     "executor-compile-and-run",

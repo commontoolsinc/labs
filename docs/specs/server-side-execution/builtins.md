@@ -112,6 +112,25 @@ request is queued; `llm` publishes only its latest request's successful result.
 Queue completion writes remain bound to the issuing identity and read the live
 input label basis. This queue behavior applies with server execution on or off.
 
+Served `llmDialog` captures the issuing handler's identity for transcript reads,
+claim checks, and turn-completion writes. Each asynchronous read phase uses a
+fresh transaction for that identity. Cell handles are shared per symbolic
+scope, while active turns are tracked per resolved result instance and retire
+when their model, tool, and error-write work settles. Stream markers are
+initialized independently in each instance. A cancellation takes effect only
+after its transaction and wave accept; withdrawing it leaves the accepted turn
+running. Refusal restores a binding while its attempt owns that physical
+publication coordinate; an accepted selection of another target supersedes it,
+while a withdrawn publication does not. Refusal does not append an assistant
+response for an uncommitted user message. Accepted claims retain local ownership
+before outbox dispatch, including across the remote-heartbeat age. Graph stop
+aborts active turns and clears matching accepted claims; later acceptance or
+dispatch cannot restart the stopped dialog. A provider release rejection clears
+its undispatched claim without replacing an active turn. These lifecycle
+guarantees do not establish actor partitioning for management-tool reads or the
+tool input integrity gate; those remain tracked under verification-coverage.md
+OW28 and OW53.
+
 `sqlite*` row clearance — RULED 2026-08-02: **per-reader
 materialization**, today's shape. The reader principal is part of
 the memo key, and each (query, reader) pair materializes its own

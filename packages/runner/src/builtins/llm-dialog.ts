@@ -24,6 +24,10 @@ import {
   LLMRequest,
   LLMToolCall,
 } from "@commonfabric/llm";
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   isBoolean,
@@ -74,6 +78,7 @@ import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { settleAbandonedRequest } from "./abandoned-request.ts";
 import { markEffectCompletion } from "../executor/effect-completion.ts";
+import { requireWaveAcceptance, waveSettlementOf } from "../executor/wave.ts";
 import { createTrustResolver } from "../cfc/trust.ts";
 import {
   CFC_ENFORCING_STRICTNESS,
@@ -932,7 +937,33 @@ type ToolCatalog = {
 
 type DialogMessageObservationMap = Record<string, unknown[]>;
 
+/** Stable cells shared by every actor of one symbolic output scope. */
+type DialogCells = {
+  /** Pattern-visible dialog state. */
+  result: Cell<Schema<typeof resultSchema>>;
+
+  /** Durable turn claim and observation history. */
+  internal: Cell<Schema<typeof internalSchema>>;
+
+  /** Links pinned during dialog turns. */
+  pinnedCells: Cell<PinnedCell[]>;
+};
+
+/** One accepted turn retained through dispatch and all resulting work. */
+type DialogTurn = DialogCells & {
+  /** Durable claim this turn may complete. */
+  requestId: string;
+
+  /** Cancellation for this turn's model and tool operations. */
+  abortController: AbortController;
+
+  /** Actor whose scoped cells this turn reads and writes. */
+  identity?: ScopeKeyIdentity;
+};
+
 type DialogRequestSnapshot = {
+  /** Actor captured before the turn leaves its accepted handler transaction. */
+  scopeKeyIdentity?: ScopeKeyIdentity;
   llmParams: LLMRequest;
   toolCatalog: ToolCatalog;
   userResultSchema: JSONSchema | undefined;
@@ -1595,6 +1626,10 @@ function materializeDialogRequestSnapshot(
   };
 
   return {
+    scopeKeyIdentity:
+      runtime.servingPosture && runtime.experimental.serverExecution
+        ? tx.tx.scopeKeyIdentity ?? runtime.scopeKeyIdentity
+        : undefined,
     // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
     // `.get()`-path today, but will in the not-too-distant future; at that point
     // this JSON round-trip silently loses any `FabricPrimitive`/`FabricInstance`
@@ -2579,9 +2614,11 @@ async function safelyPerformUpdate(
   pending: Cell<boolean>,
   internal: Cell<Schema<typeof internalSchema>>,
   requestId: string,
+  identity: ScopeKeyIdentity | undefined,
   action: (tx: IExtendedStorageTransaction) => void,
 ) {
   const { ok } = await runtime.editWithRetry((tx) => {
+    if (identity) tx.tx.scopeKeyIdentity = identity;
     if (
       pending.withTx(tx).get() &&
       internal.withTx(tx).key("requestId").get() === requestId
@@ -3304,6 +3341,9 @@ export function llmDialog(
   cause: any,
   parentCell: Cell<any>,
   runtime: Runtime, // Runtime will be injected by the registration function
+  _outputBinding?: NormalizedFullLink,
+  _awaitSync?: unknown,
+  publicationBinding?: NormalizedFullLink,
 ): RawBuiltinResult {
   const inputs = inputsCell.asSchema(LLMParamsSchema);
 
@@ -3317,67 +3357,114 @@ export function llmDialog(
     );
   };
 
-  let cellsInitialized = false;
-  let result: Cell<Schema<typeof resultSchema>>;
-  let internal: Cell<Schema<typeof internalSchema>>;
-  let pinnedCells: Cell<PinnedCell[]>;
-  let cellScope: CellScope | undefined;
-  let requestId: string | undefined = undefined;
-  let abortController: AbortController | undefined = undefined;
-  // The request id of the turn this replica is running, if any. Set when that
-  // turn's promise is registered with `trackAsyncWork` and cleared when the
-  // promise settles, so it spans the whole conversation the turn drives,
-  // including its tool calls. A turn running here needs no failure detection:
-  // this replica knows it is alive.
-  let localTurnRequestId: string | undefined = undefined;
+  const cellsByScope = new Map<CellScope, DialogCells>();
+  const activeTurns = new Map<string, DialogTurn>();
+  const served = runtime.servingPosture && runtime.experimental.serverExecution;
+  const identityFor = (tx: IExtendedStorageTransaction) =>
+    served ? tx.tx.scopeKeyIdentity ?? runtime.scopeKeyIdentity : undefined;
+  const turnKey = (scope: CellScope, tx: IExtendedStorageTransaction) =>
+    resolveScopeKey(scope, identityFor(tx) ?? runtime.scopeKeyIdentity);
 
-  // This is called when the pattern containing this node is being stopped.
-  addCancel(() => {
-    // Abort the request if it's still pending.
-    abortController?.abort("Pattern stopped");
-
-    // The cells below are assigned during the first run of this node, and a
-    // pattern can be stopped before that happens -- notably when startup
-    // fails, since the failure path cancels what it already registered. There
-    // is nothing of ours to wind down in that case, and reaching for the cells
-    // would throw from inside cleanup, replacing whatever error caused the
-    // stop.
-    if (!cellsInitialized) return;
-
-    const tx = runtime.edit();
-    // Teardown tx on piece stop — no scheduler run stamps it;
-    // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
-    // serving runtime releases the claim instead of refusing the
-    // unstamped seal. No-op off the serving posture.
-    runtime.stampServerRun(tx, {
-      actionId: `llmDialog/teardown/${parentCell.sourceURI}`,
-      kind: "bookkeeping",
+  const acceptedTurns = new Map<string, DialogTurn>();
+  const publications = new Map<string, {
+    binding: string;
+    scope: CellScope;
+    sequence: number;
+  }>();
+  let publicationSequence = 0;
+  let stopped = false;
+  const bindingKey = (tx: IExtendedStorageTransaction, scope: CellScope) =>
+    publicationBinding
+      ? resolveScopeKey(
+        publicationBinding.scope ?? "space",
+        identityFor(tx) ?? runtime.scopeKeyIdentity,
+      )
+      : turnKey(scope, tx);
+  const onAcceptance = (
+    tx: IExtendedStorageTransaction,
+    accepted: () => void,
+  ) => {
+    requireWaveAcceptance(tx);
+    tx.addCommitCallback((committed, outcome) => {
+      if (outcome.error) return;
+      const settlement = waveSettlementOf(committed) ?? waveSettlementOf(tx);
+      if (settlement) {
+        settlement.then((verdict) => {
+          if (!verdict.error) accepted();
+        });
+      } else accepted();
     });
-
-    // If the pending request is ours, set pending to false and clear the requestId.
-    if (internal.withTx(tx).key("requestId").get() === requestId) {
-      result.withTx(tx).key("pending").set(false);
-      internal.withTx(tx).key("requestId").set("");
+  };
+  const recordPublication = (
+    tx: IExtendedStorageTransaction,
+    scope: CellScope,
+    binding: string,
+    sequence: number,
+  ) =>
+    onAcceptance(tx, () => {
+      if (!publicationBinding) return;
+      for (const [key, previous] of publications) {
+        if (
+          previous.binding === binding && previous.scope !== scope &&
+          previous.sequence < sequence
+        ) {
+          publications.delete(key);
+        }
+      }
+    });
+  const clearClaim = (turn: DialogTurn) => {
+    let tx: IExtendedStorageTransaction | undefined;
+    try {
+      tx = runtime.edit();
+      if (turn.identity) tx.tx.scopeKeyIdentity = turn.identity;
+      runtime.stampServerRun(tx, {
+        actionId: `llmDialog/claim-release/${parentCell.sourceURI}`,
+        kind: "bookkeeping",
+        scopeKeyIdentity: turn.identity,
+      });
+      if (turn.internal.withTx(tx).key("requestId").get() === turn.requestId) {
+        turn.result.withTx(tx).key("pending").set(false);
+        turn.internal.withTx(tx).key("requestId").set("");
+      }
+      runtime.prepareTxForCommit(tx);
+      return tx.commit().then((outcome) => {
+        if (outcome.error) {
+          logger.warn(
+            "dialog-claim-cleanup-failed",
+            () => [turn.requestId, outcome.error],
+          );
+        }
+      });
+    } catch (error) {
+      tx?.abort(error);
+      logger.warn("dialog-claim-cleanup-failed", () => [turn.requestId, error]);
+      return Promise.resolve();
     }
+  };
 
-    // Since we're aborting, don't retry. If the above fails, it's because the
-    // requestId was already changing under us.
-    runtime.prepareTxForCommit(tx);
-    tx.commit();
+  addCancel(() => {
+    stopped = true;
+    const turns = new Set([...acceptedTurns.values(), ...activeTurns.values()]);
+    acceptedTurns.clear();
+    activeTurns.clear();
+    publications.clear();
+    for (const turn of turns) turn.abortController.abort("Pattern stopped");
+    runtime.trackAsyncWork(Promise.all([...turns].map(clearClaim)), parentCell);
   });
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
+    if (stopped) return;
     tx.resetNarrowestReadScope();
     inputs.withTx(tx).get();
     const outputScope = tx.getNarrowestReadScope();
+    let cells = cellsByScope.get(outputScope);
 
-    // Setup cells on first run.
-    if (!cellsInitialized || cellScope !== outputScope) {
+    if (!cells) {
       // Create result cell. The predictable cause means that it'll map to
       // previously existing results. Note that we might not yet have it loaded
       // and that this function will be called again once the data is loaded
       // (but this if branch will be skipped then).
-      result = ownedCell(
+      const result: DialogCells["result"] = ownedCell(
         runtime,
         tx,
         parentCell,
@@ -3390,7 +3477,7 @@ export function llmDialog(
       // Create another cell to store the internal state. This isn't returned to
       // the caller. But again, the predictable cause means all instances tied
       // to the same input cells will coordinate via the same cell.
-      internal = ownedCell(
+      const internal: DialogCells["internal"] = ownedCell(
         runtime,
         tx,
         parentCell,
@@ -3412,7 +3499,7 @@ export function llmDialog(
           required: ["path", "name"],
         },
       } as const;
-      pinnedCells = ownedCell(
+      const pinnedCells: DialogCells["pinnedCells"] = ownedCell(
         runtime,
         tx,
         parentCell,
@@ -3424,41 +3511,27 @@ export function llmDialog(
 
       const pending = result.key("pending");
 
-      // Write the stream markers and initialize pinnedCells as empty array.
-      // This write might fail (since the original data wasn't loaded yet), but
-      // that's ok, since in that case another instance already wrote these.
-      //
-      // We are carrying the existing pending state over, in case the result
-      // cell was already loaded. We don't want to overwrite it.
-      // Stream markers ({$stream: true}) don't match the schema type, so use
-      // setRawUntyped to bypass T.
-      result.setRawUntyped({
-        ...result.getRaw(),
-        addMessage: { $stream: true },
-        cancelGeneration: { $stream: true },
-        pinCell: { $stream: true },
-        unpinAllCells: { $stream: true },
-        pinnedCells: [],
-      } as FabricValue);
-
       // Declare `addMessage` handler and register
       createHandler<BuiltInLLMMessage>(
         // Cast is necessary as .key doesn't yet correctly handle Stream<>
         result.key("addMessage") as unknown as Stream<BuiltInLLMMessage>,
         (tx: IExtendedStorageTransaction, event: BuiltInLLMMessage) => {
+          if (stopped) return;
+          const key = turnKey(outputScope, tx);
           if (pending.withTx(tx).get()) {
             // A message added while a turn is running is dropped. The add
             // message UI should either be disabled or change the send button
             // to be a stop button.
             const activeRequestId = internal.withTx(tx).key("requestId").get();
             if (
-              localTurnRequestId !== undefined &&
-              localTurnRequestId === activeRequestId
+              activeRequestId !== undefined &&
+              (activeTurns.get(key)?.requestId === activeRequestId ||
+                acceptedTurns.has(activeRequestId))
             ) {
-              // The running turn is this replica's own, so its liveness is not
-              // in question and the heartbeat is not consulted. A turn can run
-              // longer than the heartbeat's staleness bound without a durable
-              // write, and the heartbeat then reads stale for a turn that is
+              // An accepted turn belongs to this replica while awaiting
+              // dispatch or running, so the heartbeat is not consulted. A turn
+              // can run longer than the heartbeat's staleness bound without a
+              // durable write, and the heartbeat reads stale for a turn that is
               // plainly alive. The writes bracket a round of tool calls rather
               // than falling between them, and nothing bounds a tool call, so a
               // single one that runs long enough is already such a gap.
@@ -3539,12 +3612,7 @@ export function llmDialog(
           );
           messagesForPush.withTx(tx).push(messageCell);
 
-          // Set up new request (abort existing ones just in case) by allocating
-          // a new request Id and setting up a new abort controller.
-          abortController?.abort("New request started");
-          abortController = undefined;
           const nextRequestId = crypto.randomUUID();
-          requestId = nextRequestId;
           internal.withTx(tx).set({
             requestId: nextRequestId,
             lastActivity: Date.now(),
@@ -3564,6 +3632,50 @@ export function llmDialog(
             resultSchema: capturedRequest.userResultSchema,
           });
 
+          const identity = capturedRequest.scopeKeyIdentity;
+          const turn: DialogTurn = {
+            result,
+            internal,
+            pinnedCells,
+            identity,
+            requestId: nextRequestId,
+            abortController: new AbortController(),
+          };
+          const publication = {
+            binding: bindingKey(tx, outputScope),
+            scope: outputScope,
+            sequence: ++publicationSequence,
+          };
+          const publicationKey = `${outputScope}/${publication.binding}`;
+          publications.set(publicationKey, publication);
+          const ownsPublication = () =>
+            !stopped && publications.get(publicationKey) === publication;
+          const finishPublication = () => {
+            if (publications.get(publicationKey) === publication) {
+              publications.delete(publicationKey);
+            }
+          };
+          let finished = false;
+          const finish = () => {
+            finished = true;
+            if (acceptedTurns.get(nextRequestId) === turn) {
+              acceptedTurns.delete(nextRequestId);
+            }
+            finishPublication();
+          };
+          onAcceptance(tx, () => {
+            finishPublication();
+            if (finished) return;
+            if (stopped) {
+              runtime.trackAsyncWork(
+                clearClaim(turn).finally(finish),
+                parentCell,
+              );
+            } else if (activeTurns.get(key) !== turn) {
+              acceptedTurns.set(nextRequestId, turn);
+            }
+          });
+
           enqueueSinkRequestPostCommitEffect(
             tx,
             "llmDialog",
@@ -3571,18 +3683,30 @@ export function llmDialog(
             requestSnapshot,
             "llmDialog-start",
             () => {
-              if (requestId !== nextRequestId) {
+              const read = runtime.readTx();
+              if (identity) read.tx.scopeKeyIdentity = identity;
+              if (stopped) {
+                runtime.trackAsyncWork(
+                  clearClaim(turn).finally(finish),
+                  parentCell,
+                );
+                return;
+              }
+              if (
+                !pending.withTx(read).get() ||
+                internal.withTx(read).key("requestId").get() !== nextRequestId
+              ) {
+                finish();
                 return;
               }
 
-              abortController = new AbortController();
-              // Set alongside starting the turn and cleared when the turn's
-              // promise settles, so the flag's lifetime is exactly the turn's.
-              localTurnRequestId = nextRequestId;
-              // Track the dialog turn (LLM call + writeback) as async builtin
-              // work owned by this run, so `runtime.settled()` and
-              // `runtime.settledFor(parentCell)` both wait for the result;
-              // `idle()` does not, so the handler never blocks on the LLM call.
+              activeTurns.get(key)?.abortController.abort(
+                "New request started",
+              );
+              if (acceptedTurns.get(nextRequestId) === turn) {
+                acceptedTurns.delete(nextRequestId);
+              }
+              activeTurns.set(key, turn);
               runtime.trackAsyncWork(
                 startRequest(
                   runtime,
@@ -3594,21 +3718,26 @@ export function llmDialog(
                   pinnedCells,
                   result,
                   nextRequestId,
-                  abortController.signal,
+                  turn.abortController.signal,
                   capturedRequest,
                 ).finally(() => {
-                  // A superseded turn keeps running until its abort reaches
-                  // every await inside it, so it can settle after a newer turn
-                  // has claimed the flag. Only the turn that still holds the
-                  // flag clears it.
-                  if (localTurnRequestId === nextRequestId) {
-                    localTurnRequestId = undefined;
-                  }
+                  if (activeTurns.get(key) === turn) activeTurns.delete(key);
+                  finish();
                 }),
                 parentCell,
               );
             },
             {
+              onReleaseRejected: () => {
+                if (activeTurns.get(key)?.requestId === nextRequestId) {
+                  finishPublication();
+                  return;
+                }
+                runtime.trackAsyncWork(
+                  clearClaim(turn).finally(finish),
+                  parentCell,
+                );
+              },
               onRejected: () => {
                 // The turn is not in the conversation: the user's message, the
                 // pending flag and the request id all rode the transaction
@@ -3624,9 +3753,28 @@ export function llmDialog(
                     "llmDialog",
                     `llmDialog:${nextRequestId}`,
                     (settleTx) => {
-                      // The announcement rode the abandoned transaction, so it
-                      // is made again whoever owns the turn now.
-                      sendResult(settleTx, result);
+                      if (capturedRequest.scopeKeyIdentity) {
+                        settleTx.tx.scopeKeyIdentity =
+                          capturedRequest.scopeKeyIdentity;
+                      }
+                      // An accepted publication owns the physical binding.
+                      // Legacy callers without that coordinate can only check
+                      // whether their input scope still selects this target.
+                      settleTx.resetNarrowestReadScope();
+                      inputs.withTx(settleTx).get();
+                      if (
+                        ownsPublication() &&
+                        (publicationBinding !== undefined ||
+                          settleTx.getNarrowestReadScope() === outputScope)
+                      ) {
+                        sendResult(settleTx, result);
+                        recordPublication(
+                          settleTx,
+                          outputScope,
+                          publication.binding,
+                          publication.sequence,
+                        );
+                      }
                       // Decided here rather than when this callback ran: a
                       // newer turn can start in between, and taking its
                       // pending flag down would report it as finished.
@@ -3637,7 +3785,7 @@ export function llmDialog(
                       }
                       pending.withTx(settleTx).set(false);
                     },
-                  ),
+                  ).finally(finish),
                   parentCell,
                 );
               },
@@ -3722,21 +3870,29 @@ export function llmDialog(
         },
       );
 
-      cellsInitialized = true;
-      cellScope = outputScope;
+      cells = { result, internal, pinnedCells };
+      cellsByScope.set(outputScope, cells);
     }
+    const { result, internal } = cells;
+
+    // Stream markers belong to every resolved instance; an initialized
+    // symbolic handle does not establish another actor's stored state.
+    result.withTx(tx).setRawUntyped({
+      ...result.withTx(tx).getRaw(),
+      addMessage: { $stream: true },
+      cancelGeneration: { $stream: true },
+      pinCell: { $stream: true },
+      unpinAllCells: { $stream: true },
+      pinnedCells: result.withTx(tx).key("pinnedCells").get() ?? [],
+    } as FabricValue);
 
     sendResult(tx, result);
-
-    // This will remain the reactive part. It will be called whenever one of the
-
-    // read cells change. This is why it's important to do the read before the
-    // "&& requestId" part: Otherwise, we'd run this once without requestId and
-    // so read no cells and then this wouldn't be called again.
-    //
-    // Note: If this were sandboxed code, this part would naturally read this
-    // cell as it's the only way to get to requestId, here we are passing it
-    // around on the side.
+    recordPublication(
+      tx,
+      outputScope,
+      bindingKey(tx, outputScope),
+      ++publicationSequence,
+    );
 
     // Update flattened tools whenever tools change
     // `flattenedTools` is for now just used in the UI, and so we only need
@@ -3750,14 +3906,29 @@ export function llmDialog(
     // Runtime already makes this a no-op if there are no changes
     result.withTx(tx).key("flattenedTools").set(flattened);
 
+    const active = activeTurns.get(turnKey(outputScope, tx));
     if (
+      active &&
       (!result.withTx(tx).key("pending").get() ||
-        requestId !== internal.withTx(tx).key("requestId").get()) && requestId
+        active.requestId !== internal.withTx(tx).key("requestId").get())
     ) {
-      // We have a pending request and either something set pending to false or
-      // another request started, so we have to abort this one.
-      abortController?.abort("Another request started");
-      requestId = undefined;
+      const key = turnKey(outputScope, tx);
+      const cancelAcceptedTurn = () => {
+        if (activeTurns.get(key) === active) {
+          active.abortController.abort("Another request started");
+        }
+      };
+      // A sealed cancellation can still be withdrawn with its wave.
+      requireWaveAcceptance(tx);
+      tx.addCommitCallback((committed, outcome) => {
+        if (outcome.error) return;
+        const settlement = waveSettlementOf(committed) ?? waveSettlementOf(tx);
+        if (settlement) {
+          settlement.then((verdict) => {
+            if (!verdict.error) cancelAcceptedTurn();
+          });
+        } else cancelAcceptedTurn();
+      });
     }
   };
 
@@ -3777,9 +3948,25 @@ async function startRequest(
   abortSignal: AbortSignal,
   capturedRequest?: DialogRequestSnapshot,
 ) {
-  // Pull input dependencies to ensure they're computed in pull mode
-  await inputs.pull();
-  await pinnedCells.pull();
+  let messagesCell = inputs.key("messages");
+  /** Reads each asynchronous phase from the current actor instance. */
+  const refreshRead = () => {
+    if (!capturedRequest?.scopeKeyIdentity) return;
+    const read = runtime.readTx();
+    read.tx.scopeKeyIdentity = capturedRequest.scopeKeyIdentity;
+    inputs = inputs.withTx(read);
+    pinnedCells = pinnedCells.withTx(read);
+    internal = internal.withTx(read);
+    messagesCell = inputs.key("messages");
+  };
+  refreshRead();
+  // Served inputs were demanded by the accepted handler. Ambient pull
+  // actions would demand the service instance instead of the issuing actor.
+  // Local execution still drives dependencies through pull scheduling.
+  if (!capturedRequest?.scopeKeyIdentity) {
+    await inputs.pull();
+    await pinnedCells.pull();
+  }
 
   // Also pull individual context cells and pinned cell targets
   const contextCellsForPull = inputs.key("context").get() ?? {};
@@ -3799,6 +3986,7 @@ async function startRequest(
     }
   }
 
+  refreshRead();
   const { system, maxTokens, model } = inputs.get();
   const queueName = capturedRequest?.queueName ??
     (inputs.key("queue").get() as unknown as string | undefined);
@@ -3815,8 +4003,6 @@ async function startRequest(
         | undefined,
     );
   const builtinTools = inputs.key("builtinTools").get() !== false;
-
-  const messagesCell = inputs.key("messages");
 
   // Epic D1 (docs/history/specs/cfc-trusted-agent-tool-integrity.md piece B): model-
   // produced bytes — assistant content and tool results entering the dialog
@@ -3935,10 +4121,14 @@ async function startRequest(
 
   // Write to result cell using editWithRetry since we're outside handler tx
   await runtime.editWithRetry((tx) => {
+    if (capturedRequest?.scopeKeyIdentity) {
+      tx.tx.scopeKeyIdentity = capturedRequest.scopeKeyIdentity;
+    }
     markEffectCompletion(tx, `llmDialog:${requestId}`);
     result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
   });
 
+  refreshRead();
   const toolCatalog = capturedRequest?.toolCatalog ?? buildToolCatalog(
     toolsCell,
     builtinTools,
@@ -4101,6 +4291,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           pending,
           internal,
           requestId,
+          capturedRequest?.scopeKeyIdentity,
           (tx) => {
             // As above: made explicitly for identity control, in the resolved
             // messages document's space and scope, schema-less.
@@ -4146,6 +4337,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             pending,
             internal,
             requestId,
+            capturedRequest?.scopeKeyIdentity,
             (tx) => {
               const nextIndex = (messagesCell.withTx(tx).get() as
                 | readonly BuiltInLLMMessage[]
@@ -4214,6 +4406,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
               pending,
               internal,
               requestId,
+              capturedRequest?.scopeKeyIdentity,
               (tx) => {
                 messagesCell.withTx(tx).push(
                   errorMessage as Schema<typeof LLMMessageSchema>,
@@ -4232,6 +4425,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             pending,
             internal,
             requestId,
+            capturedRequest?.scopeKeyIdentity,
             (tx) => {
               // Write presentResult atomically with tool result messages,
               // guarded by requestId to prevent stale writes from canceled requests.
@@ -4256,6 +4450,8 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
               );
             },
           );
+
+          refreshRead();
 
           // Optionally record to suggestion history via the default pattern's
           // recordSuggestion handler. This is intentionally best-effort: spaces
@@ -4325,6 +4521,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           pending,
           internal,
           requestId,
+          capturedRequest?.scopeKeyIdentity,
           (tx) => {
             const nextIndex = (messagesCell.withTx(tx).get() as
               | readonly BuiltInLLMMessage[]
@@ -4354,12 +4551,19 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           `I encountered an error generating a response: ${errorMessageText}`,
       } satisfies BuiltInLLMMessage;
 
-      safelyPerformUpdate(runtime, pending, internal, requestId, (tx) => {
-        messagesCell.withTx(tx).push(
-          errorMessage as Schema<typeof LLMMessageSchema>,
-        );
-        pending.withTx(tx).set(false);
-      });
+      return safelyPerformUpdate(
+        runtime,
+        pending,
+        internal,
+        requestId,
+        capturedRequest?.scopeKeyIdentity,
+        (tx) => {
+          messagesCell.withTx(tx).push(
+            errorMessage as Schema<typeof LLMMessageSchema>,
+          );
+          pending.withTx(tx).set(false);
+        },
+      );
     });
 }
 
