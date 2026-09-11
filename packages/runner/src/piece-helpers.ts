@@ -163,8 +163,8 @@ export function schemaWithScopedLinkRequiredsRelaxed(
   if (structural !== schema) {
     structuralRoot = structural;
   } else {
-    // Local references under a schema resolve against the document it sits
-    // in — the same child-root rule the CFC schema walkers apply.
+    // A local reference resolves against the document root, the rule every
+    // CFC schema walker applies; a `$defs` below that root is inert.
     structuralRoot = root ?? structural;
     const ref = (structural as { $ref?: unknown }).$ref;
     if (typeof ref === "string" && ref.startsWith("#")) {
