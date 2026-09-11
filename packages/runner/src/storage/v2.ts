@@ -1480,8 +1480,8 @@ export class StorageManager implements IStorageManager {
     space: MemorySpace,
     writes: readonly { id: string; scopeKey: ScopeKey }[],
   ): number {
-    // Already-open replicas only, like isSchemaDocPersisted: a space this
-    // manager has not opened holds nothing to refresh.
+    // Already-open replicas only, like isContentAddressedDocPersisted: a
+    // space this manager has not opened holds nothing to refresh.
     return this.#providers.get(space)?.replica.integrateStoreWrites(writes) ??
       0;
   }
@@ -8197,7 +8197,9 @@ export class SpaceReplica
       }
       for (const hash of hashes) {
         const id = `cid:${hash}` as URI;
-        if (inFrame.has(id) || this.isSchemaDocPersisted(hash)) continue;
+        if (inFrame.has(id) || this.isContentAddressedDocPersisted(hash)) {
+          continue;
+        }
         inFrame.add(id);
         const dependency = read({ id, scopeKey: "space" as ScopeKey });
         if (dependency !== undefined) frame.push(dependency);
