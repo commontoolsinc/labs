@@ -290,12 +290,12 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
    * This method is called as a result of the visitor returning a `recurse`
    * result for a visited array and is called during iteration as gaps are
    * encountered. The sequencing of this call is meant to mirror
-   * `visitedFabricArrayElement()`, but since there is nothing to recurse on (it's a
-   * gap, not any actual values), there is no regular `visitValue()` call which
-   * immediately precedes it (hence the visit was "nominal"). `start` is the
-   * start index of the gap (integer `>= 0`), and `count` is the number of holes
-   * in the gap (integer `>= 1`). This method is called as a result of the
-   * visitor returning a `recurse` result for a visited array.
+   * `visitedFabricArrayElement()`, but since there is nothing to recurse on
+   * (it's a gap, not any actual values), there is no regular `visitValue()`
+   * call which immediately precedes it (hence the visit was "nominal"). `start`
+   * is the start index of the gap (integer `>= 0`), and `count` is the number
+   * of holes in the gap (integer `>= 1`). This method is called as a result of
+   * the visitor returning a `recurse` result for a visited array.
    */
   visitedFabricArrayGap(
     array: FabricArray,

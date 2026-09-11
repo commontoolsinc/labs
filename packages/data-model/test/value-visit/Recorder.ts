@@ -3,8 +3,8 @@
  * call it receives, and builders for the result forms a test hands back.
  *
  * The recorder dispatches every value to its subtype method and recurses into
- * containers the way `ContainerIteratingValueVisitor` does by default, so a test
- * that wants the default walk sets nothing, and one that wants a different
+ * containers the way `ContainerIteratingValueVisitor` does by default, so a
+ * test that wants the default walk sets nothing, and one that wants a different
  * decision at one hook assigns the matching `on*` property.
  */
 
@@ -31,9 +31,9 @@ export type Event = [name: string, ...args: unknown[]];
 
 /**
  * Visitor that dispatches every value to its subtype method, recurses into
- * containers the way `ContainerIteratingValueVisitor` does by default, and records
- * each call it receives. Each hook can be overridden per test by assigning the
- * matching `on*` property.
+ * containers the way `ContainerIteratingValueVisitor` does by default, and
+ * records each call it receives. Each hook can be overridden per test by
+ * assigning the matching `on*` property.
  */
 export class Recorder extends ContainerIteratingValueVisitor<unknown, unknown> {
   readonly events: Event[] = [];
