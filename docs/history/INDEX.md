@@ -4,6 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Lazy scalar read width](development/performance/2026-09-11-lazy-scalar-read-width.md) — D2 eager/lazy one-scalar and all-row baseline at 74, 296, and 1,184 inline rows, with journal counts and timing limits.
+
 - [2026-09-11-nested-collection-scan-diagnostic.md](development/performance/2026-09-11-nested-collection-scan-diagnostic.md) — E3 warning acceptance across 413 pattern entries and 1,731 modules: seven occurrences at five source sites, guarded-UI limits, and callback-local exclusions.
 - [2026-09-11-computed-lift-collection-loops.md](development/performance/2026-09-11-computed-lift-collection-loops.md) — E1 compiled computed/broad-lift/narrow-lift comparison at 32/128/512 linked rows, identical default-posture read counts, and unread-field invalidation controls.
 

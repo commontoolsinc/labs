@@ -54,6 +54,20 @@ export default pattern<{ code?: PerUser<Draft>; count?: PerUser<Writable<number 
 
 const PER_SESSION_PARENT = PER_USER_PARENT.replaceAll("PerUser", "PerSession");
 
+const STATIC_CHILD_PARENT = `
+import { action, computed, Default, pattern, PerUser, Stream, Writable } from "commonfabric";
+const Child = pattern<{ count: Writable<number> }, { answer: number; bump: Stream<unknown>; isHidden: boolean }>(
+  ({ count }) => ({
+    answer: computed(() => count.get()),
+    bump: action(() => count.set(count.get() + 1)),
+    isHidden: true,
+  }),
+);
+export default pattern<{ code?: PerUser<Writable<string | Default<"">>>; count?: PerUser<Writable<number | Default<0>>> }>(
+  ({ count }) => ({ compiled: Child({ count: count! }) }),
+);
+`;
+
 const CLEARABLE_PER_USER_PARENT = `
 import { compileAndRun, computed, Default, pattern, PerUser, Writable } from "commonfabric";
 type Draft = Writable<string | Default<"">>;
@@ -859,6 +873,72 @@ export default pattern<{ code: string; count: number }, { compiled: any }>(({ co
       piece.cancelDemand();
     }
   });
+
+  for (const scope of ["user", "session"] as const) {
+    for (const compiled of [false, true]) {
+      it(`isolates uninitialized ${scope} defaults in ${compiled ? "compiled" : "static"} child handlers`, async () => {
+        const parentSource = compiled ? PER_USER_PARENT : STATIC_CHILD_PARENT;
+        const code = handlerChildProgram(1);
+        const piece = await createParent(
+          code,
+          scope === "session"
+            ? parentSource.replaceAll("PerUser", "PerSession")
+            : parentSource,
+          true,
+        );
+        let other: Awaited<ReturnType<typeof joinParent>> | undefined;
+        try {
+          await childValue(piece.result, 0);
+          other = await joinParent(
+            piece,
+            scope === "session" ? aliceSigner : bobSigner,
+            code,
+          );
+          await childValue(other.result, 0, other.runtime);
+
+          expect(
+            piece.argument.key("count").resolveAsCell()
+              .getAsNormalizedFullLink().scope,
+          ).toBe(scope);
+          expect(
+            other.argument.key("count").resolveAsCell()
+              .getAsNormalizedFullLink().scope,
+          ).toBe(scope);
+
+          const firstDelivered = Promise.withResolvers<string>();
+          piece.result.key("compiled").key("bump").send(
+            {},
+            (tx) => {
+              firstDelivered.resolve(tx.status().status);
+            },
+          );
+          expect(await firstDelivered.promise).not.toBe("error");
+          await childValue(piece.result, 1);
+          await covered();
+          await other.runtime.idle();
+          expect(visibleChild(other.result)?.answer).toBe(0);
+
+          const secondDelivered = Promise.withResolvers<string>();
+          other.result.key("compiled").key("bump").send(
+            {},
+            (tx) => {
+              secondDelivered.resolve(tx.status().status);
+            },
+          );
+          expect(await secondDelivered.promise).not.toBe("error");
+          await childValue(other.result, 1, other.runtime);
+          await covered();
+          await client.idle();
+          expect(visibleChild(piece.result)?.answer).toBe(1);
+          expect(host.stats().unstampedSealRefusals).toBe(0);
+          expect(servingErrors).toEqual([]);
+        } finally {
+          await other?.dispose();
+          piece.cancelDemand();
+        }
+      });
+    }
+  }
 
   it("dispatches each user's child handler to that user's selected program", async () => {
     const a = handlerChildProgram(1);
