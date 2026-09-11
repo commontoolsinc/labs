@@ -8259,9 +8259,9 @@ export class SpaceReplica
   /**
    * Helper for `#integrateReadThrough()`, which completes a frame of store
    * reads with the schema documents they reference: every `cid:` hash in a
-   * document's link positions, and in a schema document's own refs, that
-   * this replica does not already hold verified is read from the store
-   * and added to the frame, to a fixpoint. The delivery guarantee the
+   * document's link positions or schema metadata, and in a schema document's
+   * own refs, that this replica does not already hold verified is read from
+   * the store and added to the frame, to a fixpoint. The delivery guarantee the
    * frame validator enforces is that a document's refs resolve within
    * the delivered set; a session's server walks those references for
    * it, and this is the same chase for a frame read directly.
@@ -8275,7 +8275,9 @@ export class SpaceReplica
     for (let index = 0; index < frame.length; index++) {
       const upsert = frame[index]!;
       if (upsert.deleted === true || !isObjectNotArray(upsert.doc)) continue;
-      const hashes = new Set<string>();
+      const hashes = new Set(
+        schemaMetaRefHashes(classifySchemaMeta(upsert.doc)),
+      );
       if (upsert.id.startsWith("cid:")) {
         const value = (upsert.doc as { value?: unknown }).value;
         if (isSubschema(value)) {
